@@ -1,0 +1,31 @@
+services:
+  shoggoth:
+    build: .
+    image: shoggoth:local
+    restart: unless-stopped
+    environment:
+      SHOGGOTH_CONFIG_DIR: /etc/shoggoth/config.d
+    volumes:
+      - shoggoth-state:/var/lib/shoggoth/state
+      - shoggoth-workspaces:/var/lib/shoggoth/workspaces
+      - shoggoth-operator:/var/lib/shoggoth/operator
+      - shoggoth-media:/var/lib/shoggoth/media/inbound
+      # Effective config is baked into the image under /etc/shoggoth/config.d (see Dockerfile). Override locally:
+      #   -v "$PWD/config/example-overlay:/etc/shoggoth/config.d:ro"
+    # Root here is required so entrypoint can chown/chmod volume roots, then drop to shoggoth (UID 900) with setpriv
+    # so SETUID/SETGID caps survive (gosu clears them). Builtins spawn agent children as UID/GID 901.
+    cap_add:
+      - SETUID
+      - SETGID
+    # Optional: add `secrets: [ discord_token ]` and top-level `secrets:` — files under /run/secrets (0700 root).
+    # Copy needed files into /var/lib/shoggoth/operator (0700 shoggoth) via a custom entrypoint if the daemon
+    # must read them as user shoggoth; never expose operator paths to the agent UID/GID (901).
+    user: "0:0"
+    # Optional second service + shared /run/shoggoth for canvas_authorize HTTP hook: docs/canvas.md
+    # Optional external `proxy` network (e.g. Kiro on hostname `kiro`): docker-compose.proxy-network.yml
+
+volumes:
+  shoggoth-state:
+  shoggoth-workspaces:
+  shoggoth-operator:
+  shoggoth-media:

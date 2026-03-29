@@ -1,0 +1,10 @@
+*.tsbuildinfo
+.DS_Store
+.env
+.env.shoggoth.local
+dist/
+docker-compose.override.yml
+node_modules/
+Release/
+tests/.env.readiness.local
+tests/.generated/

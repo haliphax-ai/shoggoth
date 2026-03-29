@@ -1,0 +1,10 @@
+{
+  "skills": {
+    "scanRoots": ["/var/lib/shoggoth/workspaces/readiness-guild/skills"],
+    "disabledIds": []
+  },
+  "memory": {
+    "paths": ["/var/lib/shoggoth/workspaces/readiness-guild/memory"],
+    "embeddings": { "enabled": false }
+  }
+}

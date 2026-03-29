@@ -1,0 +1,1555 @@
+import { describe, it, beforeEach, afterEach } from "node:test";
+import assert from "node:assert";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import Database from "better-sqlite3";
+import {
+  createAgentToAgentBus,
+  createInboundMessage,
+  discordCapabilityDescriptor,
+} from "@shoggoth/messaging";
+import { ModelHttpError } from "@shoggoth/models";
+import { defaultConfig } from "@shoggoth/shared";
+import type { ShoggothMcpServerEntry } from "@shoggoth/shared";
+import { createHitlPendingResolutionStack } from "../../src/hitl/hitl-pending-stack";
+import { connectShoggothMcpServers } from "../../src/mcp/mcp-server-pool";
+import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
+import { createSessionStore } from "../../src/sessions/session-store";
+import { createLogger } from "../../src/logging";
+import { formatDiscordPlatformErrorUserText } from "../../src/platforms/discord-errors";
+import {
+  formatDiscordPlatformDegradedPrefix,
+  formatDiscordPlatformModelTagFooter,
+  startDiscordPlatform,
+} from "../../src/platforms/discord";
+import {
+  buildHitlQueuedNoticeLines,
+  formatHitlPayloadExcerpt,
+  HITL_NOTICE_PAYLOAD_MAX_CHARS,
+} from "../../src/platforms/discord-hitl-notifier";
+import type { PendingActionRow } from "../../src/hitl/pending-actions-store";
+import { transcriptRowsToModelChatMessages } from "../../src/sessions/transcript-to-chat";
+import type { DiscordMessagingRuntime } from "../../src/messaging/discord-bridge";
+
+const stubDiscordRestTransport: DiscordMessagingRuntime["discordRestTransport"] = {
+  async openDmChannel() {
+    return "dm-channel-stub";
+  },
+  async createMessage() {
+    return { id: "noop" };
+  },
+  async editMessage() {},
+};
+
+describe("discord platform helpers", () => {
+  it("formatDiscordPlatformDegradedPrefix is empty when not degraded", () => {
+    assert.equal(formatDiscordPlatformDegradedPrefix(undefined), "");
+    assert.equal(
+      formatDiscordPlatformDegradedPrefix({ degraded: false, usedModel: "m", usedProviderId: "p" }),
+      "",
+    );
+  });
+
+  it("formatDiscordPlatformDegradedPrefix includes model when degraded", () => {
+    const s = formatDiscordPlatformDegradedPrefix({
+      degraded: true,
+      usedModel: "backup-m",
+      usedProviderId: "env-default",
+    });
+    assert.match(s, /backup-m/);
+    assert.match(s, /env-default/);
+  });
+
+  it("formatDiscordPlatformModelTagFooter is empty unless env flag and meta", () => {
+    assert.equal(
+      formatDiscordPlatformModelTagFooter({ SHOGGOTH_DISCORD_MODEL_TAG: "1" }, undefined),
+      "",
+    );
+    assert.equal(
+      formatDiscordPlatformModelTagFooter(
+        {},
+        { degraded: false, usedModel: "m1", usedProviderId: "p1" },
+      ),
+      "",
+    );
+    const foot = formatDiscordPlatformModelTagFooter(
+      { SHOGGOTH_DISCORD_MODEL_TAG: "1" },
+      { degraded: false, usedModel: "m1", usedProviderId: "p1" },
+    );
+    assert.match(foot, /m1/);
+    assert.match(foot, /p1/);
+  });
+
+  it("transcriptRowsToModelChatMessages restores toolCalls metadata", () => {
+    const chat = transcriptRowsToModelChatMessages([
+      { seq: 1, role: "user", content: "u", toolCallId: null },
+      {
+        seq: 2,
+        role: "assistant",
+        content: null,
+        toolCallId: null,
+        metadata: {
+          toolCalls: [{ id: "t1", name: "builtin.read", argsJson: "{}" }],
+        },
+      },
+      { seq: 3, role: "tool", content: "{}", toolCallId: "t1" },
+    ]);
+    assert.equal(chat.length, 3);
+    assert.equal(chat[1]!.role, "assistant");
+    assert.ok("toolCalls" in chat[1]! && (chat[1] as { toolCalls: unknown[] }).toolCalls.length === 1);
+  });
+});
+
+describe("formatDiscordPlatformErrorUserText", () => {
+  it("maps ModelHttpError statuses to friendly copy", () => {
+    assert.match(formatDiscordPlatformErrorUserText(new ModelHttpError(429, "x")), /rate-limited/i);
+    assert.match(
+      formatDiscordPlatformErrorUserText(new ModelHttpError(503, "x")),
+      /unavailable/i,
+    );
+    assert.match(formatDiscordPlatformErrorUserText(new ModelHttpError(500, "x")), /500/i);
+    assert.match(formatDiscordPlatformErrorUserText(new ModelHttpError(401, "x")), /401/i);
+    assert.match(formatDiscordPlatformErrorUserText(new ModelHttpError(418, "x")), /418/);
+    assert.match(
+      formatDiscordPlatformErrorUserText(
+        new ModelHttpError(400, "Bad Request", "invalid_request: tool schema"),
+      ),
+      /400/i,
+    );
+    assert.match(
+      formatDiscordPlatformErrorUserText(
+        new ModelHttpError(400, "Bad Request", "invalid_request: tool schema"),
+      ),
+      /tool schema/i,
+    );
+  });
+
+  it("maps fetch-like TypeError to a network hint", () => {
+    assert.match(
+      formatDiscordPlatformErrorUserText(new TypeError("fetch failed")),
+      /Network error/i,
+    );
+  });
+
+  it("maps hitl_pending to approval copy with id, not stack", () => {
+    const t = formatDiscordPlatformErrorUserText(
+      new Error("hitl_pending:pend-uuid-1\n    at foo (bar.js:1:1)"),
+    );
+    assert.match(t, /pend-uuid-1/);
+    assert.match(t, /approval/i);
+    assert.equal(t.includes("at foo"), false);
+  });
+
+  it("truncates generic Error to first line", () => {
+    const t = formatDiscordPlatformErrorUserText(new Error("line1\nline2\nline3"));
+    assert.match(t, /^line1$/);
+  });
+});
+
+describe("discord-hitl-notifier", () => {
+  function row(overrides: Partial<PendingActionRow>): PendingActionRow {
+    return {
+      id: "pend-1",
+      sessionId: "sess1",
+      correlationId: undefined,
+      toolName: "builtin.write",
+      resourceSummary: undefined,
+      payload: {},
+      riskTier: "caution",
+      status: "pending",
+      denialReason: undefined,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      expiresAt: "2026-01-01T01:00:00.000Z",
+      resolvedAt: undefined,
+      resolverPrincipal: undefined,
+      ...overrides,
+    };
+  }
+
+  it("formatHitlPayloadExcerpt truncates long JSON", () => {
+    const long = { path: "p", content: "x".repeat(800) };
+    const ex = formatHitlPayloadExcerpt(long);
+    assert.ok(ex);
+    assert.ok(ex!.endsWith("…"));
+    assert.equal(ex!.length, HITL_NOTICE_PAYLOAD_MAX_CHARS);
+  });
+
+  it("buildHitlQueuedNoticeLines includes payload excerpt", () => {
+    const lines = buildHitlQueuedNoticeLines(
+      row({
+        payload: {
+          argsJson: JSON.stringify({ path: "hitl-notify.txt", content: "x" }),
+          toolCallId: "tw1",
+        },
+      }),
+    );
+    const text = lines.join("\n");
+    assert.match(text, /payload \(truncated\):/);
+    assert.match(text, /hitl-notify\.txt/);
+  });
+});
+
+describe("startDiscordPlatform", { concurrency: false }, () => {
+  let db: Database.Database;
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "shoggoth-discord-"));
+    const dbPath = join(tmp, "s.db");
+    db = new Database(dbPath);
+    db.pragma("foreign_keys = ON");
+    migrate(db, defaultMigrationsDir());
+    createSessionStore(db).create({ id: "sess1", workspacePath: tmp });
+  });
+
+  /** Unblocks runToolLoop when a HITL row is queued (same store as Discord platform). */
+  async function approveFirstPendingWhenQueued(
+    hitlStack: ReturnType<typeof createHitlPendingResolutionStack>,
+    sessionId: string,
+  ): Promise<void> {
+    for (let i = 0; i < 400; i++) {
+      const rows = hitlStack.pending.listPendingForSession(sessionId);
+      if (rows.length > 0) {
+        assert.ok(hitlStack.pending.approve(rows[0]!.id, "test-operator"));
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    assert.fail("timed out waiting for HITL pending row");
+  }
+
+  function createHitlWriteToolModelStub() {
+    let modelRound = 0;
+    return () => ({
+      async completeWithTools() {
+        modelRound++;
+        if (modelRound === 1) {
+          return {
+            content: "Using write",
+            toolCalls: [
+              {
+                id: "tw1",
+                name: "builtin.write",
+                arguments: JSON.stringify({ path: "hitl-notify.txt", content: "x" }),
+              },
+            ],
+            usedModel: "m1",
+            usedProviderId: "p1",
+          };
+        }
+        return { content: "Done", toolCalls: [], usedModel: "m1", usedProviderId: "p1" };
+      },
+    });
+  }
+
+  afterEach(() => {
+    db.close();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("runs tool loop and sends Discord reply with degraded banner", async () => {
+    const sent: { body: string }[] = [];
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: {} as DiscordMessagingRuntime["gateway"],
+      outbound: {
+        sendDiscord: async (msg) => {
+          sent.push({ body: msg.body });
+          return { channelId: "c", messageId: "mid" };
+        },
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      streamingForSession: () => undefined,
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      routes: [{ channelId: "c1", sessionId: "sess1" }],
+    };
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: defaultConfig(tmp),
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      deps: {
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            return {
+              content: "Hello (failover hop).",
+              toolCalls: [],
+              usedProviderId: "backup",
+              usedModel: "m2",
+              degraded: true,
+            };
+          },
+        }),
+      },
+    });
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d1",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "ping",
+      }),
+    );
+
+    await new Promise((r) => setTimeout(r, 500));
+    await platform.stop();
+
+    assert.equal(sent.length, 1);
+    assert.match(sent[0]!.body, /Degraded/);
+    assert.match(sent[0]!.body, /Hello/);
+  });
+
+  it("on tool loop ModelHttpError 429, sends friendly Discord error body", async () => {
+    const sent: { body: string }[] = [];
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: {} as DiscordMessagingRuntime["gateway"],
+      outbound: {
+        sendDiscord: async (msg) => {
+          sent.push({ body: msg.body });
+          return { channelId: "c", messageId: "mid" };
+        },
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      streamingForSession: () => undefined,
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      routes: [{ channelId: "c1", sessionId: "sess1" }],
+    };
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: defaultConfig(tmp),
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      deps: {
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            return { content: "", toolCalls: [] };
+          },
+        }),
+        runToolLoopImpl: async () => {
+          throw new ModelHttpError(429, "upstream", '{"error":"rate"}');
+        },
+      },
+    });
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d1",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "ping",
+      }),
+    );
+
+    await new Promise((r) => setTimeout(r, 500));
+    await platform.stop();
+
+    assert.equal(sent.length, 1);
+    assert.match(sent[0]!.body, /⚠️/);
+    assert.match(sent[0]!.body, /rate-limited/i);
+    assert.equal(sent[0]!.body.includes("upstream"), false);
+    assert.equal(sent[0]!.body.includes("Too Many"), false);
+  });
+
+  it("appends model tag footer when SHOGGOTH_DISCORD_MODEL_TAG=1", async () => {
+    const sent: { body: string }[] = [];
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: {} as DiscordMessagingRuntime["gateway"],
+      outbound: {
+        sendDiscord: async (msg) => {
+          sent.push({ body: msg.body });
+          return { channelId: "c", messageId: "mid" };
+        },
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      streamingForSession: () => undefined,
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      routes: [{ channelId: "c1", sessionId: "sess1" }],
+    };
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: defaultConfig(tmp),
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      env: { SHOGGOTH_DISCORD_MODEL_TAG: "1" },
+      deps: {
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            return {
+              content: "Hi.",
+              toolCalls: [],
+              usedProviderId: "openai",
+              usedModel: "gpt-test",
+              degraded: false,
+            };
+          },
+        }),
+      },
+    });
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d1",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "ping",
+      }),
+    );
+
+    await new Promise((r) => setTimeout(r, 500));
+    await platform.stop();
+
+    assert.equal(sent.length, 1);
+    assert.match(sent[0]!.body, /Hi\./);
+    assert.match(sent[0]!.body, /gpt-test/);
+    assert.match(sent[0]!.body, /openai/);
+  });
+
+  it("mcp poolScope global invokes connect once at startup", async () => {
+    let connectCalls = 0;
+    const stubConnect: typeof connectShoggothMcpServers = async () => {
+      connectCalls++;
+      return {
+        pool: {
+          externalSources: [],
+          close: async () => {},
+        },
+        external: async () => ({ resultJson: "{}" }),
+      };
+    };
+
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: {} as DiscordMessagingRuntime["gateway"],
+      outbound: {
+        sendDiscord: async () => ({ channelId: "c", messageId: "mid" }),
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      streamingForSession: () => undefined,
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      routes: [{ channelId: "c1", sessionId: "sess1" }],
+    };
+
+    const cfg = defaultConfig(tmp);
+    cfg.mcp = {
+      poolScope: "global",
+      servers: [{ id: "s1", transport: "stdio", command: "true", args: [] }],
+    };
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: cfg,
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      deps: {
+        connectShoggothMcpServers: stubConnect,
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            return { content: "ok", toolCalls: [] };
+          },
+        }),
+      },
+    });
+
+    assert.equal(connectCalls, 1);
+    await platform.stop();
+  });
+
+  it("mcp poolScope per_session does not connect until first inbound turn; one pool per session id", async () => {
+    let connectCalls = 0;
+    const stubConnect: typeof connectShoggothMcpServers = async () => {
+      connectCalls++;
+      return {
+        pool: {
+          externalSources: [],
+          close: async () => {},
+        },
+        external: async () => ({ resultJson: "{}" }),
+      };
+    };
+
+    createSessionStore(db).create({ id: "sess2", workspacePath: tmp });
+
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: {} as DiscordMessagingRuntime["gateway"],
+      outbound: {
+        sendDiscord: async () => ({ channelId: "c", messageId: "mid" }),
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      streamingForSession: () => undefined,
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      routes: [
+        { channelId: "c1", sessionId: "sess1" },
+        { channelId: "c2", sessionId: "sess2" },
+      ],
+    };
+
+    const cfg = defaultConfig(tmp);
+    cfg.mcp = {
+      poolScope: "per_session",
+      servers: [{ id: "s1", transport: "stdio", command: "true", args: [] }],
+    };
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: cfg,
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      deps: {
+        connectShoggothMcpServers: stubConnect,
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            return { content: "ok", toolCalls: [] };
+          },
+        }),
+      },
+    });
+
+    assert.equal(connectCalls, 0);
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d1",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "a",
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(connectCalls, 1);
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d2",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "b",
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(connectCalls, 1);
+
+    bus.deliver(
+      "sess2",
+      createInboundMessage({
+        id: "d3",
+        sessionId: "sess2",
+        createdAt: new Date().toISOString(),
+        body: "c",
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(connectCalls, 2);
+
+    await platform.stop();
+  });
+
+  it("per-session MCP pool reconnects after perSessionIdleTimeoutMs", async () => {
+    let connectCalls = 0;
+    const stubConnect: typeof connectShoggothMcpServers = async () => {
+      connectCalls++;
+      return {
+        pool: {
+          externalSources: [],
+          close: async () => {},
+        },
+        external: async () => ({ resultJson: "{}" }),
+      };
+    };
+
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: {} as DiscordMessagingRuntime["gateway"],
+      outbound: {
+        sendDiscord: async () => ({ channelId: "c", messageId: "mid" }),
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      streamingForSession: () => undefined,
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      routes: [{ channelId: "c1", sessionId: "sess1" }],
+    };
+
+    const cfg = defaultConfig(tmp);
+    cfg.mcp = {
+      poolScope: "per_session",
+      perSessionIdleTimeoutMs: 40,
+      servers: [{ id: "s1", transport: "stdio", command: "true", args: [] }],
+    };
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: cfg,
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      deps: {
+        connectShoggothMcpServers: stubConnect,
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            return { content: "ok", toolCalls: [] };
+          },
+        }),
+      },
+    });
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d1",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "a",
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(connectCalls, 1);
+
+    await new Promise((r) => setTimeout(r, 120));
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d2",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "b",
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(connectCalls, 2);
+
+    await platform.stop();
+  });
+
+  it("perSessionIdleTimeoutMs 0 keeps a single per-session MCP pool across idle gaps", async () => {
+    let connectCalls = 0;
+    const stubConnect: typeof connectShoggothMcpServers = async () => {
+      connectCalls++;
+      return {
+        pool: {
+          externalSources: [],
+          close: async () => {},
+        },
+        external: async () => ({ resultJson: "{}" }),
+      };
+    };
+
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: {} as DiscordMessagingRuntime["gateway"],
+      outbound: {
+        sendDiscord: async () => ({ channelId: "c", messageId: "mid" }),
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      streamingForSession: () => undefined,
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      routes: [{ channelId: "c1", sessionId: "sess1" }],
+    };
+
+    const cfg = defaultConfig(tmp);
+    cfg.mcp = {
+      poolScope: "per_session",
+      perSessionIdleTimeoutMs: 0,
+      servers: [{ id: "s1", transport: "stdio", command: "true", args: [] }],
+    };
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: cfg,
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      deps: {
+        connectShoggothMcpServers: stubConnect,
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            return { content: "ok", toolCalls: [] };
+          },
+        }),
+      },
+    });
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d1",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "a",
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(connectCalls, 1);
+
+    await new Promise((r) => setTimeout(r, 120));
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d2",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "b",
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(connectCalls, 1);
+
+    await platform.stop();
+  });
+
+  it("per-server poolScope mixed: global connect once at startup, per_session subset once per session id", async () => {
+    const connectLog: { ids: string[] }[] = [];
+    const stubConnect: typeof connectShoggothMcpServers = async (servers) => {
+      connectLog.push({ ids: servers.map((s) => s.id) });
+      return {
+        pool: {
+          externalSources: [],
+          close: async () => {},
+        },
+        external: async () => ({ resultJson: "{}" }),
+      };
+    };
+
+    createSessionStore(db).create({ id: "sess2", workspacePath: tmp });
+
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: {} as DiscordMessagingRuntime["gateway"],
+      outbound: {
+        sendDiscord: async () => ({ channelId: "c", messageId: "mid" }),
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      streamingForSession: () => undefined,
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      routes: [
+        { channelId: "c1", sessionId: "sess1" },
+        { channelId: "c2", sessionId: "sess2" },
+      ],
+    };
+
+    const cfg = defaultConfig(tmp);
+    cfg.mcp = {
+      poolScope: "per_session",
+      servers: [
+        { id: "g", transport: "stdio", command: "true", args: [], poolScope: "global" },
+        { id: "p", transport: "stdio", command: "true", args: [], poolScope: "inherit" },
+      ],
+    };
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: cfg,
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      deps: {
+        connectShoggothMcpServers: stubConnect,
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            return { content: "ok", toolCalls: [] };
+          },
+        }),
+      },
+    });
+
+    assert.equal(connectLog.length, 1);
+    assert.deepStrictEqual(connectLog[0]!.ids, ["g"]);
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d1",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "a",
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(connectLog.length, 2);
+    assert.deepStrictEqual(connectLog[1]!.ids, ["p"]);
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d2",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "b",
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(connectLog.length, 2);
+
+    bus.deliver(
+      "sess2",
+      createInboundMessage({
+        id: "d3",
+        sessionId: "sess2",
+        createdAt: new Date().toISOString(),
+        body: "c",
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(connectLog.length, 3);
+    assert.deepStrictEqual(connectLog[2]!.ids, ["p"]);
+
+    await platform.stop();
+  });
+
+  it("mixed per-server poolScope: global slice at startup, per-session slice on first turn per session", async () => {
+    let connectCalls = 0;
+    const connectArgs: ShoggothMcpServerEntry[][] = [];
+    const stubConnect: typeof connectShoggothMcpServers = async (servers) => {
+      connectCalls++;
+      connectArgs.push([...servers]);
+      return {
+        pool: {
+          externalSources: [],
+          close: async () => {},
+        },
+        external: async () => ({ resultJson: "{}" }),
+      };
+    };
+
+    createSessionStore(db).create({ id: "sess2", workspacePath: tmp });
+
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: {} as DiscordMessagingRuntime["gateway"],
+      outbound: {
+        sendDiscord: async () => ({ channelId: "c", messageId: "mid" }),
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      streamingForSession: () => undefined,
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      routes: [
+        { channelId: "c1", sessionId: "sess1" },
+        { channelId: "c2", sessionId: "sess2" },
+      ],
+    };
+
+    const cfg = defaultConfig(tmp);
+    cfg.mcp = {
+      poolScope: "global",
+      servers: [
+        { id: "indexer", transport: "stdio", command: "true", args: [] },
+        {
+          id: "sandbox",
+          transport: "stdio",
+          command: "true",
+          args: [],
+          poolScope: "per_session",
+        },
+      ],
+    };
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: cfg,
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      deps: {
+        connectShoggothMcpServers: stubConnect,
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            return { content: "ok", toolCalls: [] };
+          },
+        }),
+      },
+    });
+
+    assert.equal(connectCalls, 1);
+    assert.equal(connectArgs.length, 1);
+    assert.deepEqual(
+      connectArgs[0]!.map((s) => s.id),
+      ["indexer"],
+    );
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d1",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "a",
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(connectCalls, 2);
+    assert.deepEqual(
+      connectArgs[1]!.map((s) => s.id),
+      ["sandbox"],
+    );
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d2",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "b",
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(connectCalls, 2);
+
+    bus.deliver(
+      "sess2",
+      createInboundMessage({
+        id: "d3",
+        sessionId: "sess2",
+        createdAt: new Date().toISOString(),
+        body: "c",
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(connectCalls, 3);
+    assert.deepEqual(
+      connectArgs[2]!.map((s) => s.id),
+      ["sandbox"],
+    );
+
+    await platform.stop();
+  });
+
+  it("per-server poolScope global with top-level per_session connects once at startup only", async () => {
+    let connectCalls = 0;
+    const connectArgs: ShoggothMcpServerEntry[][] = [];
+    const stubConnect: typeof connectShoggothMcpServers = async (servers) => {
+      connectCalls++;
+      connectArgs.push([...servers]);
+      return {
+        pool: {
+          externalSources: [],
+          close: async () => {},
+        },
+        external: async () => ({ resultJson: "{}" }),
+      };
+    };
+
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: {} as DiscordMessagingRuntime["gateway"],
+      outbound: {
+        sendDiscord: async () => ({ channelId: "c", messageId: "mid" }),
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      streamingForSession: () => undefined,
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      routes: [{ channelId: "c1", sessionId: "sess1" }],
+    };
+
+    const cfg = defaultConfig(tmp);
+    cfg.mcp = {
+      poolScope: "per_session",
+      servers: [
+        { id: "shared_index", transport: "stdio", command: "true", args: [], poolScope: "global" },
+      ],
+    };
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: cfg,
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      deps: {
+        connectShoggothMcpServers: stubConnect,
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            return { content: "ok", toolCalls: [] };
+          },
+        }),
+      },
+    });
+
+    assert.equal(connectCalls, 1);
+    assert.deepEqual(
+      connectArgs[0]!.map((s) => s.id),
+      ["shared_index"],
+    );
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d1",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "hi",
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(connectCalls, 1);
+
+    await platform.stop();
+  });
+
+  it("posts HITL operator notification to Discord channel when SHOGGOTH_HITL_NOTIFY_CHANNEL_ID is set", async () => {
+    const notifyChannelId = "channel-hitl-notify-1";
+    const hitlStack = createHitlPendingResolutionStack(db);
+    const createMessageCalls: { channelId: string; content: string }[] = [];
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: {} as DiscordMessagingRuntime["gateway"],
+      outbound: {
+        sendDiscord: async () => ({ channelId: "c", messageId: "mid" }),
+      },
+      discordRestTransport: {
+        async openDmChannel() {
+          return "unused";
+        },
+        async createMessage(channelId, body) {
+          createMessageCalls.push({ channelId, content: body.content ?? "" });
+          return { id: "rest-op-1" };
+        },
+        async editMessage() {},
+      },
+      streamingForSession: () => undefined,
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      routes: [{ channelId: "c1", sessionId: "sess1" }],
+    };
+
+    const approveP = approveFirstPendingWhenQueued(hitlStack, "sess1");
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: defaultConfig(tmp),
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      hitlPending: hitlStack,
+      env: { ...process.env, SHOGGOTH_HITL_NOTIFY_CHANNEL_ID: notifyChannelId },
+      deps: {
+        createToolCallingClient: createHitlWriteToolModelStub(),
+      },
+    });
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d-hitl-ch",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "trigger hitl",
+      }),
+    );
+
+    await approveP;
+    await new Promise((r) => setTimeout(r, 600));
+    await platform.stop();
+
+    const opMsgs = createMessageCalls.filter((c) => c.channelId === notifyChannelId);
+    assert.equal(opMsgs.length, 1);
+    assert.match(opMsgs[0]!.content, /HITL/);
+    assert.match(opMsgs[0]!.content, /builtin\.write/);
+    assert.match(opMsgs[0]!.content, /shoggoth hitl approve/);
+    assert.match(opMsgs[0]!.content, /sess1/);
+    assert.match(opMsgs[0]!.content, /payload \(truncated\):/);
+    assert.match(opMsgs[0]!.content, /hitl-notify\.txt/);
+  });
+
+  it("posts HITL operator notification to Discord DM when SHOGGOTH_HITL_NOTIFY_DM_USER_ID is set", async () => {
+    const hitlStack = createHitlPendingResolutionStack(db);
+    const dmOpens: string[] = [];
+    const createMessageCalls: { channelId: string; content: string }[] = [];
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: {} as DiscordMessagingRuntime["gateway"],
+      outbound: {
+        sendDiscord: async () => ({ channelId: "c", messageId: "mid" }),
+      },
+      discordRestTransport: {
+        async openDmChannel(userId) {
+          dmOpens.push(userId);
+          return "dm-ch-from-api";
+        },
+        async createMessage(channelId, body) {
+          createMessageCalls.push({ channelId, content: body.content ?? "" });
+          return { id: "rest-dm-1" };
+        },
+        async editMessage() {},
+      },
+      streamingForSession: () => undefined,
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      routes: [{ channelId: "c1", sessionId: "sess1" }],
+    };
+
+    const targetDmUser = "347033761822801922";
+    const approveP = approveFirstPendingWhenQueued(hitlStack, "sess1");
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: defaultConfig(tmp),
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      hitlPending: hitlStack,
+      env: { ...process.env, SHOGGOTH_HITL_NOTIFY_DM_USER_ID: targetDmUser },
+      deps: {
+        createToolCallingClient: createHitlWriteToolModelStub(),
+      },
+    });
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d-hitl-dm",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "trigger hitl dm",
+      }),
+    );
+
+    await approveP;
+    await new Promise((r) => setTimeout(r, 600));
+    await platform.stop();
+
+    assert.deepEqual(dmOpens, [targetDmUser]);
+    const dmMsgs = createMessageCalls.filter((c) => c.channelId === "dm-ch-from-api");
+    assert.equal(dmMsgs.length, 1);
+    assert.match(dmMsgs[0]!.content, /HITL/);
+    assert.match(dmMsgs[0]!.content, /builtin\.write/);
+    assert.match(dmMsgs[0]!.content, /hitl-notify\.txt/);
+  });
+
+  it("POSTs HITL queued payload to webhook when SHOGGOTH_HITL_NOTIFY_WEBHOOK_URL is set", async () => {
+    const webhookUrl = "https://example.invalid/hitl-hook";
+    const hitlStack = createHitlPendingResolutionStack(db);
+    const fetchCalls: { url: string; init?: RequestInit }[] = [];
+    const prevFetch = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls.push({ url: String(input), init });
+      return new Response("{}", { status: 200 });
+    };
+
+    try {
+      const bus = createAgentToAgentBus();
+      const discord: DiscordMessagingRuntime = {
+        stop: async () => {},
+        gateway: {} as DiscordMessagingRuntime["gateway"],
+        outbound: {
+          sendDiscord: async () => ({ channelId: "c", messageId: "mid" }),
+        },
+        discordRestTransport: stubDiscordRestTransport,
+        streamingForSession: () => undefined,
+        bus,
+        capabilities: discordCapabilityDescriptor(),
+        routes: [{ channelId: "c1", sessionId: "sess1" }],
+      };
+
+      const approveP = approveFirstPendingWhenQueued(hitlStack, "sess1");
+
+      const platform = await startDiscordPlatform({
+        db,
+        config: defaultConfig(tmp),
+        logger: createLogger({ component: "t", minLevel: "error" }),
+        discord,
+        hitlPending: hitlStack,
+        env: { ...process.env, SHOGGOTH_HITL_NOTIFY_WEBHOOK_URL: webhookUrl },
+        deps: {
+          createToolCallingClient: createHitlWriteToolModelStub(),
+        },
+      });
+
+      bus.deliver(
+        "sess1",
+        createInboundMessage({
+          id: "d-hitl-wh",
+          sessionId: "sess1",
+          createdAt: new Date().toISOString(),
+          body: "trigger hitl webhook",
+        }),
+      );
+
+      await approveP;
+      await new Promise((r) => setTimeout(r, 600));
+      await platform.stop();
+
+      const hook = fetchCalls.find((c) => c.url === webhookUrl);
+      assert.ok(hook, "expected fetch to webhook URL");
+      assert.equal(hook!.init?.method, "POST");
+      const rawBody = hook!.init?.body;
+      assert.ok(typeof rawBody === "string");
+      const parsed = JSON.parse(rawBody) as {
+        event: string;
+        pendingId: string;
+        sessionId: string;
+        tool: string;
+        riskTier: string;
+        payloadPreview: string | null;
+      };
+      assert.equal(parsed.event, "hitl.pending_queued");
+      assert.equal(parsed.sessionId, "sess1");
+      assert.equal(parsed.tool, "builtin.write");
+      assert.equal(parsed.riskTier, "caution");
+      assert.ok(typeof parsed.pendingId === "string" && parsed.pendingId.length > 0);
+      assert.ok(typeof parsed.payloadPreview === "string" && parsed.payloadPreview.includes("hitl-notify"));
+    } finally {
+      globalThis.fetch = prevFetch;
+    }
+  });
+
+  it("sends both Discord channel message and webhook when both HITL notify env vars are set", async () => {
+    const notifyChannelId = "channel-hitl-both";
+    const webhookUrl = "https://example.invalid/hitl-both";
+    const hitlStack = createHitlPendingResolutionStack(db);
+    const createMessageCalls: { channelId: string; content: string }[] = [];
+    const fetchCalls: { url: string }[] = [];
+    const prevFetch = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      fetchCalls.push({ url: String(input) });
+      return new Response("{}", { status: 200 });
+    };
+
+    try {
+      const bus = createAgentToAgentBus();
+      const discord: DiscordMessagingRuntime = {
+        stop: async () => {},
+        gateway: {} as DiscordMessagingRuntime["gateway"],
+        outbound: {
+          sendDiscord: async () => ({ channelId: "c", messageId: "mid" }),
+        },
+        discordRestTransport: {
+          async openDmChannel() {
+            return "unused";
+          },
+          async createMessage(channelId, body) {
+            createMessageCalls.push({ channelId, content: body.content ?? "" });
+            return { id: "rest-both" };
+          },
+          async editMessage() {},
+        },
+        streamingForSession: () => undefined,
+        bus,
+        capabilities: discordCapabilityDescriptor(),
+        routes: [{ channelId: "c1", sessionId: "sess1" }],
+      };
+
+      const approveP = approveFirstPendingWhenQueued(hitlStack, "sess1");
+
+      const platform = await startDiscordPlatform({
+        db,
+        config: defaultConfig(tmp),
+        logger: createLogger({ component: "t", minLevel: "error" }),
+        discord,
+        hitlPending: hitlStack,
+        env: {
+          ...process.env,
+          SHOGGOTH_HITL_NOTIFY_CHANNEL_ID: notifyChannelId,
+          SHOGGOTH_HITL_NOTIFY_WEBHOOK_URL: webhookUrl,
+        },
+        deps: {
+          createToolCallingClient: createHitlWriteToolModelStub(),
+        },
+      });
+
+      bus.deliver(
+        "sess1",
+        createInboundMessage({
+          id: "d-hitl-both",
+          sessionId: "sess1",
+          createdAt: new Date().toISOString(),
+          body: "trigger both",
+        }),
+      );
+
+      await approveP;
+      await new Promise((r) => setTimeout(r, 600));
+      await platform.stop();
+
+      assert.ok(fetchCalls.some((c) => c.url === webhookUrl));
+      assert.equal(
+        createMessageCalls.filter((c) => c.channelId === notifyChannelId).length,
+        1,
+      );
+    } finally {
+      globalThis.fetch = prevFetch;
+    }
+  });
+
+  it("does not call Discord createMessage or webhook fetch for HITL when notify env vars are unset", async () => {
+    const hitlStack = createHitlPendingResolutionStack(db);
+    const createMessageCalls: { channelId: string }[] = [];
+    const fetchCalls: { url: string }[] = [];
+    const prevFetch = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      fetchCalls.push({ url: String(input) });
+      return new Response("{}", { status: 200 });
+    };
+
+    try {
+      const env: NodeJS.ProcessEnv = { ...process.env };
+      delete env.SHOGGOTH_HITL_NOTIFY_CHANNEL_ID;
+      delete env.SHOGGOTH_HITL_NOTIFY_WEBHOOK_URL;
+      delete env.SHOGGOTH_HITL_NOTIFY_DM_USER_ID;
+
+      const bus = createAgentToAgentBus();
+      const discord: DiscordMessagingRuntime = {
+        stop: async () => {},
+        gateway: {} as DiscordMessagingRuntime["gateway"],
+        outbound: {
+          sendDiscord: async () => ({ channelId: "c", messageId: "mid" }),
+        },
+        discordRestTransport: {
+          async openDmChannel() {
+            return "unused";
+          },
+          async createMessage(channelId) {
+            createMessageCalls.push({ channelId });
+            return { id: "x" };
+          },
+          async editMessage() {},
+        },
+        streamingForSession: () => undefined,
+        bus,
+        capabilities: discordCapabilityDescriptor(),
+        routes: [{ channelId: "c1", sessionId: "sess1" }],
+      };
+
+      const approveP = approveFirstPendingWhenQueued(hitlStack, "sess1");
+
+      const platform = await startDiscordPlatform({
+        db,
+        config: defaultConfig(tmp),
+        logger: createLogger({ component: "t", minLevel: "error" }),
+        discord,
+        hitlPending: hitlStack,
+        env,
+        deps: {
+          createToolCallingClient: createHitlWriteToolModelStub(),
+        },
+      });
+
+      bus.deliver(
+        "sess1",
+        createInboundMessage({
+          id: "d-hitl-none",
+          sessionId: "sess1",
+          createdAt: new Date().toISOString(),
+          body: "hitl no notify",
+        }),
+      );
+
+      await approveP;
+      await new Promise((r) => setTimeout(r, 600));
+      await platform.stop();
+
+      assert.equal(createMessageCalls.length, 0);
+      assert.equal(fetchCalls.length, 0);
+    } finally {
+      globalThis.fetch = prevFetch;
+    }
+  });
+
+  it("posts in-session HITL notice via outbound.sendDiscord when HITL queues without notify env vars", async () => {
+    const hitlStack = createHitlPendingResolutionStack(db);
+    const outboundBodies: string[] = [];
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: {} as DiscordMessagingRuntime["gateway"],
+      outbound: {
+        sendDiscord: async (m) => {
+          outboundBodies.push(m.body);
+          return { channelId: "c", messageId: "mid" };
+        },
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      streamingForSession: () => undefined,
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      routes: [{ channelId: "c1", sessionId: "sess1" }],
+    };
+
+    const approveP = approveFirstPendingWhenQueued(hitlStack, "sess1");
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: defaultConfig(tmp),
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      hitlPending: hitlStack,
+      env: (() => {
+        const e: NodeJS.ProcessEnv = { ...process.env };
+        delete e.SHOGGOTH_HITL_NOTIFY_CHANNEL_ID;
+        delete e.SHOGGOTH_HITL_NOTIFY_WEBHOOK_URL;
+        delete e.SHOGGOTH_HITL_NOTIFY_DM_USER_ID;
+        e.SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION = "1";
+        return e;
+      })(),
+      deps: {
+        createToolCallingClient: createHitlWriteToolModelStub(),
+      },
+    });
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d-hitl-in-thread",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "trigger hitl in thread",
+      }),
+    );
+
+    await approveP;
+    await new Promise((r) => setTimeout(r, 600));
+    await platform.stop();
+
+    const hitlBodies = outboundBodies.filter((b) => b.includes("HITL") && b.includes("shoggoth hitl approve"));
+    assert.ok(hitlBodies.length >= 1, "expected at least one outbound HITL notice");
+    assert.match(hitlBodies[0]!, /builtin\.write/);
+    assert.match(hitlBodies[0]!, /sess1/);
+    assert.match(hitlBodies[0]!, /hitl-notify\.txt/);
+  });
+
+  it("does not post in-session HITL notice when SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION=0", async () => {
+    const hitlStack = createHitlPendingResolutionStack(db);
+    const outboundBodies: string[] = [];
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: {} as DiscordMessagingRuntime["gateway"],
+      outbound: {
+        sendDiscord: async (m) => {
+          outboundBodies.push(m.body);
+          return { channelId: "c", messageId: "mid" };
+        },
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      streamingForSession: () => undefined,
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      routes: [{ channelId: "c1", sessionId: "sess1" }],
+    };
+
+    const approveP = approveFirstPendingWhenQueued(hitlStack, "sess1");
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: defaultConfig(tmp),
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      hitlPending: hitlStack,
+      env: (() => {
+        const e: NodeJS.ProcessEnv = { ...process.env };
+        delete e.SHOGGOTH_HITL_NOTIFY_CHANNEL_ID;
+        delete e.SHOGGOTH_HITL_NOTIFY_WEBHOOK_URL;
+        delete e.SHOGGOTH_HITL_NOTIFY_DM_USER_ID;
+        e.SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION = "0";
+        return e;
+      })(),
+      deps: {
+        createToolCallingClient: createHitlWriteToolModelStub(),
+      },
+    });
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d-hitl-no-in-thread",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "trigger hitl no in-thread",
+      }),
+    );
+
+    await approveP;
+    await new Promise((r) => setTimeout(r, 600));
+    await platform.stop();
+
+    const hitlBodies = outboundBodies.filter((b) => b.includes("HITL") && b.includes("shoggoth hitl approve"));
+    assert.equal(hitlBodies.length, 0, "in-thread HITL reply should be suppressed");
+  });
+
+  it("disables in-session HITL when discord.hitlReplyInSession is false (merged env)", async () => {
+    const hitlStack = createHitlPendingResolutionStack(db);
+    const outboundBodies: string[] = [];
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: {} as DiscordMessagingRuntime["gateway"],
+      outbound: {
+        sendDiscord: async (m) => {
+          outboundBodies.push(m.body);
+          return { channelId: "c", messageId: "mid" };
+        },
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      streamingForSession: () => undefined,
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      routes: [{ channelId: "c1", sessionId: "sess1" }],
+    };
+
+    const approveP = approveFirstPendingWhenQueued(hitlStack, "sess1");
+    const cfg = { ...defaultConfig(tmp), discord: { hitlReplyInSession: false as const } };
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: cfg,
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      hitlPending: hitlStack,
+      env: (() => {
+        const e: NodeJS.ProcessEnv = { ...process.env };
+        delete e.SHOGGOTH_HITL_NOTIFY_CHANNEL_ID;
+        delete e.SHOGGOTH_HITL_NOTIFY_WEBHOOK_URL;
+        delete e.SHOGGOTH_HITL_NOTIFY_DM_USER_ID;
+        delete e.SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION;
+        return e;
+      })(),
+      deps: {
+        createToolCallingClient: createHitlWriteToolModelStub(),
+      },
+    });
+
+    bus.deliver(
+      "sess1",
+      createInboundMessage({
+        id: "d-hitl-config-off",
+        sessionId: "sess1",
+        createdAt: new Date().toISOString(),
+        body: "trigger hitl config off",
+      }),
+    );
+
+    await approveP;
+    await new Promise((r) => setTimeout(r, 600));
+    await platform.stop();
+
+    const hitlBodies = outboundBodies.filter((b) => b.includes("HITL") && b.includes("shoggoth hitl approve"));
+    assert.equal(hitlBodies.length, 0);
+  });
+});

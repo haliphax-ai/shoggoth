@@ -1,0 +1,34 @@
+{
+  "name": "shoggoth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shoggoth agent orchestration platform — monorepo (daemon + CLI)",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build:native": "npm run build:native -w @shoggoth/authn",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build:native && npm run typecheck",
+    "pretest": "npm run build:native",
+    "clean": "rm -rf packages/*/dist dist",
+    "kick-tires": "bash scripts/kick-tires-up.sh",
+    "daemon": "node --import tsx/esm packages/daemon/src/index.ts",
+    "cli": "node --import tsx/esm packages/cli/src/cli.ts",
+    "test": "find . \\( -path '*/node_modules/*' -o -path '*/dist/*' \\) -prune -o -type f \\( -name '*.test.ts' -o -name '*.test.mjs' \\) -print0 | xargs -0 -r node --import tsx/esm --test --test-concurrency=true",
+    "test:ci-agent-isolation": "SHOGGOTH_CI_STRICT_AGENT_TESTS=1 npm run test -w @shoggoth/os-exec",
+    "test:readiness": "node --import tsx/esm --test tests/readiness-static.test.mjs && node --import tsx/esm --test tests/readiness-compose.test.mjs",
+    "verify:kiro-anthropic-tool": "node --import tsx/esm tests/scripts/kiro-anthropic-tool-verify.ts"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "dependencies": {
+    "tsx": "^4.19.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "~5.7.2"
+  }
+}
