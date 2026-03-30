@@ -114,13 +114,13 @@ function normalizeAnthropicInputSchema(parameters: Record<string, unknown>): Rec
 }
 
 /**
- * Kiro's Anthropic-compatible `/v1/messages` rejects model ids containing `/` with a generic
- * "Improperly formed request." OpenClaw uses `kiro/auto`, `kiro/claude-sonnet-4.5`, etc.; the
- * gateway expects `auto`, `claude-sonnet-4.5`, …
+ * Anthropic-compatible gateways often register models as `namespace/model` while the Messages API
+ * rejects slashes in `model`. Strip the first path segment (everything through the first `/`).
  */
 export function normalizeAnthropicWireModelId(model: string): string {
-  if (model.startsWith("kiro/")) return model.slice("kiro/".length);
-  return model;
+  const i = model.indexOf("/");
+  if (i < 0) return model;
+  return model.slice(i + 1);
 }
 
 /** Normalize config `baseUrl` to origin (scheme + host[:port]) for `{origin}/v1/messages`. */
@@ -661,7 +661,7 @@ export function createAnthropicMessagesProvider(
         temperature: input.temperature,
       };
       if (system !== undefined) body.system = system;
-      /** Anthropic (and some gateways like Kiro) reject `tool_choice` when `tools` is empty or absent. */
+      /** Anthropic and some compatible gateways reject `tool_choice` when `tools` is empty or absent. */
       if (anthropicTools.length > 0) {
         body.tools = anthropicTools;
         body.tool_choice = { type: "auto" };

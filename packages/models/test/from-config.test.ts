@@ -57,14 +57,14 @@ describe("createFailoverClientFromModelsConfig", () => {
     const cfg: ShoggothModelsConfig = {
       providers: [
         {
-          id: "kiro",
+          id: "anthropic-local",
           kind: "anthropic-messages",
-          baseUrl: "http://kiro:8000",
+          baseUrl: "http://127.0.0.1:8000",
           apiKeyEnv: "ANTHROPIC_API_KEY",
           anthropicVersion: "2023-06-01",
         },
       ],
-      failoverChain: [{ providerId: "kiro", model: "claude-sonnet" }],
+      failoverChain: [{ providerId: "anthropic-local", model: "claude-sonnet" }],
     };
     const c = createFailoverClientFromModelsConfig(cfg, {
       env: { ANTHROPIC_API_KEY: "k" },
@@ -78,7 +78,7 @@ describe("createFailoverClientFromModelsConfig", () => {
         ),
     });
     const r = await c.complete({ messages: [{ role: "user", content: "x" }] });
-    assert.equal(r.usedProviderId, "kiro");
+    assert.equal(r.usedProviderId, "anthropic-local");
     assert.equal(r.usedModel, "claude-sonnet");
     assert.equal(r.content, "from-anthropic");
   });
@@ -87,9 +87,9 @@ describe("createFailoverClientFromModelsConfig", () => {
     let url = "";
     const c = createFailoverClientFromModelsConfig(undefined, {
       env: {
-        ANTHROPIC_BASE_URL: "http://kiro:8000",
+        ANTHROPIC_BASE_URL: "http://127.0.0.1:8000",
         ANTHROPIC_API_KEY: "k",
-        SHOGGOTH_MODEL: "kiro/auto",
+        SHOGGOTH_MODEL: "claude-sonnet-4-20250514",
       },
       fetchImpl: async (u) => {
         url = String(u);
@@ -105,7 +105,7 @@ describe("createFailoverClientFromModelsConfig", () => {
     const r = await c.complete({ messages: [{ role: "user", content: "x" }] });
     assert.match(url, /\/v1\/messages$/);
     assert.equal(r.content, "hi");
-    assert.equal(r.usedModel, "kiro/auto");
+    assert.equal(r.usedModel, "claude-sonnet-4-20250514");
     assert.equal(r.usedProviderId, "env-default");
   });
 
@@ -113,7 +113,7 @@ describe("createFailoverClientFromModelsConfig", () => {
     let url = "";
     const c = createFailoverToolCallingClientFromModelsConfig(undefined, {
       env: {
-        ANTHROPIC_BASE_URL: "http://kiro:8000",
+        ANTHROPIC_BASE_URL: "http://127.0.0.1:8000",
         ANTHROPIC_API_KEY: "k",
         SHOGGOTH_MODEL: "m",
       },

@@ -286,7 +286,12 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
-      config: defaultConfig(tmp),
+      config: {
+        ...defaultConfig(tmp),
+        agents: {
+          list: { test: { displayName: "LabBot" } },
+        },
+      },
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
       deps: {
@@ -319,6 +324,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     assert.equal(sent.length, 1);
     assert.match(sent[0]!.body, /Degraded/);
+    assert.match(sent[0]!.body, /\*\*🦑 LabBot:\*\*\n/);
     assert.match(sent[0]!.body, /Hello/);
     assert.ok(typingSessions.length >= 1);
     assert.ok(typingSessions.every((s) => s === sessionUrn));

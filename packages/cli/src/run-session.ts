@@ -1,5 +1,5 @@
 import { invokeControlRequest, resolveSessionTargetFromCliArg } from "@shoggoth/daemon/lib";
-import { loadLayeredConfig, LAYOUT, VERSION } from "@shoggoth/shared";
+import { loadLayeredConfig, LAYOUT, resolveEffectiveModelsConfig, VERSION } from "@shoggoth/shared";
 import { runSessionCompact } from "./run-session-compact";
 
 function controlAuth():
@@ -171,9 +171,10 @@ export async function runSessionCli(argv: string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
+    const models = resolveEffectiveModelsConfig(config, sessionId) ?? config.models;
     const out = await runSessionCompact({
       stateDbPath: config.stateDbPath,
-      models: config.models,
+      models,
       sessionId,
       force,
     });

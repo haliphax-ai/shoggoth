@@ -22,7 +22,6 @@ services:
     # must read them as user shoggoth; never expose operator paths to the agent UID/GID (901).
     user: "0:0"
     # Optional second service + shared /run/shoggoth for canvas_authorize HTTP hook: docs/canvas.md
-    # Optional external `proxy` network (e.g. Kiro on hostname `kiro`): docker-compose.proxy-network.yml
 
 volumes:
   shoggoth-state:

@@ -1,9 +1,0 @@
-{
-  "memory": {
-    "paths": ["/var/lib/shoggoth/workspaces/main/memory"],
-    "embeddings": { "enabled": false }
-  },
-  "skills": {
-    "scanRoots": ["/var/lib/shoggoth/workspaces/main/skills"]
-  }
-}

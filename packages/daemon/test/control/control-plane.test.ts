@@ -1044,6 +1044,117 @@ describe("control plane (unix socket + JSONL)", () => {
     db.close();
   });
 
+  it("session_send (agent token, same-agent ok; cross-agent needs agentToAgent)", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-ssend-ag-"));
+    const sock = join(dir, "c.sock");
+    const dbPath = join(dir, "state.db");
+    const db = new Database(dbPath);
+    migrate(db, defaultMigrationsDir());
+    const sessions = createSessionStore(db);
+    const tokens = createSqliteAgentTokenStore(db);
+    const sidA = formatAgentSessionUrn("scoped", "discord", randomUUID());
+    const sidB = formatAgentSessionUrn("scoped", "discord", randomUUID());
+    const sidOther = formatAgentSessionUrn("other", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    sessions.create({ id: sidA, workspacePath: "/w1", status: "active" });
+    sessions.create({ id: sidB, workspacePath: "/w2", status: "active" });
+    sessions.create({ id: sidOther, workspacePath: "/w3", status: "active" });
+    const raw = "tok-ssend-agent";
+    tokens.register(sidA, raw);
+
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: async () => ({
+        latestAssistantText: "AGENT_SEND_OK",
+        failoverMeta: undefined,
+      }),
+      subscribeSubagentSession: () => () => {},
+      registerDiscordThreadBinding: () => () => {},
+    });
+    try {
+      const base = minimalConfig(sock);
+      await withControlPlaneSession(
+        {
+          readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
+          stateDb: db,
+          config: base,
+        },
+        async (send) => {
+          const auth = { kind: "agent", session_id: sidA, token: raw } as const;
+
+          const okSame = await send({
+            v: WIRE_VERSION,
+            id: "ssa-same",
+            op: "session_send",
+            auth,
+            payload: { session_id: sidB, message: "hi peer session", silent: true },
+          });
+          const resSame = parseResponseLine(okSame);
+          assert.equal(resSame.ok, true);
+
+          const badCross = await send({
+            v: WIRE_VERSION,
+            id: "ssa-deny",
+            op: "session_send",
+            auth,
+            payload: { session_id: sidOther, message: "nope", silent: true },
+          });
+          const resDeny = parseResponseLine(badCross);
+          assert.equal(resDeny.ok, false);
+          assert.equal(resDeny.error?.code, "ERR_FORBIDDEN");
+        },
+      );
+
+      await withControlPlaneSession(
+        {
+          readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
+          stateDb: db,
+          config: { ...base, agentToAgent: { allow: ["other"] } },
+        },
+        async (send) => {
+          const auth = { kind: "agent", session_id: sidA, token: raw } as const;
+          const line = await send({
+            v: WIRE_VERSION,
+            id: "ssa-allow",
+            op: "session_send",
+            auth,
+            payload: { session_id: sidOther, message: "cross ok", silent: true },
+          });
+          const res = parseResponseLine(line);
+          assert.equal(res.ok, true);
+          assert.equal((res.result as { reply: string }).reply, "AGENT_SEND_OK");
+        },
+      );
+
+      await withControlPlaneSession(
+        {
+          readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
+          stateDb: db,
+          config: {
+            ...base,
+            agents: { list: { scoped: { agentToAgent: { allow: ["*"] } } } },
+          },
+        },
+        async (send) => {
+          const auth = { kind: "agent", session_id: sidA, token: raw } as const;
+          const line = await send({
+            v: WIRE_VERSION,
+            id: "ssa-star",
+            op: "session_send",
+            auth,
+            payload: { session_id: sidOther, message: "star ok", silent: true },
+          });
+          const res = parseResponseLine(line);
+          assert.equal(res.ok, true);
+        },
+      );
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
+
+    db.close();
+  });
+
   it("subagent_spawn one_shot (operator + mock runtime)", async () => {
     if (process.platform !== "linux") return;
 

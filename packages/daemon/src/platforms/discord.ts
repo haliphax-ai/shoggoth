@@ -6,7 +6,12 @@ import {
   messagingCapabilitiesHasFeature,
   type InternalMessage,
 } from "@shoggoth/messaging";
-import { DEFAULT_HITL_CONFIG, parseAgentSessionUrn, type ShoggothConfig } from "@shoggoth/shared";
+import {
+  DEFAULT_HITL_CONFIG,
+  formatDiscordAgentIdentityPrefix,
+  parseAgentSessionUrn,
+  type ShoggothConfig,
+} from "@shoggoth/shared";
 import type { HitlNotifier } from "../hitl/hitl-notifier";
 import { createHitlPendingResolutionStack, type HitlPendingStack } from "../hitl/hitl-pending-stack";
 import type { Logger } from "../logging";
@@ -369,8 +374,10 @@ export async function startDiscordPlatform(
               }
             : undefined,
         sliceDisplayText: sliceDiscordPlatformMessageBody,
-        formatAssistantReply: (latest, meta) =>
-          `${formatDiscordPlatformDegradedPrefix(meta)}${latest}${formatDiscordPlatformModelTagFooter(env, meta)}`,
+        formatAssistantReply: (latest, meta) => {
+          const cfg = opts.configRef?.current ?? opts.config;
+          return `${formatDiscordPlatformDegradedPrefix(meta)}${formatDiscordAgentIdentityPrefix(cfg, msg.sessionId)}${latest}${formatDiscordPlatformModelTagFooter(env, meta)}`;
+        },
         formatErrorReply: (e) => `⚠️ ${formatDiscordPlatformErrorUserText(e)}`,
         onTurnExecutionFailed: (e) => {
           opts.logger.warn("discord.platform.turn_failed", { err: String(e), sessionId: msg.sessionId });
@@ -528,8 +535,9 @@ export async function startDiscordPlatform(
       let turnResult!: SessionAgentTurnResult;
       await withAgentTypingWhile(opts.discord, sid, async () => {
         turnResult = await executeTurn();
+        const cfg = opts.configRef?.current ?? opts.config;
         const body = sliceDiscordPlatformMessageBody(
-          `${formatDiscordPlatformDegradedPrefix(turnResult.failoverMeta)}${turnResult.latestAssistantText}${formatDiscordPlatformModelTagFooter(env, turnResult.failoverMeta)}`,
+          `${formatDiscordPlatformDegradedPrefix(turnResult.failoverMeta)}${formatDiscordAgentIdentityPrefix(cfg, sid)}${turnResult.latestAssistantText}${formatDiscordPlatformModelTagFooter(env, turnResult.failoverMeta)}`,
         );
         await opts.discord.outbound.sendDiscord(
           createOutboundMessage({

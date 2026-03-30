@@ -9,8 +9,8 @@ import {
   resolveDiscordAllowBotMessages,
   resolveDiscordIntents,
   resolveDiscordOwnerUserId,
-  resolveDiscordRoutesJson,
   resolveDefaultSessionPlatform,
+  resolveEffectiveDiscordRoutesJson,
   resolveShoggothAgentId,
 } from "../config/effective-runtime";
 
@@ -38,13 +38,19 @@ export async function startDaemonDiscordMessaging(
   return startDiscordMessagingIfConfigured({
     logger: opts.logger,
     botToken: opts.botToken,
-    routesJson: resolveDiscordRoutesJson(opts.config),
+    routesJson: resolveEffectiveDiscordRoutesJson(opts.config),
     intents: resolveDiscordIntents(opts.config),
     allowBotMessages: resolveDiscordAllowBotMessages(opts.config),
     ownerUserId: resolveDiscordOwnerUserId(opts.config),
     routeGuard: {
       resolvedAgentId: resolveShoggothAgentId(opts.config),
       defaultSessionPlatform: resolveDefaultSessionPlatform(opts.config),
+      agentsList: opts.config.agents?.list
+        ? Object.entries(opts.config.agents.list).map(([id, a]) => ({
+            id: id.trim(),
+            ...(a.defaultSessionPlatform ? { defaultSessionPlatform: a.defaultSessionPlatform } : {}),
+          }))
+        : undefined,
     },
     onMessageReactionAdd: opts.onMessageReactionAdd,
     reactionBotUserIdRef: opts.reactionBotUserIdRef,

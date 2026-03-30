@@ -10,6 +10,7 @@ import {
 } from "@shoggoth/models";
 import { toolExec, toolRead, toolWrite, type AgentCredentials } from "@shoggoth/os-exec";
 import type { ShoggothConfig } from "@shoggoth/shared";
+import { resolveEffectiveMemoryForSession, resolveEffectiveModelsConfig } from "@shoggoth/shared";
 import { mergeOrchestratorEnv } from "../config/effective-runtime";
 import { getAgentIntegrationInvoker } from "../control/agent-integration-invoke-ref";
 import { IntegrationOpError } from "../control/integration-ops";
@@ -106,9 +107,11 @@ export async function executeSessionAgentTurn(
 
   const createToolClient =
     input.createToolCallingClient ?? createFailoverToolCallingClientFromModelsConfig;
-  const toolClient = createToolClient(input.config.models, { env: input.env });
+  const modelsForSession =
+    resolveEffectiveModelsConfig(input.config, input.sessionId) ?? input.config.models;
+  const toolClient = createToolClient(modelsForSession, { env: input.env });
 
-  const modelInvocation = mergeModelInvocationParams(input.config.models, input.session.modelSelection);
+  const modelInvocation = mergeModelInvocationParams(modelsForSession, input.session.modelSelection);
 
   const model: SessionToolLoopModelClient = createSessionToolLoopModelClient({
     toolClient,
@@ -280,7 +283,7 @@ export async function executeSessionAgentTurn(
             argsJson,
             db: input.db,
             workspacePath: input.session.workspacePath,
-            memory: input.config.memory,
+            memory: resolveEffectiveMemoryForSession(input.config, input.sessionId),
             env: orchestratorEnv,
             runtimeOpenaiBaseUrl: input.config.runtime?.openaiBaseUrl,
           });

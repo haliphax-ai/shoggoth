@@ -47,29 +47,65 @@ const shoggothModelDefaultInvocationSchema = z
   })
   .strict();
 
+export const shoggothModelFailoverHopSchema = z
+  .object({
+    providerId: z.string().min(1),
+    model: z.string().min(1),
+  })
+  .strict();
+
+export type ShoggothModelFailoverHop = z.infer<typeof shoggothModelFailoverHopSchema>;
+
+export const shoggothModelsCompactionSchema = z
+  .object({
+    maxContextChars: z.number().int().positive(),
+    preserveRecentMessages: z.number().int().nonnegative(),
+    summaryMaxOutputTokens: z.number().int().positive().optional(),
+  })
+  .strict();
+
+export type ShoggothModelsCompaction = z.infer<typeof shoggothModelsCompactionSchema>;
+
+export const shoggothModelsCompactionPartialSchema = shoggothModelsCompactionSchema.partial();
+
+/** Per-agent model stack / invocation / compaction overrides (merged with global `models`). */
+export const shoggothAgentModelsOverrideSchema = z
+  .object({
+    failoverChain: z.array(shoggothModelFailoverHopSchema).min(1).optional(),
+    primary: shoggothModelFailoverHopSchema.optional(),
+    defaultInvocation: shoggothModelDefaultInvocationSchema.optional(),
+    compaction: shoggothModelsCompactionPartialSchema.optional(),
+  })
+  .strict()
+  .refine((v) => !(v.primary != null && v.failoverChain != null && v.failoverChain.length > 0), {
+    message: "agent models: set only one of primary or failoverChain",
+  });
+
+export type ShoggothAgentModelsOverride = z.infer<typeof shoggothAgentModelsOverrideSchema>;
+
+const shoggothAgentDiscordRouteRowSchema = z
+  .object({
+    channelId: z.string().min(1),
+    sessionId: z.string().min(1),
+    guildId: z.string().min(1).optional(),
+  })
+  .strict();
+
+export const shoggothAgentDiscordConfigSchema = z
+  .object({
+    routes: z.array(shoggothAgentDiscordRouteRowSchema).optional(),
+  })
+  .strict();
+
+export type ShoggothAgentDiscordConfig = z.infer<typeof shoggothAgentDiscordConfigSchema>;
+
 export const shoggothModelsConfigSchema = z
   .object({
     providers: z.array(shoggothModelProviderEntrySchema).optional(),
-    failoverChain: z
-      .array(
-        z
-          .object({
-            providerId: z.string().min(1),
-            model: z.string().min(1),
-          })
-          .strict(),
-      )
-      .optional(),
+    failoverChain: z.array(shoggothModelFailoverHopSchema).optional(),
     /** Default model call parameters; per-session `model_selection` JSON overrides by field. */
     defaultInvocation: shoggothModelDefaultInvocationSchema.optional(),
-    compaction: z
-      .object({
-        maxContextChars: z.number().int().positive(),
-        preserveRecentMessages: z.number().int().nonnegative(),
-        summaryMaxOutputTokens: z.number().int().positive().optional(),
-      })
-      .strict()
-      .optional(),
+    compaction: shoggothModelsCompactionSchema.optional(),
   })
   .strict();
 
@@ -471,6 +507,72 @@ export const shoggothRuntimeConfigSchema = z
 
 export type ShoggothRuntimeConfig = z.infer<typeof shoggothRuntimeConfigSchema>;
 
+/**
+ * Cross-agent `session_send` allowlists. Omitted → agents may only target sessions with the same
+ * logical agent id as the caller. `allow` entries name **target** agent ids; `"*"` allows any other agent.
+ */
+export const shoggothAgentToAgentAllowSchema = z
+  .object({
+    allow: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
+export const shoggothAgentToAgentConfigSchema = z
+  .object({
+    /** Default target allowlist merged into every sender's effective list (with `agents.list.<id>.agentToAgent.allow`). */
+    allow: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
+export type ShoggothAgentToAgentConfig = z.infer<typeof shoggothAgentToAgentConfigSchema>;
+
+const shoggothAgentIdKeySchema = z
+  .string()
+  .min(1)
+  .refine((s) => !s.includes(":"), "must not contain ':'");
+
+/**
+ * Per-agent block under `agents.list.<agentId>` (key is the logical agent id; matches session URN segment).
+ */
+export const shoggothAgentEntrySchema = z
+  .object({
+    /** Optional label for operators / logs; on Discord, `**<emoji> <label>:**` uses this or falls back to the list key (emoji defaults to 🦑). */
+    displayName: z.string().min(1).optional(),
+    /** Overrides default 🦑 in the Discord identity line before `displayName`. */
+    emoji: z.string().min(1).optional(),
+    /**
+     * Default messaging `platform` segment for this agent when validating default-primary Discord routes.
+     * Falls back to global `runtime.defaultSessionPlatform` when unset.
+     */
+    defaultSessionPlatform: z
+      .string()
+      .min(1)
+      .refine((s) => !s.includes(":"), "must not contain ':'")
+      .optional(),
+    models: shoggothAgentModelsOverrideSchema.optional(),
+    discord: shoggothAgentDiscordConfigSchema.optional(),
+    /** Extra memory roots (merged after global `memory.paths` for this agent's sessions). */
+    memory: z
+      .object({
+        paths: z.array(z.string().min(1)).optional(),
+      })
+      .strict()
+      .optional(),
+    agentToAgent: shoggothAgentToAgentAllowSchema.optional(),
+  })
+  .strict();
+
+export type ShoggothAgentEntry = z.infer<typeof shoggothAgentEntrySchema>;
+
+export const shoggothAgentsConfigSchema = z
+  .object({
+    /** Map of logical agent id → per-agent overrides (key must match session URN `agent:<id>:…`). */
+    list: z.record(shoggothAgentIdKeySchema, shoggothAgentEntrySchema).optional(),
+  })
+  .strict();
+
+export type ShoggothAgentsConfig = z.infer<typeof shoggothAgentsConfigSchema>;
+
 export const DEFAULT_SKILLS_CONFIG: ShoggothSkillsConfig = {
   scanRoots: [],
   disabledIds: [],
@@ -528,6 +630,8 @@ export const shoggothConfigFragmentSchema = z
     acpx: shoggothAcpxConfigSchema.partial().optional(),
     discord: shoggothDiscordConfigSchema.optional(),
     runtime: shoggothRuntimeConfigSchema.optional(),
+    agents: shoggothAgentsConfigSchema.optional(),
+    agentToAgent: shoggothAgentToAgentConfigSchema.optional(),
     policy: shoggothPolicyFragmentSchema,
   })
   .strict();
@@ -561,6 +665,8 @@ export const shoggothConfigSchema = z
     acpx: shoggothAcpxConfigSchema.optional(),
     discord: shoggothDiscordConfigSchema.optional(),
     runtime: shoggothRuntimeConfigSchema.optional(),
+    agents: shoggothAgentsConfigSchema.optional(),
+    agentToAgent: shoggothAgentToAgentConfigSchema.optional(),
     policy: shoggothPolicyConfigSchema,
   })
   .strict();

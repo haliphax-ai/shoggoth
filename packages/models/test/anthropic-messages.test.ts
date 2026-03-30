@@ -59,10 +59,14 @@ function fixtureTextThenToolStream(): string[] {
 }
 
 describe("normalizeAnthropicWireModelId", () => {
-  it("strips kiro/ prefix for gateways that reject slashes in model id", () => {
-    assert.equal(normalizeAnthropicWireModelId("kiro/auto"), "auto");
-    assert.equal(normalizeAnthropicWireModelId("kiro/claude-sonnet-4.5"), "claude-sonnet-4.5");
+  it("strips through the first slash for vendor-prefixed ids", () => {
+    assert.equal(normalizeAnthropicWireModelId("acme/auto"), "auto");
+    assert.equal(normalizeAnthropicWireModelId("acme/claude-sonnet-4.5"), "claude-sonnet-4.5");
     assert.equal(normalizeAnthropicWireModelId("claude-sonnet-4.5"), "claude-sonnet-4.5");
+  });
+
+  it("only removes the first segment when multiple slashes remain", () => {
+    assert.equal(normalizeAnthropicWireModelId("org/sub/model"), "sub/model");
   });
 });
 
@@ -75,7 +79,7 @@ describe("normalizeAnthropicMessagesOrigin", () => {
   });
 
   it("keeps host:port origin", () => {
-    assert.equal(normalizeAnthropicMessagesOrigin("http://kiro:8000"), "http://kiro:8000");
+    assert.equal(normalizeAnthropicMessagesOrigin("http://127.0.0.1:8000"), "http://127.0.0.1:8000");
   });
 });
 
@@ -213,7 +217,7 @@ describe("createAnthropicMessagesProvider", () => {
     assert.equal(req.thinking?.budget_tokens, 1234);
   });
 
-  it("complete sends wire model without kiro/ prefix", async () => {
+  it("complete sends wire model with first namespace segment stripped", async () => {
     let capturedBody: string | undefined;
     const fetchImpl = async (_url: string | URL, init?: RequestInit) => {
       capturedBody = init?.body as string;
@@ -230,7 +234,7 @@ describe("createAnthropicMessagesProvider", () => {
       apiKey: "k",
       fetchImpl,
     });
-    await p.complete({ model: "kiro/auto", messages: [{ role: "user", content: "h" }] });
+    await p.complete({ model: "acme/auto", messages: [{ role: "user", content: "h" }] });
     const req = JSON.parse(capturedBody ?? "{}") as { model?: string };
     assert.equal(req.model, "auto");
   });

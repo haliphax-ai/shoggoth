@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import type { ShoggothConfig } from "@shoggoth/shared";
+import { resolveEffectiveModelsConfig } from "@shoggoth/shared";
 import {
   createFailoverClientFromModelsConfig,
   resolveCompactionPolicyFromModelsConfig,
@@ -28,12 +29,6 @@ export async function runTranscriptAutoCompactTick(
   config: ShoggothConfig,
   options: TranscriptAutoCompactTickOptions = {},
 ): Promise<{ sessionsScanned: number; sessionsCompacted: number }> {
-  const policy = resolveCompactionPolicyFromModelsConfig(config.models);
-  const client =
-    options.modelClient ??
-    createFailoverClientFromModelsConfig(config.models, {
-      env: options.env ?? process.env,
-    });
   const limit = options.maxSessionsPerTick ?? 32;
   const sessionRows = db.prepare(`SELECT id FROM sessions ORDER BY id LIMIT ?`).all(limit) as {
     id: string;
@@ -50,10 +45,17 @@ export async function runTranscriptAutoCompactTick(
       continue;
     }
     const messages = loadSessionTranscript(db, sessionId, contextSegmentId);
+    const modelsForSession = resolveEffectiveModelsConfig(config, sessionId) ?? config.models;
+    const policy = resolveCompactionPolicyFromModelsConfig(modelsForSession);
     if (!shouldAutoCompact(messages, policy)) continue;
     try {
+      const client =
+        options.modelClient ??
+        createFailoverClientFromModelsConfig(modelsForSession, {
+          env: options.env ?? process.env,
+        });
       const { compacted } = await compactSessionTranscript(db, sessionId, policy, client, {
-        modelsConfig: config.models,
+        modelsConfig: modelsForSession,
       });
       if (compacted) {
         sessionsCompacted += 1;

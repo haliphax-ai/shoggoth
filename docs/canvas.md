@@ -1,6 +1,6 @@
 # Canvas / openclaw-canvas-web bridge
 
-Shoggoth does **not** embed the `openclaw-canvas-web` SPA. The daemon exposes **`canvas_authorize`** on the **control Unix socket** so any surface that can present or push A2UI (including canvas-web, a fork, or a thin proxy) can ask the policy engine whether the current principal may act on a **target session** before performing the equivalent of `canvas.present`, `canvas.push` / `canvas.a2ui.push`, or `canvas.navigate`.
+Shoggoth does **not** embed the `openclaw-canvas-web` SPA. The daemon exposes **`canvas_authorize`** on the **control Unix socket** so any surface that can present or push A2UI (including canvas-web, a fork, or a separate gateway service) can ask the policy engine whether the current principal may act on a **target session** before performing the equivalent of `canvas.present`, `canvas.push` / `canvas.a2ui.push`, or `canvas.navigate`.
 
 ## Actions and mapping
 

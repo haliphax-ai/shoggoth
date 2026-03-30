@@ -18,7 +18,7 @@ describe("isFailoverEligibleError", () => {
     assert.equal(isFailoverEligibleError(new ModelHttpError(500, "boom")), true);
   });
 
-  it("returns true for other transient 5xx (e.g. proxy 522)", () => {
+  it("returns true for other transient 5xx (e.g. edge 522)", () => {
     assert.equal(isFailoverEligibleError(new ModelHttpError(522, "connection timed out")), true);
   });
 

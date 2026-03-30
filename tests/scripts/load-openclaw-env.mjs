@@ -8,10 +8,12 @@
  *
  * Reads OPENCLAW_CONFIG (default ~/.openclaw/openclaw.json). Does not print secrets to stderr.
  *
- * Precedence (first match wins for *which* provider block is used):
- * 1. SHOGGOTH_READINESS_USE_LAN=1 → use `models.providers.lan` only (skip kiro).
- * 2. Else if `models.providers.kiro` has `baseUrl` → use kiro.
- * 3. Else → use `lan` (with same defaults as before).
+ * Precedence (which `models.providers.*` block is used):
+ * 1. SHOGGOTH_READINESS_USE_LAN=1 → `models.providers.lan` only.
+ * 2. Else SHOGGOTH_READINESS_PROVIDER=<id> → that key when it has `baseUrl`.
+ * 3. Else first provider (other than `lan`) with `api: "anthropic-messages"` and `baseUrl`, if any.
+ * 4. Else first provider (other than `lan`) with `baseUrl`, if any.
+ * 5. Else `lan`.
  *
  * Protocol split (within the chosen block):
  * - OpenClaw `api` is `anthropic-messages` → export ANTHROPIC_BASE_URL (origin, no `/v1`), ANTHROPIC_API_KEY,
@@ -20,15 +22,15 @@
  * - Otherwise (e.g. `openai-completions`) → export OPENAI_BASE_URL (normalized to trailing `/v1`), OPENAI_API_KEY,
  *   SHOGGOTH_MODEL; ANTHROPIC_* exported as empty strings for the same stale-env reason.
  *
- * For an LM on the Docker host only: SHOGGOTH_READINESS_MODEL_HOST=host.docker.internal eval "..."
+ * For a model server on the Docker host: SHOGGOTH_READINESS_MODEL_HOST=host.docker.internal eval "..."
  */
 import fs from "node:fs";
 import { homedir } from "node:os";
 
 const path = process.env.OPENCLAW_CONFIG ?? `${homedir()}/.openclaw/openclaw.json`;
 const j = JSON.parse(fs.readFileSync(path, "utf8"));
-const lan = j.models?.providers?.lan;
-const kiro = j.models?.providers?.kiro;
+const providers = j.models?.providers ?? {};
+const lan = providers.lan;
 
 function isAnthropicMessages(provider) {
   return provider?.api === "anthropic-messages";
@@ -57,10 +59,16 @@ const preferLan = process.env.SHOGGOTH_READINESS_USE_LAN === "1";
 let providerBlock;
 if (preferLan) {
   providerBlock = lan;
-} else if (kiro?.baseUrl) {
-  providerBlock = kiro;
 } else {
-  providerBlock = lan;
+  const explicit = process.env.SHOGGOTH_READINESS_PROVIDER?.trim();
+  if (explicit && providers[explicit]?.baseUrl) {
+    providerBlock = providers[explicit];
+  } else {
+    const entries = Object.entries(providers).filter(([, v]) => v && typeof v === "object" && v.baseUrl);
+    const anthropic = entries.find(([k, v]) => k !== "lan" && isAnthropicMessages(v));
+    const anyNamed = entries.find(([k]) => k !== "lan");
+    providerBlock = anthropic?.[1] ?? anyNamed?.[1] ?? lan;
+  }
 }
 
 let openaiBase;
@@ -72,7 +80,7 @@ let model;
 if (isAnthropicMessages(providerBlock)) {
   anthropicBase = normalizeAnthropicOriginUrl(providerBlock.baseUrl);
   anthropicApiKey = providerBlock.apiKey ?? "";
-  model = providerBlock.models?.[0]?.id ?? "kiro/auto";
+  model = providerBlock.models?.[0]?.id ?? "claude-sonnet-4-20250514";
   openaiBase = "";
   openaiApiKey = "";
 } else {

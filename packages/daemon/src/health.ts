@@ -140,7 +140,7 @@ function stripTrailingSlash(s: string): string {
   return s.replace(/\/+$/, "");
 }
 
-/** True when probe base matches `ANTHROPIC_BASE_URL` (Kiro origin); use `/` not OpenAI `/v1/models`. */
+/** True when probe base matches `ANTHROPIC_BASE_URL` (Messages API origin); use `/` not OpenAI `/v1/models`. */
 function isAnthropicModelProbeBase(normalizedBase: string): boolean {
   const a = process.env.ANTHROPIC_BASE_URL?.trim();
   if (!a) return false;

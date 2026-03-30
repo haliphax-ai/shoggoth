@@ -64,7 +64,7 @@ When `models.failoverChain` is absent or empty, `createFailoverClientFromModelsC
 
 Provider id is fixed as `env-default`. **Rule (once Anthropic env fallback is implemented):** prefer Anthropic when `ANTHROPIC_BASE_URL` is set (non-empty); otherwise use OpenAI envs as today — see plan doc.
 
-**Readiness:** `tests/scripts/load-openclaw-env.mjs` sets `ANTHROPIC_*` when OpenClaw’s chosen provider has `api: "anthropic-messages"` (e.g. Kiro), and `tests/docker-compose.readiness.yml` passes those variables into the container.
+**Readiness:** `tests/scripts/load-openclaw-env.mjs` sets `ANTHROPIC_*` when OpenClaw’s chosen provider has `api: "anthropic-messages"`, and `tests/docker-compose.readiness.yml` passes those variables into the container. Use `SHOGGOTH_READINESS_PROVIDER` to pick a specific `models.providers.<id>` entry.
 
 ## Failover and degraded mode
 

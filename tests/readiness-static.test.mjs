@@ -51,9 +51,9 @@ describe("SHOGGOTH-READY §1 Deployment and trust (documentation)", () => {
     assert.equal(/ports:\s*\n\s*-\s*"[0-9]+:7777"/.test(yml), false);
   });
 
-  it("kick-tires compose disables in-thread HITL Discord reply (DM-only profile)", () => {
-    const yml = readDoc("docker-compose.kick-tires.yml");
-    assert.match(yml, /SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION:\s*"0"/);
+  it("readiness compose avoids empty-host env_file override pattern", () => {
+    const yml = readDoc("tests/docker-compose.readiness.yml");
+    assert.match(yml, /Avoid `\$\{VAR:-\}`/);
   });
 
   it("bootstrap-main-session creates workspace memory dir for agent memory tools", () => {

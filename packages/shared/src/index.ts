@@ -6,6 +6,12 @@ export {
   DEFAULT_POLICY_CONFIG,
   defaultConfig,
   hitlRiskTierSchema,
+  shoggothAgentDiscordConfigSchema,
+  shoggothAgentEntrySchema,
+  shoggothAgentModelsOverrideSchema,
+  shoggothAgentToAgentAllowSchema,
+  shoggothAgentToAgentConfigSchema,
+  shoggothAgentsConfigSchema,
   shoggothConfigFragmentSchema,
   shoggothConfigSchema,
   shoggothDiscordConfigSchema,
@@ -19,6 +25,8 @@ export {
   shoggothMcpServerPoolScopeSchema,
   shoggothMcpStdioServerSchema,
   shoggothMcpTcpServerSchema,
+  shoggothModelFailoverHopSchema,
+  shoggothModelsCompactionSchema,
   shoggothModelsConfigSchema,
   shoggothPluginEntrySchema,
   shoggothPolicyConfigSchema,
@@ -29,6 +37,11 @@ export {
   shoggothToolRulesSchema,
   DEFAULT_SKILLS_CONFIG,
   type HitlRiskTier,
+  type ShoggothAgentDiscordConfig,
+  type ShoggothAgentEntry,
+  type ShoggothAgentModelsOverride,
+  type ShoggothAgentToAgentConfig,
+  type ShoggothAgentsConfig,
   type ShoggothConfig,
   type ShoggothConfigFragment,
   type ShoggothDiscordConfig,
@@ -39,6 +52,8 @@ export {
   type ShoggothMcpHttpServerEntry,
   type ShoggothMcpServerEntry,
   type ShoggothMcpServerPoolScope,
+  type ShoggothModelFailoverHop,
+  type ShoggothModelsCompaction,
   type ShoggothModelsConfig,
   type ShoggothPluginEntry,
   type ShoggothPolicyConfig,
@@ -48,6 +63,17 @@ export {
   type ShoggothRuntimeConfig,
   type ShoggothToolRules,
 } from "./schema";
+export {
+  crossAgentSessionSendAllowed,
+  mergeAgentToAgentAllowPatterns,
+} from "./agent-to-agent-policy";
+export {
+  formatDiscordAgentIdentityPrefix,
+  resolveAgentIdFromSessionId,
+  resolveEffectiveMemoryForSession,
+  resolveEffectiveModelsConfig,
+  SHOGGOTH_DISCORD_AGENT_DEFAULT_EMOJI,
+} from "./effective-agent-for-session";
 export { VERSION } from "./version";
 export { DEFAULT_MESSAGING_PLATFORM_ID } from "./messaging-defaults";
 export {

@@ -3,10 +3,10 @@
  *
  * Prerequisites:
  *   - docker + compose v2
- *   - Prefer repo `.env.shoggoth.local` (copy `.env.shoggoth.example`): Shoggoth’s Discord bot + Kiro/LM vars.
+ *   - Prefer repo `.env.shoggoth.local` (copy `.env.shoggoth.example`): Shoggoth’s Discord bot + model API vars.
  *   - Optional override: `tests/.env.readiness.local` (gitignored).
- *   - Inside the container, `ANTHROPIC_*` / `OPENAI_*` must reach your API (e.g. host LM via `host.docker.internal` in `.env.shoggoth.example`).
- *   - Optional external `proxy` network (local/internal only): set `SHOGGOTH_EXTRA_COMPOSE_FILE=docker-compose.proxy-network.yml`. CI uses the default compose files only (no external `proxy` network).
+ *   - Inside the container, `ANTHROPIC_*` / `OPENAI_*` must reach your API (e.g. a server on the Docker host).
+ *   - Optional extra compose fragment: `SHOGGOTH_EXTRA_COMPOSE_FILE` (path). CI uses `docker-compose.yml` + `tests/docker-compose.readiness.yml` only.
  *
  * Cooperative Discord E2E (§13): set SHOGGOTH_READINESS_COOPERATIVE_E2E=1; human user 347033761822801922.
  * Default channel is <#1487579255616573533>; override with SHOGGOTH_READINESS_DISCORD_CHANNEL_ID for #developer, etc.

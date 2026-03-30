@@ -95,6 +95,8 @@ export interface DiscordMessagingDeps {
 export interface DiscordMessagingRouteGuard {
   readonly resolvedAgentId: string;
   readonly defaultSessionPlatform: string;
+  /** When set (non-empty), default-primary UUID routes are validated against `agents.list` entries. */
+  readonly agentsList?: ReadonlyArray<{ readonly id: string; readonly defaultSessionPlatform?: string }>;
 }
 
 export interface StartDiscordMessagingOptions {
@@ -203,6 +205,9 @@ export async function startDiscordMessagingIfConfigured(
           routes,
           opts.routeGuard.resolvedAgentId,
           plat,
+          opts.routeGuard.agentsList?.length
+            ? { agentsList: opts.routeGuard.agentsList }
+            : undefined,
         );
       }
     } catch (e) {

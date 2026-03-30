@@ -1,6 +1,9 @@
 import type { ShoggothConfig } from "@shoggoth/shared";
 import { assertValidAgentId, parseAgentSessionUrn } from "@shoggoth/shared";
-import { resolveDefaultSessionPlatform, resolveDiscordRoutesJson } from "../config/effective-runtime";
+import {
+  resolveDefaultSessionPlatform,
+  resolveEffectiveDiscordRoutesJson,
+} from "../config/effective-runtime";
 import { registerBuiltInMessagingPlatforms, resolveBootstrapPrimarySessionUrn } from "@shoggoth/messaging";
 
 registerBuiltInMessagingPlatforms();
@@ -28,6 +31,6 @@ export function resolveSessionTargetFromCliArg(raw: string, cfg: ShoggothConfig)
   }
   const platform = resolveDefaultSessionPlatform(cfg);
   const primaryChannelId = process.env.SHOGGOTH_PRIMARY_DISCORD_CHANNEL_ID?.trim();
-  const routesJson = resolveDiscordRoutesJson(cfg);
+  const routesJson = resolveEffectiveDiscordRoutesJson(cfg);
   return resolveBootstrapPrimarySessionUrn(t, platform, { primaryChannelId, routesJson });
 }

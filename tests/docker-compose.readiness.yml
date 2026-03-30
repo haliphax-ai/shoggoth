@@ -1,13 +1,13 @@
 # Readiness / integration overlay — use with:
 #   docker compose -f docker-compose.yml -f tests/docker-compose.readiness.yml up
 #
-# Prefer repo-root `.env.shoggoth.local` (copy `.env.shoggoth.example`) for Discord + Kiro/LM vars — dedicated Shoggoth bot, not OpenClaw’s token.
-# Optional: `tests/.env.readiness.local` (later entries override). Model URLs in examples use `host.docker.internal` (see `.env.shoggoth.example`).
+# Prefer repo-root `.env.shoggoth.local` (copy `.env.shoggoth.example`) for Discord + model API vars — dedicated Shoggoth bot, not OpenClaw’s token.
+# Optional: `tests/.env.readiness.local` (later entries override).
 services:
   shoggoth:
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # See docker-compose.kick-tires.yml: avoid `${VAR:-}` here — it overrides env_file with empty host values.
+    # Avoid `${VAR:-}` here — it overrides env_file with empty host values.
     env_file:
       - path: .env.shoggoth.local
         required: false

@@ -62,4 +62,6 @@ docker compose up
 
 The daemon runs as **`shoggoth`** after `entrypoint.sh` creates layout and drops privileges with `setpriv` (with `cap_add: SETUID, SETGID` in Compose so builtins can spawn agent subprocesses).
 
+For a **personal** long-lived compose overlay (extra networks, layered config, local env), keep that outside this repository (e.g. a sibling folder with its own `docker-compose` fragments and `scripts/` that reference this checkout via `SHOGGOTH_REPO`).
+
 The image installs **`/usr/local/bin/shoggoth`** on `PATH`. The wrapper `cd`s **`/app`** before loading `tsx`, so it works even when the caller’s cwd is a session workspace (e.g. `docker compose exec -u agent -w /var/lib/shoggoth/workspaces/... <service> shoggoth --version`).

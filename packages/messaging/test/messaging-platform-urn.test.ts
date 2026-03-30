@@ -59,6 +59,36 @@ describe("messaging platform URN registry + Discord policy", () => {
     );
   });
 
+  it("assertDiscordRoutesDefaultPrimaryUuidMatchesAgent accepts agents.list entries for default-primary URNs", () => {
+    assertDiscordRoutesDefaultPrimaryUuidMatchesAgent(
+      [
+        {
+          sessionId: formatAgentSessionUrn("worker", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID),
+        },
+      ],
+      "main",
+      "discord",
+      { agentsList: [{ id: "worker" }] },
+    );
+  });
+
+  it("assertDiscordRoutesDefaultPrimaryUuidMatchesAgent rejects unlisted agent when agents.list is non-empty", () => {
+    assert.throws(
+      () =>
+        assertDiscordRoutesDefaultPrimaryUuidMatchesAgent(
+          [
+            {
+              sessionId: formatAgentSessionUrn("stranger", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID),
+            },
+          ],
+          "main",
+          "discord",
+          { agentsList: [{ id: "worker" }] },
+        ),
+      /not listed in agents\.list/,
+    );
+  });
+
   it("checkDiscordMessagingRouteSessionUrn requires leaf === channelId when both snowflakes", () => {
     const ok = parseAgentSessionUrn("agent:main:discord:1487579255616573533")!;
     assert.strictEqual(checkDiscordMessagingRouteSessionUrn(ok, "1487579255616573533"), "ok");

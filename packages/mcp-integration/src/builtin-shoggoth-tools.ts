@@ -180,7 +180,7 @@ export function builtinShoggothToolsCatalog(sourceId = "builtin"): McpSourceCata
       {
         name: "session.send",
         description:
-          "Send a message to another session (session_id or agent_id for main session). silent skips posting the reply to the bound channel.",
+          "Send a message to another session (session_id or agent_id for main session). Cross-agent sends require agentToAgent.allow and/or agents.list.<senderId>.agentToAgent.allow in Shoggoth config (\"*\" allows any target). silent skips posting the reply to the bound channel.",
         inputSchema: sessionSendArgs,
       },
     ],

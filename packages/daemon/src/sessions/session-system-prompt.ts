@@ -9,6 +9,8 @@ import {
 import {
   LAYOUT,
   OPERATOR_GLOBAL_INSTRUCTIONS_BASENAME,
+  resolveEffectiveMemoryForSession,
+  resolveEffectiveModelsConfig,
   type ShoggothConfig,
 } from "@shoggoth/shared";
 import { daemonPrompt } from "../prompts/load-prompts";
@@ -232,8 +234,14 @@ function buildWorkspaceSection(
   return daemonPrompt("system-workspace-none", { sandboxLine });
 }
 
-function buildMemoryConfigHint(config: ShoggothConfig | undefined): string | undefined {
-  const paths = config?.memory?.paths;
+function buildMemoryConfigHint(
+  config: ShoggothConfig | undefined,
+  sessionId: string | undefined,
+): string | undefined {
+  const paths =
+    config && sessionId
+      ? resolveEffectiveMemoryForSession(config, sessionId).paths
+      : config?.memory?.paths;
   if (!paths?.length) return undefined;
   const memoryPathLines = paths.map((p) => `- \`${p}\``).join("\n");
   return `\n${daemonPrompt("system-memory-hint", { memoryPathLines })}`;
@@ -354,7 +362,8 @@ export function buildSessionSystemContext(input: BuildSessionSystemContextInput)
   const toolCount = toolNames?.length ?? 0;
 
   const workspaceBody =
-    buildWorkspaceSection(resolvedRoot, input.sandbox) + (buildMemoryConfigHint(input.config) ?? "");
+    buildWorkspaceSection(resolvedRoot, input.sandbox) +
+    (buildMemoryConfigHint(input.config, input.sessionId) ?? "");
 
   const core = joinSections([
     buildIdentitySection(input.channel),
@@ -373,7 +382,12 @@ export function buildSessionSystemContext(input: BuildSessionSystemContextInput)
       contextSegmentId: input.contextSegmentId,
       channel: input.channel,
       resolvedWorkspace: resolvedRoot,
-      modelLabel: formatPrimaryModelLabel(input.config?.models, env),
+      modelLabel: formatPrimaryModelLabel(
+        input.sessionId && input.config
+          ? resolveEffectiveModelsConfig(input.config, input.sessionId) ?? input.config.models
+          : input.config?.models,
+        env,
+      ),
       toolCount,
     }),
   ]);

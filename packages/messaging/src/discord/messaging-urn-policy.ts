@@ -54,29 +54,65 @@ export function checkDiscordMessagingRouteSessionUrn(
 
 const DEFAULT_PRIMARY_UUID_LOWER = SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID.toLowerCase();
 
+export type DiscordDefaultPrimaryMultiAgentGuard = {
+  /** Declared agents (from `agents.list`); when non-empty, default-primary UUID routes are validated per entry. */
+  readonly agentsList?: ReadonlyArray<{ readonly id: string; readonly defaultSessionPlatform?: string }>;
+};
+
 /**
- * Ensures any route whose session URN uses the reserved default-primary UUID matches the
- * configured agent id and platform (same contract as `bootstrap-main-session.mjs`).
+ * Ensures any route whose session URN uses the reserved default-primary UUID is consistent with
+ * the configured process agent / platform, or with `agents.list` map keys when multi-agent guard is passed.
  */
 export function assertDiscordRoutesDefaultPrimaryUuidMatchesAgent(
   routes: ReadonlyArray<{ readonly sessionId: string }>,
   resolvedAgentId: string,
   resolvedPlatform: string,
+  multiAgent?: DiscordDefaultPrimaryMultiAgentGuard,
 ): void {
-  const aid = resolvedAgentId.trim();
-  const plat = resolvedPlatform.trim();
-  const expected = formatAgentSessionUrn(aid, plat, SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+  const aid0 = resolvedAgentId.trim();
+  const plat0 = resolvedPlatform.trim();
+  const list = multiAgent?.agentsList ?? [];
+
+  if (!list.length) {
+    const expected = formatAgentSessionUrn(aid0, plat0, SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    for (let i = 0; i < routes.length; i++) {
+      const p = parseAgentSessionUrn(routes[i]!.sessionId);
+      if (!p) continue;
+      if (p.uuidChain.length !== 1) continue;
+      if (p.uuidChain[0] !== DEFAULT_PRIMARY_UUID_LOWER) continue;
+      if (p.agentId === aid0 && p.platform === plat0) continue;
+      throw new Error(
+        `discord route[${i}] sessionId uses reserved primary UUID (${SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID}) but ` +
+          `agent:platform ${JSON.stringify(p.agentId)}:${JSON.stringify(p.platform)} do not match ` +
+          `SHOGGOTH_AGENT_ID / SHOGGOTH_DEFAULT_SESSION_PLATFORM (${JSON.stringify(aid0)}:${JSON.stringify(plat0)}). ` +
+          `Expected ${JSON.stringify(expected)} or use a different session leaf in the URN.`,
+      );
+    }
+    return;
+  }
+
   for (let i = 0; i < routes.length; i++) {
     const p = parseAgentSessionUrn(routes[i]!.sessionId);
     if (!p) continue;
     if (p.uuidChain.length !== 1) continue;
     if (p.uuidChain[0] !== DEFAULT_PRIMARY_UUID_LOWER) continue;
-    if (p.agentId === aid && p.platform === plat) continue;
+
+    const entry = list.find((a) => a.id === p.agentId);
+    const platformForAgent = entry?.defaultSessionPlatform?.trim() || plat0;
+    if (entry) {
+      if (p.platform !== platformForAgent) {
+        throw new Error(
+          `discord route[${i}] sessionId uses reserved primary UUID but platform ${JSON.stringify(p.platform)} ` +
+            `does not match expected ${JSON.stringify(platformForAgent)} for agent ${JSON.stringify(p.agentId)}`,
+        );
+      }
+      continue;
+    }
+
+    if (p.agentId === aid0 && p.platform === plat0) continue;
     throw new Error(
-      `discord route[${i}] sessionId uses reserved primary UUID (${SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID}) but ` +
-        `agent:platform ${JSON.stringify(p.agentId)}:${JSON.stringify(p.platform)} do not match ` +
-        `SHOGGOTH_AGENT_ID / SHOGGOTH_DEFAULT_SESSION_PLATFORM (${JSON.stringify(aid)}:${JSON.stringify(plat)}). ` +
-        `Expected ${JSON.stringify(expected)} or use a different session leaf in the URN.`,
+      `discord route[${i}] sessionId uses reserved primary UUID for agent ${JSON.stringify(p.agentId)} which is not listed in agents.list ` +
+        `(add it as a key under agents.list, or align the URN with SHOGGOTH_AGENT_ID / SHOGGOTH_DEFAULT_SESSION_PLATFORM ${JSON.stringify(aid0)}:${JSON.stringify(plat0)})`,
     );
   }
 }

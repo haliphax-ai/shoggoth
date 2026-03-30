@@ -1,6 +1,0 @@
-{
-  "memory": {
-    "paths": ["memory"],
-    "embeddings": { "enabled": false }
-  }
-}

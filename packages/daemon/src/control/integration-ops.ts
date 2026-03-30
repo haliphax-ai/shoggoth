@@ -3,7 +3,11 @@ import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import type { WireRequest } from "@shoggoth/authn";
 import type Database from "better-sqlite3";
 import type { ShoggothConfig } from "@shoggoth/shared";
-import { assertValidAgentId, parseAgentSessionUrn } from "@shoggoth/shared";
+import {
+  assertValidAgentId,
+  crossAgentSessionSendAllowed,
+  parseAgentSessionUrn,
+} from "@shoggoth/shared";
 import {
   authorizeCanvasAction,
   type CanvasAuthzAction,
@@ -157,18 +161,28 @@ function resolveSessionSendTargetSessionId(pl: Record<string, unknown>, cfg: Sho
   );
 }
 
-/** Agents may only address sessions whose URN carries the same agent id as the caller session. */
+/**
+ * Agents may `session_send` to their own agent's sessions always; cross-agent sends require
+ * Top-level `agentToAgent.allow` plus optional per-agent `agents.list.<id>.agentToAgent.allow`.
+ */
 function assertAgentMayTargetSessionForSendOrList(
   principal: AuthenticatedPrincipal,
   targetSessionId: string,
+  config: ShoggothConfig,
 ): void {
   if (principal.kind !== "agent") return;
   const callerAgentId = parseAgentSessionUrn(principal.sessionId)?.agentId;
   const targetAgentId = parseAgentSessionUrn(targetSessionId)?.agentId;
-  if (!callerAgentId || !targetAgentId || callerAgentId !== targetAgentId) {
+  if (!callerAgentId || !targetAgentId) {
     throw new IntegrationOpError(
       "ERR_FORBIDDEN",
-      "agent may only target sessions for the same agent id as the calling session",
+      "agent session_send requires valid agent session URNs for caller and target",
+    );
+  }
+  if (!crossAgentSessionSendAllowed(config, callerAgentId, targetAgentId)) {
+    throw new IntegrationOpError(
+      "ERR_FORBIDDEN",
+      "cross-agent session_send denied (configure agentToAgent.allow and/or agents.list.<id>.agentToAgent.allow)",
     );
   }
 }
@@ -820,7 +834,7 @@ export async function handleIntegrationControlOp(
       const { sessions } = requireSubagentRuntime(ctx);
       const pl = payloadObject(req);
       const sessionId = resolveSessionSendTargetSessionId(pl, ctx.config);
-      assertAgentMayTargetSessionForSendOrList(principal, sessionId);
+      assertAgentMayTargetSessionForSendOrList(principal, sessionId, ctx.config);
       const message = requireString(pl, "message");
       const silent = pl.silent === true;
       const row = sessions.getById(sessionId);

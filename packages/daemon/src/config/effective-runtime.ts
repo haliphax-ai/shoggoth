@@ -1,4 +1,5 @@
-import { DEFAULT_MESSAGING_PLATFORM_ID, type ShoggothConfig } from "@shoggoth/shared";
+import { parseAgentSessionUrn, DEFAULT_MESSAGING_PLATFORM_ID, type ShoggothConfig } from "@shoggoth/shared";
+import { parseDiscordRoutesWithMeta, type DiscordSessionRoute } from "@shoggoth/messaging";
 
 function envInt(key: string): number | undefined {
   const v = process.env[key];
@@ -65,6 +66,59 @@ export function resolveDiscordRoutesJson(cfg: ShoggothConfig): string | undefine
   return cfg.discord?.routesJson?.trim() || undefined;
 }
 
+/**
+ * Global `discord.routesJson` plus `agents.list.<agentId>.discord.routes` (validated; session URNs must belong
+ * to that agent key). Same-channel rows from agent blocks override global rows.
+ */
+export function resolveEffectiveDiscordRoutesJson(cfg: ShoggothConfig): string | undefined {
+  const globalRaw = resolveDiscordRoutesJson(cfg);
+  let globalRoutes: DiscordSessionRoute[] = [];
+  if (globalRaw?.trim()) {
+    try {
+      globalRoutes = parseDiscordRoutesWithMeta(globalRaw).routes;
+    } catch {
+      globalRoutes = [];
+    }
+  }
+
+  const fromAgents: DiscordSessionRoute[] = [];
+  for (const [aidRaw, agent] of Object.entries(cfg.agents?.list ?? {})) {
+    const rows = agent.discord?.routes;
+    if (!rows?.length) continue;
+    const aid = aidRaw.trim();
+    let parsed: DiscordSessionRoute[];
+    try {
+      parsed = parseDiscordRoutesWithMeta(JSON.stringify(rows)).routes;
+    } catch {
+      continue;
+    }
+    for (const r of parsed) {
+      const p = parseAgentSessionUrn(r.sessionId);
+      if (!p || p.agentId !== aid) continue;
+      fromAgents.push(r);
+    }
+  }
+
+  if (globalRoutes.length === 0 && fromAgents.length === 0) return undefined;
+
+  const byChannel = new Map<string, DiscordSessionRoute>();
+  for (const r of globalRoutes) {
+    byChannel.set(r.channelId, r);
+  }
+  for (const r of fromAgents) {
+    byChannel.set(r.channelId, r);
+  }
+
+  const merged = [...byChannel.values()];
+  return JSON.stringify(
+    merged.map((r) => ({
+      channelId: r.channelId,
+      sessionId: r.sessionId,
+      ...(r.guildId ? { guildId: r.guildId } : {}),
+    })),
+  );
+}
+
 export function resolveDiscordIntents(cfg: ShoggothConfig): number | undefined {
   const raw = process.env.SHOGGOTH_DISCORD_INTENTS;
   if (raw !== undefined && raw !== "") {
@@ -90,7 +144,7 @@ export function resolveDiscordOwnerUserId(cfg: ShoggothConfig): string | undefin
 
 /**
  * Model endpoint health probe base URL. Env `ANTHROPIC_BASE_URL` (origin) is checked first for
- * Kiro / Anthropic stacks; then `OPENAI_BASE_URL` / `OLLAMA_HOST`, then config.
+ * Anthropic-style stacks; then `OPENAI_BASE_URL` / `OLLAMA_HOST`, then config.
  */
 export function resolveModelHealthProbeBaseUrl(cfg: ShoggothConfig): string | undefined {
   const anthropic = process.env.ANTHROPIC_BASE_URL?.trim();

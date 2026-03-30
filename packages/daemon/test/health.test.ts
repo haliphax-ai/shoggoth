@@ -175,14 +175,14 @@ describe("HealthRegistry", () => {
 
   it("model probe anthropic origin probes root not v1/models", async () => {
     const prev = process.env.ANTHROPIC_BASE_URL;
-    process.env.ANTHROPIC_BASE_URL = "http://kiro:8000";
+    process.env.ANTHROPIC_BASE_URL = "http://127.0.0.1:8000";
     try {
       globalThis.fetch = (async (url, init) => {
-        assert.equal(String(url), "http://kiro:8000/");
+        assert.equal(String(url), "http://127.0.0.1:8000/");
         assert.equal((init as RequestInit).method, "HEAD");
         return new Response(null, { status: 200 });
       }) as typeof fetch;
-      const p = createModelEndpointProbe({ getBaseUrl: () => "http://kiro:8000" });
+      const p = createModelEndpointProbe({ getBaseUrl: () => "http://127.0.0.1:8000" });
       const c = await p.check();
       assert.equal(c.status, "pass");
     } finally {
