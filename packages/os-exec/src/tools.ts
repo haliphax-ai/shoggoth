@@ -74,6 +74,7 @@ export async function toolWrite(
  */
 function xdgEnvForWorkspace(workspaceRoot: string): NodeJS.ProcessEnv {
   return {
+    HOME: workspaceRoot,
     XDG_CONFIG_HOME: join(workspaceRoot, ".config"),
     XDG_DATA_HOME: join(workspaceRoot, ".local", "share"),
     XDG_CACHE_HOME: join(workspaceRoot, ".cache"),
