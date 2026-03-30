@@ -10,6 +10,7 @@ import {
   effectiveSpawnSubagentsEnabled,
   loadLayeredConfig,
   parseAgentSessionUrn,
+  resolveEffectiveModelsConfig,
 } from "@shoggoth/shared";
 import {
   authorizeCanvasAction,
@@ -1181,6 +1182,42 @@ export async function handleIntegrationControlOp(
         outcome: "ok",
       });
       return { ok: true };
+    }
+
+    case "session_model": {
+      if (principal.kind !== "operator") {
+        throw new IntegrationOpError("ERR_FORBIDDEN", "session_model requires operator principal");
+      }
+      if (!ctx.stateDb || !ctx.sessions) {
+        throw new IntegrationOpError("ERR_STATE_DB_REQUIRED", "session_model requires state database");
+      }
+      const pl = payloadObject(req);
+      const sessionId = requireString(pl, "session_id");
+      const row = ctx.sessions.getById(sessionId);
+      if (!row) {
+        throw new IntegrationOpError("ERR_SESSION_INACTIVE", "session not found");
+      }
+      const hasSelection = "model_selection" in pl;
+      if (hasSelection) {
+        const val = pl.model_selection;
+        const modelSelection = val === null ? undefined : val;
+        ctx.sessions.update(sessionId, { modelSelection: modelSelection ?? null });
+        const updated = ctx.sessions.getById(sessionId);
+        const effective = resolveEffectiveModelsConfig(ctx.config, sessionId) ?? null;
+        return {
+          ok: true,
+          session_id: sessionId,
+          model_selection: updated?.modelSelection ?? null,
+          effective_models: effective,
+        };
+      }
+      const effective = resolveEffectiveModelsConfig(ctx.config, sessionId) ?? null;
+      return {
+        ok: true,
+        session_id: sessionId,
+        model_selection: row.modelSelection ?? null,
+        effective_models: effective,
+      };
     }
 
     default:

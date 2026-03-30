@@ -40,6 +40,9 @@ Usage:
   shoggoth session steer <sessionUrn|agentId> <post|discord|surface|internal> <prompt...>  Extra model turn (operator)
   shoggoth session abort <sessionUrn|agentId>  Abort in-flight model turn (operator)
   shoggoth session kill <sessionUrn|agentId>      Terminate session + cleanup (operator)
+  shoggoth session model <sessionUrn|agentId>     Show current model selection (operator)
+  shoggoth session model <sessionUrn|agentId> <json>  Set model selection (JSON string)
+  shoggoth session model <sessionUrn|agentId> --clear  Reset model selection to null
 
   session send: --silent skips posting the assistant reply to the bound messaging surface (internal delivery only).`);
 }
@@ -292,6 +295,41 @@ export async function runSessionCli(argv: string[]): Promise<void> {
       auth,
       op: "session_kill",
       payload: { session_id: sessionId },
+    });
+    console.log(JSON.stringify(res, null, 2));
+    if (!res.ok) process.exitCode = 1;
+    return;
+  }
+
+  if (sub === "model") {
+    const rawTarget = argv[1]?.trim();
+    if (!rawTarget) {
+      console.error(
+        "usage: shoggoth session model <sessionUrn|agentId> [<json> | --clear]",
+      );
+      process.exitCode = 1;
+      return;
+    }
+    const sessionId = resolveSessionTargetOrExit(configDir, rawTarget);
+    if (!sessionId) return;
+    const payload: Record<string, unknown> = { session_id: sessionId };
+    if (argv.includes("--clear")) {
+      payload.model_selection = null;
+    } else if (argv[2] && argv[2] !== "--clear") {
+      const jsonStr = argv.slice(2).join(" ");
+      try {
+        payload.model_selection = JSON.parse(jsonStr);
+      } catch {
+        console.error("invalid JSON for model_selection");
+        process.exitCode = 1;
+        return;
+      }
+    }
+    const res = await invokeControlRequest({
+      socketPath,
+      auth,
+      op: "session_model",
+      payload,
     });
     console.log(JSON.stringify(res, null, 2));
     if (!res.ok) process.exitCode = 1;

@@ -43,6 +43,7 @@ export const DEFINED_CONTROL_OPS = [
   "session_steer",
   "session_abort",
   "session_kill",
+  "session_model",
 ] as const;
 export type DefinedControlOp = (typeof DEFINED_CONTROL_OPS)[number];
 
