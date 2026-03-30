@@ -19,9 +19,24 @@ describe("Outbound send path", () => {
         calls.push({ method: "createMessage", channelId, body });
         return { id: "sent-1" };
       },
+      async createMessageWithFiles(channelId, body) {
+        calls.push({ method: "createMessageWithFiles", channelId, body });
+        return { id: "sent-2" };
+      },
       async editMessage(channelId, messageId, body) {
         calls.push({ method: "editMessage", channelId, body: { ...body, messageId } });
       },
+      async deleteMessage() {},
+      async getMessage(ch: string) {
+        return { id: "m", channel_id: ch, content: "", timestamp: "", author: {}, attachments: [] };
+      },
+      async getChannelMessages() {
+        return [];
+      },
+      async createThreadFromMessage() {
+        return { id: "t" };
+      },
+      async deleteChannel() {},
       async createMessageReaction() {},
       async triggerTypingIndicator() {},
     };

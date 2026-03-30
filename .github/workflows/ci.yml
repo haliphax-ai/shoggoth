@@ -1,4 +1,4 @@
-# See docs/runbook.md § CI test matrix. `npm run build` = authn native + `tsc --noEmit` (no TS emit).
+# See docs/runbook.md § CI test matrix. `npm run build` = authn native only; `npm run typecheck` is a separate step.
 # - unit: default VM; `npm test` includes SHOGGOTH-READY compose tests when Docker/Compose is available (default stack).
 # - agent-uid-isolation: container root + uids 900/901; SHOGGOTH_CI_STRICT_AGENT_TESTS enforces DAC tests.
 name: CI
@@ -20,6 +20,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - run: npm run typecheck
       - run: npm test
 
   agent-uid-isolation:

@@ -55,7 +55,7 @@ export function reconcilePersistentBoundSubagents(input: {
     }
 
     if (expiresAt <= now) {
-      terminateBoundSubagentSession(sessionManager, s.id);
+      terminateBoundSubagentSession(sessionManager, s.id, "ttl_expired");
       expiredKilled++;
       input.logger.info("subagent.reconcile.expired_killed", { sessionId: s.id });
       continue;
@@ -73,7 +73,7 @@ export function reconcilePersistentBoundSubagents(input: {
     const remainingMs = expiresAt - now;
     ttlTimer = setTimeout(() => {
       ttlTimer = undefined;
-      terminateBoundSubagentSession(sessionManager, s.id);
+      terminateBoundSubagentSession(sessionManager, s.id, "ttl_expired");
     }, remainingMs);
 
     rememberSubagentHandles(s.id, {

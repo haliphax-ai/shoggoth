@@ -14,6 +14,7 @@ describe("Adapter capability descriptor", () => {
     assert.equal(cap.extensions.replies, true);
     assert.equal(cap.extensions.reactionsInbound, true);
     assert.equal(cap.extensions.streamingOutbound, true);
+    assert.equal(cap.extensions.messageGet, true);
     assert.ok(cap.features?.includes(MESSAGING_FEATURE.TYPING_NOTIFICATION));
     assert.ok(cap.features?.includes(MESSAGING_FEATURE.SILENT_REPLIES_CHANNEL_AWARE));
     assert.ok(cap.parameterSchemas.outboundText);

@@ -1,5 +1,12 @@
 import type { OpenAIToolFunctionDefinition } from "@shoggoth/models";
-import type { AggregateMcpCatalogResult, McpSourceCatalog } from "@shoggoth/mcp-integration";
+import type {
+  AggregateMcpCatalogResult,
+  AggregatedTool,
+  McpSourceCatalog,
+  MessageToolPlatformSlice,
+} from "@shoggoth/mcp-integration";
+import { buildMessageToolDescriptor } from "@shoggoth/mcp-integration";
+import { isSubagentSessionUrn } from "@shoggoth/shared";
 import {
   buildAggregatedMcpCatalog,
   mcpToolsForToolLoop,
@@ -13,7 +20,7 @@ export type SessionMcpToolContext = {
   readonly external?: ExternalMcpInvoke;
 };
 
-function openAiToolsFromCatalog(aggregated: AggregateMcpCatalogResult): OpenAIToolFunctionDefinition[] {
+export function openAiToolsFromCatalog(aggregated: AggregateMcpCatalogResult): OpenAIToolFunctionDefinition[] {
   return aggregated.tools.map((t) => ({
     type: "function" as const,
     function: {
@@ -22,6 +29,32 @@ function openAiToolsFromCatalog(aggregated: AggregateMcpCatalogResult): OpenAITo
       parameters: (t.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>,
     },
   }));
+}
+
+/**
+ * Appends `builtin.message` when a messaging runtime registers a capability slice (e.g. Discord).
+ */
+export function augmentSessionMcpToolContextWithMessageTool(
+  base: SessionMcpToolContext,
+  slice: MessageToolPlatformSlice | undefined,
+): SessionMcpToolContext {
+  const desc = buildMessageToolDescriptor(slice);
+  if (!desc) return base;
+  const extra: AggregatedTool = {
+    ...desc,
+    namespacedName: "builtin.message",
+    sourceId: "builtin",
+    originalName: "message",
+  };
+  const aggregated: AggregateMcpCatalogResult = {
+    tools: [...base.aggregated.tools, extra],
+  };
+  return {
+    aggregated,
+    toolsOpenAi: openAiToolsFromCatalog(aggregated),
+    toolsLoop: mcpToolsForToolLoop(aggregated),
+    external: base.external,
+  };
 }
 
 /** External MCP slices only (built-ins come from {@link buildAggregatedMcpCatalog}). */
@@ -82,5 +115,26 @@ export function buildBuiltinOnlySessionMcpToolContext(): SessionMcpToolContext {
     toolsOpenAi: openAiToolsFromCatalog(aggregated),
     toolsLoop: mcpToolsForToolLoop(aggregated),
     external: undefined,
+  };
+}
+
+/**
+ * `builtin.subagent` is only for top-level sessions; subagent runs must not recurse via tool list.
+ */
+export function omitBuiltinSubagentToolForSubagentSession(
+  ctx: SessionMcpToolContext,
+  sessionId: string,
+): SessionMcpToolContext {
+  if (!isSubagentSessionUrn(sessionId)) return ctx;
+  const tools = ctx.aggregated.tools.filter(
+    (t) => !(t.sourceId === "builtin" && t.originalName === "subagent"),
+  );
+  if (tools.length === ctx.aggregated.tools.length) return ctx;
+  const aggregated: AggregateMcpCatalogResult = { tools };
+  return {
+    aggregated,
+    toolsOpenAi: openAiToolsFromCatalog(aggregated),
+    toolsLoop: mcpToolsForToolLoop(aggregated),
+    external: ctx.external,
   };
 }

@@ -11,4 +11,7 @@ export interface JsonSchemaLike {
   readonly required?: readonly string[];
   readonly additionalProperties?: boolean;
   readonly enum?: readonly unknown[];
+  readonly oneOf?: readonly JsonSchemaLike[];
+  readonly minimum?: number;
+  readonly maximum?: number;
 }

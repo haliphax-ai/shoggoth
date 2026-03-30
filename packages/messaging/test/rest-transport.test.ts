@@ -129,6 +129,101 @@ describe("Discord REST transport", () => {
     assert.ok(calls[0]!.url.includes(encodeURIComponent("✅")));
   });
 
+  it("deleteMessage DELETEs message endpoint", async () => {
+    const fetchFn: typeof fetch = async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(null, { status: 204 });
+    };
+    const t = createDiscordRestTransport({ botToken: "tok", fetchFn, apiBase: "https://example.com/v10" });
+    await t.deleteMessage("ch1", "m9");
+    assert.match(calls[0]!.url, /\/channels\/ch1\/messages\/m9$/);
+    assert.equal(calls[0]!.init.method, "DELETE");
+  });
+
+  it("createThreadFromMessage POSTs name and returns thread id", async () => {
+    const fetchFn: typeof fetch = async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ id: "thread-1" }), { status: 201 });
+    };
+    const t = createDiscordRestTransport({ botToken: "tok", fetchFn, apiBase: "https://example.com/v10" });
+    const ref = await t.createThreadFromMessage("ch1", "m1", { name: "tname", auto_archive_duration: 60 });
+    assert.equal(ref.id, "thread-1");
+    assert.match(calls[0]!.url, /\/channels\/ch1\/messages\/m1\/threads$/);
+    const body = JSON.parse(String(calls[0]!.init.body)) as { name: string; auto_archive_duration: number };
+    assert.equal(body.name, "tname");
+    assert.equal(body.auto_archive_duration, 60);
+  });
+
+  it("deleteChannel DELETEs channel", async () => {
+    const fetchFn: typeof fetch = async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(null, { status: 204 });
+    };
+    const t = createDiscordRestTransport({ botToken: "tok", fetchFn, apiBase: "https://example.com/v10" });
+    await t.deleteChannel("thread-z");
+    assert.match(calls[0]!.url, /\/channels\/thread-z$/);
+    assert.equal(calls[0]!.init.method, "DELETE");
+  });
+
+  it("getMessage GETs single message", async () => {
+    const fetchFn: typeof fetch = async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(
+        JSON.stringify({
+          id: "msg-9",
+          channel_id: "ch1",
+          content: "hi",
+          timestamp: "t",
+          author: { id: "u1" },
+          attachments: [],
+        }),
+        { status: 200 },
+      );
+    };
+    const t = createDiscordRestTransport({ botToken: "tok", fetchFn, apiBase: "https://example.com/v10" });
+    const j = await t.getMessage("ch1", "msg-9");
+    assert.equal(j.id, "msg-9");
+    assert.match(calls[0]!.url, /\/channels\/ch1\/messages\/msg-9$/);
+    assert.equal(calls[0]!.init.method, "GET");
+  });
+
+  it("getChannelMessages GETs with query params", async () => {
+    const fetchFn: typeof fetch = async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(
+        JSON.stringify([
+          { id: "a", channel_id: "ch1", content: "1", timestamp: "t", author: {}, attachments: [] },
+        ]),
+        { status: 200 },
+      );
+    };
+    const t = createDiscordRestTransport({ botToken: "tok", fetchFn, apiBase: "https://example.com/v10" });
+    const rows = await t.getChannelMessages("ch1", { limit: 5, before: "snow" });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]!.id, "a");
+    assert.match(calls[0]!.url, /\/channels\/ch1\/messages\?/);
+    assert.match(calls[0]!.url, /limit=5/);
+    assert.match(calls[0]!.url, /before=snow/);
+  });
+
+  it("createMessageWithFiles sends multipart form with payload_json", async () => {
+    const fetchFn: typeof fetch = async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ id: "mf-1" }), { status: 200 });
+    };
+    const t = createDiscordRestTransport({ botToken: "tok", fetchFn, apiBase: "https://example.com/v10" });
+    const ref = await t.createMessageWithFiles(
+      "ch1",
+      { content: "see file" },
+      [{ filename: "a.txt", data: new Uint8Array([97, 98]) }],
+    );
+    assert.equal(ref.id, "mf-1");
+    assert.ok(calls[0]!.init.body instanceof FormData);
+    const h = calls[0]!.init.headers as Headers;
+    assert.equal(h.get("Authorization"), "Bot tok");
+    assert.equal(h.get("Content-Type"), null);
+  });
+
   it("triggerTypingIndicator POSTs to channel typing endpoint", async () => {
     const calls: { url: string; method: string; body: string }[] = [];
     const fetchFn: typeof fetch = async (url, init) => {

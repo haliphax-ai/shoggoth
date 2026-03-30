@@ -6,7 +6,7 @@ COPY package.json package-lock.json* ./
 COPY packages ./packages
 RUN npm ci
 COPY tsconfig.base.json ./
-# `npm run build` = authn `node-gyp-build` + workspace `tsc --noEmit` (no JS emit). Runtime uses `tsx` + `src/*.ts`; keep `tsx` in root `dependencies` after prune.
+# `npm run build` = authn `node-gyp-build` only (no workspace typecheck). Runtime uses `tsx` + `src/*.ts`; keep `tsx` in root `dependencies` after prune.
 RUN npm run build && npm prune --omit=dev
 
 FROM node:22-bookworm-slim

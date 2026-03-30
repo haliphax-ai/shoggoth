@@ -34,6 +34,7 @@ export {
   shoggothRetentionConfigSchema,
   shoggothRuntimeConfigSchema,
   shoggothSkillsConfigSchema,
+  shoggothSubagentSpawnAllowSchema,
   shoggothToolRulesSchema,
   DEFAULT_SKILLS_CONFIG,
   type HitlRiskTier,
@@ -59,6 +60,7 @@ export {
   type ShoggothPolicyConfig,
   type ShoggothPolicyFragment,
   type ShoggothSkillsConfig,
+  type ShoggothSubagentSpawnAllowConfig,
   type ShoggothRetentionConfig,
   type ShoggothRuntimeConfig,
   type ShoggothToolRules,
@@ -67,6 +69,13 @@ export {
   crossAgentSessionSendAllowed,
   mergeAgentToAgentAllowPatterns,
 } from "./agent-to-agent-policy";
+export { effectiveSpawnSubagentsEnabled } from "./spawn-subagents-policy";
+export {
+  agentMayInvokeSubagentSpawnByAllowlist,
+  effectiveSubagentSpawnAllowedAgentIds,
+  hasExplicitSubagentSpawnAllowConfig,
+  mergeSubagentSpawnAllowPatterns,
+} from "./subagent-spawn-allow-policy";
 export {
   formatDiscordAgentIdentityPrefix,
   resolveAgentIdFromSessionId,
@@ -80,6 +89,7 @@ export {
   assertValidAgentId,
   defaultPrimarySessionUrnForAgent,
   formatAgentSessionUrn,
+  isSubagentSessionUrn,
   isValidAgentSessionUrn,
   isValidSessionUrnTailSegment,
   mintAgentSessionUrn,

@@ -43,6 +43,10 @@ import { createDaemonRuntime } from "./runtime";
 import { createToolRunStore } from "./sessions/tool-run-store";
 import { startDiscordPlatform } from "./platforms/discord";
 import { reconcilePersistentBoundSubagents } from "./subagent/reconcile-persistent-bound-subagents";
+import {
+  messageToolContextRef,
+  messageToolSliceFromCapabilities,
+} from "./messaging/message-tool-context-ref";
 import { setSubagentRuntimeExtension } from "./subagent/subagent-extension-ref";
 import { defaultDiscordAssistantDeps } from "./sessions/assistant-runtime";
 import { createPersistingHitlAutoApproveGate } from "./hitl/hitl-auto-approve-persisting";
@@ -58,6 +62,7 @@ import {
   startDaemonDiscordMessaging,
   type DiscordMessagingRuntime,
 } from "./messaging/daemon-messaging-bootstrap";
+import { executeDiscordMessageToolAction } from "@shoggoth/messaging";
 import { loadDaemonNotices } from "./notices/load-notices";
 import { loadDaemonPrompts } from "./prompts/load-prompts";
 
@@ -244,7 +249,8 @@ void (async () => {
   stateShutdown.db = db;
   stateShutdown.toolRuns = createToolRunStore(db);
 
-  if (discordMessaging && hitlStack) {
+  const dm = discordMessaging;
+  if (dm && hitlStack) {
     const discordPlatform = await startDiscordPlatform({
       db,
       config,
@@ -255,15 +261,29 @@ void (async () => {
       hitlDiscordNoticeRegistry,
       hitlAutoApproveGate,
       logger: msgLog.child({ subsystem: "discord" }),
-      discord: discordMessaging,
+      discord: dm,
       deps: defaultDiscordAssistantDeps,
     });
     const subagentExt = {
       runSessionModelTurn: discordPlatform.runSessionModelTurn,
       subscribeSubagentSession: discordPlatform.subscribeSubagentSession,
-      registerDiscordThreadBinding: discordMessaging.registerDiscordThreadBinding,
+      registerDiscordThreadBinding: dm.registerDiscordThreadBinding,
+      announceBoundSubagentSessionEnded: discordPlatform.announceBoundSubagentSessionEnded,
     };
     setSubagentRuntimeExtension(subagentExt);
+    messageToolContextRef.current = {
+      slice: messageToolSliceFromCapabilities(dm.capabilities),
+      execute: (sessionId, args) =>
+        executeDiscordMessageToolAction(
+          {
+            capabilities: dm.capabilities,
+            transport: dm.discordRestTransport,
+            sessionToChannel: (sid) => dm.resolveOutboundChannelIdForSession?.(sid),
+          },
+          sessionId,
+          args,
+        ),
+    };
     const subRecon = reconcilePersistentBoundSubagents({
       db,
       config,
@@ -279,6 +299,7 @@ void (async () => {
     rt.shutdown.registerDrain("discord", async () => {
       await discordPlatform.stop();
       setSubagentRuntimeExtension(undefined);
+      messageToolContextRef.current = undefined;
     });
   }
 

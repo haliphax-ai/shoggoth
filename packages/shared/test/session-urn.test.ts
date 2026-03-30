@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   defaultPrimarySessionUrnForAgent,
   formatAgentSessionUrn,
+  isSubagentSessionUrn,
   isValidAgentSessionUrn,
   mintSubagentSessionUrnFromParent,
   parseAgentSessionUrn,
@@ -37,6 +38,13 @@ describe("session-urn", () => {
   it("accepts numeric channel-style tail without interpreting it (Discord validates elsewhere)", () => {
     const u = "agent:main:discord:1487579255616573533";
     assert.ok(isValidAgentSessionUrn(u));
+  });
+
+  it("isSubagentSessionUrn distinguishes depth", () => {
+    const top = formatAgentSessionUrn("a", "discord", "40000000-0000-4000-8000-000000000004");
+    assert.equal(isSubagentSessionUrn(top), false);
+    const sub = mintSubagentSessionUrnFromParent(top, "50000000-0000-4000-8000-000000000005");
+    assert.equal(isSubagentSessionUrn(sub), true);
   });
 
   it("mints subagent with parent leaf uuid", () => {

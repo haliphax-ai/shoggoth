@@ -1,6 +1,8 @@
 import type {
+  DiscordChannelMessagesQuery,
   DiscordCreateMessageBody,
   DiscordEditMessageBody,
+  DiscordMessageUploadFile,
   DiscordRestTransport,
 } from "./transport";
 
@@ -43,7 +45,13 @@ function sleep(ms: number): Promise<void> {
 
 type DiscordRestOperation =
   | "createMessage"
+  | "createMessageWithFiles"
   | "editMessage"
+  | "deleteMessage"
+  | "getMessage"
+  | "getChannelMessages"
+  | "createThreadFromMessage"
+  | "deleteChannel"
   | "openDmChannel"
   | "createMessageReaction"
   | "triggerTypingIndicator";
@@ -101,7 +109,7 @@ export function createDiscordRestTransport(options: DiscordRestTransportOptions)
   async function discordFetch(path: string, init: RequestInit): Promise<Response> {
     const headers = new Headers(init.headers);
     if (!headers.has("Authorization")) headers.set("Authorization", auth);
-    if (init.body != null && !headers.has("Content-Type")) {
+    if (init.body != null && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
       headers.set("Content-Type", "application/json");
     }
     return fetchFn(`${base}${path}`, { ...init, headers });
@@ -136,6 +144,27 @@ export function createDiscordRestTransport(options: DiscordRestTransportOptions)
       return { id: j.id };
     },
 
+    async createMessageWithFiles(channelId, body, files) {
+      const form = new FormData();
+      form.append("payload_json", JSON.stringify(body));
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i]!;
+        const blob = new Blob([f.data], { type: "application/octet-stream" });
+        form.append(`files[${i}]`, blob, f.filename);
+      }
+      const res = await discordFetchWithRateLimitRetry(
+        () =>
+          discordFetch(`/channels/${encodeURIComponent(channelId)}/messages`, {
+            method: "POST",
+            body: form,
+          }),
+        "createMessageWithFiles",
+      );
+      const j = (await res.json()) as { id?: string };
+      if (!j.id) throw new Error("Discord REST createMessageWithFiles: missing id in response");
+      return { id: j.id };
+    },
+
     async editMessage(channelId, messageId, body: DiscordEditMessageBody) {
       await discordFetchWithRateLimitRetry(
         () =>
@@ -148,6 +177,89 @@ export function createDiscordRestTransport(options: DiscordRestTransportOptions)
           ),
         "editMessage",
       );
+    },
+
+    async deleteMessage(channelId, messageId) {
+      const res = await discordFetchWithRateLimitRetry(
+        () =>
+          discordFetch(
+            `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
+            { method: "DELETE" },
+          ),
+        "deleteMessage",
+      );
+      if (!res.ok && res.status !== 204) {
+        const bodyText = await res.text();
+        throw new Error(`Discord REST deleteMessage ${res.status}: ${bodyText}`);
+      }
+    },
+
+    async createThreadFromMessage(channelId, messageId, threadBody) {
+      const res = await discordFetchWithRateLimitRetry(
+        () =>
+          discordFetch(
+            `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/threads`,
+            {
+              method: "POST",
+              body: JSON.stringify(threadBody),
+            },
+          ),
+        "createThreadFromMessage",
+      );
+      const j = (await res.json()) as { id?: string };
+      if (!j.id) throw new Error("Discord REST createThreadFromMessage: missing id in response");
+      return { id: j.id };
+    },
+
+    async deleteChannel(channelId) {
+      const res = await discordFetchWithRateLimitRetry(
+        () => discordFetch(`/channels/${encodeURIComponent(channelId)}`, { method: "DELETE" }),
+        "deleteChannel",
+      );
+      if (!res.ok && res.status !== 204) {
+        const bodyText = await res.text();
+        throw new Error(`Discord REST deleteChannel ${res.status}: ${bodyText}`);
+      }
+    },
+
+    async getMessage(channelId, messageId) {
+      const res = await discordFetchWithRateLimitRetry(
+        () =>
+          discordFetch(
+            `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
+            { method: "GET" },
+          ),
+        "getMessage",
+      );
+      const j = (await res.json()) as Record<string, unknown>;
+      if (typeof j.id !== "string") {
+        throw new Error("Discord REST getMessage: missing id in response");
+      }
+      return j;
+    },
+
+    async getChannelMessages(channelId, query: DiscordChannelMessagesQuery) {
+      const params = new URLSearchParams();
+      const lim =
+        query.limit !== undefined
+          ? Math.min(100, Math.max(1, Math.trunc(query.limit)))
+          : undefined;
+      if (lim !== undefined) params.set("limit", String(lim));
+      const cursors = [query.before, query.after, query.around].filter(Boolean);
+      if (cursors.length > 1) {
+        throw new Error("Discord REST getChannelMessages: set at most one of before, after, around");
+      }
+      if (query.before) params.set("before", query.before);
+      if (query.after) params.set("after", query.after);
+      if (query.around) params.set("around", query.around);
+      const q = params.toString();
+      const path = `/channels/${encodeURIComponent(channelId)}/messages${q ? `?${q}` : ""}`;
+      const res = await discordFetchWithRateLimitRetry(() => discordFetch(path, { method: "GET" }), "getChannelMessages");
+      const j = (await res.json()) as unknown;
+      if (!Array.isArray(j)) {
+        throw new Error("Discord REST getChannelMessages: expected JSON array");
+      }
+      return j as Record<string, unknown>[];
     },
 
     async createMessageReaction(channelId, messageId, emoji) {

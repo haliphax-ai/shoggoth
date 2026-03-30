@@ -1245,6 +1245,250 @@ describe("control plane (unix socket + JSONL)", () => {
     db.close();
   });
 
+  it("subagent_spawn denied for agent when spawnSubagents false", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-sub-spawn-off-"));
+    const sock = join(dir, "c.sock");
+    const dbPath = join(dir, "state.db");
+    const db = new Database(dbPath);
+    migrate(db, defaultMigrationsDir());
+    const sessions = createSessionStore(db);
+    const tokens = createSqliteAgentTokenStore(db);
+    const parentId = formatAgentSessionUrn("par", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    sessions.create({
+      id: parentId,
+      workspacePath: "/tmp/w",
+      status: "active",
+      modelSelection: { model: "m", temperature: 0 },
+    });
+    tokens.register(parentId, "tok-spawn-off");
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: async () => ({
+        latestAssistantText: "noop",
+        failoverMeta: undefined,
+      }),
+      subscribeSubagentSession: () => () => {},
+      registerDiscordThreadBinding: () => () => {},
+    });
+    try {
+      await withControlPlaneSession(
+        {
+          readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
+          stateDb: db,
+          config: { ...minimalConfig(sock), spawnSubagents: false },
+        },
+        async (send) => {
+          const line = await send({
+            v: WIRE_VERSION,
+            id: "sub-spawn-off",
+            op: "subagent_spawn",
+            auth: { kind: "agent", session_id: parentId, token: "tok-spawn-off" },
+            payload: { parent_session_id: parentId, prompt: "task", mode: "one_shot" },
+          });
+          const res = parseResponseLine(line);
+          assert.equal(res.ok, false);
+          assert.equal(res.error?.code, "ERR_FORBIDDEN");
+        },
+      );
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
+    db.close();
+  });
+
+  it("subagent_spawn denied for agent when subagentSpawnAllow excludes caller", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-sub-allow-"));
+    const sock = join(dir, "c.sock");
+    const dbPath = join(dir, "state.db");
+    const db = new Database(dbPath);
+    migrate(db, defaultMigrationsDir());
+    const sessions = createSessionStore(db);
+    const tokens = createSqliteAgentTokenStore(db);
+    const parentId = formatAgentSessionUrn("par", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    sessions.create({
+      id: parentId,
+      workspacePath: "/tmp/w",
+      status: "active",
+      modelSelection: { model: "m", temperature: 0 },
+    });
+    tokens.register(parentId, "tok-allow-deny");
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: async () => ({
+        latestAssistantText: "noop",
+        failoverMeta: undefined,
+      }),
+      subscribeSubagentSession: () => () => {},
+      registerDiscordThreadBinding: () => () => {},
+    });
+    try {
+      await withControlPlaneSession(
+        {
+          readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
+          stateDb: db,
+          config: {
+            ...minimalConfig(sock),
+            subagentSpawnAllow: { allow: ["someone_else"] },
+          },
+        },
+        async (send) => {
+          const line = await send({
+            v: WIRE_VERSION,
+            id: "sub-allow-deny",
+            op: "subagent_spawn",
+            auth: { kind: "agent", session_id: parentId, token: "tok-allow-deny" },
+            payload: { parent_session_id: parentId, prompt: "task", mode: "one_shot" },
+          });
+          const res = parseResponseLine(line);
+          assert.equal(res.ok, false);
+          assert.equal(res.error?.code, "ERR_FORBIDDEN");
+        },
+      );
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
+    db.close();
+  });
+
+  it("session_inspect denied for agent when spawnSubagents false", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-insp-off-"));
+    const sock = join(dir, "c.sock");
+    const dbPath = join(dir, "state.db");
+    const db = new Database(dbPath);
+    migrate(db, defaultMigrationsDir());
+    const sessions = createSessionStore(db);
+    const tokens = createSqliteAgentTokenStore(db);
+    const sid = formatAgentSessionUrn("insp", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    sessions.create({ id: sid, workspacePath: "/w", status: "active" });
+    tokens.register(sid, "tok-insp-off");
+    await withControlPlaneSession(
+      {
+        readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
+        stateDb: db,
+        config: { ...minimalConfig(sock), spawnSubagents: false },
+      },
+      async (send) => {
+        const line = await send({
+          v: WIRE_VERSION,
+          id: "insp-off",
+          op: "session_inspect",
+          auth: { kind: "agent", session_id: sid, token: "tok-insp-off" },
+          payload: { session_id: sid },
+        });
+        const res = parseResponseLine(line);
+        assert.equal(res.ok, false);
+        assert.equal(res.error?.code, "ERR_FORBIDDEN");
+      },
+    );
+    db.close();
+  });
+
+  it("session_steer allowed for agent on direct bound child", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-steer-ag-"));
+    const sock = join(dir, "c.sock");
+    const dbPath = join(dir, "state.db");
+    const db = new Database(dbPath);
+    migrate(db, defaultMigrationsDir());
+    const sessions = createSessionStore(db);
+    const tokens = createSqliteAgentTokenStore(db);
+    const parentId = formatAgentSessionUrn("st", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const childId = formatAgentSessionUrn("st", "discord", randomUUID());
+    sessions.create({ id: parentId, workspacePath: "/wp", status: "active" });
+    sessions.create({ id: childId, workspacePath: "/wc", status: "active" });
+    sessions.update(childId, { parentSessionId: parentId, subagentMode: "bound" });
+    tokens.register(parentId, "tok-steer-ag");
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: async () => ({
+        latestAssistantText: "STEER_OK",
+        failoverMeta: undefined,
+      }),
+      subscribeSubagentSession: () => () => {},
+      registerDiscordThreadBinding: () => () => {},
+    });
+    try {
+      await withControlPlaneSession(
+        {
+          readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
+          stateDb: db,
+          config: minimalConfig(sock),
+        },
+        async (send) => {
+          const line = await send({
+            v: WIRE_VERSION,
+            id: "steer-ag",
+            op: "session_steer",
+            auth: { kind: "agent", session_id: parentId, token: "tok-steer-ag" },
+            payload: { session_id: childId, prompt: "continue" },
+          });
+          const res = parseResponseLine(line);
+          assert.equal(res.ok, true);
+          assert.equal((res.result as { reply: string }).reply, "STEER_OK");
+        },
+      );
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
+    db.close();
+  });
+
+  it("session_steer denied for agent when target is not a direct child", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-steer-bad-"));
+    const sock = join(dir, "c.sock");
+    const dbPath = join(dir, "state.db");
+    const db = new Database(dbPath);
+    migrate(db, defaultMigrationsDir());
+    const sessions = createSessionStore(db);
+    const tokens = createSqliteAgentTokenStore(db);
+    const callerId = formatAgentSessionUrn("caller", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const otherParent = formatAgentSessionUrn("otherp", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const childId = formatAgentSessionUrn("otherp", "discord", randomUUID());
+    sessions.create({ id: callerId, workspacePath: "/w1", status: "active" });
+    sessions.create({ id: otherParent, workspacePath: "/w2", status: "active" });
+    sessions.create({ id: childId, workspacePath: "/w3", status: "active" });
+    sessions.update(childId, { parentSessionId: otherParent, subagentMode: "bound" });
+    tokens.register(callerId, "tok-steer-bad");
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: async () => ({
+        latestAssistantText: "should not run",
+        failoverMeta: undefined,
+      }),
+      subscribeSubagentSession: () => () => {},
+      registerDiscordThreadBinding: () => () => {},
+    });
+    try {
+      await withControlPlaneSession(
+        {
+          readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
+          stateDb: db,
+          config: minimalConfig(sock),
+        },
+        async (send) => {
+          const line = await send({
+            v: WIRE_VERSION,
+            id: "steer-bad",
+            op: "session_steer",
+            auth: { kind: "agent", session_id: callerId, token: "tok-steer-bad" },
+            payload: { session_id: childId, prompt: "nope" },
+          });
+          const res = parseResponseLine(line);
+          assert.equal(res.ok, false);
+          assert.equal(res.error?.code, "ERR_FORBIDDEN");
+        },
+      );
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
+    db.close();
+  });
+
   it("mcp_http_cancel_request forwards to injected cancel hook", async () => {
     if (process.platform !== "linux") return;
 

@@ -44,7 +44,8 @@ See [docs/operator-secrets.md](./docs/operator-secrets.md) for Compose secret mo
 
 ```bash
 npm ci
-npm run build   # authn native addon + `tsc --noEmit` in every workspace (no emit; runtime is tsx + src/*.ts)
+npm run build   # authn native addon only (fast; no workspace typecheck)
+npm run typecheck   # `tsc --noEmit` in every workspace when you want it
 npm run typecheck   # same typecheck step alone, if native already built
 npm run cli -- --version
 npm run cli -- config show

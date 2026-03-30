@@ -55,39 +55,42 @@ const memoryIngestArgs = {
   properties: {},
 } as const;
 
-const subagentSpawnOneShotArgs = {
+const subagentToolArgs = {
   type: "object",
   description:
-    "Spawn an internal one-shot subagent under this session; inherits model selection unless model_options is set.",
+    "Subagent spawn, inspect, steer, abort, and kill. Allowed only when spawnSubagents is true (top-level and/or agents.list.<id>.spawnSubagents). Top-level sessions only for spawn; steer/kill target direct child subagents; abort may target own session or a direct child.",
   properties: {
-    prompt: { type: "string", description: "User task for the subagent" },
+    action: {
+      type: "string",
+      enum: ["spawn_one_shot", "spawn_bound", "inspect", "steer", "abort", "kill"],
+      description:
+        "spawn_one_shot / spawn_bound / inspect / steer / abort / kill — use fields below as required for each action.",
+    },
+    prompt: {
+      type: "string",
+      description: "spawn_one_shot, spawn_bound, steer: task or steer text",
+    },
+    thread_id: { type: "string", description: "spawn_bound: platform thread / forum channel snowflake" },
     model_options: {
       type: "object",
-      description: "Optional overlay merged into inherited model_selection (JSON object)",
+      description: "spawn_*: optional overlay merged into inherited model_selection",
+    },
+    discord_user_id: { type: "string", description: "spawn_bound, steer: optional messaging user id" },
+    reply_to_message_id: { type: "string", description: "spawn_bound, steer: optional reply reference" },
+    lifetime_ms: { type: "integer", description: "spawn_bound: optional bound lifetime in ms" },
+    session_id: {
+      type: "string",
+      description:
+        "steer, abort, kill: target session URN (child subagent for steer and kill; own session or child for abort)",
+    },
+    delivery: {
+      type: "string",
+      enum: ["internal", "post", "discord", "surface"],
+      description:
+        "steer: internal skips messaging surface; post, discord, or surface delivers via bound messaging",
     },
   },
-  required: ["prompt"],
-} as const;
-
-const subagentSpawnBoundArgs = {
-  type: "object",
-  description:
-    "Spawn a thread-bound subagent (platform thread id, e.g. Discord); first reply uses messaging delivery.",
-  properties: {
-    thread_id: { type: "string", description: "Platform thread / forum channel snowflake" },
-    prompt: { type: "string", description: "User task for the subagent" },
-    model_options: { type: "object", description: "Optional model_selection overlay (JSON object)" },
-    discord_user_id: { type: "string", description: "Optional delivery user id override" },
-    reply_to_message_id: { type: "string", description: "Optional reply reference for first message" },
-    lifetime_ms: { type: "integer", description: "Optional bound lifetime in ms" },
-  },
-  required: ["thread_id", "prompt"],
-} as const;
-
-const subagentInspectArgs = {
-  type: "object",
-  description: "No arguments; inspects this session row and direct child subagents",
-  properties: {},
+  required: ["action"],
 } as const;
 
 const sessionListArgs = {
@@ -155,21 +158,10 @@ export function builtinShoggothToolsCatalog(sourceId = "builtin"): McpSourceCata
         inputSchema: memoryIngestArgs,
       },
       {
-        name: "subagent.spawn_one_shot",
+        name: "subagent",
         description:
-          "Run a one-shot child under this session (internal delivery). Top-level sessions only; subagents cannot call this.",
-        inputSchema: subagentSpawnOneShotArgs,
-      },
-      {
-        name: "subagent.spawn_bound",
-        description:
-          "Run a thread-bound child under this session (messaging surface delivery). Top-level sessions only.",
-        inputSchema: subagentSpawnBoundArgs,
-      },
-      {
-        name: "subagent.inspect",
-        description: "Return this session metadata and list of child subagent sessions (same session only).",
-        inputSchema: subagentInspectArgs,
+          "Unified subagent control: spawn (one_shot or bound thread), inspect this session’s children, steer/abort/kill child sessions (or abort own in-flight turn). Requires spawnSubagents in config when using agent token.",
+        inputSchema: subagentToolArgs,
       },
       {
         name: "session.list",

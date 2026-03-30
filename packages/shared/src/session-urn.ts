@@ -107,6 +107,12 @@ export function isValidAgentSessionUrn(id: string): boolean {
   return parseAgentSessionUrn(id) !== null;
 }
 
+/** True when the URN has more than one tail segment after `platform` (a child of a top-level session). */
+export function isSubagentSessionUrn(id: string): boolean {
+  const p = parseAgentSessionUrn(id);
+  return p !== null && p.uuidChain.length > 1;
+}
+
 export function formatAgentSessionUrn(agentId: string, platform: string, sessionLeaf: string): string {
   assertValidAgentId(agentId);
   const plat = platform.trim();

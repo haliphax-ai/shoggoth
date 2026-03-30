@@ -4,8 +4,10 @@ import type { WireRequest } from "@shoggoth/authn";
 import type Database from "better-sqlite3";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import {
+  agentMayInvokeSubagentSpawnByAllowlist,
   assertValidAgentId,
   crossAgentSessionSendAllowed,
+  effectiveSpawnSubagentsEnabled,
   parseAgentSessionUrn,
 } from "@shoggoth/shared";
 import {
@@ -224,6 +226,21 @@ function assertAgentMayUseSubagentSpawn(
     throw new IntegrationOpError(
       "ERR_SUBAGENT_NESTING_FORBIDDEN",
       "subagents cannot spawn nested subagents",
+    );
+  }
+}
+
+/** When false in config, agent principals cannot use subagent spawn, inspect, steer, abort, or kill. */
+function assertAgentSpawnSubagentsAllowed(
+  principal: AuthenticatedPrincipal,
+  config: ShoggothConfig,
+): void {
+  if (principal.kind !== "agent") return;
+  const agentId = parseAgentSessionUrn(principal.sessionId)?.agentId;
+  if (!effectiveSpawnSubagentsEnabled(config, agentId)) {
+    throw new IntegrationOpError(
+      "ERR_FORBIDDEN",
+      "subagent operations disabled for this agent (spawnSubagents is false)",
     );
   }
 }
@@ -588,6 +605,19 @@ export async function handleIntegrationControlOp(
           "subagent_spawn requires operator or agent principal",
         );
       }
+      if (principal.kind === "agent") {
+        assertAgentSpawnSubagentsAllowed(principal, ctx.config);
+        const callerAgentId = parseAgentSessionUrn(principal.sessionId)?.agentId;
+        if (
+          callerAgentId &&
+          !agentMayInvokeSubagentSpawnByAllowlist(ctx.config, callerAgentId)
+        ) {
+          throw new IntegrationOpError(
+            "ERR_FORBIDDEN",
+            "subagent_spawn denied for this agent id (subagentSpawnAllow)",
+          );
+        }
+      }
       const ext = subagentRuntimeExtensionRef.current;
       if (!ext) {
         throw new IntegrationOpError(
@@ -685,7 +715,7 @@ export async function handleIntegrationControlOp(
       };
       ttlTimer = setTimeout(() => {
         ttlTimer = undefined;
-        terminateBoundSubagentSession(sessionManager, childId);
+        terminateBoundSubagentSession(sessionManager, childId, "ttl_expired");
       }, lifetimeMs);
       rememberSubagentHandles(childId, {
         unregisterThread,
@@ -786,11 +816,14 @@ export async function handleIntegrationControlOp(
       const { sessions } = requireSubagentRuntime(ctx);
       const pl = payloadObject(req);
       const sessionId = requireString(pl, "session_id");
-      if (principal.kind === "agent" && sessionId !== principal.sessionId) {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "agent may only session_inspect own session",
-        );
+      if (principal.kind === "agent") {
+        if (sessionId !== principal.sessionId) {
+          throw new IntegrationOpError(
+            "ERR_FORBIDDEN",
+            "agent may only session_inspect own session",
+          );
+        }
+        assertAgentSpawnSubagentsAllowed(principal, ctx.config);
       }
       const row = sessions.getById(sessionId);
       if (!row) {
@@ -879,8 +912,14 @@ export async function handleIntegrationControlOp(
     }
 
     case "session_steer": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "session_steer requires operator principal");
+      if (principal.kind !== "operator" && principal.kind !== "agent") {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "session_steer requires operator or agent principal",
+        );
+      }
+      if (principal.kind === "agent") {
+        assertAgentSpawnSubagentsAllowed(principal, ctx.config);
       }
       const ext = subagentRuntimeExtensionRef.current;
       if (!ext) {
@@ -896,6 +935,12 @@ export async function handleIntegrationControlOp(
       const row = sessions.getById(sessionId);
       if (!row || row.status === "terminated") {
         throw new IntegrationOpError("ERR_SESSION_INACTIVE", "session is missing or terminated");
+      }
+      if (principal.kind === "agent" && row.parentSessionId !== principal.sessionId) {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "agent may only steer direct child subagents",
+        );
       }
       if (row.subagentMode === "one_shot") {
         throw new IntegrationOpError("ERR_SUBAGENT_ONE_SHOT", "one_shot subagents cannot be steered");
@@ -932,8 +977,11 @@ export async function handleIntegrationControlOp(
     }
 
     case "session_abort": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "session_abort requires operator principal");
+      if (principal.kind !== "operator" && principal.kind !== "agent") {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "session_abort requires operator or agent principal",
+        );
       }
       const { sessions } = requireSubagentRuntime(ctx);
       const pl = payloadObject(req);
@@ -941,6 +989,17 @@ export async function handleIntegrationControlOp(
       const row = sessions.getById(sessionId);
       if (!row || row.status === "terminated") {
         throw new IntegrationOpError("ERR_SESSION_INACTIVE", "session is missing or terminated");
+      }
+      if (principal.kind === "agent") {
+        assertAgentSpawnSubagentsAllowed(principal, ctx.config);
+        const own = sessionId === principal.sessionId;
+        const directChild = row.parentSessionId === principal.sessionId;
+        if (!own && !directChild) {
+          throw new IntegrationOpError(
+            "ERR_FORBIDDEN",
+            "agent may only abort own session or a direct child subagent",
+          );
+        }
       }
       const hadActiveTurn = requestSessionTurnAbort(sessionId);
       ctx.recordIntegrationAudit({
@@ -953,13 +1012,38 @@ export async function handleIntegrationControlOp(
     }
 
     case "session_kill": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "session_kill requires operator principal");
+      if (principal.kind !== "operator" && principal.kind !== "agent") {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "session_kill requires operator or agent principal",
+        );
       }
-      const { sessionManager } = requireSubagentRuntime(ctx);
+      const { sessions, sessionManager } = requireSubagentRuntime(ctx);
       const pl = payloadObject(req);
       const sessionId = requireString(pl, "session_id");
-      terminateBoundSubagentSession(sessionManager, sessionId);
+      const targetRow = sessions.getById(sessionId);
+      if (principal.kind === "agent") {
+        assertAgentSpawnSubagentsAllowed(principal, ctx.config);
+        if (!targetRow || targetRow.status === "terminated") {
+          throw new IntegrationOpError("ERR_SESSION_INACTIVE", "session is missing or terminated");
+        }
+        if (targetRow.parentSessionId !== principal.sessionId) {
+          throw new IntegrationOpError(
+            "ERR_FORBIDDEN",
+            "agent may only kill direct child subagents",
+          );
+        }
+      }
+      const shouldAnnounceKilled =
+        targetRow &&
+        targetRow.status !== "terminated" &&
+        targetRow.subagentMode === "bound" &&
+        Boolean(targetRow.subagentDiscordThreadId?.trim());
+      terminateBoundSubagentSession(
+        sessionManager,
+        sessionId,
+        shouldAnnounceKilled ? "killed" : undefined,
+      );
       ctx.recordIntegrationAudit({
         action: "session.kill",
         resource: sessionId,

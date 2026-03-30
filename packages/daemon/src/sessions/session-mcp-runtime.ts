@@ -14,12 +14,26 @@ import {
   SHOGGOTH_GLOBAL_MCP_SESSION_KEY,
 } from "../mcp/mcp-http-cancel-registry";
 import type { ExternalMcpInvoke } from "../mcp/tool-loop-mcp";
+import { messageToolContextRef } from "../messaging/message-tool-context-ref";
 import {
+  augmentSessionMcpToolContextWithMessageTool,
   buildBuiltinOnlySessionMcpToolContext,
   buildMixedSessionMcpToolContext,
   buildSessionMcpToolContext,
+  omitBuiltinSubagentToolForSubagentSession,
   type SessionMcpToolContext,
 } from "./session-mcp-tool-context";
+
+function finalizeSessionMcpToolContext(ctx: SessionMcpToolContext): SessionMcpToolContext {
+  return augmentSessionMcpToolContextWithMessageTool(ctx, messageToolContextRef.current?.slice);
+}
+
+function finalizeSessionMcpToolContextForSession(
+  ctx: SessionMcpToolContext,
+  sessionId: string,
+): SessionMcpToolContext {
+  return omitBuiltinSubagentToolForSubagentSession(finalizeSessionMcpToolContext(ctx), sessionId);
+}
 
 export interface CreateSessionMcpRuntimeOptions {
   readonly config: ShoggothConfig;
@@ -154,15 +168,15 @@ export async function createSessionMcpRuntime(
 
   async function resolveContext(sessionId: string): Promise<SessionMcpToolContext> {
     if (mcpServers.length === 0) {
-      return builtinMcpCtx;
+      return finalizeSessionMcpToolContextForSession(builtinMcpCtx, sessionId);
     }
     if (perSessionServers.length === 0) {
-      return globalOnlyMcpCtx;
+      return finalizeSessionMcpToolContextForSession(globalOnlyMcpCtx, sessionId);
     }
     if (globalServers.length === 0) {
       const cached = perSessionMcpCtx.get(sessionId);
       if (cached) {
-        return cached;
+        return finalizeSessionMcpToolContextForSession(cached, sessionId);
       }
       let inflight = perSessionMcpConnect.get(sessionId);
       if (!inflight) {
@@ -193,12 +207,12 @@ export async function createSessionMcpRuntime(
           perSessionMcpConnect.delete(sessionId);
         });
       }
-      return inflight;
+      return finalizeSessionMcpToolContextForSession(await inflight, sessionId);
     }
 
     const cached = perSessionMcpCtx.get(sessionId);
     if (cached) {
-      return cached;
+      return finalizeSessionMcpToolContextForSession(cached, sessionId);
     }
     let inflight = perSessionMcpConnect.get(sessionId);
     if (!inflight) {
@@ -241,7 +255,7 @@ export async function createSessionMcpRuntime(
         perSessionMcpConnect.delete(sessionId);
       });
     }
-    return inflight;
+    return finalizeSessionMcpToolContextForSession(await inflight, sessionId);
   }
 
   return {

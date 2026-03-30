@@ -19,6 +19,16 @@ export interface ExtensionFlags {
   readonly replies: boolean;
   readonly reactionsInbound: boolean;
   readonly streamingOutbound: boolean;
+  /** Agent `message` tool: PATCH existing messages (platform-specific). */
+  readonly messageEdit: boolean;
+  /** Agent `message` tool: delete messages. */
+  readonly messageDelete: boolean;
+  /** Agent `message` tool: start a thread from an existing message. */
+  readonly threadCreate: boolean;
+  /** Agent `message` tool: delete a thread channel. */
+  readonly threadDelete: boolean;
+  /** Agent `message` tool: read message(s) via platform API (e.g. Discord GET message / channel messages). */
+  readonly messageGet: boolean;
 }
 
 /** Well-known {@link MessagingAdapterCapabilities.features} ids (extensible string union at runtime). */
@@ -111,6 +121,11 @@ export function discordCapabilityDescriptor(): MessagingAdapterCapabilities {
       replies: true,
       reactionsInbound: true,
       streamingOutbound: true,
+      messageEdit: true,
+      messageDelete: true,
+      threadCreate: true,
+      threadDelete: true,
+      messageGet: true,
     },
     features: [MESSAGING_FEATURE.TYPING_NOTIFICATION, MESSAGING_FEATURE.SILENT_REPLIES_CHANNEL_AWARE],
     parameterSchemas: {

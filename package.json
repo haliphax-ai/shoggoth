@@ -10,7 +10,7 @@
   "scripts": {
     "build:native": "npm run build:native -w @shoggoth/authn",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "build": "npm run build:native && npm run typecheck",
+    "build": "npm run build:native",
     "pretest": "npm run build:native",
     "clean": "rm -rf packages/*/dist dist",
     "daemon": "node --import tsx/esm packages/daemon/src/index.ts",

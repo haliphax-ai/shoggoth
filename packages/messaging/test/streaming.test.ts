@@ -22,9 +22,23 @@ describe("Streaming outbound Discord", () => {
         createBodies.push(body);
         return { id: "stream-msg-1" };
       },
+      async createMessageWithFiles() {
+        return { id: "stream-msg-1" };
+      },
       async editMessage(_channelId, _messageId, body) {
         editBodies.push(body);
       },
+      async deleteMessage() {},
+      async getMessage() {
+        return { id: "m", channel_id: "c", content: "", timestamp: "", author: {}, attachments: [] };
+      },
+      async getChannelMessages() {
+        return [];
+      },
+      async createThreadFromMessage() {
+        return { id: "t" };
+      },
+      async deleteChannel() {},
       async createMessageReaction() {},
       async triggerTypingIndicator() {},
     };
@@ -47,9 +61,23 @@ describe("Streaming outbound Discord", () => {
       async createMessage() {
         return { id: "m" };
       },
+      async createMessageWithFiles() {
+        return { id: "m" };
+      },
       async editMessage(_c, _m, body) {
         editBodies.push(body);
       },
+      async deleteMessage() {},
+      async getMessage() {
+        return { id: "m", channel_id: "c", content: "", timestamp: "", author: {}, attachments: [] };
+      },
+      async getChannelMessages() {
+        return [];
+      },
+      async createThreadFromMessage() {
+        return { id: "t" };
+      },
+      async deleteChannel() {},
       async createMessageReaction() {},
       async triggerTypingIndicator() {},
     };
@@ -78,7 +106,21 @@ describe("Streaming outbound Discord", () => {
       async createMessage() {
         return { id: "x" };
       },
+      async createMessageWithFiles() {
+        return { id: "x" };
+      },
       async editMessage() {},
+      async deleteMessage() {},
+      async getMessage() {
+        return { id: "m", channel_id: "c", content: "", timestamp: "", author: {}, attachments: [] };
+      },
+      async getChannelMessages() {
+        return [];
+      },
+      async createThreadFromMessage() {
+        return { id: "t" };
+      },
+      async deleteChannel() {},
       async createMessageReaction() {},
       async triggerTypingIndicator() {},
     };

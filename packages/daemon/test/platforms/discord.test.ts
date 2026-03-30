@@ -40,7 +40,21 @@ const stubDiscordRestTransport: DiscordMessagingRuntime["discordRestTransport"] 
   async createMessage() {
     return { id: "noop" };
   },
+  async createMessageWithFiles() {
+    return { id: "noop" };
+  },
   async editMessage() {},
+  async deleteMessage() {},
+  async getMessage() {
+    return { id: "stub", channel_id: "c", content: "", timestamp: "", author: {}, attachments: [] };
+  },
+  async getChannelMessages() {
+    return [];
+  },
+  async createThreadFromMessage() {
+    return { id: "thread-stub" };
+  },
+  async deleteChannel() {},
   async createMessageReaction() {},
   async triggerTypingIndicator() {},
 };

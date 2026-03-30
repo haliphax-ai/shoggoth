@@ -27,6 +27,10 @@ export {
 } from "./acp-bridge";
 export { builtinShoggothToolsCatalog } from "./builtin-shoggoth-tools";
 export {
+  buildMessageToolDescriptor,
+  type MessageToolPlatformSlice,
+} from "./message-tool-descriptor";
+export {
   connectMcpStdioSession,
   connectMcpTcpSession,
   createMcpJsonRpcSession,

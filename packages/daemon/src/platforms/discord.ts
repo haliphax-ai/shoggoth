@@ -165,6 +165,11 @@ export interface DiscordPlatformHandle {
   }) => Promise<SessionAgentTurnResult>;
   /** Subscribe a session id to the Discord A2A bus (bound subagents). Returns unsubscribe. */
   readonly subscribeSubagentSession: (sessionId: string) => () => void;
+  /** Post a short in-thread status when a bound subagent ends (TTL or kill). */
+  readonly announceBoundSubagentSessionEnded: (input: {
+    readonly sessionId: string;
+    readonly reason: "ttl_expired" | "killed";
+  }) => void;
 }
 
 /**
@@ -573,6 +578,32 @@ export async function startDiscordPlatform(
     };
   }
 
+  function announceBoundSubagentSessionEnded(input: {
+    readonly sessionId: string;
+    readonly reason: "ttl_expired" | "killed";
+  }): void {
+    const row = sessions.getById(input.sessionId.trim());
+    if (!row || row.subagentMode !== "bound") return;
+    const threadId = row.subagentDiscordThreadId?.trim();
+    if (!threadId) return;
+    const cfg = opts.configRef?.current ?? opts.config;
+    const line =
+      input.reason === "ttl_expired"
+        ? daemonNotice("discord-subagent-bound-ended-ttl")
+        : daemonNotice("discord-subagent-bound-ended-killed");
+    const body = sliceDiscordPlatformMessageBody(
+      `${formatDiscordAgentIdentityPrefix(cfg, input.sessionId)}${line}`,
+    );
+    void opts.discord.discordRestTransport
+      .createMessage(threadId, { content: body })
+      .catch((e) => {
+        opts.logger.debug("discord.subagent.bound_end_notice_failed", {
+          sessionId: input.sessionId,
+          err: String(e),
+        });
+      });
+  }
+
   return {
     stop: async () => {
       for (const u of unsubs) u();
@@ -585,5 +616,6 @@ export async function startDiscordPlatform(
     },
     runSessionModelTurn,
     subscribeSubagentSession,
+    announceBoundSubagentSessionEnded,
   };
 }

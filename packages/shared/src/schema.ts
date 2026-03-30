@@ -295,6 +295,9 @@ export const DEFAULT_POLICY_CONFIG: ShoggothPolicyConfig = {
         "session_inspect",
         "session_list",
         "session_send",
+        "session_steer",
+        "session_abort",
+        "session_kill",
       ],
       deny: [],
     },
@@ -526,6 +529,20 @@ export const shoggothAgentToAgentConfigSchema = z
 
 export type ShoggothAgentToAgentConfig = z.infer<typeof shoggothAgentToAgentConfigSchema>;
 
+/**
+ * Which logical agent ids subagent sessions may be spawned for (merged global + `agents.list.<senderId>`),
+ * i.e. the child inherits this agent id from the parent URN. Use `"*"` to allow any id for that sender.
+ * If this block is absent both globally and on the sender’s `agents.list` entry, only that sender’s own
+ * agent id is allowed (implicit `[sender]`).
+ */
+export const shoggothSubagentSpawnAllowSchema = z
+  .object({
+    allow: z.array(z.string().min(1)),
+  })
+  .strict();
+
+export type ShoggothSubagentSpawnAllowConfig = z.infer<typeof shoggothSubagentSpawnAllowSchema>;
+
 const shoggothAgentIdKeySchema = z
   .string()
   .min(1)
@@ -559,6 +576,17 @@ export const shoggothAgentEntrySchema = z
       .strict()
       .optional(),
     agentToAgent: shoggothAgentToAgentAllowSchema.optional(),
+    /**
+     * Merged with top-level `subagentSpawnAllow.allow` for this sender id. Restricts which logical agent
+     * ids that sender may spawn subagents for. Omitted here (and globally) ⇒ only the sender’s own id.
+     */
+    subagentSpawnAllow: shoggothSubagentSpawnAllowSchema.optional(),
+    /**
+     * When false, this agent cannot use `builtin.subagent` or agent-scoped subagent control ops
+     * (`subagent_spawn`, `session_inspect`, `session_steer`, `session_abort`, `session_kill`).
+     * Overrides top-level `spawnSubagents` when set.
+     */
+    spawnSubagents: z.boolean().optional(),
   })
   .strict();
 
@@ -632,6 +660,16 @@ export const shoggothConfigFragmentSchema = z
     runtime: shoggothRuntimeConfigSchema.optional(),
     agents: shoggothAgentsConfigSchema.optional(),
     agentToAgent: shoggothAgentToAgentConfigSchema.optional(),
+    /**
+     * Default for all agents unless overridden by `agents.list.<id>.spawnSubagents`.
+     * When false, agents cannot use subagent tools / related control ops (operators unaffected).
+     */
+    spawnSubagents: z.boolean().optional(),
+    /**
+     * Default allowlist of logical agent ids subagents may be spawned for, merged with per-agent
+     * `agents.list.<id>.subagentSpawnAllow.allow`. Omitted everywhere for a sender ⇒ only that sender’s own id.
+     */
+    subagentSpawnAllow: shoggothSubagentSpawnAllowSchema.optional(),
     policy: shoggothPolicyFragmentSchema,
   })
   .strict();
@@ -667,6 +705,8 @@ export const shoggothConfigSchema = z
     runtime: shoggothRuntimeConfigSchema.optional(),
     agents: shoggothAgentsConfigSchema.optional(),
     agentToAgent: shoggothAgentToAgentConfigSchema.optional(),
+    spawnSubagents: z.boolean().optional(),
+    subagentSpawnAllow: shoggothSubagentSpawnAllowSchema.optional(),
     policy: shoggothPolicyConfigSchema,
   })
   .strict();
@@ -683,6 +723,8 @@ export const DEFAULT_HITL_CONFIG: ShoggothHitlConfig = {
     "memory.ingest": "caution",
     "session.list": "safe",
     "session.send": "caution",
+    subagent: "caution",
+    message: "caution",
   },
   /**
    * Keys are arbitrary role ids passed as `principalRoles` into the tool loop. Session turns use

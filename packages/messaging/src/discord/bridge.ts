@@ -148,6 +148,11 @@ export interface DiscordMessagingRuntime {
     threadChannelId: string,
     sessionId: string,
   ) => () => void;
+  /**
+   * Channel or thread snowflake used for REST outbound for this session (routes + thread bindings).
+   * Optional for test stubs; production bridge always implements this.
+   */
+  readonly resolveOutboundChannelIdForSession?: (sessionId: string) => string | undefined;
 }
 
 /**
@@ -324,6 +329,9 @@ export async function startDiscordMessagingIfConfigured(
         const cur = discordDynamicSessionByChannel.get(t);
         if (cur === s) discordDynamicSessionByChannel.delete(t);
       };
+    },
+    resolveOutboundChannelIdForSession(sessionId: string) {
+      return sessionToChannel(sessionId.trim());
     },
   };
 }
