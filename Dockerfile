@@ -2,10 +2,6 @@
 # Entrypoint (root) creates layout, fixes volume perms, then setpriv drops to shoggoth while retaining spawn caps.
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
-# system packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
-  sqlite3 \
-  && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json* tsconfig.base.json ./
 COPY packages ./packages
 RUN npm ci
