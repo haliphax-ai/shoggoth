@@ -105,7 +105,7 @@ describe("discord platform helpers", () => {
     assert.match(foot, /p1/);
   });
 
-  it("transcriptRowsToModelChatMessages restores toolCalls metadata", () => {
+  it("transcriptRowsToModelChatMessages restores toolCalls from dedicated field", () => {
     const chat = transcriptRowsToModelChatMessages([
       { seq: 1, role: "user", content: "u", toolCallId: null },
       {
@@ -113,9 +113,7 @@ describe("discord platform helpers", () => {
         role: "assistant",
         content: null,
         toolCallId: null,
-        metadata: {
-          toolCalls: [{ id: "t1", name: "builtin.read", argsJson: "{}" }],
-        },
+        toolCalls: [{ id: "t1", name: "builtin.read", argsJson: "{}" }],
       },
       { seq: 3, role: "tool", content: "{}", toolCallId: "t1" },
     ]);

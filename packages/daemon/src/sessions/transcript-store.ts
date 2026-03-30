@@ -1,10 +1,17 @@
 import type Database from "better-sqlite3";
 
+export interface ToolCallEntry {
+  readonly id: string;
+  readonly name: string;
+  readonly argsJson: string;
+}
+
 export interface TranscriptMessageRow {
   readonly seq: number;
   readonly role: string;
   readonly content: string | null;
   readonly toolCallId: string | null;
+  readonly toolCalls?: readonly ToolCallEntry[];
   readonly metadata?: unknown;
 }
 
@@ -15,6 +22,7 @@ export interface AppendTranscriptInput {
   readonly role: string;
   readonly content?: string | null;
   readonly toolCallId?: string | null;
+  readonly toolCalls?: readonly ToolCallEntry[];
   readonly metadata?: unknown;
 }
 
@@ -37,12 +45,12 @@ export function createTranscriptStore(db: Database.Database): TranscriptStore {
   `);
 
   const insert = db.prepare(`
-    INSERT INTO transcript_messages (session_id, context_segment_id, seq, role, content, tool_call_id, metadata_json)
-    VALUES (@session_id, @context_segment_id, @seq, @role, @content, @tool_call_id, @metadata_json)
+    INSERT INTO transcript_messages (session_id, context_segment_id, seq, role, content, tool_call_id, tool_calls_json, metadata_json)
+    VALUES (@session_id, @context_segment_id, @seq, @role, @content, @tool_call_id, @tool_calls_json, @metadata_json)
   `);
 
   const selectPage = db.prepare(`
-    SELECT seq, role, content, tool_call_id, metadata_json
+    SELECT seq, role, content, tool_call_id, tool_calls_json, metadata_json
     FROM transcript_messages
     WHERE session_id = @session_id AND context_segment_id = @context_segment_id AND seq > @after_seq
     ORDER BY seq ASC
@@ -65,6 +73,7 @@ export function createTranscriptStore(db: Database.Database): TranscriptStore {
         role: input.role,
         content: input.content ?? null,
         tool_call_id: input.toolCallId ?? null,
+        tool_calls_json: input.toolCalls?.length ? JSON.stringify(input.toolCalls) : null,
         metadata_json: input.metadata !== undefined ? JSON.stringify(input.metadata) : null,
       });
       return { seq };
@@ -81,6 +90,7 @@ export function createTranscriptStore(db: Database.Database): TranscriptStore {
         role: string;
         content: string | null;
         tool_call_id: string | null;
+        tool_calls_json: string | null;
         metadata_json: string | null;
       }[];
 
@@ -89,6 +99,9 @@ export function createTranscriptStore(db: Database.Database): TranscriptStore {
         role: r.role,
         content: r.content,
         toolCallId: r.tool_call_id,
+        toolCalls: r.tool_calls_json
+          ? (JSON.parse(r.tool_calls_json) as ToolCallEntry[])
+          : undefined,
         metadata: r.metadata_json ? (JSON.parse(r.metadata_json) as unknown) : undefined,
       }));
 

@@ -14,11 +14,8 @@ export function transcriptRowsToModelChatMessages(
       continue;
     }
     if (m.role === "assistant") {
-      const meta = m.metadata as
-        | { toolCalls?: { id: string; name: string; argsJson: string }[] }
-        | undefined;
-      if (meta?.toolCalls?.length) {
-        const toolCalls: ChatToolCall[] = meta.toolCalls.map((tc) => ({
+      if (m.toolCalls?.length) {
+        const toolCalls: ChatToolCall[] = m.toolCalls.map((tc) => ({
           id: tc.id,
           name: tc.name,
           arguments: tc.argsJson,
@@ -84,8 +81,7 @@ export function extractLatestTranscriptAssistantText(
     const page = tr.listPage({ sessionId, contextSegmentId, afterSeq: after, limit: 200 });
     for (const m of page.messages) {
       if (m.role === "assistant" && m.content) {
-        const meta = m.metadata as { toolCalls?: unknown[] } | undefined;
-        if (!meta?.toolCalls?.length) {
+        if (!m.toolCalls?.length) {
           last = m.content ?? undefined;
         }
       }

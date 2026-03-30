@@ -148,13 +148,11 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         appendTx({
           role: "assistant",
           content: turn.content ?? null,
-          metadata: {
-            toolCalls: turn.toolCalls.map((tc) => ({
-              id: tc.id,
-              name: tc.name,
-              argsJson: tc.argsJson,
-            })),
-          },
+          toolCalls: turn.toolCalls.map((tc) => ({
+            id: tc.id,
+            name: tc.name,
+            argsJson: tc.argsJson,
+          })),
         });
       }
 

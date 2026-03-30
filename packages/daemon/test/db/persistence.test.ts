@@ -114,6 +114,18 @@ describe(
           created_at TEXT NOT NULL DEFAULT (datetime('now')),
           updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
+        CREATE TABLE transcript_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+          context_segment_id TEXT NOT NULL,
+          seq INTEGER NOT NULL,
+          role TEXT NOT NULL,
+          content TEXT,
+          tool_call_id TEXT,
+          metadata_json TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE (session_id, seq)
+        );
       `);
       migrate(db, defaultMigrationsDir());
       const cols = db
