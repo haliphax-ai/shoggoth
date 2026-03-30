@@ -90,6 +90,39 @@ const subagentInspectArgs = {
   properties: {},
 } as const;
 
+const sessionListArgs = {
+  type: "object",
+  description:
+    "List sessions from the daemon state DB. Agents only see sessions for their own agent id (from the calling session URN).",
+  properties: {
+    status: { type: "string", description: "Optional status filter (e.g. active, terminated)" },
+    agent_id: {
+      type: "string",
+      description:
+        "Optional agent id filter (operator only). Agents may omit or must match their own agent id.",
+    },
+  },
+} as const;
+
+const sessionSendArgs = {
+  type: "object",
+  description:
+    "Deliver a user message to a session and run one model turn. Use session_id or agent_id (main session); not both. When silent is true, the assistant reply is not posted to the bound messaging surface (internal delivery only).",
+  properties: {
+    message: { type: "string", description: "User message content for the target session" },
+    silent: {
+      type: "boolean",
+      description:
+        "If true, do not post the assistant reply to the session bound channel; turn still runs internally",
+    },
+    session_id: { type: "string", description: "Target session URN (omit if agent_id is set)" },
+    agent_id: { type: "string", description: "Logical agent id; targets that agent’s bootstrap main session" },
+    discord_user_id: { type: "string", description: "When not silent, optional outbound user id for messaging_surface" },
+    reply_to_message_id: { type: "string", description: "When not silent, optional reply reference" },
+  },
+  required: ["message"],
+} as const;
+
 export function builtinShoggothToolsCatalog(sourceId = "builtin"): McpSourceCatalog {
   return {
     sourceId,
@@ -137,6 +170,18 @@ export function builtinShoggothToolsCatalog(sourceId = "builtin"): McpSourceCata
         name: "subagent.inspect",
         description: "Return this session metadata and list of child subagent sessions (same session only).",
         inputSchema: subagentInspectArgs,
+      },
+      {
+        name: "session.list",
+        description:
+          "List sessions (optional status and agent_id filters). Agents are scoped to their agent id automatically.",
+        inputSchema: sessionListArgs,
+      },
+      {
+        name: "session.send",
+        description:
+          "Send a message to another session (session_id or agent_id for main session). silent skips posting the reply to the bound channel.",
+        inputSchema: sessionSendArgs,
       },
     ],
   };

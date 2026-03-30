@@ -89,6 +89,18 @@ describe("policy engine", () => {
       engine.check({ principal: operator, action: "control.invoke", resource: "session_inspect" }),
       { allow: true },
     );
+    assert.deepStrictEqual(
+      engine.check({ principal: agent, action: "control.invoke", resource: "session_list" }),
+      { allow: true },
+    );
+    assert.deepStrictEqual(
+      engine.check({ principal: agent, action: "control.invoke", resource: "session_send" }),
+      { allow: true },
+    );
+    assert.deepStrictEqual(
+      engine.check({ principal: operator, action: "control.invoke", resource: "session_send" }),
+      { allow: true },
+    );
   });
 
   it("emptyPolicyConfig denies control and tools", () => {
@@ -114,6 +126,7 @@ describe("policy engine", () => {
     assert.equal(isDefinedControlOp("subagent_spawn"), true);
     assert.equal(isDefinedControlOp("session_abort"), true);
     assert.equal(isDefinedControlOp("session_list"), true);
+    assert.equal(isDefinedControlOp("session_send"), true);
     assert.equal(isDefinedControlOp("nope"), false);
   });
 });

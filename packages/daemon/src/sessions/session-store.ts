@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
+import { assertValidAgentId, parseAgentSessionUrn } from "@shoggoth/shared";
 
 export type SessionStatus = "starting" | "active" | "terminated" | string;
 
@@ -114,7 +115,7 @@ export interface SessionStore {
   getById(id: string): SessionRow | undefined;
   update(id: string, patch: UpdateSessionInput): void;
   delete(id: string): void;
-  list(filter?: { status?: SessionStatus; parentSessionId?: string }): SessionRow[];
+  list(filter?: { status?: SessionStatus; parentSessionId?: string; agentId?: string }): SessionRow[];
 }
 
 /** Current `context_segment_id` for model transcript scoping. */
@@ -277,7 +278,34 @@ export function createSessionStore(db: Database.Database): SessionStore {
           .all({ parent: filter.parentSessionId }) as R[];
         return rows.map(rowToSession);
       }
-      if (filter?.status !== undefined) {
+      const status = filter?.status;
+      const agentId = filter?.agentId?.trim();
+      if (agentId) {
+        assertValidAgentId(agentId);
+        const rows = (
+          status !== undefined
+            ? db
+                .prepare(
+                  `
+          SELECT ${cols}
+          FROM sessions WHERE status = @status ORDER BY id
+        `,
+                )
+                .all({ status })
+            : db
+                .prepare(
+                  `
+          SELECT ${cols}
+          FROM sessions ORDER BY id
+        `,
+                )
+                .all()
+        ) as R[];
+        return rows
+          .map(rowToSession)
+          .filter((r) => parseAgentSessionUrn(r.id)?.agentId === agentId);
+      }
+      if (status !== undefined) {
         const rows = db
           .prepare(
             `
@@ -285,7 +313,7 @@ export function createSessionStore(db: Database.Database): SessionStore {
           FROM sessions WHERE status = @status ORDER BY id
         `,
           )
-          .all({ status: filter.status }) as R[];
+          .all({ status }) as R[];
         return rows.map(rowToSession);
       }
       const rows = db

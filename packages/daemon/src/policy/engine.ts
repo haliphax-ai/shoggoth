@@ -38,6 +38,7 @@ export const DEFINED_CONTROL_OPS = [
   "subagent_spawn",
   "session_inspect",
   "session_list",
+  "session_send",
   "session_steer",
   "session_abort",
   "session_kill",

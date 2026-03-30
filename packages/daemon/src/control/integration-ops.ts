@@ -3,6 +3,7 @@ import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import type { WireRequest } from "@shoggoth/authn";
 import type Database from "better-sqlite3";
 import type { ShoggothConfig } from "@shoggoth/shared";
+import { assertValidAgentId, parseAgentSessionUrn } from "@shoggoth/shared";
 import {
   authorizeCanvasAction,
   type CanvasAuthzAction,
@@ -16,7 +17,8 @@ import type { AcpxProcessSupervisor } from "../acpx/acpx-process-supervisor";
 import { AcpxSupervisorError } from "../acpx/acpx-process-supervisor";
 import type { AcpxBindingStore } from "../acpx/sqlite-acpx-bindings";
 import { SessionManagerError, type SessionManager } from "../sessions/session-manager";
-import type { SessionStore } from "../sessions/session-store";
+import type { SessionRow, SessionStore } from "../sessions/session-store";
+import { resolveSessionTargetFromCliArg } from "./resolve-session-cli-target";
 import {
   applySessionContextSegmentNew,
   applySessionContextSegmentReset,
@@ -117,6 +119,58 @@ function optionalStringArray(obj: Record<string, unknown>, key: string): string[
     throw new IntegrationOpError("ERR_INVALID_PAYLOAD", `payload.${key} must be an array of strings`);
   }
   return v as string[];
+}
+
+function mapSessionListRow(row: SessionRow) {
+  return {
+    id: row.id,
+    status: row.status,
+    workspace_path: row.workspacePath,
+    context_segment_id: row.contextSegmentId,
+    parent_session_id: row.parentSessionId ?? null,
+    subagent_mode: row.subagentMode ?? null,
+    subagent_discord_thread_id: row.subagentDiscordThreadId ?? null,
+    subagent_expires_at_ms: row.subagentExpiresAtMs ?? null,
+    light_context: row.lightContext,
+  };
+}
+
+/** Resolve target session id from `session_id` or bootstrap main session for `agent_id`. */
+function resolveSessionSendTargetSessionId(pl: Record<string, unknown>, cfg: ShoggothConfig): string {
+  const sidRaw = pl.session_id;
+  const aidRaw = pl.agent_id;
+  const hasSid = typeof sidRaw === "string" && sidRaw.trim();
+  const hasAid = typeof aidRaw === "string" && aidRaw.trim();
+  if (hasSid && hasAid) {
+    throw new IntegrationOpError(
+      "ERR_INVALID_PAYLOAD",
+      "payload must not set both session_id and agent_id",
+    );
+  }
+  if (hasSid) return (sidRaw as string).trim();
+  if (hasAid) {
+    return resolveSessionTargetFromCliArg((aidRaw as string).trim(), cfg);
+  }
+  throw new IntegrationOpError(
+    "ERR_INVALID_PAYLOAD",
+    "payload.session_id or payload.agent_id is required",
+  );
+}
+
+/** Agents may only address sessions whose URN carries the same agent id as the caller session. */
+function assertAgentMayTargetSessionForSendOrList(
+  principal: AuthenticatedPrincipal,
+  targetSessionId: string,
+): void {
+  if (principal.kind !== "agent") return;
+  const callerAgentId = parseAgentSessionUrn(principal.sessionId)?.agentId;
+  const targetAgentId = parseAgentSessionUrn(targetSessionId)?.agentId;
+  if (!callerAgentId || !targetAgentId || callerAgentId !== targetAgentId) {
+    throw new IntegrationOpError(
+      "ERR_FORBIDDEN",
+      "agent may only target sessions for the same agent id as the calling session",
+    );
+  }
 }
 
 function requireSubagentRuntime(ctx: IntegrationOpsContext): {
@@ -659,8 +713,11 @@ export async function handleIntegrationControlOp(
     }
 
     case "session_list": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "session_list requires operator principal");
+      if (principal.kind !== "operator" && principal.kind !== "agent") {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "session_list requires operator or agent principal",
+        );
       }
       if (!ctx.stateDb || !ctx.sessions) {
         throw new IntegrationOpError("ERR_STATE_DB_REQUIRED", "session_list requires state database");
@@ -669,20 +726,40 @@ export async function handleIntegrationControlOp(
       const statusRaw = pl.status;
       const status =
         typeof statusRaw === "string" && statusRaw.trim() ? statusRaw.trim() : undefined;
-      const rows = status ? ctx.sessions.list({ status }) : ctx.sessions.list();
-      return {
-        sessions: rows.map((row) => ({
-          id: row.id,
-          status: row.status,
-          workspace_path: row.workspacePath,
-          context_segment_id: row.contextSegmentId,
-          parent_session_id: row.parentSessionId ?? null,
-          subagent_mode: row.subagentMode ?? null,
-          subagent_discord_thread_id: row.subagentDiscordThreadId ?? null,
-          subagent_expires_at_ms: row.subagentExpiresAtMs ?? null,
-          light_context: row.lightContext,
-        })),
-      };
+      const agentFilterRaw = pl.agent;
+      const agentFilter =
+        typeof agentFilterRaw === "string" && agentFilterRaw.trim()
+          ? agentFilterRaw.trim()
+          : undefined;
+
+      if (principal.kind === "agent") {
+        const callerAgentId = parseAgentSessionUrn(principal.sessionId)?.agentId;
+        if (!callerAgentId) {
+          throw new IntegrationOpError(
+            "ERR_FORBIDDEN",
+            "session_list requires agent principal with a valid session URN",
+          );
+        }
+        if (agentFilter !== undefined && agentFilter !== callerAgentId) {
+          throw new IntegrationOpError(
+            "ERR_FORBIDDEN",
+            "agent may only list sessions for own agent id",
+          );
+        }
+        const rows = ctx.sessions.list({ status, agentId: callerAgentId });
+        return { sessions: rows.map(mapSessionListRow) };
+      }
+
+      if (agentFilter) {
+        try {
+          assertValidAgentId(agentFilter);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          throw new IntegrationOpError("ERR_INVALID_PAYLOAD", `payload.agent: ${msg}`);
+        }
+      }
+      const rows = ctx.sessions.list({ status, agentId: agentFilter });
+      return { sessions: rows.map(mapSessionListRow) };
     }
 
     case "session_inspect": {
@@ -724,6 +801,67 @@ export async function handleIntegrationControlOp(
         },
         child_subagents: children,
       };
+    }
+
+    case "session_send": {
+      if (principal.kind !== "operator" && principal.kind !== "agent") {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "session_send requires operator or agent principal",
+        );
+      }
+      const ext = subagentRuntimeExtensionRef.current;
+      if (!ext) {
+        throw new IntegrationOpError(
+          "ERR_SUBAGENT_RUNTIME_UNAVAILABLE",
+          "session_send requires messaging runtime (e.g. Discord platform started)",
+        );
+      }
+      const { sessions } = requireSubagentRuntime(ctx);
+      const pl = payloadObject(req);
+      const sessionId = resolveSessionSendTargetSessionId(pl, ctx.config);
+      assertAgentMayTargetSessionForSendOrList(principal, sessionId);
+      const message = requireString(pl, "message");
+      const silent = pl.silent === true;
+      const row = sessions.getById(sessionId);
+      if (!row || row.status === "terminated") {
+        throw new IntegrationOpError("ERR_SESSION_INACTIVE", "session is missing or terminated");
+      }
+      if (row.subagentMode === "one_shot") {
+        throw new IntegrationOpError(
+          "ERR_SUBAGENT_ONE_SHOT",
+          "one_shot subagents cannot receive session_send",
+        );
+      }
+      const discordUserIdRaw = pl.discord_user_id;
+      const discordUserId =
+        typeof discordUserIdRaw === "string" && discordUserIdRaw.trim()
+          ? discordUserIdRaw.trim()
+          : "discord:subagent";
+      const replyToMessageId =
+        typeof pl.reply_to_message_id === "string" && pl.reply_to_message_id.trim()
+          ? pl.reply_to_message_id.trim()
+          : undefined;
+      const delivery = silent
+        ? ({ kind: "internal" } as const)
+        : ({
+            kind: "messaging_surface",
+            userId: discordUserId,
+            replyToMessageId,
+          } as const);
+      const turn = await ext.runSessionModelTurn({
+        sessionId,
+        userContent: message,
+        userMetadata: { session_send: true },
+        delivery,
+      });
+      ctx.recordIntegrationAudit({
+        action: "session.send",
+        resource: sessionId,
+        outcome: "ok",
+        argsRedactedJson: JSON.stringify({ silent }),
+      });
+      return { reply: turn.latestAssistantText, failover: turn.failoverMeta ?? null };
     }
 
     case "session_steer": {

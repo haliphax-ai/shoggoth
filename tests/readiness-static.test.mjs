@@ -104,6 +104,7 @@ describe("SHOGGOTH-READY §2 / §16 Policy, principals, audit fields", () => {
     assert.ok(DEFINED_CONTROL_OPS.includes("health"));
     assert.ok(DEFINED_CONTROL_OPS.includes("subagent_spawn"));
     assert.ok(DEFINED_CONTROL_OPS.includes("session_list"));
+    assert.ok(DEFINED_CONTROL_OPS.includes("session_send"));
     assert.ok(DEFINED_CONTROL_OPS.includes("session_abort"));
   });
 });

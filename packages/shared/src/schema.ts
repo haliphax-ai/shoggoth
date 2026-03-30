@@ -240,6 +240,7 @@ export const DEFAULT_POLICY_CONFIG: ShoggothPolicyConfig = {
         "subagent_spawn",
         "session_inspect",
         "session_list",
+        "session_send",
         "session_steer",
         "session_abort",
         "session_kill",
@@ -256,6 +257,8 @@ export const DEFAULT_POLICY_CONFIG: ShoggothPolicyConfig = {
         "canvas_authorize",
         "subagent_spawn",
         "session_inspect",
+        "session_list",
+        "session_send",
       ],
       deny: [],
     },
@@ -572,6 +575,8 @@ export const DEFAULT_HITL_CONFIG: ShoggothHitlConfig = {
     exec: "critical",
     "memory.search": "safe",
     "memory.ingest": "caution",
+    "session.list": "safe",
+    "session.send": "caution",
   },
   /**
    * Keys are arbitrary role ids passed as `principalRoles` into the tool loop. Session turns use

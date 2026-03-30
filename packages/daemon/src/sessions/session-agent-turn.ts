@@ -142,7 +142,7 @@ export async function executeSessionAgentTurn(
     builtin: async ({ originalName, argsJson }) => {
       try {
         const args = JSON.parse(argsJson) as Record<string, unknown>;
-        if (originalName.startsWith("subagent.")) {
+        if (originalName.startsWith("subagent.") || originalName.startsWith("session.")) {
           const inv = getAgentIntegrationInvoker();
           if (!inv) {
             return { resultJson: JSON.stringify({ error: "subagent_control_unavailable" }) };
@@ -184,9 +184,44 @@ export async function executeSessionAgentTurn(
           } else if (originalName === "subagent.inspect") {
             op = "session_inspect";
             payload = { session_id: input.sessionId };
+          } else if (originalName === "session.list") {
+            op = "session_list";
+            payload = {};
+            const st = args.status;
+            if (typeof st === "string" && st.trim()) payload.status = st.trim();
+            const aid = args.agent_id;
+            if (typeof aid === "string" && aid.trim()) payload.agent = aid.trim();
+          } else if (originalName === "session.send") {
+            const message = String(args.message ?? "").trim();
+            if (!message) {
+              return { resultJson: JSON.stringify({ error: "message required" }) };
+            }
+            op = "session_send";
+            payload = { message };
+            if (args.silent === true) payload.silent = true;
+            const sid = args.session_id;
+            const agid = args.agent_id;
+            const hasSid = typeof sid === "string" && sid.trim();
+            const hasAg = typeof agid === "string" && agid.trim();
+            if (hasSid && hasAg) {
+              return {
+                resultJson: JSON.stringify({ error: "set only one of session_id or agent_id" }),
+              };
+            }
+            if (hasSid) payload.session_id = (sid as string).trim();
+            else if (hasAg) payload.agent_id = (agid as string).trim();
+            else {
+              return {
+                resultJson: JSON.stringify({ error: "session_id or agent_id required" }),
+              };
+            }
+            const du = args.discord_user_id;
+            if (typeof du === "string" && du.trim()) payload.discord_user_id = du.trim();
+            const rt = args.reply_to_message_id;
+            if (typeof rt === "string" && rt.trim()) payload.reply_to_message_id = rt.trim();
           } else {
             return {
-              resultJson: JSON.stringify({ error: `unknown subagent builtin: ${originalName}` }),
+              resultJson: JSON.stringify({ error: `unknown integration builtin: ${originalName}` }),
             };
           }
           const mo = args.model_options;

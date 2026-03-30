@@ -4,6 +4,7 @@ import {
   WIRE_VERSION,
 } from "@shoggoth/authn";
 import assert from "node:assert";
+import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import { createConnection } from "node:net";
 import { describe, it } from "node:test";
@@ -919,8 +920,126 @@ describe("control plane (unix socket + JSONL)", () => {
         assert.ok(rowsF.every((r) => r.status === "terminated"));
         assert.ok(rowsF.some((r) => r.id === "sess-list-z"));
         assert.ok(!rowsF.some((r) => r.id === "sess-list-a"));
+
+        const alfA = formatAgentSessionUrn("alf", "discord", randomUUID());
+        const alfB = formatAgentSessionUrn("alf", "discord", randomUUID());
+        const bobA = formatAgentSessionUrn("bob", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+        createSessionStore(db).create({ id: alfA, workspacePath: "/wa", status: "active" });
+        createSessionStore(db).create({ id: alfB, workspacePath: "/wb", status: "active" });
+        createSessionStore(db).create({ id: bobA, workspacePath: "/wc", status: "active" });
+
+        const lineAg = await send({
+          v: WIRE_VERSION,
+          id: "sl3",
+          op: "session_list",
+          auth: peer,
+          payload: { agent: "alf" },
+        });
+        const resAg = parseResponseLine(lineAg);
+        assert.equal(resAg.ok, true);
+        const rowsAg = (resAg.result as { sessions: { id: string }[] }).sessions;
+        const idsAg = new Set(rowsAg.map((r) => r.id));
+        assert.ok(idsAg.has(alfA));
+        assert.ok(idsAg.has(alfB));
+        assert.ok(!idsAg.has(bobA));
       },
     );
+
+    db.close();
+  });
+
+  it("session_list (agent token, same agent id only)", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-slist-ag-"));
+    const sock = join(dir, "c.sock");
+    const dbPath = join(dir, "state.db");
+    const db = new Database(dbPath);
+    migrate(db, defaultMigrationsDir());
+    const sessions = createSessionStore(db);
+    const tokens = createSqliteAgentTokenStore(db);
+    const sidA = formatAgentSessionUrn("scoped", "discord", randomUUID());
+    const sidB = formatAgentSessionUrn("scoped", "discord", randomUUID());
+    const sidOther = formatAgentSessionUrn("other", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    sessions.create({ id: sidA, workspacePath: "/w1", status: "active" });
+    sessions.create({ id: sidB, workspacePath: "/w2", status: "active" });
+    sessions.create({ id: sidOther, workspacePath: "/w3", status: "active" });
+    const raw = "tok-scoped-list";
+    tokens.register(sidA, raw);
+
+    await withControlPlaneSession(
+      {
+        readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
+        stateDb: db,
+        config: minimalConfig(sock),
+      },
+      async (send) => {
+        const line = await send({
+          v: WIRE_VERSION,
+          id: "sla1",
+          op: "session_list",
+          auth: { kind: "agent", session_id: sidA, token: raw },
+          payload: {},
+        });
+        const res = parseResponseLine(line);
+        assert.equal(res.ok, true);
+        const rows = (res.result as { sessions: { id: string }[] }).sessions;
+        const ids = new Set(rows.map((r) => r.id));
+        assert.ok(ids.has(sidA));
+        assert.ok(ids.has(sidB));
+        assert.ok(!ids.has(sidOther));
+      },
+    );
+
+    db.close();
+  });
+
+  it("session_send (operator + mock runtime, silent)", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-ssend-"));
+    const sock = join(dir, "c.sock");
+    const dbPath = join(dir, "state.db");
+    const db = new Database(dbPath);
+    migrate(db, defaultMigrationsDir());
+    const target = formatAgentSessionUrn("snd", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    createSessionStore(db).create({ id: target, workspacePath: "/w", status: "active" });
+
+    let deliveryKind: string | undefined;
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: async (input) => {
+        deliveryKind = input.delivery.kind;
+        return { latestAssistantText: "SEND_OK", failoverMeta: undefined };
+      },
+      subscribeSubagentSession: () => () => {},
+      registerDiscordThreadBinding: () => () => {},
+    });
+    try {
+      await withControlPlaneSession(
+        {
+          readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
+          stateDb: db,
+          config: minimalConfig(sock),
+        },
+        async (send) => {
+          const peer = { kind: "operator_peercred" } as const;
+          const line = await send({
+            v: WIRE_VERSION,
+            id: "ss1",
+            op: "session_send",
+            auth: peer,
+            payload: { session_id: target, message: "hello operator", silent: true },
+          });
+          const res = parseResponseLine(line);
+          assert.equal(res.ok, true);
+          assert.equal(deliveryKind, "internal");
+          const body = res.result as { reply: string };
+          assert.equal(body.reply, "SEND_OK");
+        },
+      );
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
 
     db.close();
   });
