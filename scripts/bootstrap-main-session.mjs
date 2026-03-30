@@ -15,12 +15,12 @@ import {
   openStateDb,
   resolveBootstrapPrimarySessionUrn,
 } from "@shoggoth/daemon/lib";
-import { DEFAULT_MESSAGING_PLATFORM_ID, resolveAgentWorkspacePath } from "@shoggoth/shared";
+import { resolveAgentWorkspacePath } from "@shoggoth/shared";
 
 const dbPath = "/var/lib/shoggoth/state/shoggoth.db";
 const wsRoot = process.env.SHOGGOTH_WORKSPACES_ROOT?.trim() || "/var/lib/shoggoth/workspaces";
 const agentId = process.env.SHOGGOTH_AGENT_ID?.trim() || "main";
-const platform = process.env.SHOGGOTH_DEFAULT_SESSION_PLATFORM?.trim() || DEFAULT_MESSAGING_PLATFORM_ID;
+const platform = process.env.SHOGGOTH_DEFAULT_SESSION_PLATFORM?.trim() || "discord";
 const dir = resolveAgentWorkspacePath(wsRoot, agentId);
 const id = resolveBootstrapPrimarySessionUrn(agentId, platform, {
   primaryChannelId: process.env.SHOGGOTH_PRIMARY_DISCORD_CHANNEL_ID,
