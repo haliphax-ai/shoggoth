@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import { createPolicyEngine, redactToolArgsJson, DEFINED_CONTROL_OPS } from "@shoggoth/daemon/lib";
 import { DEFAULT_POLICY_CONFIG } from "@shoggoth/shared";
-import { discordCapabilityDescriptor } from "@shoggoth/messaging";
+import { discordCapabilityDescriptor } from "@shoggoth/platform-discord";
 import { resolvePathForRead, AbsolutePathRejectedError } from "@shoggoth/os-exec";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
