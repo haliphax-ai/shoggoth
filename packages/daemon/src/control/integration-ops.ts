@@ -132,6 +132,34 @@ function requireSubagentRuntime(ctx: IntegrationOpsContext): {
   return { sessions: ctx.sessions, sessionManager: ctx.sessionManager };
 }
 
+/** Top-level agents may spawn subagents under their own session id only; nested subagents may not spawn. */
+function assertAgentMayUseSubagentSpawn(
+  principal: AuthenticatedPrincipal,
+  parentSessionId: string,
+  sessions: SessionStore,
+): void {
+  if (principal.kind !== "agent") return;
+  if (principal.sessionId !== parentSessionId) {
+    throw new IntegrationOpError(
+      "ERR_FORBIDDEN",
+      "agent may only spawn subagents with parent_session_id equal to own session",
+    );
+  }
+  const row = sessions.getById(principal.sessionId);
+  if (!row || row.status === "terminated") {
+    throw new IntegrationOpError(
+      "ERR_PARENT_SESSION_INVALID",
+      "parent session is missing or terminated",
+    );
+  }
+  if (row.parentSessionId) {
+    throw new IntegrationOpError(
+      "ERR_SUBAGENT_NESTING_FORBIDDEN",
+      "subagents cannot spawn nested subagents",
+    );
+  }
+}
+
 function requireAcpxRuntime(ctx: IntegrationOpsContext): {
   acpxStore: AcpxBindingStore;
   sessions: SessionStore;
@@ -486,8 +514,11 @@ export async function handleIntegrationControlOp(
     }
 
     case "subagent_spawn": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "subagent_spawn requires operator principal");
+      if (principal.kind !== "operator" && principal.kind !== "agent") {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "subagent_spawn requires operator or agent principal",
+        );
       }
       const ext = subagentRuntimeExtensionRef.current;
       if (!ext) {
@@ -499,6 +530,7 @@ export async function handleIntegrationControlOp(
       const { sessions, sessionManager } = requireSubagentRuntime(ctx);
       const pl = payloadObject(req);
       const parentSessionId = requireString(pl, "parent_session_id");
+      assertAgentMayUseSubagentSpawn(principal, parentSessionId, sessions);
       const prompt = requireString(pl, "prompt");
       const modeRaw = requireString(pl, "mode");
       if (modeRaw !== "one_shot" && modeRaw !== "bound_discord_thread") {
@@ -654,12 +686,21 @@ export async function handleIntegrationControlOp(
     }
 
     case "session_inspect": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "session_inspect requires operator principal");
+      if (principal.kind !== "operator" && principal.kind !== "agent") {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "session_inspect requires operator or agent principal",
+        );
       }
       const { sessions } = requireSubagentRuntime(ctx);
       const pl = payloadObject(req);
       const sessionId = requireString(pl, "session_id");
+      if (principal.kind === "agent" && sessionId !== principal.sessionId) {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "agent may only session_inspect own session",
+        );
+      }
       const row = sessions.getById(sessionId);
       if (!row) {
         return { session: null };

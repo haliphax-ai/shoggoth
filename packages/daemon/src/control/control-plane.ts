@@ -40,11 +40,13 @@ import {
 import { createSessionManager } from "../sessions/session-manager";
 import { createSessionStore } from "../sessions/session-store";
 import type { PendingActionsStore } from "../hitl/pending-actions-store";
+import { setAgentIntegrationInvoker } from "./agent-integration-invoke-ref";
 import {
   handleIntegrationControlOp,
   IntegrationOpError,
   type IntegrationOpsContext,
 } from "./integration-ops";
+import { createInProcessAgentIntegrationInvoker } from "./integration-invoke";
 import { dispatchMcpHttpCancelRequest } from "../mcp/mcp-http-cancel-registry";
 
 export type ReadPeerCredFn = (socket: Socket) => PeerCredentials;
@@ -488,6 +490,15 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
 
   logger.info("control plane listening", { socketPath, mode });
 
+  setAgentIntegrationInvoker(
+    createInProcessAgentIntegrationInvoker({
+      integration: integrationBundle,
+      policyEngine: engine,
+      stateDb,
+      logger: logger.child({ subsystem: "agent-control-invoke" }),
+    }),
+  );
+
   const close = (): Promise<void> =>
     new Promise((resolve, reject) => {
       server.close((err) => {
@@ -495,6 +506,7 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
           reject(err);
           return;
         }
+        setAgentIntegrationInvoker(undefined);
         void unlink(socketPath)
           .catch(() => {
             /* ignore */

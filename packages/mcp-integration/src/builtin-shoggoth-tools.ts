@@ -55,6 +55,41 @@ const memoryIngestArgs = {
   properties: {},
 } as const;
 
+const subagentSpawnOneShotArgs = {
+  type: "object",
+  description:
+    "Spawn an internal one-shot subagent under this session; inherits model selection unless model_options is set.",
+  properties: {
+    prompt: { type: "string", description: "User task for the subagent" },
+    model_options: {
+      type: "object",
+      description: "Optional overlay merged into inherited model_selection (JSON object)",
+    },
+  },
+  required: ["prompt"],
+} as const;
+
+const subagentSpawnBoundArgs = {
+  type: "object",
+  description:
+    "Spawn a thread-bound subagent (platform thread id, e.g. Discord); first reply uses messaging delivery.",
+  properties: {
+    thread_id: { type: "string", description: "Platform thread / forum channel snowflake" },
+    prompt: { type: "string", description: "User task for the subagent" },
+    model_options: { type: "object", description: "Optional model_selection overlay (JSON object)" },
+    discord_user_id: { type: "string", description: "Optional delivery user id override" },
+    reply_to_message_id: { type: "string", description: "Optional reply reference for first message" },
+    lifetime_ms: { type: "integer", description: "Optional bound lifetime in ms" },
+  },
+  required: ["thread_id", "prompt"],
+} as const;
+
+const subagentInspectArgs = {
+  type: "object",
+  description: "No arguments; inspects this session row and direct child subagents",
+  properties: {},
+} as const;
+
 export function builtinShoggothToolsCatalog(sourceId = "builtin"): McpSourceCatalog {
   return {
     sourceId,
@@ -85,6 +120,23 @@ export function builtinShoggothToolsCatalog(sourceId = "builtin"): McpSourceCata
         description:
           "Scan memory.paths (absolute or workspace-relative) for *.md and upsert into the daemon state DB for memory.search.",
         inputSchema: memoryIngestArgs,
+      },
+      {
+        name: "subagent.spawn_one_shot",
+        description:
+          "Run a one-shot child under this session (internal delivery). Top-level sessions only; subagents cannot call this.",
+        inputSchema: subagentSpawnOneShotArgs,
+      },
+      {
+        name: "subagent.spawn_bound",
+        description:
+          "Run a thread-bound child under this session (messaging surface delivery). Top-level sessions only.",
+        inputSchema: subagentSpawnBoundArgs,
+      },
+      {
+        name: "subagent.inspect",
+        description: "Return this session metadata and list of child subagent sessions (same session only).",
+        inputSchema: subagentInspectArgs,
       },
     ],
   };

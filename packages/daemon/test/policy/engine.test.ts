@@ -79,7 +79,11 @@ describe("policy engine", () => {
     );
     assert.deepStrictEqual(
       engine.check({ principal: agent, action: "control.invoke", resource: "subagent_spawn" }),
-      { allow: false, reason: "default_deny" },
+      { allow: true },
+    );
+    assert.deepStrictEqual(
+      engine.check({ principal: agent, action: "control.invoke", resource: "session_inspect" }),
+      { allow: true },
     );
     assert.deepStrictEqual(
       engine.check({ principal: operator, action: "control.invoke", resource: "session_inspect" }),

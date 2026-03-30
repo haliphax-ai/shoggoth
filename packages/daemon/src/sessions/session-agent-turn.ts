@@ -11,6 +11,8 @@ import {
 import { toolExec, toolRead, toolWrite, type AgentCredentials } from "@shoggoth/os-exec";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import { mergeOrchestratorEnv } from "../config/effective-runtime";
+import { getAgentIntegrationInvoker } from "../control/agent-integration-invoke-ref";
+import { IntegrationOpError } from "../control/integration-ops";
 import { runMemoryBuiltin } from "../memory/builtin-memory-tools";
 import { createMcpRoutingToolExecutor } from "../mcp/tool-loop-mcp";
 import { createToolLoopPolicyAndAudit } from "../policy/tool-loop-bridge";
@@ -140,6 +142,78 @@ export async function executeSessionAgentTurn(
     builtin: async ({ originalName, argsJson }) => {
       try {
         const args = JSON.parse(argsJson) as Record<string, unknown>;
+        if (originalName.startsWith("subagent.")) {
+          const inv = getAgentIntegrationInvoker();
+          if (!inv) {
+            return { resultJson: JSON.stringify({ error: "subagent_control_unavailable" }) };
+          }
+          let op: string;
+          let payload: Record<string, unknown>;
+          if (originalName === "subagent.spawn_one_shot") {
+            const prompt = String(args.prompt ?? "").trim();
+            if (!prompt) {
+              return { resultJson: JSON.stringify({ error: "prompt required" }) };
+            }
+            op = "subagent_spawn";
+            payload = {
+              parent_session_id: input.sessionId,
+              prompt,
+              mode: "one_shot",
+            };
+          } else if (originalName === "subagent.spawn_bound") {
+            const prompt = String(args.prompt ?? "").trim();
+            const threadId = String(args.thread_id ?? "").trim();
+            if (!prompt || !threadId) {
+              return { resultJson: JSON.stringify({ error: "thread_id and prompt required" }) };
+            }
+            op = "subagent_spawn";
+            payload = {
+              parent_session_id: input.sessionId,
+              prompt,
+              mode: "bound_discord_thread",
+              discord_thread_id: threadId,
+            };
+            const du = args.discord_user_id;
+            if (typeof du === "string" && du.trim()) payload.discord_user_id = du.trim();
+            const rt = args.reply_to_message_id;
+            if (typeof rt === "string" && rt.trim()) payload.reply_to_message_id = rt.trim();
+            const lt = args.lifetime_ms;
+            if (typeof lt === "number" && Number.isFinite(lt) && lt > 0) {
+              payload.lifetime_ms = Math.trunc(lt);
+            }
+          } else if (originalName === "subagent.inspect") {
+            op = "session_inspect";
+            payload = { session_id: input.sessionId };
+          } else {
+            return {
+              resultJson: JSON.stringify({ error: `unknown subagent builtin: ${originalName}` }),
+            };
+          }
+          const mo = args.model_options;
+          if (
+            (originalName === "subagent.spawn_one_shot" || originalName === "subagent.spawn_bound") &&
+            mo &&
+            typeof mo === "object" &&
+            !Array.isArray(mo)
+          ) {
+            payload.model_options = mo;
+          }
+          try {
+            const result = await inv(input.sessionId, op, payload);
+            return { resultJson: JSON.stringify(result) };
+          } catch (e) {
+            if (e instanceof IntegrationOpError) {
+              return {
+                resultJson: JSON.stringify({
+                  ok: false,
+                  code: e.code,
+                  message: e.message,
+                }),
+              };
+            }
+            throw e;
+          }
+        }
         if (originalName === "read") {
           const path = String(args.path ?? "");
           const body = await toolRead(input.session.workspacePath, path, creds);
