@@ -456,7 +456,34 @@ export async function startDiscordPlatform(
     }
     const mcpCtx = await mcpRuntime.resolveContext(sid);
     const userMetadata = input.userMetadata ?? {};
-    const executeTurn = () =>
+    const hitlReplyInSession = env.SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION !== "0";
+    const buildAfterHitlQueued = (delivery: { readonly userId: string; readonly replyToMessageId?: string }) =>
+      hitlReplyInSession
+        ? async (row: PendingActionRow) => {
+            const ref = await opts.discord.outbound.sendDiscord(
+              createOutboundMessage({
+                id: randomUUID(),
+                sessionId: sid,
+                userId: delivery.userId,
+                createdAt: new Date().toISOString(),
+                body: sliceDiscordPlatformMessageBody(buildHitlQueuedNoticeLines(row).join("\n")),
+                extensions: { replyToMessageId: delivery.replyToMessageId },
+              }),
+            );
+            if (opts.hitlDiscordNoticeRegistry) {
+              await registerDiscordHitlNoticeAndAddReactions({
+                transport: opts.discord.discordRestTransport,
+                channelId: ref.channelId,
+                messageId: ref.messageId,
+                row,
+                registry: opts.hitlDiscordNoticeRegistry,
+                logger: opts.logger,
+              });
+            }
+          }
+        : undefined;
+
+    const executeTurn = (afterHitlQueued?: (row: PendingActionRow) => void | Promise<void>) =>
       executeSessionAgentTurn({
         db: opts.db,
         sessionId: sid,
@@ -488,6 +515,7 @@ export async function startDiscordPlatform(
           waitForHitlResolution,
           hitlNotifier,
           autoApprove: opts.hitlAutoApproveGate,
+          ...(afterHitlQueued ? { afterHitlQueued } : {}),
         },
         loopImpl,
         createToolCallingClient: createToolClient,
@@ -498,7 +526,7 @@ export async function startDiscordPlatform(
       const delivery = input.delivery;
       let turnResult!: SessionAgentTurnResult;
       await withAgentTypingWhile(opts.discord, sid, async () => {
-        turnResult = await executeTurn();
+        turnResult = await executeTurn(buildAfterHitlQueued(delivery));
         const cfg = opts.configRef?.current ?? opts.config;
         const body = sliceDiscordPlatformMessageBody(
           `${formatDiscordPlatformDegradedPrefix(turnResult.failoverMeta)}${formatDiscordAgentIdentityPrefix(cfg, sid)}${turnResult.latestAssistantText}${formatDiscordPlatformModelTagFooter(env, turnResult.failoverMeta)}`,
@@ -519,7 +547,7 @@ export async function startDiscordPlatform(
       return turnResult;
     }
 
-    return await executeTurn();
+    return await executeTurn(undefined);
   }
 
   function subscribeSubagentSession(sessionId: string): () => void {

@@ -113,6 +113,17 @@ export function isSubagentSessionUrn(id: string): boolean {
   return p !== null && p.uuidChain.length > 1;
 }
 
+/**
+ * For a subagent URN (`agent:<agentId>:<platform>:<parentLeaf>:<childUuid>`),
+ * returns the top-level session URN (`agent:<agentId>:<platform>:<parentLeaf>`).
+ * Returns `null` when the id is not a subagent URN (already top-level or invalid).
+ */
+export function resolveTopLevelSessionUrn(id: string): string | null {
+  const p = parseAgentSessionUrn(id);
+  if (!p || p.uuidChain.length <= 1) return null;
+  return `agent:${p.agentId}:${p.platform}:${p.uuidChain[0]}`;
+}
+
 export function formatAgentSessionUrn(agentId: string, platform: string, sessionLeaf: string): string {
   assertValidAgentId(agentId);
   const plat = platform.trim();

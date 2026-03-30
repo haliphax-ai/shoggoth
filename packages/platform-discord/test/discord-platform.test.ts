@@ -1794,4 +1794,169 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     assert.equal(sent.length, 1);
     assert.match(sent[0]!.body, /owner reply/);
   });
+
+  it("subagent runSessionModelTurn with messaging_surface delivery fires afterHitlQueued and hitlNotifier", async () => {
+    const parentSessionId = "agent:test:discord:10000000-0000-4000-8000-000000000001";
+    const subagentSessionId = "agent:test:discord:10000000-0000-4000-8000-000000000001:bbbbbbbb-bbbb-4ccc-dddd-eeeeeeeeeeee";
+    createSessionStore(db).create({ id: subagentSessionId, workspacePath: tmp });
+    createSessionStore(db).update(subagentSessionId, {
+      parentSessionId,
+      subagentMode: "one_shot",
+    });
+
+    const hitlStack = createHitlPendingResolutionStack(db);
+    const outboundBodies: string[] = [];
+    const notifierCalls: { pendingId: string; sessionId: string; tool: string }[] = [];
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: stubDiscordGatewaySession,
+      discordBotUserId: undefined,
+      outbound: {
+        sendDiscord: async (m) => {
+          outboundBodies.push(m.body);
+          return { channelId: "c", messageId: "mid" };
+        },
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      streamingForSession: () => undefined,
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      registerPlatformThreadBinding: () => () => {},
+      notifyAgentTypingForSession: stubNotifyAgentTyping,
+      routes: [{ channelId: "c1", sessionId: parentSessionId }],
+    };
+
+    const approveP = approveFirstPendingWhenQueued(hitlStack, subagentSessionId);
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: defaultConfig(tmp),
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      hitlPending: hitlStack,
+      hitlDiscordNoticeRegistry: createHitlDiscordNoticeRegistry(),
+      env: (() => {
+        const e: NodeJS.ProcessEnv = { ...process.env };
+        delete e.SHOGGOTH_HITL_NOTIFY_CHANNEL_ID;
+        delete e.SHOGGOTH_HITL_NOTIFY_WEBHOOK_URL;
+        delete e.SHOGGOTH_HITL_NOTIFY_DM_USER_ID;
+        return e;
+      })(),
+      deps: {
+        hitlNotifier: {
+          onQueued(row) {
+            notifierCalls.push({ pendingId: row.id, sessionId: row.sessionId, tool: row.toolName });
+          },
+        },
+        createToolCallingClient: createHitlWriteToolModelStub(),
+      },
+    });
+
+    const turnP = platform.runSessionModelTurn({
+      sessionId: subagentSessionId,
+      userContent: "trigger hitl in subagent",
+      delivery: {
+        kind: "messaging_surface",
+        userId: "discord:subagent",
+        replyToMessageId: undefined,
+      },
+    });
+
+    await approveP;
+    const result = await turnP;
+    await platform.stop();
+
+    // hitlNotifier.onQueued was called for the subagent session
+    assert.equal(notifierCalls.length, 1);
+    assert.equal(notifierCalls[0]!.sessionId, subagentSessionId);
+    assert.equal(notifierCalls[0]!.tool, "builtin.write");
+
+    // afterHitlQueued fired: in-session HITL notice was sent via outbound
+    const hitlBodies = outboundBodies.filter((b) => b.includes("HITL") && b.includes("shoggoth hitl approve"));
+    assert.ok(hitlBodies.length >= 1, "expected at least one in-session HITL notice for subagent");
+    assert.match(hitlBodies[0]!, /builtin\.write/);
+    assert.match(hitlBodies[0]!, new RegExp(subagentSessionId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+    // The turn completed with a reply
+    assert.ok(result.latestAssistantText.length > 0);
+  });
+
+  it("subagent runSessionModelTurn with internal delivery does not fire afterHitlQueued but hitlNotifier still fires", async () => {
+    const parentSessionId = "agent:test:discord:10000000-0000-4000-8000-000000000001";
+    const subagentSessionId = "agent:test:discord:10000000-0000-4000-8000-000000000001:cccccccc-cccc-4ccc-dddd-eeeeeeeeeeee";
+    createSessionStore(db).create({ id: subagentSessionId, workspacePath: tmp });
+    createSessionStore(db).update(subagentSessionId, {
+      parentSessionId,
+      subagentMode: "one_shot",
+    });
+
+    const hitlStack = createHitlPendingResolutionStack(db);
+    const outboundBodies: string[] = [];
+    const notifierCalls: { pendingId: string; sessionId: string; tool: string }[] = [];
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: stubDiscordGatewaySession,
+      discordBotUserId: undefined,
+      outbound: {
+        sendDiscord: async (m) => {
+          outboundBodies.push(m.body);
+          return { channelId: "c", messageId: "mid" };
+        },
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      streamingForSession: () => undefined,
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      registerPlatformThreadBinding: () => () => {},
+      notifyAgentTypingForSession: stubNotifyAgentTyping,
+      routes: [{ channelId: "c1", sessionId: parentSessionId }],
+    };
+
+    const approveP = approveFirstPendingWhenQueued(hitlStack, subagentSessionId);
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: defaultConfig(tmp),
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      hitlPending: hitlStack,
+      env: (() => {
+        const e: NodeJS.ProcessEnv = { ...process.env };
+        delete e.SHOGGOTH_HITL_NOTIFY_CHANNEL_ID;
+        delete e.SHOGGOTH_HITL_NOTIFY_WEBHOOK_URL;
+        delete e.SHOGGOTH_HITL_NOTIFY_DM_USER_ID;
+        return e;
+      })(),
+      deps: {
+        hitlNotifier: {
+          onQueued(row) {
+            notifierCalls.push({ pendingId: row.id, sessionId: row.sessionId, tool: row.toolName });
+          },
+        },
+        createToolCallingClient: createHitlWriteToolModelStub(),
+      },
+    });
+
+    const turnP = platform.runSessionModelTurn({
+      sessionId: subagentSessionId,
+      userContent: "trigger hitl in subagent internal",
+      delivery: { kind: "internal" },
+    });
+
+    await approveP;
+    const result = await turnP;
+    await platform.stop();
+
+    // hitlNotifier.onQueued was still called
+    assert.equal(notifierCalls.length, 1);
+    assert.equal(notifierCalls[0]!.sessionId, subagentSessionId);
+
+    // No in-session HITL notice for internal delivery
+    const hitlBodies = outboundBodies.filter((b) => b.includes("HITL") && b.includes("shoggoth hitl approve"));
+    assert.equal(hitlBodies.length, 0, "internal delivery should not produce in-session HITL notice");
+
+    assert.ok(result.latestAssistantText.length > 0);
+  });
 });

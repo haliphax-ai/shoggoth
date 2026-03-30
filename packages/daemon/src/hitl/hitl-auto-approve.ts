@@ -1,4 +1,4 @@
-import { parseAgentSessionUrn } from "@shoggoth/shared";
+import { parseAgentSessionUrn, resolveTopLevelSessionUrn } from "@shoggoth/shared";
 
 /**
  * In-memory gates: after ✅ / ♾️ on Discord, future calls for the **same tool name** in that scope
@@ -39,6 +39,9 @@ export function createHitlAutoApproveGate(): HitlAutoApproveGate {
       const sid = sessionId.trim();
       const t = toolName.trim();
       if (sessionTools.get(sid)?.has(t)) return true;
+      // For subagent sessions, also check the top-level (main) session's approvals.
+      const mainSid = resolveTopLevelSessionUrn(sid);
+      if (mainSid && sessionTools.get(mainSid)?.has(t)) return true;
       const p = parseAgentSessionUrn(sid);
       return p ? (agentTools.get(p.agentId)?.has(t) ?? false) : false;
     },

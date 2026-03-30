@@ -100,6 +100,7 @@ export {
   defaultPrimarySessionUrnForAgent,
   formatAgentSessionUrn,
   isSubagentSessionUrn,
+  resolveTopLevelSessionUrn,
   isValidAgentSessionUrn,
   isValidSessionUrnTailSegment,
   mintAgentSessionUrn,

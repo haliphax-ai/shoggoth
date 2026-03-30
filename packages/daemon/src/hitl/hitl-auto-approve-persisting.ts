@@ -1,4 +1,4 @@
-import { parseAgentSessionUrn } from "@shoggoth/shared";
+import { parseAgentSessionUrn, resolveTopLevelSessionUrn } from "@shoggoth/shared";
 import type Database from "better-sqlite3";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import type { HitlConfigRef } from "../config-hot-reload";
@@ -59,6 +59,9 @@ export function createPersistingHitlAutoApproveGate(input: {
       const sid = sessionId.trim();
       const t = toolName.trim();
       if (sessionHasToolAutoApproveFlexible(input.db, sid, t)) return true;
+      // For subagent sessions, also check the top-level (main) session's approvals.
+      const mainSid = resolveTopLevelSessionUrn(sid);
+      if (mainSid && sessionHasToolAutoApproveFlexible(input.db, mainSid, t)) return true;
       const p = parseAgentSessionUrn(sid);
       if (!p) return false;
       const mem = agentToolsMem.get(p.agentId);
