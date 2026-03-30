@@ -560,7 +560,7 @@ export async function startDiscordPlatform(
           const ref = await opts.discord.outbound.sendDiscord(
             createOutboundMessage({
               id: randomUUID(),
-              sessionId: sid,
+              sessionId: sessionRow.parentSessionId!,
               userId: ownerUserId ?? "system",
               createdAt: new Date().toISOString(),
               body: sliceDiscordPlatformMessageBody(buildHitlQueuedNoticeLines(row).join("\n")),

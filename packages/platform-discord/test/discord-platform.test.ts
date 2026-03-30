@@ -1882,9 +1882,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     assert.ok(result.latestAssistantText.length > 0);
   });
 
-  it("subagent runSessionModelTurn with internal delivery does not fire afterHitlQueued but hitlNotifier still fires", async () => {
-    const parentSessionId = "agent:test:discord:10000000-0000-4000-8000-000000000001";
-    const subagentSessionId = "agent:test:discord:10000000-0000-4000-8000-000000000001:cccccccc-cccc-4ccc-dddd-eeeeeeeeeeee";
+  it("subagent runSessionModelTurn with internal delivery fires afterHitlQueued using parent session channel", async () => {
+    const parentSessionId = "agent:test:discord:10000000-0000-4000-8000-000000000099";
+    const subagentSessionId = "agent:test:discord:10000000-0000-4000-8000-000000000099:cccccccc-cccc-4ccc-dddd-eeeeeeeeeeee";
+    createSessionStore(db).create({ id: parentSessionId, workspacePath: tmp });
     createSessionStore(db).create({ id: subagentSessionId, workspacePath: tmp });
     createSessionStore(db).update(subagentSessionId, {
       parentSessionId,
@@ -1893,6 +1894,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const hitlStack = createHitlPendingResolutionStack(db);
     const outboundBodies: string[] = [];
+    const outboundSessionIds: string[] = [];
     const notifierCalls: { pendingId: string; sessionId: string; tool: string }[] = [];
     const bus = createAgentToAgentBus();
     const discord: DiscordMessagingRuntime = {
@@ -1902,6 +1904,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       outbound: {
         sendDiscord: async (m) => {
           outboundBodies.push(m.body);
+          outboundSessionIds.push(m.sessionId);
           return { channelId: "c", messageId: "mid" };
         },
       },
@@ -1912,6 +1915,8 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       registerPlatformThreadBinding: () => () => {},
       notifyAgentTypingForSession: stubNotifyAgentTyping,
       routes: [{ channelId: "c1", sessionId: parentSessionId }],
+      resolveOutboundChannelIdForSession: (sid) =>
+        sid === parentSessionId ? "c1" : undefined,
     };
 
     const approveP = approveFirstPendingWhenQueued(hitlStack, subagentSessionId);
@@ -1953,9 +1958,15 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     assert.equal(notifierCalls.length, 1);
     assert.equal(notifierCalls[0]!.sessionId, subagentSessionId);
 
-    // No in-session HITL notice for internal delivery
-    const hitlBodies = outboundBodies.filter((b) => b.includes("HITL") && b.includes("shoggoth hitl approve"));
-    assert.equal(hitlBodies.length, 0, "internal delivery should not produce in-session HITL notice");
+    // In-session HITL notice IS sent for internal delivery using parent session ID
+    const hitlBodies = outboundBodies.filter((b) => b.includes("HITL") || b.includes("shoggoth hitl approve"));
+    assert.ok(hitlBodies.length > 0, "internal delivery with parent session should produce in-session HITL notice");
+
+    // The outbound message uses the parent session ID, not the subagent's
+    const hitlSessionIds = outboundSessionIds.filter((_, i) =>
+      outboundBodies[i]!.includes("HITL") || outboundBodies[i]!.includes("shoggoth hitl approve"));
+    assert.ok(hitlSessionIds.every((id) => id === parentSessionId),
+      "HITL notice should be sent using parent session ID");
 
     assert.ok(result.latestAssistantText.length > 0);
   });
