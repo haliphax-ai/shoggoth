@@ -101,9 +101,8 @@ export function formatDiscordAgentIdentityPrefix(cfg: ShoggothConfig, sessionId:
   if (!aid) return "";
   const idKey = aid.trim();
   const entry = cfg.agents?.list?.[idKey];
-  if (!entry) return "";
-  const name = entry.displayName?.trim() || idKey;
-  const emoji = entry.emoji?.trim() || SHOGGOTH_DISCORD_AGENT_DEFAULT_EMOJI;
+  const name = entry?.displayName?.trim() || idKey;
+  const emoji = entry?.emoji?.trim() || SHOGGOTH_DISCORD_AGENT_DEFAULT_EMOJI;
   return `**${emoji} ${name}:**\n`;
 }
 

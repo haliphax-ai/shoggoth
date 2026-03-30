@@ -717,6 +717,7 @@ export type ShoggothConfig = z.infer<typeof shoggothConfigSchema>;
 export const DEFAULT_HITL_CONFIG: ShoggothHitlConfig = {
   defaultApprovalTimeoutMs: 300_000,
   toolRisk: {
+    /* canonical names */
     "builtin.read": "safe",
     "builtin.write": "caution",
     "builtin.exec": "critical",
@@ -726,6 +727,16 @@ export const DEFAULT_HITL_CONFIG: ShoggothHitlConfig = {
     "builtin.session.send": "caution",
     "builtin.subagent": "caution",
     "builtin.message": "caution",
+    /* legacy short names for backward compat / fallback lookup */
+    "read": "safe",
+    "write": "caution",
+    "exec": "critical",
+    "memory.search": "safe",
+    "memory.ingest": "caution",
+    "session.list": "safe",
+    "session.send": "caution",
+    "subagent": "caution",
+    "message": "caution",
   },
   /**
    * Keys are arbitrary role ids passed as `principalRoles` into the tool loop. Session turns use

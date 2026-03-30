@@ -85,8 +85,11 @@ describe("effective agent config for session", () => {
     assert.equal(m?.failoverChain?.[0]?.providerId, "q");
   });
 
-  it("formatDiscordAgentIdentityPrefix is empty without agents.list entry for session agent", () => {
-    assert.equal(formatDiscordAgentIdentityPrefix(base, sid), "");
+  it("formatDiscordAgentIdentityPrefix falls back to default emoji and agent id without agents.list entry", () => {
+    assert.equal(
+      formatDiscordAgentIdentityPrefix(base, sid),
+      `**${SHOGGOTH_DISCORD_AGENT_DEFAULT_EMOJI} alice:**\n`,
+    );
   });
 
   it("formatDiscordAgentIdentityPrefix uses agent id when displayName omitted", () => {
