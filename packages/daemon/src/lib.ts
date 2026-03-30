@@ -197,3 +197,9 @@ export {
   type ConnectShoggothMcpPoolOptions,
   type McpServerPool,
 } from "./mcp/mcp-server-pool";
+export {
+  parsePlatformCommand,
+  translateCommandToControlOp,
+  type PlatformCommand,
+  type ControlOpRequest,
+} from "./platforms/platform-command";

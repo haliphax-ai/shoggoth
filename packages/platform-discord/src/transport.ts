@@ -66,4 +66,15 @@ export interface DiscordRestTransport {
   createMessageReaction(channelId: string, messageId: string, emoji: string): Promise<void>;
   /** POST `/channels/{channel.id}/typing` — lasts ~10s; renew for long model turns. */
   triggerTypingIndicator(channelId: string): Promise<void>;
+  /** POST `/interactions/{id}/{token}/callback` — respond to a slash command interaction. */
+  interactionCallback(
+    interactionId: string,
+    interactionToken: string,
+    body: { readonly type: number; readonly data?: { readonly content: string } },
+  ): Promise<void>;
+  /** PUT `/applications/{appId}/commands` — register global slash commands. */
+  registerGlobalCommands(
+    applicationId: string,
+    commands: ReadonlyArray<Record<string, unknown>>,
+  ): Promise<void>;
 }

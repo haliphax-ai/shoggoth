@@ -292,5 +292,41 @@ export function createDiscordRestTransport(options: DiscordRestTransportOptions)
         throw new Error(`Discord REST triggerTypingIndicator ${res.status}: ${bodyText}`);
       }
     },
+
+    async interactionCallback(interactionId, interactionToken, body) {
+      const res = await discordFetchWithRateLimitRetry(
+        () =>
+          discordFetch(
+            `/interactions/${encodeURIComponent(interactionId)}/${encodeURIComponent(interactionToken)}/callback`,
+            {
+              method: "POST",
+              body: JSON.stringify(body),
+            },
+          ),
+        "interactionCallback" as DiscordRestOperation,
+      );
+      if (!res.ok) {
+        const bodyText = await res.text();
+        throw new Error(`Discord REST interactionCallback ${res.status}: ${bodyText}`);
+      }
+    },
+
+    async registerGlobalCommands(applicationId, commands) {
+      const res = await discordFetchWithRateLimitRetry(
+        () =>
+          discordFetch(
+            `/applications/${encodeURIComponent(applicationId)}/commands`,
+            {
+              method: "PUT",
+              body: JSON.stringify(commands),
+            },
+          ),
+        "registerGlobalCommands" as DiscordRestOperation,
+      );
+      if (!res.ok) {
+        const bodyText = await res.text();
+        throw new Error(`Discord REST registerGlobalCommands ${res.status}: ${bodyText}`);
+      }
+    },
   };
 }

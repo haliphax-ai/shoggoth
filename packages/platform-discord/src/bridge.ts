@@ -11,6 +11,7 @@ import {
   type DiscordSessionRoute,
 } from "./adapter";
 export type { DiscordReactionAddEvent, DiscordSessionRoute } from "./adapter";
+import type { DiscordInteractionEvent } from "./interaction";
 import { connectDiscordGateway, type DiscordGatewaySession } from "./gateway-client";
 import { DISCORD_GATEWAY_INTENTS_DEFAULT } from "./gateway-payload";
 import { createDiscordRestTransport } from "./rest-transport";
@@ -116,6 +117,8 @@ export interface StartDiscordMessagingOptions {
   readonly ownerUserId?: string;
   /** Gateway `MESSAGE_REACTION_ADD` (e.g. HITL notice buttons). */
   readonly onMessageReactionAdd?: (ev: DiscordReactionAddEvent) => void;
+  /** Gateway `INTERACTION_CREATE` (e.g. slash commands). */
+  readonly onInteractionCreate?: (ev: DiscordInteractionEvent) => void;
   /** Filled with resolved bot user id after connect (ignore reaction events from this user). */
   readonly reactionBotUserIdRef?: { current: string | undefined };
   readonly deps?: DiscordMessagingDeps;
@@ -273,6 +276,7 @@ export async function startDiscordMessagingIfConfigured(
     allowBotMessages: opts.allowBotMessages,
     onMessageCreate,
     onMessageReactionAdd: opts.onMessageReactionAdd,
+    onInteractionCreate: opts.onInteractionCreate,
   });
   gatewayRef.current = gateway;
 

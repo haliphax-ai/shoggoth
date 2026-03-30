@@ -3,6 +3,7 @@ import {
   type DiscordMessagingRuntime,
   type DiscordReactionAddEvent,
 } from "./bridge";
+import type { DiscordInteractionEvent } from "./interaction";
 import { isPlatformEnabled, type ShoggothConfig } from "@shoggoth/shared";
 import type { DiscordBridgeLogger } from "./bridge";
 import type { NoticeResolver } from "./daemon-types";
@@ -15,6 +16,7 @@ import {
   resolveEffectiveDiscordRoutesJson,
   resolveShoggothAgentId,
 } from "./config";
+import { registerDiscordSlashCommands } from "./slash-commands";
 
 export type { DiscordMessagingRuntime };
 
@@ -24,9 +26,12 @@ export interface StartDaemonDiscordMessagingOptions {
   /** Resolved token (`DISCORD_BOT_TOKEN` env wins over layered `discord.botToken`). */
   readonly botToken: string | undefined;
   readonly onMessageReactionAdd?: (ev: DiscordReactionAddEvent) => void;
+  readonly onInteractionCreate?: (ev: DiscordInteractionEvent) => void;
   readonly reactionBotUserIdRef?: { current: string | undefined };
   /** Daemon's notice resolver — wired into platform-discord's `setNoticeResolver` at startup. */
   readonly noticeResolver?: NoticeResolver;
+  /** When true, register global slash commands on startup (requires bot user id). */
+  readonly registerSlashCommands?: boolean;
 }
 
 /**
@@ -42,7 +47,7 @@ export async function startDaemonDiscordMessaging(
   if (!isPlatformEnabled(opts.config, "discord")) {
     return undefined;
   }
-  return startDiscordMessagingIfConfigured({
+  const runtime = await startDiscordMessagingIfConfigured({
     logger: opts.logger,
     botToken: opts.botToken,
     routesJson: resolveEffectiveDiscordRoutesJson(opts.config),
@@ -60,6 +65,23 @@ export async function startDaemonDiscordMessaging(
         : undefined,
     },
     onMessageReactionAdd: opts.onMessageReactionAdd,
+    onInteractionCreate: opts.onInteractionCreate,
     reactionBotUserIdRef: opts.reactionBotUserIdRef,
   });
+
+  if (runtime && opts.registerSlashCommands !== false && runtime.discordBotUserId) {
+    try {
+      await registerDiscordSlashCommands({
+        transport: runtime.discordRestTransport,
+        applicationId: runtime.discordBotUserId,
+      });
+      opts.logger.info("discord.slash_commands.registered", {
+        applicationId: runtime.discordBotUserId,
+      });
+    } catch (e) {
+      opts.logger.warn("discord.slash_commands.registration_failed", { err: String(e) });
+    }
+  }
+
+  return runtime;
 }

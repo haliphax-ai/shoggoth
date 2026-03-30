@@ -1,7 +1,9 @@
 import type { DiscordInboundEvent, DiscordReactionAddEvent } from "./adapter";
+import type { DiscordInteractionEvent } from "./interaction";
 import {
   discordMessageCreateToInboundEvent,
   discordMessageReactionAddToEvent,
+  discordInteractionCreateToEvent,
   discordReadyPayloadToBotUserId,
   DISCORD_GATEWAY_INTENTS_DEFAULT,
 } from "./gateway-payload";
@@ -11,6 +13,7 @@ export interface DiscordGatewayConnectOptions {
   readonly intents?: number;
   readonly onMessageCreate: (ev: DiscordInboundEvent) => void;
   readonly onMessageReactionAdd?: (ev: DiscordReactionAddEvent) => void;
+  readonly onInteractionCreate?: (ev: DiscordInteractionEvent) => void;
   /** Default false: ignore bot-authored messages to avoid accidental feedback loops. */
   readonly allowBotMessages?: boolean;
   readonly fetchFn?: typeof fetch;
@@ -152,6 +155,11 @@ export async function connectDiscordGateway(
       if (msg.op === 0 && msg.t === "MESSAGE_REACTION_ADD") {
         const rev = discordMessageReactionAddToEvent(msg.d);
         if (rev) options.onMessageReactionAdd?.(rev);
+      }
+
+      if (msg.op === 0 && msg.t === "INTERACTION_CREATE") {
+        const iev = discordInteractionCreateToEvent(msg.d);
+        if (iev) options.onInteractionCreate?.(iev);
       }
     });
   });

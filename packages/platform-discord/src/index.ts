@@ -23,9 +23,14 @@ export * from "./hitl/notifier";
 export * from "./hitl/reaction-handler";
 export * from "./hitl/reaction-wiring";
 export * from "./hitl/notice-registry";
+export * from "./interaction";
+export * from "./slash-commands";
 
 // Step 5: Discord config resolution
 export * from "./config";
 
 // Step 6: Discord health probe
 export * from "./probe";
+
+// Step 7: Discord slash command interaction parsing
+export * from "./interaction";

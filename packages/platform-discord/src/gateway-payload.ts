@@ -3,6 +3,7 @@ import type {
   DiscordInboundEvent,
   DiscordReactionAddEvent,
 } from "./adapter";
+import type { DiscordInteractionEvent } from "./interaction";
 
 /**
  * Default gateway intents: GUILDS + GUILD_MESSAGES + GUILD_MESSAGE_REACTIONS + DIRECT_MESSAGES +
@@ -118,5 +119,55 @@ export function discordMessageReactionAddToEvent(d: unknown): DiscordReactionAdd
       id: typeof id === "string" ? id : null,
       name: typeof name === "string" ? name : null,
     },
+  };
+}
+
+/**
+ * Maps a Discord Gateway `INTERACTION_CREATE` `d` payload to our interaction event shape.
+ * Returns null for payloads missing required fields.
+ */
+export function discordInteractionCreateToEvent(d: unknown): DiscordInteractionEvent | null {
+  const o = asRecord(d);
+  if (!o) return null;
+
+  const id = o.id;
+  const token = o.token;
+  const type = o.type;
+  const channelId = o.channel_id;
+  if (
+    typeof id !== "string" ||
+    typeof token !== "string" ||
+    typeof type !== "number" ||
+    typeof channelId !== "string"
+  ) {
+    return null;
+  }
+
+  const guildId = o.guild_id;
+
+  // User id lives in `member.user.id` (guild) or `user.id` (DM).
+  const member = asRecord(o.member);
+  const memberUser = member ? asRecord(member.user) : null;
+  const topUser = asRecord(o.user);
+  const userId = memberUser?.id ?? topUser?.id;
+  if (typeof userId !== "string") return null;
+
+  const rawData = asRecord(o.data);
+  const data: DiscordInteractionEvent["data"] = {
+    name: typeof rawData?.name === "string" ? rawData.name : undefined,
+    options: Array.isArray(rawData?.options)
+      ? (rawData.options as Array<{ name: string; type: number; value: unknown }>)
+      : undefined,
+  };
+
+  return {
+    kind: "interaction_create",
+    id,
+    token,
+    type,
+    channelId,
+    guildId: typeof guildId === "string" ? guildId : undefined,
+    userId,
+    data,
   };
 }
