@@ -66,6 +66,8 @@ export {
   type ShoggothRetentionConfig,
   type ShoggothRuntimeConfig,
   type ShoggothToolRules,
+  processDeclarationSchema,
+  type ProcessDeclaration,
 } from "./schema";
 export {
   resolvePlatformConfig,

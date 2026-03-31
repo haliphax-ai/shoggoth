@@ -15,6 +15,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node --import tsx/esm --test --test-isolation=process --test-concurrency=true $(find test -name '*.test.ts' | sort)"
   },
+  "dependencies": {
+    "@shoggoth/procman": "*"
+  },
   "devDependencies": {
     "tsx": "^4.19.3",
     "typescript": "~5.7.2"

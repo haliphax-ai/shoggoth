@@ -3,6 +3,7 @@ import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import type { WireRequest } from "@shoggoth/authn";
 import type Database from "better-sqlite3";
 import type { ShoggothConfig } from "@shoggoth/shared";
+import { getProcessManager } from "../process-manager-singleton";
 import {
   agentMayInvokeSubagentSpawnByAllowlist,
   assertValidAgentId,
@@ -1556,6 +1557,69 @@ export async function handleIntegrationControlOp(
       }
       const jsonPaths = ctx.config.policy.auditRedaction.jsonPaths;
       return { ok: true, config: redactDeep(ctx.config, jsonPaths) };
+    }
+
+    case "procman_list": {
+      if (principal.kind !== "operator") {
+        throw new IntegrationOpError("ERR_FORBIDDEN", "procman_list requires operator principal");
+      }
+      let pm;
+      try {
+        pm = getProcessManager();
+      } catch {
+        return { processes: [] };
+      }
+      const processes = pm.list().map((mp) => ({
+        id: mp.spec.id,
+        label: mp.spec.label ?? null,
+        state: mp.state,
+        pid: mp.pid ?? null,
+        uptimeMs: mp.uptimeMs,
+        restartCount: mp.restartCount,
+        lastExitCode: mp.lastExitCode,
+        owner: mp.spec.owner,
+      }));
+      return { processes };
+    }
+
+    case "procman_restart": {
+      if (principal.kind !== "operator") {
+        throw new IntegrationOpError("ERR_FORBIDDEN", "procman_restart requires operator principal");
+      }
+      const pl = payloadObject(req);
+      const id = requireString(pl, "id");
+      let pm;
+      try {
+        pm = getProcessManager();
+      } catch {
+        throw new IntegrationOpError("ERR_PROCMAN_UNAVAILABLE", "process manager not initialized");
+      }
+      const mp = pm.get(id);
+      if (!mp) {
+        throw new IntegrationOpError("ERR_PROCESS_NOT_FOUND", `no managed process with id "${id}"`);
+      }
+      await mp.restart();
+      return { ok: true, id, state: mp.state };
+    }
+
+    case "procman_stop": {
+      if (principal.kind !== "operator") {
+        throw new IntegrationOpError("ERR_FORBIDDEN", "procman_stop requires operator principal");
+      }
+      const pl = payloadObject(req);
+      const id = requireString(pl, "id");
+      let pm;
+      try {
+        pm = getProcessManager();
+      } catch {
+        throw new IntegrationOpError("ERR_PROCMAN_UNAVAILABLE", "process manager not initialized");
+      }
+      const mp = pm.get(id);
+      if (!mp) {
+        throw new IntegrationOpError("ERR_PROCESS_NOT_FOUND", `no managed process with id "${id}"`);
+      }
+      await pm.stop(id);
+      return { ok: true, id };
     }
 
     default:

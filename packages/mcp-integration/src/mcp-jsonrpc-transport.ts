@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createConnection, type Socket } from "node:net";
 import type { Readable, Writable } from "node:stream";
+import type { ProcessManager, ManagedProcess, ProcessSpec } from "@shoggoth/procman";
 import type { JsonSchemaLike } from "./json-schema";
 import type { McpSourceCatalog } from "./aggregate";
 import type { McpToolDescriptor } from "./mcp-tool";
@@ -284,6 +285,8 @@ export interface McpStdioConnectOptions {
   readonly args?: readonly string[];
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
+  /** When provided, the MCP server process is spawned and managed via procman. */
+  readonly processManager?: ProcessManager;
 }
 
 export interface McpTcpConnectOptions {
@@ -293,6 +296,14 @@ export interface McpTcpConnectOptions {
 
 /** Spawn a subprocess and return an MCP session on its stdio (JSON-RPC lines). */
 export async function connectMcpStdioSession(opts: McpStdioConnectOptions): Promise<McpJsonRpcSession> {
+  if (opts.processManager) {
+    return connectMcpStdioSessionViaProcman(opts, opts.processManager);
+  }
+  return connectMcpStdioSessionDirect(opts);
+}
+
+/** Direct spawn fallback (original behavior). */
+async function connectMcpStdioSessionDirect(opts: McpStdioConnectOptions): Promise<McpJsonRpcSession> {
   const proc = spawn(opts.command, opts.args ? [...opts.args] : [], {
     cwd: opts.cwd,
     env: opts.env,
@@ -321,6 +332,67 @@ export async function connectMcpStdioSession(opts: McpStdioConnectOptions): Prom
           r();
         });
       });
+    },
+  };
+}
+
+/** Spawn via ProcessManager and wire the MCP session to the managed process's stdio. */
+async function connectMcpStdioSessionViaProcman(
+  opts: McpStdioConnectOptions,
+  pm: ProcessManager,
+): Promise<McpJsonRpcSession> {
+  const scopeId = [opts.command, ...(opts.args ?? [])].join(" ");
+  const specId = `mcp-stdio-${scopeId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 80)}-${Date.now()}`;
+
+  const spec: ProcessSpec = {
+    id: specId,
+    owner: { kind: "mcp-server", scopeId },
+    command: opts.command,
+    args: opts.args ? [...opts.args] : undefined,
+    cwd: opts.cwd,
+    env: opts.env ? { ...opts.env } as Record<string, string> : undefined,
+    restart: { mode: "on-failure", maxRetries: 5 },
+    stdio: { capture: "pipe", stdin: true },
+    shutdown: { signal: "SIGTERM", graceMs: 5000 },
+  };
+
+  const managed: ManagedProcess = await pm.start(spec);
+
+  // The managed process exposes stdout/stdin via events and writeStdin.
+  // We need Readable/Writable streams for createMcpJsonRpcSession.
+  // Build a PassThrough for stdout that receives data from the managed process events,
+  // and a writable shim that forwards to managed.writeStdin.
+  const { PassThrough } = await import("node:stream");
+  const stdoutStream = new PassThrough();
+  managed.on("stdout", (chunk: Buffer) => {
+    stdoutStream.write(chunk);
+  });
+
+  // Writable shim that delegates to managed.writeStdin
+  const stdinStream = new PassThrough();
+  stdinStream.on("data", (chunk: Buffer) => {
+    try {
+      managed.writeStdin(chunk);
+    } catch {
+      // process may have exited
+    }
+  });
+
+  const session = createMcpJsonRpcSession(stdoutStream, stdinStream);
+  const baseClose = session.close.bind(session);
+
+  return {
+    request: session.request,
+    notify: session.notify,
+    close: async () => {
+      await baseClose().catch(() => {});
+      stdoutStream.destroy();
+      stdinStream.destroy();
+      try {
+        await pm.stop(specId);
+      } catch {
+        // already stopped or removed
+      }
     },
   };
 }

@@ -48,6 +48,9 @@ export const DEFINED_CONTROL_OPS = [
   "session_kill",
   "session_model",
   "config_show",
+  "procman_list",
+  "procman_restart",
+  "procman_stop",
 ] as const;
 export type DefinedControlOp = (typeof DEFINED_CONTROL_OPS)[number];
 

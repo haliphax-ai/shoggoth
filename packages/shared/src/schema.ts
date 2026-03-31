@@ -588,6 +588,46 @@ export const DEFAULT_SKILLS_CONFIG: ShoggothSkillsConfig = {
   disabledIds: [],
 };
 
+// ---------------------------------------------------------------------------
+// Declarative sidecar process definitions (Phase 4 — procman)
+// ---------------------------------------------------------------------------
+
+export const processDeclarationHealthSchema = z
+  .object({
+    kind: z.enum(["tcp", "http", "stdout-match"]),
+    /** Port for tcp, URL for http, pattern for stdout-match. */
+    target: z.string().min(1),
+    timeoutMs: z.number().int().positive().optional(),
+  })
+  .strict();
+
+export const processDeclarationSchema = z
+  .object({
+    /** Unique ID for this process (used as ProcessSpec.id). */
+    id: z.string().min(1),
+    /** Human-readable label. */
+    label: z.string().min(1).optional(),
+    /** When to start: "boot" (daemon startup) or "on-demand" (first reference). */
+    startPolicy: z.enum(["boot", "on-demand"]),
+    /** Command to run. */
+    command: z.string().min(1),
+    /** Arguments. */
+    args: z.array(z.string()).optional(),
+    /** Working directory. */
+    cwd: z.string().min(1).optional(),
+    /** Extra environment variables. */
+    env: z.record(z.string()).optional(),
+    /** Restart policy mode. Default "on-failure". */
+    restartMode: z.enum(["never", "on-failure", "always"]).optional(),
+    /** Max restart retries. Default 5. */
+    maxRetries: z.number().int().nonnegative().optional(),
+    /** Health check (optional). */
+    health: processDeclarationHealthSchema.optional(),
+  })
+  .strict();
+
+export type ProcessDeclaration = z.infer<typeof processDeclarationSchema>;
+
 /** Layered JSON fragments must satisfy this shape after merge; defaults fill the rest. */
 export const shoggothConfigFragmentSchema = z
   .object({
@@ -656,6 +696,8 @@ export const shoggothConfigFragmentSchema = z
     /** Global session query access control: agent ids any agent may query transcripts for. */
     sessionQuery: shoggothSessionQueryConfigSchema.optional(),
     policy: shoggothPolicyFragmentSchema,
+    /** Declarative sidecar process definitions managed by procman. */
+    processes: z.array(processDeclarationSchema).optional(),
   })
   .strict();
 
@@ -695,6 +737,8 @@ export const shoggothConfigSchema = z
     subagentSpawnAllow: shoggothSubagentSpawnAllowSchema.optional(),
     sessionQuery: shoggothSessionQueryConfigSchema.optional(),
     policy: shoggothPolicyConfigSchema,
+    /** Declarative sidecar process definitions managed by procman. */
+    processes: z.array(processDeclarationSchema).optional(),
   })
   .strict();
 

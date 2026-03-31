@@ -70,6 +70,9 @@ import { createDelegatingPolicyEngine, createPolicyEngine } from "./policy/engin
 import { bootstrapPlugins } from "./plugins/bootstrap";
 import { bootstrapMainSession } from "./bootstrap-main-session";
 import { createDaemonRuntime } from "./runtime";
+import { initProcessManager } from "./process-manager-singleton";
+import type { ProcessDeclaration } from "@shoggoth/shared";
+import type { ProcessSpec } from "@shoggoth/procman";
 import { createToolRunStore } from "./sessions/tool-run-store";
 import {
   startDiscordPlatform,
@@ -368,6 +371,46 @@ void (async () => {
   }
   stateShutdown.db = db;
   stateShutdown.toolRuns = createToolRunStore(db);
+
+  // --- Process Manager: init singleton, start boot-time processes, register shutdown ---
+  const procman = initProcessManager();
+
+  function processDeclarationToSpec(decl: ProcessDeclaration): ProcessSpec {
+    return {
+      id: decl.id,
+      label: decl.label,
+      owner: { kind: "plugin", scopeId: decl.id },
+      command: decl.command,
+      args: decl.args,
+      cwd: decl.cwd,
+      env: decl.env,
+      restart: {
+        mode: decl.restartMode ?? "on-failure",
+        maxRetries: decl.maxRetries ?? 5,
+      },
+      health: decl.health
+        ? decl.health.kind === "tcp"
+          ? { kind: "tcp", port: Number(decl.health.target), timeoutMs: decl.health.timeoutMs }
+          : decl.health.kind === "http"
+            ? { kind: "http", url: decl.health.target, timeoutMs: decl.health.timeoutMs }
+            : { kind: "stdout-match", pattern: decl.health.target, timeoutMs: decl.health.timeoutMs }
+        : undefined,
+    };
+  }
+
+  const bootProcesses = (config.processes ?? []).filter((d) => d.startPolicy === "boot");
+  for (const decl of bootProcesses) {
+    try {
+      await procman.start(processDeclarationToSpec(decl));
+      rt.logger.info("boot process started", { processId: decl.id });
+    } catch (e) {
+      rt.logger.error("boot process failed to start", { processId: decl.id, err: String(e) });
+    }
+  }
+
+  rt.shutdown.registerDrain("procman", async () => {
+    await procman.stopAll();
+  });
 
   const dm = discordMessaging;
   if (dm && hitlStack) {

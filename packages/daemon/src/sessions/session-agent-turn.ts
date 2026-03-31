@@ -23,6 +23,7 @@ import { IntegrationOpError } from "../control/integration-ops";
 import { readFileSync } from "node:fs";
 import { listSkillsForConfig, skillAbsolutePathById } from "@shoggoth/skills-plugins";
 import { runMemoryBuiltin } from "../memory/builtin-memory-tools";
+import { getProcessManager } from "../process-manager-singleton";
 import { createMcpRoutingToolExecutor } from "../mcp/tool-loop-mcp";
 import { createToolLoopPolicyAndAudit } from "../policy/tool-loop-bridge";
 import { runToolLoop, type RunToolLoopHitl, type RunToolLoopOptions } from "./tool-loop";
@@ -661,6 +662,51 @@ export async function executeSessionAgentTurn(
             return { resultJson: JSON.stringify({ path: p, content }) };
           }
           return { resultJson: JSON.stringify({ error: `unknown skills action: ${action}` }) };
+        }
+        if (originalName === "procman") {
+          const action = String(args.action ?? "").trim();
+          let pm;
+          try {
+            pm = getProcessManager();
+          } catch {
+            return { resultJson: JSON.stringify({ error: "process manager not available" }) };
+          }
+          if (action === "list") {
+            const processes = pm.list().map((mp) => ({
+              id: mp.spec.id,
+              label: mp.spec.label ?? null,
+              state: mp.state,
+              pid: mp.pid ?? null,
+              uptimeMs: mp.uptimeMs,
+              restartCount: mp.restartCount,
+              owner: mp.spec.owner,
+            }));
+            return { resultJson: JSON.stringify({ processes }) };
+          }
+          if (action === "inspect") {
+            const id = String(args.id ?? "").trim();
+            if (!id) return { resultJson: JSON.stringify({ error: "id required for inspect" }) };
+            const mp = pm.get(id);
+            if (!mp) return { resultJson: JSON.stringify({ error: `no process with id "${id}"` }) };
+            const recentStdout = mp.readOutput("stdout");
+            const recentStderr = mp.readOutput("stderr");
+            return {
+              resultJson: JSON.stringify({
+                id: mp.spec.id,
+                label: mp.spec.label ?? null,
+                state: mp.state,
+                pid: mp.pid ?? null,
+                uptimeMs: mp.uptimeMs,
+                restartCount: mp.restartCount,
+                lastExitCode: mp.lastExitCode,
+                lastSignal: mp.lastSignal,
+                owner: mp.spec.owner,
+                recentStdout,
+                recentStderr,
+              }),
+            };
+          }
+          return { resultJson: JSON.stringify({ error: `unknown procman action: ${action}` }) };
         }
         return { resultJson: JSON.stringify({ error: `unknown builtin: ${originalName}` }) };
       } catch (e) {

@@ -8,6 +8,7 @@ import {
   type BackgroundHandle,
 } from "./subprocess";
 import { resolvePathForRead, resolvePathForWrite } from "./workspace-path";
+import type { ProcessManager, ManagedProcess, ProcessSpec } from "@shoggoth/procman";
 
 export interface AgentCredentials {
   uid: number;
@@ -966,24 +967,79 @@ function truncateOutput(
 }
 
 // ---------------------------------------------------------------------------
+// Process Manager integration (optional)
+// ---------------------------------------------------------------------------
+
+/** Module-level ProcessManager instance. When set, background processes are
+ *  managed through procman instead of the ad-hoc backgroundSessions Map. */
+let _processManager: ProcessManager | undefined;
+
+/** Set the ProcessManager instance for background process tracking. */
+export function setProcessManager(pm: ProcessManager | undefined): void {
+  _processManager = pm;
+}
+
+/** Get the current ProcessManager instance (if any). */
+export function getProcessManager(): ProcessManager | undefined {
+  return _processManager;
+}
+
+// ---------------------------------------------------------------------------
 // Extended exec — session registry for background processes
 // ---------------------------------------------------------------------------
 
-/** Registry of background exec sessions, keyed by sessionId. */
+/** Registry of background exec sessions, keyed by sessionId (legacy fallback). */
 const backgroundSessions = new Map<string, BackgroundHandle>();
 
-/** Retrieve a background session by ID (for use by a process-management layer). */
+/** Counter for generating unique procman spec IDs. */
+let _procmanCounter = 0;
+
+/** Generate a unique procman-compatible spec ID for exec sessions. */
+function nextProcmanId(): string {
+  return `exec-${Date.now().toString(36)}-${(++_procmanCounter).toString(36)}`;
+}
+
+/**
+ * Retrieve a background session by ID.
+ * When a ProcessManager is set, checks procman first.
+ * Falls back to the legacy Map.
+ */
 export function getExecSession(sessionId: string): BackgroundHandle | undefined {
   return backgroundSessions.get(sessionId);
 }
 
-/** List all tracked background sessions. */
+/**
+ * Get a procman-managed process by session ID.
+ * Returns undefined when no ProcessManager is set or the ID is not found.
+ */
+export function getManagedExecSession(sessionId: string): ManagedProcess | undefined {
+  return _processManager?.get(sessionId);
+}
+
+/**
+ * List all tracked background sessions (legacy Map).
+ * When a ProcessManager is set, procman-managed sessions are NOT included here —
+ * use `getProcessManager()?.listByOwner(...)` to query those.
+ */
 export function listExecSessions(): Map<string, BackgroundHandle> {
   return backgroundSessions;
 }
 
-/** Remove a completed session from the registry. */
+/**
+ * Remove a completed session from the registry.
+ * When a ProcessManager is set, stops and removes the process from procman.
+ * Falls back to the legacy Map.
+ */
 export function removeExecSession(sessionId: string): boolean {
+  // Check procman first
+  if (_processManager) {
+    const mp = _processManager.get(sessionId);
+    if (mp) {
+      // Fire-and-forget stop — the process may already be dead
+      _processManager.stop(sessionId).catch(() => {});
+      return true;
+    }
+  }
   return backgroundSessions.delete(sessionId);
 }
 
@@ -1066,6 +1122,31 @@ export async function toolExecExtended(
   // --- Background mode (immediate) ---
   // background: true wins over yieldMs; yieldMs of 0 is also immediate background.
   if (opts.background || (opts.yieldMs !== undefined && opts.yieldMs === 0)) {
+    // When a ProcessManager is available, start via procman
+    if (_processManager) {
+      const specId = nextProcmanId();
+      const spec: ProcessSpec = {
+        id: specId,
+        owner: { kind: "agent-tool", scopeId: "exec" },
+        command: "/bin/sh",
+        args: ["-c", opts.command],
+        cwd,
+        uid: creds.uid,
+        gid: creds.gid,
+        env: env as Record<string, string>,
+        restart: { mode: "never" },
+        stdio: { capture: "pipe", stdin: false },
+        limits: opts.timeout ? { maxRuntimeSeconds: opts.timeout } : undefined,
+      };
+      const mp = await _processManager.start(spec);
+      return {
+        kind: "background",
+        sessionId: specId,
+        pid: mp.pid!,
+        status: "running",
+      };
+    }
+
     const handle = spawnAsUser(spawnOpts);
     backgroundSessions.set(handle.sessionId, handle);
 
@@ -1084,6 +1165,64 @@ export async function toolExecExtended(
 
   // --- Yield-based backgrounding ---
   if (opts.yieldMs !== undefined && opts.yieldMs > 0) {
+    // When a ProcessManager is available, start via procman
+    if (_processManager) {
+      const specId = nextProcmanId();
+      const spec: ProcessSpec = {
+        id: specId,
+        owner: { kind: "agent-tool", scopeId: "exec" },
+        command: "/bin/sh",
+        args: ["-c", opts.command],
+        cwd,
+        uid: creds.uid,
+        gid: creds.gid,
+        env: env as Record<string, string>,
+        restart: { mode: "never" },
+        stdio: { capture: "pipe", stdin: false },
+        limits: opts.timeout ? { maxRuntimeSeconds: opts.timeout } : undefined,
+      };
+      const mp = await _processManager.start(spec);
+
+      // Wait up to yieldMs for the process to finish
+      const finished = await Promise.race([
+        new Promise<true>((resolve) => {
+          mp.on("state-change", (state: string) => {
+            if (state === "dead" || state === "exited") resolve(true);
+          });
+          // Already dead?
+          if (mp.state === "dead" || mp.state === "exited") resolve(true);
+        }),
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), opts.yieldMs)),
+      ]);
+
+      if (finished) {
+        // Process completed within the yield window — build foreground result
+        const stdout = mp.readOutput("stdout");
+        const stderr = mp.readOutput("stderr");
+        // Clean up from procman since we're returning a foreground result
+        _processManager.stop(specId).catch(() => {});
+        return buildForegroundResultFromParts(
+          stdout, stderr,
+          mp.lastExitCode, mp.lastSignal, false,
+          splitStreams, maxOutput, truncationMode,
+        );
+      }
+
+      // Still running — keep in procman, return background handle
+      const partialStdout = mp.readOutput("stdout");
+      const partialStderr = mp.readOutput("stderr");
+      const partialOutput = (partialStdout + partialStderr).slice(0, maxOutput) || undefined;
+
+      return {
+        kind: "background",
+        sessionId: specId,
+        pid: mp.pid!,
+        status: "running",
+        yielded: true,
+        partialOutput,
+      };
+    }
+
     const handle = spawnAsUser(spawnOpts);
 
     // Wait up to yieldMs for the process to finish

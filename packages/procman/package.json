@@ -1,5 +1,5 @@
 {
-  "name": "@shoggoth/os-exec",
+  "name": "@shoggoth/procman",
   "version": "0.1.0",
   "type": "module",
   "main": "./src/index.ts",
@@ -13,10 +13,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --import tsx/esm --test --test-concurrency=true $(find test -name '*.test.ts' | sort)"
-  },
-  "dependencies": {
-    "@shoggoth/procman": "workspace:*"
+    "test": "node --import tsx/esm --test --test-concurrency=false $(find test -name '*.test.ts' | sort)"
   },
   "devDependencies": {
     "tsx": "^4.19.3",
