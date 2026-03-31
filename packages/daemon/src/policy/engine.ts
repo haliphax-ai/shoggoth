@@ -58,14 +58,39 @@ export function isDefinedControlOp(op: string): op is DefinedControlOp {
   return (DEFINED_CONTROL_OPS as readonly string[]).includes(op);
 }
 
+/**
+ * Check if a resource matches any entry in a rule list.
+ *
+ * Compound resource matching (e.g. `exec:curl`):
+ *   - `exec:curl` matches exact `exec:curl`
+ *   - `exec:*`    matches any `exec:<sub>`
+ *   - `exec`      (bare) matches `exec:<sub>` for any sub (backward compat)
+ *   - `exec:curl` does NOT match bare `exec` (specific sub-resource rule doesn't cover the whole tool)
+ *   - `*`         matches everything
+ */
+function matchesRule(resource: string, rules: readonly string[]): boolean {
+  if (rules.includes("*")) return true;
+  if (rules.includes(resource)) return true;
+
+  // Compound resource: check wildcard and bare-tool rules
+  const colonIdx = resource.indexOf(":");
+  if (colonIdx > 0) {
+    const toolBase = resource.slice(0, colonIdx);
+    // `exec:*` matches any `exec:<sub>`
+    if (rules.includes(`${toolBase}:*`)) return true;
+    // bare `exec` matches `exec:<sub>` (backward compat)
+    if (rules.includes(toolBase)) return true;
+  }
+
+  return false;
+}
+
 function matchesAllow(resource: string, allow: readonly string[]): boolean {
-  if (allow.includes("*")) return true;
-  return allow.includes(resource);
+  return matchesRule(resource, allow);
 }
 
 function matchesDeny(resource: string, deny: readonly string[]): boolean {
-  if (deny.includes("*")) return true;
-  return deny.includes(resource);
+  return matchesRule(resource, deny);
 }
 
 /**

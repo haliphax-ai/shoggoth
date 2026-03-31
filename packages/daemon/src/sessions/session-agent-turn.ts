@@ -26,6 +26,7 @@ import { runMemoryBuiltin } from "../memory/builtin-memory-tools";
 import { getProcessManager } from "../process-manager-singleton";
 import { createMcpRoutingToolExecutor } from "../mcp/tool-loop-mcp";
 import { createToolLoopPolicyAndAudit } from "../policy/tool-loop-bridge";
+import { createDefaultSubResourceRegistry } from "../policy/sub-resource";
 import { runToolLoop, type RunToolLoopHitl, type RunToolLoopOptions } from "./tool-loop";
 import type { TranscriptStore } from "./transcript-store";
 import type { ToolRunStore } from "./tool-run-store";
@@ -731,6 +732,7 @@ export async function executeSessionAgentTurn(
       transcript: input.transcript,
       contextSegmentId: ctxSeg,
       turnAbortSignal,
+      subResourceRegistry: createDefaultSubResourceRegistry(),
       hitl: {
         ...input.hitl,
         config: input.getHitlConfig(),

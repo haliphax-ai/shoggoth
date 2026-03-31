@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import type { ShoggothHitlConfig } from "@shoggoth/shared";
 import { classifyToolRisk } from "../hitl/risk-classify";
 import { effectiveBypassUpTo, requiresHumanApproval } from "../hitl/approval-gate";
+import { resolveCompoundResource, type SubResourceExtractorRegistry } from "../policy/sub-resource";
 import type { HitlAutoApproveGate } from "../hitl/hitl-auto-approve";
 import type { HitlNotifier } from "../hitl/hitl-notifier";
 import type { PendingActionRow, PendingActionsStore } from "../hitl/pending-actions-store";
@@ -85,6 +86,8 @@ export interface RunToolLoopOptions {
   readonly hitl?: RunToolLoopHitl;
   /** When aborted (e.g. `session_abort`), the loop exits between hops; in-flight HTTP/tool work may finish first. */
   readonly turnAbortSignal?: AbortSignal;
+  /** When set, tool names are resolved to compound resources (e.g. `exec:curl`) before policy/HITL checks. */
+  readonly subResourceRegistry?: SubResourceExtractorRegistry;
 }
 
 const allowedNames = (tools: ReadonlyArray<{ name: string }>) => new Set(tools.map((t) => t.name));
@@ -165,8 +168,14 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
           throw new Error(`unknown tool: ${tc.name}`);
         }
 
+        // Resolve compound resource (e.g. exec → exec:curl) for policy/HITL checks.
+        const toolArgs = (() => { try { return JSON.parse(tc.argsJson) as Record<string, unknown>; } catch { return {}; } })();
+        const compoundResource = options.subResourceRegistry
+          ? resolveCompoundResource(tc.name, toolArgs, options.subResourceRegistry)
+          : tc.name;
+
         const decision = options.policy.check({
-          toolName: tc.name,
+          toolName: compoundResource,
           sessionId: options.sessionId,
           principalId: options.principalId,
           argsJson: tc.argsJson,
@@ -174,7 +183,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
 
         options.audit.record({
           phase: "policy",
-          tool: tc.name,
+          tool: compoundResource,
           toolCallId: tc.id,
           argsJson: tc.argsJson,
           decision,
@@ -188,11 +197,11 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         if (options.hitl) {
           const h = options.hitl;
           h.pending.expireDue(new Date(h.clock.nowMs()).toISOString());
-          const tier = classifyToolRisk(tc.name, h.config.toolRisk);
+          const tier = classifyToolRisk(compoundResource, h.config.toolRisk);
           const bypass = effectiveBypassUpTo(h.principalRoles, h.config.roleBypassUpTo);
           if (
             requiresHumanApproval(tier, bypass) &&
-            !h.autoApprove?.shouldAutoApprove(options.sessionId, tc.name)
+            !h.autoApprove?.shouldAutoApprove(options.sessionId, compoundResource)
           ) {
             const pendingId = h.newPendingId();
             const expiresAtIso = new Date(
@@ -201,7 +210,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
             h.pending.enqueue({
               id: pendingId,
               sessionId: options.sessionId,
-              toolName: tc.name,
+              toolName: compoundResource,
               payload: { argsJson: tc.argsJson, toolCallId: tc.id },
               riskTier: tier,
               expiresAtIso,
@@ -209,7 +218,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
             });
             options.audit.record({
               phase: "hitl_queued",
-              tool: tc.name,
+              tool: compoundResource,
               toolCallId: tc.id,
               pendingId,
               riskTier: tier,
@@ -240,7 +249,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
                 });
                 options.audit.record({
                   phase: "hitl_denied",
-                  tool: tc.name,
+                  tool: compoundResource,
                   toolCallId: tc.id,
                   pendingId,
                   denialReason: reason,
@@ -266,7 +275,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
 
         options.audit.record({
           phase: "execute_start",
-          tool: tc.name,
+          tool: compoundResource,
           toolCallId: tc.id,
           argsJson: tc.argsJson,
         });
@@ -280,7 +289,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
 
         options.audit.record({
           phase: "execute_done",
-          tool: tc.name,
+          tool: compoundResource,
           toolCallId: tc.id,
           resultJson: out.resultJson,
         });
