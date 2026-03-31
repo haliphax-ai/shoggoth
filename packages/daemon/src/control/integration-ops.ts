@@ -1563,12 +1563,8 @@ export async function handleIntegrationControlOp(
       if (principal.kind !== "operator") {
         throw new IntegrationOpError("ERR_FORBIDDEN", "procman_list requires operator principal");
       }
-      let pm;
-      try {
-        pm = getProcessManager();
-      } catch {
-        return { processes: [] };
-      }
+      const pm = getProcessManager();
+      if (!pm) return { processes: [] };
       const processes = pm.list().map((mp) => ({
         id: mp.spec.id,
         label: mp.spec.label ?? null,
@@ -1588,12 +1584,8 @@ export async function handleIntegrationControlOp(
       }
       const pl = payloadObject(req);
       const id = requireString(pl, "id");
-      let pm;
-      try {
-        pm = getProcessManager();
-      } catch {
-        throw new IntegrationOpError("ERR_PROCMAN_UNAVAILABLE", "process manager not initialized");
-      }
+      const pm = getProcessManager();
+      if (!pm) throw new IntegrationOpError("ERR_PROCMAN_UNAVAILABLE", "process manager not initialized");
       const mp = pm.get(id);
       if (!mp) {
         throw new IntegrationOpError("ERR_PROCESS_NOT_FOUND", `no managed process with id "${id}"`);
@@ -1608,12 +1600,8 @@ export async function handleIntegrationControlOp(
       }
       const pl = payloadObject(req);
       const id = requireString(pl, "id");
-      let pm;
-      try {
-        pm = getProcessManager();
-      } catch {
-        throw new IntegrationOpError("ERR_PROCMAN_UNAVAILABLE", "process manager not initialized");
-      }
+      const pm = getProcessManager();
+      if (!pm) throw new IntegrationOpError("ERR_PROCMAN_UNAVAILABLE", "process manager not initialized");
       const mp = pm.get(id);
       if (!mp) {
         throw new IntegrationOpError("ERR_PROCESS_NOT_FOUND", `no managed process with id "${id}"`);

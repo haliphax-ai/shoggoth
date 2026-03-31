@@ -665,10 +665,8 @@ export async function executeSessionAgentTurn(
         }
         if (originalName === "procman") {
           const action = String(args.action ?? "").trim();
-          let pm;
-          try {
-            pm = getProcessManager();
-          } catch {
+          const pm = getProcessManager();
+          if (!pm) {
             return { resultJson: JSON.stringify({ error: "process manager not available" }) };
           }
           if (action === "list") {

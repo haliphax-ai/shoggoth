@@ -13,8 +13,7 @@ export function initProcessManager(): ProcessManager {
   return instance;
 }
 
-/** Get the singleton ProcessManager. Throws if not initialized. */
-export function getProcessManager(): ProcessManager {
-  if (!instance) throw new Error("ProcessManager not initialized — call initProcessManager() first");
+/** Get the singleton ProcessManager, or undefined if not yet initialized. */
+export function getProcessManager(): ProcessManager | undefined {
   return instance;
 }

@@ -10,6 +10,7 @@ import {
   type McpStreamableHttpServerMessage,
   type McpStreamableHttpSession,
 } from "@shoggoth/mcp-integration";
+import { getProcessManager } from "../process-manager-singleton";
 import type { ShoggothMcpConfig, ShoggothMcpServerEntry } from "@shoggoth/shared";
 import type { ExternalMcpInvoke } from "./tool-loop-mcp";
 
@@ -80,6 +81,7 @@ export async function connectShoggothMcpServers(
             args: s.args,
             cwd: s.cwd,
             env: s.env,
+            processManager: getProcessManager(),
           })
         : s.transport === "tcp"
           ? await openMcpTcpClient({ host: s.host, port: s.port })

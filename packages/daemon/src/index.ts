@@ -71,6 +71,7 @@ import { bootstrapPlugins } from "./plugins/bootstrap";
 import { bootstrapMainSession } from "./bootstrap-main-session";
 import { createDaemonRuntime } from "./runtime";
 import { initProcessManager } from "./process-manager-singleton";
+import { setProcessManager } from "@shoggoth/os-exec";
 import type { ProcessDeclaration } from "@shoggoth/shared";
 import type { ProcessSpec } from "@shoggoth/procman";
 import { createToolRunStore } from "./sessions/tool-run-store";
@@ -374,6 +375,7 @@ void (async () => {
 
   // --- Process Manager: init singleton, start boot-time processes, register shutdown ---
   const procman = initProcessManager();
+  setProcessManager(procman);
 
   function processDeclarationToSpec(decl: ProcessDeclaration): ProcessSpec {
     return {
