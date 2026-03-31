@@ -7,6 +7,16 @@ import {
 } from "@shoggoth/shared";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+function readGitHash(): string {
+  try {
+    return readFileSync(resolve("/app/.git-hash"), "utf8").trim() || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
 import { migrate, defaultMigrationsDir } from "./db/migrate";
 import { openStateDb } from "./db/open";
 import { runCronTick } from "./events/cron-scheduler";
@@ -483,6 +493,7 @@ rt.health.register(
 
 rt.logger.info("daemon starting", {
   version: VERSION,
+  hashref: readGitHash(),
   stateDbPath: config.stateDbPath,
   socketPath: config.socketPath,
 });

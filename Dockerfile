@@ -7,6 +7,23 @@ COPY packages ./packages
 RUN npm ci
 RUN npm run build && npm prune --omit=dev
 
+# Extract short git commit hash from build context
+COPY .git/HEAD ./.git-meta/HEAD
+COPY .git/refs/ ./.git-meta/refs/
+COPY .git/packed-ref[s] ./.git-meta/
+RUN HASH=$(cat .git-meta/HEAD); \
+    if echo "$HASH" | grep -q "^ref:"; then \
+      REF=$(echo "$HASH" | sed 's/ref: //'); \
+      if [ -f ".git-meta/$REF" ]; then \
+        HASH=$(cat ".git-meta/$REF"); \
+      elif [ -f ".git-meta/packed-refs" ]; then \
+        HASH=$(grep " $REF\$" ".git-meta/packed-refs" | cut -d' ' -f1 || echo "unknown"); \
+      else \
+        HASH="unknown"; \
+      fi; \
+    fi; \
+    printf "%.7s" "$HASH" > /app/.git-hash
+
 FROM node:22-bookworm-slim
 RUN groupadd --system --gid 900 shoggoth \
   && useradd --system --uid 900 --gid shoggoth --home-dir /var/lib/shoggoth --shell /usr/sbin/nologin shoggoth \
@@ -17,6 +34,7 @@ WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages ./packages
 COPY --from=build /app/package.json ./
+COPY --from=build /app/.git-hash ./.git-hash
 COPY scripts ./scripts
 COPY templates/agent-workspace /app/templates/agent-workspace
 COPY migrations /app/migrations
