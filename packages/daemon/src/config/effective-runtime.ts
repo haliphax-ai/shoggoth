@@ -166,6 +166,31 @@ export function resolveModelHealthProbeBaseUrl(cfg: ShoggothConfig): string | un
 }
 
 /**
+ * Model endpoint health probe API key. Env vars checked first, then config.
+ */
+export function resolveModelHealthProbeApiKey(cfg: ShoggothConfig): string | undefined {
+  const anthropic = process.env.ANTHROPIC_API_KEY?.trim();
+  if (anthropic) return anthropic;
+  const openai = process.env.OPENAI_API_KEY?.trim();
+  if (openai) return openai;
+  return cfg.models?.providers?.[0]?.apiKey?.trim() || undefined;
+}
+
+/**
+ * Embeddings endpoint base URL from config.
+ */
+export function resolveEmbeddingsHealthProbeBaseUrl(cfg: ShoggothConfig): string | undefined {
+  return cfg.memory?.embeddings?.openaiBaseUrl?.trim() || undefined;
+}
+
+/**
+ * Embeddings endpoint API key from config.
+ */
+export function resolveEmbeddingsHealthProbeApiKey(cfg: ShoggothConfig): string | undefined {
+  return cfg.memory?.embeddings?.apiKey?.trim() || undefined;
+}
+
+/**
  * Merges `discord` / `runtime` flags into env for code paths that still read `SHOGGOTH_*`.
  * **Precedence:** `override` (e.g. tests) > `process.env` > config-derived defaults.
  */

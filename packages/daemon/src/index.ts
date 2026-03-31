@@ -35,6 +35,9 @@ import {
   resolveHeartbeatConcurrency,
   resolveHeartbeatIntervalMs,
   resolveModelHealthProbeBaseUrl,
+  resolveModelHealthProbeApiKey,
+  resolveEmbeddingsHealthProbeBaseUrl,
+  resolveEmbeddingsHealthProbeApiKey,
 } from "./config/effective-runtime";
 import { startControlPlane } from "./control/control-plane";
 import { createLogger } from "./logging";
@@ -420,13 +423,16 @@ rt.health.register(createDiscordProbe({ getToken: resolvedDiscordBotToken }));
 rt.health.register(
   createModelEndpointProbe({
     getBaseUrl: () => resolveModelHealthProbeBaseUrl(configRef.current),
-    getApiKey: () => {
-      const anthropic = process.env.ANTHROPIC_API_KEY?.trim();
-      if (anthropic && process.env.ANTHROPIC_BASE_URL?.trim()) return anthropic;
-      const openai = process.env.OPENAI_API_KEY?.trim();
-      if (openai) return openai;
-      return undefined;
-    },
+    getApiKey: () => resolveModelHealthProbeApiKey(configRef.current),
+  }),
+);
+
+// Embeddings endpoint probe
+rt.health.register(
+  createModelEndpointProbe({
+    name: "embeddings",
+    getBaseUrl: () => resolveEmbeddingsHealthProbeBaseUrl(configRef.current),
+    getApiKey: () => resolveEmbeddingsHealthProbeApiKey(configRef.current),
   }),
 );
 

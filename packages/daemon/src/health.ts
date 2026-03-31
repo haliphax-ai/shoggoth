@@ -244,25 +244,27 @@ function buildModelProbeAuthHeaders(
 export function createModelEndpointProbe(options: {
   getBaseUrl: () => string | undefined;
   getApiKey?: () => string | undefined;
+  name?: string;
 }): DependencyProbe {
+  const probeName = options.name ?? "model";
   return {
-    name: "model",
+    name: probeName,
     async check(): Promise<DependencyCheck> {
       const raw = options.getBaseUrl()?.trim();
       if (!raw) {
-        return { name: "model", status: "skipped", detail: "not configured" };
+        return { name: probeName, status: "skipped", detail: "not configured" };
       }
       let probeUrl: string;
       let normalized: string;
       try {
         normalized = normalizeModelBaseUrl(raw);
         if (!normalized) {
-          return { name: "model", status: "skipped", detail: "not configured" };
+          return { name: probeName, status: "skipped", detail: "not configured" };
         }
         probeUrl = resolveModelProbeUrl(normalized);
       } catch {
         return {
-          name: "model",
+          name: probeName,
           status: "fail",
           detail: "invalid base URL",
         };
@@ -272,11 +274,11 @@ export function createModelEndpointProbe(options: {
         const authHeaders = apiKey ? buildModelProbeAuthHeaders(normalized, apiKey) : {};
         const res = await fetchModelEndpoint(probeUrl, authHeaders);
         if (res.status >= 200 && res.status < 400) {
-          return { name: "model", status: "pass", detail: detailFromModelResponse(res) };
+          return { name: probeName, status: "pass", detail: detailFromModelResponse(res) };
         }
         if (res.status === 401) {
           return {
-            name: "model",
+            name: probeName,
             status: apiKey ? "fail" : "warn",
             detail: apiKey
               ? "API key rejected (HTTP 401)"
@@ -284,13 +286,13 @@ export function createModelEndpointProbe(options: {
           };
         }
         return {
-          name: "model",
+          name: probeName,
           status: "fail",
           detail: detailFromModelResponse(res),
         };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        return { name: "model", status: "fail", detail: msg };
+        return { name: probeName, status: "fail", detail: msg };
       }
     },
   };
