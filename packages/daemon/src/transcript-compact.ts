@@ -10,6 +10,7 @@ import {
 } from "@shoggoth/models";
 import type { ShoggothModelsConfig } from "@shoggoth/shared";
 import { createSessionStore, getSessionContextSegmentId } from "./sessions/session-store";
+import { recordCompaction } from "./sessions/session-stats-store";
 
 /** Options for {@link compactSessionTranscript}; `modelsConfig` enables per-session `model_selection` merge. */
 export type CompactSessionTranscriptOptions = CompactTranscriptOptions & {
@@ -105,6 +106,7 @@ export async function compactSessionTranscript(
   });
   if (result.compacted) {
     replaceSessionTranscript(db, sessionId, contextSegmentId, result.messages);
+    recordCompaction(db, sessionId, { transcriptMessageCount: result.messages.length });
   }
   return { compacted: result.compacted, messageCount: result.messages.length };
 }

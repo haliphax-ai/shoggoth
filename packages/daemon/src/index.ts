@@ -6,6 +6,7 @@ import {
   VERSION,
 } from "@shoggoth/shared";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 import { migrate, defaultMigrationsDir } from "./db/migrate";
 import { openStateDb } from "./db/open";
 import { runCronTick } from "./events/cron-scheduler";
@@ -40,6 +41,13 @@ import {
   resolveEmbeddingsHealthProbeApiKey,
 } from "./config/effective-runtime";
 import { startControlPlane } from "./control/control-plane";
+import {
+  handleIntegrationControlOp,
+  type IntegrationOpsContext,
+} from "./control/integration-ops";
+import { WIRE_VERSION } from "@shoggoth/authn";
+import { requestSessionTurnAbort } from "./sessions/session-turn-abort";
+import { createSessionStore } from "./sessions/session-store";
 import { createLogger } from "./logging";
 import { createDelegatingPolicyEngine, createPolicyEngine } from "./policy/engine";
 import { bootstrapPlugins } from "./plugins/bootstrap";
@@ -49,6 +57,7 @@ import { createToolRunStore } from "./sessions/tool-run-store";
 import {
   startDiscordPlatform,
   startDaemonDiscordMessaging,
+  createDiscordInteractionHandler,
   type DiscordMessagingRuntime,
   handleDiscordHitlReactionAdd,
   createHitlDiscordNoticeRegistry,
@@ -220,11 +229,46 @@ void (async () => {
 
   const msgLog = rt.logger.child({ subsystem: "messaging" });
   try {
+    const interactionTransportRef: { current: DiscordMessagingRuntime["discordRestTransport"] | undefined } = { current: undefined };
     discordMessaging = await startDaemonDiscordMessaging({
       logger: msgLog,
       config: configRef.current,
       botToken: resolvedDiscordBotToken(),
       noticeResolver: daemonNotice,
+      onInteractionCreate: createDiscordInteractionHandler({
+        transport: new Proxy({} as DiscordMessagingRuntime["discordRestTransport"], {
+          get(_t, prop, receiver) {
+            if (!interactionTransportRef.current) throw new Error("discord transport not ready");
+            return Reflect.get(interactionTransportRef.current, prop, receiver);
+          },
+        }),
+        logger: msgLog,
+        abortSession: async (sessionId) => requestSessionTurnAbort(sessionId ?? ""),
+        invokeControlOp: async (op, payload) => {
+          if (!stateDb) return { ok: false, error: "state database unavailable" };
+          const sessions = createSessionStore(stateDb);
+          const ctx: IntegrationOpsContext = {
+            config: configRef.current,
+            stateDb,
+            acpxStore: undefined,
+            sessions,
+            sessionManager: undefined,
+            acpxSupervisor: undefined,
+            hitlPending: hitlStack?.pending,
+            recordIntegrationAudit: () => {},
+          };
+          const req = {
+            v: WIRE_VERSION,
+            id: randomUUID(),
+            op,
+            auth: { kind: "operator_peercred" as const },
+            payload,
+          };
+          const principal = { kind: "operator" as const, operatorId: "discord-slash", roles: ["admin"], source: "cli_operator_token" as const };
+          const result = await handleIntegrationControlOp(req, principal, ctx);
+          return { ok: true, result };
+        },
+      }),
       onMessageReactionAdd:
         hitlStack && hitlDiscordNoticeRegistry && hitlAutoApproveGate
           ? (ev) =>
@@ -241,6 +285,7 @@ void (async () => {
       reactionBotUserIdRef,
     });
     if (discordMessaging) {
+      interactionTransportRef.current = discordMessaging.discordRestTransport;
       rt.shutdown.registerDrain("discord-messaging", () => discordMessaging!.stop());
     }
   } catch (e) {

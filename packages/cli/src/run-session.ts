@@ -37,6 +37,7 @@ Usage:
   shoggoth session context new <sessionUrn|agentId>   New context segment (control socket; operator)
   shoggoth session context reset <sessionUrn|agentId>  Reset context segment (control socket; operator)
   shoggoth session inspect <sessionUrn|agentId>   Session row + child subagents (operator)
+  shoggoth session status <sessionUrn|agentId>    Session status + stats + model info (operator)
   shoggoth session steer <sessionUrn|agentId> <post|discord|surface|internal> <prompt...>  Extra model turn (operator)
   shoggoth session abort <sessionUrn|agentId>  Abort in-flight model turn (operator)
   shoggoth session kill <sessionUrn|agentId>      Terminate session + cleanup (operator)
@@ -222,6 +223,26 @@ export async function runSessionCli(argv: string[]): Promise<void> {
       socketPath,
       auth,
       op: "session_inspect",
+      payload: { session_id: sessionId },
+    });
+    console.log(JSON.stringify(res, null, 2));
+    if (!res.ok) process.exitCode = 1;
+    return;
+  }
+
+  if (sub === "status") {
+    const rawTarget = argv[1]?.trim();
+    if (!rawTarget) {
+      console.error("usage: shoggoth session status <sessionUrn|agentId>");
+      process.exitCode = 1;
+      return;
+    }
+    const sessionId = resolveSessionTargetOrExit(configDir, rawTarget);
+    if (!sessionId) return;
+    const res = await invokeControlRequest({
+      socketPath,
+      auth,
+      op: "session_context_status",
       payload: { session_id: sessionId },
     });
     console.log(JSON.stringify(res, null, 2));

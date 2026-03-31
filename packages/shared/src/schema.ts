@@ -256,36 +256,7 @@ export type ShoggothPolicyFragment = z.infer<typeof shoggothPolicyFragmentSchema
 export const DEFAULT_POLICY_CONFIG: ShoggothPolicyConfig = {
   operator: {
     controlOps: {
-      allow: [
-        "ping",
-        "version",
-        "health",
-        "acpx_bind_get",
-        "acpx_bind_set",
-        "acpx_bind_delete",
-        "acpx_bind_list",
-        "acpx_agent_start",
-        "acpx_agent_stop",
-        "acpx_agent_list",
-        "canvas_authorize",
-        "hitl_pending_list",
-        "hitl_pending_get",
-        "hitl_pending_approve",
-        "hitl_pending_deny",
-        "hitl_clear",
-        "mcp_http_cancel_request",
-        "session_context_new",
-        "session_context_reset",
-        "subagent_spawn",
-        "session_inspect",
-        "session_list",
-        "session_send",
-        "session_steer",
-        "session_abort",
-        "session_kill",
-        "session_model",
-        "config_show",
-      ],
+      allow: ["*"],
       deny: [],
     },
     tools: { allow: ["*"], deny: [] },
@@ -297,8 +268,11 @@ export const DEFAULT_POLICY_CONFIG: ShoggothPolicyConfig = {
         "acpx_bind_get",
         "canvas_authorize",
         "subagent_spawn",
+        "session_compact",
+        "session_context_status",
         "session_inspect",
         "session_list",
+        "session_stats",
         "session_send",
         "session_steer",
         "session_abort",
@@ -484,6 +458,8 @@ export const shoggothRuntimeConfigSchema = z
     mcpLogServerMessages: z.boolean().optional(),
     openaiBaseUrl: z.string().min(1).optional(),
     ollamaHost: z.string().min(1).optional(),
+    /** When true, suppress the platform-surfaced context window mismatch notice (stderr log still fires). */
+    suppressContextWindowMismatchNotice: z.boolean().optional(),
   })
   .strict();
 

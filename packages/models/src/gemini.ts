@@ -8,9 +8,17 @@ import type {
   ModelStreamTextDeltaCallback,
   ModelToolCompleteInput,
   ModelToolCompleteOutput,
+  ModelUsage,
   OpenAIToolFunctionDefinition,
 } from "./types";
 import type { FetchLike } from "./openai-compatible";
+
+/** Extract usage metadata from a Gemini generateContent response. */
+function extractGeminiUsage(json: unknown): ModelUsage | undefined {
+  const u = (json as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }).usageMetadata;
+  if (!u || typeof u.promptTokenCount !== "number" || typeof u.candidatesTokenCount !== "number") return undefined;
+  return { inputTokens: u.promptTokenCount, outputTokens: u.candidatesTokenCount };
+}
 
 export interface GeminiProviderOptions {
   readonly id: string;
@@ -267,7 +275,7 @@ export interface ConsumeGeminiStreamOptions {
 export async function consumeGeminiStream(
   body: ReadableStream<Uint8Array>,
   options: ConsumeGeminiStreamOptions,
-): Promise<{ content: string | null; toolCalls: ChatToolCall[] }> {
+): Promise<{ content: string | null; toolCalls: ChatToolCall[]; usage?: ModelUsage }> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let lineBuf = "";
@@ -276,6 +284,7 @@ export async function consumeGeminiStream(
   const toolCalls: ChatToolCall[] = [];
   let callIndex = 0;
   let forbiddenToolUse = false;
+  let lastUsage: ModelUsage | undefined;
 
   const handleDataPayload = (raw: string) => {
     let json: unknown;
@@ -287,6 +296,11 @@ export async function consumeGeminiStream(
     if (!json || typeof json !== "object") return;
 
     const resp = json as Record<string, unknown>;
+
+    // Capture usageMetadata from each chunk; the last one has final totals.
+    const extracted = extractGeminiUsage(resp);
+    if (extracted) lastUsage = extracted;
+
     const candidates = resp.candidates as unknown[] | undefined;
     if (!candidates || candidates.length === 0) return;
 
@@ -365,7 +379,7 @@ export async function consumeGeminiStream(
   }
 
   const content = accumulatedText.length > 0 ? accumulatedText : null;
-  return { content, toolCalls };
+  return { content, toolCalls, usage: lastUsage };
 }
 
 // ---------------------------------------------------------------------------
@@ -425,7 +439,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
         if (!res.body) {
           throw new ModelHttpError(502, "missing response body for Gemini stream", undefined);
         }
-        const { content, toolCalls } = await consumeGeminiStream(res.body, {
+        const { content, toolCalls, usage } = await consumeGeminiStream(res.body, {
           accumulateTools: false,
           onTextDelta: input.onTextDelta,
         });
@@ -435,7 +449,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
         if (content === null) {
           throw new ModelHttpError(502, "missing streamed assistant content", "");
         }
-        return { content };
+        return { content, usage };
       }
 
       const text = await res.text();
@@ -465,7 +479,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
       if (content === null) {
         throw new ModelHttpError(502, "missing assistant text in Gemini response", text.slice(0, 200));
       }
-      return { content };
+      return { content, usage: extractGeminiUsage(json) };
     },
 
     async completeWithTools(input: ModelToolCompleteInput): Promise<ModelToolCompleteOutput> {
@@ -504,14 +518,14 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
         if (!res.body) {
           throw new ModelHttpError(502, "missing response body for Gemini stream", undefined);
         }
-        const { content, toolCalls } = await consumeGeminiStream(res.body, {
+        const { content, toolCalls, usage } = await consumeGeminiStream(res.body, {
           accumulateTools: true,
           onTextDelta: input.onTextDelta,
         });
         if (toolCalls.length === 0 && (content === null || content === "")) {
           throw new ModelHttpError(502, "missing assistant content and functionCall parts", "");
         }
-        return { content, toolCalls };
+        return { content, toolCalls, usage };
       }
 
       const text = await res.text();
@@ -538,7 +552,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
           text.slice(0, 200),
         );
       }
-      return { content, toolCalls };
+      return { content, toolCalls, usage: extractGeminiUsage(json) };
     },
   };
 }

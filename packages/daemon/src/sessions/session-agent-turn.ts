@@ -45,6 +45,8 @@ import {
   TurnAbortedError,
 } from "./session-turn-abort";
 import { messageToolContextRef } from "../messaging/message-tool-context-ref";
+import { recordAgentTurn } from "./session-stats-store";
+import { checkContextWindowMismatch } from "./context-window-mismatch";
 
 export interface ExecuteSessionAgentTurnInput {
   readonly db: Database.Database;
@@ -704,6 +706,43 @@ export async function executeSessionAgentTurn(
   const failoverMeta = model.getSessionToolLoopFailoverState();
   const latestAssistantText =
     extractLatestTranscriptAssistantText(input.db, input.sessionId, ctxSeg) ?? "_No reply text._";
+
+  // --- Session stats: record completed agent turn ---
+  const accumulatedUsage = model.getAccumulatedUsage();
+  const transcriptMessageCount = (
+    input.db
+      .prepare(
+        `SELECT COUNT(*) AS cnt FROM transcript_messages
+         WHERE session_id = @sessionId AND context_segment_id = @ctxSeg`,
+      )
+      .get({ sessionId: input.sessionId, ctxSeg }) as { cnt: number }
+  ).cnt;
+
+  recordAgentTurn(input.db, input.sessionId, {
+    inputTokens: accumulatedUsage?.inputTokens ?? 0,
+    outputTokens: accumulatedUsage?.outputTokens ?? 0,
+    contextWindowTokens: accumulatedUsage?.contextWindowTokens,
+    transcriptMessageCount,
+  });
+
+  // --- Context window mismatch check ---
+  if (failoverMeta) {
+    checkContextWindowMismatch({
+      providerId: failoverMeta.usedProviderId,
+      configContextWindow: undefined, // TODO: extract from model config when available
+      providerContextWindow: accumulatedUsage?.contextWindowTokens,
+      sessionId: input.sessionId,
+      logger: {
+        warn: (msg, fields) => {
+          const record = { level: "warn", msg, ...fields, ts: new Date().toISOString() };
+          process.stderr.write(`${JSON.stringify(record)}\n`);
+        },
+      },
+      // TODO: wire surfaceWarning to platform binding
+      surfaceWarning: undefined,
+      suppressNotice: input.config.runtime?.suppressContextWindowMismatchNotice,
+    });
+  }
 
   return { failoverMeta, latestAssistantText };
 }

@@ -2,6 +2,7 @@ import type {
   ChatMessage,
   FailoverToolCallingClient,
   ModelInvocationParams,
+  ModelUsage,
   OpenAIToolFunctionDefinition,
 } from "@shoggoth/models";
 import type { ModelClient } from "./tool-loop";
@@ -9,6 +10,8 @@ import type { ModelClient } from "./tool-loop";
 export interface SessionToolLoopModelClient extends ModelClient {
   /** Best-effort failover metadata from the most recent `completeWithTools` hop. */
   getSessionToolLoopFailoverState(): SessionToolLoopFailoverState | undefined;
+  /** Accumulated token usage across all `completeWithTools` calls in this tool loop. */
+  getAccumulatedUsage(): ModelUsage | undefined;
 }
 
 export interface SessionToolLoopFailoverState {
@@ -41,12 +44,25 @@ export function createSessionToolLoopModelClient(input: {
   let messages: ChatMessage[] = [...input.initialMessages];
   let banner: SessionToolLoopFailoverState | undefined;
   let degradedAny = false;
+  let accumulatedInputTokens = 0;
+  let accumulatedOutputTokens = 0;
+  let lastContextWindowTokens: number | undefined;
+  let hasUsage = false;
   /** Model reply text from earlier `complete()` rounds that returned tool calls (for streaming display). */
   let priorRoundsStreamText = "";
 
   return {
     getSessionToolLoopFailoverState() {
       return banner;
+    },
+
+    getAccumulatedUsage() {
+      if (!hasUsage) return undefined;
+      return {
+        inputTokens: accumulatedInputTokens,
+        outputTokens: accumulatedOutputTokens,
+        ...(lastContextWindowTokens != null ? { contextWindowTokens: lastContextWindowTokens } : {}),
+      };
     },
 
     async complete() {
@@ -78,6 +94,15 @@ export function createSessionToolLoopModelClient(input: {
         usedModel: out.usedModel,
         usedProviderId: out.usedProviderId,
       };
+
+      if (out.usage) {
+        hasUsage = true;
+        accumulatedInputTokens += out.usage.inputTokens;
+        accumulatedOutputTokens += out.usage.outputTokens;
+        if (out.usage.contextWindowTokens != null) {
+          lastContextWindowTokens = out.usage.contextWindowTokens;
+        }
+      }
 
       if (out.toolCalls.length > 0) {
         const piece = out.content?.trim() ? out.content : "";

@@ -8,11 +8,19 @@ import type {
   ModelStreamTextDeltaCallback,
   ModelToolCompleteInput,
   ModelToolCompleteOutput,
+  ModelUsage,
   OpenAIToolFunctionDefinition,
 } from "./types";
 import type { FetchLike } from "./openai-compatible";
 
 export type AnthropicMessagesAuthStyle = "x-api-key" | "bearer";
+
+/** Extract usage metadata from an Anthropic Messages API response. */
+function extractAnthropicUsage(json: unknown): ModelUsage | undefined {
+  const u = (json as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
+  if (!u || typeof u.input_tokens !== "number" || typeof u.output_tokens !== "number") return undefined;
+  return { inputTokens: u.input_tokens, outputTokens: u.output_tokens };
+}
 
 export interface AnthropicMessagesProviderOptions {
   readonly id: string;
@@ -322,7 +330,7 @@ export interface ConsumeAnthropicMessagesStreamOptions {
 export async function consumeAnthropicMessagesStream(
   body: ReadableStream<Uint8Array>,
   options: ConsumeAnthropicMessagesStreamOptions,
-): Promise<{ content: string | null; toolCalls: ChatToolCall[] }> {
+): Promise<{ content: string | null; toolCalls: ChatToolCall[]; usage?: ModelUsage }> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let lineBuf = "";
@@ -332,6 +340,8 @@ export async function consumeAnthropicMessagesStream(
   /** Observed tool_use while `accumulateTools` is false (`complete` streaming). */
   let forbiddenToolUse = false;
   let accumulatedAssistantText = "";
+  let usageInputTokens: number | undefined;
+  let usageOutputTokens: number | undefined;
   const blocks = new Map<number, AnthropicBlockState>();
   const toolCallsByIndex: { index: number; call: ChatToolCall }[] = [];
 
@@ -374,9 +384,22 @@ export async function consumeAnthropicMessagesStream(
 
     if (t === "message_start") {
       sawMessageStart = true;
+      // Capture input token usage from message_start event.
+      const msg = o.message as Record<string, unknown> | undefined;
+      const u = msg?.usage as { input_tokens?: number } | undefined;
+      if (u && typeof u.input_tokens === "number") {
+        usageInputTokens = u.input_tokens;
+      }
       return;
     }
     if (t === "ping" || t === "message_delta") {
+      // Capture output token usage from message_delta event.
+      if (t === "message_delta") {
+        const u = o.usage as { output_tokens?: number } | undefined;
+        if (u && typeof u.output_tokens === "number") {
+          usageOutputTokens = u.output_tokens;
+        }
+      }
       return;
     }
     if (t === "error") {
@@ -543,7 +566,12 @@ export async function consumeAnthropicMessagesStream(
   toolCallsByIndex.sort((a, b) => a.index - b.index);
   const toolCalls = toolCallsByIndex.map((x) => x.call);
 
-  return { content, toolCalls };
+  const usage: ModelUsage | undefined =
+    typeof usageInputTokens === "number" && typeof usageOutputTokens === "number"
+      ? { inputTokens: usageInputTokens, outputTokens: usageOutputTokens }
+      : undefined;
+
+  return { content, toolCalls, usage };
 }
 
 export function createAnthropicMessagesProvider(
@@ -594,7 +622,7 @@ export function createAnthropicMessagesProvider(
         if (!res.body) {
           throw new ModelHttpError(502, "missing response body for Anthropic stream", undefined);
         }
-        const { content: streamed, toolCalls } = await consumeAnthropicMessagesStream(res.body, {
+        const { content: streamed, toolCalls, usage } = await consumeAnthropicMessagesStream(res.body, {
           accumulateTools: false,
           onTextDelta: input.onTextDelta,
         });
@@ -604,7 +632,7 @@ export function createAnthropicMessagesProvider(
         if (streamed === null) {
           throw new ModelHttpError(502, "missing streamed assistant content", "");
         }
-        return { content: streamed };
+        return { content: streamed, usage };
       }
 
       const text = await res.text();
@@ -635,7 +663,7 @@ export function createAnthropicMessagesProvider(
       if (outText === null) {
         throw new ModelHttpError(502, "missing assistant text in Anthropic response", text.slice(0, 200));
       }
-      return { content: outText };
+      return { content: outText, usage: extractAnthropicUsage(json) };
     },
 
     async completeWithTools(input: ModelToolCompleteInput): Promise<ModelToolCompleteOutput> {
@@ -686,7 +714,7 @@ export function createAnthropicMessagesProvider(
         if (!res.body) {
           throw new ModelHttpError(502, "missing response body for Anthropic stream", undefined);
         }
-        const { content: outText, toolCalls } = await consumeAnthropicMessagesStream(res.body, {
+        const { content: outText, toolCalls, usage } = await consumeAnthropicMessagesStream(res.body, {
           accumulateTools: true,
           onTextDelta: input.onTextDelta,
           anthropicToOpenAiToolName: anthropicToOpenAi,
@@ -696,7 +724,7 @@ export function createAnthropicMessagesProvider(
           throw new ModelHttpError(502, "missing assistant content and tool_use blocks", "");
         }
 
-        return { content: outText, toolCalls };
+        return { content: outText, toolCalls, usage };
       }
 
       const text = await res.text();
@@ -726,7 +754,7 @@ export function createAnthropicMessagesProvider(
         );
       }
 
-      return { content: outText, toolCalls };
+      return { content: outText, toolCalls, usage: extractAnthropicUsage(json) };
     },
   };
 }

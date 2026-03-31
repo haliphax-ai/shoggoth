@@ -61,9 +61,18 @@ export interface ModelToolCompleteInput extends ModelInvocationParams {
   readonly onTextDelta?: ModelStreamTextDeltaCallback;
 }
 
+/** Token usage metadata returned by model providers (when available). */
+export interface ModelUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  /** Model's maximum context window size (when reported by the provider). */
+  readonly contextWindowTokens?: number;
+}
+
 export interface ModelToolCompleteOutput {
   readonly content: string | null;
   readonly toolCalls: readonly ChatToolCall[];
+  readonly usage?: ModelUsage;
 }
 
 export interface ModelCompleteInput extends ModelInvocationParams {
@@ -75,6 +84,7 @@ export interface ModelCompleteInput extends ModelInvocationParams {
 
 export interface ModelCompleteOutput {
   readonly content: string;
+  readonly usage?: ModelUsage;
 }
 
 export interface ModelProvider {

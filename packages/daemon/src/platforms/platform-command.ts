@@ -27,6 +27,29 @@ const COMMAND_TO_OP: Record<string, (opts: Readonly<Record<string, string>>) => 
     op: "session_abort",
     payload: opts.session_id ? { session_id: opts.session_id } : {},
   }),
+  new: (opts) => ({
+    op: "session_context_new",
+    payload: opts.session_id ? { session_id: opts.session_id } : {},
+  }),
+  reset: (opts) => ({
+    op: "session_context_reset",
+    payload: opts.session_id ? { session_id: opts.session_id } : {},
+  }),
+  compact: (opts) => ({
+    op: "session_compact",
+    payload: {
+      ...(opts.session_id ? { session_id: opts.session_id } : {}),
+      ...(opts.force === "true" ? { force: true } : {}),
+    },
+  }),
+  stats: (opts) => ({
+    op: "session_stats",
+    payload: opts.session_id ? { session_id: opts.session_id } : {},
+  }),
+  status: (opts) => ({
+    op: "session_context_status",
+    payload: opts.session_id ? { session_id: opts.session_id } : {},
+  }),
 };
 
 /** Translate a PlatformCommand to a control plane operation request. Returns null for unknown commands. */

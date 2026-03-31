@@ -41,6 +41,12 @@ import {
   clearSessionToolAutoApproveForSessionIds,
 } from "../hitl/hitl-session-tool-auto-store";
 import { mergeSubagentSpawnModelSelection } from "@shoggoth/models";
+import {
+  createFailoverClientFromModelsConfig,
+  resolveCompactionPolicyFromModelsConfig,
+} from "@shoggoth/models";
+import { compactSessionTranscript } from "../transcript-compact";
+import { getSessionStats } from "../sessions/session-stats-store";
 import { dispatchMcpHttpCancelRequest } from "../mcp/mcp-http-cancel-registry";
 import { SUBAGENT_DEFAULT_BOUND_LIFETIME_MS } from "../subagent/subagent-constants";
 import { requestSessionTurnAbort } from "../sessions/session-turn-abort";
@@ -520,6 +526,32 @@ export async function handleIntegrationControlOp(
         argsRedactedJson: JSON.stringify(out),
       });
       return out;
+    }
+
+    case "session_compact": {
+      if (principal.kind !== "operator") {
+        throw new IntegrationOpError("ERR_FORBIDDEN", "session_compact requires operator principal");
+      }
+      if (!ctx.stateDb) {
+        throw new IntegrationOpError("ERR_STATE_DB_REQUIRED", "session_compact requires state database");
+      }
+      const pl = payloadObject(req);
+      const sessionId = requireString(pl, "session_id");
+      const force = pl.force === true;
+      const modelsConfig = resolveEffectiveModelsConfig(ctx.config, sessionId) ?? ctx.config.models;
+      const policy = resolveCompactionPolicyFromModelsConfig(modelsConfig);
+      const client = createFailoverClientFromModelsConfig(modelsConfig, { env: process.env });
+      const result = await compactSessionTranscript(ctx.stateDb, sessionId, policy, client, {
+        force,
+        modelsConfig,
+      });
+      ctx.recordIntegrationAudit({
+        action: "session.compact",
+        resource: sessionId,
+        outcome: "ok",
+        argsRedactedJson: JSON.stringify(result),
+      });
+      return result;
     }
 
     case "hitl_pending_list": {
@@ -1168,6 +1200,91 @@ export async function handleIntegrationControlOp(
         limit,
       });
       return { sessions: rows.map(mapSessionListRow) };
+    }
+
+    case "session_stats": {
+      if (principal.kind !== "operator" && principal.kind !== "agent") {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "session_stats requires operator or agent principal",
+        );
+      }
+      if (!ctx.stateDb) {
+        throw new IntegrationOpError("ERR_STATE_DB_REQUIRED", "session_stats requires state database");
+      }
+      const pl = payloadObject(req);
+      const sessionId = requireString(pl, "session_id");
+      if (principal.kind === "agent" && sessionId !== principal.sessionId) {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "agent may only session_stats own session",
+        );
+      }
+      const stats = getSessionStats(ctx.stateDb, sessionId);
+      return { stats: stats ?? null };
+    }
+
+    case "session_context_status": {
+      if (principal.kind !== "operator" && principal.kind !== "agent") {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "session_context_status requires operator or agent principal",
+        );
+      }
+      if (!ctx.stateDb) {
+        throw new IntegrationOpError("ERR_STATE_DB_REQUIRED", "session_context_status requires state database");
+      }
+      const { sessions: sessionsStore } = requireSubagentRuntime(ctx);
+      const pl = payloadObject(req);
+      const sessionId = requireString(pl, "session_id");
+      if (principal.kind === "agent" && sessionId !== principal.sessionId) {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "agent may only session_context_status own session",
+        );
+      }
+      const row = sessionsStore.getById(sessionId);
+      const sessionData = row
+        ? {
+            id: row.id,
+            status: row.status,
+            agentProfileId: row.agentProfileId ?? null,
+            workspacePath: row.workspacePath,
+            contextSegmentId: row.contextSegmentId,
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt,
+          }
+        : null;
+      const statsData = getSessionStats(ctx.stateDb, sessionId);
+      let modelData: { providerId: string | null; model: string | null } | null = null;
+      if (row) {
+        try {
+          const modelSel = row.modelSelection as Record<string, unknown> | undefined;
+          let providerId: string | null = null;
+          let modelName: string | null = null;
+          if (modelSel && typeof modelSel === "object") {
+            providerId = (modelSel.providerId as string) ?? null;
+            modelName = (modelSel.model as string) ?? null;
+          }
+          if (!providerId || !modelName) {
+            const modelsConfig = resolveEffectiveModelsConfig(ctx.config, sessionId);
+            const chain = modelsConfig?.failoverChain;
+            if (chain && chain.length > 0) {
+              const first = chain[0];
+              if (!providerId) providerId = first.providerId ?? null;
+              if (!modelName) modelName = first.model ?? null;
+            }
+          }
+          modelData = { providerId, model: modelName };
+        } catch {
+          modelData = null;
+        }
+      }
+      return {
+        session: sessionData,
+        stats: statsData ?? null,
+        model: modelData,
+      };
     }
 
     case "session_inspect": {

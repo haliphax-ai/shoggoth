@@ -21,6 +21,42 @@ const GLOBAL_SLASH_COMMANDS = [
       },
     ],
   },
+  {
+    name: "new",
+    description: "Start a new session context (preserves history)",
+    options: [
+      { name: "session_id", type: 3, description: "Session URN", required: false },
+    ],
+  },
+  {
+    name: "reset",
+    description: "Reset session context (clears transcript)",
+    options: [
+      { name: "session_id", type: 3, description: "Session URN", required: false },
+    ],
+  },
+  {
+    name: "compact",
+    description: "Compact session transcript (summarize old messages)",
+    options: [
+      { name: "session_id", type: 3, description: "Session URN", required: false },
+      { name: "force", type: 5, description: "Force compaction even if under threshold", required: false },
+    ],
+  },
+  {
+    name: "stats",
+    description: "Show session statistics (tokens, turns, compactions)",
+    options: [
+      { name: "session_id", type: 3, description: "Session URN", required: false },
+    ],
+  },
+  {
+    name: "status",
+    description: "Show current session status (provider, model, tokens, turns, compactions)",
+    options: [
+      { name: "session_id", type: 3, description: "Session URN", required: false },
+    ],
+  },
 ] as const;
 
 /**
@@ -52,6 +88,7 @@ export interface DiscordInteractionHandlerDeps {
    * When `sessionId` is undefined, abort the "current" or default session.
    */
   readonly abortSession: (sessionId: string | undefined) => Promise<boolean>;
+  readonly invokeControlOp: (op: string, payload: Record<string, unknown>) => Promise<{ ok: boolean; result?: unknown; error?: string }>;
 }
 
 /**
@@ -114,6 +151,112 @@ async function handleInteraction(
       type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
       data: { content },
     });
+    return;
+  }
+
+  if (controlOp.op === "session_context_status") {
+    try {
+      const res = await deps.invokeControlOp(controlOp.op, controlOp.payload);
+      let content: string;
+      if (res.ok && res.result) {
+        const r = res.result as Record<string, unknown>;
+        if (r.session === null) {
+          content = "Session not found.";
+        } else {
+          const session = r.session as Record<string, unknown>;
+          const stats = r.stats as Record<string, unknown> | null;
+          const model = r.model as Record<string, unknown> | null;
+          const lines: (string | null)[] = [
+            `📋 **Session Status**`,
+            `ID: \`${session.id}\``,
+            `Status: ${session.status}`,
+            model?.providerId ? `Provider: ${model.providerId}` : null,
+            model?.model ? `Model: ${model.model}` : null,
+            `Context segment: \`${session.contextSegmentId}\``,
+          ];
+          if (stats) {
+            lines.push(
+              ``,
+              `📊 **Stats**`,
+              `Turns: ${stats.turnCount ?? 0}`,
+              `Tokens: ${stats.inputTokens ?? 0} in / ${stats.outputTokens ?? 0} out`,
+              stats.contextWindowTokens ? `Context window: ${stats.contextWindowTokens} tokens` : null,
+              `Messages: ${stats.transcriptMessageCount ?? 0}`,
+              `Compactions: ${stats.compactionCount ?? 0}`,
+            );
+          }
+          content = lines.filter(Boolean).join("\n");
+        }
+      } else {
+        content = `⚠️ Failed to get status: ${res.error ?? "unknown error"}`;
+      }
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content },
+      });
+    } catch (err) {
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content: `⚠️ Status failed: ${String(err)}` },
+      });
+    }
+    return;
+  }
+
+  if (controlOp.op === "session_stats") {
+    try {
+      const res = await deps.invokeControlOp(controlOp.op, controlOp.payload);
+      let content: string;
+      if (res.ok && res.result) {
+        const s = res.result as Record<string, unknown>;
+        if (s.stats === null) {
+          content = "No stats available for this session yet.";
+        } else {
+          const stats = (s.stats ?? s) as Record<string, unknown>;
+          const lines = [
+            `📊 **Session Stats**`,
+            `Turns: ${stats.turnCount ?? 0}`,
+            `Tokens: ${stats.inputTokens ?? 0} in / ${stats.outputTokens ?? 0} out`,
+            stats.contextWindowTokens ? `Context window: ${stats.contextWindowTokens} tokens` : null,
+            `Transcript messages: ${stats.transcriptMessageCount ?? 0}`,
+            `Compactions: ${stats.compactionCount ?? 0}`,
+            stats.firstTurnAt ? `First turn: ${stats.firstTurnAt}` : null,
+            stats.lastTurnAt ? `Last turn: ${stats.lastTurnAt}` : null,
+          ].filter(Boolean);
+          content = lines.join("\n");
+        }
+      } else {
+        content = `⚠️ Failed to get stats: ${res.error ?? "unknown error"}`;
+      }
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content },
+      });
+    } catch (err) {
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content: `⚠️ Stats failed: ${String(err)}` },
+      });
+    }
+    return;
+  }
+
+  if (controlOp.op === "session_context_new" || controlOp.op === "session_context_reset" || controlOp.op === "session_compact") {
+    try {
+      const res = await deps.invokeControlOp(controlOp.op, controlOp.payload);
+      const content = res.ok
+        ? `✅ \`${controlOp.op}\` completed.`
+        : `⚠️ \`${controlOp.op}\` failed: ${res.error ?? "unknown error"}`;
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content },
+      });
+    } catch (err) {
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content: `⚠️ \`${controlOp.op}\` failed: ${String(err)}` },
+      });
+    }
     return;
   }
 

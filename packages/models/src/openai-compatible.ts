@@ -7,7 +7,15 @@ import type {
   ModelProvider,
   ModelToolCompleteInput,
   ModelToolCompleteOutput,
+  ModelUsage,
 } from "./types";
+
+/** Extract usage metadata from an OpenAI chat completions response. */
+function extractOpenAIUsage(json: unknown): ModelUsage | undefined {
+  const u = (json as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage;
+  if (!u || typeof u.prompt_tokens !== "number" || typeof u.completion_tokens !== "number") return undefined;
+  return { inputTokens: u.prompt_tokens, outputTokens: u.completion_tokens };
+}
 
 export type FetchLike = (
   url: string | URL,
@@ -102,12 +110,13 @@ interface ConsumeStreamOptions {
 async function consumeOpenAIChatCompletionStream(
   body: ReadableStream<Uint8Array>,
   options: ConsumeStreamOptions,
-): Promise<{ content: string | null; toolCalls: ChatToolCall[] }> {
+): Promise<{ content: string | null; toolCalls: ChatToolCall[]; usage?: ModelUsage }> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let lineBuf = "";
   let sawValidChoice = false;
   let content: string | null = null;
+  let usage: ModelUsage | undefined;
   const toolPartials = new Map<number, ToolCallPartial>();
 
   const processDataPayload = (data: string) => {
@@ -118,6 +127,13 @@ async function consumeOpenAIChatCompletionStream(
     } catch {
       throw new ModelHttpError(502, "malformed SSE chunk", data.slice(0, 200));
     }
+
+    // Capture usage from the final chunk (sent when stream_options.include_usage is true).
+    const u = (json as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage;
+    if (u && typeof u.prompt_tokens === "number" && typeof u.completion_tokens === "number") {
+      usage = { inputTokens: u.prompt_tokens, outputTokens: u.completion_tokens };
+    }
+
     const choices = (json as { choices?: unknown }).choices;
     if (!Array.isArray(choices) || choices.length === 0) return;
     const ch0 = choices[0];
@@ -172,6 +188,7 @@ async function consumeOpenAIChatCompletionStream(
   return {
     content,
     toolCalls: options.accumulateTools ? finalizeToolCalls(toolPartials) : [],
+    usage,
   };
 }
 
@@ -199,6 +216,7 @@ export function createOpenAICompatibleProvider(
       };
       if (input.stream === true) {
         body.stream = true;
+        body.stream_options = { include_usage: true };
       }
       applyOpenAICompatibleRequestExtensions(body, input);
 
@@ -220,7 +238,7 @@ export function createOpenAICompatibleProvider(
         if (!res.body) {
           throw new ModelHttpError(502, "missing response body for stream", undefined);
         }
-        const { content: streamed, toolCalls } = await consumeOpenAIChatCompletionStream(res.body, {
+        const { content: streamed, toolCalls, usage } = await consumeOpenAIChatCompletionStream(res.body, {
           accumulateTools: false,
           onTextDelta: input.onTextDelta,
         });
@@ -234,7 +252,7 @@ export function createOpenAICompatibleProvider(
         if (streamed === null) {
           throw new ModelHttpError(502, "missing streamed assistant content", "");
         }
-        return { content: streamed };
+        return { content: streamed, usage };
       }
 
       const text = await res.text();
@@ -269,7 +287,7 @@ export function createOpenAICompatibleProvider(
         throw new ModelHttpError(502, "missing choices[0].message.content", text.slice(0, 200));
       }
 
-      return { content };
+      return { content, usage: extractOpenAIUsage(json) };
     },
 
     async completeWithTools(input: ModelToolCompleteInput): Promise<ModelToolCompleteOutput> {
@@ -289,6 +307,7 @@ export function createOpenAICompatibleProvider(
       };
       if (input.stream === true) {
         body.stream = true;
+        body.stream_options = { include_usage: true };
       }
       applyOpenAICompatibleRequestExtensions(body, input);
 
@@ -310,7 +329,7 @@ export function createOpenAICompatibleProvider(
         if (!res.body) {
           throw new ModelHttpError(502, "missing response body for stream", undefined);
         }
-        const { content, toolCalls } = await consumeOpenAIChatCompletionStream(res.body, {
+        const { content, toolCalls, usage } = await consumeOpenAIChatCompletionStream(res.body, {
           accumulateTools: true,
           onTextDelta: input.onTextDelta,
         });
@@ -319,7 +338,7 @@ export function createOpenAICompatibleProvider(
           throw new ModelHttpError(502, "missing assistant content and tool_calls", "");
         }
 
-        return { content, toolCalls };
+        return { content, toolCalls, usage };
       }
 
       const text = await res.text();
@@ -378,7 +397,7 @@ export function createOpenAICompatibleProvider(
         );
       }
 
-      return { content, toolCalls };
+      return { content, toolCalls, usage: extractOpenAIUsage(json) };
     },
   };
 }

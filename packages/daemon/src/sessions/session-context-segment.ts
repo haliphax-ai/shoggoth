@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import { clearSessionToolAutoApproveForSession } from "../hitl/hitl-session-tool-auto-store";
 import type { PendingActionsStore } from "../hitl/pending-actions-store";
 import type { SessionStore } from "./session-store";
+import { resetSegmentStats } from "./session-stats-store";
 import { createTranscriptStore } from "./transcript-store";
 
 function denyPendingForSession(pending: PendingActionsStore | undefined, sessionId: string): void {
@@ -39,6 +40,7 @@ export function applySessionContextSegmentNew(input: {
   const deletedRows = tr.deleteForSessionSegment(sessionId, previousContextSegmentId);
   const contextSegmentId = randomUUID();
   input.sessions.update(sessionId, { contextSegmentId });
+  resetSegmentStats(input.db, sessionId);
   return { previousContextSegmentId, contextSegmentId, deletedRows };
 }
 
@@ -56,5 +58,6 @@ export function applySessionContextSegmentReset(input: {
   denyPendingForSession(input.pending, sessionId);
   const tr = createTranscriptStore(input.db);
   const deletedRows = tr.deleteForSessionSegment(sessionId, contextSegmentId);
+  resetSegmentStats(input.db, sessionId);
   return { contextSegmentId, deletedRows };
 }

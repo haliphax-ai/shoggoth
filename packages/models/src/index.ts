@@ -38,6 +38,7 @@ export type {
   ModelCompleteOutput,
   ModelInvocationParams,
   ModelThinkingOptions,
+  ModelUsage,
 } from "./types";
 export {
   estimateTranscriptChars,

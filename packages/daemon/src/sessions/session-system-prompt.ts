@@ -13,7 +13,9 @@ import {
   resolveEffectiveModelsConfig,
   type ShoggothConfig,
 } from "@shoggoth/shared";
+import type Database from "better-sqlite3";
 import { daemonPrompt } from "../prompts/load-prompts";
+import { getSessionStats } from "./session-stats-store";
 
 /** Max bytes read per workspace template file (UTF-8). */
 const DEFAULT_MAX_BYTES_PER_FILE = 8192;
@@ -60,6 +62,8 @@ export interface BuildSessionSystemContextInput {
     readonly runtimeUid?: number;
     readonly runtimeGid?: number;
   };
+  /** Optional state database for session stats lookup. */
+  readonly stateDb?: Database.Database;
 }
 
 function isPathInsideResolvedRoot(rootReal: string, resolvedTarget: string): boolean {
@@ -312,6 +316,31 @@ function buildRuntimeSection(input: {
   return daemonPrompt("system-runtime", { runtimeSummary: parts.join(" · ") });
 }
 
+function formatNumber(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
+function buildSessionStatsSection(
+  stateDb: Database.Database | undefined,
+  sessionId: string | undefined,
+): string | undefined {
+  if (!stateDb || !sessionId) return undefined;
+  const stats = getSessionStats(stateDb, sessionId);
+  if (!stats) return undefined;
+
+  const totalTokens = stats.inputTokens + stats.outputTokens;
+  let contextWindowSuffix = "";
+  if (stats.contextWindowTokens != null) {
+    const pct = ((totalTokens / stats.contextWindowTokens) * 100).toFixed(1);
+    contextWindowSuffix = ` / ${formatNumber(stats.contextWindowTokens)} (${pct}%)`;
+  }
+
+  return [
+    "## Session Stats",
+    `Tokens used: ${formatNumber(totalTokens)}${contextWindowSuffix} · Turns: ${stats.turnCount} · Compactions: ${stats.compactionCount} · Messages: ${stats.transcriptMessageCount}`,
+  ].join("\n");
+}
+
 function appendEnvSystemPrompt(base: string, env: NodeJS.ProcessEnv | undefined): string {
   const extra = env?.SHOGGOTH_SESSION_SYSTEM_PROMPT?.trim();
   if (!extra) return base;
@@ -390,6 +419,7 @@ export function buildSessionSystemContext(input: BuildSessionSystemContextInput)
       ),
       toolCount,
     }),
+    buildSessionStatsSection(input.stateDb, input.sessionId),
   ]);
 
   return appendEnvSystemPrompt(core, env);
