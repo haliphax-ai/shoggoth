@@ -33,7 +33,7 @@ export {
   principalAuditFields,
   type AuditLogSource,
 } from "./policy/audit-source";
-export { redactToolArgsJson, redactJsonValue } from "./policy/redact-json";
+export { redactToolArgsJson, redactJsonValue, redactDeep } from "@shoggoth/shared";
 export { createToolLoopPolicyAndAudit, type ToolLoopBridgeOptions } from "./policy/tool-loop-bridge";
 export {
   runRetentionJobs,

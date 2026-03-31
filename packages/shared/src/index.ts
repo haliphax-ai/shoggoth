@@ -94,6 +94,7 @@ export {
   resolveEffectiveSessionQueryAllowedAgentIds,
   SHOGGOTH_DISCORD_AGENT_DEFAULT_EMOJI,
 } from "./effective-agent-for-session";
+export { redactToolArgsJson, redactJsonValue, redactDeep } from "./redact-json";
 export { VERSION } from "./version";
 export {
   assertValidAgentId,

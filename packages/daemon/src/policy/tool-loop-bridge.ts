@@ -4,7 +4,7 @@ import { appendAuditRow } from "../audit/append-audit";
 import type { ToolLoopAudit, ToolLoopPolicy } from "../sessions/tool-loop";
 import { auditSourceForPrincipal, principalAuditFields } from "./audit-source";
 import type { PolicyEngine } from "./engine";
-import { redactJsonValue, redactToolArgsJson } from "./redact-json";
+import { redactJsonValue, redactToolArgsJson } from "@shoggoth/shared";
 
 export type ToolLoopBridgeOptions = {
   readonly engine: PolicyEngine;

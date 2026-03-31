@@ -1,4 +1,4 @@
-import { loadLayeredConfig, LAYOUT } from "@shoggoth/shared";
+import { loadLayeredConfig, redactDeep, LAYOUT } from "@shoggoth/shared";
 
 export function printConfigHelp(version: string): void {
   console.log(`shoggoth ${version}
@@ -9,5 +9,8 @@ Usage:
 
 export function runConfigShow(): void {
   const configDir = process.env.SHOGGOTH_CONFIG_DIR ?? LAYOUT.configDir;
-  console.log(JSON.stringify(loadLayeredConfig(configDir), null, 2));
+  const config = loadLayeredConfig(configDir);
+  const jsonPaths = config.policy.auditRedaction.jsonPaths;
+  const redacted = redactDeep(config, jsonPaths);
+  console.log(JSON.stringify(redacted, null, 2));
 }
