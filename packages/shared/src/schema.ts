@@ -25,9 +25,23 @@ const shoggothAnthropicMessagesProviderSchema = z
   })
   .strict();
 
+const shoggothGeminiProviderSchema = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("gemini"),
+    /** API origin, e.g. "https://generativelanguage.googleapis.com". Defaults in provider factory when omitted. */
+    baseUrl: z.string().min(1).optional(),
+    apiKey: z.string().min(1).optional(),
+    apiKeyEnv: z.string().min(1).optional(),
+    /** API version path segment (default "v1beta"). */
+    apiVersion: z.string().min(1).optional(),
+  })
+  .strict();
+
 export const shoggothModelProviderEntrySchema = z.discriminatedUnion("kind", [
   shoggothOpenAiCompatibleProviderSchema,
   shoggothAnthropicMessagesProviderSchema,
+  shoggothGeminiProviderSchema,
 ]);
 
 export type ShoggothModelProviderEntry = z.infer<typeof shoggothModelProviderEntrySchema>;

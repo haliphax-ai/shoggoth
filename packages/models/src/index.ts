@@ -17,6 +17,13 @@ export {
   type ConsumeAnthropicMessagesStreamOptions,
 } from "./anthropic-messages";
 export {
+  consumeGeminiStream,
+  createGeminiProvider,
+  mapChatMessagesToGeminiPayload,
+  type ConsumeGeminiStreamOptions,
+  type GeminiProviderOptions,
+} from "./gemini";
+export {
   createFailoverModelClient,
   type FailoverChainEntry,
   type FailoverCompleteInput,

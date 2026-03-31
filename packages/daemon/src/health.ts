@@ -182,7 +182,7 @@ async function fetchModelEndpoint(probeUrl: string, extraHeaders?: Record<string
   const signal = AbortSignal.timeout(PROBE_TIMEOUT_MS);
   const headers = { ...extraHeaders };
   let res = await fetch(probeUrl, { method: "HEAD", signal, redirect: "manual", headers });
-  if (res.status === 405) {
+  if (res.status === 405 || res.status === 404) {
     const signal2 = AbortSignal.timeout(PROBE_TIMEOUT_MS);
     res = await fetch(probeUrl, {
       method: "GET",

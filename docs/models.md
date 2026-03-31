@@ -1,8 +1,6 @@
 # Models: providers, failover, and transcript compaction
 
-Shoggoth treats LLMs as **OpenAI-compatible** backends: HTTP `POST …/chat/completions` with JSON bodies and assistant text read from `choices[0].message.content`.
-
-**Planned (runtime):** Anthropic Messages API provider in `@shoggoth/models` — see [anthropic-messages-plan.md](./anthropic-messages-plan.md). Config schema will add `kind: "anthropic-messages"` (origin `baseUrl`, optional `apiKeyEnv`, optional `anthropicVersion` / auth style) alongside `openai-compatible`.
+Shoggoth supports three provider kinds: **OpenAI-compatible** (`chat/completions`), **Anthropic Messages** (`/v1/messages`), and **Google Gemini** (`generateContent` / `streamGenerateContent`). Each is a first-class `ModelProvider` behind a unified interface.
 
 Configuration lives under the top-level **`models`** object in layered JSON (merged with the rest of `shoggothConfigFragmentSchema` in `@shoggoth/shared`). Unknown keys are rejected.
 
@@ -17,9 +15,10 @@ Each entry describes one named backend:
 | Field | Required | Description |
 | --- | --- | --- |
 | `id` | yes | Stable id referenced by `failoverChain`. |
-| `kind` | yes | `"openai-compatible"` (today) or `"anthropic-messages"` (planned; Messages API at `{origin}/v1/messages`). |
-| `baseUrl` | yes | **OpenAI:** API root; `/v1` is appended if missing. **Anthropic:** origin only (no path); implementation normalizes to scheme+host. |
-| `apiKeyEnv` | no | Env var name for the secret (`Authorization: Bearer` for OpenAI; `x-api-key` for Anthropic). Omitted → no auth header. |
+| `kind` | yes | `"openai-compatible"`, `"anthropic-messages"` (Messages API at `{origin}/v1/messages`), or `"gemini"` (Google Gemini REST API via `generateContent` / `streamGenerateContent`). |
+| `baseUrl` | yes* | **OpenAI:** API root; `/v1` is appended if missing. **Anthropic:** origin only (no path); implementation normalizes to scheme+host. **Gemini:** API origin (optional, defaults to `https://generativelanguage.googleapis.com`). |
+| `apiKeyEnv` | no | Env var name for the secret (`Authorization: Bearer` for OpenAI; `x-api-key` for Anthropic; `x-goog-api-key` for Gemini). Omitted → no auth header. |
+| `apiVersion` | no | **Gemini only.** API version path segment (default `v1beta`). |
 
 Example:
 
@@ -37,6 +36,11 @@ Example:
         "id": "local",
         "kind": "openai-compatible",
         "baseUrl": "http://ollama:11434/v1"
+      },
+      {
+        "id": "gemini",
+        "kind": "gemini",
+        "apiKeyEnv": "GEMINI_API_KEY"
       }
     ]
   }
@@ -58,11 +62,13 @@ When `models.failoverChain` is absent or empty, `createFailoverClientFromModelsC
 | --- | --- | --- |
 | `OPENAI_BASE_URL` or `OLLAMA_HOST` | OpenAI-compatible base (normalized with `/v1`) | `https://api.openai.com/v1` |
 | `OPENAI_API_KEY` | Bearer token for OpenAI-compatible hops | unset |
-| `ANTHROPIC_BASE_URL` | Origin for Anthropic Messages (no `/v1` suffix in the env value) | unset until wired in code |
-| `ANTHROPIC_API_KEY` | Secret for Anthropic (`x-api-key` or gateway equivalent) | unset until wired in code |
+| `ANTHROPIC_BASE_URL` | Origin for Anthropic Messages (no `/v1` suffix in the env value) | unset |
+| `ANTHROPIC_API_KEY` | Secret for Anthropic (`x-api-key` or gateway equivalent) | unset |
+| `GEMINI_API_KEY` | API key for Gemini (sent as `x-goog-api-key`) | unset |
+| `GEMINI_BASE_URL` | Optional origin override for Gemini | `https://generativelanguage.googleapis.com` |
 | `SHOGGOTH_MODEL` | Model id for the single hop | `gpt-4o-mini` |
 
-Provider id is fixed as `env-default`. **Rule (once Anthropic env fallback is implemented):** prefer Anthropic when `ANTHROPIC_BASE_URL` is set (non-empty); otherwise use OpenAI envs as today — see plan doc.
+Provider id is fixed as `env-default`. **Priority rule:** Anthropic (if `ANTHROPIC_BASE_URL` is set) → Gemini (if `GEMINI_API_KEY` is set) → OpenAI (default).
 
 **Readiness:** `tests/scripts/load-openclaw-env.mjs` sets `ANTHROPIC_*` when OpenClaw’s chosen provider has `api: "anthropic-messages"`, and `tests/docker-compose.readiness.yml` passes those variables into the container. Use `SHOGGOTH_READINESS_PROVIDER` to pick a specific `models.providers.<id>` entry.
 
@@ -109,5 +115,5 @@ npm run cli -- session compact <sessionId> [--force]
 ## Related packages
 
 - `@shoggoth/shared` — Zod schema: `shoggothModelsConfigSchema`.
-- `@shoggoth/models` — `createOpenAICompatibleProvider`, `createFailoverModelClient`, `createFailoverClientFromModelsConfig`, `resolveCompactionPolicyFromModelsConfig`, compaction helpers.
+- `@shoggoth/models` — `createOpenAICompatibleProvider`, `createAnthropicMessagesProvider`, `createGeminiProvider`, `createFailoverModelClient`, `createFailoverClientFromModelsConfig`, `resolveCompactionPolicyFromModelsConfig`, compaction helpers.
 - `@shoggoth/daemon` — `compactSessionTranscript`, SQLite load/replace helpers in `transcript-compact`.

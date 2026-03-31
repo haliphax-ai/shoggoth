@@ -1,6 +1,7 @@
 import type { ShoggothModelsConfig } from "@shoggoth/shared";
 import { createAnthropicMessagesProvider } from "./anthropic-messages";
 import { createFailoverModelClient, type FailoverModelClient } from "./failover";
+import { createGeminiProvider } from "./gemini";
 import { createOpenAICompatibleProvider, type FetchLike } from "./openai-compatible";
 import type { CompactionPolicy } from "./compaction";
 import type { ModelProvider } from "./types";
@@ -51,6 +52,18 @@ function modelProvidersById(
           fetchImpl,
         }),
       );
+    } else if (p.kind === "gemini") {
+      const apiKey = p.apiKey ?? (p.apiKeyEnv ? env[p.apiKeyEnv] : undefined);
+      byId.set(
+        p.id,
+        createGeminiProvider({
+          id: p.id,
+          baseUrl: p.baseUrl,
+          apiKey,
+          apiVersion: p.apiVersion,
+          fetchImpl,
+        }),
+      );
     }
   }
   return byId;
@@ -75,6 +88,17 @@ function singleHopFromEnv(
       fetchImpl,
     });
     const model = env.SHOGGOTH_MODEL?.trim() || "claude-3-5-sonnet-20241022";
+    return { provider, model };
+  }
+
+  if (env.GEMINI_API_KEY) {
+    const provider = createGeminiProvider({
+      id: "env-default",
+      apiKey: env.GEMINI_API_KEY,
+      baseUrl: env.GEMINI_BASE_URL,
+      fetchImpl,
+    });
+    const model = env.SHOGGOTH_MODEL?.trim() || "gemini-2.5-flash";
     return { provider, model };
   }
 
