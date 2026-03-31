@@ -8,7 +8,7 @@ import {
   type CreateFailoverFromConfigOptions,
   type FailoverToolCallingClient,
 } from "@shoggoth/models";
-import { toolExec, toolExecExtended, toolRead, toolWrite, type AgentCredentials } from "@shoggoth/os-exec";
+import { toolExec, toolExecExtended, toolPoll, toolRead, toolWrite, type AgentCredentials } from "@shoggoth/os-exec";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import {
   isSubagentSessionUrn,
@@ -605,6 +605,20 @@ export async function executeSessionAgentTurn(
               stderr: r.stderr,
             }),
           };
+        }
+        if (originalName === "poll") {
+          const pid = typeof args.pid === "number" ? args.pid : undefined;
+          if (pid === undefined) {
+            return { resultJson: JSON.stringify({ error: "poll requires a numeric pid" }) };
+          }
+          const r = await toolPoll({
+            pid,
+            timeout: typeof args.timeout === "number" ? args.timeout : undefined,
+            streams: typeof args.streams === "boolean" ? args.streams : undefined,
+            tail: typeof args.tail === "number" ? args.tail : undefined,
+            since: typeof args.since === "number" ? args.since : undefined,
+          });
+          return { resultJson: JSON.stringify(r) };
         }
         if (originalName === "memory.search" || originalName === "memory.ingest") {
           return runMemoryBuiltin({
