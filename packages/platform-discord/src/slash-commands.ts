@@ -89,6 +89,8 @@ export interface DiscordInteractionHandlerDeps {
    */
   readonly abortSession: (sessionId: string | undefined) => Promise<boolean>;
   readonly invokeControlOp: (op: string, payload: Record<string, unknown>) => Promise<{ ok: boolean; result?: unknown; error?: string }>;
+  /** Resolve the session URN for a given channel + guild. Returns undefined if no route exists. */
+  readonly resolveSessionForChannel?: (channelId: string, guildId?: string) => string | undefined;
 }
 
 /**
@@ -156,7 +158,20 @@ async function handleInteraction(
 
   if (controlOp.op === "session_context_status") {
     try {
-      const res = await deps.invokeControlOp(controlOp.op, controlOp.payload);
+      // Resolve session_id from channel if not explicitly provided
+      const payload = { ...controlOp.payload };
+      if (!payload.session_id && deps.resolveSessionForChannel) {
+        const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
+        if (resolved) payload.session_id = resolved;
+      }
+      if (!payload.session_id) {
+        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+          data: { content: "⚠️ No session bound to this channel. Provide a session_id." },
+        });
+        return;
+      }
+      const res = await deps.invokeControlOp(controlOp.op, payload);
       let content: string;
       if (res.ok && res.result) {
         const r = res.result as Record<string, unknown>;
@@ -175,12 +190,18 @@ async function handleInteraction(
             `Context segment: \`${session.contextSegmentId}\``,
           ];
           if (stats) {
+            const inTok = (stats.inputTokens as number) ?? 0;
+            const outTok = (stats.outputTokens as number) ?? 0;
+            const totalTok = inTok + outTok;
+            const ctxWin = stats.contextWindowTokens as number | null;
+            const tokLine = ctxWin
+              ? `Tokens: ${totalTok.toLocaleString("en-US")} / ${ctxWin.toLocaleString("en-US")} (${((totalTok / ctxWin) * 100).toFixed(1)}%) — ${inTok.toLocaleString("en-US")} in / ${outTok.toLocaleString("en-US")} out`
+              : `Tokens: ${inTok.toLocaleString("en-US")} in / ${outTok.toLocaleString("en-US")} out`;
             lines.push(
               ``,
               `📊 **Stats**`,
               `Turns: ${stats.turnCount ?? 0}`,
-              `Tokens: ${stats.inputTokens ?? 0} in / ${stats.outputTokens ?? 0} out`,
-              stats.contextWindowTokens ? `Context window: ${stats.contextWindowTokens} tokens` : null,
+              tokLine,
               `Messages: ${stats.transcriptMessageCount ?? 0}`,
               `Compactions: ${stats.compactionCount ?? 0}`,
             );

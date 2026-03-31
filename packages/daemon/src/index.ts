@@ -278,6 +278,24 @@ void (async () => {
           const result = await handleIntegrationControlOp(req, principal, ctx);
           return { ok: true, result };
         },
+        resolveSessionForChannel: (channelId, guildId) => {
+          try {
+            const routes = (configRef.current.platforms as Record<string, unknown>)?.discord as Record<string, unknown> | undefined;
+            const routesList = routes?.routes;
+            if (!Array.isArray(routesList)) return undefined;
+            for (const r of routesList) {
+              if (typeof r !== "object" || r === null) continue;
+              const route = r as { channelId?: string; sessionId?: string; guildId?: string };
+              if (route.channelId !== channelId) continue;
+              if (route.guildId !== undefined && route.guildId !== guildId) continue;
+              if (route.guildId === undefined && guildId !== undefined) continue;
+              return route.sessionId;
+            }
+            return undefined;
+          } catch {
+            return undefined;
+          }
+        },
       }),
       onMessageReactionAdd:
         hitlStack && hitlDiscordNoticeRegistry && hitlAutoApproveGate

@@ -31,6 +31,8 @@ export interface DiscordParsedInteraction {
   readonly command: PlatformCommand;
   readonly interactionId: string;
   readonly interactionToken: string;
+  readonly channelId: string;
+  readonly guildId?: string;
 }
 
 /** Parse a Discord interaction event into a PlatformCommand. Returns null for non-slash-command interactions. */
@@ -56,5 +58,7 @@ export function discordInteractionToCommand(
     command: { name: name.trim(), options },
     interactionId: ev.id,
     interactionToken: ev.token,
+    channelId: ev.channelId,
+    guildId: ev.guildId,
   };
 }
