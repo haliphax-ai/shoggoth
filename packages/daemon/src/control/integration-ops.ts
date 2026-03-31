@@ -10,6 +10,7 @@ import {
   effectiveSpawnSubagentsEnabled,
   loadLayeredConfig,
   parseAgentSessionUrn,
+  redactDeep,
   resolveEffectiveModelsConfig,
 } from "@shoggoth/shared";
 import {
@@ -1218,6 +1219,14 @@ export async function handleIntegrationControlOp(
         model_selection: row.modelSelection ?? null,
         effective_models: effective,
       };
+    }
+
+    case "config_show": {
+      if (principal.kind !== "operator" && principal.kind !== "agent") {
+        throw new IntegrationOpError("ERR_FORBIDDEN", "config_show requires operator or agent principal");
+      }
+      const jsonPaths = ctx.config.policy.auditRedaction.jsonPaths;
+      return { ok: true, config: redactDeep(ctx.config, jsonPaths) };
     }
 
     default:

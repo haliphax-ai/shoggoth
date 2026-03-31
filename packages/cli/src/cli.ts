@@ -52,7 +52,7 @@ if (argv[0] === "config") {
     process.exit(0);
   }
   if (rest[0] === "show") {
-    runConfigShow();
+    await runConfigShow();
     process.exit(0);
   }
   console.error("usage: shoggoth config show");
