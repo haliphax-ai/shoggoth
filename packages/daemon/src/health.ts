@@ -147,10 +147,27 @@ function isAnthropicModelProbeBase(normalizedBase: string): boolean {
   return stripTrailingSlash(normalizeModelBaseUrl(a)) === stripTrailingSlash(normalizedBase);
 }
 
-/** OpenAI-style roots use `/v1/models`; Anthropic origins probe `/`; non-root OpenAI-compat paths append `/models`. */
-function resolveModelProbeUrl(normalizedBase: string): string {
+/** True when the URL is a Google Generative AI endpoint (uses ?key= auth, native /v1beta/models path). */
+function isGoogleGenAI(normalizedBase: string): boolean {
+  try {
+    return new URL(normalizedBase).hostname.includes("generativelanguage.googleapis.com");
+  } catch {
+    return false;
+  }
+}
+
+/** OpenAI-style roots use `/v1/models`; Anthropic origins probe `/`; Google GenAI uses native `/v1beta/models`. */
+function resolveModelProbeUrl(normalizedBase: string, apiKey?: string): string {
   const u = new URL(normalizedBase);
   const p = u.pathname.replace(/\/+$/, "") || "/";
+
+  // Google GenAI: use native models endpoint with ?key= auth (not OpenAI-compat path)
+  if (isGoogleGenAI(normalizedBase)) {
+    const modelsUrl = new URL("/v1beta/models", u.origin);
+    if (apiKey) modelsUrl.searchParams.set("key", apiKey);
+    return modelsUrl.href;
+  }
+
   if (p === "/" && isAnthropicModelProbeBase(normalizedBase)) {
     return `${u.origin}/`;
   }
@@ -230,11 +247,12 @@ export function createDiscordProbe(options: {
   };
 }
 
-/** Build auth headers for model probe based on provider type. */
+/** Build auth headers for model probe based on provider type. Google GenAI uses ?key= query param instead. */
 function buildModelProbeAuthHeaders(
   normalizedBase: string,
   apiKey: string,
 ): Record<string, string> {
+  if (isGoogleGenAI(normalizedBase)) return {};
   if (isAnthropicModelProbeBase(normalizedBase)) {
     return { "x-api-key": apiKey };
   }
@@ -262,7 +280,8 @@ export function createModelEndpointProbe(options: {
         if (!normalized) {
           return { name: probeName, status: "skipped", detail: "not configured" };
         }
-        probeUrl = resolveModelProbeUrl(normalized);
+        const apiKeyForUrl = options.getApiKey?.()?.trim();
+        probeUrl = resolveModelProbeUrl(normalized, apiKeyForUrl);
       } catch {
         return {
           name: probeName,
