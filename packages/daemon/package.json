@@ -21,6 +21,7 @@
     "test": "node --import tsx/esm --test --test-isolation=process --test-concurrency=true $(find test -name '*.test.ts' | sort)"
   },
   "dependencies": {
+    "@shoggoth/procman": "*",
     "@shoggoth/mcp-integration": "*",
     "@shoggoth/messaging": "*",
     "@shoggoth/platform-discord": "*",

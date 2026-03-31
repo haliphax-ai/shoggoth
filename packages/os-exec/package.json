@@ -16,7 +16,7 @@
     "test": "node --import tsx/esm --test --test-concurrency=true $(find test -name '*.test.ts' | sort)"
   },
   "dependencies": {
-    "@shoggoth/procman": "workspace:*"
+    "@shoggoth/procman": "*"
   },
   "devDependencies": {
     "tsx": "^4.19.3",
