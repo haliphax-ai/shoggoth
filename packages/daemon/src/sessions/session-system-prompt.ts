@@ -268,7 +268,7 @@ function buildProjectContextSection(
     if (soulPresent) {
       s += `\n\n${daemonPrompt("system-soul-guidance")}`;
     }
-    s += `\n\n${daemonPrompt("system-workspace-files-heading")}\n\n${fileBlocks.join("\n")}`;
+    s += `\n\n${daemonPrompt("system-workspace-files-heading")}\n\n${fileBlocks.join("\n")}\n--- end workspace files ---`;
   }
 
   return s;
