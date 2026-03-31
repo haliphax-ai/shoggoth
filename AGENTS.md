@@ -8,6 +8,10 @@ This is Shoggoth, an agent orchestration platform that is Docker-first with a st
 
 Contributions to this codebase must use red/green TDD.
 
+## It's Okay to Break Things
+
+This is pre-release software, and the only user is the developer. Backward compatibility, maintaining call site structure, etc. are a waste of effort and should be skipped.
+
 ## Security First
 
 The security principles and policies of the project should always be kept in mind when implementing new features or refactoring. The system, daemon, and agent layers should have read-only (or read-never) barriers between them both in the file system and in processes.
