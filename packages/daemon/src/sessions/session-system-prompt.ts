@@ -337,23 +337,21 @@ function buildSessionStatsSection(
   const stats = getSessionStats(stateDb, sessionId);
   if (!stats) return undefined;
 
-  // If transcript messages are available, estimate current-turn context tokens.
-  // Otherwise fall back to cumulative historical token count from the database.
+  // Base: cumulative actual token usage from the DB (current segment).
+  let tokenCount = stats.inputTokens + stats.outputTokens;
   let tokenDisplay: string;
-  let tokenCount: number;
 
   if (transcriptMessages && transcriptMessages.length > 0) {
-    let transcriptTokens = 0;
-    for (const msg of transcriptMessages) {
-      transcriptTokens += estimateTokens(msg.role) + estimateTokens(msg.content);
-    }
+    // Add estimated tokens for the system prompt and current user message
+    // (not yet recorded in the DB since this turn hasn't completed).
     const systemPromptTokens = assembledPromptLength
       ? Math.ceil(assembledPromptLength / 4)
       : 0;
-    tokenCount = transcriptTokens + systemPromptTokens;
+    const lastUserMsg = [...transcriptMessages].reverse().find(m => m.role === "user");
+    const currentMsgTokens = lastUserMsg ? estimateTokens(lastUserMsg.content) : 0;
+    tokenCount += systemPromptTokens + currentMsgTokens;
     tokenDisplay = `~${formatNumber(tokenCount)}`;
   } else {
-    tokenCount = stats.inputTokens + stats.outputTokens;
     tokenDisplay = formatNumber(tokenCount);
   }
 
