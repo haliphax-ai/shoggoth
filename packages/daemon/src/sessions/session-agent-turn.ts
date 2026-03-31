@@ -8,7 +8,7 @@ import {
   type CreateFailoverFromConfigOptions,
   type FailoverToolCallingClient,
 } from "@shoggoth/models";
-import { toolExec, toolRead, toolWrite, type AgentCredentials } from "@shoggoth/os-exec";
+import { toolExec, toolExecExtended, toolRead, toolWrite, type AgentCredentials } from "@shoggoth/os-exec";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import {
   isSubagentSessionUrn,
@@ -542,6 +542,60 @@ export async function executeSessionAgentTurn(
           const argv = args.argv as unknown;
           if (!Array.isArray(argv) || argv.some((x) => typeof x !== "string")) {
             return { resultJson: JSON.stringify({ error: "exec requires string argv[]" }) };
+          }
+          // Check if any extended params are present
+          const hasExtended = args.timeout !== undefined || args.stdin !== undefined ||
+            args.workdir !== undefined || args.env !== undefined ||
+            args.splitStreams !== undefined || args.maxOutput !== undefined ||
+            args.truncation !== undefined || args.background !== undefined ||
+            args.yieldMs !== undefined;
+          if (hasExtended) {
+            // Convert argv to a shell command string for toolExecExtended
+            const command = (argv as string[]).map(a =>
+              /[^a-zA-Z0-9_\-./=:]/.test(a) ? `'${a.replace(/'/g, "'\\''")}'` : a
+            ).join(" ");
+            const r = await toolExecExtended(input.session.workspacePath, {
+              command,
+              timeout: typeof args.timeout === "number" ? args.timeout : undefined,
+              stdin: typeof args.stdin === "string" ? args.stdin : undefined,
+              workdir: typeof args.workdir === "string" ? args.workdir : undefined,
+              env: args.env && typeof args.env === "object" ? args.env as Record<string, string> : undefined,
+              splitStreams: typeof args.splitStreams === "boolean" ? args.splitStreams : undefined,
+              maxOutput: typeof args.maxOutput === "number" ? args.maxOutput : undefined,
+              truncation: typeof args.truncation === "string" ? args.truncation as "head" | "tail" | "both" : undefined,
+              background: typeof args.background === "boolean" ? args.background : undefined,
+              yieldMs: typeof args.yieldMs === "number" ? args.yieldMs : undefined,
+            }, creds);
+            if (r.kind === "background") {
+              return {
+                resultJson: JSON.stringify({
+                  status: "running",
+                  sessionId: r.sessionId,
+                  pid: r.pid,
+                  yielded: r.yielded ?? false,
+                  partialOutput: r.partialOutput,
+                }),
+              };
+            }
+            // Normal foreground completion — check if split streams were used
+            if (r.stdout !== undefined || r.stderr !== undefined) {
+              return {
+                resultJson: JSON.stringify({
+                  exitCode: r.exitCode,
+                  stdout: r.stdout,
+                  stderr: r.stderr,
+                  stdoutTruncated: r.stdoutTruncated,
+                  stderrTruncated: r.stderrTruncated,
+                }),
+              };
+            }
+            return {
+              resultJson: JSON.stringify({
+                exitCode: r.exitCode,
+                output: r.output,
+                truncated: r.truncated,
+              }),
+            };
           }
           const r = await toolExec(input.session.workspacePath, argv as string[], creds);
           return {

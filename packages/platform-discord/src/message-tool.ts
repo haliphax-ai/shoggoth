@@ -26,6 +26,11 @@ export interface DiscordMessageToolDeps {
    * and file write. Returns the number of bytes written.
    */
   readonly downloadFile?: (url: string, destPath: string) => Promise<number>;
+  /**
+   * Resolve the workspace root path for a session. Used to resolve relative paths
+   * in attachment-download (so relative paths land inside the workspace, not cwd).
+   */
+  readonly getSessionWorkspace?: (sessionId: string) => string | undefined;
 }
 
 function str(v: unknown, field: string): string {
@@ -518,7 +523,15 @@ export async function executeDiscordMessageToolAction(
 
       // Sanitize filename to prevent path traversal
       const safeName = sanitizeFilename(filename);
-      const finalPath = destPath ?? safeName;
+      let finalPath = destPath ?? safeName;
+
+      // Resolve relative paths against the session workspace
+      if (finalPath && !finalPath.startsWith("/")) {
+        const workspace = deps.getSessionWorkspace?.(sid);
+        if (workspace) {
+          finalPath = `${workspace.replace(/\/+$/, "")}/${finalPath}`;
+        }
+      }
 
       const bytesWritten = await deps.downloadFile(url, finalPath);
       return {

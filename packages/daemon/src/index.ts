@@ -306,6 +306,16 @@ void (async () => {
             capabilities: dm.capabilities,
             transport: dm.discordRestTransport,
             sessionToChannel: (sid) => dm.resolveOutboundChannelIdForSession?.(sid),
+            getSessionWorkspace: (sid) => {
+              try {
+                const row = db.prepare("SELECT workspace_path FROM sessions WHERE id = ?").get(sid) as
+                  | { workspace_path: string }
+                  | undefined;
+                return row?.workspace_path;
+              } catch {
+                return undefined;
+              }
+            },
             downloadFile: async (url, destPath) => {
               const res = await fetch(url);
               if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
