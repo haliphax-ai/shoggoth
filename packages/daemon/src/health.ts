@@ -147,7 +147,7 @@ function isAnthropicModelProbeBase(normalizedBase: string): boolean {
   return stripTrailingSlash(normalizeModelBaseUrl(a)) === stripTrailingSlash(normalizedBase);
 }
 
-/** OpenAI-style roots use `/v1/models`; Anthropic origins probe `/`. */
+/** OpenAI-style roots use `/v1/models`; Anthropic origins probe `/`; non-root OpenAI-compat paths append `/models`. */
 function resolveModelProbeUrl(normalizedBase: string): string {
   const u = new URL(normalizedBase);
   const p = u.pathname.replace(/\/+$/, "") || "/";
@@ -157,7 +157,8 @@ function resolveModelProbeUrl(normalizedBase: string): string {
   if (p === "/") {
     return new URL("/v1/models", u.origin).href;
   }
-  return u.href;
+  // Non-root path (e.g. /v1beta/openai) — append /models for OpenAI-compat endpoints
+  return new URL(`${p}/models`, u.origin).href;
 }
 
 async function fetchModelEndpoint(probeUrl: string, extraHeaders?: Record<string, string>): Promise<Response> {
