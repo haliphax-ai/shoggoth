@@ -7,6 +7,7 @@ import { runSessionCli } from "./run-session";
 import { runHitlCli } from "./run-hitl";
 import { runMcpCli } from "./run-mcp";
 import { runSubagentCli } from "./run-subagent";
+import { runSystemCli } from "./run-system";
 import { printConfigHelp, runConfigShow } from "./run-config";
 
 const argv = process.argv.slice(2);
@@ -29,6 +30,7 @@ Usage:
   shoggoth skills                 Skill discovery (see: shoggoth skills --help)
   shoggoth hitl                   HITL queue / clear (see: shoggoth hitl --help)
   shoggoth mcp                    MCP helpers (see: shoggoth mcp --help)
+  shoggoth system               System operations (see: shoggoth system --help)
 
 Env: SHOGGOTH_CONTROL_SOCKET, SHOGGOTH_OPERATOR_TOKEN (non-Linux), SHOGGOTH_CONFIG_DIR`);
 }
@@ -171,6 +173,16 @@ if (argv[0] === "subagent") {
 if (argv[0] === "session") {
   try {
     await runSessionCli(argv.slice(1));
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  }
+  process.exit(process.exitCode ?? 0);
+}
+
+if (argv[0] === "system") {
+  try {
+    await runSystemCli(argv.slice(1));
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
     process.exit(1);

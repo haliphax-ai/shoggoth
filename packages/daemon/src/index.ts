@@ -443,7 +443,15 @@ rt.logger.info("daemon starting", {
 });
 
 void rt.getHealth().then((h) => {
-  rt.logger.info("initial health", {
+  const checks = h.checks ?? [];
+  const sqliteFailed = checks.some((c) => c.name === "sqlite" && c.status === "fail");
+  const modelChecks = checks.filter((c) => c.name === "model");
+  const allModelsFailed = modelChecks.length > 0 && modelChecks.every((c) => c.status === "fail");
+  const anyNonModelFailed = checks.some((c) => (c.name === "embeddings" || c.name === "discord") && c.status === "fail");
+  const someModelFailed = modelChecks.some((c) => c.status === "fail");
+
+  const level = sqliteFailed || allModelsFailed ? "error" : anyNonModelFailed || someModelFailed ? "warn" : "info";
+  rt.logger[level]("initial health", {
     ready: h.ready,
     checks: h.checks,
   });

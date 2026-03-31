@@ -30,4 +30,6 @@ RUN chmod 0755 /usr/local/bin/shoggoth-entrypoint.sh /usr/local/bin/shoggoth
 ENV NODE_ENV=production
 USER root
 ENTRYPOINT ["/usr/local/bin/shoggoth-entrypoint.sh"]
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+  CMD node --import tsx/esm packages/cli/src/cli.ts system health || exit 1
 CMD ["node", "--import", "tsx/esm", "packages/daemon/src/index.ts"]
