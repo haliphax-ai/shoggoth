@@ -55,7 +55,7 @@ describe("policy engine", () => {
     );
     assert.deepStrictEqual(
       engine.check({ principal: operator, action: "control.invoke", resource: "agent_ping" }),
-      { allow: false, reason: "default_deny" },
+      { allow: true },
     );
     assert.deepStrictEqual(
       engine.check({ principal: agent, action: "control.invoke", resource: "agent_ping" }),

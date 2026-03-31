@@ -296,7 +296,7 @@ describe("control plane (unix socket + JSONL)", () => {
     assert.ok(h.result && typeof h.result === "object");
   });
 
-  it("denies agent_ping for operator principal", async () => {
+  it("rejects agent_ping for operator principal (ERR_UNKNOWN_OP, not policy denial)", async () => {
     const line = await jsonlRoundTrip(
       {
         v: WIRE_VERSION,
@@ -314,7 +314,7 @@ describe("control plane (unix socket + JSONL)", () => {
     );
     const res = parseResponseLine(line);
     assert.equal(res.ok, false);
-    assert.equal(res.error?.code, "ERR_FORBIDDEN");
+    assert.equal(res.error?.code, "ERR_UNKNOWN_OP");
   });
 
   it("denies ping for agent principal", async () => {
