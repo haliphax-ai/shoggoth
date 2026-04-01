@@ -131,21 +131,21 @@ const config = loadLayeredConfig(configDir);
 
 const configRef = { current: config };
 
+const interruptLog = createLogger({
+  component: "shoggoth-daemon",
+  minLevel: config.logLevel,
+  baseFields: { subsystem: "lifecycle" },
+});
+
 // Assert dynamicConfigDirectory is below configDirectory when set.
 if (config.dynamicConfigDirectory) {
   const resolvedConfig = resolve(config.configDirectory);
   const resolvedDynamic = resolve(config.dynamicConfigDirectory);
   if (!resolvedDynamic.startsWith(resolvedConfig + "/") && resolvedDynamic !== resolvedConfig) {
-    process.stderr.write(
-      JSON.stringify({
-        ts: new Date().toISOString(),
-        level: "fatal",
-        msg: "dynamicConfigDirectory must be below configDirectory",
-        component: "shoggoth-daemon",
-        resolvedDynamic,
-        resolvedConfig,
-      }) + "\n",
-    );
+    interruptLog.error("dynamicConfigDirectory must be below configDirectory", {
+      resolvedDynamic,
+      resolvedConfig,
+    });
     process.exit(1);
   }
 }
@@ -172,11 +172,6 @@ const policyRef = { engine: createPolicyEngine(config.policy, config.agents) };
 const policyEngine = createDelegatingPolicyEngine(() => policyRef.engine);
 const hitlRef = { value: { ...DEFAULT_HITL_CONFIG, ...config.hitl } };
 
-const interruptLog = createLogger({
-  component: "shoggoth-daemon",
-  minLevel: config.logLevel,
-  baseFields: { subsystem: "lifecycle" },
-});
 
 const drainTimeoutMs = resolveDrainTimeoutMs(config);
 
