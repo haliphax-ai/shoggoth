@@ -10,6 +10,8 @@ completed: never
 
 ## Frontmatter
 
+> This section describes the YAML frontmatter properties. Do not include it in actual plans — just include the YAML block at the top of the README.
+
 ```yaml
 ---
 date: 2026-04-01       # Date the plan was created (YYYY-MM-DD)
