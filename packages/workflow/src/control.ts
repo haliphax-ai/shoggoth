@@ -309,6 +309,11 @@ export class ControlPlane {
     // Reset completed state so the orchestrator can continue processing
     orch.setCompleted(false);
 
+    // Restart polling if it was stopped (e.g., after an abort)
+    if (!orch.isPolling()) {
+      orch.startPolling();
+    }
+
     // Update status message
     if (this.statusManager) {
       await this.statusManager.updateStatus(wf);

@@ -224,6 +224,11 @@ export class Orchestrator {
     }
   }
 
+  /** Whether the polling timer is active. */
+  isPolling(): boolean {
+    return this.pollingTimer !== null;
+  }
+
   /** Whether the workflow has reached a terminal state. */
   isComplete(): boolean {
     return this.completed;
