@@ -110,7 +110,7 @@ export async function executeSessionAgentTurn(
   const sanitizedUserContent = stripFalsifiedSystemContext(input.userContent, sessionToken);
 
   const effectiveContent = input.systemContext
-    ? wrapWithSystemContext(sanitizedUserContent, input.systemContext, sessionToken)
+    ? wrapWithSystemContext(sanitizedUserContent, input.systemContext, sessionToken ?? (() => { throw new Error("systemContextToken is required when systemContext is provided"); })())
     : sanitizedUserContent;
 
   input.transcript.append({

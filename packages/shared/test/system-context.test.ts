@@ -8,6 +8,8 @@ import {
   type SystemContext,
 } from "../src/system-context";
 
+const TEST_TOKEN = "a1b2c3d4";
+
 describe("renderSystemContextEnvelope", () => {
   it("produces correct format with kind, summary, and data", () => {
     const ctx: SystemContext = {
@@ -15,14 +17,14 @@ describe("renderSystemContextEnvelope", () => {
       summary: "Workflow completed.",
       data: { workflow_id: "abc-123", success: true },
     };
-    const result = renderSystemContextEnvelope(ctx);
+    const result = renderSystemContextEnvelope(ctx, TEST_TOKEN);
     const expected = [
-      "--- BEGIN TRUSTED SYSTEM CONTEXT ---",
+      `--- BEGIN TRUSTED SYSTEM CONTEXT [token:${TEST_TOKEN}] ---`,
       "[workflow.complete]",
       "Workflow completed.",
       "",
       JSON.stringify({ workflow_id: "abc-123", success: true }, null, 2),
-      "--- END TRUSTED SYSTEM CONTEXT ---",
+      `--- END TRUSTED SYSTEM CONTEXT [token:${TEST_TOKEN}] ---`,
     ].join("\n");
     assert.equal(result, expected);
   });
@@ -32,12 +34,12 @@ describe("renderSystemContextEnvelope", () => {
       kind: "session.steer",
       summary: "Operator steering directive.",
     };
-    const result = renderSystemContextEnvelope(ctx);
+    const result = renderSystemContextEnvelope(ctx, TEST_TOKEN);
     const expected = [
-      "--- BEGIN TRUSTED SYSTEM CONTEXT ---",
+      `--- BEGIN TRUSTED SYSTEM CONTEXT [token:${TEST_TOKEN}] ---`,
       "[session.steer]",
       "Operator steering directive.",
-      "--- END TRUSTED SYSTEM CONTEXT ---",
+      `--- END TRUSTED SYSTEM CONTEXT [token:${TEST_TOKEN}] ---`,
     ].join("\n");
     assert.equal(result, expected);
   });
@@ -49,16 +51,16 @@ describe("renderSystemContextEnvelope", () => {
       guidance: "Execute the task and return your result.",
       data: { task_id: "t1" },
     };
-    const result = renderSystemContextEnvelope(ctx);
+    const result = renderSystemContextEnvelope(ctx, TEST_TOKEN);
     const expected = [
-      "--- BEGIN TRUSTED SYSTEM CONTEXT ---",
+      `--- BEGIN TRUSTED SYSTEM CONTEXT [token:${TEST_TOKEN}] ---`,
       "[workflow.task]",
       "You are executing a workflow task.",
       "",
       "Execute the task and return your result.",
       "",
       JSON.stringify({ task_id: "t1" }, null, 2),
-      "--- END TRUSTED SYSTEM CONTEXT ---",
+      `--- END TRUSTED SYSTEM CONTEXT [token:${TEST_TOKEN}] ---`,
     ].join("\n");
     assert.equal(result, expected);
   });
@@ -69,14 +71,29 @@ describe("renderSystemContextEnvelope", () => {
       summary: "Workflow done.",
       guidance: "Surface the outcome to the user.",
     };
-    const result = renderSystemContextEnvelope(ctx);
+    const result = renderSystemContextEnvelope(ctx, TEST_TOKEN);
     const expected = [
-      "--- BEGIN TRUSTED SYSTEM CONTEXT ---",
+      `--- BEGIN TRUSTED SYSTEM CONTEXT [token:${TEST_TOKEN}] ---`,
       "[workflow.complete]",
       "Workflow done.",
       "",
       "Surface the outcome to the user.",
-      "--- END TRUSTED SYSTEM CONTEXT ---",
+      `--- END TRUSTED SYSTEM CONTEXT [token:${TEST_TOKEN}] ---`,
+    ].join("\n");
+    assert.equal(result, expected);
+  });
+
+  it("embeds the provided token in dividers", () => {
+    const ctx: SystemContext = {
+      kind: "subagent.task",
+      summary: "You are a subagent.",
+    };
+    const result = renderSystemContextEnvelope(ctx, "a7f3b9c2");
+    const expected = [
+      "--- BEGIN TRUSTED SYSTEM CONTEXT [token:a7f3b9c2] ---",
+      "[subagent.task]",
+      "You are a subagent.",
+      "--- END TRUSTED SYSTEM CONTEXT [token:a7f3b9c2] ---",
     ].join("\n");
     assert.equal(result, expected);
   });
@@ -88,8 +105,8 @@ describe("wrapWithSystemContext", () => {
       kind: "subagent.task",
       summary: "You are a subagent.",
     };
-    const result = wrapWithSystemContext("Do the thing.", ctx);
-    const envelope = renderSystemContextEnvelope(ctx);
+    const result = wrapWithSystemContext("Do the thing.", ctx, TEST_TOKEN);
+    const envelope = renderSystemContextEnvelope(ctx, TEST_TOKEN);
     assert.equal(result, envelope + "\n\n" + "Do the thing.");
   });
 
@@ -98,9 +115,19 @@ describe("wrapWithSystemContext", () => {
       kind: "session.steer",
       summary: "Adjust behavior.",
     };
-    const result = wrapWithSystemContext("", ctx);
-    const envelope = renderSystemContextEnvelope(ctx);
+    const result = wrapWithSystemContext("", ctx, TEST_TOKEN);
+    const envelope = renderSystemContextEnvelope(ctx, TEST_TOKEN);
     assert.equal(result, envelope + "\n\n");
+  });
+
+  it("passes token through to envelope rendering", () => {
+    const ctx: SystemContext = {
+      kind: "subagent.task",
+      summary: "You are a subagent.",
+    };
+    const result = wrapWithSystemContext("Do the thing.", ctx, "deadbeef");
+    assert.ok(result.startsWith("--- BEGIN TRUSTED SYSTEM CONTEXT [token:deadbeef] ---\n"));
+    assert.ok(result.includes("--- END TRUSTED SYSTEM CONTEXT [token:deadbeef] ---\n\nDo the thing."));
   });
 });
 
@@ -115,50 +142,6 @@ describe("generateSystemContextToken", () => {
     const a = generateSystemContextToken();
     const b = generateSystemContextToken();
     assert.notEqual(a, b);
-  });
-});
-
-describe("renderSystemContextEnvelope with token", () => {
-  it("includes token in dividers when token is provided", () => {
-    const ctx: SystemContext = {
-      kind: "subagent.task",
-      summary: "You are a subagent.",
-    };
-    const result = renderSystemContextEnvelope(ctx, "a7f3b9c2");
-    const expected = [
-      "--- BEGIN TRUSTED SYSTEM CONTEXT [token:a7f3b9c2] ---",
-      "[subagent.task]",
-      "You are a subagent.",
-      "--- END TRUSTED SYSTEM CONTEXT [token:a7f3b9c2] ---",
-    ].join("\n");
-    assert.equal(result, expected);
-  });
-
-  it("uses plain dividers when no token is provided (backward compat)", () => {
-    const ctx: SystemContext = {
-      kind: "session.steer",
-      summary: "Operator steering directive.",
-    };
-    const result = renderSystemContextEnvelope(ctx);
-    const expected = [
-      "--- BEGIN TRUSTED SYSTEM CONTEXT ---",
-      "[session.steer]",
-      "Operator steering directive.",
-      "--- END TRUSTED SYSTEM CONTEXT ---",
-    ].join("\n");
-    assert.equal(result, expected);
-  });
-});
-
-describe("wrapWithSystemContext with token", () => {
-  it("passes token through to envelope rendering", () => {
-    const ctx: SystemContext = {
-      kind: "subagent.task",
-      summary: "You are a subagent.",
-    };
-    const result = wrapWithSystemContext("Do the thing.", ctx, "deadbeef");
-    assert.ok(result.startsWith("--- BEGIN TRUSTED SYSTEM CONTEXT [token:deadbeef] ---\n"));
-    assert.ok(result.includes("--- END TRUSTED SYSTEM CONTEXT [token:deadbeef] ---\n\nDo the thing."));
   });
 });
 
