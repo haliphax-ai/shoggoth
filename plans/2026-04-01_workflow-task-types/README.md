@@ -161,7 +161,7 @@ The tool descriptor's `tasks` array item schema gains a `kind` field and conditi
 }
 ```
 
-Default `kind` is `"agent"` for backward compatibility — existing workflows that don't specify `kind` continue to work.
+`kind` is required on all tasks. No default, no backward compatibility.
 
 ### Tool Handler Changes
 
@@ -174,12 +174,12 @@ Default `kind` is `"agent"` for backward compatibility — existing workflows th
 
 ## Implementation Phases
 
-### Phase 1: TaskDef Union + Agent Backward Compat
+### Phase 1: TaskDef Union
 
-- Refactor `TaskDef` into the discriminated union
-- Default `kind: "agent"` in `toTaskDefs` when not specified
+- Refactor `TaskDef` into the discriminated union with required `kind` field
 - Update all existing references to `taskDef.prompt` to use type narrowing
-- All existing tests pass unchanged
+- Update tool descriptor and handler to require `kind`
+- All existing tests updated to specify `kind: "agent"`
 
 **Files:**
 - `packages/workflow/src/types.ts`
@@ -260,11 +260,10 @@ Each phase includes unit tests for the new functionality. Integration tests shou
 - Gate skip propagation across complex dependency graphs
 - Template resolution chains (transform output feeding into agent prompt)
 - Tool failure → failure notification → parent delivery
-- Backward compatibility: existing agent-only workflows unchanged
 
 ## Migration
 
-No database migration needed — task types are stored in workflow state files (JSON on disk). Existing state files without `kind` default to `"agent"` on load.
+None. Existing workflow state files on disk are invalidated — wipe `workflow-state/` on deploy.
 
 ## Security Considerations
 
