@@ -270,6 +270,8 @@ export const DEFAULT_POLICY_CONFIG: ShoggothPolicyConfig = {
         "agent_ping",
         "acpx_bind_get",
         "subagent_spawn",
+        "subagent_result",
+        "subagent_wait",
         "session_compact",
         "session_context_status",
         "session_inspect",
