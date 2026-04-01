@@ -161,7 +161,7 @@ The tool descriptor's `tasks` array item schema gains a `kind` field and conditi
 }
 ```
 
-`kind` is required on all tasks. No default, no backward compatibility.
+`kind` defaults to `"agent"` when not specified — it's the common case and keeps task definitions concise.
 
 ### Tool Handler Changes
 
@@ -176,10 +176,10 @@ The tool descriptor's `tasks` array item schema gains a `kind` field and conditi
 
 ### Phase 1: TaskDef Union
 
-- Refactor `TaskDef` into the discriminated union with required `kind` field
+- Refactor `TaskDef` into the discriminated union
+- Default `kind` to `"agent"` when not specified
 - Update all existing references to `taskDef.prompt` to use type narrowing
-- Update tool descriptor and handler to require `kind`
-- All existing tests updated to specify `kind: "agent"`
+- Update tool descriptor and handler for the new task kinds
 
 **Files:**
 - `packages/workflow/src/types.ts`
