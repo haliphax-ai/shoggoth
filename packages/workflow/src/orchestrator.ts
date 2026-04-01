@@ -206,7 +206,7 @@ export class Orchestrator {
 
     // Update status message (skip when paused with no in-progress tasks)
     if (this.statusManager) {
-      const hasInProgress = wf.tasks.some((t) => t.status === "in_progress");
+      const hasInProgress = this.workflow.tasks.some((t: { status: string }) => t.status === "in_progress");
       if (!this.paused || hasInProgress) {
         await this.statusManager.updateStatus(this.workflow);
       }

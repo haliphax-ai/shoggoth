@@ -167,7 +167,6 @@ async function setup(
     orchestrators,
     stateDir: baseDir,
     killer,
-    statusManager,
   });
 
   return {

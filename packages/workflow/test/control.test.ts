@@ -143,7 +143,6 @@ async function setupWorkflow(
     orchestrators,
     stateDir: baseDir,
     killer,
-    statusManager,
   });
 
   return { cp, orch, wfId, spawner, poller, pollResults, notifier, killer, msgAdapter, statusManager, orchOpts };
@@ -216,7 +215,6 @@ describe("ControlPlane", () => {
         orchestrators: new Map(),
         stateDir: baseDir,
         killer: mockKillAdapter(),
-        statusManager: null,
       });
 
       await assert.rejects(() => cp.abort("nonexistent"), /not found/i);
@@ -260,7 +258,6 @@ describe("ControlPlane", () => {
         orchestrators: new Map(),
         stateDir: baseDir,
         killer: mockKillAdapter(),
-        statusManager: null,
       });
 
       await assert.rejects(() => cp.pause("nonexistent"), /not found/i);
@@ -323,7 +320,6 @@ describe("ControlPlane", () => {
         orchestrators: new Map(),
         stateDir: baseDir,
         killer: mockKillAdapter(),
-        statusManager: null,
       });
 
       await assert.rejects(() => cp.resume("nonexistent"), /not found/i);
@@ -357,7 +353,6 @@ describe("ControlPlane", () => {
         orchestrators: new Map(),
         stateDir: baseDir,
         killer: mockKillAdapter(),
-        statusManager: null,
       });
 
       const result = await cp.status(wf.id);
@@ -370,7 +365,6 @@ describe("ControlPlane", () => {
         orchestrators: new Map(),
         stateDir: baseDir,
         killer: mockKillAdapter(),
-        statusManager: null,
       });
 
       await assert.rejects(() => cp.status("nonexistent"), /not found/i);
@@ -386,7 +380,6 @@ describe("ControlPlane", () => {
         orchestrators: new Map(),
         stateDir: baseDir,
         killer: mockKillAdapter(),
-        statusManager: null,
       });
 
       const result = await cp.list();
@@ -405,7 +398,6 @@ describe("ControlPlane", () => {
         orchestrators: new Map(),
         stateDir: baseDir,
         killer: mockKillAdapter(),
-        statusManager: null,
       });
 
       const result = await cp.list();
@@ -435,7 +427,6 @@ describe("ControlPlane", () => {
         orchestrators: new Map(),
         stateDir: baseDir,
         killer: mockKillAdapter(),
-        statusManager: null,
       });
 
       await assert.rejects(() => cp.post("nonexistent"), /not found/i);
@@ -511,7 +502,6 @@ describe("ControlPlane", () => {
         orchestrators: new Map(),
         stateDir: baseDir,
         killer: mockKillAdapter(),
-        statusManager: null,
       });
 
       await assert.rejects(() => cp.edit("nonexistent", 1, { prompt: "x" }), /not found/i);
@@ -686,7 +676,6 @@ describe("ControlPlane", () => {
         orchestrators: new Map(),
         stateDir: baseDir,
         killer: mockKillAdapter(),
-        statusManager: null,
       });
 
       await assert.rejects(() => cp.retry("nonexistent", 1), /not found/i);
