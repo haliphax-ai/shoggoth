@@ -50,6 +50,8 @@ export interface OrchestratorOptions {
   pollingIntervalMs: number;
   runtimeLimitMs: number;
   name?: string;
+  /** Max tasks running in parallel. undefined/0 = unlimited. */
+  concurrency?: number;
 }
 
 // --- Helpers ---
@@ -152,6 +154,7 @@ export class Orchestrator {
       graph,
       pollingIntervalMs: opts.pollingIntervalMs,
       createdAt: Date.now(),
+      ...(opts.concurrency ? { concurrency: opts.concurrency } : {}),
     };
 
     this.workflow = workflow;
@@ -400,9 +403,16 @@ export class Orchestrator {
     const wf = this.workflow!;
     const opts = this.opts!;
     const tm = taskMap(wf.tasks);
+    const concurrency = wf.concurrency ?? 0;
 
     for (const task of wf.tasks) {
       if (task.status !== "pending") continue;
+
+      // Concurrency cap: count current in_progress tasks
+      if (concurrency > 0) {
+        const inProgress = wf.tasks.filter((t) => t.status === "in_progress").length;
+        if (inProgress >= concurrency) break;
+      }
 
       const deps = wf.graph.get(task.taskDef.id);
       if (!deps) continue; // task not in graph — skip

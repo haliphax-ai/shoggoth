@@ -127,7 +127,11 @@ async function handleInteraction(
   });
 
   if (controlOp.op === "session_abort") {
-    const sessionId = (controlOp.payload.session_id as string | undefined) ?? undefined;
+    let sessionId = (controlOp.payload.session_id as string | undefined) ?? undefined;
+    if (!sessionId && deps.resolveSessionForChannel) {
+      const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
+      if (resolved) sessionId = resolved;
+    }
     let aborted: boolean;
     try {
       aborted = await deps.abortSession(sessionId);

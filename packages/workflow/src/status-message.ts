@@ -35,7 +35,11 @@ function formatTaskLine(task: TaskState, deps: Set<number>, now?: number): strin
  * Pass `now` to pin the current time (useful for tests).
  */
 export function formatStatusMessage(wf: TaskList, now?: number): string {
-  const lines = [`**Task workflow:** ${wf.name}`, ""];
+  const lines = [`**Task workflow:** ${wf.name}`];
+  if (wf.concurrency) {
+    lines.push(`**Concurrency:** ${wf.concurrency}`);
+  }
+  lines.push("");
   for (const task of wf.tasks) {
     const deps = wf.graph.get(task.taskDef.id) ?? new Set<number>();
     lines.push(formatTaskLine(task, deps, now));

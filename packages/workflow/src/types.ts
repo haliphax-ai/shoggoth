@@ -46,6 +46,8 @@ export interface TaskList {
   graph: DependencyGraph;
   pollingIntervalMs: number;
   createdAt: number;
+  /** Max number of simultaneously in_progress tasks. undefined/0 = unlimited. */
+  concurrency?: number;
 }
 
 // Template reference types

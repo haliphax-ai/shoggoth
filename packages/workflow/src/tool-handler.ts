@@ -23,6 +23,7 @@ export interface WorkflowToolArgs {
   polling_interval_ms?: number;
   runtime_limit_ms?: number;
   reply_to?: string;
+  concurrency?: number;
   // workflow targeting
   workflow_id?: string;
   // edit / retry
@@ -114,6 +115,7 @@ export async function handleWorkflowToolCall(
           pollingIntervalMs: args.polling_interval_ms ?? 10_000,
           runtimeLimitMs: args.runtime_limit_ms ?? 600_000,
           name,
+          ...(args.concurrency ? { concurrency: args.concurrency } : {}),
         };
 
         const workflowId = await deps.server.start(taskDefs, graph, opts);

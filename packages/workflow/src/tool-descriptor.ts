@@ -76,6 +76,11 @@ const workflowToolArgs = {
       type: "string",
       description: "start: session ID where subagent results should be delivered.",
     },
+    concurrency: {
+      type: "integer",
+      description: "start: max tasks running in parallel. Default: unlimited.",
+      minimum: 1,
+    },
     // --- workflow targeting ---
     workflow_id: {
       type: "string",
