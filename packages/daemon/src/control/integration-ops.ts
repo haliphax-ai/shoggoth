@@ -487,6 +487,13 @@ export async function handleIntegrationControlOp(
         sessions: ctx.sessions,
         sessionId,
         pending: ctx.hitlPending,
+        killSubagents: ctx.sessionManager
+          ? (childIds) => {
+              for (const cid of childIds) {
+                terminateBoundSubagentSession(ctx.sessionManager!, cid, "killed");
+              }
+            }
+          : undefined,
       });
       ctx.recordIntegrationAudit({
         action: "session.context_segment_new",

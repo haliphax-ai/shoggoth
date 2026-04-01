@@ -957,17 +957,16 @@ describe("control plane (unix socket + JSONL)", () => {
         const nr = newRes.result as {
           previousContextSegmentId: string;
           contextSegmentId: string;
-          deletedRows: number;
         };
         assert.equal(nr.previousContextSegmentId, seg1);
         assert.notEqual(nr.contextSegmentId, seg1);
-        assert.equal(nr.deletedRows, 1);
         assert.equal(countSessionAutoApprove(), 0);
 
+        // Transcript rows are abandoned (not deleted); old rows remain in SQLite.
         const nAll = db
           .prepare(`SELECT COUNT(*) AS c FROM transcript_messages WHERE session_id = ?`)
           .get("sess-cx") as { c: number };
-        assert.equal(nAll.c, 0);
+        assert.equal(nAll.c, 1);
 
         const seg2 = getSessionContextSegmentId(db, "sess-cx");
         tr.append({ sessionId: "sess-cx", contextSegmentId: seg2, role: "user", content: "y" });
@@ -982,14 +981,16 @@ describe("control plane (unix socket + JSONL)", () => {
         });
         const resetRes = parseResponseLine(lineReset);
         assert.equal(resetRes.ok, true);
-        const rr = resetRes.result as { contextSegmentId: string; deletedRows: number };
-        assert.equal(rr.deletedRows, 1);
+        const rr = resetRes.result as { previousContextSegmentId: string; contextSegmentId: string };
+        assert.equal(rr.previousContextSegmentId, seg2);
+        assert.notEqual(rr.contextSegmentId, seg2);
+        // Transcript rows for seg2 are abandoned, not deleted.
         const nSeg2 = db
           .prepare(
             `SELECT COUNT(*) AS c FROM transcript_messages WHERE session_id = ? AND context_segment_id = ?`,
           )
           .get("sess-cx", seg2) as { c: number };
-        assert.equal(nSeg2.c, 0);
+        assert.equal(nSeg2.c, 1);
         assert.equal(countSessionAutoApprove(), 1);
       },
     );

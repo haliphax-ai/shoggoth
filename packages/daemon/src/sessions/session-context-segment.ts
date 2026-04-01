@@ -4,7 +4,6 @@ import { clearSessionToolAutoApproveForSession } from "../hitl/hitl-session-tool
 import type { PendingActionsStore } from "../hitl/pending-actions-store";
 import type { SessionStore } from "./session-store";
 import { resetSegmentStats } from "./session-stats-store";
-import { createTranscriptStore } from "./transcript-store";
 
 function denyPendingForSession(pending: PendingActionsStore | undefined, sessionId: string): void {
   if (!pending) return;
@@ -17,18 +16,24 @@ function denyPendingForSession(pending: PendingActionsStore | undefined, session
  * Transport-agnostic session context segments (`sessions.context_segment_id`). Callers: control-plane
  * ops (`session_context_new` / `session_context_reset`), messaging adapters, future CLI.
  *
- * **New** clears the current segment’s transcript, mints a new segment id, denies pending HITL for the
- * session, and clears **per-session** tool auto-approve (`hitl_session_tool_auto_approve`, e.g. Discord ✅
- * “this tool for session”). Older transcript rows for prior segments remain in SQLite but are excluded
- * from the model context. **Reset** clears the transcript for the current segment only (id unchanged) and
- * **retains** per-session auto-approvals.
+ * Neither operation deletes transcript rows — old messages are abandoned (excluded from model context
+ * by the new segment id) and left for the retention workflow to clean up.
+ *
+ * **New** mints a new segment id, denies pending HITL for the session, clears **per-session** tool
+ * auto-approve (`hitl_session_tool_auto_approve`, e.g. Discord ✅ "this tool for session"), and kills
+ * all subagents for the session (via the optional `killSubagents` callback).
+ *
+ * **Reset** mints a new segment id and denies pending HITL. Retains per-session auto-approvals and
+ * does not touch subagents.
  */
 export function applySessionContextSegmentNew(input: {
   readonly db: Database.Database;
   readonly sessions: SessionStore;
   readonly sessionId: string;
   readonly pending?: PendingActionsStore;
-}): { previousContextSegmentId: string; contextSegmentId: string; deletedRows: number } {
+  /** Called with child session ids to terminate; caller wires subagent kill logic. */
+  readonly killSubagents?: (childSessionIds: string[]) => void;
+}): { previousContextSegmentId: string; contextSegmentId: string } {
   const sessionId = input.sessionId.trim();
   const row = input.sessions.getById(sessionId);
   if (!row) throw new Error(`session not found: ${input.sessionId}`);
@@ -36,12 +41,17 @@ export function applySessionContextSegmentNew(input: {
   if (!previousContextSegmentId) throw new Error("session missing context_segment_id");
   denyPendingForSession(input.pending, sessionId);
   clearSessionToolAutoApproveForSession(input.db, sessionId);
-  const tr = createTranscriptStore(input.db);
-  const deletedRows = tr.deleteForSessionSegment(sessionId, previousContextSegmentId);
   const contextSegmentId = randomUUID();
   input.sessions.update(sessionId, { contextSegmentId });
   resetSegmentStats(input.db, sessionId);
-  return { previousContextSegmentId, contextSegmentId, deletedRows };
+  if (input.killSubagents) {
+    const children = input.sessions
+      .list({ parentSessionId: sessionId })
+      .filter((c) => c.status !== "terminated")
+      .map((c) => c.id);
+    if (children.length > 0) input.killSubagents(children);
+  }
+  return { previousContextSegmentId, contextSegmentId };
 }
 
 export function applySessionContextSegmentReset(input: {
@@ -49,15 +59,15 @@ export function applySessionContextSegmentReset(input: {
   readonly sessions: SessionStore;
   readonly sessionId: string;
   readonly pending?: PendingActionsStore;
-}): { contextSegmentId: string; deletedRows: number } {
+}): { previousContextSegmentId: string; contextSegmentId: string } {
   const sessionId = input.sessionId.trim();
   const row = input.sessions.getById(sessionId);
   if (!row) throw new Error(`session not found: ${input.sessionId}`);
-  const contextSegmentId = row.contextSegmentId.trim();
-  if (!contextSegmentId) throw new Error("session missing context_segment_id");
+  const previousContextSegmentId = row.contextSegmentId.trim();
+  if (!previousContextSegmentId) throw new Error("session missing context_segment_id");
   denyPendingForSession(input.pending, sessionId);
-  const tr = createTranscriptStore(input.db);
-  const deletedRows = tr.deleteForSessionSegment(sessionId, contextSegmentId);
+  const contextSegmentId = randomUUID();
+  input.sessions.update(sessionId, { contextSegmentId });
   resetSegmentStats(input.db, sessionId);
-  return { contextSegmentId, deletedRows };
+  return { previousContextSegmentId, contextSegmentId };
 }
