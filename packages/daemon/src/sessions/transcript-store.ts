@@ -24,6 +24,8 @@ export interface AppendTranscriptInput {
   readonly toolCallId?: string | null;
   readonly toolCalls?: readonly ToolCallEntry[];
   readonly metadata?: unknown;
+  /** Raw trusted system context, stored separately for structured access. */
+  readonly systemContext?: unknown;
 }
 
 export interface TranscriptStore {
@@ -45,8 +47,8 @@ export function createTranscriptStore(db: Database.Database): TranscriptStore {
   `);
 
   const insert = db.prepare(`
-    INSERT INTO transcript_messages (session_id, context_segment_id, seq, role, content, tool_call_id, tool_calls_json, metadata_json)
-    VALUES (@session_id, @context_segment_id, @seq, @role, @content, @tool_call_id, @tool_calls_json, @metadata_json)
+    INSERT INTO transcript_messages (session_id, context_segment_id, seq, role, content, tool_call_id, tool_calls_json, metadata_json, system_context_json)
+    VALUES (@session_id, @context_segment_id, @seq, @role, @content, @tool_call_id, @tool_calls_json, @metadata_json, @system_context_json)
   `);
 
   const selectPage = db.prepare(`
@@ -75,6 +77,7 @@ export function createTranscriptStore(db: Database.Database): TranscriptStore {
         tool_call_id: input.toolCallId ?? null,
         tool_calls_json: input.toolCalls?.length ? JSON.stringify(input.toolCalls) : null,
         metadata_json: input.metadata !== undefined ? JSON.stringify(input.metadata) : null,
+        system_context_json: input.systemContext !== undefined ? JSON.stringify(input.systemContext) : null,
       });
       return { seq };
     },

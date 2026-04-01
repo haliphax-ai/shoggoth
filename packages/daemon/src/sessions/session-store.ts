@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import { assertValidAgentId, parseAgentSessionUrn } from "@shoggoth/shared";
+import { assertValidAgentId, generateSystemContextToken, parseAgentSessionUrn } from "@shoggoth/shared";
 
 export type SessionStatus = "starting" | "active" | "terminated" | string;
 
@@ -27,6 +27,8 @@ export interface SessionRow {
   readonly createdAt: string;
   /** ISO 8601 datetime string from the DB `updated_at` column (tracks last activity). */
   readonly updatedAt: string;
+  /** Session-unique anti-spoofing token for trusted system context dividers. */
+  readonly systemContextToken: string | undefined;
 }
 
 export interface CreateSessionInput {
@@ -54,6 +56,7 @@ export interface UpdateSessionInput {
   readonly subagentMode?: SubagentMode | null;
   readonly subagentPlatformThreadId?: string | null;
   readonly subagentExpiresAtMs?: number | null;
+  readonly systemContextToken?: string;
 }
 
 function rowToSession(r: {
@@ -73,6 +76,7 @@ function rowToSession(r: {
   subagent_expires_at_ms?: number | null;
   created_at?: string | null;
   updated_at?: string | null;
+  system_context_token?: string | null;
 }): SessionRow {
   let model: unknown = undefined;
   if (r.model_selection_json) {
@@ -115,6 +119,7 @@ function rowToSession(r: {
       typeof exp === "number" && Number.isFinite(exp) ? Math.trunc(exp) : undefined,
     createdAt: r.created_at ?? "",
     updatedAt: r.updated_at ?? "",
+    systemContextToken: r.system_context_token?.trim() || undefined,
   };
 }
 
@@ -161,12 +166,14 @@ export function createSessionStore(db: Database.Database): SessionStore {
       id, agent_profile_id, workspace_path, status, context_segment_id,
       model_selection_json, light_context, prompt_stack_json,
       runtime_uid, runtime_gid,
-      parent_session_id, subagent_mode, subagent_platform_thread_id, subagent_expires_at_ms
+      parent_session_id, subagent_mode, subagent_platform_thread_id, subagent_expires_at_ms,
+      system_context_token
     ) VALUES (
       @id, @agent_profile_id, @workspace_path, @status, @context_segment_id,
       @model_selection_json, @light_context, @prompt_stack_json,
       @runtime_uid, @runtime_gid,
-      @parent_session_id, @subagent_mode, @subagent_platform_thread_id, @subagent_expires_at_ms
+      @parent_session_id, @subagent_mode, @subagent_platform_thread_id, @subagent_expires_at_ms,
+      @system_context_token
     )
   `);
 
@@ -174,7 +181,7 @@ export function createSessionStore(db: Database.Database): SessionStore {
     SELECT id, agent_profile_id, workspace_path, status, context_segment_id, model_selection_json,
            light_context, prompt_stack_json, runtime_uid, runtime_gid,
            parent_session_id, subagent_mode, subagent_platform_thread_id, subagent_expires_at_ms,
-           created_at, updated_at
+           created_at, updated_at, system_context_token
     FROM sessions WHERE id = @id
   `);
 
@@ -199,6 +206,7 @@ export function createSessionStore(db: Database.Database): SessionStore {
         subagent_mode: null,
         subagent_platform_thread_id: null,
         subagent_expires_at_ms: null,
+        system_context_token: generateSystemContextToken(),
       });
     },
 
@@ -219,6 +227,7 @@ export function createSessionStore(db: Database.Database): SessionStore {
             subagent_mode: string | null;
             subagent_platform_thread_id: string | null;
             subagent_expires_at_ms: number | null;
+            system_context_token: string | null;
           }
         | undefined;
       return r ? rowToSession(r) : undefined;
@@ -241,6 +250,8 @@ export function createSessionStore(db: Database.Database): SessionStore {
         patch.subagentExpiresAtMs === undefined
           ? cur.subagentExpiresAtMs ?? null
           : patch.subagentExpiresAtMs;
+      const nextToken =
+        patch.systemContextToken ?? cur.systemContextToken ?? null;
       const next = {
         agent_profile_id: patch.agentProfileId ?? cur.agentProfileId ?? null,
         workspace_path: cur.workspacePath,
@@ -261,6 +272,7 @@ export function createSessionStore(db: Database.Database): SessionStore {
         subagent_mode: nextSubMode,
         subagent_platform_thread_id: nextThread,
         subagent_expires_at_ms: nextExp,
+        system_context_token: nextToken,
       };
       db.prepare(
         `
@@ -278,6 +290,7 @@ export function createSessionStore(db: Database.Database): SessionStore {
           subagent_mode = @subagent_mode,
           subagent_platform_thread_id = @subagent_platform_thread_id,
           subagent_expires_at_ms = @subagent_expires_at_ms,
+          system_context_token = @system_context_token,
           updated_at = datetime('now')
         WHERE id = @id
       `,
@@ -293,7 +306,7 @@ export function createSessionStore(db: Database.Database): SessionStore {
       const cols = `id, agent_profile_id, workspace_path, status, context_segment_id, model_selection_json,
                  light_context, prompt_stack_json, runtime_uid, runtime_gid,
                  parent_session_id, subagent_mode, subagent_platform_thread_id, subagent_expires_at_ms,
-                 created_at, updated_at`;
+                 created_at, updated_at, system_context_token`;
 
       // --- Map sortBy to DB column ---
       const sortByMap: Record<string, string> = {

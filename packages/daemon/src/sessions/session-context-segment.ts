@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
+import { generateSystemContextToken } from "@shoggoth/shared";
 import { clearSessionToolAutoApproveForSession } from "../hitl/hitl-session-tool-auto-store";
 import type { PendingActionsStore } from "../hitl/pending-actions-store";
 import type { SessionStore } from "./session-store";
@@ -42,7 +43,7 @@ export function applySessionContextSegmentNew(input: {
   denyPendingForSession(input.pending, sessionId);
   clearSessionToolAutoApproveForSession(input.db, sessionId);
   const contextSegmentId = randomUUID();
-  input.sessions.update(sessionId, { contextSegmentId });
+  input.sessions.update(sessionId, { contextSegmentId, systemContextToken: generateSystemContextToken() });
   resetSegmentStats(input.db, sessionId);
   if (input.killSubagents) {
     const children = input.sessions
@@ -67,7 +68,7 @@ export function applySessionContextSegmentReset(input: {
   if (!previousContextSegmentId) throw new Error("session missing context_segment_id");
   denyPendingForSession(input.pending, sessionId);
   const contextSegmentId = randomUUID();
-  input.sessions.update(sessionId, { contextSegmentId });
+  input.sessions.update(sessionId, { contextSegmentId, systemContextToken: generateSystemContextToken() });
   resetSegmentStats(input.db, sessionId);
   return { previousContextSegmentId, contextSegmentId };
 }

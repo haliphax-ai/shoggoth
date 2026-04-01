@@ -99,21 +99,20 @@ export interface DiscordMessagingDeps {
 /** Route guard: reserved primary UUID in session URNs must match these resolved ids. */
 export interface DiscordMessagingRouteGuard {
   readonly resolvedAgentId: string;
-  readonly defaultSessionPlatform: string;
   /** When set (non-empty), default-primary UUID routes are validated against `agents.list` entries. */
-  readonly agentsList?: ReadonlyArray<{ readonly id: string; readonly defaultSessionPlatform?: string }>;
+  readonly agentsList?: ReadonlyArray<{ readonly id: string }>;
 }
 
 export interface StartDiscordMessagingOptions {
   readonly logger: DiscordBridgeLogger;
   readonly botToken: string | undefined;
-  /** JSON array: `{ channelId, sessionId, guildId? }[]` — each `sessionId` is an `agent:` session URN */
-  readonly routesJson: string | undefined;
+  /** Pre-parsed route list from per-agent config (`agents.list.<agentId>.platforms.discord.routes`). */
+  readonly routes: DiscordSessionRoute[] | undefined;
   readonly intents?: number;
   readonly allowBotMessages?: boolean;
   /**
    * When set, routes that use the reserved default-primary session UUID must match
-   * `resolvedAgentId` / `defaultSessionPlatform` (same contract as `bootstrapMainSession` in the daemon).
+   * `resolvedAgentId` and the discord platform (same contract as `bootstrapMainSession` in the daemon).
    */
   readonly routeGuard?: DiscordMessagingRouteGuard;
   /** Operator Discord user snowflake; marks inbound `extensions.platform.discord.isOwner` (metadata / approver context). */
@@ -166,7 +165,7 @@ export interface DiscordMessagingRuntime {
 
 /**
  * When a bot token (`DISCORD_BOT_TOKEN` env, or layered `discord.token` — env wins) and
- * `SHOGGOTH_DISCORD_ROUTES` are set, connects the Gateway, maps inbound messages to sessions,
+ * pre-parsed routes are provided, connects the Gateway, maps inbound messages to sessions,
  * delivers on the agent-to-agent bus, and wires REST outbound + streaming helpers.
  */
 export async function startDiscordMessagingIfConfigured(
@@ -175,35 +174,13 @@ export async function startDiscordMessagingIfConfigured(
   const token = opts.botToken?.trim();
   if (!token) return undefined;
 
-  const routesRaw = opts.routesJson?.trim();
-  if (!routesRaw) {
+  const routes = opts.routes;
+  if (!routes || routes.length === 0) {
     opts.logger.debug(
-      "discord messaging: token present but SHOGGOTH_DISCORD_ROUTES unset; bridge disabled",
+      "discord messaging: token present but no routes configured; bridge disabled",
     );
     return undefined;
   }
-
-  let routes: DiscordSessionRoute[];
-  let inputRowCount = 0;
-  try {
-    const parsed = parseDiscordRoutesWithMeta(routesRaw);
-    routes = parsed.routes;
-    inputRowCount = parsed.inputRowCount;
-  } catch (e) {
-    if (e instanceof DiscordRoutesConfigurationError) {
-      opts.logger.error("discord messaging: discord route configuration error", { err: String(e) });
-      throw e;
-    }
-    opts.logger.warn("discord messaging: invalid SHOGGOTH_DISCORD_ROUTES", { err: String(e) });
-    return undefined;
-  }
-  if (routes.length < inputRowCount) {
-    opts.logger.warn("discord messaging: dropped discord routes with invalid sessionId (expected agent session URN)", {
-      kept: routes.length,
-      inputRows: inputRowCount,
-    });
-  }
-  if (routes.length === 0) return undefined;
 
   /** Thread or thread-as-channel snowflake → subagent session id (runtime registrations). */
   const discordDynamicSessionByChannel = new Map<string, string>();
@@ -212,7 +189,7 @@ export async function startDiscordMessagingIfConfigured(
 
   if (opts.routeGuard) {
     try {
-      const plat = opts.routeGuard.defaultSessionPlatform;
+      const plat = "discord";
       const pol = getMessagingPlatformUrnPolicy(plat);
       if (pol) {
         pol.assertRoutesDefaultPrimaryUuidMatchesAgent(

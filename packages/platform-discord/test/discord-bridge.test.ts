@@ -19,7 +19,7 @@ function stubLogger(): DiscordBridgeLogger {
   };
 }
 
-const routeGuard = { resolvedAgentId: "main", defaultSessionPlatform: "discord" };
+const routeGuard = { resolvedAgentId: "main" };
 
 const u1 = "agent:test:discord:10000000-0000-4000-8000-000000000001";
 const u2 = "agent:test:discord:10000000-0000-4000-8000-000000000002";
@@ -106,7 +106,7 @@ describe("discord-bridge", () => {
     const r = await startDiscordMessagingIfConfigured({
       logger: stubLogger(),
       botToken: undefined,
-      routesJson: `[{"channelId":"c","sessionId":"${u1}"}]`,
+      routes: [{ channelId: "c", sessionId: u1 }],
     });
     assert.equal(r, undefined);
   });
@@ -115,33 +115,18 @@ describe("discord-bridge", () => {
     const r = await startDiscordMessagingIfConfigured({
       logger: stubLogger(),
       botToken: "x",
-      routesJson: undefined,
+      routes: undefined,
     });
     assert.equal(r, undefined);
   });
 
-  it("rejects routes when snowflake session leaf does not match channelId", async () => {
-    await assert.rejects(
-      () =>
-        startDiscordMessagingIfConfigured({
-          logger: stubLogger(),
-          botToken: "token",
-          routesJson: JSON.stringify([
-            {
-              guildId: "g",
-              channelId: "1487579255616573533",
-              sessionId: "agent:main:discord:1487579255616579999",
-            },
-          ]),
-          deps: {
-            connectGateway: async () => ({
-              stop: async () => {},
-              getBotUserId: () => undefined,
-            }),
-          },
-        }),
-      /must equal channelId/,
-    );
+  it("returns undefined with empty routes when token set", async () => {
+    const r = await startDiscordMessagingIfConfigured({
+      logger: stubLogger(),
+      botToken: "x",
+      routes: [],
+    });
+    assert.equal(r, undefined);
   });
 
   it("rejects routes when default-primary UUID does not match route guard agent id", async () => {
@@ -150,9 +135,9 @@ describe("discord-bridge", () => {
         startDiscordMessagingIfConfigured({
           logger: stubLogger(),
           botToken: "token",
-          routesJson: JSON.stringify([
+          routes: [
             { channelId: "ch", sessionId: "agent:wrong:discord:00000000-0000-4000-8000-000000000001" },
-          ]),
+          ],
           routeGuard,
           deps: {
             connectGateway: async () => ({
@@ -170,8 +155,8 @@ describe("discord-bridge", () => {
     const runtime = await startDiscordMessagingIfConfigured({
       logger: stubLogger(),
       botToken: "token",
-      routesJson: JSON.stringify([{ guildId: "g", channelId: "ch", sessionId: u1 }]),
-      routeGuard: { resolvedAgentId: "test", defaultSessionPlatform: "discord" },
+      routes: [{ guildId: "g", channelId: "ch", sessionId: u1 }],
+      routeGuard: { resolvedAgentId: "test" },
       deps: {
         connectGateway: async () => ({
           stop: async () => {

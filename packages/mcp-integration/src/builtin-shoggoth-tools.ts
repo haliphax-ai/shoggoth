@@ -1,4 +1,6 @@
 import type { McpSourceCatalog } from "./aggregate";
+import type { McpToolDescriptor } from "./mcp-tool";
+import { buildFanOutToolDescriptor } from "@shoggoth/fan-out";
 
 /**
  * Example built-in tools as MCP descriptors for aggregation with external servers (plan: expose read/write/exec as MCP).
@@ -384,6 +386,7 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
           "Request a configuration change. The fragment is validated against the config schema and written to the daemon's dynamic config directory.",
         inputSchema: configRequestArgs,
       },
+      buildFanOutToolDescriptor() as McpToolDescriptor,
     ],
   };
 }

@@ -1,4 +1,4 @@
-import assert from "node:assert";
+import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { defaultConfig, SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID } from "@shoggoth/shared";
 import { resolveSessionTargetFromCliArg } from "../../src/control/resolve-session-cli-target";
@@ -7,14 +7,29 @@ import { registerBuiltInMessagingPlatforms } from "@shoggoth/platform-discord";
 registerBuiltInMessagingPlatforms();
 
 describe("resolveSessionTargetFromCliArg", () => {
-  const cfg = { ...defaultConfig("/tmp/cfg"), runtime: { defaultSessionPlatform: "discord" } } as ReturnType<typeof defaultConfig>;
+  const cfg = {
+    ...defaultConfig("/tmp/cfg"),
+    agents: {
+      list: {
+        myagent: {
+          platforms: { discord: { routes: [] } },
+        },
+        a1: {
+          platforms: { discord: { routes: [] } },
+        },
+        dev: {
+          platforms: { discord: { routes: [] } },
+        },
+      },
+    },
+  } as ReturnType<typeof defaultConfig>;
 
   it("returns a full session URN unchanged", () => {
     const urn = "agent:dev:discord:1111111111111111111";
     assert.equal(resolveSessionTargetFromCliArg(urn, cfg), urn);
   });
 
-  it("resolves agent id to default-primary UUID session on discord", () => {
+  it("resolves agent id to default-primary UUID session using agent platform bindings", () => {
     const prev = process.env.SHOGGOTH_PRIMARY_CHANNEL_ID;
     const prevRoutes = process.env.SHOGGOTH_DISCORD_ROUTES;
     try {
@@ -49,4 +64,16 @@ describe("resolveSessionTargetFromCliArg", () => {
     assert.throws(() => resolveSessionTargetFromCliArg("", cfg), /non-empty/);
     assert.throws(() => resolveSessionTargetFromCliArg("bad:id", cfg), /not a valid session URN/);
   });
+
+  it("throws when agent has no platform bindings", () => {
+    const noPlatCfg = {
+      ...defaultConfig("/tmp/cfg"),
+      agents: { list: { lonely: {} } },
+    } as ReturnType<typeof defaultConfig>;
+    assert.throws(
+      () => resolveSessionTargetFromCliArg("lonely", noPlatCfg),
+      /no platform bindings configured for agent "lonely"/,
+    );
+  });
+
 });

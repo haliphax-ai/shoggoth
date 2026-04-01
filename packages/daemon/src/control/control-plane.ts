@@ -34,7 +34,6 @@ import type { ShutdownCoordinator } from "../shutdown";
 import { createAcpxProcessSupervisor, type AcpxSpawnFn } from "../acpx/acpx-process-supervisor";
 import { createSqliteAcpxBindingStore } from "../acpx/sqlite-acpx-bindings";
 import {
-  resolveDefaultSessionPlatform,
   resolveShoggothAgentId,
 } from "../config/effective-runtime";
 import { createSessionManager } from "../sessions/session-manager";
@@ -390,7 +389,7 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
       agentTokens: agentStore,
       workspacesRoot: config.workspacesRoot,
       agentId: resolveShoggothAgentId(config),
-      defaultSessionPlatform: resolveDefaultSessionPlatform(config),
+      agentsConfig: config.agents,
     });
     acpxSupervisor = createAcpxProcessSupervisor({
       logger: logger.child({ subsystem: "acpx" }),

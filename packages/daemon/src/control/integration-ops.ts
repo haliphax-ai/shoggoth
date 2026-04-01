@@ -829,6 +829,11 @@ export async function handleIntegrationControlOp(
             respond_to: respondTo,
             internal: internalDelivery,
           },
+          systemContext: {
+            kind: "subagent.task",
+            summary: "You are a one-shot subagent. Complete the following task and return the result.",
+            data: { parent_session_id: parentSessionId, respond_to: respondTo, internal: internalDelivery },
+          },
           delivery: { kind: "internal" },
         });
         terminatePersistentSubagentSession(sessionManager, childId);
@@ -913,6 +918,16 @@ export async function handleIntegrationControlOp(
           platform_thread_id: platformThreadId ?? null,
           respond_to: respondTo,
           internal: internalDelivery,
+        },
+        systemContext: {
+          kind: "subagent.task",
+          summary: "You are a persistent subagent session. Complete the following task.",
+          data: {
+            parent_session_id: parentSessionId,
+            respond_to: respondTo,
+            platform_thread_id: platformThreadId ?? null,
+            internal: internalDelivery,
+          },
         },
         delivery,
       });
@@ -1360,10 +1375,16 @@ export async function handleIntegrationControlOp(
               replyToMessageId,
             } as const;
           })();
+      const senderSessionId = principal.kind === "agent" ? principal.sessionId : `operator:${principal.operatorId}`;
       const turn = await ext.runSessionModelTurn({
         sessionId,
         userContent: message,
         userMetadata: { session_send: true },
+        systemContext: {
+          kind: "session.message",
+          summary: `Message from session ${senderSessionId}.`,
+          data: { sender_session_id: senderSessionId },
+        },
         delivery,
       });
       ctx.recordIntegrationAudit({
@@ -1435,10 +1456,16 @@ export async function handleIntegrationControlOp(
                 replyToMessageId,
               } as const;
             })();
+      const senderInfo = principal.kind === "agent" ? principal.sessionId : `operator:${principal.operatorId}`;
       const turn = await ext.runSessionModelTurn({
         sessionId,
         userContent: prompt,
         userMetadata: { session_steer: true },
+        systemContext: {
+          kind: "session.steer",
+          summary: "Operator steering directive. Adjust your behavior accordingly.",
+          data: { steered_by: senderInfo },
+        },
         delivery,
       });
       ctx.recordIntegrationAudit({

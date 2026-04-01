@@ -1,4 +1,4 @@
-import { resolvePlatformConfig, type ShoggothConfig } from "@shoggoth/shared";
+import { resolveAgentDefaultPlatform, resolvePlatformConfig, type ShoggothConfig } from "@shoggoth/shared";
 
 function envInt(key: string): number | undefined {
   const v = process.env[key];
@@ -50,13 +50,6 @@ export function resolveShoggothAgentId(cfg: ShoggothConfig): string {
   const e = process.env.SHOGGOTH_AGENT_ID?.trim();
   if (e) return e;
   return cfg.runtime?.agentId?.trim() || "main";
-}
-
-/** Env `SHOGGOTH_DEFAULT_SESSION_PLATFORM` wins; else `runtime.defaultSessionPlatform`. */
-export function resolveDefaultSessionPlatform(cfg: ShoggothConfig): string | undefined {
-  const e = process.env.SHOGGOTH_DEFAULT_SESSION_PLATFORM?.trim();
-  if (e) return e;
-  return cfg.runtime?.defaultSessionPlatform?.trim() || undefined;
 }
 
 /** Env `SHOGGOTH_PLATFORM_OWNER_USER_ID` wins; else layered platform `ownerUserId`. */
@@ -116,7 +109,8 @@ export function resolveEmbeddingsHealthProbeApiKey(cfg: ShoggothConfig): string 
  */
 export function mergeOrchestratorEnv(cfg: ShoggothConfig, override?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const base: NodeJS.ProcessEnv = { ...process.env, ...override };
-  const platform = resolveDefaultSessionPlatform(cfg);
+  const agentId = resolveShoggothAgentId(cfg);
+  const platform = resolveAgentDefaultPlatform(cfg, agentId);
   const d = platform ? resolvePlatformConfig(cfg, platform) : undefined;
   const r = cfg.runtime;
   const setIfEmpty = (key: string, val: string | undefined) => {
@@ -138,7 +132,6 @@ export function mergeOrchestratorEnv(cfg: ShoggothConfig, override?: NodeJS.Proc
   setIfEmpty("SHOGGOTH_PLATFORM_OWNER_USER_ID", d?.ownerUserId as string | undefined);
   if (r?.mcpLogServerMessages === true) setIfEmpty("SHOGGOTH_MCP_LOG_SERVER_MESSAGES", "1");
   setIfEmpty("SHOGGOTH_AGENT_ID", r?.agentId);
-  setIfEmpty("SHOGGOTH_DEFAULT_SESSION_PLATFORM", r?.defaultSessionPlatform);
   const memEmb = cfg.memory?.embeddings;
   setIfEmpty("SHOGGOTH_MEMORY_OPENAI_BASE_URL", memEmb?.openaiBaseUrl);
   return base;

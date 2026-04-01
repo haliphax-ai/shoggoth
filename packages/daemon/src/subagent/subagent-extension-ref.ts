@@ -1,5 +1,6 @@
 import type { SessionModelTurnDelivery } from "../messaging/session-model-turn-delivery";
 import type { SessionAgentTurnResult } from "../sessions/session-agent-turn";
+import type { SystemContext } from "@shoggoth/shared";
 
 /** Why a persistent subagent session is being torn down (for optional thread status posts). */
 export type PersistentSubagentSessionEndReason = "ttl_expired" | "killed";
@@ -12,6 +13,7 @@ export type SubagentRuntimeExtension = {
     readonly sessionId: string;
     readonly userContent: string;
     readonly userMetadata?: Record<string, unknown>;
+    readonly systemContext?: SystemContext;
     readonly delivery: SessionModelTurnDelivery;
   }) => Promise<SessionAgentTurnResult>;
   readonly subscribeSubagentSession: (sessionId: string) => () => void;

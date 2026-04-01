@@ -1,4 +1,4 @@
-import assert from "node:assert";
+import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,13 +6,80 @@ import Database from "better-sqlite3";
 import { describe, it } from "node:test";
 import { SHOGGOTH_AGENT_TOKEN_ENV } from "@shoggoth/authn";
 import { formatAgentSessionUrn, parseAgentSessionUrn } from "@shoggoth/shared";
+import type { ShoggothAgentsConfig } from "@shoggoth/shared";
 import { migrate, defaultMigrationsDir } from "../../src/db/migrate";
 import { createSqliteAgentTokenStore } from "../../src/auth/sqlite-agent-tokens";
 import { createSessionStore } from "../../src/sessions/session-store";
 import { createSessionManager } from "../../src/sessions/session-manager";
 
 describe("createSessionManager", () => {
-  it("spawn mints URN, workspace under workspacesRoot/agentId, credential persists", () => {
+  it("spawn resolves platform from agentsConfig when no explicit platform given", () => {
+    const db = new Database(":memory:");
+    migrate(db, defaultMigrationsDir());
+    const sessions = createSessionStore(db);
+    const agentTokens = createSqliteAgentTokenStore(db);
+    const workspacesRoot = mkdtempSync(join(tmpdir(), "shoggoth-ws-"));
+    const agentsConfig: ShoggothAgentsConfig = {
+      list: {
+        pytest: {
+          platforms: {
+            discord: { routes: [] },
+          },
+        },
+      },
+    };
+    const mgr = createSessionManager({
+      db,
+      sessions,
+      agentTokens,
+      workspacesRoot,
+      agentId: "pytest",
+      agentsConfig,
+      mintToken: () => "fixed-test-token",
+    });
+    const out = mgr.spawn({});
+    assert.equal(out.agentTokenEnvName, SHOGGOTH_AGENT_TOKEN_ENV);
+    assert.equal(out.agentToken, "fixed-test-token");
+    assert.ok(parseAgentSessionUrn(out.sessionId));
+    // Session URN should contain "discord" as the platform segment
+    assert.ok(out.sessionId.includes(":discord:"), `expected discord in URN: ${out.sessionId}`);
+    assert.equal(agentTokens.validate("fixed-test-token", out.sessionId), true);
+    const row = sessions.getById(out.sessionId);
+    assert.ok(row);
+    assert.equal(row!.workspacePath, join(workspacesRoot, "pytest"));
+    mgr.kill(out.sessionId);
+    assert.equal(agentTokens.validate("fixed-test-token", out.sessionId), false);
+  });
+
+  it("spawn with explicit platform uses it instead of agentsConfig", () => {
+    const db = new Database(":memory:");
+    migrate(db, defaultMigrationsDir());
+    const sessions = createSessionStore(db);
+    const agentTokens = createSqliteAgentTokenStore(db);
+    const workspacesRoot = mkdtempSync(join(tmpdir(), "shoggoth-ws-"));
+    const agentsConfig: ShoggothAgentsConfig = {
+      list: {
+        myagent: {
+          platforms: {
+            discord: { routes: [] },
+          },
+        },
+      },
+    };
+    const mgr = createSessionManager({
+      db,
+      sessions,
+      agentTokens,
+      workspacesRoot,
+      agentId: "myagent",
+      agentsConfig,
+      mintToken: () => "tok",
+    });
+    const out = mgr.spawn({ platform: "control" });
+    assert.ok(out.sessionId.includes(":control:"), `expected control in URN: ${out.sessionId}`);
+  });
+
+  it("spawn throws ERR_NO_PLATFORM when no platform resolvable from agentsConfig", () => {
     const db = new Database(":memory:");
     migrate(db, defaultMigrationsDir());
     const sessions = createSessionStore(db);
@@ -23,20 +90,14 @@ describe("createSessionManager", () => {
       sessions,
       agentTokens,
       workspacesRoot,
-      agentId: "pytest",
-      defaultSessionPlatform: "discord",
-      mintToken: () => "fixed-test-token",
+      agentId: "noplat",
+      agentsConfig: { list: { noplat: {} } },
+      mintToken: () => "tok",
     });
-    const out = mgr.spawn({});
-    assert.strictEqual(out.agentTokenEnvName, SHOGGOTH_AGENT_TOKEN_ENV);
-    assert.strictEqual(out.agentToken, "fixed-test-token");
-    assert.ok(parseAgentSessionUrn(out.sessionId));
-    assert.strictEqual(agentTokens.validate("fixed-test-token", out.sessionId), true);
-    const row = sessions.getById(out.sessionId);
-    assert.ok(row);
-    assert.strictEqual(row!.workspacePath, join(workspacesRoot, "pytest"));
-    mgr.kill(out.sessionId);
-    assert.strictEqual(agentTokens.validate("fixed-test-token", out.sessionId), false);
+    assert.throws(
+      () => mgr.spawn({}),
+      (err: any) => err.code === "ERR_NO_PLATFORM" && /platform bindings/.test(err.message),
+    );
   });
 
   it("spawn with parentSessionId mints subagent URN and reuses parent agent workspace", () => {
@@ -63,9 +124,39 @@ describe("createSessionManager", () => {
     const out = mgr.spawn({ parentSessionId: parent });
     const parsed = parseAgentSessionUrn(out.sessionId);
     assert.ok(parsed);
-    assert.strictEqual(parsed!.uuidChain.length, 2);
+    assert.equal(parsed!.uuidChain.length, 2);
     const row = sessions.getById(out.sessionId);
     assert.ok(row);
-    assert.strictEqual(row!.workspacePath, join(workspacesRoot, "parent"));
+    assert.equal(row!.workspacePath, join(workspacesRoot, "parent"));
+  });
+
+  it("spawn resolves platform for a different agentId from agentsConfig", () => {
+    const db = new Database(":memory:");
+    migrate(db, defaultMigrationsDir());
+    const sessions = createSessionStore(db);
+    const agentTokens = createSqliteAgentTokenStore(db);
+    const workspacesRoot = mkdtempSync(join(tmpdir(), "shoggoth-ws-"));
+    const agentsConfig: ShoggothAgentsConfig = {
+      list: {
+        main: {
+          platforms: { discord: { routes: [] } },
+        },
+        secondary: {
+          platforms: { slack: { routes: [] } },
+        },
+      },
+    };
+    const mgr = createSessionManager({
+      db,
+      sessions,
+      agentTokens,
+      workspacesRoot,
+      agentId: "main",
+      agentsConfig,
+      mintToken: () => "tok",
+    });
+    // Spawn for a different agent — should resolve platform from that agent's bindings
+    const out = mgr.spawn({ agentId: "secondary" });
+    assert.ok(out.sessionId.includes(":slack:"), `expected slack in URN: ${out.sessionId}`);
   });
 });

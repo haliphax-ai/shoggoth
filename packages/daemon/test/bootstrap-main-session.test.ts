@@ -49,7 +49,6 @@ function makeConfig(overrides: Partial<ShoggothConfig> = {}): ShoggothConfig {
     plugins: [],
     mcp: { servers: [], poolScope: "global" },
     platforms: {},
-    runtime: { defaultSessionPlatform: "discord" },
     agents: {
       list: {
         main: {
@@ -153,6 +152,49 @@ describe("bootstrapMainSession", () => {
 
       const session = store.getById("agent:main:discord:1234567890123456789");
       assert.ok(session, "should still create the session");
+
+      db.close();
+    } finally {
+      teardown();
+    }
+  });
+
+  it("derives platform from agent bindings", () => {
+    setup();
+    try {
+      const db = new Database(":memory:");
+      migrate(db, defaultMigrationsDir());
+      const stub = stubLogger();
+
+      bootstrapMainSession({ db, config: makeConfig(), logger: stub.logger as any });
+
+      const store = createSessionStore(db);
+      // Platform is derived from agent bindings (discord)
+      const session = store.getById("agent:main:discord:1234567890123456789");
+      assert.ok(session, "should derive platform from agent bindings");
+
+      db.close();
+    } finally {
+      teardown();
+    }
+  });
+
+  it("throws when agent has no platform bindings", () => {
+    setup();
+    try {
+      const db = new Database(":memory:");
+      migrate(db, defaultMigrationsDir());
+      const stub = stubLogger();
+
+      const cfg = makeConfig({
+        agents: { list: { main: {} } },
+        runtime: undefined,
+      });
+
+      assert.throws(
+        () => bootstrapMainSession({ db, config: cfg, logger: stub.logger as any }),
+        /No platform bindings configured for agent "main"/,
+      );
 
       db.close();
     } finally {

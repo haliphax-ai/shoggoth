@@ -12,8 +12,7 @@ import {
   resolveDiscordAllowBotMessages,
   resolveDiscordIntents,
   resolveDiscordOwnerUserId,
-  resolveDefaultSessionPlatform,
-  resolveEffectiveDiscordRoutesJson,
+  resolveEffectiveDiscordRoutes,
   resolveShoggothAgentId,
 } from "./config";
 import { registerDiscordSlashCommands } from "./slash-commands";
@@ -50,17 +49,15 @@ export async function startDaemonDiscordMessaging(
   const runtime = await startDiscordMessagingIfConfigured({
     logger: opts.logger,
     botToken: opts.botToken,
-    routesJson: resolveEffectiveDiscordRoutesJson(opts.config),
+    routes: resolveEffectiveDiscordRoutes(opts.config),
     intents: resolveDiscordIntents(opts.config),
     allowBotMessages: resolveDiscordAllowBotMessages(opts.config),
     ownerUserId: resolveDiscordOwnerUserId(opts.config),
     routeGuard: {
       resolvedAgentId: resolveShoggothAgentId(opts.config),
-      defaultSessionPlatform: resolveDefaultSessionPlatform(opts.config),
       agentsList: opts.config.agents?.list
-        ? Object.entries(opts.config.agents.list).map(([id, a]) => ({
+        ? Object.entries(opts.config.agents.list).map(([id]) => ({
             id: id.trim(),
-            ...(a.defaultSessionPlatform ? { defaultSessionPlatform: a.defaultSessionPlatform } : {}),
           }))
         : undefined,
     },

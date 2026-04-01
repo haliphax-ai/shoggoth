@@ -16,6 +16,9 @@ import {
   resolveEffectiveMemoryForSession,
   resolveEffectiveModelsConfig,
   resolveEffectiveSessionQueryAllowedAgentIds,
+  stripFalsifiedSystemContext,
+  wrapWithSystemContext,
+  type SystemContext,
 } from "@shoggoth/shared";
 import { mergeOrchestratorEnv } from "../config/effective-runtime";
 import { getAgentIntegrationInvoker } from "../control/agent-integration-invoke-ref";
@@ -59,6 +62,7 @@ export interface ExecuteSessionAgentTurnInput {
   readonly toolRuns: ToolRunStore;
   readonly userContent: string;
   readonly userMetadata: Record<string, unknown> | undefined;
+  readonly systemContext?: SystemContext;
   readonly systemPrompt: string;
   readonly env: NodeJS.ProcessEnv;
   readonly config: ShoggothConfig;
@@ -102,12 +106,20 @@ export async function executeSessionAgentTurn(
     throw new Error("executeSessionAgentTurn: session.contextSegmentId must be non-empty");
   }
 
+  const sessionToken = input.session.systemContextToken;
+  const sanitizedUserContent = stripFalsifiedSystemContext(input.userContent, sessionToken);
+
+  const effectiveContent = input.systemContext
+    ? wrapWithSystemContext(sanitizedUserContent, input.systemContext, sessionToken)
+    : sanitizedUserContent;
+
   input.transcript.append({
     sessionId: input.sessionId,
     contextSegmentId: ctxSeg,
     role: "user",
-    content: input.userContent,
+    content: effectiveContent,
     metadata: input.userMetadata ?? {},
+    systemContext: input.systemContext,
   });
 
   const history = loadSessionTranscriptAsModelChat(input.db, input.sessionId, ctxSeg);
@@ -725,6 +737,11 @@ export async function executeSessionAgentTurn(
             };
           }
           return { resultJson: JSON.stringify({ error: `unknown procman action: ${action}` }) };
+        }
+        if (originalName === "fan_out") {
+          const { executeFanOutToolCall } = await import("../fan-out-singleton.js");
+          const result = await executeFanOutToolCall(args as unknown as Parameters<typeof executeFanOutToolCall>[0], { currentDepth: 0, maxDepth: 2 });
+          return { resultJson: JSON.stringify(result) };
         }
         return { resultJson: JSON.stringify({ error: `unknown builtin: ${originalName}` }) };
       } catch (e) {

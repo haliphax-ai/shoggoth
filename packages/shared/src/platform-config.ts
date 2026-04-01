@@ -49,3 +49,14 @@ export function resolveAgentPlatformConfig(
   if (fromPlatforms) return fromPlatforms;
   return undefined;
 }
+
+/**
+ * Derive the default platform for an agent from its `agents.list.<agentId>.platforms` bindings.
+ * Returns the first configured platform key, or `undefined` when no bindings exist.
+ */
+export function resolveAgentDefaultPlatform(cfg: ShoggothConfig, agentId: string): string | undefined {
+  const agent = cfg.agents?.list?.[agentId];
+  if (!agent?.platforms) return undefined;
+  const keys = Object.keys(agent.platforms);
+  return keys.length > 0 ? keys[0] : undefined;
+}

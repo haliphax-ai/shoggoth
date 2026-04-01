@@ -442,15 +442,6 @@ export const shoggothRuntimeConfigSchema = z
       .min(1)
       .refine((s) => !s.includes(":"), "must not contain ':'")
       .optional(),
-    /**
-     * Default platform segment for auto-minted session URNs (e.g. `discord`, `control`).
-     * Env override: `SHOGGOTH_DEFAULT_SESSION_PLATFORM`.
-     */
-    defaultSessionPlatform: z
-      .string()
-      .min(1)
-      .refine((s) => !s.includes(":"), "must not contain ':'")
-      .optional(),
     drainTimeoutMs: z.number().int().positive().optional(),
     bootStaleClaimMs: z.number().int().nonnegative().optional(),
     heartbeatIntervalMs: z.number().int().positive().optional(),
@@ -539,15 +530,6 @@ export const shoggothAgentEntrySchema = z
     displayName: z.string().min(1).optional(),
     /** Overrides default 🦑 in the identity line before `displayName`. */
     emoji: z.string().min(1).optional(),
-    /**
-     * Default messaging `platform` segment for this agent when validating default-primary platform routes.
-     * Falls back to global `runtime.defaultSessionPlatform` when unset.
-     */
-    defaultSessionPlatform: z
-      .string()
-      .min(1)
-      .refine((s) => !s.includes(":"), "must not contain ':'")
-      .optional(),
     models: shoggothAgentModelsOverrideSchema.optional(),
     /** Per-agent platform overrides — each key is a platform id. */
     platforms: z.record(z.string(), z.object({

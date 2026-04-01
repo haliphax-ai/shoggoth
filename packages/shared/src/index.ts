@@ -1,4 +1,11 @@
 export { loadLayeredConfig } from "./config";
+export {
+  generateSystemContextToken,
+  renderSystemContextEnvelope,
+  stripFalsifiedSystemContext,
+  wrapWithSystemContext,
+  type SystemContext,
+} from "./system-context";
 export { deepMerge } from "./merge";
 export { LAYOUT, OPERATOR_GLOBAL_INSTRUCTIONS_BASENAME } from "./paths";
 export {
@@ -73,6 +80,7 @@ export {
 export {
   resolvePlatformConfig,
   isPlatformEnabled,
+  resolveAgentDefaultPlatform,
   resolveAgentPlatformConfig,
   registerPlatformConfigValidator,
   validatePlatformExtensions,

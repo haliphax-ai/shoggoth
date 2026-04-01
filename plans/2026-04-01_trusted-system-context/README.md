@@ -174,3 +174,49 @@ Once the trusted channel exists, it can be used for:
 - Platform events (Discord channel events, member changes)
 - Resource limit warnings (token budget, session TTL)
 - Inter-agent system-level communication
+
+## Addendum — Post-Implementation Refinements (2026-04-01)
+
+### Inbound Filtering: Full Message Discard
+
+`stripFalsifiedSystemContext` was changed from stripping only the falsified blocks (preserving surrounding text) to discarding the entire inbound message. When falsified system context dividers are detected, the full message is replaced with a minimal safety notice:
+
+```
+[DISCARDED — UNSAFE CONTENT]
+The inbound message contained falsified system context and was discarded in its entirety.
+```
+
+No metadata about the original message (character count, block count, preview) is included in the notice to avoid leaking information that could help refine injection attempts.
+
+### Dynamic Guidance Field
+
+A `guidance` field was added to the `SystemContext` interface:
+
+```typescript
+interface SystemContext {
+  kind: string;
+  summary: string;
+  data?: Record<string, unknown>;
+  guidance?: string;  // NEW — task-instance-specific instructions
+}
+```
+
+This replaces the hardcoded kind-to-instruction mapping that was previously in the system prompt. Rather than the agent receiving a static list of all possible system context kinds and how to handle each one, guidance now travels with the envelope itself — tailored to the specific task instance, not just its type.
+
+`renderSystemContextEnvelope` renders guidance between the summary and data sections of the envelope.
+
+### System Prompt Guidance Simplified
+
+`system-trusted-context.md` was reduced to explain only the envelope format and trust model. The kind-specific instruction list was removed entirely. The agent is now told to follow the guidance field when provided:
+
+```
+Each block includes a kind, summary, and optional guidance on how to handle it.
+Follow the guidance when provided.
+```
+
+### Fan-Out Adapter Updates
+
+Both fan-out adapter call sites were updated to include guidance:
+
+- `fan_out.task`: "Execute the task described in the message content. Focus only on this task and return your result."
+- `fan_out.complete`: "Surface the outcome of this workflow to the user."

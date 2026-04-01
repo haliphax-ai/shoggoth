@@ -14,7 +14,6 @@ const discordExtensionSchema = z.object({
   hitlNotifyDmUserId: z.string().optional(),
   hitlNotifyChannelId: z.string().optional(),
   hitlNotifyWebhookUrl: z.string().optional(),
-  routesJson: z.string().optional(),
 });
 
 registerPlatformConfigValidator("discord", (raw) => {
@@ -39,35 +38,8 @@ export function resolveShoggothAgentId(cfg: ShoggothConfig): string {
   return cfg.runtime?.agentId?.trim() || "main";
 }
 
-/** Env `SHOGGOTH_DEFAULT_SESSION_PLATFORM` wins; else `runtime.defaultSessionPlatform`; else `"discord"`. */
-export function resolveDefaultSessionPlatform(cfg: ShoggothConfig): string {
-  const e = process.env.SHOGGOTH_DEFAULT_SESSION_PLATFORM?.trim();
-  if (e) return e;
-  return cfg.runtime?.defaultSessionPlatform?.trim() || "discord";
-}
 
-export function resolveDiscordRoutesJson(cfg: ShoggothConfig): string | undefined {
-  const e = process.env.SHOGGOTH_DISCORD_ROUTES?.trim();
-  if (e) return e;
-  const dc = resolveDiscordPlatformConfig(cfg);
-  return (dc?.routesJson as string | undefined)?.trim() || undefined;
-}
-
-/**
- * Global `discord.routesJson` plus `agents.list.<agentId>.discord.routes` (validated; session URNs must belong
- * to that agent key). Same-channel rows from agent blocks override global rows.
- */
-export function resolveEffectiveDiscordRoutesJson(cfg: ShoggothConfig): string | undefined {
-  const globalRaw = resolveDiscordRoutesJson(cfg);
-  let globalRoutes: DiscordSessionRoute[] = [];
-  if (globalRaw?.trim()) {
-    try {
-      globalRoutes = parseDiscordRoutesWithMeta(globalRaw).routes;
-    } catch {
-      globalRoutes = [];
-    }
-  }
-
+export function resolveEffectiveDiscordRoutes(cfg: ShoggothConfig): DiscordSessionRoute[] {
   const fromAgents: DiscordSessionRoute[] = [];
   for (const [aidRaw, agent] of Object.entries(cfg.agents?.list ?? {})) {
     const agentDiscord = resolveAgentPlatformConfig(agent, "discord");
@@ -87,24 +59,7 @@ export function resolveEffectiveDiscordRoutesJson(cfg: ShoggothConfig): string |
     }
   }
 
-  if (globalRoutes.length === 0 && fromAgents.length === 0) return undefined;
-
-  const byChannel = new Map<string, DiscordSessionRoute>();
-  for (const r of globalRoutes) {
-    byChannel.set(r.channelId, r);
-  }
-  for (const r of fromAgents) {
-    byChannel.set(r.channelId, r);
-  }
-
-  const merged = [...byChannel.values()];
-  return JSON.stringify(
-    merged.map((r) => ({
-      channelId: r.channelId,
-      sessionId: r.sessionId,
-      ...(r.guildId ? { guildId: r.guildId } : {}),
-    })),
-  );
+  return fromAgents;
 }
 
 export function resolveDiscordIntents(cfg: ShoggothConfig): number | undefined {
@@ -160,7 +115,6 @@ export function mergeOrchestratorEnv(cfg: ShoggothConfig, override?: NodeJS.Proc
   setIfEmpty("SHOGGOTH_DISCORD_OWNER_USER_ID", d?.ownerUserId as string | undefined);
   if (r?.mcpLogServerMessages === true) setIfEmpty("SHOGGOTH_MCP_LOG_SERVER_MESSAGES", "1");
   setIfEmpty("SHOGGOTH_AGENT_ID", r?.agentId);
-  setIfEmpty("SHOGGOTH_DEFAULT_SESSION_PLATFORM", r?.defaultSessionPlatform);
   const memEmb = cfg.memory?.embeddings;
   setIfEmpty("SHOGGOTH_MEMORY_OPENAI_BASE_URL", memEmb?.openaiBaseUrl);
   return base;

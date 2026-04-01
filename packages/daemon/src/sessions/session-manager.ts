@@ -8,6 +8,7 @@ import {
   mintSubagentSessionUrnFromParent,
   parseAgentSessionUrn,
   resolveAgentWorkspacePath,
+  type ShoggothAgentsConfig,
 } from "@shoggoth/shared";
 import type Database from "better-sqlite3";
 import { ensureAgentWorkspaceLayout } from "../workspaces/agent-workspace-layout";
@@ -28,8 +29,8 @@ export interface SessionManagerOptions {
   readonly workspacesRoot: string;
   /** Default agent id (workspace `{workspacesRoot}/{agentId}`) for top-level spawns. */
   readonly agentId?: string;
-  /** Default platform segment when `spawn` omits `platform`. */
-  readonly defaultSessionPlatform?: string;
+  /** Agents config for resolving platform from agent bindings when `spawn` omits `platform`. */
+  readonly agentsConfig?: ShoggothAgentsConfig;
   /** Test hook */
   readonly mintToken?: () => string;
 }
@@ -69,11 +70,18 @@ export interface SessionManager {
 export function createSessionManager(options: SessionManagerOptions): SessionManager {
   const mintToken = options.mintToken ?? mintAgentCredentialRaw;
   const defaultAgentId = options.agentId ?? "main";
-  const defaultSessionPlatform = options.defaultSessionPlatform;
+  const agentsConfig = options.agentsConfig;
+
+  /** Resolve platform from agent's platform bindings in agentsConfig. */
+  function resolveAgentPlatform(agentId: string): string | undefined {
+    const agent = agentsConfig?.list?.[agentId];
+    if (!agent?.platforms) return undefined;
+    const keys = Object.keys(agent.platforms);
+    return keys.length > 0 ? keys[0] : undefined;
+  }
 
   return {
     spawn(input) {
-      const platform = input.platform ?? defaultSessionPlatform;
       let id: string;
       let dirAgentId: string;
       if (input.parentSessionId) {
@@ -88,10 +96,11 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
         dirAgentId = p.agentId;
       } else {
         const aid = input.agentId?.trim() || defaultAgentId;
+        const platform = input.platform ?? resolveAgentPlatform(aid);
         if (!platform) {
           throw new SessionManagerError(
             "ERR_NO_PLATFORM",
-            "no session platform specified and no default configured (set runtime.defaultSessionPlatform)",
+            `no session platform specified and no platform bindings configured for agent "${aid}" (add platforms under agents.list.${aid}.platforms)`,
           );
         }
         id = mintAgentSessionUrn(aid, platform);

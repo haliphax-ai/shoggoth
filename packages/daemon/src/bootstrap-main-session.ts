@@ -31,18 +31,29 @@ export function bootstrapMainSession(opts: BootstrapMainSessionOptions): void {
   const { db, config, logger } = opts;
 
   const agentId = config.runtime?.agentId?.trim() || "main";
-  const platform = config.runtime?.defaultSessionPlatform?.trim();
-  if (!platform) {
-    logger.warn("bootstrap.main_session.no_platform", {
-      detail: "runtime.defaultSessionPlatform is not configured; skipping main session bootstrap",
+
+  // Always derive platform from the agent's platform bindings.
+  const agentEntry = config.agents?.list?.[agentId];
+  const platformKeys = agentEntry?.platforms ? Object.keys(agentEntry.platforms) : [];
+  if (platformKeys.length === 0) {
+    throw new Error(
+      `No platform bindings configured for agent "${agentId}". ` +
+      `Add at least one platform under agents.list.${agentId}.platforms.`,
+    );
+  }
+  const platform = platformKeys[0];
+  if (platformKeys.length > 1) {
+    logger.info("bootstrap.main_session.platform_inferred", {
+      agentId,
+      platform,
+      available: platformKeys,
+      detail: `Inferred default platform "${platform}" from agent bindings (${platformKeys.length} available).`,
     });
-    return;
   }
   const wsRoot = config.workspacesRoot;
   const dir = resolveAgentWorkspacePath(wsRoot, agentId);
 
   // Resolve session id from the agent's first platform route.
-  const agentEntry = config.agents?.list?.[agentId];
   const agentPlatform = agentEntry
     ? resolveAgentPlatformConfig(agentEntry, platform)
     : undefined;

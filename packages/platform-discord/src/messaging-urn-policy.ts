@@ -56,7 +56,7 @@ const DEFAULT_PRIMARY_UUID_LOWER = SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID.toLower
 
 export type DiscordDefaultPrimaryMultiAgentGuard = {
   /** Declared agents (from `agents.list`); when non-empty, default-primary UUID routes are validated per entry. */
-  readonly agentsList?: ReadonlyArray<{ readonly id: string; readonly defaultSessionPlatform?: string }>;
+  readonly agentsList?: ReadonlyArray<{ readonly id: string }>;
 };
 
 /**
@@ -84,7 +84,7 @@ export function assertDiscordRoutesDefaultPrimaryUuidMatchesAgent(
       throw new Error(
         `discord route[${i}] sessionId uses reserved primary UUID (${SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID}) but ` +
           `agent:platform ${JSON.stringify(p.agentId)}:${JSON.stringify(p.platform)} do not match ` +
-          `SHOGGOTH_AGENT_ID / SHOGGOTH_DEFAULT_SESSION_PLATFORM (${JSON.stringify(aid0)}:${JSON.stringify(plat0)}). ` +
+          `resolved agent / platform (${JSON.stringify(aid0)}:${JSON.stringify(plat0)}). ` +
           `Expected ${JSON.stringify(expected)} or use a different session leaf in the URN.`,
       );
     }
@@ -98,12 +98,11 @@ export function assertDiscordRoutesDefaultPrimaryUuidMatchesAgent(
     if (p.uuidChain[0] !== DEFAULT_PRIMARY_UUID_LOWER) continue;
 
     const entry = list.find((a) => a.id === p.agentId);
-    const platformForAgent = entry?.defaultSessionPlatform?.trim() || plat0;
     if (entry) {
-      if (p.platform !== platformForAgent) {
+      if (p.platform !== plat0) {
         throw new Error(
           `discord route[${i}] sessionId uses reserved primary UUID but platform ${JSON.stringify(p.platform)} ` +
-            `does not match expected ${JSON.stringify(platformForAgent)} for agent ${JSON.stringify(p.agentId)}`,
+            `does not match expected ${JSON.stringify(plat0)} for agent ${JSON.stringify(p.agentId)}`,
         );
       }
       continue;
@@ -112,7 +111,7 @@ export function assertDiscordRoutesDefaultPrimaryUuidMatchesAgent(
     if (p.agentId === aid0 && p.platform === plat0) continue;
     throw new Error(
       `discord route[${i}] sessionId uses reserved primary UUID for agent ${JSON.stringify(p.agentId)} which is not listed in agents.list ` +
-        `(add it as a key under agents.list, or align the URN with SHOGGOTH_AGENT_ID / SHOGGOTH_DEFAULT_SESSION_PLATFORM ${JSON.stringify(aid0)}:${JSON.stringify(plat0)})`,
+        `(add it as a key under agents.list, or align the URN with resolved agent / platform ${JSON.stringify(aid0)}:${JSON.stringify(plat0)})`,
     );
   }
 }
@@ -133,12 +132,11 @@ export function parseFirstDiscordChannelIdFromRoutesJson(raw: string | undefined
 
 export interface DiscordBootstrapPrimaryOptions {
   readonly primaryChannelId?: string | undefined;
-  readonly routesJson?: string | undefined;
 }
 
 /**
  * Primary SQLite session id for bootstrap: Discord uses a channel snowflake in the URN when
- * `SHOGGOTH_PRIMARY_DISCORD_CHANNEL_ID` or the first routes entry `channelId` is a valid snowflake;
+ * `SHOGGOTH_PRIMARY_DISCORD_CHANNEL_ID` is a valid snowflake;
  * otherwise the shared reserved primary UUID.
  */
 export function resolveDiscordBootstrapPrimarySessionUrn(
@@ -146,8 +144,7 @@ export function resolveDiscordBootstrapPrimarySessionUrn(
   platform: string,
   options?: DiscordBootstrapPrimaryOptions,
 ): string {
-  const ch =
-    options?.primaryChannelId?.trim() || parseFirstDiscordChannelIdFromRoutesJson(options?.routesJson);
+  const ch = options?.primaryChannelId?.trim();
   if (ch && DISCORD_SNOWFLAKE_RE.test(ch)) {
     return formatAgentSessionUrn(agentId, platform, ch);
   }

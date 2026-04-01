@@ -11,6 +11,7 @@ import {
   formatAgentIdentityPrefix,
   parseAgentSessionUrn,
   type ShoggothConfig,
+  type SystemContext,
 } from "@shoggoth/shared";
 import {
   createHitlPendingResolutionStack,
@@ -129,6 +130,7 @@ export interface DiscordPlatformHandle {
     readonly sessionId: string;
     readonly userContent: string;
     readonly userMetadata?: Record<string, unknown>;
+    readonly systemContext?: SystemContext;
     readonly delivery: SessionModelTurnDelivery;
   }) => Promise<SessionAgentTurnResult>;
   readonly subscribeSubagentSession: (sessionId: string) => () => void;
@@ -476,6 +478,7 @@ export async function startDiscordPlatform(
     readonly sessionId: string;
     readonly userContent: string;
     readonly userMetadata?: Record<string, unknown>;
+    readonly systemContext?: SystemContext;
     readonly delivery: SessionModelTurnDelivery;
   }): Promise<SessionAgentTurnResult> {
     const sid = input.sessionId.trim();
@@ -521,6 +524,7 @@ export async function startDiscordPlatform(
         toolRuns,
         userContent: input.userContent,
         userMetadata,
+        systemContext: input.systemContext,
         systemPrompt: buildSessionSystemContext({
           workspacePath: sessionRow.workspacePath,
           config: opts.config,

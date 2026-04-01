@@ -2,6 +2,7 @@ import {
   DEFAULT_HITL_CONFIG,
   loadLayeredConfig,
   LAYOUT,
+  parseAgentSessionUrn,
   resolvePlatformConfig,
   VERSION,
 } from "@shoggoth/shared";
@@ -104,6 +105,20 @@ import {
   messageToolFinalizer,
   subagentToolStripFinalizer,
 } from "./sessions/session-mcp-tool-context";
+import { initFanOut } from "./fan-out-singleton";
+import {
+  createDaemonSpawnAdapter,
+  createDaemonPollAdapter,
+  createDaemonKillAdapter,
+  createDaemonMessageAdapter,
+  type CompletionMap,
+} from "./fan-out-adapters";
+import { createSessionManager } from "./sessions/session-manager";
+import { createSqliteAgentTokenStore } from "./auth/sqlite-agent-tokens";
+import {
+  resolveShoggothAgentId,
+} from "./config/effective-runtime";
+import { subagentRuntimeExtensionRef } from "./subagent/subagent-extension-ref";
 
 loadDaemonPrompts();
 loadDaemonNotices();
@@ -413,6 +428,114 @@ void (async () => {
   rt.shutdown.registerDrain("procman", async () => {
     await procman.stopAll();
   });
+
+  // --- Fan-out tool: init server, resume incomplete workflows, register shutdown ---
+  // Adapters use lazy refs because the Discord platform (and thus sessionManager,
+  // runSessionModelTurn, messageToolContextRef) are initialized later in this file.
+  const fanOutStateDir = resolve(config.stateDbPath, "..", "fan-out-state");
+  try {
+    const fanOutSessions = createSessionStore(db);
+    const fanOutSessionManager = createSessionManager({
+      db,
+      sessions: fanOutSessions,
+      agentTokens: createSqliteAgentTokenStore(db),
+      workspacesRoot: config.workspacesRoot,
+      agentId: resolveShoggothAgentId(config),
+      agentsConfig: config.agents,
+    });
+
+    const spawner = createDaemonSpawnAdapter({
+      sessionManager: fanOutSessionManager,
+      sessions: fanOutSessions,
+      runSessionModelTurn: (input) => {
+        const ext = subagentRuntimeExtensionRef.current;
+        if (!ext) throw new Error("subagent runtime not available (platform not started)");
+        return ext.runSessionModelTurn({
+          ...input,
+          delivery: { kind: "internal" },
+        });
+      },
+    });
+
+    const poller = createDaemonPollAdapter({
+      sessions: fanOutSessions,
+      completionMap: spawner.completionMap,
+    });
+
+    const killer = createDaemonKillAdapter({
+      sessionManager: fanOutSessionManager,
+      requestTurnAbort: (id) => requestSessionTurnAbort(id),
+    });
+
+    const fanOut = initFanOut({
+      stateDir: fanOutStateDir,
+      spawner,
+      poller,
+      notifier: {
+        async notify(workflowId, success, context) {
+          rt.logger.info("fan-out workflow completed", { workflowId, success, replyTo: context?.replyTo ?? null });
+          try {
+            const sessionId = context?.replyTo;
+            if (!sessionId) { rt.logger.warn("fan-out notify: no replyTo in context"); return; }
+
+            const ext = subagentRuntimeExtensionRef.current;
+            if (!ext) { rt.logger.warn("fan-out notify: subagent runtime not available"); return; }
+
+            const status = success ? "✅ completed successfully" : "❌ completed with failures";
+            const message = `**Fan-out workflow ${status}:** \`${workflowId}\``;
+
+            rt.logger.debug("fan-out notify: delivering to session", { sessionId });
+            const parsed = parseAgentSessionUrn(sessionId);
+            const delivery = (() => {
+              if (parsed?.platform === "discord") {
+                const ownerUserId = resolveDiscordOwnerUserId(configRef.current);
+                if (ownerUserId) {
+                  return { kind: "messaging_surface" as const, userId: ownerUserId };
+                }
+              }
+              return { kind: "internal" as const };
+            })();
+            rt.logger.debug("fan-out notify: resolved delivery", { sessionId, deliveryKind: delivery.kind });
+            await ext.runSessionModelTurn({
+              sessionId,
+              userContent: message,
+              userMetadata: { fan_out_notify: true, workflow_id: workflowId, success },
+              systemContext: {
+                kind: "fan_out.complete",
+                summary: `Fan-out workflow completed ${success ? "successfully" : "with failures"}.`,
+                guidance: "The user can already see task statuses, durations, total duration, and workflow completion in the automated status post. Surface any meaningful information beyond that, or simply acknowledge completion in your own voice.",
+                data: { workflow_id: workflowId, success },
+              },
+              delivery,
+            });
+            rt.logger.debug("fan-out notify: delivered");
+          } catch (e) {
+            rt.logger.warn("fan-out completion notification failed", { workflowId, err: String(e) });
+          }
+        },
+      },
+      killer,
+      createMessageAdapter: (sessionId: string) => createDaemonMessageAdapter({
+        getMessageContext: () => messageToolContextRef.current ?? undefined,
+        resolveChannelId: () => {
+          if (!discordMessaging?.resolveOutboundChannelIdForSession) return undefined;
+          return discordMessaging.resolveOutboundChannelIdForSession(sessionId);
+        },
+        sessionId,
+      }),
+    });
+
+    const resumed = await fanOut.server.resume();
+    if (resumed.length > 0) {
+      rt.logger.info("fan-out resumed incomplete workflows", { count: resumed.length, ids: resumed });
+    }
+
+    rt.shutdown.registerDrain("fan-out", async () => {
+      await fanOut.server.stopAll();
+    });
+  } catch (e) {
+    rt.logger.warn("fan-out server failed to initialize", { err: String(e) });
+  }
 
   const dm = discordMessaging;
   if (dm && hitlStack) {

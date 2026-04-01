@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import { createSqliteAgentTokenStore } from "../auth/sqlite-agent-tokens";
-import { resolveDefaultSessionPlatform, resolveShoggothAgentId } from "../config/effective-runtime";
+import { resolveShoggothAgentId } from "../config/effective-runtime";
 import type { Logger } from "../logging";
 import { createSessionManager } from "../sessions/session-manager";
 import { createSessionStore } from "../sessions/session-store";
@@ -32,7 +32,7 @@ export function reconcilePersistentSubagents(input: {
     agentTokens: createSqliteAgentTokenStore(input.db),
     workspacesRoot: input.config.workspacesRoot,
     agentId: resolveShoggothAgentId(input.config),
-    defaultSessionPlatform: resolveDefaultSessionPlatform(input.config),
+    agentsConfig: input.config.agents,
   });
 
   const candidates = sessions.list().filter(

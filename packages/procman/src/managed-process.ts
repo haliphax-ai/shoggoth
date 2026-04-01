@@ -423,6 +423,12 @@ export class ManagedProcess extends EventEmitter {
         }
 
         this._healthRetries++;
+        log("warn", "health probe failed, retrying", {
+          processId: this.spec.id,
+          kind: hc.kind,
+          attempt: this._healthRetries,
+          maxRetries,
+        });
         if (this._healthRetries >= maxRetries) {
           log("error", "health check retries exhausted", { processId: this.spec.id });
           this._setState("failed");
