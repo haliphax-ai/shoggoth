@@ -1,7 +1,7 @@
 import {
   invokeControlRequest,
   resolveSessionTargetFromCliArg,
-  SUBAGENT_DEFAULT_BOUND_LIFETIME_MS,
+  SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS,
 } from "@shoggoth/daemon/lib";
 import { loadLayeredConfig, LAYOUT, VERSION } from "@shoggoth/shared";
 
@@ -78,22 +78,22 @@ function printSubagentHelp(): void {
   console.log(`shoggoth ${VERSION}
 Usage:
   shoggoth subagent spawn [--model-options <json>] one_shot <parentUrn|agentId> <prompt...>
-  shoggoth subagent spawn [--model-options <json>] bound <parentUrn|agentId> <threadId> <prompt...>
+  shoggoth subagent spawn [--model-options <json>] persistent <parentUrn|agentId> [threadId] <prompt...>
 
-  one_shot   Internal one-shot child (operator).
-  bound      Thread-bound child: platform thread id for replies (e.g. Discord); operator.
+  one_shot      Internal one-shot child (operator).
+  persistent    Persistent child: optional platform thread id for replies; A2A-only when omitted; operator.
 
   Child inherits parent session model_selection by default; --model-options is a JSON object overlay.
 
-  Env: SHOGGOTH_SUBAGENT_LIFETIME_MS (bound only, default ${String(SUBAGENT_DEFAULT_BOUND_LIFETIME_MS)})`);
+  Env: SHOGGOTH_SUBAGENT_LIFETIME_MS (persistent only, default ${String(SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS)})`);
 }
 
 const SPAWN_USAGE =
   "usage: shoggoth subagent spawn [--model-options <json>] one_shot <parentUrn|agentId> <prompt...>\n" +
-  "       shoggoth subagent spawn [--model-options <json>] bound <parentUrn|agentId> <threadId> <prompt...>\n" +
+  "       shoggoth subagent spawn [--model-options <json>] persistent <parentUrn|agentId> [threadId] <prompt...>\n" +
   "       (see: shoggoth subagent --help)\n" +
-  "       env: optional SHOGGOTH_SUBAGENT_LIFETIME_MS (bound only, default " +
-  String(SUBAGENT_DEFAULT_BOUND_LIFETIME_MS) +
+  "       env: optional SHOGGOTH_SUBAGENT_LIFETIME_MS (persistent only, default " +
+  String(SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS) +
   ")";
 
 export async function runSubagentCli(argv: string[]): Promise<void> {
@@ -116,7 +116,7 @@ export async function runSubagentCli(argv: string[]): Promise<void> {
     }
     const mode = positional[0]?.trim();
     const parent = positional[1]?.trim();
-    if ((mode !== "one_shot" && mode !== "bound") || !parent) {
+    if ((mode !== "one_shot" && mode !== "persistent") || !parent) {
       console.error(SPAWN_USAGE);
       process.exitCode = 1;
       return;
@@ -136,11 +136,21 @@ export async function runSubagentCli(argv: string[]): Promise<void> {
       }
       payload = { parent_session_id: parentSessionId, prompt, mode: "one_shot" };
     } else {
-      const threadId = positional[2]?.trim();
-      const prompt = positional.slice(3).join(" ").trim();
-      if (!threadId || !prompt) {
+      // persistent mode: threadId is optional; if the next positional looks like a numeric platform id, treat it as threadId
+      const maybeThreadId = positional[2]?.trim();
+      let threadId: string | undefined;
+      let promptParts: string[];
+      // Heuristic: if it's all digits, it's a numeric platform thread id
+      if (maybeThreadId && /^\d+$/.test(maybeThreadId)) {
+        threadId = maybeThreadId;
+        promptParts = positional.slice(3);
+      } else {
+        promptParts = positional.slice(2);
+      }
+      const prompt = promptParts.join(" ").trim();
+      if (!prompt) {
         console.error(
-          "usage: shoggoth subagent spawn [--model-options <json>] bound <parentUrn|agentId> <threadId> <prompt...>",
+          "usage: shoggoth subagent spawn [--model-options <json>] persistent <parentUrn|agentId> [threadId] <prompt...>",
         );
         process.exitCode = 1;
         return;
@@ -150,9 +160,11 @@ export async function runSubagentCli(argv: string[]): Promise<void> {
       payload = {
         parent_session_id: parentSessionId,
         prompt,
-        mode: "bound_thread",
-        platform_thread_id: threadId,
+        mode: "persistent",
       };
+      if (threadId) {
+        payload.platform_thread_id = threadId;
+      }
       if (lifetimeMs !== undefined && Number.isFinite(lifetimeMs) && lifetimeMs > 0) {
         payload.lifetime_ms = lifetimeMs;
       }

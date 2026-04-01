@@ -4,6 +4,7 @@ const TIER_RANK: Record<HitlRiskTier, number> = {
   safe: 0,
   caution: 1,
   critical: 2,
+  never: 3,
 };
 
 /**
@@ -12,12 +13,12 @@ const TIER_RANK: Record<HitlRiskTier, number> = {
  */
 export function effectiveBypassUpTo(
   principalRoles: readonly string[],
-  roleBypassUpTo: Readonly<Record<string, HitlRiskTier>>,
+  agentBypassUpTo: Readonly<Record<string, HitlRiskTier>>,
 ): HitlRiskTier {
   let best: HitlRiskTier = "safe";
   let bestRank = TIER_RANK[best];
   for (const role of principalRoles) {
-    const t = roleBypassUpTo[role];
+    const t = agentBypassUpTo[role];
     if (t !== undefined && TIER_RANK[t] > bestRank) {
       best = t;
       bestRank = TIER_RANK[t];

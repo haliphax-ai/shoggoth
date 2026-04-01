@@ -21,8 +21,8 @@ export const REQUIRED_NOTICE_KEYS: readonly string[] = [
   "segment-ack-new",
   "segment-ack-reset",
   "segment-command-error",
-  "subagent-bound-ended-killed",
-  "subagent-bound-ended-ttl",
+  "subagent-persistent-ended-killed",
+  "subagent-persistent-ended-ttl",
   "hitl-queued-notice",
 ] as const;
 
@@ -53,7 +53,7 @@ function noticeText(key: string): string {
   return s;
 }
 
-/** User-facing copy (Discord, operator channels, etc.); same `{{name}}` rules as prompts. */
+/** User-facing copy (operator channels, etc.); same `{{name}}` rules as prompts. */
 export function daemonNotice(key: string, vars: Record<string, string> = {}): string {
   return fillPromptTemplate(noticeText(key), vars);
 }

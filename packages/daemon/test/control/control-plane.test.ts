@@ -48,7 +48,7 @@ function minimalConfig(socketPath: string): ShoggothConfig {
     hitl: {
       defaultApprovalTimeoutMs: 300_000,
       toolRisk: { read: "safe", write: "caution", exec: "critical" },
-      roleBypassUpTo: {},
+      agentBypassUpTo: {},
       agentToolAutoApprove: {},
     },
     memory: { paths: [], embeddings: { enabled: false } },
@@ -1511,7 +1511,7 @@ describe("control plane (unix socket + JSONL)", () => {
     db.close();
   });
 
-  it("session_steer allowed for agent on direct bound child", async () => {
+  it("session_steer allowed for agent on direct persistent child", async () => {
     if (process.platform !== "linux") return;
 
     const dir = await mkdtemp(join(tmpdir(), "shoggoth-steer-ag-"));
@@ -1525,7 +1525,7 @@ describe("control plane (unix socket + JSONL)", () => {
     const childId = formatAgentSessionUrn("st", "discord", randomUUID());
     sessions.create({ id: parentId, workspacePath: "/wp", status: "active" });
     sessions.create({ id: childId, workspacePath: "/wc", status: "active" });
-    sessions.update(childId, { parentSessionId: parentId, subagentMode: "bound" });
+    sessions.update(childId, { parentSessionId: parentId, subagentMode: "persistent" });
     tokens.register(parentId, "tok-steer-ag");
     setSubagentRuntimeExtension({
       runSessionModelTurn: async () => ({
@@ -1577,7 +1577,7 @@ describe("control plane (unix socket + JSONL)", () => {
     sessions.create({ id: callerId, workspacePath: "/w1", status: "active" });
     sessions.create({ id: otherParent, workspacePath: "/w2", status: "active" });
     sessions.create({ id: childId, workspacePath: "/w3", status: "active" });
-    sessions.update(childId, { parentSessionId: otherParent, subagentMode: "bound" });
+    sessions.update(childId, { parentSessionId: otherParent, subagentMode: "persistent" });
     tokens.register(callerId, "tok-steer-bad");
     setSubagentRuntimeExtension({
       runSessionModelTurn: async () => ({

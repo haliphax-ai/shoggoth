@@ -27,7 +27,7 @@ export interface ExtensionFlags {
   readonly threadCreate: boolean;
   /** Agent `message` tool: delete a thread channel. */
   readonly threadDelete: boolean;
-  /** Agent `message` tool: read message(s) via platform API (e.g. Discord GET message / channel messages). */
+  /** Agent `message` tool: read message(s) via platform API (e.g. platform GET message / channel messages). */
   readonly messageGet: boolean;
   /** Agent `message` tool: add/remove emoji reactions on messages. */
   readonly react: boolean;

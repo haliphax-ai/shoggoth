@@ -4,7 +4,7 @@
  *   that must pass {@link isValidSessionUrnTailSegment} (portable charset/length only).
  * - Subagent: `agent:<agentId>:<platform>:<parentLeaf>:<childLeaf>:…` (same rules per segment).
  *
- * **Platform bridges** (e.g. Discord) must validate their own tail shapes (snowflakes, UUIDs, etc.)
+ * **Platform bridges** must validate their own tail shapes (identifiers, UUIDs, etc.)
  * before trusting a route; core only enforces structure so new platforms can ship as plugins.
  *
  * `agentId` matches {@link assertValidAgentId} (no colons). `platform` is a short bridge name (e.g. `discord`).
@@ -24,8 +24,7 @@ export const SHOGGOTH_SESSION_UUID_RE =
 export const SHOGGOTH_SESSION_URN_TAIL_SEGMENT_RE = /^[A-Za-z0-9._-]{1,128}$/;
 
 /**
- * Reserved UUID for the default primary session when bootstrap has no platform-specific session key
- * (e.g. Discord channel snowflake from routes).
+ * Reserved UUID for the default primary session when bootstrap has no platform-specific session key.
  */
 export const SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID = "00000000-0000-4000-8000-000000000001";
 
@@ -150,7 +149,7 @@ export function mintAgentSessionUrn(agentId: string, platform: string): string {
 /** Primary session URN for bootstrap when no platform-specific key is supplied (daemon resolves via registered per-platform URN policy). */
 export function defaultPrimarySessionUrnForAgent(
   agentId: string,
-  platform: string = "discord",
+  platform: string,
 ): string {
   return formatAgentSessionUrn(agentId, platform, SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
 }

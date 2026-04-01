@@ -1,4 +1,5 @@
 export { loadLayeredConfig } from "./config";
+export { deepMerge } from "./merge";
 export { LAYOUT, OPERATOR_GLOBAL_INSTRUCTIONS_BASENAME } from "./paths";
 export {
   DEFAULT_HITL_CONFIG,
@@ -89,12 +90,12 @@ export {
   mergeSubagentSpawnAllowPatterns,
 } from "./subagent-spawn-allow-policy";
 export {
-  formatDiscordAgentIdentityPrefix,
+  formatAgentIdentityPrefix,
   resolveAgentIdFromSessionId,
   resolveEffectiveMemoryForSession,
   resolveEffectiveModelsConfig,
   resolveEffectiveSessionQueryAllowedAgentIds,
-  SHOGGOTH_DISCORD_AGENT_DEFAULT_EMOJI,
+  SHOGGOTH_AGENT_DEFAULT_EMOJI,
 } from "./effective-agent-for-session";
 export { redactToolArgsJson, redactJsonValue, redactDeep } from "./redact-json";
 export { VERSION } from "./version";

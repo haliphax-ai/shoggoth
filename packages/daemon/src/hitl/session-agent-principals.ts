@@ -2,7 +2,7 @@ import { parseAgentSessionUrn } from "@shoggoth/shared";
 
 /**
  * Principal role id for tool-loop HITL when the session id is not a normal agent session URN.
- * With no matching `hitl.roleBypassUpTo` entry, the effective bypass tier stays at baseline `safe`.
+ * With no matching `hitl.agentBypassUpTo` entry, the effective bypass tier stays at baseline `safe`.
  */
 export const SHOGGOTH_HITL_UNKNOWN_SESSION_AGENT = "agent:unknown";
 

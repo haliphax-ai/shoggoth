@@ -93,54 +93,6 @@ describe(
     }
   });
 
-  it("repairs pre-subagent sessions table when 0001 was applied before subagent columns existed", () => {
-    const legacy = join(dir, "legacy.db");
-    const db = openStateDb(legacy);
-    try {
-      db.exec(`
-        CREATE TABLE _schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));
-        INSERT INTO _schema_migrations (version, name) VALUES (1, 'initial');
-        CREATE TABLE sessions (
-          id TEXT PRIMARY KEY,
-          agent_profile_id TEXT,
-          model_selection_json TEXT,
-          workspace_path TEXT NOT NULL,
-          runtime_uid INTEGER,
-          runtime_gid INTEGER,
-          status TEXT NOT NULL,
-          light_context INTEGER NOT NULL DEFAULT 0,
-          prompt_stack_json TEXT NOT NULL DEFAULT '[]',
-          context_segment_id TEXT NOT NULL,
-          created_at TEXT NOT NULL DEFAULT (datetime('now')),
-          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        CREATE TABLE transcript_messages (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
-          context_segment_id TEXT NOT NULL,
-          seq INTEGER NOT NULL,
-          role TEXT NOT NULL,
-          content TEXT,
-          tool_call_id TEXT,
-          metadata_json TEXT,
-          created_at TEXT NOT NULL DEFAULT (datetime('now')),
-          UNIQUE (session_id, seq)
-        );
-      `);
-      migrate(db, defaultMigrationsDir());
-      const cols = db
-        .prepare("SELECT name FROM pragma_table_info('sessions') ORDER BY name")
-        .all() as { name: string }[];
-      const names = new Set(cols.map((c) => c.name));
-      assert.ok(names.has("parent_session_id"));
-      assert.ok(names.has("subagent_mode"));
-      assert.ok(names.has("subagent_platform_thread_id"));
-      assert.ok(names.has("subagent_expires_at_ms"));
-    } finally {
-      db.close();
-    }
-  });
-
   it("rejects duplicate migration versions in the same directory", () => {
     const badDir = join(dir, "bad-migrations");
     mkdirSync(badDir, { recursive: true });

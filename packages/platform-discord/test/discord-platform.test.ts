@@ -1715,11 +1715,13 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         createdAt: new Date().toISOString(),
         body: "hi",
         extensions: {
-          discord: {
-            authorSnowflake: "222222222222222222",
-            authorIsBot: false,
-            isSelf: false,
-            isOwner: false,
+          platform: {
+            discord: {
+              authorId: "222222222222222222",
+              authorIsBot: false,
+              isSelf: false,
+              isOwner: false,
+            },
           },
         },
       }),
@@ -1731,7 +1733,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     assert.equal(sent.length, 0);
   });
 
-  it("forwards inbound when discord.ownerUserId is set and extensions.discord.isOwner is true", async () => {
+  it("forwards inbound when discord.ownerUserId is set and extensions.platform.discord.isOwner is true", async () => {
     const sent: { body: string }[] = [];
     const bus = createAgentToAgentBus();
     const discord: DiscordMessagingRuntime = {
@@ -1778,11 +1780,13 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         createdAt: new Date().toISOString(),
         body: "hi",
         extensions: {
-          discord: {
-            authorSnowflake: ownerId,
-            authorIsBot: false,
-            isSelf: false,
-            isOwner: true,
+          platform: {
+            discord: {
+              authorId: ownerId,
+              authorIsBot: false,
+              isSelf: false,
+              isOwner: true,
+            },
           },
         },
       }),

@@ -1,8 +1,8 @@
 import type { SessionModelTurnDelivery } from "../messaging/session-model-turn-delivery";
 import type { SessionAgentTurnResult } from "../sessions/session-agent-turn";
 
-/** Why a bound subagent session is being torn down (for optional thread status posts). */
-export type BoundSubagentSessionEndReason = "ttl_expired" | "killed";
+/** Why a persistent subagent session is being torn down (for optional thread status posts). */
+export type PersistentSubagentSessionEndReason = "ttl_expired" | "killed";
 
 /**
  * Filled from `index.ts` after a platform starts. Control-plane subagent ops consult this ref.
@@ -21,12 +21,12 @@ export type SubagentRuntimeExtension = {
     sessionId: string,
   ) => () => void;
   /**
-   * Best-effort: post a short status line in the bound platform thread before bindings are cleared.
+   * Best-effort: post a short status line in the platform thread (if bound) before bindings are cleared.
    * Implementations should read session/thread ids synchronously; network I/O may continue async.
    */
-  readonly announceBoundSubagentSessionEnded?: (input: {
+  readonly announcePersistentSubagentSessionEnded?: (input: {
     readonly sessionId: string;
-    readonly reason: BoundSubagentSessionEndReason;
+    readonly reason: PersistentSubagentSessionEndReason;
   }) => void;
 };
 

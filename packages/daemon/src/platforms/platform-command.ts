@@ -1,6 +1,6 @@
 /**
  * Platform-agnostic command interface for translating operator commands
- * (e.g. Discord slash commands) into control plane operations.
+ * (e.g. slash commands, chat commands) into control plane operations.
  */
 
 export interface PlatformCommand {

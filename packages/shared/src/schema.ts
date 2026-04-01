@@ -128,7 +128,7 @@ export const shoggothRetentionConfigSchema = z
 
 export type ShoggothRetentionConfig = z.infer<typeof shoggothRetentionConfigSchema>;
 
-export const hitlRiskTierSchema = z.enum(["safe", "caution", "critical"]);
+export const hitlRiskTierSchema = z.enum(["safe", "caution", "critical", "never"]);
 
 export type HitlRiskTier = z.infer<typeof hitlRiskTierSchema>;
 
@@ -137,10 +137,10 @@ export const shoggothHitlConfigSchema = z
     defaultApprovalTimeoutMs: z.number().int().positive(),
     toolRisk: z.record(z.string(), hitlRiskTierSchema),
     /** Role id → highest tier that may run without human approval (inclusive). */
-    roleBypassUpTo: z.record(z.string(), hitlRiskTierSchema),
+    agentBypassUpTo: z.record(z.string(), hitlRiskTierSchema),
     /**
      * Logical agent id (URN segment after `agent:`, e.g. `main` in `agent:main:discord:…`) → tools that skip HITL.
-     * Discord ♾️ appends here via `z-hitl-agent-tool-auto-approve.json` in `configDirectory`.
+     * Platform reactions (e.g. ♾️) append here via `z-hitl-agent-tool-auto-approve.json` in `configDirectory`.
      */
     agentToolAutoApprove: z.record(z.string().min(1), z.array(z.string().min(1))).default({}),
   })
@@ -281,6 +281,7 @@ export const DEFAULT_POLICY_CONFIG: ShoggothPolicyConfig = {
         "session_steer",
         "session_abort",
         "session_kill",
+        "config_request",
       ],
       deny: [],
       review: [],
@@ -387,12 +388,12 @@ export const shoggothMcpConfigSchema = z
     servers: z.array(shoggothMcpServerEntrySchema),
     /**
      * Default for servers that omit `poolScope` or set `poolScope: "inherit"`.
-     * `global`: one MCP connection set shared across all Discord-bound sessions.
+     * `global`: one MCP connection set shared across all platform-bound sessions.
      * `per_session`: lazy pool per Shoggoth `sessionId` on first inbound turn; closed on orchestrator stop.
      */
     poolScope: z.enum(["global", "per_session"]).default("global"),
     /**
-     * After an inbound Discord turn completes, close that session's per-session MCP pool if no further
+     * After an inbound platform turn completes, close that session's per-session MCP pool if no further
      * turn completes within this many milliseconds. `0` disables. When omitted and any server uses an
      * effective per-session pool, defaults to {@link SHOGGOTH_DEFAULT_PER_SESSION_MCP_IDLE_MS}.
      */
@@ -534,12 +535,12 @@ const shoggothAgentIdKeySchema = z
  */
 export const shoggothAgentEntrySchema = z
   .object({
-    /** Optional label for operators / logs; on Discord, `**<emoji> <label>:**` uses this or falls back to the list key (emoji defaults to 🦑). */
+    /** Optional label for operators / logs; on messaging platforms, `**<emoji> <label>:**` uses this or falls back to the list key (emoji defaults to 🦑). */
     displayName: z.string().min(1).optional(),
-    /** Overrides default 🦑 in the Discord identity line before `displayName`. */
+    /** Overrides default 🦑 in the identity line before `displayName`. */
     emoji: z.string().min(1).optional(),
     /**
-     * Default messaging `platform` segment for this agent when validating default-primary Discord routes.
+     * Default messaging `platform` segment for this agent when validating default-primary platform routes.
      * Falls back to global `runtime.defaultSessionPlatform` when unset.
      */
     defaultSessionPlatform: z
@@ -702,6 +703,8 @@ export const shoggothConfigFragmentSchema = z
     policy: shoggothPolicyFragmentSchema,
     /** Declarative sidecar process definitions managed by procman. */
     processes: z.array(processDeclarationSchema).optional(),
+    /** Daemon-writable directory for agent-requested config overrides. */
+    dynamicConfigDirectory: z.string().min(1).optional(),
   })
   .strict();
 
@@ -743,6 +746,8 @@ export const shoggothConfigSchema = z
     policy: shoggothPolicyConfigSchema,
     /** Declarative sidecar process definitions managed by procman. */
     processes: z.array(processDeclarationSchema).optional(),
+    /** Daemon-writable directory for agent-requested config overrides. */
+    dynamicConfigDirectory: z.string().min(1).optional(),
   })
   .strict();
 
@@ -761,13 +766,14 @@ export const DEFAULT_HITL_CONFIG: ShoggothHitlConfig = {
     "builtin.session.query": "safe",
     "builtin.subagent": "caution",
     "builtin.message": "caution",
+    "builtin.config.request": "never",
   },
   /**
    * Keys are arbitrary role ids passed as `principalRoles` into the tool loop. Session turns use
    * `agent:<agentId>` from the session URN (e.g. `agent:main`). Unlisted roles contribute nothing;
    * baseline bypass remains `safe`. The human operator is not a principal here — they approve HITL.
    */
-  roleBypassUpTo: {
+  agentBypassUpTo: {
     "agent:main": "safe",
   },
   agentToolAutoApprove: {},
@@ -814,6 +820,7 @@ export function defaultConfig(configDirectory: string): ShoggothConfig {
     inboundMediaRoot: LAYOUT.inboundMediaRoot,
     operatorDirectory: LAYOUT.operatorDir,
     configDirectory,
+    dynamicConfigDirectory: "/etc/shoggoth/config.d/dynamic",
     hitl: DEFAULT_HITL_CONFIG,
     memory: DEFAULT_MEMORY_CONFIG,
     skills: DEFAULT_SKILLS_CONFIG,

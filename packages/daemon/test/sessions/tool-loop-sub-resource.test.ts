@@ -86,7 +86,7 @@ describe("tool-loop sub-resource extraction", () => {
         config: {
           defaultApprovalTimeoutMs: 300_000,
           toolRisk: { exec: "critical" },
-          roleBypassUpTo: {},
+          agentBypassUpTo: {},
         },
         principalRoles: [],
         pending: hitlStack.pending,
@@ -156,7 +156,7 @@ describe("tool-loop sub-resource extraction", () => {
         config: {
           defaultApprovalTimeoutMs: 300_000,
           toolRisk: { exec: "critical" },
-          roleBypassUpTo: {},
+          agentBypassUpTo: {},
         },
         principalRoles: [],
         pending: hitlStack.pending,
@@ -225,7 +225,7 @@ describe("tool-loop sub-resource extraction", () => {
         config: {
           defaultApprovalTimeoutMs: 300_000,
           toolRisk: { exec: "critical" },
-          roleBypassUpTo: {},
+          agentBypassUpTo: {},
         },
         principalRoles: [],
         pending: hitlStack.pending,
@@ -290,7 +290,7 @@ describe("tool-loop sub-resource extraction", () => {
         config: {
           defaultApprovalTimeoutMs: 300_000,
           toolRisk: { write: "caution" },
-          roleBypassUpTo: {},
+          agentBypassUpTo: {},
         },
         principalRoles: [],
         pending: hitlStack.pending,
@@ -531,7 +531,7 @@ describe("tool-loop sub-resource extraction", () => {
         config: {
           defaultApprovalTimeoutMs: 300_000,
           toolRisk: { exec: "critical" },
-          roleBypassUpTo: {},
+          agentBypassUpTo: {},
         },
         principalRoles: [],
         pending: hitlStack.pending,
@@ -601,7 +601,7 @@ describe("tool-loop sub-resource extraction", () => {
         config: {
           defaultApprovalTimeoutMs: 300_000,
           toolRisk: { exec: "critical" },
-          roleBypassUpTo: {},
+          agentBypassUpTo: {},
         },
         principalRoles: [],
         pending: hitlStack.pending,

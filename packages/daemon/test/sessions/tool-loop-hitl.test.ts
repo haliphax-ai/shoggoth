@@ -75,7 +75,7 @@ describe("runToolLoop HITL (shared pending store + resolution hub)", () => {
         config: {
           defaultApprovalTimeoutMs: 300_000,
           toolRisk: { read: "safe", write: "caution", exec: "critical" },
-          roleBypassUpTo: {},
+          agentBypassUpTo: {},
         },
         principalRoles: [],
         pending: hitlStack.pending,
@@ -162,7 +162,7 @@ describe("runToolLoop HITL (shared pending store + resolution hub)", () => {
         config: {
           defaultApprovalTimeoutMs: 300_000,
           toolRisk: { read: "safe", write: "caution", exec: "critical" },
-          roleBypassUpTo: {},
+          agentBypassUpTo: {},
         },
         principalRoles: [],
         pending: hitlStack.pending,

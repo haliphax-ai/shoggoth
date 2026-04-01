@@ -6,9 +6,9 @@ import { tmpdir } from "node:os";
 import {
   HealthRegistry,
   createSqliteProbe,
-  createDiscordProbe,
   createModelEndpointProbe,
 } from "../src/health";
+import { createDiscordProbe } from "@shoggoth/platform-discord";
 
 const origFetch = globalThis.fetch;
 

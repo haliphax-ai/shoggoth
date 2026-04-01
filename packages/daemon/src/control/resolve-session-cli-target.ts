@@ -2,12 +2,8 @@ import type { ShoggothConfig } from "@shoggoth/shared";
 import { assertValidAgentId, parseAgentSessionUrn } from "@shoggoth/shared";
 import {
   resolveDefaultSessionPlatform,
-  resolveEffectiveDiscordRoutesJson,
 } from "../config/effective-runtime";
-import { registerBuiltInMessagingPlatforms } from "@shoggoth/platform-discord";
-import { resolveBootstrapPrimarySessionUrn } from "@shoggoth/messaging";
-
-registerBuiltInMessagingPlatforms();
+import { resolveBootstrapPrimarySessionUrn, resolveEffectivePlatformRoutesJson } from "@shoggoth/messaging";
 
 /**
  * CLI/session tooling: if `raw` is a valid agent session URN, use it; otherwise treat `raw` as an
@@ -31,7 +27,10 @@ export function resolveSessionTargetFromCliArg(raw: string, cfg: ShoggothConfig)
     );
   }
   const platform = resolveDefaultSessionPlatform(cfg);
-  const primaryChannelId = process.env.SHOGGOTH_PRIMARY_DISCORD_CHANNEL_ID?.trim();
-  const routesJson = resolveEffectiveDiscordRoutesJson(cfg);
+  if (!platform) {
+    throw new Error("no default session platform configured (set runtime.defaultSessionPlatform in config)");
+  }
+  const primaryChannelId = process.env.SHOGGOTH_PRIMARY_CHANNEL_ID?.trim();
+  const routesJson = resolveEffectivePlatformRoutesJson(platform, cfg);
   return resolveBootstrapPrimarySessionUrn(t, platform, { primaryChannelId, routesJson });
 }

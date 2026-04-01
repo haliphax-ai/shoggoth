@@ -7,11 +7,11 @@ import Database from "better-sqlite3";
 import { defaultConfig } from "@shoggoth/shared";
 import { migrate, defaultMigrationsDir } from "../../src/db/migrate";
 import { createSessionStore } from "../../src/sessions/session-store";
-import { reconcilePersistentBoundSubagents } from "../../src/subagent/reconcile-persistent-bound-subagents";
+import { reconcilePersistentSubagents } from "../../src/subagent/reconcile-persistent-subagents";
 import { disposeSubagentRuntime } from "../../src/subagent/subagent-disposables";
 import { createLogger } from "../../src/logging";
 
-describe("reconcilePersistentBoundSubagents", () => {
+describe("reconcilePersistentSubagents", () => {
   let dir: string;
   let db: Database.Database;
 
@@ -28,7 +28,7 @@ describe("reconcilePersistentBoundSubagents", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("restores active bound rows and registers thread + bus hooks", () => {
+  it("restores active persistent rows and registers thread + bus hooks", () => {
     const sessions = createSessionStore(db);
     const parent = "agent:p:discord:10000000-0000-4000-8000-000000000099";
     const child = "agent:p:discord:10000000-0000-4000-8000-000000000099:aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee";
@@ -37,7 +37,7 @@ describe("reconcilePersistentBoundSubagents", () => {
     const future = Date.now() + 3_600_000;
     sessions.update(child, {
       parentSessionId: parent,
-      subagentMode: "bound",
+      subagentMode: "persistent",
       subagentPlatformThreadId: "thread-snowflake-1",
       subagentExpiresAtMs: future,
     });
@@ -45,7 +45,7 @@ describe("reconcilePersistentBoundSubagents", () => {
     const registered: string[] = [];
     const subscribed: string[] = [];
     const log = createLogger({ component: "t", minLevel: "error" });
-    const r = reconcilePersistentBoundSubagents({
+    const r = reconcilePersistentSubagents({
       db,
       config: defaultConfig(dir),
       logger: log,
@@ -77,13 +77,13 @@ describe("reconcilePersistentBoundSubagents", () => {
     sessions.create({ id: child, workspacePath: "/w", status: "active" });
     sessions.update(child, {
       parentSessionId: parent,
-      subagentMode: "bound",
+      subagentMode: "persistent",
       subagentPlatformThreadId: "thread-x",
       subagentExpiresAtMs: Date.now() - 1000,
     });
 
     const log = createLogger({ component: "t", minLevel: "error" });
-    const r = reconcilePersistentBoundSubagents({
+    const r = reconcilePersistentSubagents({
       db,
       config: defaultConfig(dir),
       logger: log,
@@ -98,5 +98,48 @@ describe("reconcilePersistentBoundSubagents", () => {
     assert.equal(r.expiredKilled, 1);
     const row = sessions.getById(child);
     assert.equal(row?.status, "terminated");
+  });
+
+  it("restores threadless persistent subagent without registering thread binding", () => {
+    const sessions = createSessionStore(db);
+    const parent = "agent:p:discord:30000000-0000-4000-8000-000000000099";
+    const child = "agent:p:discord:30000000-0000-4000-8000-000000000099:cccccccc-bbbb-4ccc-dddd-eeeeeeeeeeee";
+    sessions.create({ id: parent, workspacePath: "/w", status: "active" });
+    sessions.create({ id: child, workspacePath: "/w", status: "active" });
+    const future = Date.now() + 3_600_000;
+    sessions.update(child, {
+      parentSessionId: parent,
+      subagentMode: "persistent",
+      subagentExpiresAtMs: future,
+      // no subagentPlatformThreadId — threadless A2A-only
+    });
+
+    const registered: string[] = [];
+    const subscribed: string[] = [];
+    const log = createLogger({ component: "t", minLevel: "error" });
+    const r = reconcilePersistentSubagents({
+      db,
+      config: defaultConfig(dir),
+      logger: log,
+      ext: {
+        runSessionModelTurn: async () => ({ latestAssistantText: "", failoverMeta: undefined }),
+        subscribeSubagentSession: (sid) => {
+          subscribed.push(sid);
+          return () => {};
+        },
+        registerPlatformThreadBinding: (tid, sid) => {
+          registered.push(`${tid}:${sid}`);
+          return () => {};
+        },
+      },
+    });
+
+    assert.equal(r.restored, 1);
+    assert.equal(r.expiredKilled, 0);
+    // No thread binding registered for threadless persistent subagent
+    assert.deepStrictEqual(registered, []);
+    // Bus subscription still happens
+    assert.deepStrictEqual(subscribed, [child]);
+    disposeSubagentRuntime(child);
   });
 });

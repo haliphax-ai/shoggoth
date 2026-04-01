@@ -22,6 +22,10 @@ fix_dir() {
 
 # Config directory; bind mounts should go in subfolders
 fix_dir /etc/shoggoth/config.d 0700 shoggoth shoggoth
+# Dynamic config subdirectory (optional volume mount for agent-writable config overrides)
+if [ -d /etc/shoggoth/config.d/dynamic ]; then
+  fix_dir /etc/shoggoth/config.d/dynamic 0700 shoggoth shoggoth
+fi
 fix_dir /var/lib/shoggoth/state 0700 shoggoth shoggoth
 # Workspaces root: setgid (2…) so new session dirs inherit group `agent`; agent UID 901 matches group perms.
 fix_dir /var/lib/shoggoth/workspaces 2770 shoggoth agent

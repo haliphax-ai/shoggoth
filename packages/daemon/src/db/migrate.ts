@@ -55,54 +55,6 @@ function appliedVersions(db: Database.Database): Set<number> {
   return new Set(rows.map((r) => r.version));
 }
 
-/**
- * Older deployments ran `0001_initial` before subagent columns existed on `sessions`. Migrations are
- * versioned once (`_schema_migrations`); editing `0001_*.sql` does not alter existing DBs. Add any
- * columns missing from the current code's expectations (idempotent).
- */
-const SESSIONS_SUBAGENT_DDL: readonly { readonly column: string; readonly sql: string }[] = [
-  { column: "parent_session_id", sql: "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT" },
-  { column: "subagent_mode", sql: "ALTER TABLE sessions ADD COLUMN subagent_mode TEXT" },
-  {
-    column: "subagent_platform_thread_id",
-    sql: "ALTER TABLE sessions ADD COLUMN subagent_platform_thread_id TEXT",
-  },
-  {
-    column: "subagent_expires_at_ms",
-    sql: "ALTER TABLE sessions ADD COLUMN subagent_expires_at_ms INTEGER",
-  },
-];
-
-function sessionsTableColumnNames(db: Database.Database): Set<string> | undefined {
-  try {
-    const rows = db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
-    return new Set(rows.map((r) => r.name));
-  } catch {
-    return undefined;
-  }
-}
-
-export function repairSessionsSubagentColumnsIfNeeded(db: Database.Database): void {
-  const cols = sessionsTableColumnNames(db);
-  if (!cols?.has("id")) return;
-
-  // Rename legacy column if it exists (pre-platform-agnostic rename).
-  if (cols.has("subagent_discord_thread_id") && !cols.has("subagent_platform_thread_id")) {
-    db.exec("ALTER TABLE sessions RENAME COLUMN subagent_discord_thread_id TO subagent_platform_thread_id");
-    cols.delete("subagent_discord_thread_id");
-    cols.add("subagent_platform_thread_id");
-  }
-
-  for (const { column, sql } of SESSIONS_SUBAGENT_DDL) {
-    if (cols.has(column)) continue;
-    db.exec(sql);
-    cols.add(column);
-  }
-  db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_sessions_parent_session ON sessions (parent_session_id)",
-  );
-}
-
 export function migrate(db: Database.Database, migrationsDir: string): MigrateResult {
   ensureMetaTable(db);
   const migrations = loadMigrationsFromDir(migrationsDir);
@@ -121,8 +73,6 @@ export function migrate(db: Database.Database, migrationsDir: string): MigrateRe
     appliedVersionsNow.push(m.version);
     done.add(m.version);
   }
-
-  repairSessionsSubagentColumnsIfNeeded(db);
 
   return { appliedVersions: appliedVersionsNow };
 }

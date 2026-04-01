@@ -7,7 +7,7 @@ import type { ShoggothConfig } from "@shoggoth/shared";
 import { connectShoggothMcpServers } from "../mcp/mcp-server-pool";
 import { runToolLoop, type RunToolLoopOptions } from "./tool-loop";
 
-export interface DiscordPlatformAssistantDeps {
+export interface PlatformAssistantDeps {
   readonly createToolCallingClient: (
     models: ShoggothConfig["models"],
     options?: CreateFailoverFromConfigOptions,
@@ -16,7 +16,7 @@ export interface DiscordPlatformAssistantDeps {
   readonly connectShoggothMcpServers: typeof connectShoggothMcpServers;
 }
 
-export const defaultDiscordAssistantDeps: DiscordPlatformAssistantDeps = {
+export const defaultPlatformAssistantDeps: PlatformAssistantDeps = {
   createToolCallingClient: createFailoverToolCallingClientFromModelsConfig,
   runToolLoopImpl: runToolLoop,
   connectShoggothMcpServers,

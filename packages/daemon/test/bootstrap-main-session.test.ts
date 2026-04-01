@@ -41,7 +41,7 @@ function makeConfig(overrides: Partial<ShoggothConfig> = {}): ShoggothConfig {
     hitl: {
       defaultApprovalTimeoutMs: 300000,
       toolRisk: {},
-      roleBypassUpTo: {},
+      agentBypassUpTo: {},
       agentToolAutoApprove: {},
     },
     memory: { paths: [], embeddings: { enabled: false } },
@@ -49,6 +49,7 @@ function makeConfig(overrides: Partial<ShoggothConfig> = {}): ShoggothConfig {
     plugins: [],
     mcp: { servers: [], poolScope: "global" },
     platforms: {},
+    runtime: { defaultSessionPlatform: "discord" },
     agents: {
       list: {
         main: {

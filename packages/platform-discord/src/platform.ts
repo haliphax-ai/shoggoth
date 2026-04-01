@@ -8,7 +8,7 @@ import {
 } from "@shoggoth/messaging";
 import {
   DEFAULT_HITL_CONFIG,
-  formatDiscordAgentIdentityPrefix,
+  formatAgentIdentityPrefix,
   parseAgentSessionUrn,
   type ShoggothConfig,
 } from "@shoggoth/shared";
@@ -27,14 +27,14 @@ import {
   executeSessionAgentTurn,
   buildSessionSystemContext,
   createSessionMcpRuntime,
-  defaultDiscordAssistantDeps,
+  defaultPlatformAssistantDeps,
   type HitlPendingStack,
   type PolicyEngine,
   type HitlConfigRef,
   type SessionAgentTurnResult,
   type SessionToolLoopFailoverState,
   type SessionModelTurnDelivery,
-  type DiscordPlatformAssistantDeps,
+  type PlatformAssistantDeps,
 } from "@shoggoth/daemon/lib";
 import type { HitlNotifier, PendingActionRow, Logger, HitlAutoApproveGate } from "./daemon-types";
 import { daemonNotice } from "./notices";
@@ -73,12 +73,12 @@ async function withAgentTypingWhile(
 }
 
 function pickDiscordAssistantDeps(
-  input?: Partial<DiscordPlatformAssistantDeps> & { readonly hitlNotifier?: HitlNotifier },
-): DiscordPlatformAssistantDeps {
-  if (!input) return defaultDiscordAssistantDeps;
+  input?: Partial<PlatformAssistantDeps> & { readonly hitlNotifier?: HitlNotifier },
+): PlatformAssistantDeps {
+  if (!input) return defaultPlatformAssistantDeps;
   const { hitlNotifier: _hitlNotifier, ...rest } = input;
   void _hitlNotifier;
-  return { ...defaultDiscordAssistantDeps, ...rest };
+  return { ...defaultPlatformAssistantDeps, ...rest };
 }
 
 export function formatDiscordPlatformDegradedPrefix(
@@ -116,7 +116,7 @@ export interface DiscordPlatformOptions {
   readonly hitlDiscordNoticeRegistry?: HitlDiscordNoticeRegistry;
   readonly hitlAutoApproveGate?: HitlAutoApproveGate;
   readonly env?: NodeJS.ProcessEnv;
-  readonly deps?: Partial<DiscordPlatformAssistantDeps> & {
+  readonly deps?: Partial<PlatformAssistantDeps> & {
     readonly hitlNotifier?: HitlNotifier;
   };
 }
@@ -130,7 +130,7 @@ export interface DiscordPlatformHandle {
     readonly delivery: SessionModelTurnDelivery;
   }) => Promise<SessionAgentTurnResult>;
   readonly subscribeSubagentSession: (sessionId: string) => () => void;
-  readonly announceBoundSubagentSessionEnded: (input: {
+  readonly announcePersistentSubagentSessionEnded: (input: {
     readonly sessionId: string;
     readonly reason: "ttl_expired" | "killed";
   }) => void;
@@ -210,7 +210,7 @@ export async function startDiscordPlatform(
 
     const ownerSnowflake = resolveDiscordOwnerUserId(configForOwnerGate());
     if (ownerSnowflake && !session.subagentMode) {
-      if (!msg.extensions.discord?.isOwner) return;
+      if (!msg.extensions.platform?.discord?.isOwner) return;
     }
 
     const segmentMode = parseSessionSegmentInlineCommand(text);
@@ -309,13 +309,13 @@ export async function startDiscordPlatform(
           }
         : undefined;
 
-    const d = msg.extensions.discord;
+    const d = msg.extensions.platform?.discord;
     const userMetadata: Record<string, unknown> = {
       ...extraUserMetadata,
       discordMessageId: msg.id,
       ...(d
         ? {
-            discordAuthorSnowflake: d.authorSnowflake,
+            discordAuthorId: d.authorId,
             discordAuthorIsBot: d.authorIsBot,
             discordIsSelf: d.isSelf,
             discordIsOwner: d.isOwner,
@@ -353,7 +353,7 @@ export async function startDiscordPlatform(
         sliceDisplayText: sliceDiscordPlatformMessageBody,
         formatAssistantReply: (latest, meta) => {
           const cfg = opts.configRef?.current ?? opts.config;
-          return `${formatDiscordPlatformDegradedPrefix(meta)}${formatDiscordAgentIdentityPrefix(cfg, msg.sessionId)}${latest}${formatDiscordPlatformModelTagFooter(env, meta)}`;
+          return `${formatDiscordPlatformDegradedPrefix(meta)}${formatAgentIdentityPrefix(cfg, msg.sessionId)}${latest}${formatDiscordPlatformModelTagFooter(env, meta)}`;
         },
         formatErrorReply: (e) => `⚠️ ${formatDiscordPlatformErrorUserText(e)}`,
         onTurnExecutionFailed: (e) => {
@@ -552,7 +552,7 @@ export async function startDiscordPlatform(
         turnResult = await executeTurn(buildAfterHitlQueued(delivery));
         const cfg = opts.configRef?.current ?? opts.config;
         const body = sliceDiscordPlatformMessageBody(
-          `${formatDiscordPlatformDegradedPrefix(turnResult.failoverMeta)}${formatDiscordAgentIdentityPrefix(cfg, sid)}${turnResult.latestAssistantText}${formatDiscordPlatformModelTagFooter(env, turnResult.failoverMeta)}`,
+          `${formatDiscordPlatformDegradedPrefix(turnResult.failoverMeta)}${formatAgentIdentityPrefix(cfg, sid)}${turnResult.latestAssistantText}${formatDiscordPlatformModelTagFooter(env, turnResult.failoverMeta)}`,
         );
         await opts.discord.outbound.sendDiscord(
           createOutboundMessage({
@@ -622,26 +622,26 @@ export async function startDiscordPlatform(
     };
   }
 
-  function announceBoundSubagentSessionEnded(input: {
+  function announcePersistentSubagentSessionEnded(input: {
     readonly sessionId: string;
     readonly reason: "ttl_expired" | "killed";
   }): void {
     const row = sessions.getById(input.sessionId.trim());
-    if (!row || row.subagentMode !== "bound") return;
+    if (!row || row.subagentMode !== "persistent") return;
     const threadId = row.subagentPlatformThreadId?.trim();
     if (!threadId) return;
     const cfg = opts.configRef?.current ?? opts.config;
     const line =
       input.reason === "ttl_expired"
-        ? daemonNotice("subagent-bound-ended-ttl")
-        : daemonNotice("subagent-bound-ended-killed");
+        ? daemonNotice("subagent-persistent-ended-ttl")
+        : daemonNotice("subagent-persistent-ended-killed");
     const body = sliceDiscordPlatformMessageBody(
-      `${formatDiscordAgentIdentityPrefix(cfg, input.sessionId)}${line}`,
+      `${formatAgentIdentityPrefix(cfg, input.sessionId)}${line}`,
     );
     void opts.discord.discordRestTransport
       .createMessage(threadId, { content: body })
       .catch((e) => {
-        opts.logger.debug("discord.subagent.bound_end_notice_failed", {
+        opts.logger.debug("discord.subagent.persistent_end_notice_failed", {
           sessionId: input.sessionId,
           err: String(e),
         });
@@ -660,6 +660,6 @@ export async function startDiscordPlatform(
     },
     runSessionModelTurn,
     subscribeSubagentSession,
-    announceBoundSubagentSessionEnded,
+    announcePersistentSubagentSessionEnded,
   };
 }

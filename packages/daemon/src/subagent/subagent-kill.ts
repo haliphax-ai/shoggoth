@@ -1,23 +1,23 @@
 import type { SessionManager } from "../sessions/session-manager";
 import { disposeSubagentRuntime } from "./subagent-disposables";
-import { subagentRuntimeExtensionRef, type BoundSubagentSessionEndReason } from "./subagent-extension-ref";
+import { subagentRuntimeExtensionRef, type PersistentSubagentSessionEndReason } from "./subagent-extension-ref";
 
-export type { BoundSubagentSessionEndReason };
+export type { PersistentSubagentSessionEndReason };
 
 /**
  * Clears in-process bindings then terminates the session (tokens revoked, status terminated).
- * For bound Discord-thread subagents, pass `endReason` so the messaging layer can announce in-thread first.
+ * For persistent subagents with a thread binding, pass `endReason` so the messaging layer can announce in-thread first.
  */
-export function terminateBoundSubagentSession(
+export function terminatePersistentSubagentSession(
   sessionManager: SessionManager,
   sessionId: string,
-  endReason?: BoundSubagentSessionEndReason,
+  endReason?: PersistentSubagentSessionEndReason,
 ): void {
   const sid = sessionId.trim();
   const ext = subagentRuntimeExtensionRef.current;
-  if (endReason && ext?.announceBoundSubagentSessionEnded) {
+  if (endReason && ext?.announcePersistentSubagentSessionEnded) {
     try {
-      ext.announceBoundSubagentSessionEnded({ sessionId: sid, reason: endReason });
+      ext.announcePersistentSubagentSessionEnded({ sessionId: sid, reason: endReason });
     } catch {
       /* best-effort notice */
     }

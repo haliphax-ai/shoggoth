@@ -31,7 +31,13 @@ export function bootstrapMainSession(opts: BootstrapMainSessionOptions): void {
   const { db, config, logger } = opts;
 
   const agentId = config.runtime?.agentId?.trim() || "main";
-  const platform = config.runtime?.defaultSessionPlatform?.trim() || "discord";
+  const platform = config.runtime?.defaultSessionPlatform?.trim();
+  if (!platform) {
+    logger.warn("bootstrap.main_session.no_platform", {
+      detail: "runtime.defaultSessionPlatform is not configured; skipping main session bootstrap",
+    });
+    return;
+  }
   const wsRoot = config.workspacesRoot;
   const dir = resolveAgentWorkspacePath(wsRoot, agentId);
 

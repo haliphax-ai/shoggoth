@@ -104,22 +104,22 @@ export function resolveEffectiveModelsConfig(
   };
 }
 
-/** Default `emoji` in {@link formatDiscordAgentIdentityPrefix} when `agents.list.<id>.emoji` is unset. */
-export const SHOGGOTH_DISCORD_AGENT_DEFAULT_EMOJI = "🦑";
+/** Default `emoji` in {@link formatAgentIdentityPrefix} when `agents.list.<id>.emoji` is unset. */
+export const SHOGGOTH_AGENT_DEFAULT_EMOJI = "🦑";
 
 /**
- * When `agents.list.<agentId>` exists for the session's logical agent id, returns a Discord markdown header
+ * When `agents.list.<agentId>` exists for the session's logical agent id, returns a markdown header
  * to prepend before assistant text: `**<emoji> <label>:**` plus newline. `label` is `displayName` when set,
- * otherwise the agent id. `emoji` defaults to {@link SHOGGOTH_DISCORD_AGENT_DEFAULT_EMOJI} when omitted.
+ * otherwise the agent id. `emoji` defaults to {@link SHOGGOTH_AGENT_DEFAULT_EMOJI} when omitted.
  * No prefix when there is no matching `agents.list` entry or the session URN has no agent id.
  */
-export function formatDiscordAgentIdentityPrefix(cfg: ShoggothConfig, sessionId: string): string {
+export function formatAgentIdentityPrefix(cfg: ShoggothConfig, sessionId: string): string {
   const aid = resolveAgentIdFromSessionId(sessionId);
   if (!aid) return "";
   const idKey = aid.trim();
   const entry = cfg.agents?.list?.[idKey];
   const name = entry?.displayName?.trim() || idKey;
-  const emoji = entry?.emoji?.trim() || SHOGGOTH_DISCORD_AGENT_DEFAULT_EMOJI;
+  const emoji = entry?.emoji?.trim() || SHOGGOTH_AGENT_DEFAULT_EMOJI;
   return `**${emoji} ${name}:**\n`;
 }
 

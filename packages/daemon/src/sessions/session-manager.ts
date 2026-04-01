@@ -69,7 +69,7 @@ export interface SessionManager {
 export function createSessionManager(options: SessionManagerOptions): SessionManager {
   const mintToken = options.mintToken ?? mintAgentCredentialRaw;
   const defaultAgentId = options.agentId ?? "main";
-  const defaultSessionPlatform = options.defaultSessionPlatform ?? "discord";
+  const defaultSessionPlatform = options.defaultSessionPlatform;
 
   return {
     spawn(input) {
@@ -88,6 +88,12 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
         dirAgentId = p.agentId;
       } else {
         const aid = input.agentId?.trim() || defaultAgentId;
+        if (!platform) {
+          throw new SessionManagerError(
+            "ERR_NO_PLATFORM",
+            "no session platform specified and no default configured (set runtime.defaultSessionPlatform)",
+          );
+        }
         id = mintAgentSessionUrn(aid, platform);
         dirAgentId = aid;
       }

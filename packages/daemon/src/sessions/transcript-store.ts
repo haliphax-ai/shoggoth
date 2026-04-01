@@ -34,7 +34,7 @@ export interface TranscriptStore {
     afterSeq: number;
     limit: number;
   }): { messages: TranscriptMessageRow[]; nextCursor: number | undefined };
-  /** Removes all transcript rows for a session + segment (Discord `new` / `reset`). */
+  /** Removes all transcript rows for a session + segment (`new` / `reset` commands). */
   deleteForSessionSegment(sessionId: string, contextSegmentId: string): number;
 }
 

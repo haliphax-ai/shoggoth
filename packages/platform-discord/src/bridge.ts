@@ -40,11 +40,14 @@ function applyDiscordTransportEnvelope(
     ...msg,
     extensions: {
       ...msg.extensions,
-      discord: {
-        authorSnowflake: ev.authorId,
-        authorIsBot: ev.authorIsBot,
-        isSelf: Boolean(bid && ev.authorId === bid),
-        isOwner: Boolean(ownerTrim && ev.authorId === ownerTrim),
+      platform: {
+        ...msg.extensions.platform,
+        discord: {
+          authorId: ev.authorId,
+          authorIsBot: ev.authorIsBot,
+          isSelf: Boolean(bid && ev.authorId === bid),
+          isOwner: Boolean(ownerTrim && ev.authorId === ownerTrim),
+        },
       },
     },
   };
@@ -113,7 +116,7 @@ export interface StartDiscordMessagingOptions {
    * `resolvedAgentId` / `defaultSessionPlatform` (same contract as `bootstrapMainSession` in the daemon).
    */
   readonly routeGuard?: DiscordMessagingRouteGuard;
-  /** Operator Discord user snowflake; marks inbound `extensions.discord.isOwner` (metadata / approver context). */
+  /** Operator Discord user snowflake; marks inbound `extensions.platform.discord.isOwner` (metadata / approver context). */
   readonly ownerUserId?: string;
   /** Gateway `MESSAGE_REACTION_ADD` (e.g. HITL notice buttons). */
   readonly onMessageReactionAdd?: (ev: DiscordReactionAddEvent) => void;

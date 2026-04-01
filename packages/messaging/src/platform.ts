@@ -93,7 +93,7 @@ export interface PlatformTransportEnvelope {
  * Platform capability descriptor.
  *
  * Re-exported from {@link MessagingAdapterCapabilities} which is already
- * platform-agnostic (keyed by a `platform` string, no Discord-specific fields).
+ * platform-agnostic (keyed by a `platform` string, no platform-specific fields).
  * This alias exists for naming consistency with the other `Platform*` types.
  */
 export type PlatformCapabilityDescriptor = MessagingAdapterCapabilities;

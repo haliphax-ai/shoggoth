@@ -19,8 +19,8 @@ services:
       # Config is loaded recursively from /etc/shoggoth/config.d in full-path alphabetical order.
       # Base config (operator-managed, read-only):
       #   -v "$PWD/config:/etc/shoggoth/config.d/base:ro"
-      # Dynamic config (agent-writable at runtime):
-      #   -v "shoggoth-dynamic-config:/etc/shoggoth/config.d/dynamic"
+      # Dynamic config (daemon-writable at runtime, requires dynamicConfigDirectory in config):
+      #   - shoggoth-dynamic-config:/etc/shoggoth/config.d/dynamic
     # Root here is required so entrypoint can chown/chmod volume roots, then drop to shoggoth (UID 900) with setpriv
     # so SETUID/SETGID caps survive. Builtins spawn agent children as UID/GID 901.
     cap_add:
@@ -36,3 +36,4 @@ volumes:
   shoggoth-workspaces:
   shoggoth-operator:
   shoggoth-media:
+  # shoggoth-dynamic-config:

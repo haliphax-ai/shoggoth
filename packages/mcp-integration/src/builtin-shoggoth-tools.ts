@@ -104,22 +104,22 @@ const subagentToolArgs = {
   properties: {
     action: {
       type: "string",
-      enum: ["spawn_one_shot", "spawn_bound", "inspect", "steer", "abort", "kill", "wait", "result"],
+      enum: ["spawn_one_shot", "spawn_persistent", "inspect", "steer", "abort", "kill", "wait", "result"],
       description:
-        "spawn_one_shot / spawn_bound / inspect / steer / abort / kill / wait / result — use fields below as required for each action.",
+        "spawn_one_shot / spawn_persistent / inspect / steer / abort / kill / wait / result — use fields below as required for each action.",
     },
     prompt: {
       type: "string",
-      description: "spawn_one_shot, spawn_bound, steer: task or steer text",
+      description: "spawn_one_shot, spawn_persistent, steer: task or steer text",
     },
-    thread_id: { type: "string", description: "spawn_bound: platform thread / forum channel snowflake" },
+    thread_id: { type: "string", description: "spawn_persistent: optional platform thread / channel identifier (omit for A2A-only)" },
     model_options: {
       type: "object",
       description: "spawn_*: optional overlay merged into inherited model_selection",
     },
-    platform_user_id: { type: "string", description: "spawn_bound, steer: optional messaging user id" },
-    reply_to_message_id: { type: "string", description: "spawn_bound, steer: optional reply reference" },
-    lifetime_ms: { type: "integer", description: "spawn_bound: optional bound lifetime in ms" },
+    platform_user_id: { type: "string", description: "spawn_persistent, steer: optional messaging user id" },
+    reply_to_message_id: { type: "string", description: "spawn_persistent, steer: optional reply reference" },
+    lifetime_ms: { type: "integer", description: "spawn_persistent: optional persistent lifetime in ms" },
     session_id: {
       type: "string",
       description:
@@ -149,17 +149,17 @@ const subagentToolArgs = {
     },
     respond_to: {
       type: "string",
-      description: "spawn_one_shot, spawn_bound: session ID where the subagent's completion result should be delivered (default: spawning session)",
+      description: "spawn_one_shot, spawn_persistent: session ID where the subagent's completion result should be delivered (default: spawning session)",
     },
     internal: {
       type: "boolean",
-      description: "spawn_one_shot, spawn_bound: if true (default), deliver response as internal session message; if false, surface to the respondTo session's message platform binding",
+      description: "spawn_one_shot, spawn_persistent: if true (default), deliver response as internal session message; if false, surface to the respondTo session's message platform binding",
     },
     delivery: {
       type: "string",
-      enum: ["internal", "post", "discord", "surface"],
+      enum: ["internal", "surface"],
       description:
-        "steer: internal skips messaging surface; post, discord, or surface delivers via bound messaging",
+        "steer: delivery mode. Defaults to internal for persistent subagents with no platform thread binding. For thread-bound persistent subagents, defaults to messaging_surface. Explicit internal skips messaging surface; other values deliver via the session's bound messaging platform",
     },
   },
   required: ["action"],
@@ -255,6 +255,17 @@ const pollArgs = {
   required: ["pid"],
 } as const;
 
+const configRequestArgs = {
+  type: "object",
+  properties: {
+    fragment: {
+      type: "object",
+      description: "Partial configuration fragment to merge",
+    },
+  },
+  required: ["fragment"],
+} as const;
+
 const skillsToolArgs = {
   type: "object",
   description:
@@ -334,7 +345,7 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
       {
         name: "subagent",
         description:
-          "Unified subagent control: spawn (one_shot or bound thread), inspect this session’s children, steer/abort/kill child sessions (or abort own in-flight turn). Requires spawnSubagents in config when using agent token.",
+          "Unified subagent control: spawn (one_shot or persistent), inspect this session’s children, steer/abort/kill child sessions (or abort own in-flight turn). Requires spawnSubagents in config when using agent token.",
         inputSchema: subagentToolArgs,
       },
       {
@@ -366,6 +377,12 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
         description:
           "Query available skills from the configured scan roots. Use list to enumerate, path to resolve a skill's file path, or read to get its content.",
         inputSchema: skillsToolArgs,
+      },
+      {
+        name: "config.request",
+        description:
+          "Request a configuration change. The fragment is validated against the config schema and written to the daemon's dynamic config directory.",
+        inputSchema: configRequestArgs,
       },
     ],
   };

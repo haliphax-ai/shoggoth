@@ -1,4 +1,4 @@
-/** Runtime handles for bound subagents (thread routing, bus subscription, TTL). */
+/** Runtime handles for persistent subagents (thread routing, bus subscription, TTL). */
 
 export type SubagentRuntimeHandles = {
   readonly unregisterThread: () => void;

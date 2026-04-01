@@ -34,4 +34,10 @@ describe("classifyToolRisk", () => {
     const map: Record<string, HitlRiskTier> = { read: "critical" };
     assert.equal(classifyToolRisk("read", map), "critical");
   });
+
+  it("classifies tool as never when configured", () => {
+    const map: Record<string, HitlRiskTier> = { "builtin.exec": "never" };
+    assert.equal(classifyToolRisk("builtin.exec", map), "never");
+    assert.equal(classifyToolRisk("exec", map), "never");
+  });
 });

@@ -4,7 +4,9 @@ import {
   parseFirstDiscordChannelIdFromRoutesJson,
   resolveDiscordBootstrapPrimarySessionUrn,
 } from "./messaging-urn-policy";
+import { resolveEffectiveDiscordRoutesJson } from "./config";
 import { registerMessagingPlatformUrnPolicy, type MessagingPlatformUrnPolicy } from "@shoggoth/messaging";
+import type { ShoggothConfig } from "@shoggoth/shared";
 
 const discordUrnPolicy: MessagingPlatformUrnPolicy = {
   platformId: "discord",
@@ -12,6 +14,7 @@ const discordUrnPolicy: MessagingPlatformUrnPolicy = {
   assertRoutesDefaultPrimaryUuidMatchesAgent: assertDiscordRoutesDefaultPrimaryUuidMatchesAgent,
   parseFirstChannelIdFromRoutesJson: parseFirstDiscordChannelIdFromRoutesJson,
   resolveBootstrapPrimarySessionUrn: resolveDiscordBootstrapPrimarySessionUrn,
+  resolveEffectiveRoutesJson: (cfg: unknown) => resolveEffectiveDiscordRoutesJson(cfg as ShoggothConfig),
 };
 
 let didRegister = false;

@@ -5,7 +5,7 @@ import { assertValidAgentId, parseAgentSessionUrn } from "@shoggoth/shared";
 export type SessionStatus = "starting" | "active" | "terminated" | string;
 
 /** Subagent spawn mode (see control op `subagent_spawn`). */
-export type SubagentMode = "one_shot" | "bound";
+export type SubagentMode = "one_shot" | "persistent";
 
 export interface SessionRow {
   readonly id: string;
@@ -95,7 +95,7 @@ function rowToSession(r: {
   }
   const modeRaw = r.subagent_mode?.trim();
   const subagentMode: SubagentMode | undefined =
-    modeRaw === "one_shot" || modeRaw === "bound" ? (modeRaw as SubagentMode) : undefined;
+    modeRaw === "one_shot" || modeRaw === "persistent" ? (modeRaw as SubagentMode) : undefined;
   const exp = r.subagent_expires_at_ms;
   return {
     id: r.id,

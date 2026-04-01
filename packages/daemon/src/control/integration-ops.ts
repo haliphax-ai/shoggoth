@@ -1,6 +1,8 @@
 import { SHOGGOTH_AGENT_TOKEN_ENV } from "@shoggoth/authn";
 import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import type { WireRequest } from "@shoggoth/authn";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type Database from "better-sqlite3";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import { getProcessManager } from "../process-manager-singleton";
@@ -8,11 +10,14 @@ import {
   agentMayInvokeSubagentSpawnByAllowlist,
   assertValidAgentId,
   crossAgentSessionSendAllowed,
+  deepMerge,
   effectiveSpawnSubagentsEnabled,
   loadLayeredConfig,
   parseAgentSessionUrn,
   redactDeep,
   resolveEffectiveModelsConfig,
+  shoggothConfigFragmentSchema,
+  shoggothConfigSchema,
 } from "@shoggoth/shared";
 import {
   createAcpxBinding,
@@ -47,11 +52,11 @@ import {
 import { compactSessionTranscript } from "../transcript-compact";
 import { getSessionStats } from "../sessions/session-stats-store";
 import { dispatchMcpHttpCancelRequest } from "../mcp/mcp-http-cancel-registry";
-import { SUBAGENT_DEFAULT_BOUND_LIFETIME_MS } from "../subagent/subagent-constants";
+import { SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS } from "../subagent/subagent-constants";
 import { requestSessionTurnAbort } from "../sessions/session-turn-abort";
 import { disposeSubagentRuntime, rememberSubagentHandles } from "../subagent/subagent-disposables";
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
-import { terminateBoundSubagentSession } from "../subagent/subagent-kill";
+import { terminatePersistentSubagentSession } from "../subagent/subagent-kill";
 import { extractLatestTranscriptAssistantText } from "../sessions/transcript-to-chat";
 
 export class IntegrationOpError extends Error {
@@ -90,7 +95,7 @@ export type IntegrationOpsContext = {
     readonly autoApproveGate: HitlAutoApproveGate;
   };
   /**
-   * MCP streamable HTTP cancel routing (default: process registry filled by Discord platform).
+   * MCP streamable HTTP cancel routing (default: process registry filled by the active platform).
    * Override in tests.
    */
   readonly cancelMcpHttpRequest?: (input: {
@@ -490,7 +495,7 @@ export async function handleIntegrationControlOp(
         killSubagents: ctx.sessionManager
           ? (childIds) => {
               for (const cid of childIds) {
-                terminateBoundSubagentSession(ctx.sessionManager!, cid, "killed");
+                terminatePersistentSubagentSession(ctx.sessionManager!, cid, "killed");
               }
             }
           : undefined,
@@ -763,7 +768,7 @@ export async function handleIntegrationControlOp(
       if (!ext) {
         throw new IntegrationOpError(
           "ERR_SUBAGENT_RUNTIME_UNAVAILABLE",
-          "subagent runtime not configured (start messaging platform; Discord when enabled)",
+          "subagent runtime not configured (start messaging platform)",
         );
       }
       const { sessions, sessionManager } = requireSubagentRuntime(ctx);
@@ -772,10 +777,10 @@ export async function handleIntegrationControlOp(
       assertAgentMayUseSubagentSpawn(principal, parentSessionId, sessions);
       const prompt = requireString(pl, "prompt");
       const modeRaw = requireString(pl, "mode");
-      if (modeRaw !== "one_shot" && modeRaw !== "bound_thread") {
+      if (modeRaw !== "one_shot" && modeRaw !== "persistent") {
         throw new IntegrationOpError(
           "ERR_INVALID_PAYLOAD",
-          "payload.mode must be one_shot or bound_thread",
+          "payload.mode must be one_shot or persistent",
         );
       }
       const parent = sessions.getById(parentSessionId);
@@ -784,8 +789,7 @@ export async function handleIntegrationControlOp(
           "ERR_PARENT_SESSION_INVALID",
           "parent session is missing or terminated",
         );
-      }
-      const modelOptions = optionalRecordObject(pl, "model_options");
+      }      const modelOptions = optionalRecordObject(pl, "model_options");
       const modelSelection = mergeSubagentSpawnModelSelection(parent.modelSelection, modelOptions);
 
       // Optional response delivery routing (defaults: respondTo = parent, internal = true).
@@ -827,7 +831,7 @@ export async function handleIntegrationControlOp(
           },
           delivery: { kind: "internal" },
         });
-        terminateBoundSubagentSession(sessionManager, childId);
+        terminatePersistentSubagentSession(sessionManager, childId);
         ctx.recordIntegrationAudit({
           action: "subagent.spawn_one_shot",
           resource: childId,
@@ -843,13 +847,17 @@ export async function handleIntegrationControlOp(
           failover: turn.failoverMeta ?? null,
         };
       }
-      const platformThreadId = requireString(pl, "platform_thread_id");
-      const lifetimeMs = optionalFinitePositiveInt(pl, "lifetime_ms") ?? SUBAGENT_DEFAULT_BOUND_LIFETIME_MS;
+      const platformThreadIdRaw = pl.platform_thread_id;
+      const platformThreadId =
+        typeof platformThreadIdRaw === "string" && platformThreadIdRaw.trim()
+          ? platformThreadIdRaw.trim()
+          : undefined;
+      const lifetimeMs = optionalFinitePositiveInt(pl, "lifetime_ms") ?? SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS;
       const platformUserIdRaw = pl.platform_user_id;
       const platformUserId =
         typeof platformUserIdRaw === "string" && platformUserIdRaw.trim()
           ? platformUserIdRaw.trim()
-          : "discord:subagent";
+          : undefined;
       const replyToMessageId =
         typeof pl.reply_to_message_id === "string" && pl.reply_to_message_id.trim()
           ? pl.reply_to_message_id.trim()
@@ -857,11 +865,13 @@ export async function handleIntegrationControlOp(
       const expiresAt = now + lifetimeMs;
       sessions.update(childId, {
         parentSessionId,
-        subagentMode: "bound",
-        subagentPlatformThreadId: platformThreadId,
+        subagentMode: "persistent",
+        subagentPlatformThreadId: platformThreadId ?? null,
         subagentExpiresAtMs: expiresAt,
       });
-      const unregisterThread = ext.registerPlatformThreadBinding(platformThreadId, childId);
+      const unregisterThread = platformThreadId
+        ? ext.registerPlatformThreadBinding(platformThreadId, childId)
+        : () => {};
       const unsubscribeBus = ext.subscribeSubagentSession(childId);
       let ttlTimer: ReturnType<typeof setTimeout> | undefined;
       const clearTtl = () => {
@@ -872,43 +882,54 @@ export async function handleIntegrationControlOp(
       };
       ttlTimer = setTimeout(() => {
         ttlTimer = undefined;
-        terminateBoundSubagentSession(sessionManager, childId, "ttl_expired");
+        terminatePersistentSubagentSession(sessionManager, childId, "ttl_expired");
       }, lifetimeMs);
       rememberSubagentHandles(childId, {
         unregisterThread,
         unsubscribeBus,
         clearTtl,
       });
+      const delivery = platformThreadId
+        ? (() => {
+            if (!platformUserId) {
+              throw new IntegrationOpError(
+                "ERR_MISSING_PLATFORM_USER_ID",
+                "platform_user_id is required for messaging_surface delivery",
+              );
+            }
+            return {
+              kind: "messaging_surface",
+              userId: platformUserId,
+              replyToMessageId,
+            } as const;
+          })()
+        : ({ kind: "internal" } as const);
       const turn = await ext.runSessionModelTurn({
         sessionId: childId,
         userContent: prompt,
         userMetadata: {
-          subagent_bound: true,
+          subagent_persistent: true,
           parent_session_id: parentSessionId,
-          platform_thread_id: platformThreadId,
+          platform_thread_id: platformThreadId ?? null,
           respond_to: respondTo,
           internal: internalDelivery,
         },
-        delivery: {
-          kind: "messaging_surface",
-          userId: platformUserId,
-          replyToMessageId,
-        },
+        delivery,
       });
       ctx.recordIntegrationAudit({
-        action: "subagent.spawn_bound",
+        action: "subagent.spawn_persistent",
         resource: childId,
         outcome: "ok",
         argsRedactedJson: JSON.stringify({
           parent_session_id: parentSessionId,
-          platform_thread_id: platformThreadId,
+          platform_thread_id: platformThreadId ?? null,
           expires_at_ms: expiresAt,
         }),
       });
       return {
         session_id: childId,
-        mode: "bound_thread",
-        platform_thread_id: platformThreadId,
+        mode: "persistent",
+        platform_thread_id: platformThreadId ?? null,
         expires_at_ms: expiresAt,
         respond_to: respondTo,
         internal: internalDelivery,
@@ -1296,7 +1317,7 @@ export async function handleIntegrationControlOp(
       if (!ext) {
         throw new IntegrationOpError(
           "ERR_SUBAGENT_RUNTIME_UNAVAILABLE",
-          "session_send requires messaging runtime (e.g. Discord platform started)",
+          "session_send requires messaging runtime",
         );
       }
       const { sessions } = requireSubagentRuntime(ctx);
@@ -1319,18 +1340,26 @@ export async function handleIntegrationControlOp(
       const platformUserId =
         typeof platformUserIdRaw === "string" && platformUserIdRaw.trim()
           ? platformUserIdRaw.trim()
-          : "discord:subagent";
+          : undefined;
       const replyToMessageId =
         typeof pl.reply_to_message_id === "string" && pl.reply_to_message_id.trim()
           ? pl.reply_to_message_id.trim()
           : undefined;
       const delivery = silent
         ? ({ kind: "internal" } as const)
-        : ({
-            kind: "messaging_surface",
-            userId: platformUserId,
-            replyToMessageId,
-          } as const);
+        : (() => {
+            if (!platformUserId) {
+              throw new IntegrationOpError(
+                "ERR_MISSING_PLATFORM_USER_ID",
+                "platform_user_id is required for messaging_surface delivery",
+              );
+            }
+            return {
+              kind: "messaging_surface",
+              userId: platformUserId,
+              replyToMessageId,
+            } as const;
+          })();
       const turn = await ext.runSessionModelTurn({
         sessionId,
         userContent: message,
@@ -1360,7 +1389,7 @@ export async function handleIntegrationControlOp(
       if (!ext) {
         throw new IntegrationOpError(
           "ERR_SUBAGENT_RUNTIME_UNAVAILABLE",
-          "subagent runtime not configured (start messaging platform; Discord when enabled)",
+          "subagent runtime not configured (start messaging platform)",
         );
       }
       const { sessions } = requireSubagentRuntime(ctx);
@@ -1384,19 +1413,28 @@ export async function handleIntegrationControlOp(
       const platformUserId =
         typeof platformUserIdRaw === "string" && platformUserIdRaw.trim()
           ? platformUserIdRaw.trim()
-          : "discord:subagent";
+          : undefined;
       const replyToMessageId =
         typeof pl.reply_to_message_id === "string" && pl.reply_to_message_id.trim()
           ? pl.reply_to_message_id.trim()
           : undefined;
+      const hasThreadBinding = Boolean(row.subagentPlatformThreadId?.trim());
       const delivery =
-        pl.delivery === "internal"
+        pl.delivery === "internal" || (!hasThreadBinding && pl.delivery !== "messaging_surface")
           ? ({ kind: "internal" } as const)
-          : ({
-              kind: "messaging_surface",
-              userId: platformUserId,
-              replyToMessageId,
-            } as const);
+          : (() => {
+              if (!platformUserId) {
+                throw new IntegrationOpError(
+                  "ERR_MISSING_PLATFORM_USER_ID",
+                  "platform_user_id is required for messaging_surface delivery",
+                );
+              }
+              return {
+                kind: "messaging_surface",
+                userId: platformUserId,
+                replyToMessageId,
+              } as const;
+            })();
       const turn = await ext.runSessionModelTurn({
         sessionId,
         userContent: prompt,
@@ -1472,9 +1510,9 @@ export async function handleIntegrationControlOp(
       const shouldAnnounceKilled =
         targetRow &&
         targetRow.status !== "terminated" &&
-        targetRow.subagentMode === "bound" &&
+        targetRow.subagentMode === "persistent" &&
         Boolean(targetRow.subagentPlatformThreadId?.trim());
-      terminateBoundSubagentSession(
+      terminatePersistentSubagentSession(
         sessionManager,
         sessionId,
         shouldAnnounceKilled ? "killed" : undefined,
@@ -1580,6 +1618,37 @@ export async function handleIntegrationControlOp(
       }
       await pm.stop(id);
       return { ok: true, id };
+    }
+
+    case "config_request": {
+      if (principal.kind !== "agent") {
+        throw new IntegrationOpError("ERR_FORBIDDEN", "config_request requires agent principal");
+      }
+      if (!ctx.config.dynamicConfigDirectory) {
+        throw new IntegrationOpError(
+          "ERR_CONFIG_REQUEST_UNAVAILABLE",
+          "dynamicConfigDirectory not configured",
+        );
+      }
+      const pl = payloadObject(req);
+      const fragmentRaw = pl.fragment;
+      if (!fragmentRaw || typeof fragmentRaw !== "object" || Array.isArray(fragmentRaw)) {
+        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "payload.fragment must be a JSON object");
+      }
+      const fragmentParse = shoggothConfigFragmentSchema.safeParse(fragmentRaw);
+      if (!fragmentParse.success) {
+        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", fragmentParse.error.message);
+      }
+      const fragment = fragmentParse.data;
+      const currentConfig = loadLayeredConfig(ctx.config.configDirectory);
+      const merged = deepMerge(currentConfig, fragment);
+      const fullParse = shoggothConfigSchema.safeParse(merged);
+      if (!fullParse.success) {
+        return { ok: false, error: "validation_failed", details: fullParse.error };
+      }
+      const filePath = join(ctx.config.dynamicConfigDirectory, `${process.pid}.json`);
+      writeFileSync(filePath, JSON.stringify(fragment, null, 2), { encoding: "utf8" });
+      return { ok: true, path: filePath };
     }
 
     default:

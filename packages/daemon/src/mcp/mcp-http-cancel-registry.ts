@@ -1,9 +1,9 @@
 /**
  * Routes operator-initiated MCP streamable HTTP `cancelRequest` to the live pool
- * for a Shoggoth session (Discord route `sessionId`) or the global MCP slice.
+ * for a Shoggoth session or the global MCP slice.
  */
 
-/** Use this `session_id` with control / CLI when targeting the Discord platform global MCP pool. */
+/** Use this `session_id` with control / CLI when targeting the platform global MCP pool. */
 export const SHOGGOTH_GLOBAL_MCP_SESSION_KEY = "__global__";
 
 type CancelHandler = (sourceId: string, requestId: number) => boolean;

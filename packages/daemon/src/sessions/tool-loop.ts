@@ -59,11 +59,11 @@ export interface RunToolLoopHitl {
   /** Invoked after a row is enqueued (operator alerts / logs). */
   readonly hitlNotifier?: HitlNotifier;
   /**
-   * Optional follow-up after enqueue (e.g. Discord in-thread notice). Errors are swallowed by the tool loop.
+   * Optional follow-up after enqueue (e.g. in-thread notice). Errors are swallowed by the tool loop.
    */
   readonly afterHitlQueued?: (row: PendingActionRow) => void | Promise<void>;
   /**
-   * When set (e.g. Discord ♾️/✅ reactions), matching session/agent **for this tool name** skips HITL.
+   * When set (e.g. platform ♾️/✅ reactions), matching session/agent **for this tool name** skips HITL.
    */
   readonly autoApprove?: HitlAutoApproveGate;
 }
@@ -206,11 +206,11 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
           const h = options.hitl;
           h.pending.expireDue(new Date(h.clock.nowMs()).toISOString());
           const tier = classifyToolRisk(compoundResource, h.config.toolRisk);
-          const bypass = effectiveBypassUpTo(h.principalRoles, h.config.roleBypassUpTo);
+          const bypass = effectiveBypassUpTo(h.principalRoles, h.config.agentBypassUpTo);
           if (
             requiresReview ||
             (requiresHumanApproval(tier, bypass) &&
-            !h.autoApprove?.shouldAutoApprove(options.sessionId, compoundResource))
+            (tier === "never" || !h.autoApprove?.shouldAutoApprove(options.sessionId, compoundResource)))
           ) {
             const pendingId = h.newPendingId();
             const expiresAtIso = new Date(

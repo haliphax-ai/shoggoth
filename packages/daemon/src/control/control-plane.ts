@@ -77,7 +77,7 @@ export type ControlPlaneOptions = {
   hitlPending?: PendingActionsStore;
   /** When set with `hitlPending`, enables `hitl_clear` to wipe agent auto-approve (disk + memory). */
   hitlClear?: IntegrationOpsContext["hitlClear"];
-  /** Test hook: override `mcp_http_cancel_request` routing (default: Discord platform cancel registry). */
+  /** Test hook: override `mcp_http_cancel_request` routing (default: platform cancel registry). */
   cancelMcpHttpRequest?: IntegrationOpsContext["cancelMcpHttpRequest"];
 };
 

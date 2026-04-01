@@ -1,4 +1,4 @@
--- Shoggoth prototype schema (single migration). Schema changes: delete the state DB and recreate.
+-- Shoggoth schema. Prototype: wipe state DB on schema change.
 -- Single-writer SQLite; WAL is enabled by the application.
 
 -- ---------------------------------------------------------------------------
@@ -17,7 +17,7 @@ CREATE TABLE sessions (
   context_segment_id TEXT NOT NULL,
   parent_session_id TEXT,
   subagent_mode TEXT,
-  subagent_discord_thread_id TEXT,
+  subagent_platform_thread_id TEXT,
   subagent_expires_at_ms INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -37,6 +37,7 @@ CREATE TABLE transcript_messages (
   role TEXT NOT NULL,
   content TEXT,
   tool_call_id TEXT,
+  tool_calls_json TEXT DEFAULT NULL,
   metadata_json TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (session_id, seq)
@@ -197,7 +198,7 @@ CREATE INDEX idx_hitl_pending_session_status ON hitl_pending_actions (session_id
 CREATE INDEX idx_hitl_pending_expires ON hitl_pending_actions (status, expires_at);
 
 -- ---------------------------------------------------------------------------
--- HITL: session tools that skip approval (e.g. Discord reaction)
+-- HITL: session tools that skip approval
 -- ---------------------------------------------------------------------------
 CREATE TABLE hitl_session_tool_auto_approve (
   session_id TEXT NOT NULL,
@@ -268,3 +269,20 @@ CREATE TABLE acpx_workspace_bindings (
 );
 
 CREATE INDEX idx_acpx_bindings_session ON acpx_workspace_bindings (shoggoth_session_id);
+
+-- ---------------------------------------------------------------------------
+-- Session stats
+-- ---------------------------------------------------------------------------
+CREATE TABLE session_stats (
+  session_id TEXT PRIMARY KEY REFERENCES sessions (id) ON DELETE CASCADE,
+  turn_count INTEGER NOT NULL DEFAULT 0,
+  compaction_count INTEGER NOT NULL DEFAULT 0,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  context_window_tokens INTEGER,
+  first_turn_at TEXT,
+  last_turn_at TEXT,
+  last_compacted_at TEXT,
+  transcript_message_count INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

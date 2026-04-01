@@ -1,9 +1,8 @@
 /**
  * Platform-agnostic interfaces for daemon platform implementations.
  *
- * Discord is the first concrete platform; these abstractions allow future platforms
- * (Slack, Matrix, CLI, etc.) to plug in without coupling the daemon core to any
- * single transport.
+ * These abstractions allow platforms (Discord, Slack, Matrix, CLI, etc.) to plug
+ * in without coupling the daemon core to any single transport.
  */
 
 import type Database from "better-sqlite3";
@@ -29,8 +28,6 @@ import type { connectShoggothMcpServers } from "../mcp/mcp-server-pool";
  * Lifecycle handle returned by a started platform. Provides the daemon core with
  * transport-agnostic operations: running model turns, managing subagent bus
  * subscriptions, and announcing subagent lifecycle events.
- *
- * Discord implementation: {@link DiscordPlatformHandle} in `./discord.ts`.
  */
 export interface PlatformHandle {
   /** Unsubscribe from platform routes and release resources (MCP subprocesses, sockets, etc.). */
@@ -50,17 +47,17 @@ export interface PlatformHandle {
   }) => Promise<SessionAgentTurnResult>;
 
   /**
-   * Subscribe a session id to the platform's agent-to-agent bus (bound subagents).
+   * Subscribe a session id to the platform's agent-to-agent bus (persistent subagents).
    * Returns an unsubscribe function.
    */
   readonly subscribeSubagentSession: (sessionId: string) => () => void;
 
   /**
-   * Post a short in-thread status when a bound subagent session ends.
-   * Platforms decide how to surface this (Discord posts a message in the thread,
-   * other platforms may use their own notification mechanism).
+   * Post a short in-thread status when a persistent subagent session ends.
+   * Platforms decide how to surface this (e.g. a message in a thread,
+   * a notification, or another platform-specific mechanism).
    */
-  readonly announceBoundSubagentSessionEnded: (input: {
+  readonly announcePersistentSubagentSessionEnded: (input: {
     readonly sessionId: string;
     readonly reason: "ttl_expired" | "killed";
   }) => void;
@@ -73,9 +70,6 @@ export interface PlatformHandle {
 /**
  * Platform-specific error formatting. Each platform maps thrown values to
  * user-facing copy (no stack traces) and enforces message-body length limits.
- *
- * Discord implementation: `formatDiscordPlatformErrorUserText` / `sliceDiscordPlatformMessageBody`
- * in `./discord-errors.ts`.
  */
 export interface PlatformErrorFormatter {
   /** Map a thrown value to a short, platform-safe user-facing error string. */
@@ -93,9 +87,6 @@ export interface PlatformErrorFormatter {
  * Dependency injection seam for the assistant tool loop, model client creation,
  * and MCP server connectivity. Production platforms use real implementations;
  * tests may override individual pieces.
- *
- * Discord implementation: {@link DiscordPlatformAssistantDeps} in
- * `../sessions/assistant-runtime.ts`.
  */
 export interface PlatformAssistantDeps {
   /** Factory for the failover-capable tool-calling model client. */
@@ -117,8 +108,6 @@ export interface PlatformAssistantDeps {
 
 /**
  * Result of a single platform health-check probe.
- *
- * Discord implementation: `createDiscordProbe` in `../health.ts`.
  */
 export interface PlatformProbeResult {
   readonly name: string;
@@ -145,13 +134,9 @@ export interface PlatformProbe {
 /**
  * Platform-specific human-in-the-loop interaction adapter.
  *
- * Discord uses emoji reactions (✅/♾️/❌/1️⃣) on notice messages to capture
- * operator approval. Other platforms may use buttons, slash commands, or
- * entirely different UX patterns. This interface captures the concept of
- * "platform-specific HITL interaction" without assuming any particular mechanism.
- *
- * Discord implementation: `HitlDiscordNoticeRegistry` + `registerDiscordHitlNoticeAndAddReactions`
- * in `../hitl/`.
+ * Platforms use their own UX patterns to capture operator approval — emoji
+ * reactions, buttons, slash commands, etc. This interface captures the concept
+ * of "platform-specific HITL interaction" without assuming any particular mechanism.
  */
 export interface PlatformHitlAdapter {
   /**
@@ -161,7 +146,7 @@ export interface PlatformHitlAdapter {
    * @param pendingId  Unique id of the pending HITL action.
    * @param sessionId  Session that owns the pending action.
    * @param toolName   Name of the tool awaiting approval.
-   * @param ref        Platform-specific reference (e.g. Discord message id + channel id).
+   * @param ref        Platform-specific reference (e.g. message id + channel id).
    */
   registerNotice(pendingId: string, sessionId: string, toolName: string, ref: unknown): void;
 
@@ -181,10 +166,7 @@ export interface PlatformHitlAdapter {
 
 /**
  * Common configuration and dependencies passed to a platform's `start*` factory.
- * Each concrete platform extends this with transport-specific fields (e.g. Discord
- * adds `discord: DiscordMessagingRuntime`).
- *
- * Discord implementation: {@link DiscordPlatformOptions} in `./discord.ts`.
+ * Each concrete platform extends this with transport-specific fields.
  */
 export interface PlatformOptions {
   /** SQLite database handle for sessions, transcripts, tool runs, and HITL state. */

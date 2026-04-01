@@ -141,13 +141,12 @@ export {
   type PendingActionStatus,
 } from "./hitl/pending-actions-store";
 export { invokeControlRequest, type InvokeControlRequestInput } from "./control/control-client";
-export { SUBAGENT_DEFAULT_BOUND_LIFETIME_MS } from "./subagent/subagent-constants";
+export { SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS } from "./subagent/subagent-constants";
 export { resolveSessionTargetFromCliArg } from "./control/resolve-session-cli-target";
 export { createLogger, type Logger, type LogLevel, type LogFields } from "./logging";
 export { createHitlAutoApproveGate, type HitlAutoApproveGate } from "./hitl/hitl-auto-approve";
 export { transcriptRowsToModelChatMessages } from "./sessions/transcript-to-chat";
 export { daemonNotice, loadDaemonNotices } from "./notices/load-notices";
-export { DiscordRoutesConfigurationError } from "@shoggoth/platform-discord";
 export {
   resolveBootstrapPrimarySessionUrn,
   parseFirstChannelIdFromRoutesJson,
@@ -188,8 +187,8 @@ export {
 export type { SessionModelTurnDelivery } from "./messaging/session-model-turn-delivery";
 export type { HitlConfigRef } from "./config-hot-reload";
 export {
-  defaultDiscordAssistantDeps,
-  type DiscordPlatformAssistantDeps,
+  defaultPlatformAssistantDeps,
+  type PlatformAssistantDeps,
 } from "./sessions/assistant-runtime";
 export {
   connectShoggothMcpServers,

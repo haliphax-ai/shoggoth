@@ -2,9 +2,12 @@ import assert from "node:assert";
 import { describe, it } from "node:test";
 import { defaultConfig, SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID } from "@shoggoth/shared";
 import { resolveSessionTargetFromCliArg } from "../../src/control/resolve-session-cli-target";
+import { registerBuiltInMessagingPlatforms } from "@shoggoth/platform-discord";
+
+registerBuiltInMessagingPlatforms();
 
 describe("resolveSessionTargetFromCliArg", () => {
-  const cfg = defaultConfig("/tmp/cfg");
+  const cfg = { ...defaultConfig("/tmp/cfg"), runtime: { defaultSessionPlatform: "discord" } } as ReturnType<typeof defaultConfig>;
 
   it("returns a full session URN unchanged", () => {
     const urn = "agent:dev:discord:1111111111111111111";
@@ -12,10 +15,10 @@ describe("resolveSessionTargetFromCliArg", () => {
   });
 
   it("resolves agent id to default-primary UUID session on discord", () => {
-    const prev = process.env.SHOGGOTH_PRIMARY_DISCORD_CHANNEL_ID;
+    const prev = process.env.SHOGGOTH_PRIMARY_CHANNEL_ID;
     const prevRoutes = process.env.SHOGGOTH_DISCORD_ROUTES;
     try {
-      delete process.env.SHOGGOTH_PRIMARY_DISCORD_CHANNEL_ID;
+      delete process.env.SHOGGOTH_PRIMARY_CHANNEL_ID;
       delete process.env.SHOGGOTH_DISCORD_ROUTES;
       const out = resolveSessionTargetFromCliArg("myagent", cfg);
       assert.equal(
@@ -23,22 +26,22 @@ describe("resolveSessionTargetFromCliArg", () => {
         `agent:myagent:discord:${SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID.toLowerCase()}`,
       );
     } finally {
-      if (prev !== undefined) process.env.SHOGGOTH_PRIMARY_DISCORD_CHANNEL_ID = prev;
-      else delete process.env.SHOGGOTH_PRIMARY_DISCORD_CHANNEL_ID;
+      if (prev !== undefined) process.env.SHOGGOTH_PRIMARY_CHANNEL_ID = prev;
+      else delete process.env.SHOGGOTH_PRIMARY_CHANNEL_ID;
       if (prevRoutes !== undefined) process.env.SHOGGOTH_DISCORD_ROUTES = prevRoutes;
       else delete process.env.SHOGGOTH_DISCORD_ROUTES;
     }
   });
 
-  it("uses SHOGGOTH_PRIMARY_DISCORD_CHANNEL_ID snowflake when set", () => {
-    const prev = process.env.SHOGGOTH_PRIMARY_DISCORD_CHANNEL_ID;
+  it("uses SHOGGOTH_PRIMARY_CHANNEL_ID when set", () => {
+    const prev = process.env.SHOGGOTH_PRIMARY_CHANNEL_ID;
     try {
-      process.env.SHOGGOTH_PRIMARY_DISCORD_CHANNEL_ID = "1487579255616573533";
+      process.env.SHOGGOTH_PRIMARY_CHANNEL_ID = "1487579255616573533";
       const out = resolveSessionTargetFromCliArg("a1", cfg);
       assert.equal(out, "agent:a1:discord:1487579255616573533");
     } finally {
-      if (prev !== undefined) process.env.SHOGGOTH_PRIMARY_DISCORD_CHANNEL_ID = prev;
-      else delete process.env.SHOGGOTH_PRIMARY_DISCORD_CHANNEL_ID;
+      if (prev !== undefined) process.env.SHOGGOTH_PRIMARY_CHANNEL_ID = prev;
+      else delete process.env.SHOGGOTH_PRIMARY_CHANNEL_ID;
     }
   });
 

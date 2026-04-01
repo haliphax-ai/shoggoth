@@ -36,4 +36,11 @@ describe("requiresHumanApproval", () => {
     assert.equal(requiresHumanApproval("caution", "caution"), false);
     assert.equal(requiresHumanApproval("critical", "caution"), true);
   });
+
+  it("requires approval for never tier unless bypass is never", () => {
+    assert.equal(requiresHumanApproval("never", "safe"), true);
+    assert.equal(requiresHumanApproval("never", "caution"), true);
+    assert.equal(requiresHumanApproval("never", "critical"), true);
+    assert.equal(requiresHumanApproval("never", "never"), false);
+  });
 });

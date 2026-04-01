@@ -38,7 +38,7 @@ Usage:
   shoggoth session context reset <sessionUrn|agentId>  Reset context segment (control socket; operator)
   shoggoth session inspect <sessionUrn|agentId>   Session row + child subagents (operator)
   shoggoth session status <sessionUrn|agentId>    Session status + stats + model info (operator)
-  shoggoth session steer <sessionUrn|agentId> <post|discord|surface|internal> <prompt...>  Extra model turn (operator)
+  shoggoth session steer <sessionUrn|agentId> <surface|internal> <prompt...>  Extra model turn (operator)
   shoggoth session abort <sessionUrn|agentId>  Abort in-flight model turn (operator)
   shoggoth session kill <sessionUrn|agentId>      Terminate session + cleanup (operator)
   shoggoth session model <sessionUrn|agentId>     Show current model selection (operator)
@@ -255,11 +255,10 @@ export async function runSessionCli(argv: string[]): Promise<void> {
     const deliveryRaw = argv[2]?.trim().toLowerCase();
     const prompt = argv.slice(3).join(" ").trim();
     const deliveryInternal = deliveryRaw === "internal";
-    const deliveryPost =
-      deliveryRaw === "post" || deliveryRaw === "discord" || deliveryRaw === "surface";
-    if (!rawTarget || (!deliveryInternal && !deliveryPost) || !prompt) {
+    const deliverySurface = deliveryRaw === "surface";
+    if (!rawTarget || (!deliveryInternal && !deliverySurface) || !prompt) {
       console.error(
-        "usage: shoggoth session steer <sessionUrn|agentId> <post|discord|surface|internal> <prompt...>",
+        "usage: shoggoth session steer <sessionUrn|agentId> <surface|internal> <prompt...>",
       );
       process.exitCode = 1;
       return;

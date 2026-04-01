@@ -1,7 +1,7 @@
 import { parseAgentSessionUrn, resolveTopLevelSessionUrn } from "@shoggoth/shared";
 
 /**
- * In-memory gates: after ✅ / ♾️ on Discord, future calls for the **same tool name** in that scope
+ * In-memory gates: after ✅ / ♾️ approval, future calls for the **same tool name** in that scope
  * skip HITL (until daemon restart). Scoped per tool, not all tools.
  */
 export type HitlAutoApproveGate = {

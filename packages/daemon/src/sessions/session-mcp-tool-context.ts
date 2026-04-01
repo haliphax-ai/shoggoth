@@ -33,7 +33,7 @@ export function openAiToolsFromCatalog(aggregated: AggregateMcpCatalogResult): O
 }
 
 /**
- * Appends `builtin.message` when a messaging runtime registers a capability slice (e.g. Discord).
+ * Appends `builtin.message` when a messaging runtime registers a capability slice.
  */
 export function augmentSessionMcpToolContextWithMessageTool(
   base: SessionMcpToolContext,

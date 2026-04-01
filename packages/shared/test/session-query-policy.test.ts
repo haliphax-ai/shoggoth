@@ -16,7 +16,7 @@ describe("resolveEffectiveSessionQueryAllowedAgentIds", () => {
     hitl: {
       defaultApprovalTimeoutMs: 1,
       toolRisk: {},
-      roleBypassUpTo: {},
+      agentBypassUpTo: {},
       agentToolAutoApprove: {},
     },
     memory: { paths: [], embeddings: { enabled: false } },

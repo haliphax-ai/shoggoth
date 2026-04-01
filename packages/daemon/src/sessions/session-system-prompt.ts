@@ -47,9 +47,9 @@ export interface BuildSessionSystemContextInput {
   readonly workspacePath: string | undefined;
   readonly config?: ShoggothConfig;
   readonly env?: NodeJS.ProcessEnv;
-  /** Session id for the runtime line (e.g. Discord-bound session). */
+  /** Session id for the runtime line (e.g. platform-bound session). */
   readonly sessionId?: string;
-  /** Internal context segment UUID (`sessions.context_segment_id`; `new` / `reset` on Discord). */
+  /** Internal context segment UUID (`sessions.context_segment_id`; `new` / `reset` commands). */
   readonly contextSegmentId?: string;
   /** Delivery surface id from the session URN (`agent:…:<platform>:…`), when known. */
   readonly channel?: string;
@@ -285,7 +285,7 @@ function buildSilentRepliesSection(input: {
   readonly channel: string | undefined;
 }): string {
   if (messagingCapabilitiesHasFeature(input.messagingCapabilities, MESSAGING_FEATURE.SILENT_REPLIES_CHANNEL_AWARE)) {
-    return daemonPrompt("system-silent-replies-discord");
+    return daemonPrompt("system-silent-replies-platform");
   }
   return daemonPrompt("system-silent-replies-default");
 }

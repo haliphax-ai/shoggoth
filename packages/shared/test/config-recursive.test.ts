@@ -46,18 +46,18 @@ describe("loadLayeredConfig recursive", () => {
       writeFileSync(
         join(TMP, "base", "10-hitl.json"),
         JSON.stringify({
-          hitl: { roleBypassUpTo: { "agent:main": "safe" } },
+          hitl: { agentBypassUpTo: { "agent:main": "safe" } },
         }),
       );
       writeFileSync(
         join(TMP, "dynamic", "10-hitl.json"),
         JSON.stringify({
-          hitl: { roleBypassUpTo: { "agent:main": "critical" } },
+          hitl: { agentBypassUpTo: { "agent:main": "critical" } },
         }),
       );
 
       const cfg = loadLayeredConfig(TMP);
-      assert.equal(cfg.hitl.roleBypassUpTo["agent:main"], "critical");
+      assert.equal(cfg.hitl.agentBypassUpTo["agent:main"], "critical");
     } finally {
       teardown();
     }

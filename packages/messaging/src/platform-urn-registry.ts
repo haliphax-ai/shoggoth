@@ -31,6 +31,8 @@ export interface MessagingPlatformUrnPolicy {
     platform: string,
     options?: BootstrapPrimarySessionUrnOptions,
   ): string;
+  /** Resolve effective routes JSON from config. Platform-specific merging logic lives in the implementation. */
+  resolveEffectiveRoutesJson?(cfg: unknown): string | undefined;
 }
 
 const policiesByPlatform = new Map<string, MessagingPlatformUrnPolicy>();
@@ -60,4 +62,11 @@ export function parseFirstChannelIdFromRoutesJson(
   raw: string | undefined,
 ): string | undefined {
   return getMessagingPlatformUrnPolicy(platform.trim().toLowerCase())?.parseFirstChannelIdFromRoutesJson(raw);
+}
+
+export function resolveEffectivePlatformRoutesJson(
+  platform: string,
+  cfg: unknown,
+): string | undefined {
+  return getMessagingPlatformUrnPolicy(platform.trim().toLowerCase())?.resolveEffectiveRoutesJson?.(cfg);
 }

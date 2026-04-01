@@ -2,10 +2,10 @@ import assert from "node:assert";
 import { describe, it } from "node:test";
 import { formatAgentSessionUrn, SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID } from "../src/session-urn.js";
 import {
-  formatDiscordAgentIdentityPrefix,
+  formatAgentIdentityPrefix,
   resolveEffectiveMemoryForSession,
   resolveEffectiveModelsConfig,
-  SHOGGOTH_DISCORD_AGENT_DEFAULT_EMOJI,
+  SHOGGOTH_AGENT_DEFAULT_EMOJI,
 } from "../src/effective-agent-for-session.js";
 import type { ShoggothConfig } from "../src/schema.js";
 
@@ -22,7 +22,7 @@ describe("effective agent config for session", () => {
     hitl: {
       defaultApprovalTimeoutMs: 1,
       toolRisk: {},
-      roleBypassUpTo: {},
+      agentBypassUpTo: {},
       agentToolAutoApprove: {},
     },
     memory: { paths: ["mem/global"], embeddings: { enabled: false } },
@@ -85,46 +85,46 @@ describe("effective agent config for session", () => {
     assert.equal(m?.failoverChain?.[0]?.providerId, "q");
   });
 
-  it("formatDiscordAgentIdentityPrefix falls back to default emoji and agent id without agents.list entry", () => {
+  it("formatAgentIdentityPrefix falls back to default emoji and agent id without agents.list entry", () => {
     assert.equal(
-      formatDiscordAgentIdentityPrefix(base, sid),
-      `**${SHOGGOTH_DISCORD_AGENT_DEFAULT_EMOJI} alice:**\n`,
+      formatAgentIdentityPrefix(base, sid),
+      `**${SHOGGOTH_AGENT_DEFAULT_EMOJI} alice:**\n`,
     );
   });
 
-  it("formatDiscordAgentIdentityPrefix uses agent id when displayName omitted", () => {
+  it("formatAgentIdentityPrefix uses agent id when displayName omitted", () => {
     const emptyEntry: ShoggothConfig = {
       ...base,
       agents: { list: { alice: {} } },
     };
     assert.equal(
-      formatDiscordAgentIdentityPrefix(emptyEntry, sid),
-      `**${SHOGGOTH_DISCORD_AGENT_DEFAULT_EMOJI} alice:**\n`,
+      formatAgentIdentityPrefix(emptyEntry, sid),
+      `**${SHOGGOTH_AGENT_DEFAULT_EMOJI} alice:**\n`,
     );
     const onlyEmoji: ShoggothConfig = {
       ...base,
       agents: { list: { alice: { emoji: "🤖" } } },
     };
-    assert.equal(formatDiscordAgentIdentityPrefix(onlyEmoji, sid), "**🤖 alice:**\n");
+    assert.equal(formatAgentIdentityPrefix(onlyEmoji, sid), "**🤖 alice:**\n");
   });
 
-  it("formatDiscordAgentIdentityPrefix uses default emoji when only displayName is set", () => {
+  it("formatAgentIdentityPrefix uses default emoji when only displayName is set", () => {
     const cfg: ShoggothConfig = {
       ...base,
       agents: { list: { alice: { displayName: "A" } } },
     };
     assert.equal(
-      formatDiscordAgentIdentityPrefix(cfg, sid),
-      `**${SHOGGOTH_DISCORD_AGENT_DEFAULT_EMOJI} A:**\n`,
+      formatAgentIdentityPrefix(cfg, sid),
+      `**${SHOGGOTH_AGENT_DEFAULT_EMOJI} A:**\n`,
     );
   });
 
-  it("formatDiscordAgentIdentityPrefix includes bold emoji and displayName", () => {
+  it("formatAgentIdentityPrefix includes bold emoji and displayName", () => {
     const cfg: ShoggothConfig = {
       ...base,
       agents: { list: { alice: { emoji: "🤖", displayName: "Rook" } } },
     };
-    assert.equal(formatDiscordAgentIdentityPrefix(cfg, sid), "**🤖 Rook:**\n");
+    assert.equal(formatAgentIdentityPrefix(cfg, sid), "**🤖 Rook:**\n");
   });
 
   it("merges memory.paths for matching agent", () => {

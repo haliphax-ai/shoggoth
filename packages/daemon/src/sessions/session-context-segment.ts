@@ -20,7 +20,7 @@ function denyPendingForSession(pending: PendingActionsStore | undefined, session
  * by the new segment id) and left for the retention workflow to clean up.
  *
  * **New** mints a new segment id, denies pending HITL for the session, clears **per-session** tool
- * auto-approve (`hitl_session_tool_auto_approve`, e.g. Discord ✅ "this tool for session"), and kills
+ * auto-approve (`hitl_session_tool_auto_approve`, e.g. ✅ "this tool for session"), and kills
  * all subagents for the session (via the optional `killSubagents` callback).
  *
  * **Reset** mints a new segment id and denies pending HITL. Retains per-session auto-approvals and

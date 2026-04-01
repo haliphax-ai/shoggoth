@@ -195,7 +195,7 @@ describe("runToolLoop", () => {
     const toolRuns = createToolRunStore(db);
     const config = {
       ...DEFAULT_HITL_CONFIG,
-      roleBypassUpTo: { admin: "critical" as const },
+      agentBypassUpTo: { admin: "critical" as const },
     };
     await runToolLoop({
       db,

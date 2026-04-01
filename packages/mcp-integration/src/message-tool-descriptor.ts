@@ -3,7 +3,7 @@ import type { McpToolDescriptor } from "./mcp-tool";
 
 /**
  * Subset of messaging adapter flags used to build the `builtin.message` JSON schema.
- * Populated by the daemon from the active platform (e.g. Discord).
+ * Populated by the daemon from the active messaging platform.
  */
 export interface MessageToolPlatformSlice {
   readonly attachments: boolean;
@@ -56,11 +56,11 @@ export function buildMessageToolDescriptor(slice: MessageToolPlatformSlice | und
     },
     name: {
       type: "string",
-      description: "create_thread: thread name (Discord).",
+      description: "create_thread: thread name.",
     },
     thread_id: {
       type: "string",
-      description: "delete_thread: thread channel snowflake (Discord).",
+      description: "delete_thread: thread/channel identifier.",
     },
   };
 
@@ -68,7 +68,7 @@ export function buildMessageToolDescriptor(slice: MessageToolPlatformSlice | und
     properties.channel_id = {
       type: "string",
       description:
-        "get only: Discord channel or thread snowflake; defaults to this session's bound outbound channel when omitted.",
+        "get only: channel or thread identifier; defaults to this session's bound outbound channel when omitted.",
     };
     properties.limit = {
       type: "integer",
@@ -80,7 +80,7 @@ export function buildMessageToolDescriptor(slice: MessageToolPlatformSlice | und
     properties.anchor_message_id = {
       type: "string",
       description:
-        "get: pivot snowflake; with list_direction selects messages before, after, or around this id (Discord GET /messages). Omit for latest messages.",
+        "get: pivot message identifier; with list_direction selects messages before, after, or around this id. Omit for latest messages.",
     };
     properties.list_direction = {
       type: "string",
@@ -114,7 +114,7 @@ export function buildMessageToolDescriptor(slice: MessageToolPlatformSlice | und
     properties.auto_archive_duration_minutes = {
       type: "integer",
       enum: [60, 1440, 4320, 10080],
-      description: "create_thread only: optional auto-archive minutes (Discord).",
+      description: "create_thread only: optional auto-archive minutes.",
     };
   }
 
@@ -165,7 +165,7 @@ export function buildMessageToolDescriptor(slice: MessageToolPlatformSlice | und
       items: { type: "string" },
       description: "search: search across multiple channels. Defaults to the bound channel.",
     };
-    // Extend limit description for search (max 25 for Discord search)
+    // Extend limit description for search (max 25 for some platform search APIs)
     if (!properties.limit) {
       properties.limit = {
         type: "integer",

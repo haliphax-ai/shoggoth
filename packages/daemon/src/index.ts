@@ -32,7 +32,6 @@ import {
 } from "./events/heartbeat-consumer";
 import {
   createSqliteProbe,
-  createDiscordProbe,
   createModelEndpointProbe,
   fetchGeminiMetadataForProviders,
   fetchOpenAIMetadataForProviders,
@@ -47,7 +46,6 @@ import {
   isConfigHotReloadEnabled,
   resolveBootStaleClaimMs,
   resolveCronTickIntervalMs,
-  resolveDiscordOwnerUserId,
   resolveDrainTimeoutMs,
   resolveHeartbeatBatchSize,
   resolveHeartbeatConcurrency,
@@ -85,15 +83,17 @@ import {
   type HitlDiscordNoticeRegistry,
   executeDiscordMessageToolAction,
   registerBuiltInMessagingPlatforms,
+  createDiscordProbe,
+  resolveDiscordOwnerUserId,
 } from "@shoggoth/platform-discord";
 import { registerPlatform, stopAllPlatforms } from "./platforms/platform-registry";
-import { reconcilePersistentBoundSubagents } from "./subagent/reconcile-persistent-bound-subagents";
+import { reconcilePersistentSubagents } from "./subagent/reconcile-persistent-subagents";
 import {
   messageToolContextRef,
   messageToolSliceFromCapabilities,
 } from "./messaging/message-tool-context-ref";
 import { setSubagentRuntimeExtension } from "./subagent/subagent-extension-ref";
-import { defaultDiscordAssistantDeps } from "./sessions/assistant-runtime";
+import { defaultPlatformAssistantDeps } from "./sessions/assistant-runtime";
 import { createPersistingHitlAutoApproveGate } from "./hitl/hitl-auto-approve-persisting";
 import { type HitlAutoApproveGate } from "./hitl/hitl-auto-approve";
 import { createHitlPendingResolutionStack, type HitlPendingStack } from "./hitl/hitl-pending-stack";
@@ -427,14 +427,14 @@ void (async () => {
       hitlAutoApproveGate,
       logger: msgLog.child({ subsystem: "discord" }),
       discord: dm,
-      deps: defaultDiscordAssistantDeps,
+      deps: defaultPlatformAssistantDeps,
     });
     registerPlatform("discord", discordPlatform);
     const subagentExt = {
       runSessionModelTurn: discordPlatform.runSessionModelTurn,
       subscribeSubagentSession: discordPlatform.subscribeSubagentSession,
       registerPlatformThreadBinding: dm.registerPlatformThreadBinding,
-      announceBoundSubagentSessionEnded: discordPlatform.announceBoundSubagentSessionEnded,
+      announcePersistentSubagentSessionEnded: discordPlatform.announcePersistentSubagentSessionEnded,
     };
     setSubagentRuntimeExtension(subagentExt);
     messageToolContextRef.current = {
@@ -471,7 +471,7 @@ void (async () => {
           args,
         ),
     };
-    const subRecon = reconcilePersistentBoundSubagents({
+    const subRecon = reconcilePersistentSubagents({
       db,
       config,
       logger: msgLog.child({ subsystem: "subagent-reconcile" }),

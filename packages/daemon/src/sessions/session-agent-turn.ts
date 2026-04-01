@@ -91,7 +91,7 @@ function sessionCreds(uid?: number, gid?: number): AgentCredentials {
 /**
  * Appends the user turn, runs the tool loop with MCP + built-ins, and returns the latest
  * assistant text plus failover metadata. Caller handles message-platform delivery and formatting.
- * CI/non-Discord entrypoint: `test/sessions/session-agent-turn.test.ts` (mocked model client).
+ * CI/non-platform entrypoint: `test/sessions/session-agent-turn.test.ts` (mocked model client).
  */
 export async function executeSessionAgentTurn(
   input: ExecuteSessionAgentTurnInput,
@@ -371,19 +371,21 @@ export async function executeSessionAgentTurn(
                 payload.respond_to = respondTo.trim();
               }
               if (args.internal === false) payload.internal = false;
-            } else if (action === "spawn_bound") {
+            } else if (action === "spawn_persistent") {
               const prompt = String(args.prompt ?? "").trim();
               const threadId = String(args.thread_id ?? "").trim();
-              if (!prompt || !threadId) {
-                return { resultJson: JSON.stringify({ error: "thread_id and prompt required" }) };
+              if (!prompt) {
+                return { resultJson: JSON.stringify({ error: "prompt required" }) };
               }
               op = "subagent_spawn";
               payload = {
                 parent_session_id: input.sessionId,
                 prompt,
-                mode: "bound_thread",
-                platform_thread_id: threadId,
+                mode: "persistent",
               };
+              if (threadId) {
+                payload.platform_thread_id = threadId;
+              }
               const du = args.platform_user_id;
               if (typeof du === "string" && du.trim()) payload.platform_user_id = du.trim();
               const rt = args.reply_to_message_id;
@@ -512,7 +514,7 @@ export async function executeSessionAgentTurn(
           const spawnAction =
             originalName === "subagent" &&
             (String(args.action ?? "").trim() === "spawn_one_shot" ||
-              String(args.action ?? "").trim() === "spawn_bound");
+              String(args.action ?? "").trim() === "spawn_persistent");
           if (spawnAction && mo && typeof mo === "object" && !Array.isArray(mo)) {
             payload.model_options = mo;
           }
@@ -663,6 +665,23 @@ export async function executeSessionAgentTurn(
             return { resultJson: JSON.stringify({ path: p, content }) };
           }
           return { resultJson: JSON.stringify({ error: `unknown skills action: ${action}` }) };
+        }
+        if (originalName === "config.request") {
+          const inv = getAgentIntegrationInvoker();
+          if (!inv) {
+            return { resultJson: JSON.stringify({ error: "config_request_unavailable" }) };
+          }
+          try {
+            const result = await inv(input.sessionId, "config_request", { fragment: args.fragment });
+            return { resultJson: JSON.stringify(result) };
+          } catch (e) {
+            if (e instanceof IntegrationOpError) {
+              return {
+                resultJson: JSON.stringify({ ok: false, code: e.code, message: e.message }),
+              };
+            }
+            throw e;
+          }
         }
         if (originalName === "procman") {
           const action = String(args.action ?? "").trim();

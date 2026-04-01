@@ -19,7 +19,7 @@ export const REQUIRED_PROMPT_KEYS: readonly string[] = [
   "system-runtime",
   "system-safety",
   "system-silent-replies-default",
-  "system-silent-replies-discord",
+  "system-silent-replies-platform",
   "system-soul-guidance",
   "system-tooling",
   "system-workspace-files-heading",
