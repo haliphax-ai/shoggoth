@@ -1,5 +1,5 @@
 import type { TaskDef, TaskList, TaskStatus } from "./types.js";
-import type { Orchestrator, KillAdapter } from "./orchestrator.js";
+import type { Orchestrator, KillAdapter, SpawnAdapter } from "./orchestrator.js";
 import { saveWorkflow, loadWorkflow } from "./state.js";
 import { retentionRun, type RetentionSummary, type RetentionOptions } from "./retention.js";
 import { getTransitiveDeps } from "./graph.js";
@@ -19,6 +19,8 @@ export interface ControlPlaneOptions {
   orchestrators: Map<string, Orchestrator>;
   stateDir: string;
   killer: KillAdapter;
+  /** Optional: spawner with abortTask for cancelling in-flight model turns. */
+  spawner?: SpawnAdapter;
 }
 
 // --- Helpers ---
@@ -69,11 +71,13 @@ export class ControlPlane {
   private readonly orchestrators: Map<string, Orchestrator>;
   private readonly stateDir: string;
   private readonly killer: KillAdapter;
+  private readonly spawner: SpawnAdapter | undefined;
 
   constructor(opts: ControlPlaneOptions) {
     this.orchestrators = opts.orchestrators;
     this.stateDir = opts.stateDir;
     this.killer = opts.killer;
+    this.spawner = opts.spawner;
   }
 
   /** Resolve a workflow — prefer in-memory orchestrator, fall back to disk. */
@@ -109,6 +113,7 @@ export class ControlPlane {
     // Kill all sessions (in-progress, completed, and failed)
     for (const task of wf.tasks) {
       if (task.sessionKey) {
+        this.spawner?.abortTask?.(task.sessionKey);
         await this.killer.kill(task.sessionKey).catch(() => {});
       }
     }

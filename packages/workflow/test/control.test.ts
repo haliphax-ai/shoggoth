@@ -219,6 +219,40 @@ describe("ControlPlane", () => {
 
       await assert.rejects(() => cp.abort("nonexistent"), /not found/i);
     });
+
+    it("calls abortTask on spawner for tasks with session keys", async () => {
+      const abortedKeys: string[] = [];
+      const spawner = mockSpawnAdapter();
+      spawner.abortTask = (key: string) => { abortedKeys.push(key); };
+      const pollResults = new Map<string, PollResult>();
+      const poller = mockPollAdapter(pollResults);
+      const notifier = mockNotifyAdapter();
+      const killer = mockKillAdapter();
+      const msgAdapter = mockMessageAdapter();
+      const statusManager = new StatusManager(msgAdapter);
+
+      const orch = new Orchestrator(spawner, poller, notifier, statusManager, undefined, killer);
+      const wfId = await orch.start(
+        [makeTask(1), makeTask(2)],
+        "1 2",
+        defaultOpts(baseDir),
+      );
+
+      const orchestrators = new Map<string, Orchestrator>();
+      orchestrators.set(wfId, orch);
+
+      const cp = new ControlPlane({
+        orchestrators,
+        stateDir: baseDir,
+        killer,
+        spawner,
+      });
+
+      await cp.abort(wfId);
+
+      assert.ok(abortedKeys.includes("session-1"));
+      assert.ok(abortedKeys.includes("session-2"));
+    });
   });
 
   describe("pause", () => {

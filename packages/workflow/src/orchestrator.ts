@@ -24,6 +24,8 @@ export interface PollResult {
 
 export interface SpawnAdapter {
   spawn(req: SpawnRequest): Promise<string>;
+  /** Abort an in-flight task by session key. Optional — callers check before invoking. */
+  abortTask?(sessionKey: string): void;
 }
 
 export interface PollAdapter {
@@ -103,7 +105,7 @@ export class Orchestrator {
   private opts: OrchestratorOptions | null = null;
   private completed = false;
   private paused = false;
-  private pollingTimer: ReturnType<typeof setInterval> | null = null;
+  private pollingTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     spawner: SpawnAdapter,
@@ -204,10 +206,11 @@ export class Orchestrator {
     // Persist state
     saveWorkflow(this.opts.stateDir, this.workflow);
 
-    // Update status message (skip when paused with no in-progress tasks)
+    // Update status message (skip when paused with no in-progress tasks, or when all terminal)
     if (this.statusManager) {
       const hasInProgress = this.workflow.tasks.some((t: { status: string }) => t.status === "in_progress");
-      if (!this.paused || hasInProgress) {
+      const allTerminal = this.workflow.tasks.every((t) => isTerminal(t.status));
+      if (!allTerminal && (!this.paused || hasInProgress)) {
         await this.statusManager.updateStatus(this.workflow);
       }
     }
@@ -219,13 +222,20 @@ export class Orchestrator {
   /** Start the automatic polling loop. */
   startPolling(): void {
     if (!this.workflow || !this.opts) return;
-    this.pollingTimer = setInterval(() => this.tick(), this.opts.pollingIntervalMs);
+    const scheduleNext = () => {
+      if (!this.workflow || !this.opts) return;
+      this.pollingTimer = setTimeout(async () => {
+        await this.tick();
+        if (this.pollingTimer !== null) scheduleNext();
+      }, this.opts.pollingIntervalMs);
+    };
+    scheduleNext();
   }
 
   /** Stop the automatic polling loop. */
   stopPolling(): void {
     if (this.pollingTimer) {
-      clearInterval(this.pollingTimer);
+      clearTimeout(this.pollingTimer);
       this.pollingTimer = null;
     }
   }
@@ -313,6 +323,9 @@ export class Orchestrator {
       const elapsed = now - task.startedAt;
 
       if (elapsed > limit) {
+        // Abort the in-flight model turn
+        this.spawner.abortTask?.(task.sessionKey);
+
         // Kill the session
         if (this.killer) {
           await this.killer.kill(task.sessionKey);
@@ -378,6 +391,7 @@ export class Orchestrator {
     // Kill all in-progress tasks
     for (const task of wf.tasks) {
       if (task.status === "in_progress" && task.sessionKey) {
+        this.spawner.abortTask?.(task.sessionKey);
         if (this.killer) {
           await this.killer.kill(task.sessionKey);
         }

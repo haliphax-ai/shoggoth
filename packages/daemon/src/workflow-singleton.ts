@@ -59,6 +59,7 @@ export function initWorkflow(opts: WorkflowSingletonOptions): { server: Workflow
     orchestrators: server.getOrchestrators(),
     stateDir,
     killer: opts.killer,
+    spawner: opts.spawner,
   });
 
   return { server, controlPlane };

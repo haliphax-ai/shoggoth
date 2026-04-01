@@ -137,6 +137,77 @@ describe("createDaemonSpawnAdapter", () => {
     assert.equal(turnInput.sessionId, "agent:main:discord:abc:child-uuid");
     assert.equal(turnInput.userContent, "analyze data");
   });
+
+  it("abortTask calls requestTurnAbort for the session key", async () => {
+    const sm = fakeSessionManager();
+    const sessions = fakeSessionStore();
+    const turn = fakeRunSessionModelTurn();
+    const abortedIds: string[] = [];
+
+    const adapter = createDaemonSpawnAdapter({
+      sessionManager: sm,
+      sessions,
+      parentSessionId: "agent:main:discord:abc",
+      runSessionModelTurn: turn.fn,
+      requestTurnAbort: (id: string) => { abortedIds.push(id); return true; },
+    });
+
+    const childId = await adapter.spawn({
+      taskId: 1,
+      prompt: "long task",
+      replyTo: "agent:main:discord:abc",
+      timeoutMs: 60_000,
+    });
+
+    adapter.abortTask!(childId);
+    assert.deepEqual(abortedIds, [childId]);
+  });
+
+  it("abortTask is a no-op when requestTurnAbort is not provided", async () => {
+    const sm = fakeSessionManager();
+    const sessions = fakeSessionStore();
+    const turn = fakeRunSessionModelTurn();
+
+    const adapter = createDaemonSpawnAdapter({
+      sessionManager: sm,
+      sessions,
+      parentSessionId: "agent:main:discord:abc",
+      runSessionModelTurn: turn.fn,
+    });
+
+    // Should not throw
+    adapter.abortTask!("nonexistent-session");
+  });
+
+  it("completionMap records success after turn completes normally", async () => {
+    const sm = fakeSessionManager();
+    const sessions = fakeSessionStore();
+    const turn = fakeRunSessionModelTurn();
+
+    const adapter = createDaemonSpawnAdapter({
+      sessionManager: sm,
+      sessions,
+      parentSessionId: "agent:main:discord:abc",
+      runSessionModelTurn: turn.fn,
+    });
+
+    const childId = await adapter.spawn({
+      taskId: 1,
+      prompt: "quick task",
+      replyTo: "agent:main:discord:abc",
+      timeoutMs: 60_000,
+    });
+
+    // Wait for the turn to complete
+    await new Promise((r) => setTimeout(r, 20));
+
+    // abortTask should be a no-op now (controller cleaned up)
+    adapter.abortTask!(childId);
+    // completionMap should show success, not an abort error
+    const entry = adapter.completionMap.get(childId);
+    assert.ok(entry);
+    assert.equal(entry.ok, true);
+  });
 });
 
 // ---------------------------------------------------------------------------

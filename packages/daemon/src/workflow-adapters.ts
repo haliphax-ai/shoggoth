@@ -47,15 +47,20 @@ export interface DaemonSpawnAdapterDeps {
     readonly systemContext?: { kind: string; summary: string; data?: Record<string, unknown>; guidance?: string };
     readonly delivery: { kind: string };
   }) => Promise<{ latestAssistantText: string; failoverMeta?: unknown }>;
+  /** Abort an in-flight session turn by session ID. Uses the existing session turn abort scope. */
+  readonly requestTurnAbort?: (sessionId: string) => boolean;
   /** Optional map to track completion of spawned turns. Created internally if not provided. */
   readonly completionMap?: CompletionMap;
 }
 
-export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAdapter & { completionMap: CompletionMap } {
+export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAdapter & { completionMap: CompletionMap; abortTask: (sessionKey: string) => void } {
   const completionMap: CompletionMap = deps.completionMap ?? new Map();
 
   return {
     completionMap,
+    abortTask(sessionKey: string): void {
+      deps.requestTurnAbort?.(sessionKey);
+    },
     async spawn(req: SpawnRequest): Promise<string> {
       const parentSessionId = deps.parentSessionId ?? req.replyTo;
 

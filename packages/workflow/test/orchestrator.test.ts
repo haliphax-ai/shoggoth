@@ -9,6 +9,7 @@ import {
   type SpawnAdapter,
   type PollAdapter,
   type NotifyAdapter,
+  type KillAdapter,
   type SpawnRequest,
   type PollResult,
   type OrchestratorOptions,
@@ -58,6 +59,17 @@ function mockNotifyAdapter(): NotifyAdapter & { calls: Array<{ workflowId: strin
     calls,
     async notify(workflowId: string, success: boolean): Promise<void> {
       calls.push({ workflowId, success });
+    },
+  };
+}
+
+/** A mock kill adapter that records calls. */
+function mockKillAdapter(): KillAdapter & { calls: string[] } {
+  const calls: string[] = [];
+  return {
+    calls,
+    async kill(sessionKey: string): Promise<void> {
+      calls.push(sessionKey);
     },
   };
 }
@@ -371,6 +383,122 @@ describe("Orchestrator", () => {
       // All three roots should be spawned immediately
       const spawnedIds = spawner.calls.map((c) => c.taskId);
       assert.deepStrictEqual(spawnedIds.sort(), [1, 2, 3]);
+    });
+  });
+
+  describe("task abort propagation", () => {
+    it("calls abortTask on spawner when enforceRuntimeLimits times out a task", async () => {
+      const abortedKeys: string[] = [];
+      const spawner = mockSpawnAdapter();
+      spawner.abortTask = (key: string) => { abortedKeys.push(key); };
+      const pollResults = new Map<string, PollResult>();
+      const poller = mockPollAdapter(pollResults);
+      const notifier = mockNotifyAdapter();
+      const killer = mockKillAdapter();
+      const orch = new Orchestrator(spawner, poller, notifier, undefined, undefined, killer);
+
+      const tasks = [makeTask(1)];
+      tasks[0].runtimeLimitMs = 1; // 1ms — will expire immediately
+      await orch.start(tasks, "1", defaultOpts(baseDir));
+
+      // Wait a tick so the runtime limit is exceeded
+      await new Promise((r) => setTimeout(r, 10));
+      await orch.tick();
+
+      assert.deepEqual(abortedKeys, ["session-1"]);
+    });
+
+    it("calls abortTask for in-progress tasks during abort-behavior workflow abort", async () => {
+      const abortedKeys: string[] = [];
+      const spawner = mockSpawnAdapter();
+      spawner.abortTask = (key: string) => { abortedKeys.push(key); };
+      const pollResults = new Map<string, PollResult>();
+      const poller = mockPollAdapter(pollResults);
+      const notifier = mockNotifyAdapter();
+      const killer = mockKillAdapter();
+      const orch = new Orchestrator(spawner, poller, notifier, undefined, undefined, killer);
+
+      // Task 1 has abort behavior; tasks 2 and 3 are independent roots
+      const task1 = makeTask(1);
+      task1.failureBehavior = "abort";
+      const tasks = [task1, makeTask(2), makeTask(3)];
+      const graphDsl = "1 2 3"; // all independent
+      await orch.start(tasks, graphDsl, defaultOpts(baseDir));
+
+      // Task 1 fails — should trigger abort of in-progress tasks 2 and 3
+      pollResults.set("session-1", { status: "failed", error: "boom" });
+      await orch.tick();
+
+      // Tasks 2 and 3 were in-progress and should have been aborted
+      assert.ok(abortedKeys.includes("session-2"));
+      assert.ok(abortedKeys.includes("session-3"));
+    });
+
+    it("skips abortTask gracefully when spawner does not implement it", async () => {
+      const spawner = mockSpawnAdapter(); // no abortTask
+      const pollResults = new Map<string, PollResult>();
+      const poller = mockPollAdapter(pollResults);
+      const notifier = mockNotifyAdapter();
+      const killer = mockKillAdapter();
+      const orch = new Orchestrator(spawner, poller, notifier, undefined, undefined, killer);
+
+      const tasks = [makeTask(1)];
+      tasks[0].runtimeLimitMs = 1;
+      await orch.start(tasks, "1", defaultOpts(baseDir));
+
+      await new Promise((r) => setTimeout(r, 10));
+      // Should not throw even without abortTask
+      await orch.tick();
+
+      const status = orch.getWorkflowStatus()!;
+      assert.equal(status.tasks[0].status, "failed");
+    });
+  });
+
+  describe("polling uses self-scheduling setTimeout", () => {
+    it("stops cleanly without lingering timers", async () => {
+      const spawner = mockSpawnAdapter();
+      const pollResults = new Map<string, PollResult>();
+      const poller = mockPollAdapter(pollResults);
+      const notifier = mockNotifyAdapter();
+      const orch = new Orchestrator(spawner, poller, notifier);
+
+      const tasks = [makeTask(1)];
+      await orch.start(tasks, "1", defaultOpts(baseDir));
+
+      orch.startPolling();
+      assert.ok(orch.isPolling());
+
+      orch.stopPolling();
+      assert.ok(!orch.isPolling());
+    });
+  });
+
+  describe("status edits skip when all terminal", () => {
+    it("does not update status when all tasks are terminal and not paused", async () => {
+      const spawner = mockSpawnAdapter();
+      const pollResults = new Map<string, PollResult>();
+      const poller = mockPollAdapter(pollResults);
+      const notifier = mockNotifyAdapter();
+      const updateCalls: unknown[] = [];
+      const statusManager = {
+        postInitialStatus: async () => {},
+        updateStatus: async () => { updateCalls.push("update"); },
+        postSummary: async () => {},
+      };
+      const orch = new Orchestrator(spawner, poller, notifier, statusManager as any);
+
+      const tasks = [makeTask(1)];
+      await orch.start(tasks, "1", defaultOpts(baseDir));
+
+      // Complete task 1
+      pollResults.set("session-1", { status: "done", output: "ok" });
+      updateCalls.length = 0; // reset
+      await orch.tick();
+
+      // The tick that completes the workflow should skip the status update
+      // (checkCompletion posts summary instead)
+      assert.equal(updateCalls.length, 0);
     });
   });
 

@@ -447,6 +447,7 @@ void (async () => {
     const spawner = createDaemonSpawnAdapter({
       sessionManager: workflowSessionManager,
       sessions: workflowSessions,
+      requestTurnAbort: (id) => requestSessionTurnAbort(id),
       runSessionModelTurn: (input) => {
         const ext = subagentRuntimeExtensionRef.current;
         if (!ext) throw new Error("subagent runtime not available (platform not started)");
