@@ -1,6 +1,5 @@
 import type { TaskDef, TaskList, TaskStatus } from "./types.js";
 import type { Orchestrator, KillAdapter } from "./orchestrator.js";
-import type { StatusManager } from "./status-manager.js";
 import { saveWorkflow, loadWorkflow } from "./state.js";
 import { retentionRun, type RetentionSummary, type RetentionOptions } from "./retention.js";
 import { getTransitiveDeps } from "./graph.js";
@@ -20,7 +19,6 @@ export interface ControlPlaneOptions {
   orchestrators: Map<string, Orchestrator>;
   stateDir: string;
   killer: KillAdapter;
-  statusManager?: StatusManager | null;
 }
 
 // --- Helpers ---
@@ -71,13 +69,11 @@ export class ControlPlane {
   private readonly orchestrators: Map<string, Orchestrator>;
   private readonly stateDir: string;
   private readonly killer: KillAdapter;
-  private readonly statusManager: StatusManager | null;
 
   constructor(opts: ControlPlaneOptions) {
     this.orchestrators = opts.orchestrators;
     this.stateDir = opts.stateDir;
     this.killer = opts.killer;
-    this.statusManager = opts.statusManager ?? null;
   }
 
   /** Resolve a workflow — prefer in-memory orchestrator, fall back to disk. */
@@ -132,9 +128,10 @@ export class ControlPlane {
     orch.setCompleted(true);
 
     // Post summary and update status message
-    if (this.statusManager) {
-      await this.statusManager.postSummary(wf);
-      await this.statusManager.updateStatus(wf);
+    const sm = orch.getStatusManager();
+    if (sm) {
+      await sm.postSummary(wf);
+      await sm.updateStatus(wf);
     }
 
     // Persist
@@ -152,8 +149,9 @@ export class ControlPlane {
     orch.setPaused(true);
 
     // Update status message
-    if (this.statusManager) {
-      await this.statusManager.updateStatus(wf);
+    const sm = orch.getStatusManager();
+    if (sm) {
+      await sm.updateStatus(wf);
     }
 
     // Persist
@@ -171,8 +169,9 @@ export class ControlPlane {
     orch.setPaused(false);
 
     // Update status message
-    if (this.statusManager) {
-      await this.statusManager.updateStatus(wf);
+    const sm = orch.getStatusManager();
+    if (sm) {
+      await sm.updateStatus(wf);
     }
 
     // Persist
@@ -219,13 +218,16 @@ export class ControlPlane {
    * Repost the current status message for the workflow.
    */
   async post(workflowId: string): Promise<void> {
-    const wf = this.resolveWorkflow(workflowId);
+    const orch = this.requireOrchestrator(workflowId);
+    const wf = orch.getWorkflowStatus();
+    if (!wf) throw new Error(`Workflow not found: ${workflowId}`);
 
-    if (!this.statusManager) {
+    const sm = orch.getStatusManager();
+    if (!sm) {
       throw new Error("No status manager configured");
     }
 
-    await this.statusManager.postInitialStatus(wf);
+    await sm.postInitialStatus(wf);
   }
 
   /**
@@ -316,8 +318,9 @@ export class ControlPlane {
     }
 
     // Update status message
-    if (this.statusManager) {
-      await this.statusManager.updateStatus(wf);
+    const sm = orch.getStatusManager();
+    if (sm) {
+      await sm.updateStatus(wf);
     }
 
     // Persist

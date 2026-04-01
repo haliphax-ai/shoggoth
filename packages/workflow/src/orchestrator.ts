@@ -239,6 +239,11 @@ export class Orchestrator {
     return this.paused;
   }
 
+  /** Get the status manager for this workflow, if any. */
+  getStatusManager(): StatusManager | null {
+    return this.statusManager;
+  }
+
   /** Set the paused state externally (used by control plane). */
   setPaused(paused: boolean): void {
     this.paused = paused;
