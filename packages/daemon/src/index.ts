@@ -445,6 +445,7 @@ void (async () => {
             capabilities: dm.capabilities,
             transport: dm.discordRestTransport,
             sessionToChannel: (sid) => dm.resolveOutboundChannelIdForSession?.(sid),
+            sessionToGuild: (sid) => dm.resolveGuildIdForSession?.(sid),
             getSessionWorkspace: (sid) => {
               try {
                 const row = db.prepare("SELECT workspace_path FROM sessions WHERE id = ?").get(sid) as

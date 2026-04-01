@@ -157,6 +157,8 @@ export interface DiscordMessagingRuntime {
    * Optional for test stubs; production bridge always implements this.
    */
   readonly resolveOutboundChannelIdForSession?: (sessionId: string) => string | undefined;
+  /** Resolve the guild snowflake for a session (routes + thread bindings). */
+  readonly resolveGuildIdForSession?: (sessionId: string) => string | undefined;
 }
 
 /**
@@ -236,6 +238,17 @@ export async function startDiscordMessagingIfConfigured(
 
   const sessionToChannel = (sessionId: string): string | undefined =>
     discordOutboundChannelBySession.get(sessionId) ?? routes.find((r) => r.sessionId === sessionId)?.channelId;
+
+  const sessionToGuild = (sessionId: string): string | undefined => {
+    const direct = routes.find((r) => r.sessionId === sessionId);
+    if (direct) return direct.guildId;
+    // Dynamic thread binding: resolve the thread channel, then find the parent route's guild.
+    const ch = discordOutboundChannelBySession.get(sessionId);
+    if (!ch) return undefined;
+    // Thread channels inherit the guild from the route whose channel spawned the thread.
+    // Fall back to any route with a guildId (single-guild setups).
+    return routes.find((r) => r.channelId === ch)?.guildId ?? routes.find((r) => r.guildId)?.guildId;
+  };
 
   const outbound = createOutboundSender({ capabilities, transport, sessionToChannel });
 
@@ -337,6 +350,9 @@ export async function startDiscordMessagingIfConfigured(
     },
     resolveOutboundChannelIdForSession(sessionId: string) {
       return sessionToChannel(sessionId.trim());
+    },
+    resolveGuildIdForSession(sessionId: string) {
+      return sessionToGuild(sessionId.trim());
     },
   };
 }
