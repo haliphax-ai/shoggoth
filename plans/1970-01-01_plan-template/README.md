@@ -61,6 +61,16 @@ Break the work into ordered phases. Each phase should be independently shippable
 
 What needs to be tested and how. List the key test scenarios. Unit tests, integration tests, and manual verification steps as appropriate.
 
+## Considerations
+
+Gotchas, deferred work, hidden complexity, and open questions. This section captures things that aren't blockers but should be kept in mind during implementation or revisited later.
+
+- Known edge cases that aren't addressed in this plan
+- Work intentionally deferred to a future plan
+- Areas where the design might not scale or where assumptions could break
+- Dependencies on external systems or unfinished features
+- Security, performance, or compatibility concerns worth flagging
+
 ## Migration
 
 How existing data, state, or configuration is affected. If nothing needs migration, say so explicitly. If state files are invalidated, note the wipe-on-deploy expectation.
