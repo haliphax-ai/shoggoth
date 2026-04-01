@@ -1,27 +1,55 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  resolveSessionAgentHitlPrincipalRoles,
-  SHOGGOTH_HITL_UNKNOWN_SESSION_AGENT,
-} from "../../src/hitl/session-agent-principals.js";
+import { resolveSessionBypassUpTo } from "../../src/hitl/session-agent-principals.js";
+import { defaultConfig } from "@shoggoth/shared";
 
-describe("resolveSessionAgentHitlPrincipalRoles", () => {
-  it("returns agent:<id> from session URN", () => {
-    assert.deepEqual(resolveSessionAgentHitlPrincipalRoles("agent:main:discord:00000000-0000-4000-8000-000000000001"), [
-      "agent:main",
-    ]);
-  });
+const baseConfig = defaultConfig("/tmp/test-config");
 
-  it("uses same agent id for subagent URNs", () => {
-    assert.deepEqual(
-      resolveSessionAgentHitlPrincipalRoles(
-        "agent:pytest:discord:10000000-0000-4000-8000-000000000001:20000000-0000-4000-8000-000000000002",
-      ),
-      ["agent:pytest"],
+describe("resolveSessionBypassUpTo", () => {
+  it("returns root hitl.bypassUpTo when no per-agent override exists", () => {
+    assert.equal(
+      resolveSessionBypassUpTo("agent:main:discord:00000000-0000-4000-8000-000000000001", baseConfig),
+      "safe",
     );
   });
 
-  it("falls back when session id is not an agent URN", () => {
-    assert.deepEqual(resolveSessionAgentHitlPrincipalRoles("not-a-urn"), [SHOGGOTH_HITL_UNKNOWN_SESSION_AGENT]);
+  it("returns per-agent hitl.bypassUpTo when set", () => {
+    const config = {
+      ...baseConfig,
+      agents: { list: { main: { hitl: { bypassUpTo: "critical" as const } } } },
+    };
+    assert.equal(
+      resolveSessionBypassUpTo("agent:main:discord:00000000-0000-4000-8000-000000000001", config),
+      "critical",
+    );
+  });
+
+  it("falls back to root default for unknown agent", () => {
+    const config = {
+      ...baseConfig,
+      agents: { list: { other: { hitl: { bypassUpTo: "critical" as const } } } },
+    };
+    assert.equal(
+      resolveSessionBypassUpTo("agent:main:discord:00000000-0000-4000-8000-000000000001", config),
+      "safe",
+    );
+  });
+
+  it("falls back to root default for non-URN session id", () => {
+    assert.equal(resolveSessionBypassUpTo("not-a-urn", baseConfig), "safe");
+  });
+
+  it("uses same agent id for subagent URNs", () => {
+    const config = {
+      ...baseConfig,
+      agents: { list: { pytest: { hitl: { bypassUpTo: "caution" as const } } } },
+    };
+    assert.equal(
+      resolveSessionBypassUpTo(
+        "agent:pytest:discord:10000000-0000-4000-8000-000000000001:20000000-0000-4000-8000-000000000002",
+        config,
+      ),
+      "caution",
+    );
   });
 });

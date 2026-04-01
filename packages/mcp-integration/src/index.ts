@@ -18,7 +18,7 @@ export {
   SHOGGOTH_SESSION_ID_ENV,
   type AcpxWorkspaceBinding,
 } from "./acp-bridge";
-export { builtinShoggothToolsCatalog, BUILTIN_SOURCE_ID, BUILTIN_TOOL_SHORT_NAMES } from "./builtin-shoggoth-tools";
+export { builtinShoggothToolsCatalog, BUILTIN_SOURCE_ID } from "./builtin-shoggoth-tools";
 export {
   buildMessageToolDescriptor,
   type MessageToolPlatformSlice,

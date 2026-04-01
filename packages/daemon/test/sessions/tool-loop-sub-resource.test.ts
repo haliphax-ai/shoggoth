@@ -58,7 +58,7 @@ describe("tool-loop sub-resource extraction", () => {
             content: null,
             toolCalls: [{
               id: "tc1",
-              name: "exec",
+              name: "builtin.exec",
               argsJson: JSON.stringify({ command: "curl https://example.com" }),
             }],
           };
@@ -76,7 +76,7 @@ describe("tool-loop sub-resource extraction", () => {
       policy,
       audit,
       model,
-      tools: [{ name: "exec" }],
+      tools: [{ name: "builtin.exec" }],
       executor: {
         execute: async () => ({ resultJson: '{"ok":true}' }),
       },
@@ -85,10 +85,10 @@ describe("tool-loop sub-resource extraction", () => {
       hitl: {
         config: {
           defaultApprovalTimeoutMs: 300_000,
-          toolRisk: { exec: "critical" },
-          agentBypassUpTo: {},
+          toolRisk: { "builtin.exec": "critical" },
+          bypassUpTo: "safe",
         },
-        principalRoles: [],
+        bypassUpTo: "safe",
         pending: hitlStack.pending,
         clock: { nowMs: () => Date.now() },
         newPendingId: () => "pend-sub-curl",
@@ -102,7 +102,7 @@ describe("tool-loop sub-resource extraction", () => {
       },
     });
 
-    assert.deepStrictEqual(queuedToolNames, ["exec:curl"]);
+    assert.deepStrictEqual(queuedToolNames, ["builtin.exec:curl"]);
     db.close();
   });
 
@@ -113,7 +113,7 @@ describe("tool-loop sub-resource extraction", () => {
     const toolRuns = createToolRunStore(db);
     const autoApprove = createHitlAutoApproveGate();
     // Simulate prior sticky approval for exec:curl
-    autoApprove.enableSessionTool("s-sticky-curl", "exec:curl");
+    autoApprove.enableSessionTool("s-sticky-curl", "builtin.exec:curl");
 
     const queuedToolNames: string[] = [];
     const executed: string[] = [];
@@ -125,7 +125,7 @@ describe("tool-loop sub-resource extraction", () => {
             content: null,
             toolCalls: [{
               id: "tc1",
-              name: "exec",
+              name: "builtin.exec",
               argsJson: JSON.stringify({ command: "curl https://example.com" }),
             }],
           };
@@ -143,7 +143,7 @@ describe("tool-loop sub-resource extraction", () => {
       policy,
       audit,
       model,
-      tools: [{ name: "exec" }],
+      tools: [{ name: "builtin.exec" }],
       executor: {
         execute: async ({ name }) => {
           executed.push(name);
@@ -155,10 +155,10 @@ describe("tool-loop sub-resource extraction", () => {
       hitl: {
         config: {
           defaultApprovalTimeoutMs: 300_000,
-          toolRisk: { exec: "critical" },
-          agentBypassUpTo: {},
+          toolRisk: { "builtin.exec": "critical" },
+          bypassUpTo: "safe",
         },
-        principalRoles: [],
+        bypassUpTo: "safe",
         pending: hitlStack.pending,
         clock: { nowMs: () => Date.now() },
         newPendingId: () => "pend-sticky",
@@ -175,7 +175,7 @@ describe("tool-loop sub-resource extraction", () => {
 
     // Should NOT have been queued — auto-approved via sticky
     assert.deepStrictEqual(queuedToolNames, []);
-    assert.deepStrictEqual(executed, ["exec"]);
+    assert.deepStrictEqual(executed, ["builtin.exec"]);
     db.close();
   });
 
@@ -186,7 +186,7 @@ describe("tool-loop sub-resource extraction", () => {
     const toolRuns = createToolRunStore(db);
     const autoApprove = createHitlAutoApproveGate();
     // Only curl is approved, not rm
-    autoApprove.enableSessionTool("s-sticky-rm", "exec:curl");
+    autoApprove.enableSessionTool("s-sticky-rm", "builtin.exec:curl");
 
     const queuedToolNames: string[] = [];
     let modelTurn = 0;
@@ -197,7 +197,7 @@ describe("tool-loop sub-resource extraction", () => {
             content: null,
             toolCalls: [{
               id: "tc1",
-              name: "exec",
+              name: "builtin.exec",
               argsJson: JSON.stringify({ command: "rm -rf /tmp/foo" }),
             }],
           };
@@ -215,7 +215,7 @@ describe("tool-loop sub-resource extraction", () => {
       policy,
       audit,
       model,
-      tools: [{ name: "exec" }],
+      tools: [{ name: "builtin.exec" }],
       executor: {
         execute: async () => ({ resultJson: '{"ok":true}' }),
       },
@@ -224,10 +224,10 @@ describe("tool-loop sub-resource extraction", () => {
       hitl: {
         config: {
           defaultApprovalTimeoutMs: 300_000,
-          toolRisk: { exec: "critical" },
-          agentBypassUpTo: {},
+          toolRisk: { "builtin.exec": "critical" },
+          bypassUpTo: "safe",
         },
-        principalRoles: [],
+        bypassUpTo: "safe",
         pending: hitlStack.pending,
         clock: { nowMs: () => Date.now() },
         newPendingId: () => "pend-rm",
@@ -243,7 +243,7 @@ describe("tool-loop sub-resource extraction", () => {
     });
 
     // rm should have been queued for HITL (not auto-approved)
-    assert.deepStrictEqual(queuedToolNames, ["exec:rm"]);
+    assert.deepStrictEqual(queuedToolNames, ["builtin.exec:rm"]);
     db.close();
   });
 
@@ -262,7 +262,7 @@ describe("tool-loop sub-resource extraction", () => {
             content: null,
             toolCalls: [{
               id: "tc1",
-              name: "write",
+              name: "builtin.write",
               argsJson: JSON.stringify({ path: "/tmp/foo", content: "bar" }),
             }],
           };
@@ -280,7 +280,7 @@ describe("tool-loop sub-resource extraction", () => {
       policy,
       audit,
       model,
-      tools: [{ name: "write" }],
+      tools: [{ name: "builtin.write" }],
       executor: {
         execute: async () => ({ resultJson: '{"ok":true}' }),
       },
@@ -289,10 +289,10 @@ describe("tool-loop sub-resource extraction", () => {
       hitl: {
         config: {
           defaultApprovalTimeoutMs: 300_000,
-          toolRisk: { write: "caution" },
-          agentBypassUpTo: {},
+          toolRisk: { "builtin.write": "caution" },
+          bypassUpTo: "safe",
         },
-        principalRoles: [],
+        bypassUpTo: "safe",
         pending: hitlStack.pending,
         clock: { nowMs: () => Date.now() },
         newPendingId: () => "pend-write",
@@ -307,7 +307,7 @@ describe("tool-loop sub-resource extraction", () => {
     });
 
     // Should be queued as bare "write" — no sub-resource extraction
-    assert.deepStrictEqual(queuedToolNames, ["write"]);
+    assert.deepStrictEqual(queuedToolNames, ["builtin.write"]);
     db.close();
   });
 
@@ -319,7 +319,7 @@ describe("tool-loop sub-resource extraction", () => {
       ...DEFAULT_POLICY_CONFIG,
       agent: {
         ...DEFAULT_POLICY_CONFIG.agent,
-        tools: { allow: ["exec"], deny: [] },
+        tools: { allow: ["builtin.exec"], deny: [] },
       },
     });
     const principal: AuthenticatedPrincipal = {
@@ -344,7 +344,7 @@ describe("tool-loop sub-resource extraction", () => {
             content: null,
             toolCalls: [{
               id: "tc1",
-              name: "exec",
+              name: "builtin.exec",
               argsJson: JSON.stringify({ command: "curl https://example.com" }),
             }],
           };
@@ -362,7 +362,7 @@ describe("tool-loop sub-resource extraction", () => {
       policy,
       audit,
       model,
-      tools: [{ name: "exec" }],
+      tools: [{ name: "builtin.exec" }],
       executor: {
         execute: async ({ name }) => {
           executed.push(name);
@@ -373,8 +373,8 @@ describe("tool-loop sub-resource extraction", () => {
       subResourceRegistry: createDefaultSubResourceRegistry(),
     });
 
-    // Policy allows "exec" which covers "exec:curl" — should execute without HITL
-    assert.deepStrictEqual(executed, ["exec"]);
+    // Policy allows "exec" which covers "builtin.exec:curl" — should execute without HITL
+    assert.deepStrictEqual(executed, ["builtin.exec"]);
     db.close();
   });
 
@@ -386,7 +386,7 @@ describe("tool-loop sub-resource extraction", () => {
       ...DEFAULT_POLICY_CONFIG,
       agent: {
         ...DEFAULT_POLICY_CONFIG.agent,
-        tools: { allow: ["exec:curl", "write"], deny: [] },
+        tools: { allow: ["builtin.exec:curl", "write"], deny: [] },
       },
     });
     const principal: AuthenticatedPrincipal = {
@@ -412,7 +412,7 @@ describe("tool-loop sub-resource extraction", () => {
             content: null,
             toolCalls: [{
               id: "tc1",
-              name: "exec",
+              name: "builtin.exec",
               argsJson: JSON.stringify({ command: "curl https://example.com" }),
             }],
           };
@@ -430,7 +430,7 @@ describe("tool-loop sub-resource extraction", () => {
       policy,
       audit,
       model,
-      tools: [{ name: "exec" }],
+      tools: [{ name: "builtin.exec" }],
       executor: {
         execute: async ({ name }) => {
           executed.push(name);
@@ -441,7 +441,7 @@ describe("tool-loop sub-resource extraction", () => {
       subResourceRegistry: createDefaultSubResourceRegistry(),
     });
 
-    assert.deepStrictEqual(executed, ["exec"]);
+    assert.deepStrictEqual(executed, ["builtin.exec"]);
 
     // Second call: exec rm — should be denied by policy (exec:rm not in allow list)
     let modelTurn2 = 0;
@@ -452,7 +452,7 @@ describe("tool-loop sub-resource extraction", () => {
             content: null,
             toolCalls: [{
               id: "tc2",
-              name: "exec",
+              name: "builtin.exec",
               argsJson: JSON.stringify({ command: "rm -rf /tmp/foo" }),
             }],
           };
@@ -471,7 +471,7 @@ describe("tool-loop sub-resource extraction", () => {
         policy,
         audit,
         model: model2,
-        tools: [{ name: "exec" }],
+        tools: [{ name: "builtin.exec" }],
         executor: {
           execute: async ({ name }) => {
             executed.push(name);
@@ -485,7 +485,7 @@ describe("tool-loop sub-resource extraction", () => {
     );
 
     // rm should NOT have executed
-    assert.deepStrictEqual(executed, ["exec"]);
+    assert.deepStrictEqual(executed, ["builtin.exec"]);
     db.close();
   });
 
@@ -503,7 +503,7 @@ describe("tool-loop sub-resource extraction", () => {
             content: null,
             toolCalls: [{
               id: "tc1",
-              name: "exec",
+              name: "builtin.exec",
               argsJson: JSON.stringify({ command: "git status" }),
             }],
           };
@@ -521,7 +521,7 @@ describe("tool-loop sub-resource extraction", () => {
       policy,
       audit,
       model,
-      tools: [{ name: "exec" }],
+      tools: [{ name: "builtin.exec" }],
       executor: {
         execute: async () => ({ resultJson: '{"ok":true}' }),
       },
@@ -530,10 +530,10 @@ describe("tool-loop sub-resource extraction", () => {
       hitl: {
         config: {
           defaultApprovalTimeoutMs: 300_000,
-          toolRisk: { exec: "critical" },
-          agentBypassUpTo: {},
+          toolRisk: { "builtin.exec": "critical" },
+          bypassUpTo: "safe",
         },
-        principalRoles: [],
+        bypassUpTo: "safe",
         pending: hitlStack.pending,
         clock: { nowMs: () => Date.now() },
         newPendingId: () => "pend-audit",
@@ -548,12 +548,12 @@ describe("tool-loop sub-resource extraction", () => {
 
     // Check that audit records use the compound resource
     const auditRows = db
-      .prepare(`SELECT action, resource FROM audit_log WHERE resource LIKE 'exec:%' ORDER BY rowid`)
+      .prepare(`SELECT action, resource FROM audit_log WHERE resource LIKE 'builtin.exec:%' ORDER BY rowid`)
       .all() as { action: string; resource: string }[];
 
     // Should have policy check, hitl queued, execute_start, execute_done all with exec:git
     const resources = auditRows.map((r) => r.resource);
-    assert.ok(resources.every((r) => r === "exec:git"), `Expected all resources to be exec:git, got: ${JSON.stringify(resources)}`);
+    assert.ok(resources.every((r) => r === "builtin.exec:git"), `Expected all resources to be exec:git, got: ${JSON.stringify(resources)}`);
     assert.ok(resources.length >= 2, `Expected at least 2 audit rows with exec:git, got ${resources.length}`);
     db.close();
   });
@@ -573,7 +573,7 @@ describe("tool-loop sub-resource extraction", () => {
             content: null,
             toolCalls: [{
               id: "tc1",
-              name: "exec",
+              name: "builtin.exec",
               argsJson: JSON.stringify({ command: "curl https://example.com" }),
             }],
           };
@@ -591,7 +591,7 @@ describe("tool-loop sub-resource extraction", () => {
       policy,
       audit,
       model,
-      tools: [{ name: "exec" }],
+      tools: [{ name: "builtin.exec" }],
       executor: {
         execute: async () => ({ resultJson: '{"ok":true}' }),
       },
@@ -600,10 +600,10 @@ describe("tool-loop sub-resource extraction", () => {
       hitl: {
         config: {
           defaultApprovalTimeoutMs: 300_000,
-          toolRisk: { exec: "critical" },
-          agentBypassUpTo: {},
+          toolRisk: { "builtin.exec": "critical" },
+          bypassUpTo: "safe",
         },
-        principalRoles: [],
+        bypassUpTo: "safe",
         pending: hitlStack.pending,
         clock: { nowMs: () => Date.now() },
         newPendingId: () => "pend-no-reg",
@@ -618,7 +618,7 @@ describe("tool-loop sub-resource extraction", () => {
     });
 
     // Without registry, should use bare "exec"
-    assert.deepStrictEqual(queuedToolNames, ["exec"]);
+    assert.deepStrictEqual(queuedToolNames, ["builtin.exec"]);
     db.close();
   });
 });

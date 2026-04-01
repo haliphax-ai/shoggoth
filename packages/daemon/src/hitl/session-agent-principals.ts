@@ -1,19 +1,17 @@
-import { parseAgentSessionUrn } from "@shoggoth/shared";
+import { parseAgentSessionUrn, type HitlRiskTier, type ShoggothConfig } from "@shoggoth/shared";
 
 /**
- * Principal role id for tool-loop HITL when the session id is not a normal agent session URN.
- * With no matching `hitl.agentBypassUpTo` entry, the effective bypass tier stays at baseline `safe`.
+ * Resolve the effective HITL bypass tier for a session.
+ * Checks agents.list.<agentId>.hitl.bypassUpTo first, falls back to hitl.bypassUpTo.
  */
-export const SHOGGOTH_HITL_UNKNOWN_SESSION_AGENT = "agent:unknown";
-
-/**
- * Roles used only to decide **whether** a tool call needs human approval before execution.
- * The human operator approves via CLI / notify channels; they are not a principal here.
- *
- * Returns `agent:<agentId>` parsed from the session URN (`agent:<agentId>:<platform>:<leaf>…`).
- */
-export function resolveSessionAgentHitlPrincipalRoles(sessionId: string): string[] {
+export function resolveSessionBypassUpTo(
+  sessionId: string,
+  config: ShoggothConfig,
+): HitlRiskTier {
   const p = parseAgentSessionUrn(sessionId.trim());
-  if (!p) return [SHOGGOTH_HITL_UNKNOWN_SESSION_AGENT];
-  return [`agent:${p.agentId}`];
+  if (p) {
+    const agentHitl = config.agents?.list?.[p.agentId]?.hitl;
+    if (agentHitl?.bypassUpTo !== undefined) return agentHitl.bypassUpTo;
+  }
+  return config.hitl.bypassUpTo;
 }

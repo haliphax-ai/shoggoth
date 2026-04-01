@@ -23,7 +23,7 @@ import {
   applySessionContextSegmentReset,
   parseSessionSegmentInlineCommand,
   sessionSegmentStartupUserContent,
-  resolveSessionAgentHitlPrincipalRoles,
+  resolveSessionBypassUpTo,
   runInboundSessionTurn,
   executeSessionAgentTurn,
   buildSessionSystemContext,
@@ -435,7 +435,7 @@ export async function startDiscordPlatform(
             policyEngine: engine,
             getHitlConfig,
             hitl: {
-              principalRoles: resolveSessionAgentHitlPrincipalRoles(msg.sessionId),
+              bypassUpTo: resolveSessionBypassUpTo(msg.sessionId, opts.config),
               pending,
               clock: { nowMs: () => Date.now() },
               newPendingId: () => randomUUID(),
@@ -555,7 +555,7 @@ export async function startDiscordPlatform(
         policyEngine: engine,
         getHitlConfig,
         hitl: {
-          principalRoles: resolveSessionAgentHitlPrincipalRoles(sid),
+          bypassUpTo: resolveSessionBypassUpTo(sid, opts.config),
           pending,
           clock: { nowMs: () => Date.now() },
           newPendingId: () => randomUUID(),

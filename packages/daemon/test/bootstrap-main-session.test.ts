@@ -41,8 +41,7 @@ function makeConfig(overrides: Partial<ShoggothConfig> = {}): ShoggothConfig {
     hitl: {
       defaultApprovalTimeoutMs: 300000,
       toolRisk: {},
-      agentBypassUpTo: {},
-      agentToolAutoApprove: {},
+      bypassUpTo: "safe",
     },
     memory: { paths: [], embeddings: { enabled: false } },
     skills: { scanRoots: [], disabledIds: [] },

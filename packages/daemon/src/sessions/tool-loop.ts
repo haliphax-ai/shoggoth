@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
-import type { ShoggothHitlConfig } from "@shoggoth/shared";
+import type { ShoggothHitlConfig, HitlRiskTier } from "@shoggoth/shared";
 import { classifyToolRisk } from "../hitl/risk-classify";
-import { effectiveBypassUpTo, requiresHumanApproval } from "../hitl/approval-gate";
+import { requiresHumanApproval } from "../hitl/approval-gate";
 import { resolveCompoundResource, type SubResourceExtractorRegistry } from "../policy/sub-resource";
 import type { HitlAutoApproveGate } from "../hitl/hitl-auto-approve";
 import type { HitlNotifier } from "../hitl/hitl-notifier";
@@ -50,7 +50,7 @@ export interface ToolLoopAudit {
 
 export interface RunToolLoopHitl {
   readonly config: ShoggothHitlConfig;
-  readonly principalRoles: readonly string[];
+  readonly bypassUpTo: HitlRiskTier;
   readonly pending: PendingActionsStore;
   readonly clock: { readonly nowMs: () => number };
   readonly newPendingId: () => string;
@@ -206,7 +206,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
           const h = options.hitl;
           h.pending.expireDue(new Date(h.clock.nowMs()).toISOString());
           const tier = classifyToolRisk(compoundResource, h.config.toolRisk);
-          const bypass = effectiveBypassUpTo(h.principalRoles, h.config.agentBypassUpTo);
+          const bypass = h.bypassUpTo;
           if (
             requiresReview ||
             (requiresHumanApproval(tier, bypass) &&

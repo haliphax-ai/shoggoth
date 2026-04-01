@@ -100,7 +100,7 @@ describe("session.query tool handler", { concurrency: false }, () => {
       policyEngine: createPolicyEngine(config.policy),
       getHitlConfig: () => ({ ...DEFAULT_HITL_CONFIG, ...config.hitl }),
       hitl: {
-        principalRoles: [],
+        bypassUpTo: "safe",
         pending: hitlStack.pending,
         clock: { nowMs: () => Date.now() },
         newPendingId: () => randomUUID(),

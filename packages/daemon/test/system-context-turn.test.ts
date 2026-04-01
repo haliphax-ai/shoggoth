@@ -67,7 +67,7 @@ describe("SystemContext in session agent turns", { concurrency: false }, () => {
       policyEngine: createPolicyEngine(config.policy),
       getHitlConfig: () => ({ ...DEFAULT_HITL_CONFIG, ...config.hitl }),
       hitl: {
-        principalRoles: [] as string[],
+        bypassUpTo: "safe",
         pending: hitlStack.pending,
         clock: { nowMs: () => Date.now() },
         newPendingId: () => randomUUID(),

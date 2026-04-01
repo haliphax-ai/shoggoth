@@ -51,6 +51,6 @@ export function resolveCompoundResource(
  */
 export function createDefaultSubResourceRegistry(): SubResourceExtractorRegistry {
   const registry: SubResourceExtractorRegistry = new Map();
-  registry.set("exec", execSubResourceExtractor);
+  registry.set("builtin.exec", execSubResourceExtractor);
   return registry;
 }

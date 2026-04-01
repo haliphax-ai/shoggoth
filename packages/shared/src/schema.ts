@@ -136,13 +136,8 @@ export const shoggothHitlConfigSchema = z
   .object({
     defaultApprovalTimeoutMs: z.number().int().positive(),
     toolRisk: z.record(z.string(), hitlRiskTierSchema),
-    /** Role id → highest tier that may run without human approval (inclusive). */
-    agentBypassUpTo: z.record(z.string(), hitlRiskTierSchema),
-    /**
-     * Logical agent id (URN segment after `agent:`, e.g. `main` in `agent:main:discord:…`) → tools that skip HITL.
-     * Platform reactions (e.g. ♾️) append here via `z-hitl-agent-tool-auto-approve.json` in `configDirectory`.
-     */
-    agentToolAutoApprove: z.record(z.string().min(1), z.array(z.string().min(1))).default({}),
+    /** Default highest tier that may run without human approval (inclusive). Per-agent overrides live in agents.list.<id>.hitl.bypassUpTo. */
+    bypassUpTo: hitlRiskTierSchema,
   })
   .strict();
 
@@ -564,6 +559,16 @@ export const shoggothAgentEntrySchema = z
       })
       .strict()
       .optional(),
+    /** Per-agent HITL overrides. */
+    hitl: z
+      .object({
+        /** Override the global hitl.bypassUpTo for this agent. */
+        bypassUpTo: hitlRiskTierSchema.optional(),
+        /** Tools that skip HITL for this agent. Platform reactions (e.g. ♾️) append here via dynamic config. */
+        toolAutoApprove: z.array(z.string().min(1)).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -759,46 +764,10 @@ export const DEFAULT_HITL_CONFIG: ShoggothHitlConfig = {
     "builtin.config.request": "never",
   },
   /**
-   * Keys are arbitrary role ids passed as `principalRoles` into the tool loop. Session turns use
-   * `agent:<agentId>` from the session URN (e.g. `agent:main`). Unlisted roles contribute nothing;
-   * baseline bypass remains `safe`. The human operator is not a principal here — they approve HITL.
+   * Default bypass tier for all agents. Per-agent overrides in agents.list.<id>.hitl.bypassUpTo.
    */
-  agentBypassUpTo: {
-    "agent:main": "safe",
-  },
-  agentToolAutoApprove: {},
+  bypassUpTo: "safe",
 };
-
-/**
- * Legacy short tool names → canonical `source.toolName` form.
- * Used to normalise existing config / DB entries written before canonical names.
- */
-const LEGACY_SHORT_TO_CANONICAL: Readonly<Record<string, string>> = {
-  read: "builtin.read",
-  write: "builtin.write",
-  exec: "builtin.exec",
-  "memory.search": "builtin.memory.search",
-  "memory.ingest": "builtin.memory.ingest",
-  subagent: "builtin.subagent",
-  "session.list": "builtin.session.list",
-  "session.send": "builtin.session.send",
-  "session.query": "builtin.session.query",
-  message: "builtin.message",
-};
-
-/** Expand legacy short keys in a `toolRisk`-shaped record to canonical form. */
-export function normalizeHitlToolKeys<V>(map: Record<string, V>): Record<string, V> {
-  const out: Record<string, V> = {};
-  for (const [k, v] of Object.entries(map)) {
-    out[LEGACY_SHORT_TO_CANONICAL[k] ?? k] = v;
-  }
-  return out;
-}
-
-/** Expand a single tool name from legacy short form to canonical if applicable. */
-export function normalizeToolName(name: string): string {
-  return LEGACY_SHORT_TO_CANONICAL[name] ?? name;
-}
 
 export function defaultConfig(configDirectory: string): ShoggothConfig {
   return {

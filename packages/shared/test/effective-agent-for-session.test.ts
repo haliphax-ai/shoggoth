@@ -22,8 +22,7 @@ describe("effective agent config for session", () => {
     hitl: {
       defaultApprovalTimeoutMs: 1,
       toolRisk: {},
-      agentBypassUpTo: {},
-      agentToolAutoApprove: {},
+      bypassUpTo: "safe",
     },
     memory: { paths: ["mem/global"], embeddings: { enabled: false } },
     skills: { scanRoots: [], disabledIds: [] },

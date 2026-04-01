@@ -88,7 +88,7 @@ describe("runToolLoop", () => {
       async complete() {
         return {
           content: null,
-          toolCalls: [{ id: "c1", name: "exec", argsJson: "{}" }],
+          toolCalls: [{ id: "c1", name: "builtin.exec", argsJson: "{}" }],
         };
       },
     };
@@ -105,7 +105,7 @@ describe("runToolLoop", () => {
           },
           audit: { record: () => {} },
           model,
-          tools: [{ name: "exec" }],
+          tools: [{ name: "builtin.exec" }],
           executor: { execute: async () => ({ resultJson: "{}" }) },
           toolRuns,
         }),
@@ -130,7 +130,7 @@ describe("runToolLoop", () => {
         if (step === 1) {
           return {
             content: null,
-            toolCalls: [{ id: "h1", name: "exec", argsJson: '{"x":1}' }],
+            toolCalls: [{ id: "h1", name: "builtin.exec", argsJson: '{"x":1}' }],
           };
         }
         return { content: "ok after hitl", toolCalls: [] };
@@ -145,12 +145,12 @@ describe("runToolLoop", () => {
       policy: { check: () => ({ allow: true }) },
       audit: { record: audit },
       model,
-      tools: [{ name: "exec" }],
+      tools: [{ name: "builtin.exec" }],
       executor: { execute: exec },
       toolRuns,
       hitl: {
         config: DEFAULT_HITL_CONFIG,
-        principalRoles: [],
+        bypassUpTo: "safe",
         pending: stack.pending,
         clock: { nowMs: () => 1_700_000_000_000 },
         newPendingId: () => `pend-${++idSeq}`,
@@ -168,7 +168,7 @@ describe("runToolLoop", () => {
     const row = stack.pending.getById("pend-1");
     assert.ok(row);
     assert.equal(row!.status, "denied");
-    assert.equal(row!.toolName, "exec");
+    assert.equal(row!.toolName, "builtin.exec");
     const run = db
       .prepare(`SELECT status, failure_reason FROM tool_runs WHERE id = 'run-hitl'`)
       .get() as { status: string; failure_reason: string | null };
@@ -186,7 +186,7 @@ describe("runToolLoop", () => {
         if (step === 1) {
           return {
             content: null,
-            toolCalls: [{ id: "h2", name: "exec", argsJson: "{}" }],
+            toolCalls: [{ id: "h2", name: "builtin.exec", argsJson: "{}" }],
           };
         }
         return { content: "ok", toolCalls: [] };
@@ -195,7 +195,6 @@ describe("runToolLoop", () => {
     const toolRuns = createToolRunStore(db);
     const config = {
       ...DEFAULT_HITL_CONFIG,
-      agentBypassUpTo: { admin: "critical" as const },
     };
     await runToolLoop({
       db,
@@ -205,12 +204,12 @@ describe("runToolLoop", () => {
       policy: { check: () => ({ allow: true }) },
       audit: { record: () => {} },
       model,
-      tools: [{ name: "exec" }],
+      tools: [{ name: "builtin.exec" }],
       executor: { execute: exec },
       toolRuns,
       hitl: {
         config,
-        principalRoles: ["admin"],
+        bypassUpTo: "critical",
         pending,
         clock: { nowMs: () => Date.now() },
         newPendingId: () => "should-not-use",
@@ -234,7 +233,7 @@ describe("runToolLoop", () => {
         if (step === 1) {
           return {
             content: null,
-            toolCalls: [{ id: "h3", name: "exec", argsJson: "{}" }],
+            toolCalls: [{ id: "h3", name: "builtin.exec", argsJson: "{}" }],
           };
         }
         return { content: "ok", toolCalls: [] };
@@ -249,12 +248,12 @@ describe("runToolLoop", () => {
       policy: { check: () => ({ allow: true }) },
       audit: { record: () => {} },
       model,
-      tools: [{ name: "exec" }],
+      tools: [{ name: "builtin.exec" }],
       executor: { execute: exec },
       toolRuns,
       hitl: {
         config: DEFAULT_HITL_CONFIG,
-        principalRoles: ["agent:main"],
+        bypassUpTo: "safe",
         pending,
         clock: { nowMs: () => Date.now() },
         newPendingId: () => "no-queue",

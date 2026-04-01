@@ -21,7 +21,7 @@ function minimalConfig(
     hitl: {
       defaultApprovalTimeoutMs: 1,
       toolRisk: {},
-      agentBypassUpTo: {},
+      bypassUpTo: "safe",
     },
     memory: { paths: [], embeddings: { enabled: false } },
     skills: {

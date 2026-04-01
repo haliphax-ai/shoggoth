@@ -29,8 +29,7 @@ function minimalConfig(tmp: string, dynamicConfigDirectory?: string): ShoggothCo
     hitl: {
       defaultApprovalTimeoutMs: 300_000,
       toolRisk: { "builtin.read": "safe" as const },
-      agentBypassUpTo: {},
-      agentToolAutoApprove: {},
+      bypassUpTo: "safe",
     },
     memory: { paths: [] as string[], embeddings: { enabled: false } },
     skills: { scanRoots: [] as string[], disabledIds: [] as string[] },

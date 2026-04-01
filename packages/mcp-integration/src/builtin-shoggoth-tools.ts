@@ -396,8 +396,3 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
     ],
   };
 }
-
-/** All known builtin short names, used for normalizing legacy short keys to canonical form. */
-export const BUILTIN_TOOL_SHORT_NAMES: ReadonlySet<string> = new Set(
-  builtinShoggothToolsCatalog().tools.map((t) => t.name),
-);

@@ -74,7 +74,7 @@ describe("runToolLoop HITL", () => {
       toolRuns,
       hitl: {
         config: DEFAULT_HITL_CONFIG,
-        principalRoles: [],
+        bypassUpTo: "safe",
         pending: stack.pending,
         clock: { nowMs: () => Date.now() },
         newPendingId: () => randomUUID(),
@@ -161,7 +161,7 @@ describe("runToolLoop HITL", () => {
       toolRuns,
       hitl: {
         config: DEFAULT_HITL_CONFIG,
-        principalRoles: [],
+        bypassUpTo: "safe",
         pending: stack.pending,
         clock: { nowMs: () => Date.now() },
         newPendingId: () => randomUUID(),

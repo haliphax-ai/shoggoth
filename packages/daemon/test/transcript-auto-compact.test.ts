@@ -24,8 +24,7 @@ function baseConfig(): ShoggothConfig {
     hitl: {
       defaultApprovalTimeoutMs: 300_000,
       toolRisk: { read: "safe", write: "caution", exec: "critical" },
-      agentBypassUpTo: {},
-      agentToolAutoApprove: {},
+      bypassUpTo: "safe",
     },
     memory: { paths: [], embeddings: { enabled: false } },
     skills: { scanRoots: [], disabledIds: [] },

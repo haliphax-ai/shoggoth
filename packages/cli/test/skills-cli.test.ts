@@ -21,7 +21,7 @@ function cfg(
     hitl: {
       defaultApprovalTimeoutMs: 1,
       toolRisk: { read: "safe" },
-      agentBypassUpTo: {},
+      bypassUpTo: "safe",
     },
     memory: { paths: [], embeddings: { enabled: false } },
     skills,

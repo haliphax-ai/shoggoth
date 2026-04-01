@@ -48,8 +48,7 @@ function minimalConfig(socketPath: string): ShoggothConfig {
     hitl: {
       defaultApprovalTimeoutMs: 300_000,
       toolRisk: { read: "safe", write: "caution", exec: "critical" },
-      agentBypassUpTo: {},
-      agentToolAutoApprove: {},
+      bypassUpTo: "safe",
     },
     memory: { paths: [], embeddings: { enabled: false } },
     skills: { scanRoots: [], disabledIds: [] },
@@ -908,8 +907,9 @@ describe("control plane (unix socket + JSONL)", () => {
         assert.equal(sessRows, 0);
 
         assert.equal(autoGate.shouldAutoApprove(sid, "builtin.read"), false);
-        const after = loadLayeredConfig(cfgDir).hitl.agentToolAutoApprove;
-        assert.deepStrictEqual(after["wipeme"], []);
+        const afterConfig = loadLayeredConfig(cfgDir);
+        const after = afterConfig.agents?.list?.["wipeme"]?.hitl?.toolAutoApprove ?? [];
+        assert.deepStrictEqual(after, []);
       },
     );
 

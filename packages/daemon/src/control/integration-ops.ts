@@ -37,7 +37,7 @@ import {
   applySessionContextSegmentReset,
 } from "../sessions/session-context-segment";
 import type { HitlConfigRef } from "../config-hot-reload";
-import { rewriteAgentToolAutoApproveMapAndReload } from "../hitl/hitl-agent-tool-auto-persist";
+import { rewriteAgentToolAutoApproveMapAndReload, readAgentToolAutoApproveMap } from "../hitl/hitl-agent-tool-auto-persist";
 import type { HitlAutoApproveGate } from "../hitl/hitl-auto-approve";
 import type { PendingActionsStore } from "../hitl/pending-actions-store";
 import {
@@ -690,7 +690,7 @@ export async function handleIntegrationControlOp(
         } else {
           clearedSessionAutoApprove = clearSessionToolAutoApproveForSessionIds(ctx.stateDb, sessionIds);
         }
-        const merged = loadLayeredConfig(hc.configDirectory).hitl.agentToolAutoApprove;
+        const merged = readAgentToolAutoApproveMap(loadLayeredConfig(hc.configDirectory));
         const nextMap: Record<string, string[]> =
           agentIdRaw === "all"
             ? Object.fromEntries(Object.keys(merged).map((k) => [k, [] as string[]]))

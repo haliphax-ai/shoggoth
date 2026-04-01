@@ -30,6 +30,7 @@ describe("createPersistingHitlAutoApproveGate", () => {
         const gate = createPersistingHitlAutoApproveGate({
           db,
           configDirectory: cfgDir,
+          dynamicConfigDirectory: cfgDir,
           configRef,
           hitlRef,
           logger: log,
@@ -45,6 +46,7 @@ describe("createPersistingHitlAutoApproveGate", () => {
         const gate = createPersistingHitlAutoApproveGate({
           db,
           configDirectory: cfgDir,
+          dynamicConfigDirectory: cfgDir,
           configRef,
           hitlRef,
           logger: log,
@@ -66,6 +68,7 @@ describe("createPersistingHitlAutoApproveGate", () => {
         const gate = createPersistingHitlAutoApproveGate({
           db,
           configDirectory: cfgDir,
+          dynamicConfigDirectory: cfgDir,
           configRef,
           hitlRef,
           logger: log,

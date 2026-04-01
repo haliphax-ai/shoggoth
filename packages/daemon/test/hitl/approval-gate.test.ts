@@ -1,23 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { effectiveBypassUpTo, requiresHumanApproval } from "../../src/hitl/approval-gate";
-import type { HitlRiskTier } from "@shoggoth/shared";
-
-describe("effectiveBypassUpTo", () => {
-  it("defaults to safe when no roles match", () => {
-    assert.equal(effectiveBypassUpTo(["agent"], { admin: "critical" }), "safe");
-  });
-
-  it("picks the most permissive bypass among matched roles", () => {
-    const roleBypass: Record<string, HitlRiskTier> = {
-      viewer: "safe",
-      power_user: "caution",
-      admin: "critical",
-    };
-    assert.equal(effectiveBypassUpTo(["viewer", "admin"], roleBypass), "critical");
-    assert.equal(effectiveBypassUpTo(["viewer", "power_user"], roleBypass), "caution");
-  });
-});
+import { requiresHumanApproval } from "../../src/hitl/approval-gate";
 
 describe("requiresHumanApproval", () => {
   it("requires approval for caution and critical when bypass is safe", () => {

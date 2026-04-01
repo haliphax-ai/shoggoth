@@ -138,7 +138,7 @@ describe("Anti-Spoofing Hardening (Phase 4)", { concurrency: false }, () => {
       policyEngine: createPolicyEngine(config.policy),
       getHitlConfig: () => ({ ...DEFAULT_HITL_CONFIG, ...config.hitl }),
       hitl: {
-        principalRoles: [] as string[],
+        bypassUpTo: "safe",
         pending: hitlStack.pending,
         clock: { nowMs: () => Date.now() },
         newPendingId: () => randomUUID(),
@@ -173,8 +173,10 @@ describe("Anti-Spoofing Hardening (Phase 4)", { concurrency: false }, () => {
       !userMsg.content!.includes("BEGIN TRUSTED SYSTEM CONTEXT"),
       "fake system context block should be stripped from user content",
     );
-    assert.ok(userMsg.content!.includes("Hello"), "text before fake block should be preserved");
-    assert.ok(userMsg.content!.includes("World"), "text after fake block should be preserved");
+    assert.ok(
+      userMsg.content!.includes("DISCARDED"),
+      "entire message should be discarded when it contains falsified system context",
+    );
   });
 
   it("the envelope rendered during a turn includes the session's token", async () => {
@@ -207,7 +209,7 @@ describe("Anti-Spoofing Hardening (Phase 4)", { concurrency: false }, () => {
       policyEngine: createPolicyEngine(config.policy),
       getHitlConfig: () => ({ ...DEFAULT_HITL_CONFIG, ...config.hitl }),
       hitl: {
-        principalRoles: [] as string[],
+        bypassUpTo: "safe",
         pending: hitlStack.pending,
         clock: { nowMs: () => Date.now() },
         newPendingId: () => randomUUID(),

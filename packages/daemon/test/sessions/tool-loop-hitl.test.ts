@@ -74,10 +74,10 @@ describe("runToolLoop HITL (shared pending store + resolution hub)", () => {
       hitl: {
         config: {
           defaultApprovalTimeoutMs: 300_000,
-          toolRisk: { read: "safe", write: "caution", exec: "critical" },
-          agentBypassUpTo: {},
+          toolRisk: { "builtin.read": "safe", "builtin.write": "caution", "builtin.exec": "critical" },
+          bypassUpTo: "safe",
         },
-        principalRoles: [],
+        bypassUpTo: "safe",
         pending: hitlStack.pending,
         clock: { nowMs: () => Date.now() },
         newPendingId: () => "pend-approve-1",
@@ -161,10 +161,10 @@ describe("runToolLoop HITL (shared pending store + resolution hub)", () => {
       hitl: {
         config: {
           defaultApprovalTimeoutMs: 300_000,
-          toolRisk: { read: "safe", write: "caution", exec: "critical" },
-          agentBypassUpTo: {},
+          toolRisk: { "builtin.read": "safe", "builtin.write": "caution", "builtin.exec": "critical" },
+          bypassUpTo: "safe",
         },
-        principalRoles: [],
+        bypassUpTo: "safe",
         pending: hitlStack.pending,
         clock: { nowMs: () => Date.now() },
         newPendingId: () => "pend-deny-1",

@@ -80,8 +80,8 @@ export function createPersistingHitlAutoApproveGate(input: {
           if (hitlAutoApproveToolNamesMatch(t, entry)) return true;
         }
       }
-      const list = input.hitlRef.value.agentToolAutoApprove[p.agentId];
-      if (!Array.isArray(list)) return false;
+      const list = input.configRef.current.agents?.list?.[p.agentId]?.hitl?.toolAutoApprove;
+      if (!Array.isArray(list) || list.length === 0) return false;
       for (const a of list) {
         if (hitlAutoApproveToolNamesMatch(t, a)) return true;
       }

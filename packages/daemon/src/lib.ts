@@ -182,8 +182,7 @@ export type {
   SessionToolLoopModelClient,
 } from "./sessions/session-tool-loop-model-client";
 export {
-  resolveSessionAgentHitlPrincipalRoles,
-  SHOGGOTH_HITL_UNKNOWN_SESSION_AGENT,
+  resolveSessionBypassUpTo,
 } from "./hitl/session-agent-principals";
 export type { SessionModelTurnDelivery } from "./messaging/session-model-turn-delivery";
 export type { HitlConfigRef } from "./config-hot-reload";

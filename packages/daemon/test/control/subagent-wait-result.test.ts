@@ -33,8 +33,7 @@ function minimalConfig(tmp: string) {
     hitl: {
       defaultApprovalTimeoutMs: 300_000,
       toolRisk: { read: "safe" as const, write: "caution" as const, exec: "critical" as const },
-      agentBypassUpTo: {},
-      agentToolAutoApprove: {},
+      bypassUpTo: "safe",
     },
     memory: { paths: [] as string[], embeddings: { enabled: false } },
     skills: { scanRoots: [] as string[], disabledIds: [] as string[] },
