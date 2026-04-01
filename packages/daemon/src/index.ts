@@ -131,6 +131,18 @@ const config = loadLayeredConfig(configDir);
 
 const configRef = { current: config };
 
+// Assert dynamicConfigDirectory is below configDirectory when set.
+if (config.dynamicConfigDirectory) {
+  const resolvedConfig = resolve(config.configDirectory);
+  const resolvedDynamic = resolve(config.dynamicConfigDirectory);
+  if (!resolvedDynamic.startsWith(resolvedConfig + "/") && resolvedDynamic !== resolvedConfig) {
+    console.error(
+      `FATAL: dynamicConfigDirectory (${resolvedDynamic}) must be below configDirectory (${resolvedConfig})`,
+    );
+    process.exit(1);
+  }
+}
+
 // Initialize model metadata store from config and register known defaults.
 if (config.models?.failoverChain) {
   initModelMetadataFromConfig(config.models.failoverChain);

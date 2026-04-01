@@ -12,14 +12,17 @@ export const HITL_AGENT_TOOL_AUTO_APPROVE_FILENAME = "z-hitl-agent-tool-auto-app
 
 export function persistAgentToolAutoApproveAndReload(input: {
   readonly configDirectory: string;
+  readonly dynamicConfigDirectory: string;
   readonly configRef: { current: ShoggothConfig };
   readonly hitlRef: HitlConfigRef;
   readonly agentId: string;
   readonly toolName: string;
 }): void {
   const dir = input.configDirectory.trim();
+  const dynDir = input.dynamicConfigDirectory.trim();
   if (!dir) throw new Error("configDirectory required");
-  mkdirSync(dir, { recursive: true });
+  if (!dynDir) throw new Error("dynamicConfigDirectory required");
+  mkdirSync(dynDir, { recursive: true });
   const merged = loadLayeredConfig(dir).hitl.agentToolAutoApprove;
   const aid = input.agentId.trim();
   const tn = input.toolName.trim();
@@ -27,7 +30,7 @@ export function persistAgentToolAutoApproveAndReload(input: {
   cur.add(tn);
   const nextMap: Record<string, string[]> = { ...merged, [aid]: [...cur].sort() };
   const body = `${JSON.stringify({ hitl: { agentToolAutoApprove: nextMap } }, null, 2)}\n`;
-  const full = join(dir, HITL_AGENT_TOOL_AUTO_APPROVE_FILENAME);
+  const full = join(dynDir, HITL_AGENT_TOOL_AUTO_APPROVE_FILENAME);
   const tmp = `${full}.tmp`;
   writeFileSync(tmp, body, "utf8");
   renameSync(tmp, full);
@@ -42,15 +45,18 @@ export function persistAgentToolAutoApproveAndReload(input: {
  */
 export function rewriteAgentToolAutoApproveMapAndReload(input: {
   readonly configDirectory: string;
+  readonly dynamicConfigDirectory: string;
   readonly configRef: { current: ShoggothConfig };
   readonly hitlRef: HitlConfigRef;
   readonly nextAgentToolAutoApprove: Record<string, string[]>;
 }): void {
   const dir = input.configDirectory.trim();
+  const dynDir = input.dynamicConfigDirectory.trim();
   if (!dir) throw new Error("configDirectory required");
-  mkdirSync(dir, { recursive: true });
+  if (!dynDir) throw new Error("dynamicConfigDirectory required");
+  mkdirSync(dynDir, { recursive: true });
   const body = `${JSON.stringify({ hitl: { agentToolAutoApprove: input.nextAgentToolAutoApprove } }, null, 2)}\n`;
-  const full = join(dir, HITL_AGENT_TOOL_AUTO_APPROVE_FILENAME);
+  const full = join(dynDir, HITL_AGENT_TOOL_AUTO_APPROVE_FILENAME);
   const tmp = `${full}.tmp`;
   writeFileSync(tmp, body, "utf8");
   renameSync(tmp, full);

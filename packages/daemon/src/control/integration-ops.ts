@@ -90,6 +90,7 @@ export type IntegrationOpsContext = {
    */
   readonly hitlClear?: {
     readonly configDirectory: string;
+    readonly dynamicConfigDirectory?: string;
     readonly configRef: { current: ShoggothConfig };
     readonly hitlRef: HitlConfigRef;
     readonly autoApproveGate: HitlAutoApproveGate;
@@ -694,12 +695,15 @@ export async function handleIntegrationControlOp(
           agentIdRaw === "all"
             ? Object.fromEntries(Object.keys(merged).map((k) => [k, [] as string[]]))
             : { ...merged, [agentIdRaw]: [] };
-        rewriteAgentToolAutoApproveMapAndReload({
-          configDirectory: hc.configDirectory,
-          configRef: hc.configRef,
-          hitlRef: hc.hitlRef,
-          nextAgentToolAutoApprove: nextMap,
-        });
+        if (hc.dynamicConfigDirectory) {
+          rewriteAgentToolAutoApproveMapAndReload({
+            configDirectory: hc.configDirectory,
+            dynamicConfigDirectory: hc.dynamicConfigDirectory,
+            configRef: hc.configRef,
+            hitlRef: hc.hitlRef,
+            nextAgentToolAutoApprove: nextMap,
+          });
+        }
         clearedAgentAutoApproveAgents = agentIdRaw === "all" ? Object.keys(merged).length : 1;
         if (agentIdRaw === "all") {
           hc.autoApproveGate.clearAutoApproveMemory?.({ agents: "all" });

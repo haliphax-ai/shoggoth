@@ -14,6 +14,7 @@ import { hitlAutoApproveToolNamesMatch } from "./hitl-tool-name-match";
 export function createPersistingHitlAutoApproveGate(input: {
   readonly db: Database.Database;
   readonly configDirectory: string;
+  readonly dynamicConfigDirectory?: string;
   readonly configRef: { current: ShoggothConfig };
   readonly hitlRef: HitlConfigRef;
   readonly logger: Logger;
@@ -39,9 +40,18 @@ export function createPersistingHitlAutoApproveGate(input: {
     },
     enableAgentTool(agentId, toolName) {
       rememberAgentTool(agentId, toolName);
+      if (!input.dynamicConfigDirectory) {
+        input.logger.warn("hitl.agent_tool_auto_approve_memory_only", {
+          reason: "dynamicConfigDirectory not configured; ♾️ approval is in-memory only and will not survive restart",
+          agentId,
+          toolName,
+        });
+        return;
+      }
       try {
         persistAgentToolAutoApproveAndReload({
           configDirectory: input.configDirectory,
+          dynamicConfigDirectory: input.dynamicConfigDirectory,
           configRef: input.configRef,
           hitlRef: input.hitlRef,
           agentId,
