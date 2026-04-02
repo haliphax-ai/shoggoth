@@ -52,7 +52,7 @@ interface ModelResilienceGate {
 
 ### Per-Provider Manager: `ProviderResilienceManager`
 
-Each provider gets its own manager instance, keyed by provider ID (e.g. `"anthropic"`, `"openai"`, `"gemini"`).
+Each configured provider instance gets its own manager, keyed by the provider's config ID (e.g. `"anthropic-prod"`, `"openai-fast"`, `"openai-bulk"`). Users may configure multiple instances of the same provider kind (e.g. two OpenAI endpoints with different API keys and rate limits), so managers are per-config-entry, not per-provider-type.
 
 ```ts
 interface ProviderResilienceManager {
@@ -174,12 +174,16 @@ Global and per-provider overrides:
       "jitterMs": 500,
       "defaultConcurrency": 5,
       "providers": {
-        "anthropic": {
+        "anthropic-prod": {
           "maxRetries": 4,
           "concurrency": 3
         },
-        "gemini": {
+        "openai-fast": {
           "concurrency": 8
+        },
+        "openai-bulk": {
+          "concurrency": 2,
+          "maxRetries": 5
         }
       }
     }
