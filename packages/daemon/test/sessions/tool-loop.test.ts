@@ -12,6 +12,7 @@ import { createToolRunStore } from "../../src/sessions/tool-run-store";
 import {
   runToolLoop,
   TurnAbortedError,
+  ToolCallTimeoutError,
   type ModelClient,
   type ToolExecutor,
 } from "../../src/sessions/tool-loop";
@@ -348,4 +349,91 @@ describe("runToolLoop", () => {
     );
     assert.equal(completeCalls, 1);
   });
+  it("injects timeout error when tool call exceeds toolCallTimeoutMs", async () => {
+    const pushed: { toolCallId: string; content: string }[] = [];
+    let step = 0;
+    const model: ModelClient = {
+      async complete() {
+        step += 1;
+        if (step === 1) {
+          return {
+            content: null,
+            toolCalls: [{ id: "t1", name: "slow", argsJson: "{}" }],
+          };
+        }
+        return { content: "recovered", toolCalls: [] };
+      },
+      pushToolMessage(msg) {
+        pushed.push(msg);
+      },
+    };
+    const toolRuns = createToolRunStore(db);
+    const tr = createTranscriptStore(db);
+    const seg = getSessionContextSegmentId(db, "sess");
+    await runToolLoop({
+      db,
+      sessionId: "sess",
+      runId: "run-timeout",
+      principalId: "p",
+      policy: { check: () => ({ allow: true }) },
+      audit: { record: () => {} },
+      model,
+      tools: [{ name: "slow" }],
+      executor: {
+        execute: () => new Promise((resolve) => setTimeout(() => resolve({ resultJson: '"late"' }), 500)),
+      },
+      toolRuns,
+      transcript: tr,
+      contextSegmentId: seg,
+      toolCallTimeoutMs: 50,
+    });
+    // The model should have received a timeout error message
+    assert.equal(pushed.length, 1);
+    const parsed = JSON.parse(pushed[0]!.content);
+    assert.equal(parsed.error, "tool_call_timeout");
+    assert.equal(parsed.tool, "slow");
+    assert.equal(parsed.timeoutMs, 50);
+    // Transcript should contain the timeout tool message
+    const page = tr.listPage({ sessionId: "sess", contextSegmentId: seg, afterSeq: 0, limit: 20 });
+    const toolMsgs = page.messages.filter((m) => m.role === "tool");
+    assert.equal(toolMsgs.length, 1);
+    assert.ok(toolMsgs[0]!.content!.includes("tool_call_timeout"));
+    // Run should still complete (model recovered)
+    const row = db.prepare(`SELECT status FROM tool_runs WHERE id = 'run-timeout'`).get() as { status: string };
+    assert.equal(row.status, "completed");
+  });
+
+  it("does not timeout when toolCallTimeoutMs is not set", async () => {
+    const exec = vi.fn(async () => ({ resultJson: '{"ok":true}' }));
+    let step = 0;
+    const model: ModelClient = {
+      async complete() {
+        step += 1;
+        if (step === 1) {
+          return {
+            content: null,
+            toolCalls: [{ id: "nt1", name: "fast", argsJson: "{}" }],
+          };
+        }
+        return { content: "done", toolCalls: [] };
+      },
+    };
+    const toolRuns = createToolRunStore(db);
+    await runToolLoop({
+      db,
+      sessionId: "sess",
+      runId: "run-no-timeout",
+      principalId: "p",
+      policy: { check: () => ({ allow: true }) },
+      audit: { record: () => {} },
+      model,
+      tools: [{ name: "fast" }],
+      executor: { execute: exec },
+      toolRuns,
+    });
+    assert.equal(exec.mock.calls.length, 1);
+    const row = db.prepare(`SELECT status FROM tool_runs WHERE id = 'run-no-timeout'`).get() as { status: string };
+    assert.equal(row.status, "completed");
+  });
+
 });

@@ -18,7 +18,7 @@ import {
   wrapWithSystemContext,
   type SystemContext,
 } from "@shoggoth/shared";
-import { mergeOrchestratorEnv } from "../config/effective-runtime";
+import { mergeOrchestratorEnv, resolveToolCallTimeoutMs } from "../config/effective-runtime";
 import { getAgentIntegrationInvoker } from "../control/agent-integration-invoke-ref";
 import { getProcessManager } from "../process-manager-singleton";
 import { BuiltinToolRegistry, type BuiltinToolContext } from "./builtin-tool-registry";
@@ -269,6 +269,7 @@ export async function executeSessionAgentTurn(
         ...input.hitl,
         config: input.getHitlConfig(),
       },
+      toolCallTimeoutMs: resolveToolCallTimeoutMs(input.config, input.sessionId),
     });
   } catch (e) {
     if (e instanceof TurnAbortedError) {

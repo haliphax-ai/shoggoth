@@ -46,6 +46,7 @@ export {
   shoggothSubagentSpawnAllowSchema,
   shoggothToolRulesSchema,
   DEFAULT_SKILLS_CONFIG,
+  DEFAULT_TOOL_CALL_TIMEOUT_MS,
   type HitlRiskTier,
   type ShoggothAgentEntry,
   type ShoggothAgentModelsOverride,

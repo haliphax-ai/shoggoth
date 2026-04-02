@@ -1,4 +1,4 @@
-import { resolveAgentDefaultPlatform, resolvePlatformConfig, type ShoggothConfig } from "@shoggoth/shared";
+import { resolveAgentDefaultPlatform, resolveAgentIdFromSessionId, resolvePlatformConfig, DEFAULT_TOOL_CALL_TIMEOUT_MS, type ShoggothConfig } from "@shoggoth/shared";
 
 function envInt(key: string): number | undefined {
   const v = process.env[key];
@@ -135,4 +135,17 @@ export function mergeOrchestratorEnv(cfg: ShoggothConfig, override?: NodeJS.Proc
   const memEmb = cfg.memory?.embeddings;
   setIfEmpty("SHOGGOTH_MEMORY_OPENAI_BASE_URL", memEmb?.openaiBaseUrl);
   return base;
+}
+
+/**
+ * Effective tool call timeout for a session: per-agent `agents.list.<id>.toolCallTimeoutMs` wins,
+ * then env `SHOGGOTH_TOOL_CALL_TIMEOUT_MS`, then `runtime.toolCallTimeoutMs`, then default 10 min.
+ */
+export function resolveToolCallTimeoutMs(cfg: ShoggothConfig, sessionId: string): number {
+  const agentId = resolveAgentIdFromSessionId(sessionId);
+  if (agentId) {
+    const entry = cfg.agents?.list?.[agentId];
+    if (entry?.toolCallTimeoutMs != null) return entry.toolCallTimeoutMs;
+  }
+  return envPositiveInt("SHOGGOTH_TOOL_CALL_TIMEOUT_MS") ?? cfg.runtime?.toolCallTimeoutMs ?? DEFAULT_TOOL_CALL_TIMEOUT_MS;
 }

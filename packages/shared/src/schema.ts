@@ -307,6 +307,9 @@ export const DEFAULT_REACTIONS_CONFIG = {
 
 export const DEFAULT_MINIMAL_CONTEXT_TAIL_MESSAGES = 2;
 
+/** Default tool call timeout: 10 minutes. */
+export const DEFAULT_TOOL_CALL_TIMEOUT_MS = 600_000;
+
 export const shoggothPluginEntrySchema = z
   .object({
     id: z.string().min(1).optional(),
@@ -476,6 +479,8 @@ export const shoggothRuntimeConfigSchema = z
       })
       .strict()
       .optional(),
+    /** Maximum milliseconds a single tool call may run before being killed. Default 600_000 (10 min). Env override: `SHOGGOTH_TOOL_CALL_TIMEOUT_MS`. */
+    toolCallTimeoutMs: z.number().int().positive().optional(),
   })
   .strict();
 
@@ -593,6 +598,8 @@ export const shoggothAgentEntrySchema = z
       .strict()
       .optional(),
     reactions: shoggothReactionsConfigSchema.partial().optional(),
+    /** Per-agent tool call timeout override (ms). When set, takes precedence over `runtime.toolCallTimeoutMs` for this agent's sessions. */
+    toolCallTimeoutMs: z.number().int().positive().optional(),
   })
   .strict();
 

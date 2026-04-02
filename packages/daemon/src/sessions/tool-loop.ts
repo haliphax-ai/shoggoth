@@ -13,6 +13,13 @@ import { getLogger } from "../logging";
 
 export { TurnAbortedError } from "./session-turn-abort";
 
+export class ToolCallTimeoutError extends Error {
+  constructor(public readonly toolName: string, public readonly timeoutMs: number) {
+    super(`Tool call "${toolName}" timed out after ${timeoutMs}ms`);
+    this.name = "ToolCallTimeoutError";
+  }
+}
+
 export interface ToolCall {
   readonly id: string;
   readonly name: string;
@@ -89,6 +96,8 @@ export interface RunToolLoopOptions {
   readonly turnAbortSignal?: AbortSignal;
   /** When set, tool names are resolved to compound resources (e.g. `exec:curl`) before policy/HITL checks. */
   readonly subResourceRegistry?: SubResourceExtractorRegistry;
+  /** Maximum milliseconds a single tool call may run. When exceeded the call is killed and a timeout error is injected. */
+  readonly toolCallTimeoutMs?: number;
 }
 
 const allowedNames = (tools: ReadonlyArray<{ name: string }>) => new Set(tools.map((t) => t.name));
@@ -308,11 +317,37 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         assertNotAborted(options.turnAbortSignal);
         const t0 = Date.now();
         log.debug("tool call started", { toolName: compoundResource, toolCallId: tc.id, sessionId: options.sessionId, args: truncate(tc.argsJson) });
-        const out = await options.executor.execute({
+
+        const execPromise = options.executor.execute({
           name: tc.name,
           argsJson: tc.argsJson,
           toolCallId: tc.id,
         });
+
+        let out: { resultJson: string };
+        const timeoutMs = options.toolCallTimeoutMs;
+        if (timeoutMs != null && timeoutMs > 0) {
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new ToolCallTimeoutError(compoundResource, timeoutMs)), timeoutMs);
+          });
+          try {
+            out = await Promise.race([execPromise, timeoutPromise, abortPromise(options.turnAbortSignal)]);
+          } catch (e) {
+            if (e instanceof ToolCallTimeoutError) {
+              log.warn("tool call timed out", { toolName: compoundResource, toolCallId: tc.id, sessionId: options.sessionId, timeoutMs });
+              const errBody = JSON.stringify({ error: "tool_call_timeout", tool: compoundResource, timeoutMs });
+              options.audit.record({ phase: "execute_timeout", tool: compoundResource, toolCallId: tc.id, timeoutMs });
+              options.model.pushToolMessage?.({ toolCallId: tc.id, content: errBody });
+              if (options.transcript) {
+                appendTx({ role: "tool", content: errBody, toolCallId: tc.id, metadata: { tool: tc.name } });
+              }
+              continue;
+            }
+            throw e;
+          }
+        } else {
+          out = await execPromise;
+        }
         log.debug("tool call completed", { toolName: compoundResource, toolCallId: tc.id, sessionId: options.sessionId, durationMs: Date.now() - t0, success: true });
 
         options.audit.record({
