@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from "node:test";
+import { describe, it, beforeEach } from "vitest";
 import assert from "node:assert/strict";
 import type { TaskList, TaskState, TaskDef, DependencyGraph } from "../src/types.js";
 import type { MessageAdapter } from "../src/message-adapter.js";

@@ -2,7 +2,7 @@ import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import { DEFAULT_POLICY_CONFIG } from "@shoggoth/shared";
 import assert from "node:assert";
 import Database from "better-sqlite3";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
 import { runToolLoop } from "../../src/sessions/tool-loop";
 import { createSessionStore } from "../../src/sessions/session-store";

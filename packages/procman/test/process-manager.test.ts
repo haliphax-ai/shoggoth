@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { ProcessManager } from "../src/process-manager.js";
 import type { ProcessSpec } from "../src/types.js";

@@ -1,7 +1,7 @@
 /**
  * DAC integration: needs root + uid 901 spawn; CI matrix in shoggoth/docs/runbook.md.
  */
-import { describe, it, beforeEach, afterEach, before } from "node:test";
+import { describe, it, beforeEach, afterEach, beforeAll } from "vitest";
 import assert from "node:assert";
 import { chmodSync, chownSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -58,7 +58,7 @@ async function assertAgentCannotReadAbsolutePath(absPath: string): Promise<void>
 describe("DAC + deny sensitive paths (integration)", () => {
   let canDropToAgent: boolean;
 
-  before(async () => {
+  beforeAll(async () => {
     try {
       const r = await runAsUser({
         file: "/usr/bin/true",

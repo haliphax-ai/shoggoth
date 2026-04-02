@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { defaultConfig, SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID } from "@shoggoth/shared";
 import { resolveSessionTargetFromCliArg } from "../../src/control/resolve-session-cli-target";
 import { registerBuiltInMessagingPlatforms } from "@shoggoth/platform-discord";

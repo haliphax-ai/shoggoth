@@ -7,7 +7,7 @@ import assert from "node:assert";
 import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import { createConnection } from "node:net";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { mkdir, stat, mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

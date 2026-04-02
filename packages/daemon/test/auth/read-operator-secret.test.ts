@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import { writeFileSync, unlinkSync } from "node:fs";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { readOperatorTokenSecret } from "../../src/auth/read-operator-secret";

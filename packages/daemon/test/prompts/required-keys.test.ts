@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert";
 import { readdirSync } from "node:fs";
 import { dirname, join } from "node:path";

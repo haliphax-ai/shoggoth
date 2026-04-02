@@ -4,7 +4,7 @@ import assert from "node:assert";
 import Database from "better-sqlite3";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
 import { createPolicyEngine } from "../../src/policy/engine";
 import { createToolLoopPolicyAndAudit } from "../../src/policy/tool-loop-bridge";

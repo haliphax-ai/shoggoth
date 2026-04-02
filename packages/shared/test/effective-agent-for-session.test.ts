@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { formatAgentSessionUrn, SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID } from "../src/session-urn.js";
 import {
   formatAgentIdentityPrefix,

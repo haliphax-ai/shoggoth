@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { describe, it, beforeEach } from "node:test";
+import { describe, it, beforeEach } from "vitest";
 import {
   buildBuiltinOnlySessionMcpToolContext,
   openAiToolsFromCatalog,

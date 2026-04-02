@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert";
 import { createFailoverModelClient } from "../src/failover";
 import type { ModelProvider } from "../src/types";

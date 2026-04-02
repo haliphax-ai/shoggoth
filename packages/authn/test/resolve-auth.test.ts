@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { MemoryAgentTokenStore, mintAgentCredentialRaw } from "../src/agent-token";
 import { operatorMapFromFileJson } from "../src/operator-map";
 import { resolveAuthenticatedPrincipal } from "../src/resolve-auth";

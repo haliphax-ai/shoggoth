@@ -2,7 +2,7 @@ import assert from "node:assert";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, test } from "node:test";
+import { describe, test } from "vitest";
 import { fileURLToPath } from "node:url";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import { HookRegistry } from "../src/hook-registry";

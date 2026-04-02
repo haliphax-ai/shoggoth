@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import Database from "better-sqlite3";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { chainOperatorMaps, operatorMapFromFileJson } from "@shoggoth/authn";
 import { migrate, defaultMigrationsDir } from "../../src/db/migrate";
 import { createSqliteOperatorMap } from "../../src/auth/sqlite-operator-map";

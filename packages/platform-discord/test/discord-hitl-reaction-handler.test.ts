@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import Database from "better-sqlite3";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";

@@ -2,7 +2,7 @@ import { DEFAULT_POLICY_CONFIG } from "@shoggoth/shared";
 import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import assert from "node:assert";
 import Database from "better-sqlite3";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
 import { createHitlPendingResolutionStack } from "../../src/hitl/hitl-pending-stack";
 import { createPolicyEngine } from "../../src/policy/engine";

@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert";
 import { createSessionToolLoopModelClient } from "../../src/sessions/session-tool-loop-model-client";
 

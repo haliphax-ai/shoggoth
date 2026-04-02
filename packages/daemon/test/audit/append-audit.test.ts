@@ -2,7 +2,7 @@ import assert from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, it } from "node:test";
+import { afterEach, describe, it } from "vitest";
 import { openStateDb } from "../../src/db/open";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
 import { appendAuditRow } from "../../src/audit/append-audit";

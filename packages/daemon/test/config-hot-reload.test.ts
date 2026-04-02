@@ -1,6 +1,6 @@
 import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import assert from "node:assert";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { DEFAULT_POLICY_CONFIG, defaultConfig, type ShoggothConfig } from "@shoggoth/shared";
 import { diffRestartRequiredKeys } from "../src/config-hot-reload";
 import { createDelegatingPolicyEngine, createPolicyEngine, emptyPolicyConfig } from "../src/policy/engine";

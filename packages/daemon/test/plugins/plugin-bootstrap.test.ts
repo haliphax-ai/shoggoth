@@ -2,7 +2,7 @@ import assert from "node:assert";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, it } from "node:test";
+import { afterEach, describe, it } from "vitest";
 import { fileURLToPath } from "node:url";
 import { defaultConfig, type ShoggothConfig } from "@shoggoth/shared";
 import { openStateDb } from "../../src/db/open";

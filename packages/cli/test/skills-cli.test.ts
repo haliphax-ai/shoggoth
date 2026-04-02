@@ -2,7 +2,7 @@ import assert from "node:assert";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, test } from "node:test";
+import { describe, test } from "vitest";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import { formatSkillPathLine, formatSkillReadJson, formatSkillsListJson, formatSkillsSearchJson } from "../src/skills-cli";
 

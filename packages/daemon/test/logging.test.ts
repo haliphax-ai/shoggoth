@@ -1,4 +1,4 @@
-import { describe, it, mock, beforeEach, afterEach } from "node:test";
+import { describe, it, vi, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { createLogger } from "../src/logging";
 
@@ -9,7 +9,7 @@ describe("createLogger", () => {
   beforeEach(() => {
     chunks = [];
     origWrite = process.stderr.write.bind(process.stderr);
-    const write = mock.fn((chunk: string | Uint8Array, _enc?: unknown, cb?: () => void) => {
+    const write = vi.fn((chunk: string | Uint8Array, _enc?: unknown, cb?: () => void) => {
       chunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString());
       cb?.();
       return true;

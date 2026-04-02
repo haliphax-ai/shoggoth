@@ -15,8 +15,8 @@
     "clean": "rm -rf packages/*/dist dist",
     "daemon": "node --import tsx/esm packages/daemon/src/index.ts",
     "cli": "node --import tsx/esm packages/cli/src/cli.ts",
-    "test": "find . \\( -path '*/node_modules/*' -o -path '*/dist/*' \\) -prune -o -type f \\( -name '*.test.ts' -o -name '*.test.mjs' \\) -print0 | xargs -0 -r node --import tsx/esm --test --test-concurrency=false",
-    "test:ci-agent-isolation": "SHOGGOTH_CI_STRICT_AGENT_TESTS=1 npm run test -w @shoggoth/os-exec"
+    "test": "vitest run",
+    "test:ci-agent-isolation": "SHOGGOTH_CI_STRICT_AGENT_TESTS=1 npx vitest run packages/os-exec"
   },
   "engines": {
     "node": "~22"
@@ -26,6 +26,7 @@
   },
   "devDependencies": {
     "@types/node": "~22",
-    "typescript": "~5.7.2"
+    "typescript": "~5.7.2",
+    "vitest": "^4.1.2"
   }
 }

@@ -5,7 +5,7 @@
  * `systemContext` with the expected `kind`, `summary`, and `data` fields.
  */
 
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";

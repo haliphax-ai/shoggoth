@@ -3,7 +3,7 @@ import { createConnection, createServer, Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { unlink } from "node:fs/promises";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import {
   readPeerCredFromSocket,
   ERR_PEERCRED_NOT_IMPLEMENTED,

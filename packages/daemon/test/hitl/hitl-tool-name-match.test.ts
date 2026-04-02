@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { hitlAutoApproveToolNamesMatch } from "../../src/hitl/hitl-tool-name-match.js";
 
 describe("hitlAutoApproveToolNamesMatch", () => {

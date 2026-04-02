@@ -2,7 +2,7 @@
  * Phase 5: second entrypoint — calls `executeSessionAgentTurn` with mocked `completeWithTools` (no Discord),
  * proving the session turn core is platform-agnostic and CI-safe.
  */
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";

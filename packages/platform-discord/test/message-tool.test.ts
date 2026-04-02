@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert";
 import { discordCapabilityDescriptor } from "../src/capabilities";
 import { executeDiscordMessageToolAction } from "../src/message-tool";

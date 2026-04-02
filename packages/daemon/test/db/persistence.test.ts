@@ -1,4 +1,4 @@
-import { describe, it, before, after } from "node:test";
+import { describe, it, beforeAll, afterAll } from "vitest";
 import assert from "node:assert";
 import {
   mkdirSync,
@@ -27,17 +27,16 @@ function migrationVersionsInDir(migrationsDir: string): number[] {
 
 describe(
   "persistence (migrations, WAL, backup)",
-  { concurrency: false },
   () => {
   let dir: string;
   let dbPath: string;
 
-  before(() => {
+  beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), "shoggoth-persist-"));
     dbPath = join(dir, "state.db");
   });
 
-  after(() => {
+  afterAll(() => {
     rmSync(dir, { recursive: true, force: true });
   });
 

@@ -1,4 +1,4 @@
-import { describe, it, mock } from "node:test";
+import { describe, it, vi } from "vitest";
 import assert from "node:assert";
 import { EventEmitter } from "node:events";
 import { createLogger } from "../src/logging";
@@ -9,7 +9,7 @@ describe("ShutdownCoordinator", () => {
   it("runs drains in order then marks interrupted", async () => {
     const order: string[] = [];
     const log = createLogger({ component: "t", minLevel: "error" });
-    const mark = mock.fn(async () => {
+    const mark = vi.fn(async () => {
       order.push("mark");
     });
     const s = new ShutdownCoordinator({
@@ -31,7 +31,7 @@ describe("ShutdownCoordinator", () => {
 
   it("invokes markInterruptedRunsFailed on timeout", async () => {
     const log = createLogger({ component: "t", minLevel: "error" });
-    const mark = mock.fn(async () => {});
+    const mark = vi.fn(async () => {});
     const s = new ShutdownCoordinator({
       logger: log,
       drainTimeoutMs: 30,
@@ -40,8 +40,8 @@ describe("ShutdownCoordinator", () => {
     s.registerDrain("slow", () => new Promise<void>(() => {}));
     await s.requestShutdown("sig");
     assert.equal(mark.mock.calls.length, 1);
-    const first = mark.mock.calls[0] as { arguments: unknown[] } | undefined;
-    const reason = String(first?.arguments[0] ?? "");
+    const first = mark.mock.calls[0] as unknown[] | undefined;
+    const reason = String(first?.[0] ?? "");
     assert.match(reason, /timeout/);
   });
 });
@@ -51,7 +51,7 @@ describe("installSignalHandlers", () => {
     const ee = new EventEmitter() as NodeJS.Process;
     (ee as unknown as { pid: number }).pid = 42;
     const log = createLogger({ component: "t", minLevel: "error" });
-    const onSignal = mock.fn(async (_s: NodeJS.Signals) => {});
+    const onSignal = vi.fn(async (_s: NodeJS.Signals) => {});
     const dispose = installSignalHandlers({
       logger: log,
       proc: ee,

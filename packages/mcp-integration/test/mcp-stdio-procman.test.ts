@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import { fileURLToPath } from "node:url";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { ProcessManager } from "@shoggoth/procman";
 import {
   connectMcpStdioSession,

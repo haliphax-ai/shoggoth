@@ -1,7 +1,7 @@
 /**
  * Tests for subagent_wait and subagent_result control ops.
  */
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";

@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert";
 import { createAgentToAgentBus } from "../src/a2a";
 import { createInboundMessage } from "../src/model";

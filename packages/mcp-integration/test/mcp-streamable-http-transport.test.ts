@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { mcpFetchToolsList, mcpInvokeTool } from "../src/mcp-jsonrpc-transport";
 import {
   connectMcpStreamableHttpSession,

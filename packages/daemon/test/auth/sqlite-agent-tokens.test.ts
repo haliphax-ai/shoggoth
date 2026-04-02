@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import Database from "better-sqlite3";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { migrate, defaultMigrationsDir } from "../../src/db/migrate";
 import { createSessionStore } from "../../src/sessions/session-store";
 import { createSqliteAgentTokenStore } from "../../src/auth/sqlite-agent-tokens";

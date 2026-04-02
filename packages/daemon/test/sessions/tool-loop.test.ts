@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach, mock } from "node:test";
+import { describe, it, beforeEach, afterEach, vi } from "vitest";
 import assert from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -44,8 +44,8 @@ describe("runToolLoop", () => {
   });
 
   it("invokes executor and audit when policy allows", async () => {
-    const audit = mock.fn((_e: unknown) => {});
-    const exec = mock.fn(async () => ({ resultJson: "{}" }));
+    const audit = vi.fn((_e: unknown) => {});
+    const exec = vi.fn(async () => ({ resultJson: "{}" }));
     let step = 0;
     const model: ModelClient = {
       async complete() {
@@ -119,8 +119,8 @@ describe("runToolLoop", () => {
   });
 
   it("queues HITL pending and skips execute when operator denies", async () => {
-    const audit = mock.fn((_e: unknown) => {});
-    const exec = mock.fn(async () => ({ resultJson: "{}" }));
+    const audit = vi.fn((_e: unknown) => {});
+    const exec = vi.fn(async () => ({ resultJson: "{}" }));
     const stack = createHitlPendingResolutionStack(db);
     let idSeq = 0;
     let step = 0;
@@ -173,11 +173,11 @@ describe("runToolLoop", () => {
       .prepare(`SELECT status, failure_reason FROM tool_runs WHERE id = 'run-hitl'`)
       .get() as { status: string; failure_reason: string | null };
     assert.equal(run.status, "completed");
-    assert.ok(audit.mock.calls.some((c) => String(JSON.stringify(c.arguments)).includes("hitl_queued")));
+    assert.ok(audit.mock.calls.some((c) => String(JSON.stringify(c)).includes("hitl_queued")));
   });
 
   it("does not queue HITL when role bypass covers tool risk", async () => {
-    const exec = mock.fn(async () => ({ resultJson: "{}" }));
+    const exec = vi.fn(async () => ({ resultJson: "{}" }));
     const pending = createPendingActionsStore(db);
     let step = 0;
     const model: ModelClient = {
@@ -224,7 +224,7 @@ describe("runToolLoop", () => {
   });
 
   it("skips HITL enqueue when autoApprove.shouldAutoApprove is true", async () => {
-    const exec = mock.fn(async () => ({ resultJson: "{}" }));
+    const exec = vi.fn(async () => ({ resultJson: "{}" }));
     const pending = createPendingActionsStore(db);
     let step = 0;
     const model: ModelClient = {

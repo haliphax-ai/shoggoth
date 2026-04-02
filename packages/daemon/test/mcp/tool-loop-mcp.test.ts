@@ -2,7 +2,7 @@ import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import { DEFAULT_POLICY_CONFIG } from "@shoggoth/shared";
 import assert from "node:assert";
 import Database from "better-sqlite3";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
 import { createPolicyEngine } from "../../src/policy/engine";
 import { createToolLoopPolicyAndAudit } from "../../src/policy/tool-loop-bridge";

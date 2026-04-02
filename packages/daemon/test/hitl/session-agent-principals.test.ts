@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { resolveSessionBypassUpTo } from "../../src/hitl/session-agent-principals.js";
 import { defaultConfig } from "@shoggoth/shared";
 

@@ -3,7 +3,7 @@
  * Verifies session token generation, regeneration on reset, system prompt inclusion,
  * inbound message sanitization, and token-bearing envelope rendering during turns.
  */
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";

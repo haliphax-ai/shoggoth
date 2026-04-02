@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import type { TaskList, TaskState, TaskDef, DependencyGraph } from "../src/types.js";
 import { formatStatusMessage, formatSummaryMessage } from "../src/status-message.js";

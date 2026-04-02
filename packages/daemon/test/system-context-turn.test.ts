@@ -2,7 +2,7 @@
  * Tests for SystemContext integration in session agent turns.
  * Verifies envelope rendering, transcript storage, and pass-through behavior.
  */
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";

@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { DEFAULT_POLICY_CONFIG, type ShoggothConfig, type ShoggothToolRules } from "@shoggoth/shared";
 import {
   createPolicyEngine,

@@ -1,4 +1,4 @@
-import { afterEach, describe, it } from "node:test";
+import { afterEach, describe, it } from "vitest";
 import assert from "node:assert";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";

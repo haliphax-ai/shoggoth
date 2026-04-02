@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { SHOGGOTH_AGENT_TOKEN_ENV } from "@shoggoth/authn";
 import { formatAgentSessionUrn, parseAgentSessionUrn } from "@shoggoth/shared";
 import type { ShoggothAgentsConfig } from "@shoggoth/shared";

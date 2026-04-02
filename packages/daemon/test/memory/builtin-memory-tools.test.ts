@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert";
 import Database from "better-sqlite3";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";

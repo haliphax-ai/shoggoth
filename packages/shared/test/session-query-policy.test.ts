@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { resolveEffectiveSessionQueryAllowedAgentIds } from "../src/effective-agent-for-session.js";
 import type { ShoggothConfig } from "../src/schema.js";
 

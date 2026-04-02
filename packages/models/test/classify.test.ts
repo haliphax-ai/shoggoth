@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert";
 import { isFailoverEligibleError } from "../src/classify";
 import { ModelHttpError } from "../src/errors";
