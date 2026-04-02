@@ -101,6 +101,7 @@ import { createPersistingHitlAutoApproveGate } from "./hitl/hitl-auto-approve-pe
 import { type HitlAutoApproveGate } from "./hitl/hitl-auto-approve";
 import { createHitlPendingResolutionStack, type HitlPendingStack } from "./hitl/hitl-pending-stack";
 import { daemonNotice, loadDaemonNotices } from "./notices/load-notices";
+import { setNoticeResolver as setPresentationNoticeResolver } from "./presentation/notices";
 import { loadDaemonPrompts } from "./prompts/load-prompts";
 import { registerContextFinalizer } from "./sessions/session-mcp-runtime";
 import {
@@ -127,6 +128,7 @@ import { subagentRuntimeExtensionRef } from "./subagent/subagent-extension-ref";
 
 loadDaemonPrompts();
 loadDaemonNotices();
+setPresentationNoticeResolver(daemonNotice);
 registerBuiltInMessagingPlatforms();
 registerContextFinalizer(messageToolFinalizer);
 registerContextFinalizer(subagentToolStripFinalizer);

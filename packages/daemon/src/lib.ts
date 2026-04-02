@@ -232,3 +232,6 @@ export {
   formatAdhocReactionEventContext,
   type MinimalContextInput,
 } from "./presentation/minimal-context";
+export {
+  setNoticeResolver as setPresentationNoticeResolver,
+} from "./presentation/notices";

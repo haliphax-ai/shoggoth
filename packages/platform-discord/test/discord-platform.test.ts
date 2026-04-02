@@ -24,6 +24,7 @@ import {
   transcriptRowsToModelChatMessages,
   TieredTurnQueue,
   setTurnQueue,
+  setPresentationNoticeResolver,
 } from "@shoggoth/daemon/lib";
 import { formatDiscordPlatformErrorUserText } from "../src/errors";
 import {
@@ -43,6 +44,7 @@ import { setNoticeResolver } from "../src/notices";
 // Wire daemon notice resolver so platform-discord's daemonNotice() works in tests.
 loadDaemonNotices();
 setNoticeResolver(daemonNotice);
+setPresentationNoticeResolver(daemonNotice);
 
 /** Stub type for connectShoggothMcpServers (daemon internal) */
 type ConnectShoggothMcpServersFn = (servers: ShoggothMcpServerEntry[]) => Promise<{
