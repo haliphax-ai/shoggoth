@@ -7,6 +7,7 @@ The Discord platform package (`platform-discord`) currently handles responsibili
 - **Formatting:** degraded prefix, model tag footer, agent identity prefix, error text formatting, message body slicing
 - **Streaming coordination:** coalescing stream setup, interval config, stream failure handling
 - **Turn orchestration:** building turn input (MCP context resolution, system prompt assembly), calling `runInboundSessionTurn`
+- **Inbound dispatch chain:** `dispatchChained` serializes inbound messages per session; `runDiscordInboundModelTurn` handles turn queue enqueue + fire-and-forget — none of this is Discord-specific
 - **HITL notice rendering:** building queued notice lines, reaction wiring, notice registry
 - **Error presentation:** `formatDiscordPlatformErrorUserText`, `onTurnExecutionFailed` callback
 
@@ -140,6 +141,7 @@ interface PlatformCapabilities {
 | `errors.ts: formatDiscordPlatformErrorUserText` | `presentation/reply-formatter.ts: formatErrorUserText` |
 | `errors.ts: sliceDiscordPlatformMessageBody` | stays in platform (transport concern: message size limit) |
 | `platform.ts: runInboundSessionTurn options` | `presentation/turn-orchestrator.ts` |
+| `platform.ts: dispatchChained + runDiscordInboundModelTurn` | `presentation/turn-orchestrator.ts` (inbound dispatch chain + turn queue enqueue) |
 | `hitl/notifier.ts: buildHitlQueuedNoticeLines` | `presentation/hitl-notice-formatter.ts` |
 | `notices.ts: daemonNotice` | `presentation/notices.ts` (notice template registry) |
 
