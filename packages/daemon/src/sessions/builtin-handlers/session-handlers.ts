@@ -40,7 +40,12 @@ async function sessionQuery(
     return { resultJson: JSON.stringify({ error: `not allowed to query sessions for agent id: ${requestedAgentId}` }) };
   }
   const limit = Math.min(Math.max(1, Math.trunc(Number(args.limit) || 50)), 200);
-  const offset = Math.max(0, Math.trunc(Number(args.offset) || 0));
+  const orderRaw = args.order;
+  const order: "asc" | "desc" = orderRaw === "desc" ? "desc" : "asc";
+  const hasExplicitOffset = args.offset !== undefined && args.offset !== null;
+  const offset = hasExplicitOffset
+    ? Math.max(0, Math.trunc(Number(args.offset) || 0))
+    : (order === "desc" ? Number.MAX_SAFE_INTEGER : 0);
   const sessionIdFilter = typeof args.session_id === "string" && args.session_id.trim()
     ? args.session_id.trim()
     : undefined;
@@ -110,18 +115,20 @@ async function sessionQuery(
 
   let sql: string;
   if (needsJsFilter) {
+    const sqlOrderJs = order === "desc" ? "DESC" : "ASC";
     sql = `SELECT seq, role, content, tool_call_id, tool_calls_json, metadata_json, session_id, created_at
            FROM transcript_messages
            WHERE ${whereClauses.join(" AND ")}
-           ORDER BY ${sessionIdFilter ? "seq" : "session_id, seq"} ASC`;
+           ORDER BY ${sessionIdFilter ? "seq" : "session_id, seq"} ${sqlOrderJs}`;
   } else {
-    whereClauses.push("seq > @offset");
+    whereClauses.push(order === "desc" ? "seq < @offset" : "seq > @offset");
     params.offset = offset;
     params.limit = limit;
+    const sqlOrder = order === "desc" ? "DESC" : "ASC";
     sql = `SELECT seq, role, content, tool_call_id, tool_calls_json, metadata_json, session_id, created_at
            FROM transcript_messages
            WHERE ${whereClauses.join(" AND ")}
-           ORDER BY ${sessionIdFilter ? "seq" : "session_id, seq"} ASC
+           ORDER BY ${sessionIdFilter ? "seq" : "session_id, seq"} ${sqlOrder}
            LIMIT @limit`;
   }
 
@@ -136,7 +143,9 @@ async function sessionQuery(
   // JS-side regex filter + pagination when needed
   if (compiledRegex) {
     rows = rows.filter((r) => r.content != null && compiledRegex!.test(r.content));
-    const startIdx = rows.findIndex((r) => r.seq > offset);
+    const startIdx = order === "desc"
+      ? rows.findIndex((r) => r.seq < offset)
+      : rows.findIndex((r) => r.seq > offset);
     if (startIdx === -1) {
       rows = [];
     } else {
