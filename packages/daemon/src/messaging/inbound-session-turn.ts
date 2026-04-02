@@ -141,9 +141,7 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
     }
   } catch (e) {
     options.onTurnExecutionFailed?.(e);
-    if (!options.onTurnExecutionFailed) {
-      log.warn("inbound_session_turn.failed", { ...ctx, err: String(e) });
-    }
+    log.warn("inbound_session_turn.failed", { ...ctx, err: String(e) });
     try {
       await options.sendErrorBody(sliceDisplayText(formatErrorReply(e)));
     } catch (sendErr) {
