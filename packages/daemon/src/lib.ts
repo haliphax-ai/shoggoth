@@ -1,7 +1,3 @@
-import { registerBuiltInMessagingPlatforms } from "@shoggoth/platform-discord";
-
-registerBuiltInMessagingPlatforms();
-
 export { openStateDb, getJournalMode } from "./db/open";
 export { backupDatabaseToFile } from "./db/backup";
 export {

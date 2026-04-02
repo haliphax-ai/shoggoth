@@ -4,6 +4,3 @@ export const DISCORD_PLATFORM_MAX_MESSAGE_BODY_CHARS = 2000;
 export function sliceDiscordPlatformMessageBody(text: string): string {
   return text.slice(0, DISCORD_PLATFORM_MAX_MESSAGE_BODY_CHARS);
 }
-
-// Re-export presentation-layer error formatter for backward compatibility.
-export { formatErrorUserText as formatDiscordPlatformErrorUserText } from "@shoggoth/daemon/lib";
