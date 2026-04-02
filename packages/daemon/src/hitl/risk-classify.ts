@@ -13,6 +13,12 @@ export function classifyToolRisk(
   const map: Record<string, HitlRiskTier> = { ...DEFAULT_TOOL_RISK, ...toolRiskOverlay };
   const direct = map[toolName];
   if (direct !== undefined) return direct;
+  // Compound resource (e.g. builtin-exec:bash) — fall back to base tool name
+  const colon = toolName.indexOf(":");
+  if (colon > 0) {
+    const base = map[toolName.slice(0, colon)];
+    if (base !== undefined) return base;
+  }
   const wild = map["*"];
   if (wild !== undefined) return wild;
   return "caution";

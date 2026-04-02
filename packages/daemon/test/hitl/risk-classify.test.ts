@@ -36,4 +36,17 @@ describe("classifyToolRisk", () => {
     const map: Record<string, HitlRiskTier> = { "builtin-exec": "never" };
     assert.equal(classifyToolRisk("builtin-exec", map), "never");
   });
+
+  it("compound resource falls back to base tool name", () => {
+    assert.equal(classifyToolRisk("builtin-exec:bash", {}), "critical");
+    assert.equal(classifyToolRisk("builtin-exec:sh", {}), "critical");
+    assert.equal(classifyToolRisk("builtin-write:somefile", {}), "caution");
+    assert.equal(classifyToolRisk("builtin-read:somefile", {}), "safe");
+  });
+
+  it("compound resource uses direct match over base fallback", () => {
+    const map: Record<string, HitlRiskTier> = { "builtin-exec:curl": "safe", "builtin-exec": "critical" };
+    assert.equal(classifyToolRisk("builtin-exec:curl", map), "safe");
+    assert.equal(classifyToolRisk("builtin-exec:bash", map), "critical");
+  });
 });
