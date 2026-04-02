@@ -198,11 +198,12 @@ export class Orchestrator {
     // Handle failures from this tick
     await this.handleFailures();
 
-    // Only spawn new tasks and mark blocked if not paused
-    if (!this.paused) {
-      // Mark blocked pending tasks as failed
-      this.markBlockedTasks();
+    // Mark blocked pending tasks as failed (always, even when paused —
+    // blocked tasks can never run regardless of pause state)
+    this.markBlockedTasks();
 
+    // Only spawn new tasks if not paused
+    if (!this.paused) {
       // Spawn newly ready tasks
       await this.spawnReadyTasks();
     }

@@ -190,12 +190,15 @@ describe("Failure Handling", () => {
       const task2 = wf.tasks.find((t) => t.taskDef.id === 2)!;
       assert.equal(task2.status, "done");
 
-      // Task 3 should NOT have been spawned (paused)
+      // Task 3 should be marked as blocked (dependency failed) even while paused
       const task3 = wf.tasks.find((t) => t.taskDef.id === 3)!;
-      assert.equal(task3.status, "pending");
+      assert.equal(task3.status, "failed");
+      assert.equal(task3.error, "blocked: dependency failed");
 
-      // Workflow should NOT be complete (paused, task 3 still pending)
+      // Workflow is NOT "complete" (still paused — operator can retry),
+      // but all tasks are terminal so a `wait` call would resolve.
       assert.ok(!orch.isComplete());
+      assert.ok(wf.tasks.every((t) => t.status === "done" || t.status === "failed"));
     });
   });
 
