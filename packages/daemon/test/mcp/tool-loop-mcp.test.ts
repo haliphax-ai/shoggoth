@@ -46,8 +46,8 @@ describe("tool-loop MCP bridge", () => {
       },
     ]);
     const tools = mcpToolsForToolLoop(aggregated);
-    assert.ok(tools.some((t) => t.name === "builtin.read"));
-    assert.ok(tools.some((t) => t.name === "demo_ext.noop"));
+    assert.ok(tools.some((t) => t.name === "builtin-read"));
+    assert.ok(tools.some((t) => t.name === "demo_ext-noop"));
 
     let calls = 0;
     const model = {
@@ -55,7 +55,7 @@ describe("tool-loop MCP bridge", () => {
         if (calls++ === 0) {
           return {
             content: null,
-            toolCalls: [{ id: "c1", name: "builtin.read", argsJson: '{"path":"a.txt"}' }],
+            toolCalls: [{ id: "c1", name: "builtin-read", argsJson: '{"path":"a.txt"}' }],
           };
         }
         return { content: null, toolCalls: [] };
@@ -107,7 +107,7 @@ describe("tool-loop MCP bridge", () => {
       builtin: async () => ({ resultJson: "{}" }),
     });
     const out = await ex.execute({
-      name: "other.ping",
+      name: "other-ping",
       argsJson: "{}",
       toolCallId: "t0",
     });

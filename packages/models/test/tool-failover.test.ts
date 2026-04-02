@@ -41,16 +41,16 @@ describe("createFailoverToolCallingClient", () => {
     const c = createFailoverToolCallingClient([
       {
         provider: mockToolProvider("a", "ok", undefined, [
-          { id: "t1", name: "builtin.read", arguments: "{}" },
+          { id: "t1", name: "builtin-read", arguments: "{}" },
         ]),
         model: "m",
       },
     ]);
     const r = await c.completeWithTools({
       messages: [{ role: "user", content: "go" }],
-      tools: [{ type: "function", function: { name: "builtin.read", parameters: {} } }],
+      tools: [{ type: "function", function: { name: "builtin-read", parameters: {} } }],
     });
     assert.equal(r.toolCalls.length, 1);
-    assert.equal(r.toolCalls[0]!.name, "builtin.read");
+    assert.equal(r.toolCalls[0]!.name, "builtin-read");
   });
 });

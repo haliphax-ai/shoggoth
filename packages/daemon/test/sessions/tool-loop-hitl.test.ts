@@ -45,7 +45,7 @@ describe("runToolLoop HITL (shared pending store + resolution hub)", () => {
         if (modelTurn++ === 0) {
           return {
             content: null,
-            toolCalls: [{ id: "w1", name: "builtin.write", argsJson: "{}" }],
+            toolCalls: [{ id: "w1", name: "builtin-write", argsJson: "{}" }],
           };
         }
         return { content: "ok", toolCalls: [] };
@@ -63,7 +63,7 @@ describe("runToolLoop HITL (shared pending store + resolution hub)", () => {
       policy,
       audit,
       model,
-      tools: [{ name: "builtin.write" }],
+      tools: [{ name: "builtin-write" }],
       executor: {
         execute: async () => {
           execCount++;
@@ -74,7 +74,7 @@ describe("runToolLoop HITL (shared pending store + resolution hub)", () => {
       hitl: {
         config: {
           defaultApprovalTimeoutMs: 300_000,
-          toolRisk: { "builtin.read": "safe", "builtin.write": "caution", "builtin.exec": "critical" },
+          toolRisk: { "builtin-read": "safe", "builtin-write": "caution", "builtin-exec": "critical" },
           bypassUpTo: "safe",
         },
         bypassUpTo: "safe",
@@ -132,7 +132,7 @@ describe("runToolLoop HITL (shared pending store + resolution hub)", () => {
         if (modelTurn++ === 0) {
           return {
             content: null,
-            toolCalls: [{ id: "w1", name: "builtin.write", argsJson: "{}" }],
+            toolCalls: [{ id: "w1", name: "builtin-write", argsJson: "{}" }],
           };
         }
         return { content: "after deny", toolCalls: [] };
@@ -150,7 +150,7 @@ describe("runToolLoop HITL (shared pending store + resolution hub)", () => {
       policy,
       audit,
       model,
-      tools: [{ name: "builtin.write" }],
+      tools: [{ name: "builtin-write" }],
       executor: {
         execute: async () => {
           execCount++;
@@ -161,7 +161,7 @@ describe("runToolLoop HITL (shared pending store + resolution hub)", () => {
       hitl: {
         config: {
           defaultApprovalTimeoutMs: 300_000,
-          toolRisk: { "builtin.read": "safe", "builtin.write": "caution", "builtin.exec": "critical" },
+          toolRisk: { "builtin-read": "safe", "builtin-write": "caution", "builtin-exec": "critical" },
           bypassUpTo: "safe",
         },
         bypassUpTo: "safe",

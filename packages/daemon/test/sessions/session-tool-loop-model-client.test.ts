@@ -12,7 +12,7 @@ describe("createSessionToolLoopModelClient", () => {
           assert.equal(input.messages.length, 2);
           return {
             content: null,
-            toolCalls: [{ id: "c1", name: "builtin.read", arguments: "{}" }],
+            toolCalls: [{ id: "c1", name: "builtin-read", arguments: "{}" }],
             usedProviderId: "p",
             usedModel: "m",
             degraded: false,
@@ -36,7 +36,7 @@ describe("createSessionToolLoopModelClient", () => {
         { role: "system", content: "sys" },
         { role: "user", content: "hi" },
       ],
-      tools: [{ type: "function", function: { name: "builtin.read", parameters: {} } }],
+      tools: [{ type: "function", function: { name: "builtin-read", parameters: {} } }],
     });
 
     const t1 = await model.complete();
@@ -64,7 +64,7 @@ describe("createSessionToolLoopModelClient", () => {
           req.onTextDelta?.("b", "ab");
           return {
             content: "ab",
-            toolCalls: [{ id: "c1", name: "builtin.read", arguments: "{}" }],
+            toolCalls: [{ id: "c1", name: "builtin-read", arguments: "{}" }],
             usedProviderId: "p",
             usedModel: "m",
             degraded: false,
@@ -89,7 +89,7 @@ describe("createSessionToolLoopModelClient", () => {
         { role: "system", content: "sys" },
         { role: "user", content: "hi" },
       ],
-      tools: [{ type: "function", function: { name: "builtin.read", parameters: {} } }],
+      tools: [{ type: "function", function: { name: "builtin-read", parameters: {} } }],
       streamModel: true,
       onModelTextDelta: (t) => {
         deltas.push(t);

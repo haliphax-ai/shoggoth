@@ -2,12 +2,10 @@ export type { JsonSchemaLike } from "./json-schema";
 export type { McpToolDescriptor } from "./mcp-tool";
 export {
   aggregateMcpCatalogs,
-  parseNamespacedMcpTool,
   routeMcpToolInvocation,
   type AggregateMcpCatalogResult,
   type AggregatedTool,
   type McpSourceCatalog,
-  type ParsedNamespacedTool,
 } from "./aggregate";
 export { toMcpToolsListPayload, type McpToolsListPayload } from "./advertise";
 export {

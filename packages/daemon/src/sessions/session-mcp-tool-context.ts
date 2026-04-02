@@ -26,14 +26,14 @@ export function openAiToolsFromCatalog(aggregated: AggregateMcpCatalogResult): O
     type: "function" as const,
     function: {
       name: t.namespacedName,
-      description: t.description ?? `${t.sourceId}.${t.originalName}`,
+      description: t.description ?? `${t.sourceId}-${t.originalName}`,
       parameters: (t.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>,
     },
   }));
 }
 
 /**
- * Appends `builtin.message` when a messaging runtime registers a capability slice.
+ * Appends `builtin-message` when a messaging runtime registers a capability slice.
  */
 export function augmentSessionMcpToolContextWithMessageTool(
   base: SessionMcpToolContext,
@@ -43,7 +43,7 @@ export function augmentSessionMcpToolContextWithMessageTool(
   if (!desc) return base;
   const extra: AggregatedTool = {
     ...desc,
-    namespacedName: "builtin.message",
+    namespacedName: "builtin-message",
     sourceId: "builtin",
     originalName: "message",
   };
@@ -73,7 +73,7 @@ export function buildSessionMcpToolContext(
 }
 
 /**
- * Merges global + per-session MCP tool catalogs (global sources first). Duplicate `source.tool`
+ * Merges global + per-session MCP tool catalogs (global sources first). Duplicate `source-tool`
  * names across pools make aggregate throw — use distinct server `id`s.
  */
 export function buildMixedSessionMcpToolContext(
@@ -120,7 +120,7 @@ export function buildBuiltinOnlySessionMcpToolContext(): SessionMcpToolContext {
 }
 
 /**
- * `builtin.subagent` is only for top-level sessions; subagent runs must not recurse via tool list.
+ * `builtin-subagent` is only for top-level sessions; subagent runs must not recurse via tool list.
  */
 export function omitBuiltinSubagentToolForSubagentSession(
   ctx: SessionMcpToolContext,
@@ -141,7 +141,7 @@ export function omitBuiltinSubagentToolForSubagentSession(
 }
 
 /**
- * Standalone finalizer: appends `builtin.message` when a messaging runtime is active.
+ * Standalone finalizer: appends `builtin-message` when a messaging runtime is active.
  */
 export function messageToolFinalizer(
   ctx: SessionMcpToolContext,
@@ -151,7 +151,7 @@ export function messageToolFinalizer(
 }
 
 /**
- * Standalone finalizer: strips `builtin.subagent` for subagent session URNs.
+ * Standalone finalizer: strips `builtin-subagent` for subagent session URNs.
  */
 export function subagentToolStripFinalizer(
   ctx: SessionMcpToolContext,

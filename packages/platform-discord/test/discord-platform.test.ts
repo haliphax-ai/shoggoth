@@ -128,7 +128,7 @@ describe("discord platform helpers", () => {
         role: "assistant",
         content: null,
         toolCallId: null,
-        toolCalls: [{ id: "t1", name: "builtin.read", argsJson: "{}" }],
+        toolCalls: [{ id: "t1", name: "builtin-read", argsJson: "{}" }],
       },
       { seq: 3, role: "tool", content: "{}", toolCallId: "t1" },
     ]);
@@ -190,7 +190,7 @@ describe("discord-hitl-notifier", () => {
       id: "pend-1",
       sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
       correlationId: undefined,
-      toolName: "builtin.write",
+      toolName: "builtin-write",
       resourceSummary: undefined,
       payload: {},
       riskTier: "caution",
@@ -267,7 +267,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
             toolCalls: [
               {
                 id: "tw1",
-                name: "builtin.write",
+                name: "builtin-write",
                 arguments: JSON.stringify({ path: "hitl-notify.txt", content: "x" }),
               },
             ],
@@ -1156,7 +1156,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     const opMsgs = createMessageCalls.filter((c) => c.channelId === notifyChannelId);
     assert.equal(opMsgs.length, 1);
     assert.match(opMsgs[0]!.content, /HITL/);
-    assert.match(opMsgs[0]!.content, /builtin\.write/);
+    assert.match(opMsgs[0]!.content, /builtin-write/);
     assert.match(opMsgs[0]!.content, /shoggoth hitl approve/);
     assert.match(opMsgs[0]!.content, /agent:test:discord:10000000-0000-4000-8000-000000000001/);
     assert.match(opMsgs[0]!.content, /payload \(truncated\):/);
@@ -1230,7 +1230,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     const dmMsgs = createMessageCalls.filter((c) => c.channelId === "dm-ch-from-api");
     assert.equal(dmMsgs.length, 1);
     assert.match(dmMsgs[0]!.content, /HITL/);
-    assert.match(dmMsgs[0]!.content, /builtin\.write/);
+    assert.match(dmMsgs[0]!.content, /builtin-write/);
     assert.match(dmMsgs[0]!.content, /hitl-notify\.txt/);
   });
 
@@ -1305,7 +1305,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       };
       assert.equal(parsed.event, "hitl.pending_queued");
       assert.equal(parsed.sessionId, "agent:test:discord:10000000-0000-4000-8000-000000000001");
-      assert.equal(parsed.tool, "builtin.write");
+      assert.equal(parsed.tool, "builtin-write");
       assert.equal(parsed.riskTier, "caution");
       assert.ok(typeof parsed.pendingId === "string" && parsed.pendingId.length > 0);
       assert.ok(typeof parsed.payloadPreview === "string" && parsed.payloadPreview.includes("hitl-notify"));
@@ -1538,7 +1538,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const hitlBodies = outboundBodies.filter((b) => b.includes("HITL") && b.includes("shoggoth hitl approve"));
     assert.ok(hitlBodies.length >= 1, "expected at least one outbound HITL notice");
-    assert.match(hitlBodies[0]!, /builtin\.write/);
+    assert.match(hitlBodies[0]!, /builtin-write/);
     assert.match(hitlBodies[0]!, /agent:test:discord:10000000-0000-4000-8000-000000000001/);
     assert.match(hitlBodies[0]!, /hitl-notify\.txt/);
   });
@@ -1874,12 +1874,12 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     // hitlNotifier.onQueued was called for the subagent session
     assert.equal(notifierCalls.length, 1);
     assert.equal(notifierCalls[0]!.sessionId, subagentSessionId);
-    assert.equal(notifierCalls[0]!.tool, "builtin.write");
+    assert.equal(notifierCalls[0]!.tool, "builtin-write");
 
     // afterHitlQueued fired: in-session HITL notice was sent via outbound
     const hitlBodies = outboundBodies.filter((b) => b.includes("HITL") && b.includes("shoggoth hitl approve"));
     assert.ok(hitlBodies.length >= 1, "expected at least one in-session HITL notice for subagent");
-    assert.match(hitlBodies[0]!, /builtin\.write/);
+    assert.match(hitlBodies[0]!, /builtin-write/);
     assert.match(hitlBodies[0]!, new RegExp(subagentSessionId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
     // The turn completed with a reply

@@ -545,7 +545,7 @@ export const shoggothAgentEntrySchema = z
      */
     subagentSpawnAllow: shoggothSubagentSpawnAllowSchema.optional(),
     /**
-     * When false, this agent cannot use `builtin.subagent` or agent-scoped subagent control ops
+     * When false, this agent cannot use `builtin-subagent` or agent-scoped subagent control ops
      * (`subagent_spawn`, `session_inspect`, `session_steer`, `session_abort`, `session_kill`).
      * Overrides top-level `spawnSubagents` when set.
      */
@@ -751,17 +751,17 @@ export type ShoggothConfig = z.infer<typeof shoggothConfigSchema>;
 export const DEFAULT_HITL_CONFIG: ShoggothHitlConfig = {
   defaultApprovalTimeoutMs: 300_000,
   toolRisk: {
-    "builtin.read": "safe",
-    "builtin.write": "caution",
-    "builtin.exec": "critical",
-    "builtin.memory.search": "safe",
-    "builtin.memory.ingest": "caution",
-    "builtin.session.list": "safe",
-    "builtin.session.send": "caution",
-    "builtin.session.query": "safe",
-    "builtin.subagent": "caution",
-    "builtin.message": "caution",
-    "builtin.config.request": "never",
+    "builtin-read": "safe",
+    "builtin-write": "caution",
+    "builtin-exec": "critical",
+    "builtin-memory-search": "safe",
+    "builtin-memory-ingest": "caution",
+    "builtin-session-list": "safe",
+    "builtin-session-send": "caution",
+    "builtin-session-query": "safe",
+    "builtin-subagent": "caution",
+    "builtin-message": "caution",
+    "builtin-config-request": "never",
   },
   /**
    * Default bypass tier for all agents. Per-agent overrides in agents.list.<id>.hitl.bypassUpTo.

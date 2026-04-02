@@ -50,7 +50,7 @@ function fixtureTextThenToolStream(): string[] {
     'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
     'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Checking"}}',
     'data: {"type":"content_block_stop","index":0}',
-    'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"builtin_read","input":{}}}',
+    'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"builtin-read","input":{}}}',
     'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"pa"}}',
     'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"th\\":\\"a\\"}"}}',
     'data: {"type":"content_block_stop","index":1}',
@@ -125,7 +125,7 @@ describe("mapChatMessagesToAnthropicPayload", () => {
     const tools = [
       {
         type: "function" as const,
-        function: { name: "builtin.read", description: "d", parameters: { type: "object" as const, properties: {} } },
+        function: { name: "builtin-read", description: "d", parameters: { type: "object" as const, properties: {} } },
       },
     ];
     const m = buildOpenAiToAnthropicToolNameMap(tools);
@@ -134,13 +134,13 @@ describe("mapChatMessagesToAnthropicPayload", () => {
         {
           role: "assistant",
           content: null,
-          toolCalls: [{ id: "x", name: "builtin.read", arguments: "{}" }],
+          toolCalls: [{ id: "x", name: "builtin-read", arguments: "{}" }],
         },
       ],
       m,
     );
     const assistant = out[0] as { content: { type: string; name: string }[] };
-    assert.equal(assistant.content[0]?.name, "builtin_read");
+    assert.equal(assistant.content[0]?.name, "builtin-read");
   });
 });
 
@@ -279,7 +279,7 @@ describe("createAnthropicMessagesProvider", () => {
             {
               type: "tool_use",
               id: "toolu_1",
-              name: "builtin_read",
+              name: "builtin-read",
               input: { path: "a" },
             },
           ],
@@ -301,7 +301,7 @@ describe("createAnthropicMessagesProvider", () => {
         {
           type: "function",
           function: {
-            name: "builtin.read",
+            name: "builtin-read",
             description: "read",
             parameters: { type: "object", properties: { path: { type: "string" } } },
           },
@@ -310,11 +310,11 @@ describe("createAnthropicMessagesProvider", () => {
     });
 
     assert.equal(out.toolCalls.length, 1);
-    assert.equal(out.toolCalls[0]!.name, "builtin.read");
+    assert.equal(out.toolCalls[0]!.name, "builtin-read");
     assert.match(out.toolCalls[0]!.arguments, /"path"\s*:\s*"a"/);
     assert.equal(out.content, null);
     const req = JSON.parse(capturedBody ?? "{}") as { tools?: { name: string }[] };
-    assert.equal(req.tools?.[0]?.name, "builtin_read");
+    assert.equal(req.tools?.[0]?.name, "builtin-read");
   });
 
   it("completeWithTools omits tools and tool_choice when tools array is empty", async () => {
@@ -414,7 +414,7 @@ describe("createAnthropicMessagesProvider", () => {
         {
           type: "function",
           function: {
-            name: "builtin.read",
+            name: "builtin-read",
             description: "read",
             parameters: { type: "object", properties: { path: { type: "string" } } },
           },
@@ -426,7 +426,7 @@ describe("createAnthropicMessagesProvider", () => {
 
     assert.equal(out.content, "Checking");
     assert.equal(out.toolCalls.length, 1);
-    assert.equal(out.toolCalls[0]!.name, "builtin.read");
+    assert.equal(out.toolCalls[0]!.name, "builtin-read");
     assert.equal(out.toolCalls[0]!.arguments, '{"path":"a"}');
     assert.deepEqual(deltas, ["Checking"]);
   });

@@ -4,7 +4,7 @@ export const DEFAULT_TOOL_RISK: Readonly<Record<string, HitlRiskTier>> = DEFAULT
 
 /**
  * Config-driven risk tier for a tool name. Direct map lookup only — all tool names
- * are expected in canonical namespaced form (e.g. `builtin.exec`).
+ * are expected in canonical namespaced form (e.g. `builtin-exec`).
  */
 export function classifyToolRisk(
   toolName: string,

@@ -731,7 +731,7 @@ describe("control plane (unix socket + JSONL)", () => {
       riskTier: "critical",
       expiresAtIso: "2099-01-01T00:00:00.000Z",
     });
-    insertSessionToolAutoApprove(db, sid, "builtin.write");
+    insertSessionToolAutoApprove(db, sid, "builtin-write");
 
     const countSessionAuto = () =>
       (
@@ -846,7 +846,7 @@ describe("control plane (unix socket + JSONL)", () => {
       riskTier: "critical",
       expiresAtIso: "2099-01-01T00:00:00.000Z",
     });
-    insertSessionToolAutoApprove(db, sid, "builtin.write");
+    insertSessionToolAutoApprove(db, sid, "builtin-write");
 
     const testConfig: ShoggothConfig = { ...minimalConfig(sock), configDirectory: cfgDir };
     const configRef = { current: testConfig };
@@ -861,8 +861,8 @@ describe("control plane (unix socket + JSONL)", () => {
       hitlRef,
       logger: hitlLog,
     });
-    autoGate.enableAgentTool("wipeme", "builtin.read");
-    assert.ok(autoGate.shouldAutoApprove(sid, "builtin.read"));
+    autoGate.enableAgentTool("wipeme", "builtin-read");
+    assert.ok(autoGate.shouldAutoApprove(sid, "builtin-read"));
 
     await withControlPlaneSession(
       {
@@ -906,7 +906,7 @@ describe("control plane (unix socket + JSONL)", () => {
         ).c;
         assert.equal(sessRows, 0);
 
-        assert.equal(autoGate.shouldAutoApprove(sid, "builtin.read"), false);
+        assert.equal(autoGate.shouldAutoApprove(sid, "builtin-read"), false);
         const afterConfig = loadLayeredConfig(cfgDir);
         const after = afterConfig.agents?.list?.["wipeme"]?.hitl?.toolAutoApprove ?? [];
         assert.deepStrictEqual(after, []);
@@ -928,7 +928,7 @@ describe("control plane (unix socket + JSONL)", () => {
     const seg1 = getSessionContextSegmentId(db, "sess-cx");
     const tr = createTranscriptStore(db);
     tr.append({ sessionId: "sess-cx", contextSegmentId: seg1, role: "user", content: "x" });
-    insertSessionToolAutoApprove(db, "sess-cx", "builtin.write");
+    insertSessionToolAutoApprove(db, "sess-cx", "builtin-write");
     const countSessionAutoApprove = () =>
       (
         db
@@ -970,7 +970,7 @@ describe("control plane (unix socket + JSONL)", () => {
 
         const seg2 = getSessionContextSegmentId(db, "sess-cx");
         tr.append({ sessionId: "sess-cx", contextSegmentId: seg2, role: "user", content: "y" });
-        insertSessionToolAutoApprove(db, "sess-cx", "builtin.write");
+        insertSessionToolAutoApprove(db, "sess-cx", "builtin-write");
         assert.equal(countSessionAutoApprove(), 1);
         const lineReset = await send({
           v: WIRE_VERSION,

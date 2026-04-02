@@ -77,7 +77,7 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
     ]);
     try {
       const aggregated = buildAggregatedMcpCatalog(pool.externalSources);
-      assert.ok(aggregated.tools.some((t) => t.namespacedName === "mocksrv.echo"));
+      assert.ok(aggregated.tools.some((t) => t.namespacedName === "mocksrv-echo"));
 
       const db = new Database(":memory:");
       db.pragma("foreign_keys = ON");
@@ -102,7 +102,7 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
           if (step++ === 0) {
             return {
               content: null,
-              toolCalls: [{ id: "c1", name: "mocksrv.echo", argsJson: '{"text":"from-mcp"}' }],
+              toolCalls: [{ id: "c1", name: "mocksrv-echo", argsJson: '{"text":"from-mcp"}' }],
             };
           }
           return { content: "done", toolCalls: [] };
@@ -228,7 +228,7 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
     ]);
     try {
       const aggregated = buildAggregatedMcpCatalog(pool.externalSources);
-      assert.ok(aggregated.tools.some((t) => t.namespacedName === "httpsrv.echo"));
+      assert.ok(aggregated.tools.some((t) => t.namespacedName === "httpsrv-echo"));
 
       const db = new Database(":memory:");
       db.pragma("foreign_keys = ON");
@@ -253,7 +253,7 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
           if (step++ === 0) {
             return {
               content: null,
-              toolCalls: [{ id: "c1", name: "httpsrv.echo", argsJson: '{"text":"from-http"}' }],
+              toolCalls: [{ id: "c1", name: "httpsrv-echo", argsJson: '{"text":"from-http"}' }],
             };
           }
           return { content: "done", toolCalls: [] };

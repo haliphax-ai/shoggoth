@@ -20,7 +20,7 @@ describe("createToolLoopPolicyAndAudit", () => {
       ...DEFAULT_POLICY_CONFIG,
       agent: {
         ...DEFAULT_POLICY_CONFIG.agent,
-        tools: { allow: ["builtin.read"], deny: [] },
+        tools: { allow: ["builtin-read"], deny: [] },
       },
     });
     const principal: AuthenticatedPrincipal = {
@@ -40,7 +40,7 @@ describe("createToolLoopPolicyAndAudit", () => {
         if (calls++ === 0) {
           return {
             content: null,
-            toolCalls: [{ id: "t1", name: "builtin.exec", argsJson: '{"token":"secret"}' }],
+            toolCalls: [{ id: "t1", name: "builtin-exec", argsJson: '{"token":"secret"}' }],
           };
         }
         return { content: null, toolCalls: [] };
@@ -56,7 +56,7 @@ describe("createToolLoopPolicyAndAudit", () => {
         policy,
         audit,
         model,
-        tools: [{ name: "builtin.read" }, { name: "builtin.exec" }],
+        tools: [{ name: "builtin-read" }, { name: "builtin-exec" }],
         executor: {
           execute: async () => ({ resultJson: "{}" }),
         },
@@ -73,7 +73,7 @@ describe("createToolLoopPolicyAndAudit", () => {
     }[];
     const denied = rows.find((r) => r.action === "authz.tool" && r.outcome === "denied");
     assert.ok(denied);
-    assert.strictEqual(denied!.resource, "builtin.exec");
+    assert.strictEqual(denied!.resource, "builtin-exec");
     assert.match(denied!.args_redacted_json ?? "", /REDACTED/);
     db.close();
   });

@@ -43,7 +43,7 @@ describe("runToolLoop HITL", () => {
             toolCalls: [
               {
                 id: "tc-exec",
-                name: "builtin.exec",
+                name: "builtin-exec",
                 argsJson: JSON.stringify({ argv: ["true"] }),
               },
             ],
@@ -64,7 +64,7 @@ describe("runToolLoop HITL", () => {
       policy,
       audit,
       model,
-      tools: [{ name: "builtin.exec" }],
+      tools: [{ name: "builtin-exec" }],
       executor: {
         execute: async ({ name }) => {
           executed.push(name);
@@ -88,7 +88,7 @@ describe("runToolLoop HITL", () => {
       },
     });
 
-    assert.deepStrictEqual(executed, ["builtin.exec"]);
+    assert.deepStrictEqual(executed, ["builtin-exec"]);
     const tr = db
       .prepare(`SELECT status FROM tool_runs WHERE id = ?`)
       .get("run-hitl-ok") as { status: string } | undefined;
@@ -127,7 +127,7 @@ describe("runToolLoop HITL", () => {
             toolCalls: [
               {
                 id: "tc-exec-2",
-                name: "builtin.exec",
+                name: "builtin-exec",
                 argsJson: "{}",
               },
             ],
@@ -151,7 +151,7 @@ describe("runToolLoop HITL", () => {
       policy,
       audit,
       model,
-      tools: [{ name: "builtin.exec" }],
+      tools: [{ name: "builtin-exec" }],
       executor: {
         execute: async ({ name }) => {
           executed.push(name);

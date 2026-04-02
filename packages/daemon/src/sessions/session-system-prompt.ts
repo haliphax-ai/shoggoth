@@ -55,7 +55,7 @@ export interface BuildSessionSystemContextInput {
   readonly channel?: string;
   /** When set, core prompt sections use transport {@link MessagingAdapterCapabilities.features}. */
   readonly messagingCapabilities?: MessagingAdapterCapabilities;
-  /** MCP + built-in tool names exposed to the model for this turn (e.g. `builtin.read`). */
+  /** MCP + built-in tool names exposed to the model for this turn (e.g. `builtin-read`). */
   readonly toolNames?: readonly string[];
   /** Optional sandbox identity for the workspace section. */
   readonly sandbox?: {

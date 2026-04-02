@@ -194,7 +194,7 @@ export async function executeSessionAgentTurn(
           return builtinRegistry.execute(originalName, args, toolCtx);
         }
         // Preserve the original error for unrecognised session.* names
-        if (originalName.startsWith("session.")) {
+        if (originalName.startsWith("session-")) {
           return { resultJson: JSON.stringify({ error: `unknown integration builtin: ${originalName}` }) };
         }
         return { resultJson: JSON.stringify({ error: `unknown builtin: ${originalName}` }) };

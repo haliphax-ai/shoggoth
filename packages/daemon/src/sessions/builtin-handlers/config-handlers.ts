@@ -1,13 +1,13 @@
 // ---------------------------------------------------------------------------
-// config.show & config.request handlers
+// config-show & config-request handlers
 // ---------------------------------------------------------------------------
 
 import { IntegrationOpError } from "../../control/integration-ops";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
 
 export function register(registry: BuiltinToolRegistry): void {
-  registry.register("config.show", configShow);
-  registry.register("config.request", configRequest);
+  registry.register("config-show", configShow);
+  registry.register("config-request", configRequest);
 }
 
 async function configShow(

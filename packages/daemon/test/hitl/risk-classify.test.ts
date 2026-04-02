@@ -5,8 +5,8 @@ import type { HitlRiskTier } from "@shoggoth/shared";
 
 describe("classifyToolRisk", () => {
   it("uses per-tool map when present", () => {
-    const map: Record<string, HitlRiskTier> = { ...DEFAULT_TOOL_RISK, "builtin.exec": "caution" };
-    assert.equal(classifyToolRisk("builtin.exec", map), "caution");
+    const map: Record<string, HitlRiskTier> = { ...DEFAULT_TOOL_RISK, "builtin-exec": "caution" };
+    assert.equal(classifyToolRisk("builtin-exec", map), "caution");
   });
 
   it("falls back to wildcard * in map", () => {
@@ -15,11 +15,11 @@ describe("classifyToolRisk", () => {
   });
 
   it("uses default built-in map for canonical tool names", () => {
-    assert.equal(classifyToolRisk("builtin.read", {}), "safe");
-    assert.equal(classifyToolRisk("builtin.write", {}), "caution");
-    assert.equal(classifyToolRisk("builtin.exec", {}), "critical");
-    assert.equal(classifyToolRisk("builtin.memory.search", {}), "safe");
-    assert.equal(classifyToolRisk("builtin.memory.ingest", {}), "caution");
+    assert.equal(classifyToolRisk("builtin-read", {}), "safe");
+    assert.equal(classifyToolRisk("builtin-write", {}), "caution");
+    assert.equal(classifyToolRisk("builtin-exec", {}), "critical");
+    assert.equal(classifyToolRisk("builtin-memory-search", {}), "safe");
+    assert.equal(classifyToolRisk("builtin-memory-ingest", {}), "caution");
   });
 
   it("unknown tool names fall back to caution", () => {
@@ -28,12 +28,12 @@ describe("classifyToolRisk", () => {
   });
 
   it("overlay wins over defaults", () => {
-    const map: Record<string, HitlRiskTier> = { "builtin.read": "critical" };
-    assert.equal(classifyToolRisk("builtin.read", map), "critical");
+    const map: Record<string, HitlRiskTier> = { "builtin-read": "critical" };
+    assert.equal(classifyToolRisk("builtin-read", map), "critical");
   });
 
   it("classifies tool as never when configured", () => {
-    const map: Record<string, HitlRiskTier> = { "builtin.exec": "never" };
-    assert.equal(classifyToolRisk("builtin.exec", map), "never");
+    const map: Record<string, HitlRiskTier> = { "builtin-exec": "never" };
+    assert.equal(classifyToolRisk("builtin-exec", map), "never");
   });
 });

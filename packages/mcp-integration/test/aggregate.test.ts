@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import {
   aggregateMcpCatalogs,
-  parseNamespacedMcpTool,
   routeMcpToolInvocation,
 } from "../src/aggregate";
 import { toMcpToolsListPayload } from "../src/advertise";
@@ -23,11 +22,11 @@ describe("aggregateMcpCatalogs", () => {
       },
     ]);
     assert.equal(agg.tools.length, 15);
-    const read = agg.tools.find((t) => t.namespacedName === "a.read");
+    const read = agg.tools.find((t) => t.namespacedName === "a-read");
     assert.ok(read);
     assert.equal(read?.originalName, "read");
     const payload = toMcpToolsListPayload(agg);
-    assert.ok(payload.tools.some((t) => t.name === "a.read" && t.inputSchema.properties));
+    assert.ok(payload.tools.some((t) => t.name === "a-read" && t.inputSchema.properties));
   });
 
   it("rejects duplicate aggregated names", () => {
@@ -47,24 +46,10 @@ describe("aggregateMcpCatalogs", () => {
 
   it("routes invocations", () => {
     const agg = aggregateMcpCatalogs([builtinShoggothToolsCatalog()]);
-    const ok = routeMcpToolInvocation(agg, "builtin.read");
+    const ok = routeMcpToolInvocation(agg, "builtin-read");
     assert.ok("tool" in ok);
     if ("tool" in ok) assert.equal(ok.tool.originalName, "read");
-    const bad = routeMcpToolInvocation(agg, "builtin.nope");
+    const bad = routeMcpToolInvocation(agg, "builtin-nope");
     assert.ok("error" in bad);
-  });
-});
-
-describe("parseNamespacedMcpTool", () => {
-  it("splits on first dot only", () => {
-    assert.deepEqual(parseNamespacedMcpTool("canvas-web.canvas_navigate"), {
-      sourceId: "canvas-web",
-      toolName: "canvas_navigate",
-    });
-    assert.deepEqual(parseNamespacedMcpTool("a.b.c.d"), {
-      sourceId: "a",
-      toolName: "b.c.d",
-    });
-    assert.equal(parseNamespacedMcpTool("nodot"), null);
   });
 });

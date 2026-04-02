@@ -1,7 +1,7 @@
 import type { ShoggothConfig } from "./schema.js";
 
 /**
- * Whether the agent id may use subagent-related builtins (`builtin.subagent`) and matching
+ * Whether the agent id may use subagent-related builtins (`builtin-subagent`) and matching
  * control ops. Per-agent `agents.list.<id>.spawnSubagents` overrides top-level `spawnSubagents`
  * when set. Omitted booleans default to **true** (backward compatible).
  *

@@ -28,7 +28,7 @@ function minimalConfig(tmp: string, dynamicConfigDirectory?: string): ShoggothCo
     operatorDirectory: tmp,
     hitl: {
       defaultApprovalTimeoutMs: 300_000,
-      toolRisk: { "builtin.read": "safe" as const },
+      toolRisk: { "builtin-read": "safe" as const },
       bypassUpTo: "safe",
     },
     memory: { paths: [] as string[], embeddings: { enabled: false } },

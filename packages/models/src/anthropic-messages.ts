@@ -317,7 +317,7 @@ type AnthropicBlockState =
 export interface ConsumeAnthropicMessagesStreamOptions {
   readonly accumulateTools: boolean;
   readonly onTextDelta?: ModelStreamTextDeltaCallback;
-  /** Map Anthropic-safe tool names back to OpenAI/MCP names (e.g. `builtin_read` → `builtin.read`). */
+  /** Map Anthropic-safe tool names back to OpenAI/MCP names (e.g. `builtin_read` → `builtin-read`). */
   readonly anthropicToOpenAiToolName?: ReadonlyMap<string, string>;
 }
 

@@ -2,7 +2,7 @@ import type { JsonSchemaLike } from "./json-schema";
 import type { McpToolDescriptor } from "./mcp-tool";
 
 /**
- * Subset of messaging adapter flags used to build the `builtin.message` JSON schema.
+ * Subset of messaging adapter flags used to build the `builtin-message` JSON schema.
  * Populated by the daemon from the active messaging platform.
  */
 export interface MessageToolPlatformSlice {

@@ -28,7 +28,7 @@ function makeToolCallClient(toolArgs: Record<string, unknown>) {
       if (callCount === 1) {
         return {
           content: "",
-          toolCalls: [{ id: "tc1", name: "builtin.session.query", arguments: JSON.stringify(toolArgs) }],
+          toolCalls: [{ id: "tc1", name: "builtin-session-query", arguments: JSON.stringify(toolArgs) }],
           usedModel: "stub",
           usedProviderId: "stub",
           degraded: false,

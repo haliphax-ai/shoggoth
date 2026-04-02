@@ -103,7 +103,7 @@ describe("createOpenAICompatibleProvider", () => {
                   {
                     id: "call_1",
                     type: "function",
-                    function: { name: "builtin.read", arguments: '{"path":"a"}' },
+                    function: { name: "builtin-read", arguments: '{"path":"a"}' },
                   },
                 ],
               },
@@ -126,7 +126,7 @@ describe("createOpenAICompatibleProvider", () => {
         {
           type: "function",
           function: {
-            name: "builtin.read",
+            name: "builtin-read",
             parameters: { type: "object", properties: { path: { type: "string" } } },
           },
         },
@@ -135,7 +135,7 @@ describe("createOpenAICompatibleProvider", () => {
     });
 
     assert.equal(out.toolCalls.length, 1);
-    assert.equal(out.toolCalls[0]!.name, "builtin.read");
+    assert.equal(out.toolCalls[0]!.name, "builtin-read");
     assert.match(out.toolCalls[0]!.arguments, /a/);
   });
 
@@ -198,7 +198,7 @@ describe("createOpenAICompatibleProvider", () => {
                       index: 0,
                       id: "call_1",
                       type: "function",
-                      function: { name: "builtin.read" },
+                      function: { name: "builtin-read" },
                     },
                   ],
                 },
@@ -241,7 +241,7 @@ describe("createOpenAICompatibleProvider", () => {
         {
           type: "function",
           function: {
-            name: "builtin.read",
+            name: "builtin-read",
             parameters: { type: "object", properties: { path: { type: "string" } } },
           },
         },
@@ -251,7 +251,7 @@ describe("createOpenAICompatibleProvider", () => {
 
     assert.equal(out.toolCalls.length, 1);
     assert.equal(out.toolCalls[0]!.id, "call_1");
-    assert.equal(out.toolCalls[0]!.name, "builtin.read");
+    assert.equal(out.toolCalls[0]!.name, "builtin-read");
     assert.equal(out.toolCalls[0]!.arguments, '{"path":"a"}');
     assert.equal(out.content, null);
   });

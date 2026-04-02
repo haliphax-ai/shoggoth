@@ -333,15 +333,15 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
         inputSchema: execArgs,
       },
       {
-        name: "memory.search",
+        name: "memory-search",
         description:
-          "Search indexed markdown memory (BM25; optional vector rank when memory.embeddings.enabled and embeddings API succeeds). Configure memory.paths; call memory.ingest after adding or changing .md files under those roots.",
+          "Search indexed markdown memory (BM25; optional vector rank when memory.embeddings.enabled and embeddings API succeeds). Configure memory.paths; call memory-ingest after adding or changing .md files under those roots.",
         inputSchema: memorySearchArgs,
       },
       {
-        name: "memory.ingest",
+        name: "memory-ingest",
         description:
-          "Scan memory.paths (absolute or workspace-relative) for *.md and upsert into the daemon state DB for memory.search.",
+          "Scan memory.paths (absolute or workspace-relative) for *.md and upsert into the daemon state DB for memory-search.",
         inputSchema: memoryIngestArgs,
       },
       {
@@ -351,19 +351,19 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
         inputSchema: subagentToolArgs,
       },
       {
-        name: "session.list",
+        name: "session-list",
         description:
           "List sessions (optional status and agent_id filters). Agents are scoped to their agent id automatically.",
         inputSchema: sessionListArgs,
       },
       {
-        name: "session.send",
+        name: "session-send",
         description:
           "Send a message to another session (session_id or agent_id for main session). Cross-agent sends require agentToAgent.allow and/or agents.list.<senderId>.agentToAgent.allow in Shoggoth config (\"*\" allows any target). silent skips posting the reply to the bound channel.",
         inputSchema: sessionSendArgs,
       },
       {
-        name: "session.query",
+        name: "session-query",
         description:
           "Read-only query of session transcript messages. Returns messages with seq, role, and content. Agents can only query their own sessions unless allowed via sessionQuery config.",
         inputSchema: sessionQueryArgs,
@@ -381,13 +381,13 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
         inputSchema: skillsToolArgs,
       },
       {
-        name: "config.request",
+        name: "config-request",
         description:
           "Request a configuration change. The fragment is validated against the config schema and written to the daemon's dynamic config directory.",
         inputSchema: configRequestArgs,
       },
       {
-        name: "config.show",
+        name: "config-show",
         description:
           "Show the current daemon configuration (sensitive fields are redacted).",
         inputSchema: { type: "object" as const, properties: {} },

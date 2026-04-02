@@ -30,7 +30,7 @@ describe("builtin memory tools", () => {
     const memory = { paths: ["memory"], embeddings: { enabled: false } };
 
     const ing = await runMemoryBuiltin({
-      originalName: "memory.ingest",
+      originalName: "memory-ingest",
       argsJson: "{}",
       db,
       workspacePath: ws,
@@ -42,7 +42,7 @@ describe("builtin memory tools", () => {
     assert.equal(ingParsed.rootsScanned, 1);
 
     const sr = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "uniquebeta", limit: 5 }),
       db,
       workspacePath: ws,
@@ -64,7 +64,7 @@ describe("builtin memory tools", () => {
     db.pragma("foreign_keys = ON");
     migrate(db, defaultMigrationsDir());
     const out = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "x" }),
       db,
       workspacePath: "/tmp",
@@ -118,7 +118,7 @@ describe("builtin memory tools", () => {
     };
 
     await runMemoryBuiltin({
-      originalName: "memory.ingest",
+      originalName: "memory-ingest",
       argsJson: "{}",
       db,
       workspacePath: ws,
@@ -129,7 +129,7 @@ describe("builtin memory tools", () => {
     assert.ok(embeddingPosts >= 1, "ingest should request embeddings for documents");
 
     const sr = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "fruit alpha", limit: 5 }),
       db,
       workspacePath: ws,
@@ -162,7 +162,7 @@ describe("builtin memory tools", () => {
     };
 
     await runMemoryBuiltin({
-      originalName: "memory.ingest",
+      originalName: "memory-ingest",
       argsJson: "{}",
       db,
       workspacePath: ws,
@@ -187,7 +187,7 @@ describe("builtin memory tools", () => {
     };
 
     const sr = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "uniqueq", limit: 5 }),
       db,
       workspacePath: ws,
@@ -218,7 +218,7 @@ describe("builtin memory tools", () => {
     };
 
     await runMemoryBuiltin({
-      originalName: "memory.ingest",
+      originalName: "memory-ingest",
       argsJson: "{}",
       db,
       workspacePath: ws,
@@ -228,7 +228,7 @@ describe("builtin memory tools", () => {
     });
 
     const sr = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "uniquexyz", limit: 5 }),
       db,
       workspacePath: ws,
@@ -276,7 +276,7 @@ describe("builtin memory tools", () => {
     const env = { OPENAI_API_KEY: "k", OPENAI_BASE_URL: "https://api.openai.com/v1" };
 
     await runMemoryBuiltin({
-      originalName: "memory.ingest",
+      originalName: "memory-ingest",
       argsJson: "{}",
       db,
       workspacePath: ws,
@@ -287,7 +287,7 @@ describe("builtin memory tools", () => {
     const firstPosts = posts;
 
     await runMemoryBuiltin({
-      originalName: "memory.ingest",
+      originalName: "memory-ingest",
       argsJson: "{}",
       db,
       workspacePath: ws,
@@ -299,7 +299,7 @@ describe("builtin memory tools", () => {
 
     writeFileSync(f, "# T\n\nstable body gamma delta\n", "utf8");
     await runMemoryBuiltin({
-      originalName: "memory.ingest",
+      originalName: "memory-ingest",
       argsJson: "{}",
       db,
       workspacePath: ws,
@@ -330,10 +330,10 @@ describe("memory.search — relevance scores", () => {
     migrate(db, defaultMigrationsDir());
 
     const memory = { paths: ["memory"], embeddings: { enabled: false } };
-    await runMemoryBuiltin({ originalName: "memory.ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
+    await runMemoryBuiltin({ originalName: "memory-ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
 
     const sr = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "scoreword", include_scores: true }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -355,10 +355,10 @@ describe("memory.search — relevance scores", () => {
     migrate(db, defaultMigrationsDir());
 
     const memory = { paths: ["memory"], embeddings: { enabled: false } };
-    await runMemoryBuiltin({ originalName: "memory.ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
+    await runMemoryBuiltin({ originalName: "memory-ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
 
     const sr = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "noscorekw" }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -381,10 +381,10 @@ describe("memory.search — relevance scores", () => {
     migrate(db, defaultMigrationsDir());
 
     const memory = { paths: ["memory"], embeddings: { enabled: false } };
-    await runMemoryBuiltin({ originalName: "memory.ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
+    await runMemoryBuiltin({ originalName: "memory-ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
 
     const sr = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "filterword", include_scores: true, min_score: 0.99 }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -408,11 +408,11 @@ describe("memory.search — path prefix filter", () => {
     migrate(db, defaultMigrationsDir());
 
     const memory = { paths: ["memory"], embeddings: { enabled: false } };
-    await runMemoryBuiltin({ originalName: "memory.ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
+    await runMemoryBuiltin({ originalName: "memory-ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
 
     // Use the absolute path as path_prefix since source_path is absolute after ingest.
     const sr = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "pathkeyword", path_prefix: join(mem, "alpha") }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -435,11 +435,11 @@ describe("memory.search — date range filters", () => {
     migrate(db, defaultMigrationsDir());
 
     const memory = { paths: ["memory"], embeddings: { enabled: false } };
-    await runMemoryBuiltin({ originalName: "memory.ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
+    await runMemoryBuiltin({ originalName: "memory-ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
 
     // Future date should exclude everything.
     const sr = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "datekw", after: "2099-01-01T00:00:00Z" }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -448,7 +448,7 @@ describe("memory.search — date range filters", () => {
 
     // Past date should include everything.
     const sr2 = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "datekw", after: "2000-01-01T00:00:00Z" }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -468,11 +468,11 @@ describe("memory.search — date range filters", () => {
     migrate(db, defaultMigrationsDir());
 
     const memory = { paths: ["memory"], embeddings: { enabled: false } };
-    await runMemoryBuiltin({ originalName: "memory.ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
+    await runMemoryBuiltin({ originalName: "memory-ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
 
     // Past date should exclude everything.
     const sr = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "beforekw", before: "2000-01-01T00:00:00Z" }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -481,7 +481,7 @@ describe("memory.search — date range filters", () => {
 
     // Future date should include everything.
     const sr2 = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "beforekw", before: "2099-01-01T00:00:00Z" }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -496,7 +496,7 @@ describe("memory.search — date range filters", () => {
     migrate(db, defaultMigrationsDir());
 
     const sr = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "test", after: "2026-06-01T00:00:00Z", before: "2026-01-01T00:00:00Z" }),
       db, workspacePath: "/tmp",
       memory: { paths: ["memory"], embeddings: { enabled: false } },
@@ -513,7 +513,7 @@ describe("memory.search — date range filters", () => {
     migrate(db, defaultMigrationsDir());
 
     const sr = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "test", after: "not-a-date" }),
       db, workspacePath: "/tmp",
       memory: { paths: ["memory"], embeddings: { enabled: false } },
@@ -538,10 +538,10 @@ describe("memory.search — snippet mode", () => {
     migrate(db, defaultMigrationsDir());
 
     const memory = { paths: ["memory"], embeddings: { enabled: false } };
-    await runMemoryBuiltin({ originalName: "memory.ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
+    await runMemoryBuiltin({ originalName: "memory-ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
 
     const sr = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "rollback", snippet: true, snippet_chars: 100 }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -564,10 +564,10 @@ describe("memory.search — snippet mode", () => {
     migrate(db, defaultMigrationsDir());
 
     const memory = { paths: ["memory"], embeddings: { enabled: false } };
-    await runMemoryBuiltin({ originalName: "memory.ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
+    await runMemoryBuiltin({ originalName: "memory-ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
 
     const sr = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "rollback", snippet: true, include_body: true }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -589,10 +589,10 @@ describe("memory.search — snippet mode", () => {
     migrate(db, defaultMigrationsDir());
 
     const memory = { paths: ["memory"], embeddings: { enabled: false } };
-    await runMemoryBuiltin({ originalName: "memory.ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
+    await runMemoryBuiltin({ originalName: "memory-ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
 
     const sr = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "highlight", snippet: true, highlight_tag: "==" }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -613,10 +613,10 @@ describe("memory.search — snippet mode", () => {
     migrate(db, defaultMigrationsDir());
 
     const memory = { paths: ["memory"], embeddings: { enabled: false } };
-    await runMemoryBuiltin({ originalName: "memory.ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
+    await runMemoryBuiltin({ originalName: "memory-ingest", argsJson: "{}", db, workspacePath: ws, memory, env: { ...process.env } });
 
     const sr = await runMemoryBuiltin({
-      originalName: "memory.search",
+      originalName: "memory-search",
       argsJson: JSON.stringify({ query: "nohighlight", snippet: true, highlight_tag: "" }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -646,7 +646,7 @@ describe("memory.ingest — report parameter", () => {
 
     const memory = { paths: ["memory"], embeddings: { enabled: false } };
     const result = await runMemoryBuiltin({
-      originalName: "memory.ingest",
+      originalName: "memory-ingest",
       argsJson: JSON.stringify({ report: true }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -675,7 +675,7 @@ describe("memory.ingest — report parameter", () => {
 
     const memory = { paths: ["memory"], embeddings: { enabled: false } };
     const result = await runMemoryBuiltin({
-      originalName: "memory.ingest",
+      originalName: "memory-ingest",
       argsJson: "{}",
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -700,7 +700,7 @@ describe("memory.ingest — report parameter", () => {
 
     // First ingest to populate the index.
     await runMemoryBuiltin({
-      originalName: "memory.ingest",
+      originalName: "memory-ingest",
       argsJson: "{}",
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -708,7 +708,7 @@ describe("memory.ingest — report parameter", () => {
     // Delete the file and re-ingest with report.
     unlinkSync(f);
     const result = await runMemoryBuiltin({
-      originalName: "memory.ingest",
+      originalName: "memory-ingest",
       argsJson: JSON.stringify({ report: true }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -734,13 +734,13 @@ describe("memory.ingest — report parameter", () => {
 
     const memory = { paths: ["memory"], embeddings: { enabled: false } };
     await runMemoryBuiltin({
-      originalName: "memory.ingest",
+      originalName: "memory-ingest",
       argsJson: "{}",
       db, workspacePath: ws, memory, env: { ...process.env },
     });
 
     const result = await runMemoryBuiltin({
-      originalName: "memory.ingest",
+      originalName: "memory-ingest",
       argsJson: JSON.stringify({ report: true }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -771,7 +771,7 @@ describe("memory.ingest — selective ingest", () => {
 
     const memory = { paths: ["memory"], embeddings: { enabled: false } };
     const result = await runMemoryBuiltin({
-      originalName: "memory.ingest",
+      originalName: "memory-ingest",
       argsJson: JSON.stringify({ paths: ["src/**"], report: true }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -798,7 +798,7 @@ describe("memory.ingest — selective ingest", () => {
 
     const memory = { paths: ["memory"], embeddings: { enabled: false } };
     const result = await runMemoryBuiltin({
-      originalName: "memory.ingest",
+      originalName: "memory-ingest",
       argsJson: JSON.stringify({ exclude: ["*.test.md"], report: true }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -826,7 +826,7 @@ describe("memory.ingest — selective ingest", () => {
 
     const memory = { paths: ["memory"], embeddings: { enabled: false } };
     const result = await runMemoryBuiltin({
-      originalName: "memory.ingest",
+      originalName: "memory-ingest",
       argsJson: JSON.stringify({ paths: ["src/**"], exclude: ["**/*.test.md"], report: true }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });
@@ -851,7 +851,7 @@ describe("memory.ingest — selective ingest", () => {
 
     const memory = { paths: ["memory"], embeddings: { enabled: false } };
     const result = await runMemoryBuiltin({
-      originalName: "memory.ingest",
+      originalName: "memory-ingest",
       argsJson: JSON.stringify({ paths: ["nonexistent/**"], report: true }),
       db, workspacePath: ws, memory, env: { ...process.env },
     });

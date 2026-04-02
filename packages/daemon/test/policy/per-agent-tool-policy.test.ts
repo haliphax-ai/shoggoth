@@ -11,7 +11,7 @@ describe("resolveEffectiveToolRules", () => {
   const globalRules: ShoggothToolRules = {
     allow: ["*"],
     deny: [],
-    review: ["builtin.exec:bash", "builtin.exec:sh"],
+    review: ["builtin-exec:bash", "builtin-exec:sh"],
   };
 
   it("returns global rules when no per-agent config exists", () => {
@@ -25,47 +25,47 @@ describe("resolveEffectiveToolRules", () => {
   });
 
   it("per-agent allow replaces global allow, inherits other fields", () => {
-    const effective = resolveEffectiveToolRules(globalRules, { allow: ["builtin.read"] });
+    const effective = resolveEffectiveToolRules(globalRules, { allow: ["builtin-read"] });
     assert.deepStrictEqual(effective, {
-      allow: ["builtin.read"],
+      allow: ["builtin-read"],
       deny: [],
-      review: ["builtin.exec:bash", "builtin.exec:sh"],
+      review: ["builtin-exec:bash", "builtin-exec:sh"],
     });
   });
 
   it("per-agent deny replaces global deny, inherits other fields", () => {
-    const effective = resolveEffectiveToolRules(globalRules, { deny: ["builtin.exec"] });
+    const effective = resolveEffectiveToolRules(globalRules, { deny: ["builtin-exec"] });
     assert.deepStrictEqual(effective, {
       allow: ["*"],
-      deny: ["builtin.exec"],
-      review: ["builtin.exec:bash", "builtin.exec:sh"],
+      deny: ["builtin-exec"],
+      review: ["builtin-exec:bash", "builtin-exec:sh"],
     });
   });
 
   it("per-agent can replace all fields", () => {
     const effective = resolveEffectiveToolRules(globalRules, {
-      allow: ["builtin.read"],
-      deny: ["builtin.write"],
-      review: ["builtin.exec"],
+      allow: ["builtin-read"],
+      deny: ["builtin-write"],
+      review: ["builtin-exec"],
     });
     assert.deepStrictEqual(effective, {
-      allow: ["builtin.read"],
-      deny: ["builtin.write"],
-      review: ["builtin.exec"],
+      allow: ["builtin-read"],
+      deny: ["builtin-write"],
+      review: ["builtin-exec"],
     });
   });
 });
 
 describe("evaluateRules – review takes precedence over allow", () => {
   it("review match blocks even when allow:* is set", () => {
-    const rules: ShoggothToolRules = { allow: ["*"], deny: [], review: ["builtin.exec:bash"] };
-    const decision = evaluateRules("builtin.exec:bash", rules);
+    const rules: ShoggothToolRules = { allow: ["*"], deny: [], review: ["builtin-exec:bash"] };
+    const decision = evaluateRules("builtin-exec:bash", rules);
     assert.deepStrictEqual(decision, { allow: false, reason: "requires_review" });
   });
 
   it("non-reviewed tool still allowed", () => {
-    const rules: ShoggothToolRules = { allow: ["*"], deny: [], review: ["builtin.exec:bash"] };
-    const decision = evaluateRules("builtin.read", rules);
+    const rules: ShoggothToolRules = { allow: ["*"], deny: [], review: ["builtin-exec:bash"] };
+    const decision = evaluateRules("builtin-read", rules);
     assert.deepStrictEqual(decision, { allow: true });
   });
 });
@@ -76,7 +76,7 @@ describe("policy engine – per-agent tool rules via config", () => {
       ...DEFAULT_POLICY_CONFIG,
       agent: {
         ...DEFAULT_POLICY_CONFIG.agent,
-        tools: { allow: ["*"], deny: [], review: ["builtin.exec:bash", "builtin.exec:sh"] },
+        tools: { allow: ["*"], deny: [], review: ["builtin-exec:bash", "builtin-exec:sh"] },
       },
     };
     const agentsConfig: ShoggothConfig["agents"] = {
@@ -90,7 +90,7 @@ describe("policy engine – per-agent tool rules via config", () => {
     const decision = engine.check({
       principal: { kind: "agent", sessionId: "agent:main:discord:ch:123", source: "agent" },
       action: "tool.invoke",
-      resource: "builtin.exec:bash",
+      resource: "builtin-exec:bash",
     });
     assert.deepStrictEqual(decision, { allow: true });
   });
@@ -100,14 +100,14 @@ describe("policy engine – per-agent tool rules via config", () => {
       ...DEFAULT_POLICY_CONFIG,
       agent: {
         ...DEFAULT_POLICY_CONFIG.agent,
-        tools: { allow: ["*"], deny: [], review: ["builtin.exec:bash"] },
+        tools: { allow: ["*"], deny: [], review: ["builtin-exec:bash"] },
       },
     };
     const engine = createPolicyEngine(config);
     const decision = engine.check({
       principal: { kind: "agent", sessionId: "agent:helper:discord:ch:456", source: "agent" },
       action: "tool.invoke",
-      resource: "builtin.exec:bash",
+      resource: "builtin-exec:bash",
     });
     assert.deepStrictEqual(decision, { allow: false, reason: "requires_review" });
   });
@@ -117,7 +117,7 @@ describe("policy engine – per-agent tool rules via config", () => {
       ...DEFAULT_POLICY_CONFIG,
       agent: {
         ...DEFAULT_POLICY_CONFIG.agent,
-        tools: { allow: ["*"], deny: [], review: ["builtin.exec:bash"] },
+        tools: { allow: ["*"], deny: [], review: ["builtin-exec:bash"] },
       },
     };
     const agentsConfig: ShoggothConfig["agents"] = {
@@ -132,7 +132,7 @@ describe("policy engine – per-agent tool rules via config", () => {
     const decision = engine.check({
       principal: { kind: "agent", sessionId: "agent:other:discord:ch:789", source: "agent" },
       action: "tool.invoke",
-      resource: "builtin.exec:bash",
+      resource: "builtin-exec:bash",
     });
     assert.deepStrictEqual(decision, { allow: false, reason: "requires_review" });
   });
@@ -142,7 +142,7 @@ describe("policy engine – per-agent tool rules via config", () => {
       ...DEFAULT_POLICY_CONFIG,
       agent: {
         ...DEFAULT_POLICY_CONFIG.agent,
-        tools: { allow: ["*"], deny: [], review: ["builtin.exec:bash"] },
+        tools: { allow: ["*"], deny: [], review: ["builtin-exec:bash"] },
       },
     };
     const agentsConfig: ShoggothConfig["agents"] = {
@@ -157,7 +157,7 @@ describe("policy engine – per-agent tool rules via config", () => {
         source: "cli_socket",
       },
       action: "tool.invoke",
-      resource: "builtin.exec:bash",
+      resource: "builtin-exec:bash",
     });
     // Operator uses operator.tools which has allow:* and no review
     assert.deepStrictEqual(decision, { allow: true });

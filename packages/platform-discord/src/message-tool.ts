@@ -123,7 +123,7 @@ function decodeBase64File(
 }
 
 /**
- * Executes the agent `builtin.message` tool against Discord REST for the channel mapped to
+ * Executes the agent `builtin-message` tool against Discord REST for the channel mapped to
  * `sessionId`. Validates each action against {@link MessagingAdapterCapabilities.extensions}.
  */
 export async function executeDiscordMessageToolAction(

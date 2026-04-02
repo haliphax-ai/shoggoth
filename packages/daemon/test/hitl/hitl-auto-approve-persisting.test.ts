@@ -35,8 +35,8 @@ describe("createPersistingHitlAutoApproveGate", () => {
           hitlRef,
           logger: log,
         });
-        gate.enableSessionTool(sessionId, "builtin.write");
-        assert.equal(gate.shouldAutoApprove(sessionId, "builtin.write"), true);
+        gate.enableSessionTool(sessionId, "builtin-write");
+        assert.equal(gate.shouldAutoApprove(sessionId, "builtin-write"), true);
         db.close();
       }
 
@@ -51,14 +51,14 @@ describe("createPersistingHitlAutoApproveGate", () => {
           hitlRef,
           logger: log,
         });
-        assert.equal(gate.shouldAutoApprove(sessionId, "builtin.write"), true);
+        assert.equal(gate.shouldAutoApprove(sessionId, "builtin-write"), true);
         assert.equal(gate.shouldAutoApprove(sessionId, "other.tool"), false);
 
-        gate.enableAgentTool("main", "memory.search");
+        gate.enableAgentTool("main", "memory-search");
         const zPath = join(cfgDir, HITL_AGENT_TOOL_AUTO_APPROVE_FILENAME);
         const raw = readFileSync(zPath, "utf8");
-        assert.ok(raw.includes("memory.search"));
-        assert.equal(gate.shouldAutoApprove(sessionId, "memory.search"), true);
+        assert.ok(raw.includes("memory-search"));
+        assert.equal(gate.shouldAutoApprove(sessionId, "memory-search"), true);
         db.close();
       }
 
@@ -73,8 +73,8 @@ describe("createPersistingHitlAutoApproveGate", () => {
           hitlRef,
           logger: log,
         });
-        gate.enableAgentTool("main", "builtin.write");
-        assert.equal(gate.shouldAutoApprove(sessionId, "builtin.write"), true);
+        gate.enableAgentTool("main", "builtin-write");
+        assert.equal(gate.shouldAutoApprove(sessionId, "builtin-write"), true);
         assert.equal(gate.shouldAutoApprove(sessionId, "write"), false);
         db.close();
       }

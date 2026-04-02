@@ -6,7 +6,7 @@ export interface McpSourceCatalog {
 }
 
 export interface AggregatedTool extends McpToolDescriptor {
-  /** Namespaced name exposed to the model / router, e.g. `builtin.read`. */
+  /** Namespaced name exposed to the model / router, e.g. `builtin-read`. */
   readonly namespacedName: string;
   readonly sourceId: string;
   readonly originalName: string;
@@ -23,11 +23,11 @@ function assertValidSourceId(sourceId: string): void {
 }
 
 function namespaced(sourceId: string, toolName: string): string {
-  return `${sourceId}.${toolName}`;
+  return `${sourceId}-${toolName}`;
 }
 
 /**
- * Merge multiple MCP-style catalogs into one list with stable `source.tool` names.
+ * Merge multiple MCP-style catalogs into one list with stable `source-tool` names.
  * Collisions throw so routing stays unambiguous.
  */
 export function aggregateMcpCatalogs(sources: readonly McpSourceCatalog[]): AggregateMcpCatalogResult {
@@ -53,23 +53,6 @@ export function aggregateMcpCatalogs(sources: readonly McpSourceCatalog[]): Aggr
   }
 
   return { tools: out };
-}
-
-export interface ParsedNamespacedTool {
-  readonly sourceId: string;
-  readonly toolName: string;
-}
-
-/** Split `source.tool` on the first dot; tool name may contain further dots. */
-export function parseNamespacedMcpTool(namespacedName: string): ParsedNamespacedTool | null {
-  const i = namespacedName.indexOf(".");
-  if (i <= 0 || i === namespacedName.length - 1) {
-    return null;
-  }
-  return {
-    sourceId: namespacedName.slice(0, i),
-    toolName: namespacedName.slice(i + 1),
-  };
 }
 
 /** Resolve an aggregated name back to a backend invocation target. */

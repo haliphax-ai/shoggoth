@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// session.query, subagent, session.list, session.send handlers
+// session-query, subagent, session-list, session-send handlers
 // ---------------------------------------------------------------------------
 
 import {
@@ -14,14 +14,14 @@ import { getLogger } from "../../logging";
 const log = getLogger("subagent");
 
 export function register(registry: BuiltinToolRegistry): void {
-  registry.register("session.query", sessionQuery);
+  registry.register("session-query", sessionQuery);
   registry.register("subagent", subagentHandler);
-  registry.register("session.list", sessionListHandler);
-  registry.register("session.send", sessionSendHandler);
+  registry.register("session-list", sessionListHandler);
+  registry.register("session-send", sessionSendHandler);
 }
 
 // ---------------------------------------------------------------------------
-// session.query
+// session-query
 // ---------------------------------------------------------------------------
 
 async function sessionQuery(
@@ -30,7 +30,7 @@ async function sessionQuery(
 ): Promise<{ resultJson: string }> {
   const callerAgentId = resolveAgentIdFromSessionId(ctx.sessionId);
   if (!callerAgentId) {
-    return { resultJson: JSON.stringify({ error: "session.query requires a valid agent session URN" }) };
+    return { resultJson: JSON.stringify({ error: "session-query requires a valid agent session URN" }) };
   }
   const requestedAgentId = typeof args.agent_id === "string" && args.agent_id.trim()
     ? args.agent_id.trim()
@@ -344,7 +344,7 @@ async function subagentHandler(
 }
 
 // ---------------------------------------------------------------------------
-// session.list
+// session-list
 // ---------------------------------------------------------------------------
 
 async function sessionListHandler(
@@ -364,7 +364,7 @@ async function sessionListHandler(
 }
 
 // ---------------------------------------------------------------------------
-// session.send
+// session-send
 // ---------------------------------------------------------------------------
 
 async function sessionSendHandler(

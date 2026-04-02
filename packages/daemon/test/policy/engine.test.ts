@@ -133,56 +133,56 @@ describe("policy engine", () => {
 describe("evaluateRules – review list", () => {
   it("review match returns requires_review even when allow matches", () => {
     assert.deepStrictEqual(
-      evaluateRules("builtin.exec:bash", { allow: ["builtin.exec:*"], deny: [], review: ["builtin.exec:bash"] }),
+      evaluateRules("builtin-exec:bash", { allow: ["builtin-exec:*"], deny: [], review: ["builtin-exec:bash"] }),
       { allow: false, reason: "requires_review" },
     );
   });
 
   it("non-review resource still auto-approved", () => {
     assert.deepStrictEqual(
-      evaluateRules("builtin.exec:curl", { allow: ["builtin.exec:*"], deny: [], review: ["builtin.exec:bash"] }),
+      evaluateRules("builtin-exec:curl", { allow: ["builtin-exec:*"], deny: [], review: ["builtin-exec:bash"] }),
       { allow: true },
     );
   });
 
   it("deny wins over review", () => {
     assert.deepStrictEqual(
-      evaluateRules("builtin.exec:bash", { allow: ["builtin.exec:*"], deny: ["builtin.exec:bash"], review: ["builtin.exec:bash"] }),
+      evaluateRules("builtin-exec:bash", { allow: ["builtin-exec:*"], deny: ["builtin-exec:bash"], review: ["builtin-exec:bash"] }),
       { allow: false, reason: "explicit_deny" },
     );
   });
 
   it("review without allow still returns requires_review", () => {
     assert.deepStrictEqual(
-      evaluateRules("builtin.exec:bash", { allow: [], deny: [], review: ["builtin.exec:bash"] }),
+      evaluateRules("builtin-exec:bash", { allow: [], deny: [], review: ["builtin-exec:bash"] }),
       { allow: false, reason: "requires_review" },
     );
   });
 
   it("empty review list is backward compatible (allow works)", () => {
     assert.deepStrictEqual(
-      evaluateRules("builtin.read", { allow: ["builtin.read"], deny: [], review: [] }),
+      evaluateRules("builtin-read", { allow: ["builtin-read"], deny: [], review: [] }),
       { allow: true },
     );
   });
 
   it("missing review field is backward compatible (allow works)", () => {
     assert.deepStrictEqual(
-      evaluateRules("builtin.exec", { allow: ["builtin.exec"], deny: [] }),
+      evaluateRules("builtin-exec", { allow: ["builtin-exec"], deny: [] }),
       { allow: true },
     );
   });
 
   it("review with wildcard matches all sub-resources", () => {
     assert.deepStrictEqual(
-      evaluateRules("builtin.exec:curl", { allow: ["builtin.exec:*"], deny: [], review: ["builtin.exec:*"] }),
+      evaluateRules("builtin-exec:curl", { allow: ["builtin-exec:*"], deny: [], review: ["builtin-exec:*"] }),
       { allow: false, reason: "requires_review" },
     );
   });
 
   it("bare tool in review matches sub-resources", () => {
     assert.deepStrictEqual(
-      evaluateRules("builtin.exec:curl", { allow: ["builtin.exec:*"], deny: [], review: ["builtin.exec"] }),
+      evaluateRules("builtin-exec:curl", { allow: ["builtin-exec:*"], deny: [], review: ["builtin-exec"] }),
       { allow: false, reason: "requires_review" },
     );
   });

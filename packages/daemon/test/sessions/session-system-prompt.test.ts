@@ -24,14 +24,14 @@ describe("buildSessionSystemContext", () => {
       sessionId: "sid-1",
       channel: "discord",
       messagingCapabilities: discordCapabilityDescriptor(),
-      toolNames: ["builtin.read", "builtin.exec"],
+      toolNames: ["builtin-read", "builtin-exec"],
     });
     assert.match(s, /^You are \*\*Shoggoth\*\*/m);
     assert.match(s, /## Shoggoth CLI and reference docs/);
     assert.match(s, /\/app\/docs/);
     assert.match(s, /## Tooling/);
-    assert.match(s, /`builtin\.exec`/);
-    assert.match(s, /`builtin\.read`/);
+    assert.match(s, /`builtin-exec`/);
+    assert.match(s, /`builtin-read`/);
     assert.match(s, /## Safety/);
     assert.match(s, /## Workspace/);
     assert.match(s, /No workspace root/);

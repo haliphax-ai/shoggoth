@@ -35,7 +35,7 @@ describe("config.show handler", () => {
   it("returns error when integration invoker is unavailable", async () => {
     const reg = new BuiltinToolRegistry();
     registerConfig(reg);
-    const result = await reg.execute("config.show", {}, stubCtx());
+    const result = await reg.execute("config-show", {}, stubCtx());
     assert.deepStrictEqual(JSON.parse(result.resultJson), {
       error: "config_show_unavailable",
     });
@@ -48,7 +48,7 @@ describe("config.show handler", () => {
       getAgentIntegrationInvoker: () =>
         async (_sid: string, _op: string, _payload: unknown) => ({ some: "config" }),
     });
-    const result = await reg.execute("config.show", {}, ctx);
+    const result = await reg.execute("config-show", {}, ctx);
     assert.deepStrictEqual(JSON.parse(result.resultJson), { some: "config" });
   });
 
@@ -61,7 +61,7 @@ describe("config.show handler", () => {
       getAgentIntegrationInvoker: () =>
         async () => { throw new IntegrationOpError("FORBIDDEN", "not allowed"); },
     });
-    const result = await reg.execute("config.show", {}, ctx);
+    const result = await reg.execute("config-show", {}, ctx);
     const parsed = JSON.parse(result.resultJson);
     assert.strictEqual(parsed.ok, false);
     assert.strictEqual(parsed.code, "FORBIDDEN");
@@ -77,7 +77,7 @@ describe("config.request handler", () => {
   it("returns error when integration invoker is unavailable", async () => {
     const reg = new BuiltinToolRegistry();
     registerConfig(reg);
-    const result = await reg.execute("config.request", { fragment: "agents" }, stubCtx());
+    const result = await reg.execute("config-request", { fragment: "agents" }, stubCtx());
     assert.deepStrictEqual(JSON.parse(result.resultJson), {
       error: "config_request_unavailable",
     });
@@ -94,7 +94,7 @@ describe("config.request handler", () => {
           return { ok: true };
         },
     });
-    const result = await reg.execute("config.request", { fragment: "agents" }, ctx);
+    const result = await reg.execute("config-request", { fragment: "agents" }, ctx);
     assert.deepStrictEqual(JSON.parse(result.resultJson), { ok: true });
     assert.deepStrictEqual(capturedPayload, { fragment: "agents" });
   });

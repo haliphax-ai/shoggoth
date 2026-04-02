@@ -114,16 +114,16 @@ const messagingCapabilities: MessagingAdapterCapabilities = {
 
 // --- 5. Example tool names ---
 const toolNames = [
-  "builtin.read",
-  "builtin.write",
-  "builtin.exec",
-  "builtin.message",
-  "builtin.subagent",
-  "builtin.memory.search",
-  "builtin.session.list",
-  "builtin.session.send",
-  "mcp-hass.get_state",
-  "mcp-hass.call_service",
+  "builtin-read",
+  "builtin-write",
+  "builtin-exec",
+  "builtin-message",
+  "builtin-subagent",
+  "builtin-memory-search",
+  "builtin-session-list",
+  "builtin-session-send",
+  "mcp-hass-get_state",
+  "mcp-hass-call_service",
 ];
 
 // --- 6. Build and print ---

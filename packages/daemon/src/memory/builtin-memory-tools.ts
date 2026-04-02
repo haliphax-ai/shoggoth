@@ -131,7 +131,7 @@ export async function runMemoryBuiltin(input: {
     return { resultJson: JSON.stringify({ error: "invalid JSON args" }) };
   }
 
-  if (originalName === "memory.ingest") {
+  if (originalName === "memory-ingest") {
     const roots = resolveMemoryScanRoots(workspacePath, memory.paths);
 
     // --- New parameters ---
@@ -187,7 +187,7 @@ export async function runMemoryBuiltin(input: {
     return { resultJson: JSON.stringify(response) };
   }
 
-  if (originalName === "memory.search") {
+  if (originalName === "memory-search") {
     if (!memory.paths.length) {
       return {
         resultJson: JSON.stringify({
@@ -198,7 +198,7 @@ export async function runMemoryBuiltin(input: {
     }
     const query = String(args.query ?? "").trim();
     if (!query) {
-      return { resultJson: JSON.stringify({ error: "memory.search requires non-empty query" }) };
+      return { resultJson: JSON.stringify({ error: "memory-search requires non-empty query" }) };
     }
     const rawLimit = args.limit;
     let limit = DEFAULT_LIMIT;
