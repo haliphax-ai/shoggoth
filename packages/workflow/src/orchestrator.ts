@@ -211,11 +211,12 @@ export class Orchestrator {
     // Persist state
     saveWorkflow(this.opts.stateDir, this.workflow);
 
-    // Update status message (skip when paused with no in-progress tasks, or when all terminal)
+    // Update status message
     if (this.statusManager) {
-      const hasInProgress = this.workflow.tasks.some((t: { status: string }) => t.status === "in_progress");
       const allTerminal = this.workflow.tasks.every((t) => isTerminal(t.status));
-      if (!allTerminal && (!this.paused || hasInProgress)) {
+      const hasInProgress = this.workflow.tasks.some((t: { status: string }) => t.status === "in_progress");
+      // Always update on terminal transition; skip only when paused with no activity
+      if (allTerminal || hasInProgress || !this.paused) {
         await this.statusManager.updateStatus(this.workflow);
       }
     }

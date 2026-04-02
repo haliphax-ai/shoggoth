@@ -496,9 +496,9 @@ describe("Orchestrator", () => {
       updateCalls.length = 0; // reset
       await orch.tick();
 
-      // The tick that completes the workflow should skip the status update
-      // (checkCompletion posts summary instead)
-      assert.equal(updateCalls.length, 0);
+      // The tick that completes the workflow should still update the status
+      // so the post reflects the final state before summary is posted
+      assert.equal(updateCalls.length, 1);
     });
   });
 
