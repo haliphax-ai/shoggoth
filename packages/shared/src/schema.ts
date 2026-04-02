@@ -456,6 +456,7 @@ export const shoggothRuntimeConfigSchema = z
     turnQueue: z
       .object({
         starvationThreshold: z.number().int().positive().optional(),
+        maxDepth: z.number().int().positive().optional(),
       })
       .strict()
       .optional(),

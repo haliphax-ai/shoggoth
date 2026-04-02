@@ -21,6 +21,13 @@ export class TurnDroppedError extends Error {
   }
 }
 
+export class TurnQueueFullError extends Error {
+  constructor(priority: TurnPriority, depth: number) {
+    super(`Queue full: ${priority} tier at ${depth}`);
+    this.name = "TurnQueueFullError";
+  }
+}
+
 interface QueueEntry {
   readonly id: string;
   readonly priority: TurnPriority;
@@ -41,9 +48,11 @@ interface SessionQueue {
 export class TieredTurnQueue {
   private readonly sessions = new Map<string, SessionQueue>();
   readonly starvationThreshold: number;
+  readonly maxDepth: number;
 
-  constructor(starvationThreshold = 3) {
+  constructor(starvationThreshold = 2, maxDepth = 6) {
     this.starvationThreshold = starvationThreshold;
+    this.maxDepth = maxDepth;
   }
 
   enqueue(
@@ -53,6 +62,10 @@ export class TieredTurnQueue {
     fn: () => Promise<void>,
   ): Promise<void> {
     const sq = this.getOrCreate(sessionId);
+    const arr = priority === "system" ? sq.high : sq.normal;
+    if (arr.length >= this.maxDepth) {
+      return Promise.reject(new TurnQueueFullError(priority, arr.length));
+    }
     return new Promise<void>((resolve, reject) => {
       const entry: QueueEntry = {
         id: randomUUID(),

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { TieredTurnQueue, TurnDroppedError } from "../../src/sessions/session-turn-queue";
+import { TieredTurnQueue, TurnDroppedError, TurnQueueFullError } from "../../src/sessions/session-turn-queue";
 
 describe("TieredTurnQueue", () => {
   let q: TieredTurnQueue;
@@ -416,6 +416,64 @@ describe("TieredTurnQueue", () => {
       await q.enqueue("s1", "user", "msg", async () => {});
       // Internal map should be cleaned up
       expect(q.getDepth("s1")).toEqual({ system: 0, user: 0 });
+    });
+  });
+
+  describe("max depth", () => {
+    it("rejects with TurnQueueFullError when tier exceeds maxDepth", async () => {
+      const small = new TieredTurnQueue(2, 2);
+      let resolveFirst!: () => void;
+      const gate = new Promise<void>((r) => { resolveFirst = r; });
+
+      const p0 = small.enqueue("s1", "user", "blocker", async () => {
+        await gate;
+      });
+
+      // Fill the user tier to capacity (2)
+      small.enqueue("s1", "user", "u1", async () => {}).catch(() => {});
+      small.enqueue("s1", "user", "u2", async () => {}).catch(() => {});
+
+      // Third should be rejected
+      await expect(
+        small.enqueue("s1", "user", "u3", async () => {}),
+      ).rejects.toThrow(TurnQueueFullError);
+
+      small.clear("s1");
+      resolveFirst();
+      await p0;
+    });
+
+    it("enforces maxDepth per tier independently", async () => {
+      const small = new TieredTurnQueue(2, 2);
+      let resolveFirst!: () => void;
+      const gate = new Promise<void>((r) => { resolveFirst = r; });
+
+      const p0 = small.enqueue("s1", "user", "blocker", async () => {
+        await gate;
+      });
+
+      // Fill system tier
+      small.enqueue("s1", "system", "s1", async () => {}).catch(() => {});
+      small.enqueue("s1", "system", "s2", async () => {}).catch(() => {});
+
+      // System full, but user still has room
+      await expect(
+        small.enqueue("s1", "system", "s3", async () => {}),
+      ).rejects.toThrow(TurnQueueFullError);
+
+      // User tier still accepts
+      small.enqueue("s1", "user", "u1", async () => {}).catch(() => {});
+      expect(small.getDepth("s1")).toEqual({ system: 2, user: 1 });
+
+      small.clear("s1");
+      resolveFirst();
+      await p0;
+    });
+
+    it("uses default maxDepth of 6", () => {
+      const defaultQ = new TieredTurnQueue();
+      expect(defaultQ.maxDepth).toBe(6);
+      expect(defaultQ.starvationThreshold).toBe(2);
     });
   });
 });

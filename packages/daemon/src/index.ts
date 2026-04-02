@@ -408,8 +408,9 @@ void (async () => {
   setProcessManager(procman);
 
   // --- Turn Queue: init singleton ---
-  const starvationThreshold = config.runtime?.turnQueue?.starvationThreshold ?? 3;
-  setTurnQueue(new TieredTurnQueue(starvationThreshold));
+  const starvationThreshold = config.runtime?.turnQueue?.starvationThreshold ?? 2;
+  const maxQueueDepth = config.runtime?.turnQueue?.maxDepth ?? 6;
+  setTurnQueue(new TieredTurnQueue(starvationThreshold, maxQueueDepth));
 
   function processDeclarationToSpec(decl: ProcessDeclaration): ProcessSpec {
     return {

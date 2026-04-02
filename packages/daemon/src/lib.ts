@@ -158,7 +158,7 @@ export {
   type ExecuteSessionAgentTurnInput,
   type SessionAgentTurnResult,
 } from "./sessions/session-agent-turn";
-export { TieredTurnQueue, TurnDroppedError, type TurnPriority, type QueueDepth, type QueueEntryInfo } from "./sessions/session-turn-queue";
+export { TieredTurnQueue, TurnDroppedError, TurnQueueFullError, type TurnPriority, type QueueDepth, type QueueEntryInfo } from "./sessions/session-turn-queue";
 export { getTurnQueue, setTurnQueue } from "./sessions/session-turn-queue-singleton";
 export {
   runInboundSessionTurn,
