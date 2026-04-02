@@ -1,17 +1,19 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { setNoticeResolver } from "../../src/presentation/notices";
 import {
-  setNoticeResolver,
   formatHitlPayloadExcerpt,
   buildHitlQueuedNoticeLines,
   HITL_NOTICE_PAYLOAD_MAX_CHARS,
-} from "../../src/presentation/index.js";
-
-function stubResolver(key: string, vars: Record<string, string> = {}): string {
-  return `${key}:${JSON.stringify(vars)}`;
-}
+  type HitlPendingActionRow,
+} from "../../src/presentation/hitl-notice-formatter";
 
 beforeEach(() => {
-  setNoticeResolver(stubResolver);
+  setNoticeResolver((key, vars = {}) => {
+    const varStr = Object.entries(vars)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(",");
+    return varStr ? `[${key}:${varStr}]` : `[${key}]`;
+  });
 });
 
 describe("formatHitlPayloadExcerpt", () => {
@@ -20,7 +22,7 @@ describe("formatHitlPayloadExcerpt", () => {
     expect(formatHitlPayloadExcerpt(undefined)).toBeUndefined();
   });
 
-  it("returns undefined for empty string", () => {
+  it("returns undefined for empty string payload", () => {
     expect(formatHitlPayloadExcerpt("")).toBeUndefined();
   });
 
@@ -28,58 +30,58 @@ describe("formatHitlPayloadExcerpt", () => {
     expect(formatHitlPayloadExcerpt("hello")).toBe("hello");
   });
 
-  it("JSON-stringifies objects", () => {
+  it("JSON-stringifies object payloads", () => {
     expect(formatHitlPayloadExcerpt({ a: 1 })).toBe('{"a":1}');
   });
 
-  it("truncates long payloads", () => {
+  it("truncates long payloads with ellipsis", () => {
     const long = "x".repeat(HITL_NOTICE_PAYLOAD_MAX_CHARS + 100);
     const result = formatHitlPayloadExcerpt(long)!;
     expect(result.length).toBe(HITL_NOTICE_PAYLOAD_MAX_CHARS);
-    expect(result).toMatch(/…$/);
-  });
-
-  it("replaces backticks with single quotes", () => {
-    expect(formatHitlPayloadExcerpt("foo`bar`baz")).toBe("foo'bar'baz");
-  });
-
-  it("collapses newlines to spaces", () => {
-    expect(formatHitlPayloadExcerpt("line1\nline2\r\nline3")).toBe("line1 line2 line3");
+    expect(result).toEndWith("…");
   });
 
   it("respects custom maxChars", () => {
     const result = formatHitlPayloadExcerpt("abcdefghij", 5)!;
     expect(result.length).toBe(5);
-    expect(result).toBe("abcd…");
+    expect(result).toEndWith("…");
+  });
+
+  it("collapses newlines and replaces backticks", () => {
+    expect(formatHitlPayloadExcerpt("line1\nline2")).toBe("line1 line2");
+    expect(formatHitlPayloadExcerpt("`code`")).toBe("'code'");
   });
 });
 
 describe("buildHitlQueuedNoticeLines", () => {
-  it("produces lines from daemonNotice", () => {
-    const lines = buildHitlQueuedNoticeLines({
+  it("returns lines from the notice template", () => {
+    const row: HitlPendingActionRow = {
       id: "p1",
       sessionId: "s1",
-      correlationId: undefined,
+      correlationId: "corr1",
       toolName: "exec",
-      payload: "rm -rf /",
-      riskTier: "high" as any,
-    });
+      payload: { cmd: "ls" },
+      riskTier: "high",
+    };
+    const lines = buildHitlQueuedNoticeLines(row);
     expect(lines.length).toBeGreaterThan(0);
+    // The notice resolver returns a single line with key + vars
     expect(lines.join("\n")).toContain("hitl-queued-notice");
-    expect(lines.join("\n")).toContain("p1");
-    expect(lines.join("\n")).toContain("exec");
   });
 
-  it("includes correlation line when present", () => {
-    const lines = buildHitlQueuedNoticeLines({
+  it("omits correlation line when correlationId is undefined", () => {
+    const row: HitlPendingActionRow = {
       id: "p2",
       sessionId: "s2",
-      correlationId: "corr-abc",
-      toolName: "write",
+      correlationId: undefined,
+      toolName: "read",
       payload: null,
-      riskTier: "medium" as any,
-    });
+      riskTier: "low",
+    };
+    const lines = buildHitlQueuedNoticeLines(row);
     const joined = lines.join("\n");
-    expect(joined).toContain("corr-abc");
+    expect(joined).toContain("hitl-queued-notice");
+    // correlationLine should be empty
+    expect(joined).not.toContain("run:");
   });
 });

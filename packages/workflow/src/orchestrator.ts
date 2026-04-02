@@ -36,7 +36,7 @@ export interface PollAdapter {
 }
 
 export interface NotifyAdapter {
-  notify(workflowId: string, success: boolean, context?: { replyTo: string }): Promise<void>;
+  notify(workflowId: string, success: boolean, context?: { replyTo: string; aborted?: boolean }): Promise<void>;
 }
 
 export interface NotificationAdapter {
@@ -537,7 +537,8 @@ export class Orchestrator {
       }
 
       const allSuccess = wf.tasks.every((t) => t.status === "done");
-      this.notifier.notify(wf.id, allSuccess, { replyTo: this.opts?.replyTo ?? "" });
+      const wasAborted = wf.tasks.some((t) => t.error?.startsWith("aborted:"));
+      this.notifier.notify(wf.id, allSuccess, { replyTo: this.opts?.replyTo ?? "", aborted: wasAborted });
       if (allSuccess) {
         log.info("workflow completed", { workflowId: wf.id });
       } else {

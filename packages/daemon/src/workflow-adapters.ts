@@ -265,8 +265,8 @@ export interface WorkflowNotifierDeps {
 
 export function createWorkflowNotifier(deps: WorkflowNotifierDeps): NotifyAdapter {
   return {
-    async notify(workflowId: string, success: boolean, context?: { replyTo: string }): Promise<void> {
-      deps.logger.info("workflow completed", { workflowId, success, replyTo: context?.replyTo ?? null });
+    async notify(workflowId: string, success: boolean, context?: { replyTo: string; aborted?: boolean }): Promise<void> {
+      deps.logger.info("workflow completed", { workflowId, success, aborted: context?.aborted ?? false, replyTo: context?.replyTo ?? null });
       try {
         const sessionId = context?.replyTo;
         if (!sessionId) { deps.logger.warn("workflow notify: no replyTo in context"); return; }
@@ -274,8 +274,34 @@ export function createWorkflowNotifier(deps: WorkflowNotifierDeps): NotifyAdapte
         const runTurn = deps.getRunSessionModelTurn();
         if (!runTurn) { deps.logger.warn("workflow notify: subagent runtime not available"); return; }
 
-        const status = success ? "✅ completed successfully" : "❌ completed with failures";
-        const message = `**Workflow ${status}:** \`${workflowId}\``;
+        let status: string;
+        let message: string;
+        let guidance: string;
+
+        if (success) {
+          status = "✅ completed successfully";
+          message = `**Workflow ${status}:** \`${workflowId}\``;
+          guidance = "The user can already see task statuses, durations, total duration, and workflow completion in the automated status post. Surface any meaningful information beyond that, or simply acknowledge completion in your own voice.";
+        } else if (context?.aborted) {
+          status = "🛑 aborted";
+          message = `**Workflow ${status}:** \`${workflowId}\``;
+          guidance = [
+            "This workflow was aborted, not just failed. If you aborted it yourself, explain why.",
+            "If you did not abort it (e.g. the operator or a system process did), inform the user that the workflow was aborted and ask how they would like to proceed.",
+            "Do NOT blindly restart the workflow. Review the task statuses and errors in the status post first.",
+            "If you were not given specific instructions for handling aborts, ask the user what they want to do next.",
+          ].join(" ");
+        } else {
+          status = "❌ failed";
+          message = `**Workflow ${status}:** \`${workflowId}\``;
+          guidance = [
+            "This workflow failed. Do NOT blindly restart it.",
+            "Review the task statuses and errors in the status post to understand what went wrong.",
+            "If you were given specific instructions for handling failures, follow them.",
+            "Otherwise, inform the user of the failure and ask how they would like to proceed.",
+            "Do not attempt to fix or retry tasks without understanding the root cause first.",
+          ].join(" ");
+        }
 
         deps.logger.debug("workflow notify: delivering to session", { sessionId });
         const delivery = deps.resolveDelivery?.(sessionId) ?? { kind: "internal" };
@@ -283,12 +309,12 @@ export function createWorkflowNotifier(deps: WorkflowNotifierDeps): NotifyAdapte
         await runTurn({
           sessionId,
           userContent: message,
-          userMetadata: { workflow_notify: true, workflow_id: workflowId, success },
+          userMetadata: { workflow_notify: true, workflow_id: workflowId, success, aborted: context?.aborted ?? false },
           systemContext: {
             kind: "workflow.complete",
-            summary: `Workflow completed ${success ? "successfully" : "with failures"}.`,
-            guidance: "The user can already see task statuses, durations, total duration, and workflow completion in the automated status post. Surface any meaningful information beyond that, or simply acknowledge completion in your own voice.",
-            data: { workflow_id: workflowId, success },
+            summary: `Workflow ${success ? "completed successfully" : context?.aborted ? "was aborted" : "failed"}.`,
+            guidance,
+            data: { workflow_id: workflowId, success, aborted: context?.aborted ?? false },
           },
           delivery,
         });

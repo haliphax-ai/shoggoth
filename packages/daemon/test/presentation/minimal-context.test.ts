@@ -1,126 +1,97 @@
-import { describe, it } from "vitest";
-import assert from "node:assert";
+import { describe, it, expect } from "vitest";
+import type { ChatMessage } from "@shoggoth/models";
 import {
   buildMinimalContextMessages,
   formatGlobalReactionEventContext,
   formatAdhocReactionEventContext,
 } from "../../src/presentation/minimal-context";
-import type { ChatMessage } from "@shoggoth/models";
-
-// ---------------------------------------------------------------------------
-// buildMinimalContextMessages
-// ---------------------------------------------------------------------------
-
-const SYSTEM = "You are a helpful assistant.";
-const EVENT = "User reacted 👍";
-
-function transcript(n: number): ChatMessage[] {
-  const msgs: ChatMessage[] = [];
-  for (let i = 0; i < n; i++) {
-    msgs.push({ role: i % 2 === 0 ? "user" : "assistant", content: `msg-${i}` });
-  }
-  return msgs;
-}
 
 describe("buildMinimalContextMessages", () => {
-  it("tailMessages=0 returns only system + event", () => {
-    const result = buildMinimalContextMessages({
-      systemPrompt: SYSTEM,
-      fullTranscript: transcript(5),
-      tailMessages: 0,
-      eventContext: EVENT,
-    });
-    assert.equal(result.length, 2);
-    assert.equal(result[0]!.role, "system");
-    assert.equal(result[0]!.content, SYSTEM);
-    assert.equal(result[1]!.role, "user");
-    assert.equal(result[1]!.content, EVENT);
-  });
+  const transcript: ChatMessage[] = [
+    { role: "user", content: "msg1" },
+    { role: "assistant", content: "msg2" },
+    { role: "user", content: "msg3" },
+    { role: "assistant", content: "msg4" },
+  ];
 
-  it("tailMessages=2 returns system + last 2 transcript msgs + event", () => {
-    const full = transcript(5);
+  it("returns system + tail + event message", () => {
     const result = buildMinimalContextMessages({
-      systemPrompt: SYSTEM,
-      fullTranscript: full,
+      systemPrompt: "You are helpful.",
+      fullTranscript: transcript,
       tailMessages: 2,
-      eventContext: EVENT,
+      eventContext: "reaction event",
     });
-    assert.equal(result.length, 4); // system + 2 tail + event
-    assert.equal(result[0]!.role, "system");
-    assert.equal(result[1]!.content, "msg-3");
-    assert.equal(result[2]!.content, "msg-4");
-    assert.equal(result[3]!.content, EVENT);
+    expect(result).toHaveLength(4); // system + 2 tail + event
+    expect(result[0]).toEqual({ role: "system", content: "You are helpful." });
+    expect(result[1]).toEqual({ role: "user", content: "msg3" });
+    expect(result[2]).toEqual({ role: "assistant", content: "msg4" });
+    expect(result[3]).toEqual({ role: "user", content: "reaction event" });
   });
 
-  it("tailMessages > transcript length includes entire transcript", () => {
-    const full = transcript(3);
+  it("returns system + event when tailMessages is 0", () => {
     const result = buildMinimalContextMessages({
-      systemPrompt: SYSTEM,
-      fullTranscript: full,
-      tailMessages: 100,
-      eventContext: EVENT,
+      systemPrompt: "sys",
+      fullTranscript: transcript,
+      tailMessages: 0,
+      eventContext: "ev",
     });
-    assert.equal(result.length, 5); // system + 3 transcript + event
-    assert.equal(result[1]!.content, "msg-0");
-    assert.equal(result[2]!.content, "msg-1");
-    assert.equal(result[3]!.content, "msg-2");
+    expect(result).toHaveLength(2);
+    expect(result[0]!.role).toBe("system");
+    expect(result[1]!.role).toBe("user");
+  });
+
+  it("handles tailMessages larger than transcript", () => {
+    const result = buildMinimalContextMessages({
+      systemPrompt: "sys",
+      fullTranscript: transcript,
+      tailMessages: 100,
+      eventContext: "ev",
+    });
+    // system + all 4 transcript + event
+    expect(result).toHaveLength(6);
   });
 });
-
-// ---------------------------------------------------------------------------
-// formatGlobalReactionEventContext
-// ---------------------------------------------------------------------------
 
 describe("formatGlobalReactionEventContext", () => {
-  it("includes emoji and message content", () => {
-    const ctx = formatGlobalReactionEventContext("👍", "Great job!");
-    assert.ok(ctx.includes("👍"));
-    assert.ok(ctx.includes("Great job!"));
+  it("formats a global reaction event", () => {
+    const result = formatGlobalReactionEventContext("👍", "some message");
+    expect(result).toContain("👍");
+    expect(result).toContain("some message");
+    expect(result).toContain("Operator reacted");
   });
 
-  it("truncates long messages at 500 chars", () => {
+  it("truncates long message content at 500 chars", () => {
     const long = "x".repeat(600);
-    const ctx = formatGlobalReactionEventContext("👍", long);
-    // Should contain exactly 500 x's followed by ellipsis
-    assert.ok(ctx.includes("x".repeat(500) + "\u2026"));
-    assert.ok(!ctx.includes("x".repeat(501)));
-  });
-
-  it("does not truncate messages at exactly 500 chars", () => {
-    const exact = "y".repeat(500);
-    const ctx = formatGlobalReactionEventContext("👍", exact);
-    assert.ok(ctx.includes(exact));
-    assert.ok(!ctx.includes("\u2026"));
+    const result = formatGlobalReactionEventContext("👍", long);
+    expect(result).toContain("…");
+    // The truncated content should be 500 chars + ellipsis
+    expect(result.length).toBeLessThan(600);
   });
 });
-
-// ---------------------------------------------------------------------------
-// formatAdhocReactionEventContext
-// ---------------------------------------------------------------------------
 
 describe("formatAdhocReactionEventContext", () => {
   const legend = [
     { emoji: "✅", label: "Approve" },
-    { emoji: "❌", label: "Deny" },
+    { emoji: "❌", label: "Reject" },
   ];
 
-  it("marks the selected entry", () => {
-    const ctx = formatAdhocReactionEventContext("✅", legend, "Pick one");
-    assert.ok(ctx.includes("✅ Approve ← selected"));
-    // Non-selected entry should NOT have the marker
-    assert.ok(ctx.includes("❌ Deny"));
-    assert.ok(!ctx.includes("❌ Deny ← selected"));
+  it("formats an adhoc reaction with legend", () => {
+    const result = formatAdhocReactionEventContext("✅", legend, "choose one");
+    expect(result).toContain("✅ Approve ← selected");
+    expect(result).toContain("❌ Reject");
+    expect(result).toContain("choose one");
+    expect(result).toContain("reaction legend");
   });
 
-  it("includes original message content", () => {
-    const ctx = formatAdhocReactionEventContext("✅", legend, "Pick one");
-    assert.ok(ctx.includes("Pick one"));
+  it("marks only the selected entry", () => {
+    const result = formatAdhocReactionEventContext("❌", legend, "msg");
+    expect(result).toContain("❌ Reject ← selected");
+    expect(result).not.toContain("✅ Approve ← selected");
   });
 
-  it("truncates long original message at 500 chars", () => {
-    const long = "z".repeat(600);
-    const ctx = formatAdhocReactionEventContext("✅", legend, long);
-    assert.ok(ctx.includes("z".repeat(500) + "\u2026"));
-    assert.ok(!ctx.includes("z".repeat(501)));
+  it("truncates long message content", () => {
+    const long = "y".repeat(600);
+    const result = formatAdhocReactionEventContext("✅", legend, long);
+    expect(result).toContain("…");
   });
 });

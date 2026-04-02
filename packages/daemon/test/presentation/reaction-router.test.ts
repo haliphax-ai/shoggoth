@@ -1,140 +1,134 @@
-import { describe, it } from "vitest";
-import assert from "node:assert";
+import { describe, it, expect } from "vitest";
 import {
   parseReactionLegend,
   routeReaction,
   type ReactionRouteInput,
 } from "../../src/presentation/reaction-router";
 
-// ---------------------------------------------------------------------------
-// parseReactionLegend
-// ---------------------------------------------------------------------------
-// NOTE: parseReactionLegend currently always returns null because the regex
-// match does not consume the trailing newline, so afterHeader starts with "\n"
-// and split("\n") yields an empty first element that triggers the blank-line
-// break immediately.  Tests below document actual behaviour.
-
 describe("parseReactionLegend", () => {
-  it("returns null for a standard legend block (known bug: leading empty split element)", () => {
-    const content = [
-      "Here are your options:",
-      "React to choose:",
-      "👍 Approve",
-      "👎 Reject",
-      "🔄 Retry",
-    ].join("\n");
-    // Would expect entries, but the split produces ["", "👍 Approve", ...]
-    // and the empty first element triggers the blank-line break.
-    assert.equal(parseReactionLegend(content), null);
-  });
-
   it("returns null when no legend header is present", () => {
-    const content = "Just a normal message with no legend at all.";
-    assert.equal(parseReactionLegend(content), null);
+    expect(parseReactionLegend("just a normal message")).toBeNull();
   });
 
-  it("returns null for legend at end of message (same split bug)", () => {
-    const content = [
-      "Some preamble text.",
-      "",
-      "React to choose:",
-      "✅ Yes",
-      "❌ No",
-    ].join("\n");
-    assert.equal(parseReactionLegend(content), null);
+  it("parses a simple legend block", () => {
+    const content = `Some text\nReact to choose:\n👍 Approve\n👎 Reject\n\nMore text`;
+    const legend = parseReactionLegend(content);
+    expect(legend).not.toBeNull();
+    expect(legend!.entries).toEqual([
+      { emoji: "👍", label: "Approve" },
+      { emoji: "👎", label: "Reject" },
+    ]);
   });
 
-  it("returns null for legend with blank line terminator (same split bug)", () => {
-    const content = [
-      "React to choose:",
-      "🅰️ Option A",
-      "🅱️ Option B",
-      "",
-      "This text is after the legend and should be ignored.",
-    ].join("\n");
-    assert.equal(parseReactionLegend(content), null);
+  it("handles emoji-only entries (no label)", () => {
+    const content = `React to choose:\n🔥\n`;
+    const legend = parseReactionLegend(content);
+    expect(legend).not.toBeNull();
+    expect(legend!.entries).toEqual([{ emoji: "🔥", label: "" }]);
+  });
+
+  it("stops at blank line", () => {
+    const content = `React to choose:\n✅ Yes\n\n❌ No`;
+    const legend = parseReactionLegend(content);
+    expect(legend!.entries).toHaveLength(1);
+    expect(legend!.entries[0]).toEqual({ emoji: "✅", label: "Yes" });
+  });
+
+  it("returns null when header exists but no entries follow", () => {
+    const content = `React to choose:\n\nNothing here`;
+    expect(parseReactionLegend(content)).toBeNull();
+  });
+
+  it("is case-insensitive for the header", () => {
+    const content = `REACT TO CHOOSE:\n🎉 Party`;
+    const legend = parseReactionLegend(content);
+    expect(legend).not.toBeNull();
+    expect(legend!.entries[0]!.label).toBe("Party");
   });
 });
 
-// ---------------------------------------------------------------------------
-// routeReaction
-// ---------------------------------------------------------------------------
-// Because parseReactionLegend always returns null, the legend path (adhoc) is
-// never taken.  All reactions route through the global passthrough check.
-
-function baseInput(overrides: Partial<ReactionRouteInput> = {}): ReactionRouteInput {
-  return {
+describe("routeReaction", () => {
+  const base: ReactionRouteInput = {
     emoji: "👍",
-    messageContent: "Hello world",
-    messageTimestamp: Date.now() - 1000,
+    messageContent: "hello",
+    messageTimestamp: Date.now(),
     nowMs: Date.now(),
     maxAgeMinutes: 30,
     globalPassthrough: ["👍", "👎"],
-    ...overrides,
   };
-}
-
-describe("routeReaction", () => {
-  it("routes via global when emoji is in passthrough (no legend detected)", () => {
-    const content = "React to choose:\n✅ Approve\n❌ Deny";
-    const result = routeReaction(baseInput({ emoji: "👍", messageContent: content, globalPassthrough: ["👍"] }));
-    // Legend is not detected (parseReactionLegend bug), so falls through to global
-    assert.equal(result.kind, "global");
-    if (result.kind === "global") {
-      assert.equal(result.emoji, "👍");
-    }
-  });
-
-  it("discards when emoji not in legend AND not in global passthrough", () => {
-    const content = "React to choose:\n✅ Approve\n❌ Deny";
-    const result = routeReaction(baseInput({ emoji: "🔥", messageContent: content, globalPassthrough: ["👍"] }));
-    assert.equal(result.kind, "discard");
-    if (result.kind === "discard") {
-      assert.equal(result.reason, "no legend and emoji not in global passthrough");
-    }
-  });
-
-  it("routes global match when no legend present", () => {
-    const result = routeReaction(baseInput({ emoji: "👍", messageContent: "plain message" }));
-    assert.equal(result.kind, "global");
-    if (result.kind === "global") {
-      assert.equal(result.emoji, "👍");
-      assert.equal(result.messageContent, "plain message");
-    }
-  });
-
-  it("discards when emoji not in global passthrough set", () => {
-    const result = routeReaction(baseInput({ emoji: "🔥", messageContent: "plain message" }));
-    assert.equal(result.kind, "discard");
-    if (result.kind === "discard") {
-      assert.equal(result.reason, "no legend and emoji not in global passthrough");
-    }
-  });
 
   it("discards when message is too old", () => {
-    const result = routeReaction(
-      baseInput({
-        messageTimestamp: Date.now() - 60 * 60_000, // 60 minutes ago
-        maxAgeMinutes: 30,
-      }),
-    );
-    assert.equal(result.kind, "discard");
+    const result = routeReaction({
+      ...base,
+      messageTimestamp: Date.now() - 60 * 60_000, // 60 minutes ago
+      nowMs: Date.now(),
+      maxAgeMinutes: 30,
+    });
+    expect(result.kind).toBe("discard");
     if (result.kind === "discard") {
-      assert.ok(result.reason.includes("too old"));
+      expect(result.reason).toContain("too old");
     }
   });
 
-  it("legend present + global emoji -> global (legend not detected due to bug, no discard)", () => {
-    // Intended behaviour: legend present + emoji not in legend -> discard.
-    // Actual behaviour: legend is never parsed, so global passthrough applies.
-    const content = "React to choose:\n✅ Approve\n❌ Deny";
-    const result = routeReaction(
-      baseInput({
-        emoji: "👍", // in globalPassthrough but not in legend
-        messageContent: content,
-        globalPassthrough: ["👍", "👎"],
-      }),
-    );
-    assert.equal(result.kind, "global");
+  it("returns adhoc when legend matches", () => {
+    const content = `React to choose:\n👍 Approve\n👎 Reject`;
+    const now = Date.now();
+    const result = routeReaction({
+      ...base,
+      messageContent: content,
+      messageTimestamp: now - 1000,
+      nowMs: now,
+    });
+    expect(result.kind).toBe("adhoc");
+    if (result.kind === "adhoc") {
+      expect(result.selected.emoji).toBe("👍");
+      expect(result.selected.label).toBe("Approve");
+    }
+  });
+
+  it("discards when legend exists but emoji not in legend", () => {
+    const content = `React to choose:\n✅ Yes\n❌ No`;
+    const now = Date.now();
+    const result = routeReaction({
+      ...base,
+      emoji: "🔥",
+      messageContent: content,
+      messageTimestamp: now - 1000,
+      nowMs: now,
+    });
+    expect(result.kind).toBe("discard");
+    if (result.kind === "discard") {
+      expect(result.reason).toContain("not in legend");
+    }
+  });
+
+  it("returns global when no legend and emoji in passthrough", () => {
+    const now = Date.now();
+    const result = routeReaction({
+      ...base,
+      messageContent: "no legend here",
+      messageTimestamp: now - 1000,
+      nowMs: now,
+    });
+    expect(result.kind).toBe("global");
+    if (result.kind === "global") {
+      expect(result.emoji).toBe("👍");
+    }
+  });
+
+  it("discards when no legend and emoji not in passthrough", () => {
+    const now = Date.now();
+    const result = routeReaction({
+      ...base,
+      emoji: "🔥",
+      messageContent: "no legend here",
+      messageTimestamp: now - 1000,
+      nowMs: now,
+      globalPassthrough: ["👍"],
+    });
+    expect(result.kind).toBe("discard");
+    if (result.kind === "discard") {
+      expect(result.reason).toContain("not in global passthrough");
+    }
   });
 });
