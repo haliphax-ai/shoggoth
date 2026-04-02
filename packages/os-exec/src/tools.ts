@@ -93,7 +93,7 @@ export type ReadExtendedResult =
 // ---------------------------------------------------------------------------
 
 /** Options for the extended write tool. All fields except `path` and `content` are optional. */
-export interface WriteExtendedOptions {
+export interface WriteOptions {
   /** File path (workspace-relative). */
   path: string;
   /** Content to write, append, or insert. */
@@ -110,8 +110,8 @@ export interface WriteExtendedOptions {
   mkdirp?: boolean;
 }
 
-/** Result metadata returned by toolWriteExtended. */
-export interface WriteExtendedResult {
+/** Result metadata returned by toolWrite. */
+export interface WriteResult {
   /** Absolute path that was written. */
   path: string;
   /** Number of bytes written (full file size for overwrite/line-range; appended bytes for append). */
@@ -125,10 +125,6 @@ const ENV_WRITE = "SHOGGOTH_TOOL_WRITE_PATH";
 
 function nodeReadScript(): string {
   return `require("fs").writeFileSync(1, require("fs").readFileSync(process.env.${ENV_READ}, "utf8"));`;
-}
-
-function nodeWriteScript(): string {
-  return `require("fs").writeFileSync(process.env.${ENV_WRITE}, require("fs").readFileSync(0, "utf8"));`;
 }
 
 /**
@@ -155,30 +151,6 @@ export async function toolRead(
   return r.stdout;
 }
 
-/**
- * Write content to a workspace-relative path as the agent UID/GID.
- */
-export async function toolWrite(
-  workspaceRoot: string,
-  userPath: string,
-  content: string,
-  creds: AgentCredentials,
-): Promise<void> {
-  const abs = resolvePathForWrite(workspaceRoot, userPath);
-  const cwd = realpathSync(workspaceRoot);
-  const r = await runAsUser({
-    file: process.execPath,
-    args: ["-e", nodeWriteScript()],
-    cwd,
-    uid: creds.uid,
-    gid: creds.gid,
-    stdin: content,
-    env: { [ENV_WRITE]: abs },
-  });
-  if (r.exitCode !== 0) {
-    throw new Error(`toolWrite failed: ${r.stderr.trim() || `exit ${r.exitCode}`}`);
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Extended write helpers
@@ -306,9 +278,9 @@ function nodeWriteExtendedScript(): string {
 }
 
 /**
- * Validate WriteExtendedOptions, throwing on invalid combinations.
+ * Validate WriteOptions, throwing on invalid combinations.
  */
-function validateWriteOptions(opts: WriteExtendedOptions): void {
+function validateWriteOptions(opts: WriteOptions): void {
   if (!opts.path) {
     throw new Error("`path` is required.");
   }
@@ -362,11 +334,11 @@ function validateWriteOptions(opts: WriteExtendedOptions): void {
  * All new parameters are optional — when called with just `path` and `content`,
  * behavior is identical to the original `toolWrite` (plus auto mkdirp).
  */
-export async function toolWriteExtended(
+export async function toolWrite(
   workspaceRoot: string,
-  opts: WriteExtendedOptions,
+  opts: WriteOptions,
   creds: AgentCredentials,
-): Promise<WriteExtendedResult> {
+): Promise<WriteResult> {
   validateWriteOptions(opts);
 
   const hasLineRange = opts.startLine !== undefined;
@@ -420,7 +392,7 @@ export async function toolWriteExtended(
   });
 
   if (r.exitCode !== 0) {
-    throw new Error(`toolWriteExtended failed: ${r.stderr.trim() || `exit ${r.exitCode}`}`);
+    throw new Error(`toolWrite failed: ${r.stderr.trim() || `exit ${r.exitCode}`}`);
   }
 
   // Parse result metadata from subprocess stdout

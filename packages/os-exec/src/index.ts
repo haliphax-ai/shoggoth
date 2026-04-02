@@ -15,6 +15,8 @@ export {
 export {
   toolRead,
   toolWrite,
+  type WriteOptions,
+  type WriteResult,
   toolExec,
   toolReadExtended,
   toolExecExtended,

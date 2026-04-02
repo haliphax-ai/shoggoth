@@ -25,7 +25,7 @@ describe("minimal v1 tools (read / write / exec)", () => {
   });
 
   it("toolWrite creates file as agent uid", async () => {
-    await toolWrite(ws, "out.txt", "wrote\n", creds);
+    await toolWrite(ws, { path: "out.txt", content: "wrote\n" }, creds);
     assert.equal(readFileSync(join(ws, "out.txt"), "utf8"), "wrote\n");
   });
 

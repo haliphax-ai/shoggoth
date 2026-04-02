@@ -25,6 +25,6 @@ async function writeHandler(
 ): Promise<{ resultJson: string }> {
   const path = String(args.path ?? "");
   const content = String(args.content ?? "");
-  await toolWrite(ctx.workspacePath, path, content, ctx.creds);
+  await toolWrite(ctx.workspacePath, { path, content, mkdirp: true }, ctx.creds);
   return { resultJson: JSON.stringify({ ok: true, path }) };
 }
