@@ -1,4 +1,6 @@
-# Shoggoth runtime image: daemon runs as `shoggoth` (UID 900) after entrypoint; agent worker pool `agent` (UID 901).
+# Shoggoth runtime image: daemon runs as `shoggoth` (default UID 1000) after entrypoint; agent worker pool `agent` (default UID 900).
+# SHOGGOTH_UID defaults to 1000 (common host user) so the host user has daemon-level file access by default.
+# AGENT_UID defaults to 900 to reduce collision risk with real host users.
 # Entrypoint (root) creates layout, fixes volume perms, then setpriv drops to shoggoth while retaining spawn caps.
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
@@ -25,11 +27,12 @@ RUN HASH=$(cat .git-meta/HEAD); \
     printf "%.7s" "$HASH" > /app/.git-hash
 
 FROM node:22-bookworm-slim
-RUN groupadd --system --gid 900 shoggoth \
-  && useradd --system --uid 900 --gid shoggoth --home-dir /var/lib/shoggoth --shell /usr/sbin/nologin shoggoth \
-  && groupadd --system --gid 901 agent \
-  && useradd --system --uid 901 --gid agent --home-dir /var/lib/shoggoth/agent-stub --shell /usr/sbin/nologin agent \
-  && apt-get update && apt-get install -y --no-install-recommends acl && rm -rf /var/lib/apt/lists/*
+ARG SHOGGOTH_UID=1000
+ARG AGENT_UID=900
+RUN groupadd --system --gid ${SHOGGOTH_UID} shoggoth \
+  && useradd --system --uid ${SHOGGOTH_UID} --gid shoggoth --home-dir /var/lib/shoggoth --shell /usr/sbin/nologin shoggoth \
+  && groupadd --system --gid ${AGENT_UID} agent \
+  && useradd --system --uid ${AGENT_UID} --gid agent --home-dir /var/lib/shoggoth/agent-stub --shell /usr/sbin/nologin agent
 
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules

@@ -33,11 +33,6 @@ fix_dir /var/lib/shoggoth/workspaces 2770 shoggoth agent
 find /var/lib/shoggoth/workspaces -mindepth 1 -exec chown shoggoth:agent {} + 2>/dev/null || true
 find /var/lib/shoggoth/workspaces -type d -exec chmod 2770 {} + 2>/dev/null || true
 find /var/lib/shoggoth/workspaces -type f -exec chmod 660 {} + 2>/dev/null || true
-# Grant read access to the host user so the build script can access the agent's repo.
-if [ -n "${HOST_UID:-}" ]; then
-  setfacl -R -m u:${HOST_UID}:rX /var/lib/shoggoth/workspaces 2>/dev/null || true
-  setfacl -R -d -m u:${HOST_UID}:rX /var/lib/shoggoth/workspaces 2>/dev/null || true
-fi
 fix_dir /var/lib/shoggoth/operator 0700 shoggoth shoggoth
 fix_dir /var/lib/shoggoth/media/inbound 0750 shoggoth shoggoth
 fix_dir /run/shoggoth 0750 shoggoth shoggoth

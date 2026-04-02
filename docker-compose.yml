@@ -1,10 +1,12 @@
 services:
   shoggoth:
-    build: .
+    build:
+      context: .
+      args:
+        SHOGGOTH_UID: ${SHOGGOTH_UID:-1000}
+        AGENT_UID: ${AGENT_UID:-900}
     image: shoggoth:local
     restart: unless-stopped
-    environment:
-      HOST_UID: $HOST_UID
     logging:
       driver: json-file
       options:
@@ -21,8 +23,8 @@ services:
       #   -v "$PWD/config:/etc/shoggoth/config.d/base:ro"
       # Dynamic config (daemon-writable at runtime, requires dynamicConfigDirectory in config):
       #   - shoggoth-dynamic-config:/etc/shoggoth/config.d/dynamic
-    # Root here is required so entrypoint can chown/chmod volume roots, then drop to shoggoth (UID 900) with setpriv
-    # so SETUID/SETGID caps survive. Builtins spawn agent children as UID/GID 901.
+    # Root here is required so entrypoint can chown/chmod volume roots, then drop to shoggoth (default UID 1000) with setpriv
+    # so SETUID/SETGID caps survive. Builtins spawn agent children as the agent UID/GID (default 900).
     cap_add:
       - SETUID
       - SETGID
