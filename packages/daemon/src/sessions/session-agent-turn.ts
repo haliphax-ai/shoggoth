@@ -51,7 +51,6 @@ import { checkContextWindowMismatch } from "./context-window-mismatch";
 import { getModelContextWindowTokens } from "../model-metadata";
 import { getLogger } from "../logging";
 
-const log = getLogger("session-agent-turn");
 
 export interface ExecuteSessionAgentTurnInput {
   readonly db: Database.Database;
@@ -104,6 +103,7 @@ registerAllBuiltinHandlers(builtinRegistry);
 export async function executeSessionAgentTurn(
   input: ExecuteSessionAgentTurnInput,
 ): Promise<SessionAgentTurnResult> {
+  const log = getLogger("session-agent-turn");
   log.debug("executeSessionAgentTurn entered", { sessionId: input.sessionId });
   const loopImpl = input.loopImpl ?? runToolLoop;
   const ctxSeg = input.session.contextSegmentId.trim();
