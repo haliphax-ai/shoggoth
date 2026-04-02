@@ -1,45 +1,15 @@
-import { daemonNotice } from "../notices";
 import { registerDiscordHitlNoticeAndAddReactions } from "./reaction-wiring";
+import {
+  formatHitlPayloadExcerpt,
+  buildHitlQueuedNoticeLines,
+  HITL_NOTICE_PAYLOAD_MAX_CHARS,
+} from "@shoggoth/daemon/lib";
 import type { HitlNotifier, PendingActionRow, Logger } from "../daemon-types";
 import type { HitlDiscordNoticeRegistry } from "./notice-registry";
 import type { DiscordMessagingRuntime } from "../bridge";
 
-/** Max chars for tool payload JSON shown in Discord HITL notices (webhook uses the same cap). */
-export const HITL_NOTICE_PAYLOAD_MAX_CHARS = 600;
-
-/** JSON/string excerpt for operator-facing HITL copy; collapses whitespace, strips backticks. */
-export function formatHitlPayloadExcerpt(
-  payload: unknown,
-  maxChars: number = HITL_NOTICE_PAYLOAD_MAX_CHARS,
-): string | undefined {
-  if (payload === undefined || payload === null) return undefined;
-  let s: string;
-  try {
-    s = typeof payload === "string" ? payload : JSON.stringify(payload);
-  } catch {
-    s = String(payload);
-  }
-  const oneLine = s.replace(/`/g, "'").replace(/\r?\n/g, " ").trim();
-  if (oneLine.length === 0) return undefined;
-  if (oneLine.length <= maxChars) return oneLine;
-  return `${oneLine.slice(0, maxChars - 1)}…`;
-}
-
-/** Shared copy for operator channel posts and in-session Discord replies when HITL queues. */
-export function buildHitlQueuedNoticeLines(row: PendingActionRow): string[] {
-  const correlationLine = row.correlationId ? `run: \`${row.correlationId}\`\n` : "";
-  const payloadExcerpt = formatHitlPayloadExcerpt(row.payload);
-  const payloadLine = payloadExcerpt ? `payload (truncated): \`${payloadExcerpt}\`\n` : "";
-  const text = daemonNotice("hitl-queued-notice", {
-    id: row.id,
-    sessionId: row.sessionId,
-    toolName: row.toolName,
-    riskTier: row.riskTier,
-    correlationLine,
-    payloadLine,
-  });
-  return text.split("\n");
-}
+// Re-export presentation-layer symbols so existing consumers (index.ts, tests) keep working.
+export { formatHitlPayloadExcerpt, buildHitlQueuedNoticeLines, HITL_NOTICE_PAYLOAD_MAX_CHARS };
 
 export function createDiscordHitlNotifier(input: {
   readonly logger: Logger;

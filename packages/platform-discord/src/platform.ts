@@ -30,6 +30,10 @@ import {
   createSessionMcpRuntime,
   defaultPlatformAssistantDeps,
   getTurnQueue,
+  formatDegradedPrefix,
+  formatModelTagFooter,
+  formatErrorUserText,
+  routeReaction,
   type TieredTurnQueue,
   type HitlPendingStack,
   type PolicyEngine,
@@ -47,10 +51,7 @@ import { mergeOrchestratorEnv, resolveDiscordOwnerUserId } from "./config";
 import { registerDiscordHitlNoticeAndAddReactions } from "./hitl/reaction-wiring";
 import type { HitlDiscordNoticeRegistry } from "./hitl/notice-registry";
 import { buildHitlQueuedNoticeLines, createDiscordHitlNotifier } from "./hitl/notifier";
-import {
-  formatDiscordPlatformErrorUserText,
-  sliceDiscordPlatformMessageBody,
-} from "./errors";
+import { sliceDiscordPlatformMessageBody } from "./errors";
 import { splitDiscordMessage } from "./split-message";
 import { formatAttachmentMetadata } from "./attachment-metadata";
 
@@ -86,28 +87,9 @@ function pickDiscordAssistantDeps(
   return { ...defaultPlatformAssistantDeps, ...rest };
 }
 
-export function formatDiscordPlatformDegradedPrefix(
-  meta: SessionToolLoopFailoverState | undefined,
-): string {
-  if (!meta?.degraded) return "";
-  return `${daemonNotice("degraded-banner", {
-    usedModel: meta.usedModel,
-    usedProviderId: meta.usedProviderId,
-  })}\n\n`;
-}
-
-/** When `SHOGGOTH_DISCORD_MODEL_TAG=1`, append italic operator footer with last hop model/provider. */
-export function formatDiscordPlatformModelTagFooter(
-  processEnv: NodeJS.ProcessEnv | undefined,
-  meta: SessionToolLoopFailoverState | undefined,
-): string {
-  const e = processEnv ?? process.env;
-  if (e.SHOGGOTH_DISCORD_MODEL_TAG !== "1" || !meta) return "";
-  return `\n\n${daemonNotice("model-tag-footer", {
-    usedModel: meta.usedModel,
-    usedProviderId: meta.usedProviderId,
-  })}`;
-}
+// Re-export presentation-layer formatting helpers for backward compatibility.
+export { formatDegradedPrefix as formatDiscordPlatformDegradedPrefix } from "@shoggoth/daemon/lib";
+export { formatModelTagFooter as formatDiscordPlatformModelTagFooter } from "@shoggoth/daemon/lib";
 
 export interface DiscordPlatformOptions {
   readonly db: Database.Database;
@@ -375,9 +357,9 @@ export async function startDiscordPlatform(
         sliceDisplayText: sliceDiscordPlatformMessageBody,
         formatAssistantReply: (latest, meta) => {
           const cfg = opts.configRef?.current ?? opts.config;
-          return `${formatDiscordPlatformDegradedPrefix(meta)}${formatAgentIdentityPrefix(cfg, msg.sessionId)}${latest}${formatDiscordPlatformModelTagFooter(env, meta)}`;
+          return `${formatDegradedPrefix(meta)}${formatAgentIdentityPrefix(cfg, msg.sessionId)}${latest}${formatModelTagFooter(env, meta)}`;
         },
-        formatErrorReply: (e) => `⚠️ ${formatDiscordPlatformErrorUserText(e)}`,
+        formatErrorReply: (e) => `⚠️ ${formatErrorUserText(e)}`,
         onTurnExecutionFailed: (e) => {
           opts.logger.warn("discord.platform.turn_failed", { err: String(e), sessionId: msg.sessionId });
         },
@@ -586,7 +568,7 @@ export async function startDiscordPlatform(
         turnResult = await executeTurn(buildAfterHitlQueued(delivery));
         const cfg = opts.configRef?.current ?? opts.config;
         const fullBody =
-          `${formatDiscordPlatformDegradedPrefix(turnResult.failoverMeta)}${formatAgentIdentityPrefix(cfg, sid)}${turnResult.latestAssistantText}${formatDiscordPlatformModelTagFooter(env, turnResult.failoverMeta)}`;
+          `${formatDegradedPrefix(turnResult.failoverMeta)}${formatAgentIdentityPrefix(cfg, sid)}${turnResult.latestAssistantText}${formatModelTagFooter(env, turnResult.failoverMeta)}`;
         const chunks = splitDiscordMessage(fullBody);
         for (let i = 0; i < chunks.length; i++) {
           await opts.discord.outbound.sendDiscord(
@@ -684,25 +666,6 @@ export async function startDiscordPlatform(
         });
       });
   }
-
-  function parseReactionLegendInline(content: string): { emoji: string; label: string }[] | null {
-    const lines = content.split('\n');
-    let startIdx = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (/^react to choose:/i.test(lines[i].trim())) { startIdx = i + 1; break; }
-    }
-    if (startIdx < 0) return null;
-    const entries: { emoji: string; label: string }[] = [];
-    for (let i = startIdx; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) break;
-      const spaceIdx = line.indexOf(' ');
-      if (spaceIdx < 1) continue;
-      entries.push({ emoji: line.slice(0, spaceIdx), label: line.slice(spaceIdx + 1).trim() });
-    }
-    return entries.length > 0 ? entries : null;
-  }
-
   async function handleReactionPassthrough(ev: {
     readonly sessionId: string;
     readonly messageContent: string;
@@ -716,24 +679,24 @@ export async function startDiscordPlatform(
     const globalPassthrough = (agentReactions?.globalPassthrough ?? (cfg as any).reactions?.globalPassthrough ?? ['\uD83D\uDC4D', '\uD83D\uDC4E', '\u2705', '\u274C']) as string[];
     const maxAgeMinutes = (agentReactions?.maxAgeMinutes ?? (cfg as any).reactions?.maxAgeMinutes ?? 30) as number;
 
-    const nowMs = Date.now();
-    const ageMs = nowMs - ev.messageTimestamp;
-    if (ageMs > maxAgeMinutes * 60 * 1000) {
-      opts.logger.debug('reaction.passthrough.too_old', { sessionId: ev.sessionId, ageMs });
+    const route = routeReaction({
+      emoji: ev.emoji,
+      messageContent: ev.messageContent,
+      messageTimestamp: ev.messageTimestamp,
+      nowMs: Date.now(),
+      maxAgeMinutes,
+      globalPassthrough,
+    });
+
+    if (route.kind === "discard") {
+      opts.logger.debug("reaction.passthrough.discard", { sessionId: ev.sessionId, emoji: ev.emoji, reason: route.reason });
       return;
     }
 
-    const legend = parseReactionLegendInline(ev.messageContent);
     let eventContext: string;
-
-    if (legend) {
-      const match = legend.find(e => e.emoji === ev.emoji);
-      if (!match) {
-        opts.logger.debug('reaction.passthrough.legend_no_match', { sessionId: ev.sessionId, emoji: ev.emoji });
-        return;
-      }
-      const truncated = ev.messageContent.length > 500 ? ev.messageContent.slice(0, 500) + '\u2026' : ev.messageContent;
-      const legendLines = legend.map(e =>
+    if (route.kind === "adhoc") {
+      const truncated = ev.messageContent.length > 500 ? ev.messageContent.slice(0, 500) + "\u2026" : ev.messageContent;
+      const legendLines = route.legend.entries.map(e =>
         e.emoji === ev.emoji ? `${e.emoji} ${e.label} \u2190 selected` : `${e.emoji} ${e.label}`
       );
       eventContext = [
@@ -741,13 +704,9 @@ export async function startDiscordPlatform(
         ...legendLines,
         '',
         `Original message: "${truncated}"`,
-      ].join('\n');
+      ].join("\n");
     } else {
-      if (!globalPassthrough.includes(ev.emoji)) {
-        opts.logger.debug('reaction.passthrough.not_global', { sessionId: ev.sessionId, emoji: ev.emoji });
-        return;
-      }
-      const truncated = ev.messageContent.length > 500 ? ev.messageContent.slice(0, 500) + '\u2026' : ev.messageContent;
+      const truncated = ev.messageContent.length > 500 ? ev.messageContent.slice(0, 500) + "\u2026" : ev.messageContent;
       eventContext = `Operator reacted ${ev.emoji} to your message: "${truncated}"`;
     }
 

@@ -203,3 +203,26 @@ export {
   type PlatformCommand,
   type ControlOpRequest,
 } from "./platforms/platform-command";
+
+// --- Presentation layer exports (used by platform-discord) ---
+export {
+  formatDegradedPrefix,
+  formatModelTagFooter,
+  formatErrorUserText,
+  formatAssistantReply,
+  type FailoverMeta,
+} from "./presentation/reply-formatter";
+export {
+  formatHitlPayloadExcerpt,
+  buildHitlQueuedNoticeLines,
+  HITL_NOTICE_PAYLOAD_MAX_CHARS,
+  type HitlPendingActionRow,
+} from "./presentation/hitl-notice-formatter";
+export {
+  routeReaction,
+  parseReactionLegend,
+  type ReactionRouteInput,
+  type ReactionRouteResult,
+  type ReactionLegendEntry,
+  type ParsedReactionLegend,
+} from "./presentation/reaction-router";
