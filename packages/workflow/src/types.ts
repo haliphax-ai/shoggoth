@@ -13,15 +13,67 @@ export type FailureNotification =
   | FailureNotificationParent
   | FailureNotificationTarget;
 
-// Task definition — the static spec for a task
-export interface TaskDef {
+// --- Task definition: discriminated union by `kind` ---
+
+/** Common fields shared by all task definition kinds. */
+interface TaskDefBase {
   id: number;
-  prompt: string;
   /** Optional display title for status/summary posts (max 60 chars). Falls back to truncated prompt. */
   title?: string;
   failureBehavior: FailureBehavior;
   failureNotification: FailureNotification;
   runtimeLimitMs?: number;
+}
+
+/** Agent task — spawns a subagent session with a prompt. */
+export interface AgentTaskDef extends TaskDefBase {
+  kind: "agent";
+  prompt: string;
+}
+
+/** Tool task — invokes an MCP tool directly (Phase 2). */
+export interface ToolTaskDef extends TaskDefBase {
+  kind: "tool";
+  tool: string;
+  args?: Record<string, unknown>;
+}
+
+/** Gate task — evaluates a condition expression (Phase 3). */
+export interface GateTaskDef extends TaskDefBase {
+  kind: "gate";
+  condition: string;
+}
+
+/** Transform task — applies a template string (Phase 3). */
+export interface TransformTaskDef extends TaskDefBase {
+  kind: "transform";
+  template: string;
+}
+
+/** Message task — posts a message to a channel (Phase 3). */
+export interface MessageTaskDef extends TaskDefBase {
+  kind: "message";
+  message: string;
+  channel?: string;
+}
+
+/** Discriminated union of all task definition kinds. */
+export type TaskDef = AgentTaskDef | ToolTaskDef | GateTaskDef | TransformTaskDef | MessageTaskDef;
+
+/** Return a human-readable label for any TaskDef (prompt text for agent, tool name for tool, etc.). */
+export function getTaskPromptOrLabel(td: TaskDef): string {
+  switch (td.kind) {
+    case "agent":
+      return td.prompt;
+    case "tool":
+      return td.title ?? `tool:${td.tool}`;
+    case "gate":
+      return td.title ?? `gate:${td.condition}`;
+    case "transform":
+      return td.title ?? `transform`;
+    case "message":
+      return td.title ?? td.message;
+  }
 }
 
 // Task runtime state

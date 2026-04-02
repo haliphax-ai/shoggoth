@@ -1,4 +1,5 @@
 import type { TaskList, TaskState } from "./types.js";
+import { getTaskPromptOrLabel } from "./types.js";
 import { formatDuration } from "./format.js";
 
 const STATUS_EMOJI: Record<TaskState["status"], string> = {
@@ -11,8 +12,8 @@ const STATUS_EMOJI: Record<TaskState["status"], string> = {
 
 function taskDisplayName(task: TaskState): string {
   if (task.taskDef.title) return task.taskDef.title;
-  const prompt = task.taskDef.prompt;
-  return prompt.length > 57 ? prompt.slice(0, 57) + "…" : prompt;
+  const label = getTaskPromptOrLabel(task.taskDef);
+  return label.length > 57 ? label.slice(0, 57) + "…" : label;
 }
 
 function taskDuration(task: TaskState, now?: number): string | null {

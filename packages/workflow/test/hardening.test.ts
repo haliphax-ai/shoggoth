@@ -23,6 +23,7 @@ function makeTmpDir(): string {
 
 function makeTask(id: number, prompt = `do task ${id}`): TaskDef {
   return {
+    kind: "agent",
     id,
     prompt,
     failureBehavior: "continue",

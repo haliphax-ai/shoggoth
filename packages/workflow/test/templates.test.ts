@@ -14,6 +14,7 @@ function makeTaskState(
   output?: string,
 ): TaskState {
   const taskDef: TaskDef = {
+    kind: "agent",
     id,
     prompt: `Task ${id}`,
     failureBehavior: "continue",

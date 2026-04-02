@@ -1,4 +1,4 @@
-import type { TaskDef, TaskList, TaskStatus } from "./types.js";
+import type { TaskDef, TaskList, TaskStatus, FailureBehavior, FailureNotification } from "./types.js";
 import type { Orchestrator, KillAdapter, SpawnAdapter } from "./orchestrator.js";
 import { saveWorkflow, loadWorkflow } from "./state.js";
 import { retentionRun, type RetentionSummary, type RetentionOptions } from "./retention.js";
@@ -246,7 +246,7 @@ export class ControlPlane {
   async edit(
     workflowId: string,
     taskId: number,
-    updates: Partial<Pick<TaskDef, "prompt" | "failureBehavior" | "failureNotification" | "runtimeLimitMs">>,
+    updates: Partial<Pick<TaskDef, "failureBehavior" | "failureNotification" | "runtimeLimitMs" | "title">> & { prompt?: string },
   ): Promise<void> {
     const orch = this.orchestrators.get(workflowId);
     let wf: TaskList;
@@ -270,7 +270,9 @@ export class ControlPlane {
     }
 
     // Apply allowed updates
-    if (updates.prompt !== undefined) task.taskDef.prompt = updates.prompt;
+    if (updates.prompt !== undefined && "prompt" in task.taskDef) {
+      (task.taskDef as { prompt: string }).prompt = updates.prompt;
+    }
     if (updates.failureBehavior !== undefined) task.taskDef.failureBehavior = updates.failureBehavior;
     if (updates.failureNotification !== undefined) task.taskDef.failureNotification = updates.failureNotification;
     if (updates.runtimeLimitMs !== undefined) task.taskDef.runtimeLimitMs = updates.runtimeLimitMs;

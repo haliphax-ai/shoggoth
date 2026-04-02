@@ -34,6 +34,7 @@ function makeTask(
   opts: Partial<Pick<TaskDef, "failureBehavior" | "failureNotification" | "runtimeLimitMs">> = {},
 ): TaskDef {
   return {
+    kind: "agent",
     id,
     prompt,
     failureBehavior: opts.failureBehavior ?? "continue",
@@ -414,7 +415,11 @@ describe("Integration: edit", () => {
 
     // Verify the edit persisted
     const wfEdited = s.orch.getWorkflowStatus()!;
-    assert.equal(wfEdited.tasks.find((t) => t.taskDef.id === 2)!.taskDef.prompt, "edited prompt");
+    const task2Def = wfEdited.tasks.find((t) => t.taskDef.id === 2)!.taskDef;
+    assert.equal(task2Def.kind, "agent");
+    if (task2Def.kind === "agent") {
+      assert.equal(task2Def.prompt, "edited prompt");
+    }
 
     // Resume and complete task 1
     await s.cp.resume(s.wfId);

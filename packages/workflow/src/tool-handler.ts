@@ -1,4 +1,4 @@
-import type { TaskDef, FailureBehavior, FailureNotification } from "./types.js";
+import type { TaskDef, AgentTaskDef, ToolTaskDef, FailureBehavior, FailureNotification } from "./types.js";
 import type { WorkflowServer } from "./server.js";
 import type { ControlPlane } from "./control.js";
 import type { OrchestratorOptions } from "./orchestrator.js";
@@ -7,11 +7,16 @@ import type { OrchestratorOptions } from "./orchestrator.js";
 
 interface TaskInput {
   id: number;
-  prompt: string;
+  kind?: "agent" | "tool" | "gate" | "transform";
+  prompt?: string;
   title?: string;
   failure_behavior?: "abort" | "pause" | "continue";
   failure_notification?: "silent" | { kind: "notify-parent" } | { kind: "notify-target"; target_id: string };
   runtime_limit_ms?: number;
+  tool?: string;
+  args?: Record<string, unknown>;
+  condition?: string;
+  template?: string;
 }
 
 export interface WorkflowToolArgs {
@@ -71,14 +76,38 @@ function normalizeFailureNotification(
 }
 
 function toTaskDefs(inputs: TaskInput[]): TaskDef[] {
-  return inputs.map((t) => ({
-    id: t.id,
-    prompt: t.prompt,
-    ...(t.title ? { title: t.title.slice(0, 60) } : {}),
-    failureBehavior: (t.failure_behavior ?? "continue") as FailureBehavior,
-    failureNotification: normalizeFailureNotification(t.failure_notification),
-    runtimeLimitMs: t.runtime_limit_ms,
-  }));
+  return inputs.map((t) => {
+    const kind = t.kind ?? "agent";
+    const base = {
+      id: t.id,
+      ...(t.title ? { title: t.title.slice(0, 60) } : {}),
+      failureBehavior: (t.failure_behavior ?? "continue") as FailureBehavior,
+      failureNotification: normalizeFailureNotification(t.failure_notification),
+      runtimeLimitMs: t.runtime_limit_ms,
+    };
+
+    switch (kind) {
+      case "agent": {
+        const prompt = requireField(t.prompt, `tasks[${t.id}].prompt (required for agent task)`);
+        return { ...base, kind: "agent" as const, prompt };
+      }
+      case "tool": {
+        const tool = requireField(t.tool, `tasks[${t.id}].tool (required for tool task)`);
+        const args = requireField(t.args, `tasks[${t.id}].args (required for tool task)`);
+        return { ...base, kind: "tool" as const, tool, args };
+      }
+      case "gate": {
+        const condition = requireField(t.condition, `tasks[${t.id}].condition (required for gate task)`);
+        return { ...base, kind: "gate" as const, condition };
+      }
+      case "transform": {
+        const template = requireField(t.template, `tasks[${t.id}].template (required for transform task)`);
+        return { ...base, kind: "transform" as const, template };
+      }
+      default:
+        throw new Error(`Unknown task kind: ${kind}`);
+    }
+  });
 }
 
 /** Convert a DependencyGraph (Map<number, Set<number>>) to a JSON-safe object. */

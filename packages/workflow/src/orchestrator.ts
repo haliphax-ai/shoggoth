@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { TaskDef, TaskState, TaskList, DependencyGraph } from "./types.js";
+import { getTaskPromptOrLabel } from "./types.js";
 import { parseGraph, validateGraph } from "./graph.js";
 import { parseTemplateRefs, validateTemplateRefs, resolveTemplates } from "./templates.js";
 import { canSpawn } from "./depth.js";
@@ -89,7 +90,7 @@ function isBlocked(taskId: number, graph: DependencyGraph, tasks: Map<number, Ta
 }
 
 function formatFailureMessage(task: TaskState): string {
-  const desc = task.taskDef.prompt.slice(0, 100);
+  const desc = getTaskPromptOrLabel(task.taskDef).slice(0, 100);
   return `Task ${task.taskDef.id} failed: "${desc}" — ${task.error ?? "unknown error"}`;
 }
 
@@ -139,9 +140,11 @@ export class Orchestrator {
 
     // Validate template refs for each task
     for (const task of tasks) {
-      const refs = parseTemplateRefs(task.prompt);
-      if (refs.length > 0) {
-        validateTemplateRefs(task.id, refs, graph);
+      if (task.kind === "agent") {
+        const refs = parseTemplateRefs(task.prompt);
+        if (refs.length > 0) {
+          validateTemplateRefs(task.id, refs, graph);
+        }
       }
     }
 
@@ -459,7 +462,15 @@ export class Orchestrator {
 
       if (!allDepsDone) continue;
 
-      // Resolve templates in prompt
+      // Only agent tasks can be spawned; fail other kinds until later phases implement them
+      if (task.taskDef.kind !== "agent") {
+        task.status = "failed";
+        task.error = `unsupported task kind: ${task.taskDef.kind}`;
+        task.completedAt = Date.now();
+        continue;
+      }
+
+      // Resolve templates in prompt (agent tasks only)
       const resolvedPrompt = resolveTemplates(task.taskDef.prompt, tm);
 
       // Spawn — handle errors

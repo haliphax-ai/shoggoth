@@ -7,6 +7,11 @@ export type {
   FailureNotificationParent,
   FailureNotificationTarget,
   TaskDef,
+  AgentTaskDef,
+  ToolTaskDef,
+  GateTaskDef,
+  TransformTaskDef,
+  MessageTaskDef,
   TaskState,
   TaskList,
   DependencyGraph,
@@ -14,6 +19,7 @@ export type {
   TaskOutputRef,
   TaskSuccessRef,
 } from "./types.js";
+export { getTaskPromptOrLabel } from "./types.js";
 
 // Graph
 export { parseGraph, validateGraph, getTransitiveDeps } from "./graph.js";

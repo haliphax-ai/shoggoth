@@ -42,9 +42,9 @@ function makeWorkflow(overrides: Partial<TaskList> = {}): TaskList {
     id: "wf-test",
     name: "my-workflow",
     tasks: [
-      { taskDef: { id: 1, prompt: "task one", failureBehavior: "continue" as const, failureNotification: "silent" as const }, status: "done" as const, output: "result-1", startedAt: 1000, completedAt: 2000 },
-      { taskDef: { id: 2, prompt: "task two", failureBehavior: "continue" as const, failureNotification: "silent" as const }, status: "done" as const, output: "result-2", startedAt: 1000, completedAt: 3000 },
-      { taskDef: { id: 3, prompt: "task three", failureBehavior: "continue" as const, failureNotification: "silent" as const }, status: "done" as const, output: "result-3", startedAt: 3000, completedAt: 5000 },
+      { taskDef: { kind: "agent" as const, id: 1, prompt: "task one", failureBehavior: "continue" as const, failureNotification: "silent" as const }, status: "done" as const, output: "result-1", startedAt: 1000, completedAt: 2000 },
+      { taskDef: { kind: "agent" as const, id: 2, prompt: "task two", failureBehavior: "continue" as const, failureNotification: "silent" as const }, status: "done" as const, output: "result-2", startedAt: 1000, completedAt: 3000 },
+      { taskDef: { kind: "agent" as const, id: 3, prompt: "task three", failureBehavior: "continue" as const, failureNotification: "silent" as const }, status: "done" as const, output: "result-3", startedAt: 3000, completedAt: 5000 },
     ],
     graph,
     pollingIntervalMs: 10000,

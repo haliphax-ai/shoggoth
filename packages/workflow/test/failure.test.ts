@@ -26,6 +26,7 @@ function makeTask(
   opts: Partial<Pick<TaskDef, "failureBehavior" | "failureNotification" | "runtimeLimitMs">> = {},
 ): TaskDef {
   return {
+    kind: "agent",
     id,
     prompt,
     failureBehavior: opts.failureBehavior ?? "continue",

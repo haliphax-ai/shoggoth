@@ -21,6 +21,7 @@ function makeTmpDir(): string {
 
 function makeTask(id: number, prompt = `do task ${id}`): TaskDef {
   return {
+    kind: "agent",
     id,
     prompt,
     failureBehavior: "continue",
@@ -134,12 +135,7 @@ describe("Orchestrator", () => {
       const notifier = mockNotifyAdapter();
       const orch = new Orchestrator(spawner, poller, notifier);
 
-      // Build a cyclic graph manually via DSL that won't cycle,
-      // then test with a manually constructed cycle
       const tasks = [makeTask(1), makeTask(2)];
-      // parseGraph("1>2") is fine, but we need a cycle — the graph parser
-      // doesn't produce cycles, so we test that validateGraph catches it
-      // by passing a graph string that references missing tasks
       await assert.rejects(
         () => orch.start(tasks, "1>2>3", defaultOpts(baseDir)),
         /not in the task list/,

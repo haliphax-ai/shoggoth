@@ -25,6 +25,7 @@ const workflowToolArgs = {
         type: "object",
         properties: {
           id: { type: "integer", description: "Unique task number (1-based)." },
+          kind: { type: "string", enum: ["agent", "tool", "gate", "transform"], description: "Task kind. Default: agent." },
           prompt: { type: "string", description: "Task prompt. May contain {{task:N:output}} or {{task:N:success}} templates." },
           title: { type: "string", description: "Optional display title for status/summary posts (max 60 chars). Falls back to truncated prompt.", maxLength: 60 },
           failure_behavior: {
@@ -52,8 +53,12 @@ const workflowToolArgs = {
             description: "Max runtime for this task in ms. Default: 600000 (10 min).",
             minimum: 1000,
           },
+          tool: { type: "string", description: "Tool task: tool name." },
+          args: { type: "object", description: "Tool task: tool arguments." },
+          condition: { type: "string", description: "Gate task: condition expression." },
+          template: { type: "string", description: "Transform task: template string." },
         },
-        required: ["id", "prompt"],
+        required: ["id"],
       },
       description: "start: array of task definitions.",
     },

@@ -6,7 +6,7 @@ import { formatStatusMessage, formatSummaryMessage } from "../src/status-message
 // --- Helpers ---
 
 function makeDef(id: number, prompt: string): TaskDef {
-  return { id, prompt, failureBehavior: "continue", failureNotification: "silent" };
+  return { kind: "agent", id, prompt, failureBehavior: "continue", failureNotification: "silent" };
 }
 
 function makeTask(

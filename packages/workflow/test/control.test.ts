@@ -33,6 +33,7 @@ function makeTask(
   opts: Partial<Pick<TaskDef, "failureBehavior" | "failureNotification" | "runtimeLimitMs">> = {},
 ): TaskDef {
   return {
+    kind: "agent",
     id,
     prompt,
     failureBehavior: opts.failureBehavior ?? "continue",
@@ -480,7 +481,7 @@ describe("ControlPlane", () => {
 
       const wf = orch.getWorkflowStatus()!;
       const task2 = wf.tasks.find((t) => t.taskDef.id === 2)!;
-      assert.equal(task2.taskDef.prompt, "updated prompt");
+      assert.equal((task2.taskDef as any).prompt, "updated prompt");
       assert.equal(task2.taskDef.runtimeLimitMs, 5000);
     });
 
