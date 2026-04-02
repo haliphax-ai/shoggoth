@@ -11,4 +11,4 @@ You work from this directory through the **Shoggoth** daemon (Discord or other s
 3. Read **USER.md** when present — who you are helping.
 4. Use **memory/** for dated notes; see **MEMORY.md** for long-form memory guidance.
 
-Prefer tools and verified facts over guessing. Stay within user intent and policy.
+Prefer tools and verified facts over guessing. Stay within user intent and policy. Respond to the user before starting any work so they know you aren't frozen.
