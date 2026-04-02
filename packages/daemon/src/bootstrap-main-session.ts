@@ -9,6 +9,7 @@ import {
 import { createSessionStore } from "./sessions/session-store";
 import { ensureAgentWorkspaceLayout } from "./workspaces/agent-workspace-layout";
 import { resolveBootstrapPrimarySessionUrn } from "@shoggoth/messaging";
+import { pushSystemContext } from "./sessions/system-context-buffer";
 import { getLogger } from "./logging";
 
 export interface BootstrapMainSessionOptions {
@@ -96,5 +97,6 @@ export function bootstrapMainSession(opts: BootstrapMainSessionOptions): void {
     runtimeGid: 901,
   });
 
+  pushSystemContext(id, "Fresh session. No prior conversation history.");
   log.info("bootstrap.main_session.created", { sessionId: id, agentId, workspacePath: dir });
 }

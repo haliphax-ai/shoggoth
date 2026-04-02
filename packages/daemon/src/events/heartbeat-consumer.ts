@@ -7,6 +7,7 @@ import {
   markEventFailed,
   type EventQueueRow,
 } from "./events-queue";
+import { pushSystemContext } from "../sessions/system-context-buffer";
 
 const log = getLogger("heartbeat");
 
@@ -83,6 +84,13 @@ export function createDefaultHeartbeatHandlers(): Record<string, HeartbeatHandle
         scope: row.scope,
         idempotencyKey: row.idempotencyKey,
       });
+      const m = /^session:(.+)$/.exec(row.scope ?? "");
+      if (m?.[1]) pushSystemContext(m[1], "Scheduled cron job invocation.");
+    },
+    "heartbeat.check": (row) => {
+      log.debug("heartbeat.check consumed", { eventId: row.id, scope: row.scope });
+      const m = /^session:(.+)$/.exec(row.scope ?? "");
+      if (m?.[1]) pushSystemContext(m[1], "Scheduled heartbeat check.");
     },
   };
 }

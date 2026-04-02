@@ -59,6 +59,7 @@ import { disposeSubagentRuntime, rememberSubagentHandles } from "../subagent/sub
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
 import { terminatePersistentSubagentSession } from "../subagent/subagent-kill";
 import { extractLatestTranscriptAssistantText } from "../sessions/transcript-to-chat";
+import { pushSystemContext } from "../sessions/system-context-buffer";
 
 export class IntegrationOpError extends Error {
   constructor(
@@ -827,6 +828,7 @@ export async function handleIntegrationControlOp(
         });
         const subLog = getLogger("subagent");
         subLog.info("subagent one_shot model turn starting", { childId, parentSessionId, promptLen: prompt.length });
+        pushSystemContext(childId, "One-shot subagent task spawned by parent session.");
         const turn = await ext.runSessionModelTurn({
           sessionId: childId,
           userContent: prompt,

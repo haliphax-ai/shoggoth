@@ -16,6 +16,7 @@ import type {
 } from "@shoggoth/workflow";
 import type { SessionManager } from "./sessions/session-manager.js";
 import type { SessionStore, SessionRow } from "./sessions/session-store.js";
+import { pushSystemContext } from "./sessions/system-context-buffer";
 import { getLogger } from "./logging";
 
 const log = getLogger("workflow-adapters");
@@ -77,6 +78,7 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
       });
 
       // Fire off the model turn without awaiting — poll adapter tracks completion.
+      pushSystemContext(childId, "Workflow task execution.");
       const turnPromise = deps.runSessionModelTurn({
         sessionId: childId,
         userContent: req.prompt,

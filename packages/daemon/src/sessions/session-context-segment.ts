@@ -5,6 +5,7 @@ import { clearSessionToolAutoApproveForSession } from "../hitl/hitl-session-tool
 import type { PendingActionsStore } from "../hitl/pending-actions-store";
 import type { SessionStore } from "./session-store";
 import { resetSegmentStats } from "./session-stats-store";
+import { pushSystemContext } from "./system-context-buffer";
 
 function denyPendingForSession(pending: PendingActionsStore | undefined, sessionId: string): void {
   if (!pending) return;
@@ -52,6 +53,7 @@ export function applySessionContextSegmentNew(input: {
       .map((c) => c.id);
     if (children.length > 0) input.killSubagents(children);
   }
+  pushSystemContext(sessionId, "Fresh session. No prior conversation history.");
   return { previousContextSegmentId, contextSegmentId };
 }
 
@@ -70,5 +72,6 @@ export function applySessionContextSegmentReset(input: {
   const contextSegmentId = randomUUID();
   input.sessions.update(sessionId, { contextSegmentId, systemContextToken: generateSystemContextToken() });
   resetSegmentStats(input.db, sessionId);
+  pushSystemContext(sessionId, "Fresh session. No prior conversation history.");
   return { previousContextSegmentId, contextSegmentId };
 }

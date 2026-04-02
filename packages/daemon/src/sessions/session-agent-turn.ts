@@ -49,6 +49,7 @@ import { messageToolContextRef } from "../messaging/message-tool-context-ref";
 import { recordAgentTurn } from "./session-stats-store";
 import { checkContextWindowMismatch } from "./context-window-mismatch";
 import { getModelContextWindowTokens } from "../model-metadata";
+import { drainSystemContext, pushSystemContext } from "./system-context-buffer";
 import { getLogger } from "../logging";
 
 
@@ -105,6 +106,13 @@ export async function executeSessionAgentTurn(
 ): Promise<SessionAgentTurnResult> {
   const log = getLogger("session-agent-turn");
   log.debug("executeSessionAgentTurn entered", { sessionId: input.sessionId });
+
+  // Drain any buffered system context entries and prepend to the system prompt.
+  const buffered = drainSystemContext(input.sessionId);
+  const effectiveSystemPrompt = buffered.length > 0
+    ? buffered.join("\n") + "\n\n" + input.systemPrompt
+    : input.systemPrompt;
+
   const loopImpl = input.loopImpl ?? runToolLoop;
   const ctxSeg = input.session.contextSegmentId.trim();
   if (!ctxSeg) {
@@ -130,7 +138,7 @@ export async function executeSessionAgentTurn(
   const history = loadSessionTranscriptAsModelChat(input.db, input.sessionId, ctxSeg);
   const system: ChatMessage = {
     role: "system",
-    content: input.systemPrompt,
+    content: effectiveSystemPrompt,
   };
   const initialMessages: ChatMessage[] = [system, ...history];
 
@@ -242,6 +250,7 @@ export async function executeSessionAgentTurn(
     });
   } catch (e) {
     if (e instanceof TurnAbortedError) {
+      pushSystemContext(input.sessionId, "Previous turn was aborted. Results may be partial.");
       const failoverMeta = model.getSessionToolLoopFailoverState();
       const latestAssistantText =
         extractLatestTranscriptAssistantText(input.db, input.sessionId, ctxSeg) ?? "_Aborted._";
