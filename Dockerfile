@@ -40,6 +40,8 @@ COPY scripts ./scripts
 COPY templates/agent-workspace /app/templates/agent-workspace
 COPY migrations /app/migrations
 COPY docs /app/docs
+# Ensure all app files are world-readable (build context from agent workspaces may have restrictive ACL-derived permissions)
+RUN chmod -R a+rX /app
 COPY docker/entrypoint.sh /usr/local/bin/shoggoth-entrypoint.sh
 COPY docker/shoggoth-wrapper.sh /usr/local/bin/shoggoth
 RUN chmod 0755 /usr/local/bin/shoggoth-entrypoint.sh /usr/local/bin/shoggoth
