@@ -4,7 +4,9 @@ import {
   type ExecuteSessionAgentTurnInput,
   type SessionAgentTurnResult,
 } from "../sessions/session-agent-turn";
-import type { Logger } from "../logging";
+import { getLogger } from "../logging";
+
+const log = getLogger("inbound-session-turn");
 
 /**
  * Coalesces high-frequency model token updates into occasional `setFull` calls (rate-limit friendly).
@@ -79,7 +81,6 @@ export interface RunInboundSessionTurnOptions {
     readonly onTurnBegin?: () => void;
     readonly onTurnEnd?: () => void;
   };
-  readonly logger?: Logger;
   readonly logContext?: Record<string, string | undefined>;
   /** Observed before {@link sendErrorBody} (e.g. transport-specific log keys). */
   readonly onTurnExecutionFailed?: (err: unknown) => void;
@@ -91,7 +92,6 @@ export interface RunInboundSessionTurnOptions {
  */
 export async function runInboundSessionTurn(options: RunInboundSessionTurnOptions): Promise<void> {
   const { streaming, sliceDisplayText, formatAssistantReply, formatErrorReply } = options;
-  const log = options.logger;
   const ctx = options.logContext;
 
   options.mcpLifecycle?.onTurnBegin?.();
@@ -142,12 +142,12 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
   } catch (e) {
     options.onTurnExecutionFailed?.(e);
     if (!options.onTurnExecutionFailed) {
-      log?.warn("inbound_session_turn.failed", { ...ctx, err: String(e) });
+      log.warn("inbound_session_turn.failed", { ...ctx, err: String(e) });
     }
     try {
       await options.sendErrorBody(sliceDisplayText(formatErrorReply(e)));
     } catch (sendErr) {
-      log?.error("inbound_session_turn.error_delivery_failed", {
+      log.error("inbound_session_turn.error_delivery_failed", {
         ...ctx,
         err: String(sendErr),
       });

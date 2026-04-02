@@ -1,5 +1,7 @@
 import { spawn as defaultSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
-import type { Logger } from "../logging";
+import { getLogger } from "../logging";
+
+const log = getLogger("acpx");
 
 export type AcpxSpawnFn = (command: string, args: string[], options: SpawnOptions) => ChildProcess;
 
@@ -20,7 +22,6 @@ export class AcpxSupervisorError extends Error {
 }
 
 export type AcpxProcessSupervisorOptions = {
-  readonly logger: Logger;
   readonly spawn?: AcpxSpawnFn;
 };
 
@@ -28,7 +29,6 @@ export type AcpxProcessSupervisorOptions = {
  * Tracks acpx child processes keyed by ACP workspace root (one managed process per binding root).
  */
 export class AcpxProcessSupervisor {
-  private readonly logger: Logger;
   private readonly spawnFn: AcpxSpawnFn;
   private readonly byRoot = new Map<
     string,
@@ -36,7 +36,6 @@ export class AcpxProcessSupervisor {
   >();
 
   constructor(opts: AcpxProcessSupervisorOptions) {
-    this.logger = opts.logger;
     this.spawnFn = opts.spawn ?? defaultSpawn;
   }
 
@@ -80,11 +79,11 @@ export class AcpxProcessSupervisor {
       const t = this.byRoot.get(root);
       if (t?.pid === pid) {
         this.byRoot.delete(root);
-        this.logger.info("acpx child exited", { root, pid, code, signal });
+        log.info("acpx child exited", { root, pid, code, signal });
       }
     });
     child.on("error", (err) => {
-      this.logger.warn("acpx child process error", { root, pid, err: String(err) });
+      log.warn("acpx child process error", { root, pid, err: String(err) });
       const t = this.byRoot.get(root);
       if (t?.pid === pid) {
         this.byRoot.delete(root);
@@ -104,7 +103,7 @@ export class AcpxProcessSupervisor {
     try {
       process.kill(t.pid, "SIGTERM");
     } catch (e) {
-      this.logger.debug("acpx stop kill", { pid: t.pid, err: String(e) });
+      log.debug("acpx stop kill", { pid: t.pid, err: String(e) });
     }
     return { stopped: true, pid: t.pid };
   }
@@ -124,6 +123,6 @@ export class AcpxProcessSupervisor {
   }
 }
 
-export function createAcpxProcessSupervisor(opts: AcpxProcessSupervisorOptions): AcpxProcessSupervisor {
-  return new AcpxProcessSupervisor(opts);
+export function createAcpxProcessSupervisor(opts?: AcpxProcessSupervisorOptions): AcpxProcessSupervisor {
+  return new AcpxProcessSupervisor(opts ?? {});
 }

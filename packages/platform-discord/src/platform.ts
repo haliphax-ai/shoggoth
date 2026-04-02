@@ -173,7 +173,6 @@ export async function startDiscordPlatform(
 
   const mcpRuntime = await createSessionMcpRuntime({
     config: opts.config,
-    logger: opts.logger,
     env,
     deps: { connectShoggothMcpServers: assistantDeps.connectShoggothMcpServers },
   });

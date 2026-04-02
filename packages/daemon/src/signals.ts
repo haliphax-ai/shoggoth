@@ -1,9 +1,8 @@
-import type { Logger } from "./logging";
+import { getLogger } from "./logging";
 
 export type SignalName = NodeJS.Signals;
 
 export interface SignalHandlerOptions {
-  logger: Logger;
   signals?: SignalName[];
   onSignal: (signal: SignalName) => void | Promise<void>;
   proc?: Pick<NodeJS.Process, "on" | "off" | "pid">;
@@ -16,13 +15,13 @@ export interface SignalHandlerOptions {
 export function installSignalHandlers(options: SignalHandlerOptions): () => void {
   const proc = options.proc ?? process;
   const signals = options.signals ?? (["SIGINT", "SIGTERM"] as SignalName[]);
-  const logger = options.logger;
+  const log = getLogger("signals");
 
   const listeners = new Map<SignalName, () => void>();
   for (const s of signals) {
     const listener = () => {
       void Promise.resolve(options.onSignal(s)).catch((e) => {
-        logger.error("onSignal handler failed", { signal: s, err: String(e) });
+        log.error("onSignal handler failed", { signal: s, err: String(e) });
       });
     };
     listeners.set(s, listener);

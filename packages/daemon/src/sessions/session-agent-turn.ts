@@ -49,6 +49,9 @@ import { messageToolContextRef } from "../messaging/message-tool-context-ref";
 import { recordAgentTurn } from "./session-stats-store";
 import { checkContextWindowMismatch } from "./context-window-mismatch";
 import { getModelContextWindowTokens } from "../model-metadata";
+import { getLogger } from "../logging";
+
+const log = getLogger("session-agent-turn");
 
 export interface ExecuteSessionAgentTurnInput {
   readonly db: Database.Database;
@@ -204,6 +207,11 @@ export async function executeSessionAgentTurn(
   const { signal: turnAbortSignal, end: endTurnAbortScope } = beginSessionTurnAbortScope(
     input.sessionId,
   );
+  log.debug("model call started", {
+    sessionId: input.sessionId,
+    messageCount: initialMessages.length,
+    toolCount: mcpCtx.toolsLoop.length,
+  });
   try {
     await loopImpl({
       db: input.db,
@@ -241,6 +249,13 @@ export async function executeSessionAgentTurn(
   const latestAssistantText =
     extractLatestTranscriptAssistantText(input.db, input.sessionId, ctxSeg) ?? "_No reply text._";
 
+  log.debug("model response received", {
+    sessionId: input.sessionId,
+    model: failoverMeta?.usedModel,
+    contentLength: latestAssistantText.length,
+    degraded: failoverMeta?.degraded,
+  });
+
   // --- Session stats: record completed agent turn ---
   const accumulatedUsage = model.getAccumulatedUsage();
 
@@ -273,12 +288,6 @@ export async function executeSessionAgentTurn(
       configContextWindow: undefined, // TODO: extract from model config when available
       providerContextWindow: contextWindowTokens,
       sessionId: input.sessionId,
-      logger: {
-        warn: (msg, fields) => {
-          const record = { level: "warn", msg, ...fields, ts: new Date().toISOString() };
-          process.stderr.write(`${JSON.stringify(record)}\n`);
-        },
-      },
       // TODO: wire surfaceWarning to platform binding
       surfaceWarning: undefined,
       suppressNotice: input.config.runtime?.suppressContextWindowMismatchNotice,

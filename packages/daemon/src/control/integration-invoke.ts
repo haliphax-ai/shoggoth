@@ -5,12 +5,14 @@ import { WIRE_VERSION, type WireRequest } from "@shoggoth/authn";
 import { appendAuditRow } from "../audit/append-audit";
 import { auditSourceForPrincipal, principalAuditFields } from "../policy/audit-source";
 import type { PolicyEngine } from "../policy/engine";
-import type { Logger } from "../logging";
+import { getLogger } from "../logging";
 import {
   handleIntegrationControlOp,
   IntegrationOpError,
   type IntegrationOpsContext,
 } from "./integration-ops";
+
+const log = getLogger("agent-control-invoke");
 
 export type AgentIntegrationInvoker = (
   sessionId: string,
@@ -19,9 +21,9 @@ export type AgentIntegrationInvoker = (
 ) => Promise<unknown>;
 
 /**
- * In-process control ops as the given session’s agent (policy-checked). Used by built-in subagent tools
+ * In-process control ops as the given session's agent (policy-checked). Used by built-in subagent tools
  * inside {@link executeSessionAgentTurn}; wire auth is skipped because the caller is already the daemon
- * running that session’s turn.
+ * running that session's turn.
  */
 export function createInProcessAgentIntegrationInvoker(input: {
   readonly integration: Pick<
@@ -38,7 +40,6 @@ export function createInProcessAgentIntegrationInvoker(input: {
   >;
   readonly policyEngine: PolicyEngine;
   readonly stateDb: Database.Database | undefined;
-  readonly logger: Logger;
 }): AgentIntegrationInvoker {
   return async (sessionId, op, payload) => {
     const principal: AuthenticatedPrincipal = { kind: "agent", sessionId, source: "agent" };
@@ -65,7 +66,7 @@ export function createInProcessAgentIntegrationInvoker(input: {
           argsRedactedJson: extras.argsRedactedJson,
         });
       } catch (e) {
-        input.logger.warn("agent integration audit append failed", { err: String(e) });
+        log.warn("agent integration audit append failed", { err: String(e) });
       }
     };
     const ctx: IntegrationOpsContext = {

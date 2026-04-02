@@ -9,12 +9,11 @@ import {
 import { createSessionStore } from "./sessions/session-store";
 import { ensureAgentWorkspaceLayout } from "./workspaces/agent-workspace-layout";
 import { resolveBootstrapPrimarySessionUrn } from "@shoggoth/messaging";
-import type { Logger } from "./logging";
+import { getLogger } from "./logging";
 
 export interface BootstrapMainSessionOptions {
   readonly db: Database.Database;
   readonly config: ShoggothConfig;
-  readonly logger: Logger;
 }
 
 /**
@@ -28,7 +27,8 @@ export interface BootstrapMainSessionOptions {
  * - Existing DB without a matching session: logs a warning, then hydrates.
  */
 export function bootstrapMainSession(opts: BootstrapMainSessionOptions): void {
-  const { db, config, logger } = opts;
+  const log = getLogger("bootstrap");
+  const { db, config } = opts;
 
   const agentId = config.runtime?.agentId?.trim() || "main";
 
@@ -43,7 +43,7 @@ export function bootstrapMainSession(opts: BootstrapMainSessionOptions): void {
   }
   const platform = platformKeys[0];
   if (platformKeys.length > 1) {
-    logger.info("bootstrap.main_session.platform_inferred", {
+    log.info("bootstrap.main_session.platform_inferred", {
       agentId,
       platform,
       available: platformKeys,
@@ -69,7 +69,7 @@ export function bootstrapMainSession(opts: BootstrapMainSessionOptions): void {
   const existing = store.getById(id);
 
   if (existing) {
-    logger.debug("bootstrap.main_session.exists", { sessionId: id, agentId });
+    log.debug("bootstrap.main_session.exists", { sessionId: id, agentId });
     return;
   }
 
@@ -79,7 +79,7 @@ export function bootstrapMainSession(opts: BootstrapMainSessionOptions): void {
   ).n;
 
   if (count > 0) {
-    logger.warn("bootstrap.main_session.missing", {
+    log.warn("bootstrap.main_session.missing", {
       sessionId: id,
       agentId,
       existingSessions: count,
@@ -96,5 +96,5 @@ export function bootstrapMainSession(opts: BootstrapMainSessionOptions): void {
     runtimeGid: 901,
   });
 
-  logger.info("bootstrap.main_session.created", { sessionId: id, agentId, workspacePath: dir });
+  log.info("bootstrap.main_session.created", { sessionId: id, agentId, workspacePath: dir });
 }

@@ -64,7 +64,9 @@ import {
 import { WIRE_VERSION } from "@shoggoth/authn";
 import { requestSessionTurnAbort } from "./sessions/session-turn-abort";
 import { createSessionStore } from "./sessions/session-store";
-import { createLogger } from "./logging";
+import { initLogger, getLogger } from "./logging";
+
+const log = getLogger("shoggoth-daemon");
 import { createDelegatingPolicyEngine, createPolicyEngine } from "./policy/engine";
 import { bootstrapPlugins } from "./plugins/bootstrap";
 import { bootstrapMainSession } from "./bootstrap-main-session";
@@ -131,18 +133,14 @@ const config = loadLayeredConfig(configDir);
 
 const configRef = { current: config };
 
-const interruptLog = createLogger({
-  component: "shoggoth-daemon",
-  minLevel: config.logLevel,
-  baseFields: { subsystem: "lifecycle" },
-});
+initLogger({ minLevel: config.logLevel });
 
 // Assert dynamicConfigDirectory is below configDirectory when set.
 if (config.dynamicConfigDirectory) {
   const resolvedConfig = resolve(config.configDirectory);
   const resolvedDynamic = resolve(config.dynamicConfigDirectory);
   if (!resolvedDynamic.startsWith(resolvedConfig + "/") && resolvedDynamic !== resolvedConfig) {
-    interruptLog.error("dynamicConfigDirectory must be below configDirectory", {
+    log.error("dynamicConfigDirectory must be below configDirectory", {
       resolvedDynamic,
       resolvedConfig,
     });
@@ -190,17 +188,17 @@ const rt = createDaemonRuntime({
   shutdown: {
     drainTimeoutMs,
     async onStopAccepting() {
-      interruptLog.info("stop accepting new work");
+      log.info("stop accepting new work");
     },
     async markInterruptedRunsFailed(reason: string) {
       try {
         const tr = stateShutdown.toolRuns;
         if (tr) {
           const n = tr.markAllRunningFailed(reason);
-          interruptLog.info("interrupted tool runs marked failed", { reason, count: n });
+          log.info("interrupted tool runs marked failed", { reason, count: n });
         }
       } catch (e) {
-        interruptLog.error("mark interrupted tool runs failed", { err: String(e) });
+        log.error("mark interrupted tool runs failed", { err: String(e) });
       } finally {
         try {
           stateShutdown.db?.close();
@@ -225,12 +223,11 @@ void (async () => {
     bootstrapMainSession({
       db,
       config,
-      logger: rt.logger.child({ subsystem: "bootstrap" }),
     });
 
     hitlStack = createHitlPendingResolutionStack(db);
   } catch (e) {
-    rt.logger.warn("state database unavailable; control plane uses ephemeral agent tokens", {
+    getLogger("daemon").warn("state database unavailable; control plane uses ephemeral agent tokens", {
       err: String(e),
     });
   }
@@ -246,7 +243,6 @@ void (async () => {
       dynamicConfigDirectory: configRef.current.dynamicConfigDirectory,
       configRef,
       hitlRef,
-      logger: rt.logger.child({ subsystem: "hitl-auto-approve" }),
     });
   }
 
@@ -254,7 +250,6 @@ void (async () => {
     await startControlPlane({
       config,
       policyEngine,
-      logger: rt.logger.child({ subsystem: "control" }),
       shutdown: rt.shutdown,
       getHealth: () => rt.getHealth(),
       version: VERSION,
@@ -273,7 +268,6 @@ void (async () => {
     });
     const stopConfigHotReload = startConfigHotReload({
       configDirectory: config.configDirectory,
-      logger: rt.logger.child({ subsystem: "config-hot-reload" }),
       configRef,
       policyRef,
       hitlRef,
@@ -283,18 +277,17 @@ void (async () => {
       stopConfigHotReload();
     });
   } catch (e) {
-    rt.logger.error("control plane failed to start", { err: String(e) });
+    getLogger("daemon").error("control plane failed to start", { err: String(e) });
   }
 
   rt.shutdown.registerDrain("stop-event-loops", () => {
     stopEventLoops();
   });
 
-  const msgLog = rt.logger.child({ subsystem: "messaging" });
   try {
     const interactionTransportRef: { current: DiscordMessagingRuntime["discordRestTransport"] | undefined } = { current: undefined };
     discordMessaging = await startDaemonDiscordMessaging({
-      logger: msgLog,
+      logger: getLogger("messaging"),
       config: configRef.current,
       botToken: resolvedDiscordBotToken(),
       noticeResolver: daemonNotice,
@@ -305,7 +298,7 @@ void (async () => {
             return Reflect.get(interactionTransportRef.current, prop, receiver);
           },
         }),
-        logger: msgLog,
+        logger: getLogger("messaging"),
         abortSession: async (sessionId) => requestSessionTurnAbort(sessionId ?? ""),
         invokeControlOp: async (op, payload) => {
           if (!stateDb) return { ok: false, error: "state database unavailable" };
@@ -360,7 +353,7 @@ void (async () => {
                 autoApprove: hitlAutoApproveGate!,
                 ownerUserId: resolveDiscordOwnerUserId(configRef.current),
                 botUserIdRef: reactionBotUserIdRef,
-                logger: msgLog.child({ subsystem: "discord-reactions" }),
+                logger: getLogger("discord-reactions"),
               })
           : undefined,
       reactionBotUserIdRef,
@@ -370,22 +363,21 @@ void (async () => {
       rt.shutdown.registerDrain("discord-messaging", () => discordMessaging!.stop());
     }
   } catch (e) {
-    msgLog.warn("discord messaging failed to start", { err: String(e) });
+    getLogger("messaging").warn("discord messaging failed to start", { err: String(e) });
   }
 
   if (!stateDb) {
-    rt.logger.warn("plugins and event loops skipped (no state database)");
+    getLogger("daemon").warn("plugins and event loops skipped (no state database)");
     return;
   }
 
   const db = stateDb;
-  const evLog = rt.logger.child({ subsystem: "events" });
   const boot = runBootReconciliation(db, {
     staleClaimMs: resolveBootStaleClaimMs(configRef.current),
     orphanedToolRunReason: "restart_reconciliation",
   });
   if (boot.staleEventsRequeued > 0 || boot.toolRunsMarkedFailed > 0) {
-    evLog.info("boot reconciliation", {
+    getLogger("events").info("boot reconciliation", {
       staleEventsRequeued: boot.staleEventsRequeued,
       toolRunsMarkedFailed: boot.toolRunsMarkedFailed,
     });
@@ -399,7 +391,7 @@ void (async () => {
       resolveFromFile: fileURLToPath(import.meta.url),
     });
   } catch (e) {
-    rt.logger.warn("plugin bootstrap failed", { err: String(e) });
+    getLogger("daemon").warn("plugin bootstrap failed", { err: String(e) });
   }
   stateShutdown.db = db;
   stateShutdown.toolRuns = createToolRunStore(db);
@@ -435,9 +427,9 @@ void (async () => {
   for (const decl of bootProcesses) {
     try {
       await procman.start(processDeclarationToSpec(decl));
-      rt.logger.info("boot process started", { processId: decl.id });
+      getLogger("daemon").info("boot process started", { processId: decl.id });
     } catch (e) {
-      rt.logger.error("boot process failed to start", { processId: decl.id, err: String(e) });
+      getLogger("daemon").error("boot process failed to start", { processId: decl.id, err: String(e) });
     }
   }
 
@@ -490,18 +482,18 @@ void (async () => {
       poller,
       notifier: {
         async notify(workflowId, success, context) {
-          rt.logger.info("workflow completed", { workflowId, success, replyTo: context?.replyTo ?? null });
+          getLogger("daemon").info("workflow completed", { workflowId, success, replyTo: context?.replyTo ?? null });
           try {
             const sessionId = context?.replyTo;
-            if (!sessionId) { rt.logger.warn("workflow notify: no replyTo in context"); return; }
+            if (!sessionId) { getLogger("daemon").warn("workflow notify: no replyTo in context"); return; }
 
             const ext = subagentRuntimeExtensionRef.current;
-            if (!ext) { rt.logger.warn("workflow notify: subagent runtime not available"); return; }
+            if (!ext) { getLogger("daemon").warn("workflow notify: subagent runtime not available"); return; }
 
             const status = success ? "✅ completed successfully" : "❌ completed with failures";
             const message = `**Workflow ${status}:** \`${workflowId}\``;
 
-            rt.logger.debug("workflow notify: delivering to session", { sessionId });
+            getLogger("daemon").debug("workflow notify: delivering to session", { sessionId });
             const parsed = parseAgentSessionUrn(sessionId);
             const delivery = (() => {
               if (parsed?.platform === "discord") {
@@ -512,7 +504,7 @@ void (async () => {
               }
               return { kind: "internal" as const };
             })();
-            rt.logger.debug("workflow notify: resolved delivery", { sessionId, deliveryKind: delivery.kind });
+            getLogger("daemon").debug("workflow notify: resolved delivery", { sessionId, deliveryKind: delivery.kind });
             await ext.runSessionModelTurn({
               sessionId,
               userContent: message,
@@ -525,9 +517,9 @@ void (async () => {
               },
               delivery,
             });
-            rt.logger.debug("workflow notify: delivered");
+            getLogger("daemon").debug("workflow notify: delivered");
           } catch (e) {
-            rt.logger.warn("workflow completion notification failed", { workflowId, err: String(e) });
+            getLogger("daemon").warn("workflow completion notification failed", { workflowId, err: String(e) });
           }
         },
       },
@@ -543,7 +535,7 @@ void (async () => {
       createNotificationAdapter: (replyToSessionId: string) => ({
         async sendNotification(target: string, message: string): Promise<void> {
           const ext = subagentRuntimeExtensionRef.current;
-          if (!ext) { rt.logger.warn("workflow task notification: subagent runtime not available"); return; }
+          if (!ext) { getLogger("daemon").warn("workflow task notification: subagent runtime not available"); return; }
           const parsed = parseAgentSessionUrn(target);
           const delivery = (() => {
             if (parsed?.platform === "discord") {
@@ -565,7 +557,7 @@ void (async () => {
               delivery,
             });
           } catch (e) {
-            rt.logger.warn("workflow task failure notification failed", { target, err: String(e) });
+            getLogger("daemon").warn("workflow task failure notification failed", { target, err: String(e) });
           }
         },
       }),
@@ -573,14 +565,14 @@ void (async () => {
 
     const resumed = await workflow.server.resume();
     if (resumed.length > 0) {
-      rt.logger.info("workflow resumed incomplete workflows", { count: resumed.length, ids: resumed });
+      getLogger("daemon").info("workflow resumed incomplete workflows", { count: resumed.length, ids: resumed });
     }
 
     rt.shutdown.registerDrain("workflow", async () => {
       await workflow.server.stopAll();
     });
   } catch (e) {
-    rt.logger.warn("workflow server failed to initialize", { err: String(e) });
+    getLogger("daemon").warn("workflow server failed to initialize", { err: String(e) });
   }
 
   const dm = discordMessaging;
@@ -594,7 +586,7 @@ void (async () => {
       hitlPending: hitlStack,
       hitlDiscordNoticeRegistry,
       hitlAutoApproveGate,
-      logger: msgLog.child({ subsystem: "discord" }),
+      logger: getLogger("discord"),
       discord: dm,
       deps: defaultPlatformAssistantDeps,
     });
@@ -643,11 +635,10 @@ void (async () => {
     const subRecon = reconcilePersistentSubagents({
       db,
       config,
-      logger: msgLog.child({ subsystem: "subagent-reconcile" }),
       ext: subagentExt,
     });
     if (subRecon.restored > 0 || subRecon.expiredKilled > 0) {
-      msgLog.info("subagent.persisted_reconciled", {
+      getLogger("messaging").info("subagent.persisted_reconciled", {
         restored: subRecon.restored,
         expired_killed: subRecon.expiredKilled,
       });
@@ -663,25 +654,24 @@ void (async () => {
   const cronMs = resolveCronTickIntervalMs(configRef.current);
   const batchLimit = resolveHeartbeatBatchSize(configRef.current);
   const concurrency = resolveHeartbeatConcurrency(configRef.current);
-  const handlers = createDefaultHeartbeatHandlers({ logger: evLog });
+  const handlers = createDefaultHeartbeatHandlers();
 
   const hbTimer = setInterval(() => {
     void runHeartbeatBatch(db, {
       batchLimit,
       concurrency,
       handlers,
-      logger: evLog,
     }).catch((e) => {
-      evLog.error("heartbeat batch failed", { err: String(e) });
+      getLogger("events").error("heartbeat batch failed", { err: String(e) });
     });
   }, heartbeatMs);
 
   const cronTimer = setInterval(() => {
     try {
       const n = runCronTick(db);
-      if (n > 0) evLog.debug("cron tick fired", { count: n });
+      if (n > 0) getLogger("events").debug("cron tick fired", { count: n });
     } catch (e) {
-      evLog.error("cron tick failed", { err: String(e) });
+      getLogger("events").error("cron tick failed", { err: String(e) });
     }
   }, cronMs);
 
@@ -695,11 +685,11 @@ void (async () => {
                 summary.inboundMediaDeletedFiles > 0 ||
                 summary.transcriptMessagesDeleted > 0
               ) {
-                evLog.info("retention tick", { ...summary });
+                getLogger("events").info("retention tick", { ...summary });
               }
             })
             .catch((e) => {
-              evLog.error("retention tick failed", { err: String(e) });
+              getLogger("events").error("retention tick failed", { err: String(e) });
             });
         }, retentionMs)
       : undefined;
@@ -709,9 +699,9 @@ void (async () => {
     compactMs > 0
       ? setInterval(() => {
           void runTranscriptAutoCompactTick(db, config, {
-            logger: evLog.child({ component: "auto-compact" }),
+            logger: getLogger("auto-compact"),
           }).catch((e) => {
-            evLog.error("transcript auto-compact tick failed", { err: String(e) });
+            getLogger("events").error("transcript auto-compact tick failed", { err: String(e) });
           });
         }, compactMs)
       : undefined;
@@ -742,7 +732,7 @@ rt.health.register(
   }),
 );
 
-rt.logger.info("daemon starting", {
+getLogger("daemon").info("daemon starting", {
   version: VERSION,
   hashref: readGitHash(),
   stateDbPath: config.stateDbPath,
@@ -758,7 +748,7 @@ void rt.getHealth().then((h) => {
   const someModelFailed = modelChecks.some((c) => c.status === "fail");
 
   const level = sqliteFailed || allModelsFailed ? "error" : anyNonModelFailed || someModelFailed ? "warn" : "info";
-  rt.logger[level]("initial health", {
+  getLogger("daemon")[level]("initial health", {
     ready: h.ready,
     checks: h.checks,
   });
@@ -770,19 +760,19 @@ void rt.getHealth().then((h) => {
       config.models.providers,
       config.models.failoverChain,
       process.env,
-      rt.logger,
+      getLogger("daemon"),
     );
     void fetchOpenAIMetadataForProviders(
       config.models.providers,
       config.models.failoverChain,
       process.env,
-      rt.logger,
+      getLogger("daemon"),
     );
   }
 });
 
 void rt.shutdown.finished.then(() => {
-  rt.logger.info("shutdown complete");
+  getLogger("daemon").info("shutdown complete");
   process.exit(0);
 });
 

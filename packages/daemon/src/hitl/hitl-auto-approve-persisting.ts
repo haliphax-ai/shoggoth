@@ -2,8 +2,10 @@ import { parseAgentSessionUrn, resolveTopLevelSessionUrn } from "@shoggoth/share
 import type Database from "better-sqlite3";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import type { HitlConfigRef } from "../config-hot-reload";
-import type { Logger } from "../logging";
+import { getLogger } from "../logging";
 import { persistAgentToolAutoApproveAndReload } from "./hitl-agent-tool-auto-persist";
+
+const log = getLogger("hitl-auto-approve");
 import {
   insertSessionToolAutoApprove,
   sessionHasToolAutoApproveFlexible,
@@ -17,7 +19,6 @@ export function createPersistingHitlAutoApproveGate(input: {
   readonly dynamicConfigDirectory?: string;
   readonly configRef: { current: ShoggothConfig };
   readonly hitlRef: HitlConfigRef;
-  readonly logger: Logger;
 }): HitlAutoApproveGate {
   /** Process-local agent-scope auto-approve (♾️); updated before disk persist so it sticks even if JSON write fails */
   const agentToolsMem = new Map<string, Set<string>>();
@@ -41,7 +42,7 @@ export function createPersistingHitlAutoApproveGate(input: {
     enableAgentTool(agentId, toolName) {
       rememberAgentTool(agentId, toolName);
       if (!input.dynamicConfigDirectory) {
-        input.logger.warn("hitl.agent_tool_auto_approve_memory_only", {
+        log.warn("hitl.agent_tool_auto_approve_memory_only", {
           reason: "dynamicConfigDirectory not configured; ♾️ approval is in-memory only and will not survive restart",
           agentId,
           toolName,
@@ -58,7 +59,7 @@ export function createPersistingHitlAutoApproveGate(input: {
           toolName,
         });
       } catch (e) {
-        input.logger.warn("hitl.agent_tool_auto_persist_failed", {
+        log.warn("hitl.agent_tool_auto_persist_failed", {
           err: String(e),
           agentId,
           toolName,

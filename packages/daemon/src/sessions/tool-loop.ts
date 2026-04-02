@@ -9,6 +9,7 @@ import type { PendingActionRow, PendingActionsStore } from "../hitl/pending-acti
 import type { TranscriptStore } from "./transcript-store";
 import type { ToolRunStore } from "./tool-run-store";
 import { TurnAbortedError } from "./session-turn-abort";
+import { getLogger } from "../logging";
 
 export { TurnAbortedError } from "./session-turn-abort";
 
@@ -94,8 +95,14 @@ const allowedNames = (tools: ReadonlyArray<{ name: string }>) => new Set(tools.m
 
 const HITL_EXPIRE_POLL_MS = 1000;
 
+const log = getLogger("tool-loop");
+
 function assertNotAborted(sig: AbortSignal | undefined): void {
   if (sig?.aborted) throw new TurnAbortedError();
+}
+
+function truncate(s: string, max = 100): string {
+  return s.length > max ? s.slice(0, max) + "…" : s;
 }
 
 function abortPromise(signal: AbortSignal | undefined): Promise<never> {
@@ -207,10 +214,15 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
           h.pending.expireDue(new Date(h.clock.nowMs()).toISOString());
           const tier = classifyToolRisk(compoundResource, h.config.toolRisk);
           const bypass = h.bypassUpTo;
+          const needsApproval = requiresHumanApproval(tier, bypass);
+          const autoApproved = needsApproval && tier !== "never" && h.autoApprove?.shouldAutoApprove(options.sessionId, compoundResource);
+          if (autoApproved) {
+            log.info("hitl auto-approve fired", { toolName: compoundResource, sessionId: options.sessionId });
+          }
           if (
             requiresReview ||
-            (requiresHumanApproval(tier, bypass) &&
-            (tier === "never" || !h.autoApprove?.shouldAutoApprove(options.sessionId, compoundResource)))
+            (needsApproval &&
+            (tier === "never" || !autoApproved))
           ) {
             const pendingId = h.newPendingId();
             const expiresAtIso = new Date(
@@ -232,6 +244,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
               pendingId,
               riskTier: tier,
             });
+            log.info("hitl approval requested", { toolName: compoundResource, sessionId: options.sessionId, pendingId, riskTier: tier });
 
             const queuedRow = h.pending.getById(pendingId);
             if (queuedRow) {
@@ -263,6 +276,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
                   pendingId,
                   denialReason: reason,
                 });
+                log.info("hitl approval denied", { pendingId, toolName: compoundResource, reason });
                 // Without pushToolMessage, the next model.complete() must not re-emit the same tool
                 // call or the outer for (;;) will spin (HITL re-queue + wait forever).
                 options.model.pushToolMessage?.({ toolCallId: tc.id, content: errBody });
@@ -279,6 +293,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
             } finally {
               clearInterval(expireTimer);
             }
+            log.info("hitl approval granted", { pendingId, toolName: compoundResource, sessionId: options.sessionId });
           }
         }
 
@@ -290,11 +305,14 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         });
 
         assertNotAborted(options.turnAbortSignal);
+        const t0 = Date.now();
+        log.debug("tool call started", { toolName: compoundResource, toolCallId: tc.id, sessionId: options.sessionId, args: truncate(tc.argsJson) });
         const out = await options.executor.execute({
           name: tc.name,
           argsJson: tc.argsJson,
           toolCallId: tc.id,
         });
+        log.debug("tool call completed", { toolName: compoundResource, toolCallId: tc.id, sessionId: options.sessionId, durationMs: Date.now() - t0, success: true });
 
         options.audit.record({
           phase: "execute_done",

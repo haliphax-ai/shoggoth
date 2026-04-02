@@ -2,9 +2,11 @@ import type Database from "better-sqlite3";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import { createSqliteAgentTokenStore } from "../auth/sqlite-agent-tokens";
 import { resolveShoggothAgentId } from "../config/effective-runtime";
-import type { Logger } from "../logging";
+import { getLogger } from "../logging";
 import { createSessionManager } from "../sessions/session-manager";
 import { createSessionStore } from "../sessions/session-store";
+
+const log = getLogger("subagent-reconcile");
 import { SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS } from "./subagent-constants";
 import { rememberSubagentHandles } from "./subagent-disposables";
 import type { SubagentRuntimeExtension } from "./subagent-extension-ref";
@@ -22,7 +24,6 @@ export type ReconcilePersistentSubagentsResult = {
 export function reconcilePersistentSubagents(input: {
   readonly db: Database.Database;
   readonly config: ShoggothConfig;
-  readonly logger: Logger;
   readonly ext: SubagentRuntimeExtension;
 }): ReconcilePersistentSubagentsResult {
   const sessions = createSessionStore(input.db);
@@ -56,7 +57,7 @@ export function reconcilePersistentSubagents(input: {
     if (expiresAt <= now) {
       terminatePersistentSubagentSession(sessionManager, s.id, "ttl_expired");
       expiredKilled++;
-      input.logger.info("subagent.reconcile.expired_killed", { sessionId: s.id });
+      log.info("subagent.reconcile.expired_killed", { sessionId: s.id });
       continue;
     }
 
@@ -83,7 +84,7 @@ export function reconcilePersistentSubagents(input: {
       clearTtl,
     });
     restored++;
-    input.logger.info("subagent.reconcile.restored", {
+    log.info("subagent.reconcile.restored", {
       sessionId: s.id,
       threadId: threadId ?? null,
       expires_at_ms: expiresAt,

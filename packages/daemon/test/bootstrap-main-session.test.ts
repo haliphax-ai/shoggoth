@@ -1,4 +1,4 @@
-import { describe, it } from "vitest";
+import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -7,6 +7,7 @@ import { migrate, defaultMigrationsDir } from "../src/lib";
 import { createSessionStore } from "../src/sessions/session-store";
 import { bootstrapMainSession } from "../src/bootstrap-main-session";
 import type { ShoggothConfig } from "@shoggoth/shared";
+import { setRootLogger } from "../src/logging";
 
 const TMP = join(import.meta.dirname ?? ".", ".tmp-bootstrap-test");
 
@@ -15,17 +16,14 @@ function stubLogger() {
   const log = (level: string) => (msg: string, fields?: Record<string, unknown>) => {
     logs.push({ level, msg, fields });
   };
-  return {
+  const logger = {
     debug: log("debug"),
     info: log("info"),
     warn: log("warn"),
     error: log("error"),
-    child: () => stubLogger().logger,
-    logs,
-    get logger() {
-      return { debug: this.debug, info: this.info, warn: this.warn, error: this.error, child: this.child };
-    },
+    child: () => logger,
   };
+  return { logger, logs };
 }
 
 function makeConfig(overrides: Partial<ShoggothConfig> = {}): ShoggothConfig {
@@ -85,7 +83,8 @@ describe("bootstrapMainSession", () => {
       migrate(db, defaultMigrationsDir());
       const stub = stubLogger();
 
-      bootstrapMainSession({ db, config: makeConfig(), logger: stub.logger as any });
+      setRootLogger(stub.logger as any);
+      bootstrapMainSession({ db, config: makeConfig() });
 
       const store = createSessionStore(db);
       const session = store.getById("agent:main:discord:1234567890123456789");
@@ -109,9 +108,11 @@ describe("bootstrapMainSession", () => {
       const stub = stubLogger();
 
       // Bootstrap twice
-      bootstrapMainSession({ db, config: makeConfig(), logger: stub.logger as any });
+      setRootLogger(stub.logger as any);
+      bootstrapMainSession({ db, config: makeConfig() });
       stub.logs.length = 0;
-      bootstrapMainSession({ db, config: makeConfig(), logger: stub.logger as any });
+      setRootLogger(stub.logger as any);
+      bootstrapMainSession({ db, config: makeConfig() });
 
       const exists = stub.logs.find((l) => l.msg === "bootstrap.main_session.exists");
       assert.ok(exists, "should log session exists");
@@ -143,7 +144,8 @@ describe("bootstrapMainSession", () => {
       });
 
       const stub = stubLogger();
-      bootstrapMainSession({ db, config: makeConfig(), logger: stub.logger as any });
+      setRootLogger(stub.logger as any);
+      bootstrapMainSession({ db, config: makeConfig() });
 
       const warn = stub.logs.find((l) => l.msg === "bootstrap.main_session.missing");
       assert.ok(warn, "should warn about missing session in existing DB");
@@ -165,7 +167,8 @@ describe("bootstrapMainSession", () => {
       migrate(db, defaultMigrationsDir());
       const stub = stubLogger();
 
-      bootstrapMainSession({ db, config: makeConfig(), logger: stub.logger as any });
+      setRootLogger(stub.logger as any);
+      bootstrapMainSession({ db, config: makeConfig() });
 
       const store = createSessionStore(db);
       // Platform is derived from agent bindings (discord)

@@ -27,7 +27,7 @@ import { readOperatorTokenSecret } from "../auth/read-operator-secret";
 import { createSqliteAgentTokenStore } from "../auth/sqlite-agent-tokens";
 import { createSqliteOperatorMap } from "../auth/sqlite-operator-map";
 import type { HealthSnapshot } from "../health";
-import type { Logger } from "../logging";
+import { getLogger } from "../logging";
 import { auditSourceForPrincipal, principalAuditFields } from "../policy/audit-source";
 import { createPolicyEngine, isDefinedControlOp, type PolicyEngine } from "../policy/engine";
 import type { ShutdownCoordinator } from "../shutdown";
@@ -57,7 +57,6 @@ export type ControlPlaneOptions = {
    * `config.policy` (supports in-process policy updates via {@link createDelegatingPolicyEngine}).
    */
   policyEngine?: PolicyEngine;
-  logger: Logger;
   shutdown: ShutdownCoordinator;
   getHealth: () => Promise<HealthSnapshot>;
   version: string;
@@ -127,14 +126,13 @@ function buildOperatorMap(config: ShoggothConfig, stateDb?: Database.Database): 
 
 function recordControlPlaneAudit(
   db: Database.Database | undefined,
-  logger: Logger,
   row: AppendAuditRowInput,
 ): void {
   if (!db) return;
   try {
     appendAuditRow(db, row);
   } catch (e) {
-    logger.warn("audit append failed", { err: String(e) });
+    getLogger("control-plane").warn("audit append failed", { err: String(e) });
   }
 }
 
@@ -190,7 +188,6 @@ async function handleOneLine(
       | "hitlClear"
       | "cancelMcpHttpRequest"
     >;
-    logger: Logger;
   },
 ): Promise<WireResponse> {
   let req: WireRequest;
@@ -242,7 +239,7 @@ async function handleOneLine(
     };
 
     if (!isDefinedControlOp(req.op)) {
-      recordControlPlaneAudit(deps.stateDb, deps.logger, {
+      recordControlPlaneAudit(deps.stateDb, {
         ...auditBaseFields(),
         action: "authz.control",
         resource: req.op,
@@ -262,7 +259,7 @@ async function handleOneLine(
       resource: req.op,
     });
     if (!authz.allow) {
-      recordControlPlaneAudit(deps.stateDb, deps.logger, {
+      recordControlPlaneAudit(deps.stateDb, {
         ...auditBaseFields(),
         action: "authz.control",
         resource: req.op,
@@ -288,7 +285,7 @@ async function handleOneLine(
       hitlClear: deps.integration.hitlClear,
       cancelMcpHttpRequest: deps.integration.cancelMcpHttpRequest,
       recordIntegrationAudit: (extras) =>
-        recordControlPlaneAudit(deps.stateDb, deps.logger, {
+        recordControlPlaneAudit(deps.stateDb, {
           ...auditBaseFields(),
           ...extras,
         }),
@@ -303,7 +300,7 @@ async function handleOneLine(
       principal,
       integrationCtx,
     );
-    recordControlPlaneAudit(deps.stateDb, deps.logger, {
+    recordControlPlaneAudit(deps.stateDb, {
       ...auditBaseFields(),
       action: "authz.control",
       resource: req.op,
@@ -354,7 +351,6 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
   const {
     config,
     policyEngine: policyEngineOpt,
-    logger,
     shutdown,
     getHealth,
     version,
@@ -367,6 +363,7 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
     cancelMcpHttpRequest: cancelMcpHttpRequestOpt,
   } = opts;
 
+  const logger = getLogger("control-plane");
   const readPeer = readPeerCred ?? readPeerCredFromSocket;
   const operatorMap = buildOperatorMap(config, stateDb);
   const acpxStore = stateDb ? createSqliteAcpxBindingStore(stateDb) : undefined;
@@ -392,7 +389,6 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
       agentsConfig: config.agents,
     });
     acpxSupervisor = createAcpxProcessSupervisor({
-      logger: logger.child({ subsystem: "acpx" }),
       spawn: acpxSpawn,
     });
     shutdown.registerDrain("acpx-processes", () => {
@@ -453,7 +449,6 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
               engine,
               stateDb,
               integration: integrationBundle,
-              logger,
             }),
           )
           .then((res) => {
@@ -501,7 +496,6 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
       integration: integrationBundle,
       policyEngine: engine,
       stateDb,
-      logger: logger.child({ subsystem: "agent-control-invoke" }),
     }),
   );
 

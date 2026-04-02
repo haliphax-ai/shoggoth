@@ -64,3 +64,5 @@ export interface TaskSuccessRef {
 }
 
 export type TemplateRef = TaskOutputRef | TaskSuccessRef;
+
+/** Minimal structured logger for workflow internals. */

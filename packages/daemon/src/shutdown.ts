@@ -1,9 +1,8 @@
-import type { Logger } from "./logging";
+import { getLogger } from "./logging";
 
 export type DrainFn = () => void | Promise<void>;
 
 export interface ShutdownOptions {
-  logger: Logger;
   drainTimeoutMs: number;
   onStopAccepting?: () => void | Promise<void>;
   /** Mark in-flight tool loops / cron slices failed when interrupted by shutdown. */
@@ -49,7 +48,7 @@ export class ShutdownCoordinator {
   async requestShutdown(signal: string): Promise<void> {
     if (this.phase !== "running") return;
     this.phase = "stopping";
-    const log = this.opts.logger;
+    const log = getLogger("shutdown");
     log.info("shutdown requested", { signal });
 
     try {

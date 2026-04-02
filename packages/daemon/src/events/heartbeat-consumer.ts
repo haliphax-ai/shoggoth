@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { Logger } from "../logging";
+import { getLogger } from "../logging";
 import {
   claimPendingEvents,
   hasEventProcessingRecord,
@@ -8,13 +8,14 @@ import {
   type EventQueueRow,
 } from "./events-queue";
 
+const log = getLogger("heartbeat");
+
 export type HeartbeatHandler = (row: EventQueueRow) => void | Promise<void>;
 
 export interface HeartbeatBatchOptions {
   readonly batchLimit: number;
   readonly concurrency: number;
   readonly handlers: Readonly<Record<string, HeartbeatHandler>>;
-  readonly logger?: Logger;
 }
 
 async function runPool<T>(
@@ -46,8 +47,6 @@ export async function runHeartbeatBatch(
   const batch = claimPendingEvents(db, { limit: options.batchLimit });
   if (batch.length === 0) return 0;
 
-  const log = options.logger;
-
   const processOne = async (row: EventQueueRow) => {
     if (hasEventProcessingRecord(db, row.id)) {
       markEventCompleted(db, row.id);
@@ -64,7 +63,7 @@ export async function runHeartbeatBatch(
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       markEventFailed(db, row.id, msg);
-      log?.warn("event handler failed", {
+      log.warn("event handler failed", {
         eventId: row.id,
         eventType: row.eventType,
         err: msg,
@@ -76,12 +75,10 @@ export async function runHeartbeatBatch(
   return batch.length;
 }
 
-export function createDefaultHeartbeatHandlers(ctx: {
-  readonly logger?: Logger;
-}): Record<string, HeartbeatHandler> {
+export function createDefaultHeartbeatHandlers(): Record<string, HeartbeatHandler> {
   return {
     "cron.fire": (row) => {
-      ctx.logger?.debug("cron.fire consumed", {
+      log.debug("cron.fire consumed", {
         eventId: row.id,
         scope: row.scope,
         idempotencyKey: row.idempotencyKey,

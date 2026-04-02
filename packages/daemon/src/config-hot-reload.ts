@@ -5,7 +5,9 @@ import {
   type ConfigRestartRequiredKey,
 } from "./config-policy";
 import { createPolicyEngine, type PolicyEngine } from "./policy/engine";
-import type { Logger } from "./logging";
+import { getLogger } from "./logging";
+
+const log = getLogger("config-hot-reload");
 
 export type PolicyEngineRef = { engine: PolicyEngine };
 
@@ -32,7 +34,6 @@ export function diffRestartRequiredKeys(
 
 export type StartConfigHotReloadOptions = {
   configDirectory: string;
-  logger: Logger;
   /** Snapshot of the last successfully applied layered config (mutated on success). */
   configRef: { current: ShoggothConfig };
   policyRef: PolicyEngineRef;
@@ -55,12 +56,12 @@ export function startConfigHotReload(options: StartConfigHotReloadOptions): () =
   }
   const dir = options.configDirectory;
   if (!existsSync(dir)) {
-    options.logger.debug("config hot-reload skipped (config directory missing)", { dir });
+    log.debug("config hot-reload skipped (config directory missing)", { dir });
     return () => {};
   }
 
   const debounceMs = options.debounceMs ?? 400;
-  const { logger, configRef, policyRef, hitlRef } = options;
+  const { configRef, policyRef, hitlRef } = options;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let watcher: FSWatcher | undefined;
 
@@ -69,12 +70,12 @@ export function startConfigHotReload(options: StartConfigHotReloadOptions): () =
     try {
       next = loadLayeredConfig(dir);
     } catch (e) {
-      logger.warn("config hot-reload load failed; keeping previous config", { err: String(e) });
+      log.warn("config hot-reload load failed; keeping previous config", { err: String(e) });
       return;
     }
     const deltas = diffRestartRequiredKeys(configRef.current, next);
     if (deltas.length > 0) {
-      logger.warn("config file changed but restart-required keys differ; restart daemon to apply", {
+      log.warn("config file changed but restart-required keys differ; restart daemon to apply", {
         keys: deltas,
       });
       return;
@@ -82,7 +83,7 @@ export function startConfigHotReload(options: StartConfigHotReloadOptions): () =
     policyRef.engine = createPolicyEngine(next.policy, next.agents);
     hitlRef.value = { ...DEFAULT_HITL_CONFIG, ...next.hitl };
     configRef.current = next;
-    logger.info("config hot-reload applied", { slices: ["policy", "hitl"] });
+    log.info("config hot-reload applied", { slices: ["policy", "hitl"] });
   };
 
   const schedule = (): void => {
@@ -98,7 +99,7 @@ export function startConfigHotReload(options: StartConfigHotReloadOptions): () =
       schedule();
     });
   } catch (e) {
-    logger.warn("config hot-reload watch failed", { err: String(e) });
+    log.warn("config hot-reload watch failed", { err: String(e) });
     return () => {};
   }
 

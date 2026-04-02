@@ -5,6 +5,8 @@ import { parseTemplateRefs, validateTemplateRefs, resolveTemplates } from "./tem
 import { canSpawn } from "./depth.js";
 import { saveWorkflow, loadWorkflow } from "./state.js";
 import type { StatusManager } from "./status-manager.js";
+import { getLogger } from "@shoggoth/shared";
+const log = getLogger("workflow");
 
 // --- Adapter interfaces (dependency injection for testability) ---
 
@@ -178,6 +180,8 @@ export class Orchestrator {
       await this.statusManager.postInitialStatus(workflow);
     }
 
+    log.info("workflow started", { workflowId: workflow.id, name: workflow.name, taskCount: tasks.length });
+
     return workflow.id;
   }
 
@@ -296,6 +300,7 @@ export class Orchestrator {
         task.status = "done";
         task.output = result.output;
         task.completedAt = Date.now();
+        log.debug("task completed", { workflowId: wf.id, taskId: task.taskDef.id });
         if (this.killer && task.sessionKey) {
           await this.killer.kill(task.sessionKey).catch(() => {});
         }
@@ -303,6 +308,7 @@ export class Orchestrator {
         task.status = "failed";
         task.error = result.error;
         task.completedAt = Date.now();
+        log.debug("task failed", { workflowId: wf.id, taskId: task.taskDef.id, error: result.error });
         if (this.killer && task.sessionKey) {
           await this.killer.kill(task.sessionKey).catch(() => {});
         }
@@ -334,6 +340,7 @@ export class Orchestrator {
         task.status = "failed";
         task.error = `timeout: task exceeded runtime limit of ${limit}ms`;
         task.completedAt = now;
+        log.debug("task timed out", { workflowId: wf.id, taskId: task.taskDef.id, limitMs: limit });
       }
     }
   }
@@ -466,6 +473,7 @@ export class Orchestrator {
         task.status = "in_progress";
         task.sessionKey = sessionKey;
         task.startedAt = Date.now();
+        log.debug("task started", { workflowId: wf.id, taskId: task.taskDef.id, sessionKey });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         task.status = "failed";
@@ -517,6 +525,11 @@ export class Orchestrator {
 
       const allSuccess = wf.tasks.every((t) => t.status === "done");
       this.notifier.notify(wf.id, allSuccess, { replyTo: this.opts?.replyTo ?? "" });
+      if (allSuccess) {
+        log.info("workflow completed", { workflowId: wf.id });
+      } else {
+        log.error("workflow failed", { workflowId: wf.id });
+      }
     }
   }
 }

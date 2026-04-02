@@ -122,3 +122,4 @@ export {
   SHOGGOTH_SESSION_UUID_RE,
   type ParsedAgentSessionUrn,
 } from "./session-urn";
+export { type Logger, type LogLevel, type LogFields, createLogger, initLogger, getLogger, setRootLogger } from "./logging.js";

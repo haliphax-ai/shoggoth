@@ -1,5 +1,9 @@
 /** In-memory tracker for context window mismatch warnings. Resets on daemon restart. */
 
+import { getLogger } from "../logging";
+
+const log = getLogger("context-window-mismatch");
+
 const warnedProviders = new Set<string>();
 
 export interface ContextWindowMismatchInput {
@@ -7,7 +11,6 @@ export interface ContextWindowMismatchInput {
   readonly configContextWindow: number | undefined;
   readonly providerContextWindow: number | undefined;
   readonly sessionId: string;
-  readonly logger: { warn: (msg: string, fields?: Record<string, unknown>) => void };
   /** Callback to surface warning to the session's message platform binding. Omit to skip platform surfacing. */
   readonly surfaceWarning?: (message: string) => void;
   /** When true, suppress platform surfacing (stderr log still fires). */
@@ -26,7 +29,7 @@ export function checkContextWindowMismatch(input: ContextWindowMismatchInput): v
   const key = input.providerId;
 
   // Always log to stderr
-  input.logger.warn("context window mismatch", {
+  log.warn("context window mismatch", {
     providerId: input.providerId,
     sessionId: input.sessionId,
     configValue: input.configContextWindow,

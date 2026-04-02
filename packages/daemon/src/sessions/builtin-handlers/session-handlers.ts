@@ -9,6 +9,9 @@ import {
 } from "@shoggoth/shared";
 import { IntegrationOpError } from "../../control/integration-ops";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
+import { getLogger } from "../../logging";
+
+const log = getLogger("subagent");
 
 export function register(registry: BuiltinToolRegistry): void {
   registry.register("session.query", sessionQuery);
@@ -330,7 +333,14 @@ async function subagentHandler(
     payload.model_options = mo;
   }
 
-  return invokeIntegration(inv, ctx.sessionId, op, payload);
+  if (spawnAction) {
+    log.info("subagent spawned", { action, parentSessionId: ctx.sessionId, mode: payload.mode });
+  }
+  const result = await invokeIntegration(inv, ctx.sessionId, op, payload);
+  if (spawnAction) {
+    log.info("subagent completed", { action, parentSessionId: ctx.sessionId });
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------

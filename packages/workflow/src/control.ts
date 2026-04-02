@@ -3,6 +3,8 @@ import type { Orchestrator, KillAdapter, SpawnAdapter } from "./orchestrator.js"
 import { saveWorkflow, loadWorkflow } from "./state.js";
 import { retentionRun, type RetentionSummary, type RetentionOptions } from "./retention.js";
 import { getTransitiveDeps } from "./graph.js";
+import { getLogger } from "@shoggoth/shared";
+const log = getLogger("workflow");
 import fs from "node:fs";
 import path from "node:path";
 
@@ -141,6 +143,7 @@ export class ControlPlane {
 
     // Persist
     saveWorkflow(this.stateDir, wf);
+    log.warn("workflow aborted", { workflowId });
   }
 
   /**
@@ -161,6 +164,7 @@ export class ControlPlane {
 
     // Persist
     saveWorkflow(this.stateDir, wf);
+    log.info("workflow paused", { workflowId });
   }
 
   /**
@@ -181,6 +185,7 @@ export class ControlPlane {
 
     // Persist
     saveWorkflow(this.stateDir, wf);
+    log.info("workflow resumed", { workflowId });
   }
 
   /**
@@ -330,6 +335,7 @@ export class ControlPlane {
 
     // Persist
     saveWorkflow(this.stateDir, wf);
+    log.info("workflow task retried", { workflowId, taskId, cascade: Boolean(cascade) });
   }
 
   /**

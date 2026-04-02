@@ -16,6 +16,9 @@ import type {
 } from "@shoggoth/workflow";
 import type { SessionManager } from "./sessions/session-manager.js";
 import type { SessionStore, SessionRow } from "./sessions/session-store.js";
+import { getLogger } from "./logging";
+
+const log = getLogger("workflow-adapters");
 
 // ---------------------------------------------------------------------------
 // Completion tracking for spawned subagent turns
@@ -175,19 +178,14 @@ export interface DaemonMessageAdapterDeps {
   readonly sessionId: string;
 }
 
-function log(level: string, msg: string, fields: Record<string, unknown> = {}): void {
-  const entry = JSON.stringify({ ts: new Date().toISOString(), level, msg, component: "workflow-msg", ...fields });
-  process.stderr.write(entry + "\n");
-}
-
 export function createDaemonMessageAdapter(deps: DaemonMessageAdapterDeps): MessageAdapter {
-  log("debug", "adapter created", { sessionId: deps.sessionId });
+  log.debug("adapter created", { sessionId: deps.sessionId });
   return {
     async postMessage(content: string): Promise<{ messageId: string }> {
       const ctx = deps.getMessageContext();
       const channelId = deps.resolveChannelId();
-      log("debug", "postMessage", { hasCtx: !!ctx, sessionId: deps.sessionId, channelId: channelId ?? null });
-      if (!ctx) { log("error", "postMessage: no message context available"); return { messageId: "" }; }
+      log.debug("postMessage", { hasCtx: !!ctx, sessionId: deps.sessionId, channelId: channelId ?? null });
+      if (!ctx) { log.error("postMessage: no message context available"); return { messageId: "" }; }
 
       try {
         const result = await ctx.execute(deps.sessionId, {
@@ -198,15 +196,15 @@ export function createDaemonMessageAdapter(deps: DaemonMessageAdapterDeps): Mess
 
         const res = result as { ok?: boolean; error?: string; message_id?: string };
         if (res.ok === false) {
-          log("error", "postMessage failed", { error: res.error, sessionId: deps.sessionId, channelId: channelId ?? null });
+          log.error("postMessage failed", { error: res.error, sessionId: deps.sessionId, channelId: channelId ?? null });
           return { messageId: "" };
         }
 
         const id = res.message_id ?? "";
-        log("debug", "postMessage sent", { messageId: id });
+        log.debug("postMessage sent", { messageId: id });
         return { messageId: id };
       } catch (e) {
-        log("error", "postMessage threw", { err: String(e), sessionId: deps.sessionId });
+        log.error("postMessage threw", { err: String(e), sessionId: deps.sessionId });
         return { messageId: "" };
       }
     },
@@ -214,8 +212,8 @@ export function createDaemonMessageAdapter(deps: DaemonMessageAdapterDeps): Mess
     async editMessage(messageId: string, content: string): Promise<boolean> {
       const ctx = deps.getMessageContext();
       const channelId = deps.resolveChannelId();
-      log("debug", "editMessage", { hasCtx: !!ctx, messageId, channelId: channelId ?? null });
-      if (!ctx) { log("error", "editMessage: no message context available"); return false; }
+      log.debug("editMessage", { hasCtx: !!ctx, messageId, channelId: channelId ?? null });
+      if (!ctx) { log.error("editMessage: no message context available"); return false; }
 
       try {
         const result = await ctx.execute(deps.sessionId, {
@@ -227,14 +225,14 @@ export function createDaemonMessageAdapter(deps: DaemonMessageAdapterDeps): Mess
 
         const res = result as { ok?: boolean; error?: string };
         if (res.ok === false) {
-          log("error", "editMessage failed", { error: res.error, messageId, sessionId: deps.sessionId });
+          log.error("editMessage failed", { error: res.error, messageId, sessionId: deps.sessionId });
           return false;
         }
 
-        log("debug", "editMessage sent", { messageId });
+        log.debug("editMessage sent", { messageId });
         return true;
       } catch (e) {
-        log("error", "editMessage threw", { err: String(e), messageId });
+        log.error("editMessage threw", { err: String(e), messageId });
         return false;
       }
     },

@@ -85,6 +85,8 @@ export {
   type WorkflowToolHandlerDeps,
 } from "./tool-handler.js";
 
+// Workflow logger
+
 // Hardening
 export {
   isValidTransition,

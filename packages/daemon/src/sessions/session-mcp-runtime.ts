@@ -3,7 +3,7 @@ import {
   SHOGGOTH_DEFAULT_PER_SESSION_MCP_IDLE_MS,
   type ShoggothConfig,
 } from "@shoggoth/shared";
-import type { Logger } from "../logging";
+import { getLogger } from "../logging";
 import {
   connectShoggothMcpServers,
   partitionMcpServersByEffectiveScope,
@@ -21,6 +21,8 @@ import {
   type SessionMcpToolContext,
 } from "./session-mcp-tool-context";
 
+const log = getLogger("session-mcp");
+
 export type SessionMcpContextFinalizer = (ctx: SessionMcpToolContext, sessionId: string) => SessionMcpToolContext;
 
 const contextFinalizers: SessionMcpContextFinalizer[] = [];
@@ -35,7 +37,6 @@ function runContextFinalizers(ctx: SessionMcpToolContext, sessionId: string): Se
 
 export interface CreateSessionMcpRuntimeOptions {
   readonly config: ShoggothConfig;
-  readonly logger: Logger;
   readonly env: NodeJS.ProcessEnv;
   readonly deps?: {
     readonly connectShoggothMcpServers?: typeof connectShoggothMcpServers;
@@ -53,11 +54,10 @@ export interface SessionMcpRuntime {
 }
 
 function buildMcpPoolConnectOptions(
-  logger: Logger,
   env: NodeJS.ProcessEnv,
 ): ConnectShoggothMcpPoolOptions | undefined {
   if (env.SHOGGOTH_MCP_LOG_SERVER_MESSAGES !== "1") return undefined;
-  const child = logger.child({ component: "mcp-sse" });
+  const child = log.child({ component: "mcp-sse" });
   return {
     onMcpServerMessage: ({ sourceId, msg }) => {
       child.debug("mcp.server_message", { sourceId, msg });
@@ -76,7 +76,7 @@ export async function createSessionMcpRuntime(
   const mcpPoolScope = opts.config.mcp?.poolScope ?? "global";
   const connectMcpPool = opts.deps?.connectShoggothMcpServers ?? connectShoggothMcpServers;
   const builtinMcpCtx = buildBuiltinOnlySessionMcpToolContext();
-  const mcpConnectOpts = buildMcpPoolConnectOptions(opts.logger, opts.env);
+  const mcpConnectOpts = buildMcpPoolConnectOptions(opts.env);
 
   const { globalServers, perSessionServers } = partitionMcpServersByEffectiveScope(
     mcpServers,
@@ -103,7 +103,7 @@ export async function createSessionMcpRuntime(
       globalExternalSources = pool.externalSources;
       globalExternalInvoke = external;
     } catch (e) {
-      opts.logger.error("session.mcp_pool.connect_failed", { err: String(e) });
+      log.error("session.mcp_pool.connect_failed", { err: String(e) });
     }
   }
 
@@ -158,7 +158,7 @@ export async function createSessionMcpRuntime(
     cancelPerSessionMcpIdleTimer(sessionId);
     const t = setTimeout(() => {
       perSessionMcpIdleTimers.delete(sessionId);
-      opts.logger.info("session.mcp_pool.idle_evicted", { sessionId });
+      log.info("session.mcp_pool.idle_evicted", { sessionId });
       evictPerSessionMcpIdlePool(sessionId);
     }, perSessionMcpIdleMs);
     perSessionMcpIdleTimers.set(sessionId, t);
@@ -192,7 +192,7 @@ export async function createSessionMcpRuntime(
             perSessionMcpCtx.set(sessionId, ctx);
             return ctx;
           } catch (e) {
-            opts.logger.error("session.mcp_pool.connect_failed", {
+            log.error("session.mcp_pool.connect_failed", {
               err: String(e),
               sessionId,
             });
@@ -235,7 +235,7 @@ export async function createSessionMcpRuntime(
           perSessionMcpCtx.set(sessionId, ctx);
           return ctx;
         } catch (e) {
-          opts.logger.error("session.mcp_pool.connect_failed", { err: String(e), sessionId });
+          log.error("session.mcp_pool.connect_failed", { err: String(e), sessionId });
           const fallback = buildMixedSessionMcpToolContext(
             globalExternalSources,
             globalExternalInvoke,

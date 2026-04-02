@@ -9,7 +9,6 @@ import type Database from "better-sqlite3";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import type { SessionModelTurnDelivery } from "../messaging/session-model-turn-delivery";
 import type { SessionAgentTurnResult } from "../sessions/session-agent-turn";
-import type { Logger } from "../logging";
 import type { PolicyEngine } from "../policy/engine";
 import type { HitlConfigRef } from "../config-hot-reload";
 import type { HitlPendingStack } from "../hitl/hitl-pending-stack";
@@ -187,9 +186,6 @@ export interface PlatformOptions {
    * will not unblock this platform's waiters).
    */
   readonly hitlPending?: HitlPendingStack;
-
-  /** Structured logger instance. */
-  readonly logger: Logger;
 
   /**
    * Merged environment variables. Layered with `process.env` and config-derived
