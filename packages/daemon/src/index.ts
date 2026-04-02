@@ -302,6 +302,7 @@ void (async () => {
             return Reflect.get(interactionTransportRef.current, prop, receiver);
           },
         }),
+        get applicationId() { return reactionBotUserIdRef.current ?? ""; },
         logger: getLogger("messaging"),
         abortSession: async (sessionId) => requestSessionTurnAbort(sessionId ?? ""),
         invokeControlOp: async (op, payload) => {

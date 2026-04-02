@@ -110,4 +110,10 @@ export interface DiscordRestTransport {
     applicationId: string,
     commands: ReadonlyArray<Record<string, unknown>>,
   ): Promise<void>;
+  /** PATCH `/webhooks/{appId}/{token}/messages/@original` — edit a deferred interaction response. */
+  editOriginalInteractionResponse(
+    applicationId: string,
+    interactionToken: string,
+    body: { readonly content: string },
+  ): Promise<void>;
 }

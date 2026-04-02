@@ -388,5 +388,23 @@ export function createDiscordRestTransport(options: DiscordRestTransportOptions)
         throw new Error(`Discord REST registerGlobalCommands ${res.status}: ${bodyText}`);
       }
     },
+
+    async editOriginalInteractionResponse(applicationId, interactionToken, body) {
+      const res = await discordFetchWithRateLimitRetry(
+        () =>
+          discordFetch(
+            `/webhooks/${encodeURIComponent(applicationId)}/${encodeURIComponent(interactionToken)}/messages/@original`,
+            {
+              method: "PATCH",
+              body: JSON.stringify(body),
+            },
+          ),
+        "editOriginalInteractionResponse" as DiscordRestOperation,
+      );
+      if (!res.ok) {
+        const bodyText = await res.text();
+        throw new Error(`Discord REST editOriginalInteractionResponse ${res.status}: ${bodyText}`);
+      }
+    },
   };
 }

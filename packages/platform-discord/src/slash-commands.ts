@@ -80,9 +80,12 @@ export async function registerDiscordSlashCommands(opts: {
 
 /** Interaction response type 4 = CHANNEL_MESSAGE_WITH_SOURCE. */
 const INTERACTION_RESPONSE_CHANNEL_MESSAGE = 4;
+/** Interaction response type 5 = DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE. */
+const INTERACTION_RESPONSE_DEFERRED = 5;
 
 export interface DiscordInteractionHandlerDeps {
   readonly transport: DiscordRestTransport;
+  readonly applicationId: string;
   readonly logger: {
     readonly info: (msg: string, fields?: Record<string, unknown>) => void;
     readonly warn: (msg: string, fields?: Record<string, unknown>) => void;
@@ -235,6 +238,7 @@ async function handleInteraction(
   }
 
   if (controlOp.op === "session_context_new" || controlOp.op === "session_context_reset" || controlOp.op === "session_compact") {
+    const isCompact = controlOp.op === "session_compact";
     try {
       // Resolve session_id from channel if not explicitly provided
       const payload = { ...controlOp.payload };
@@ -249,6 +253,26 @@ async function handleInteraction(
         });
         return;
       }
+
+      // Compact can take a long time (model summarization call) — defer the response.
+      if (isCompact) {
+        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+          type: INTERACTION_RESPONSE_DEFERRED,
+        });
+        try {
+          const res = await deps.invokeControlOp(controlOp.op, payload);
+          const content = res.ok
+            ? `✅ \`${controlOp.op}\` completed.`
+            : `⚠️ \`${controlOp.op}\` failed: ${res.error ?? "unknown error"}`;
+          await deps.transport.editOriginalInteractionResponse(deps.applicationId, parsed.interactionToken, { content });
+        } catch (err) {
+          await deps.transport.editOriginalInteractionResponse(deps.applicationId, parsed.interactionToken, {
+            content: `⚠️ \`${controlOp.op}\` failed: ${String(err)}`,
+          });
+        }
+        return;
+      }
+
       const res = await deps.invokeControlOp(controlOp.op, payload);
       const content = res.ok
         ? `✅ \`${controlOp.op}\` completed.`
