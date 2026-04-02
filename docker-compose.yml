@@ -3,8 +3,8 @@ services:
     build: .
     image: shoggoth:local
     restart: unless-stopped
-#    environment:
-#      SHOGGOTH_CONFIG_DIR: /etc/shoggoth/config.d
+    environment:
+      HOST_UID: $HOST_UID
     logging:
       driver: json-file
       options:
