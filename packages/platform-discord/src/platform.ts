@@ -357,7 +357,6 @@ export async function startDiscordPlatform(
 
     await withAgentTypingWhile(opts.discord, msg.sessionId, async () => {
       await runInboundSessionTurn({
-        logger: opts.logger,
         logContext: { sessionId: msg.sessionId },
         mcpLifecycle,
         streaming:

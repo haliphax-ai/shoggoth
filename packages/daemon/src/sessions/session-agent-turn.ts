@@ -241,7 +241,7 @@ export async function executeSessionAgentTurn(
     toolCount: mcpCtx.toolsLoop.length,
     systemPromptLen: input.systemPrompt.length,
     totalContentLen: initialMessages.reduce((n, m) => n + (m.content?.length ?? 0), 0),
-    model: modelInvocation?.model ?? "default",
+    model: (modelInvocation as Record<string, unknown>)?.model ?? "default",
     isSubagent: isSubagentSessionUrn(input.sessionId),
   });
   try {
