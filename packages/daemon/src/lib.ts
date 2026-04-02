@@ -226,3 +226,9 @@ export {
   type ReactionLegendEntry,
   type ParsedReactionLegend,
 } from "./presentation/reaction-router";
+export {
+  buildMinimalContextMessages,
+  formatGlobalReactionEventContext,
+  formatAdhocReactionEventContext,
+  type MinimalContextInput,
+} from "./presentation/minimal-context";

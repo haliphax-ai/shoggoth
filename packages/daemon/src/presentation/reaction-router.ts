@@ -21,7 +21,12 @@ export function parseReactionLegend(messageContent: string): ParsedReactionLegen
   const match = LEGEND_HEADER_RE.exec(messageContent);
   if (!match) return null;
 
-  const afterHeader = messageContent.slice(match.index + match[0].length);
+  // Find the end of the header line and start parsing from the next line.
+  // (The regex $ in multiline mode may or may not consume trailing \s,
+  // so we locate the line break explicitly.)
+  const lineEnd = messageContent.indexOf("\n", match.index);
+  if (lineEnd === -1) return null; // header is the last line — no entries
+  const afterHeader = messageContent.slice(lineEnd + 1);
   const lines = afterHeader.split("\n");
   const entries: ReactionLegendEntry[] = [];
 

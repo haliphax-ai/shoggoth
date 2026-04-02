@@ -30,10 +30,11 @@ import {
   createSessionMcpRuntime,
   defaultPlatformAssistantDeps,
   getTurnQueue,
-  formatDegradedPrefix,
-  formatModelTagFooter,
+  formatAssistantReply,
   formatErrorUserText,
   routeReaction,
+  formatGlobalReactionEventContext,
+  formatAdhocReactionEventContext,
   type TieredTurnQueue,
   type HitlPendingStack,
   type PolicyEngine,
@@ -357,7 +358,7 @@ export async function startDiscordPlatform(
         sliceDisplayText: sliceDiscordPlatformMessageBody,
         formatAssistantReply: (latest, meta) => {
           const cfg = opts.configRef?.current ?? opts.config;
-          return `${formatDegradedPrefix(meta)}${formatAgentIdentityPrefix(cfg, msg.sessionId)}${latest}${formatModelTagFooter(env, meta)}`;
+          return formatAssistantReply(cfg, msg.sessionId, env, latest, meta);
         },
         formatErrorReply: (e) => `⚠️ ${formatErrorUserText(e)}`,
         onTurnExecutionFailed: (e) => {
@@ -568,7 +569,7 @@ export async function startDiscordPlatform(
         turnResult = await executeTurn(buildAfterHitlQueued(delivery));
         const cfg = opts.configRef?.current ?? opts.config;
         const fullBody =
-          `${formatDegradedPrefix(turnResult.failoverMeta)}${formatAgentIdentityPrefix(cfg, sid)}${turnResult.latestAssistantText}${formatModelTagFooter(env, turnResult.failoverMeta)}`;
+          formatAssistantReply(cfg, sid, env, turnResult.latestAssistantText, turnResult.failoverMeta);
         const chunks = splitDiscordMessage(fullBody);
         for (let i = 0; i < chunks.length; i++) {
           await opts.discord.outbound.sendDiscord(
@@ -695,19 +696,9 @@ export async function startDiscordPlatform(
 
     let eventContext: string;
     if (route.kind === "adhoc") {
-      const truncated = ev.messageContent.length > 500 ? ev.messageContent.slice(0, 500) + "\u2026" : ev.messageContent;
-      const legendLines = route.legend.entries.map(e =>
-        e.emoji === ev.emoji ? `${e.emoji} ${e.label} \u2190 selected` : `${e.emoji} ${e.label}`
-      );
-      eventContext = [
-        `Operator reacted ${ev.emoji} to your message with reaction legend:`,
-        ...legendLines,
-        '',
-        `Original message: "${truncated}"`,
-      ].join("\n");
+      eventContext = formatAdhocReactionEventContext(ev.emoji, route.legend.entries, ev.messageContent);
     } else {
-      const truncated = ev.messageContent.length > 500 ? ev.messageContent.slice(0, 500) + "\u2026" : ev.messageContent;
-      eventContext = `Operator reacted ${ev.emoji} to your message: "${truncated}"`;
+      eventContext = formatGlobalReactionEventContext(ev.emoji, ev.messageContent);
     }
 
     try {

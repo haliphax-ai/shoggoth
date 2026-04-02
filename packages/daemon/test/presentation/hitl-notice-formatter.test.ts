@@ -38,13 +38,13 @@ describe("formatHitlPayloadExcerpt", () => {
     const long = "x".repeat(HITL_NOTICE_PAYLOAD_MAX_CHARS + 100);
     const result = formatHitlPayloadExcerpt(long)!;
     expect(result.length).toBe(HITL_NOTICE_PAYLOAD_MAX_CHARS);
-    expect(result).toEndWith("…");
+    expect(result.endsWith("…")).toBe(true);
   });
 
   it("respects custom maxChars", () => {
     const result = formatHitlPayloadExcerpt("abcdefghij", 5)!;
     expect(result.length).toBe(5);
-    expect(result).toEndWith("…");
+    expect(result.endsWith("…")).toBe(true);
   });
 
   it("collapses newlines and replaces backticks", () => {

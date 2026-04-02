@@ -71,7 +71,7 @@ describe("routeReaction", () => {
   });
 
   it("returns adhoc when legend matches", () => {
-    const content = `React to choose:\n👍 Approve\n👎 Reject`;
+    const content = "Some text\nReact to choose:\n👍 Approve\n👎 Reject\n\nMore text";
     const now = Date.now();
     const result = routeReaction({
       ...base,
@@ -87,7 +87,7 @@ describe("routeReaction", () => {
   });
 
   it("discards when legend exists but emoji not in legend", () => {
-    const content = `React to choose:\n✅ Yes\n❌ No`;
+    const content = "Some text\nReact to choose:\n✅ Yes\n❌ No\n\nMore text";
     const now = Date.now();
     const result = routeReaction({
       ...base,
