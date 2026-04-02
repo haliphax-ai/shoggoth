@@ -28,7 +28,8 @@ FROM node:22-bookworm-slim
 RUN groupadd --system --gid 900 shoggoth \
   && useradd --system --uid 900 --gid shoggoth --home-dir /var/lib/shoggoth --shell /usr/sbin/nologin shoggoth \
   && groupadd --system --gid 901 agent \
-  && useradd --system --uid 901 --gid agent --home-dir /var/lib/shoggoth/agent-stub --shell /usr/sbin/nologin agent
+  && useradd --system --uid 901 --gid agent --home-dir /var/lib/shoggoth/agent-stub --shell /usr/sbin/nologin agent \
+  && apt-get update && apt-get install -y --no-install-recommends acl && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
