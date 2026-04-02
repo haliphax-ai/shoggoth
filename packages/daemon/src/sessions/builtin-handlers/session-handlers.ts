@@ -41,7 +41,7 @@ async function sessionQuery(
   }
   const limit = Math.min(Math.max(1, Math.trunc(Number(args.limit) || 50)), 200);
   const orderRaw = args.order;
-  const order: "asc" | "desc" = orderRaw === "desc" ? "desc" : "asc";
+  const order: "asc" | "desc" = orderRaw === "asc" ? "asc" : "desc";
   const hasExplicitOffset = args.offset !== undefined && args.offset !== null;
   const offset = hasExplicitOffset
     ? Math.max(0, Math.trunc(Number(args.offset) || 0))

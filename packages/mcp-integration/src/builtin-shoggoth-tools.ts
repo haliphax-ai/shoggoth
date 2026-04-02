@@ -307,7 +307,7 @@ const sessionQueryArgs = {
     queryRegex: { type: "string", description: "Regex pattern to match against message content. Mutually exclusive with query." },
     includeMetadata: { type: "boolean", description: "When true, each returned message includes _meta with timestamp (ISO 8601), tokenCount (approximate), and index (absolute position). Default false." },
     metadataOnly: { type: "boolean", description: "When true, return only role and _meta (no content). Implies includeMetadata. Useful for session size analysis without consuming context. Default false." },
-    order: { type: "string", enum: ["asc", "desc"], description: "Traversal order by seq. 'asc' (default) returns oldest first from offset; 'desc' returns newest first. When desc, offset defaults to the most recent message." },
+    order: { type: "string", enum: ["asc", "desc"], description: "Traversal order by seq. 'desc' (default) returns newest first; 'asc' returns oldest first. When desc, offset defaults to the most recent message." },
   },
 } as const;
 
