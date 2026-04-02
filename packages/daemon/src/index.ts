@@ -354,7 +354,7 @@ void (async () => {
       onMessageReactionAdd:
         hitlStack && hitlDiscordNoticeRegistry && hitlAutoApproveGate
           ? (ev) => {
-              handleDiscordHitlReactionAdd({
+              const consumed = handleDiscordHitlReactionAdd({
                 ev,
                 pending: hitlStack.pending,
                 registry: hitlDiscordNoticeRegistry!,
@@ -363,7 +363,7 @@ void (async () => {
                 botUserIdRef: reactionBotUserIdRef,
                 logger: getLogger("discord-reactions"),
               });
-              reactionPassthroughRef.current?.(ev);
+              if (!consumed) reactionPassthroughRef.current?.(ev);
             }
           : (ev) => { reactionPassthroughRef.current?.(ev); },
       reactionBotUserIdRef,

@@ -73,19 +73,19 @@ export function handleDiscordHitlReactionAdd(input: {
   readonly ownerUserId: string | undefined;
   readonly botUserIdRef: { current: string | undefined };
   readonly logger: Logger;
-}): void {
+}): boolean {
   const owner = input.ownerUserId?.trim();
-  if (!owner) return;
-  if (input.ev.userId !== owner) return;
+  if (!owner) return false;
+  if (input.ev.userId !== owner) return false;
 
   const bot = input.botUserIdRef.current?.trim();
-  if (bot && input.ev.userId === bot) return;
+  if (bot && input.ev.userId === bot) return false;
 
   const mapped = input.registry.lookup(input.ev.channelId, input.ev.messageId);
-  if (!mapped) return;
+  if (!mapped) return false;
 
   const kind = classifyHitlDiscordReaction(input.ev.emoji);
-  if (!kind) return;
+  if (!kind) return false;
 
   try {
     applyKind({
@@ -102,7 +102,9 @@ export function handleDiscordHitlReactionAdd(input: {
       sessionId: mapped.sessionId,
       tool: mapped.toolName,
     });
+    return true;
   } catch (e) {
     input.logger.warn("hitl.discord_reaction_apply_failed", { err: String(e), kind });
+    return false;
   }
 }
