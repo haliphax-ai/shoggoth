@@ -169,6 +169,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
       }
 
       for (const tc of turn.toolCalls) {
+        log.debug("tool call received", { toolName: tc.name, toolCallId: tc.id, sessionId: options.sessionId, args: truncate(tc.argsJson, 200) });
         assertNotAborted(options.turnAbortSignal);
         if (!names.has(tc.name)) {
           options.toolRuns.markFailed(options.runId, `unknown_tool:${tc.name}`);

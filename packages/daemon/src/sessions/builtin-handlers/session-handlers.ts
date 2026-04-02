@@ -333,12 +333,15 @@ async function subagentHandler(
     payload.model_options = mo;
   }
 
+  log.info("subagent invoked", { action, sessionId: ctx.sessionId });
   if (spawnAction) {
     log.info("subagent spawned", { action, parentSessionId: ctx.sessionId, mode: payload.mode });
   }
   const result = await invokeIntegration(inv, ctx.sessionId, op, payload);
   if (spawnAction) {
-    log.info("subagent completed", { action, parentSessionId: ctx.sessionId });
+    let childId: string | undefined;
+    try { const parsed = JSON.parse(result.resultJson); childId = parsed.session_id; } catch { /* ignore */ }
+    log.info("subagent completed", { action, childId, parentSessionId: ctx.sessionId });
   }
   return result;
 }

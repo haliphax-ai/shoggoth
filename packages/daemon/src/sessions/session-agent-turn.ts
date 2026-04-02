@@ -244,6 +244,11 @@ export async function executeSessionAgentTurn(
     model: (modelInvocation as Record<string, unknown>)?.model ?? "default",
     isSubagent: isSubagentSessionUrn(input.sessionId),
   });
+  log.debug("user message", {
+    sessionId: input.sessionId,
+    userContent: effectiveContent,
+    systemContext: input.systemContext ?? null,
+  });
   try {
     await loopImpl({
       db: input.db,
@@ -287,6 +292,10 @@ export async function executeSessionAgentTurn(
     model: failoverMeta?.usedModel,
     contentLength: latestAssistantText.length,
     degraded: failoverMeta?.degraded,
+  });
+  log.debug("agent response content", {
+    sessionId: input.sessionId,
+    response: latestAssistantText,
   });
 
   // --- Session stats: record completed agent turn ---

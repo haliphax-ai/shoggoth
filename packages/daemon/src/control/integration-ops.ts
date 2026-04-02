@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type Database from "better-sqlite3";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import { getLogger } from "../logging";
+const ioLog = getLogger("integration-ops");
 import { getProcessManager } from "../process-manager-singleton";
 import {
   agentMayInvokeSubagentSpawnByAllowlist,
@@ -319,6 +320,9 @@ export async function handleIntegrationControlOp(
   principal: AuthenticatedPrincipal,
   ctx: IntegrationOpsContext,
 ): Promise<unknown> {
+  if (principal.kind === "operator") {
+    ioLog.info("operator action", { op: req.op, operatorId: principal.operatorId });
+  }
   switch (req.op) {
     case "acpx_bind_get": {
       if (!ctx.acpxStore) {
@@ -1346,6 +1350,7 @@ export async function handleIntegrationControlOp(
     }
 
     case "session_send": {
+      ioLog.debug("subagent conversation: send", { op: req.op, principalKind: principal.kind });
       if (principal.kind !== "operator" && principal.kind !== "agent") {
         throw new IntegrationOpError(
           "ERR_FORBIDDEN",
@@ -1421,6 +1426,7 @@ export async function handleIntegrationControlOp(
     }
 
     case "session_steer": {
+      ioLog.debug("subagent conversation: steer", { op: req.op, principalKind: principal.kind });
       if (principal.kind !== "operator" && principal.kind !== "agent") {
         throw new IntegrationOpError(
           "ERR_FORBIDDEN",

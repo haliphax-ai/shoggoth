@@ -136,12 +136,15 @@ function recordControlPlaneAudit(
   }
 }
 
+const cpLog = getLogger("control-plane");
+
 async function dispatchOp(
   req: WireRequest,
   ctx: { getHealth: () => Promise<HealthSnapshot>; version: string },
   principal: AuthenticatedPrincipal,
   integrationCtx: IntegrationOpsContext,
 ): Promise<unknown> {
+  cpLog.debug("control plane op dispatched", { op: req.op, principalKind: principal.kind });
   const integration = await handleIntegrationControlOp(req, principal, integrationCtx);
   if (integration !== undefined) return integration;
 
