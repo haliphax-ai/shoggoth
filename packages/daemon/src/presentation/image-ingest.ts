@@ -98,7 +98,7 @@ export async function ingestAttachmentImage(
  * Sniff the actual image format from the first bytes of the buffer.
  * Returns the correct MIME type, or undefined if unrecognised.
  */
-function detectMediaTypeFromBytes(buf: Buffer): string | undefined {
+export function detectMediaTypeFromBytes(buf: Buffer): string | undefined {
   if (buf.length < 12) return undefined;
   // PNG: 0x89 P N G
   if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "image/png";

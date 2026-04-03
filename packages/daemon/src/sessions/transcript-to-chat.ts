@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { ChatMessage, ChatToolCall, ChatContentPart } from "@shoggoth/models";
+import type { ChatMessage, ChatToolCall, ChatContentPart, ImageBlockCodec } from "@shoggoth/models";
 import type { TranscriptMessageRow } from "./transcript-store";
 import { createTranscriptStore } from "./transcript-store";
 
@@ -110,4 +110,66 @@ export function extractLatestTranscriptAssistantText(
     after = page.nextCursor;
   }
   return last;
+}
+
+// ---------------------------------------------------------------------------
+// Provider capability gating — image block sanitization
+// ---------------------------------------------------------------------------
+
+/** Estimate the raw byte size of an image block from its base64 payload. */
+function estimateImageBytes(part: ChatContentPart & { type: "image" }): number {
+  if (part.base64) {
+    // base64 encodes 3 bytes per 4 chars
+    return Math.floor((part.base64.length * 3) / 4);
+  }
+  return 0;
+}
+
+/** Human-readable byte size (e.g. "34KB", "1.2MB"). */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+/**
+ * Replace image content parts with a text placeholder describing the image.
+ * Returns the parts array unchanged when no image parts are present.
+ */
+function sanitizeContentParts(parts: ChatContentPart[]): ChatContentPart[] {
+  let hasImage = false;
+  for (const p of parts) {
+    if (p.type === "image") { hasImage = true; break; }
+  }
+  if (!hasImage) return parts;
+
+  return parts.map((p) => {
+    if (p.type !== "image") return p;
+    const size = estimateImageBytes(p);
+    const sizeStr = size > 0 ? `, ${formatBytes(size)}` : "";
+    return { type: "text" as const, text: `[image: ${p.mediaType}${sizeStr}]` };
+  });
+}
+
+/**
+ * Strip image blocks from transcript messages when the active provider does not
+ * support image input. Each image block is replaced with a text placeholder like
+ * `[image: image/png, 34KB]`.
+ *
+ * When `codec` is undefined or `codec.supportsImageInput` is true, messages pass
+ * through unchanged (no copies made).
+ */
+export function sanitizeTranscriptForProvider(
+  messages: ChatMessage[],
+  codec: ImageBlockCodec | undefined,
+): ChatMessage[] {
+  // Nothing to strip when the provider supports images (or no codec is available).
+  if (!codec || codec.supportsImageInput) return messages;
+
+  return messages.map((msg) => {
+    if (!Array.isArray(msg.content)) return msg;
+    const sanitized = sanitizeContentParts(msg.content);
+    if (sanitized === msg.content) return msg;
+    return { ...msg, content: sanitized };
+  });
 }

@@ -6,6 +6,7 @@ import type { ImageBlock, ImageBlockCodec } from "./types";
 
 export const openaiImageBlockCodec: ImageBlockCodec = {
   supportsUrl: true,
+  supportsImageInput: true,
 
   encode(block: ImageBlock): unknown {
     const url = block.url
@@ -46,6 +47,7 @@ export const openaiImageBlockCodec: ImageBlockCodec = {
 
 export const anthropicImageBlockCodec: ImageBlockCodec = {
   supportsUrl: true,
+  supportsImageInput: true,
 
   encode(block: ImageBlock): unknown {
     if (block.url) {
@@ -97,6 +99,7 @@ export const anthropicImageBlockCodec: ImageBlockCodec = {
 
 export const geminiImageBlockCodec: ImageBlockCodec = {
   supportsUrl: false,
+  supportsImageInput: true,
 
   encode(block: ImageBlock): unknown {
     if (!block.base64) {

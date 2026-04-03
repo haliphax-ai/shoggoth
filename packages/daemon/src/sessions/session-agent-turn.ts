@@ -34,6 +34,7 @@ import type { SessionRow } from "./session-store";
 import {
   extractLatestTranscriptAssistantText,
   loadSessionTranscriptAsModelChat,
+  sanitizeTranscriptForProvider,
 } from "./transcript-to-chat";
 import {
   createSessionToolLoopModelClient,
@@ -51,6 +52,9 @@ import { incrementTokenUsage, updateTranscriptMessageCount, incrementTurnCount }
 import { checkContextWindowMismatch } from "./context-window-mismatch";
 import { getModelContextWindowTokens } from "../model-metadata";
 import { drainSystemContext, pushSystemContext } from "./system-context-buffer";
+import type { OutboundAttachment } from "../presentation/platform-adapter";
+import { extractShowBlocks } from "../presentation/show-blocks";
+import { createTranscriptStore } from "./transcript-store";
 import { getLogger } from "../logging";
 
 
@@ -89,6 +93,8 @@ export interface ExecuteSessionAgentTurnInput {
 export interface SessionAgentTurnResult {
   readonly failoverMeta: SessionToolLoopFailoverState | undefined;
   readonly latestAssistantText: string;
+  /** Outbound attachments extracted from `show` tool results in this turn. */
+  readonly showAttachments?: readonly OutboundAttachment[];
 }
 
 function sessionCreds(uid?: number, gid?: number): AgentCredentials {
@@ -128,6 +134,26 @@ function resolveImageBlockCodec(
 // flows through BuiltinToolContext.
 const builtinRegistry = new BuiltinToolRegistry();
 registerAllBuiltinHandlers(builtinRegistry);
+
+/**
+ * Query transcript rows added during this turn (seq > seqBefore) and extract
+ * outbound attachments from `show` tool results.
+ */
+function extractTurnShowAttachments(
+  db: Database.Database,
+  sessionId: string,
+  contextSegmentId: string,
+  seqBefore: number,
+): OutboundAttachment[] {
+  const tr = createTranscriptStore(db);
+  const page = tr.listPage({
+    sessionId,
+    contextSegmentId,
+    afterSeq: seqBefore,
+    limit: 500,
+  });
+  return extractShowBlocks(page.messages);
+}
 
 /**
  * Appends the user turn, runs the tool loop with MCP + built-ins, and returns the latest
@@ -170,6 +196,11 @@ export async function executeSessionAgentTurn(
     });
   }
 
+  // Record current max seq so we can extract show blocks from this turn only.
+  const seqBefore = (input.db.prepare(
+    `SELECT COALESCE(MAX(seq), 0) AS n FROM transcript_messages WHERE session_id = ?`,
+  ).get(input.sessionId) as { n: number }).n;
+
   const history = loadSessionTranscriptAsModelChat(input.db, input.sessionId, ctxSeg);
   let effectiveHistory: ChatMessage[];
   if (input.minimalContext) {
@@ -185,7 +216,6 @@ export async function executeSessionAgentTurn(
     role: "system",
     content: effectiveSystemPrompt,
   };
-  const initialMessages: ChatMessage[] = [system, ...effectiveHistory];
 
   log.debug("resolving mcp context", { sessionId: input.sessionId });
   const mcpCtx = await input.resolveMcpContext(input.sessionId);
@@ -198,6 +228,14 @@ export async function executeSessionAgentTurn(
   const toolClient = createToolClient(modelsForSession, { env: input.env });
 
   const modelInvocation = mergeModelInvocationParams(modelsForSession, input.session.modelSelection);
+
+  const imageBlockCodec = resolveImageBlockCodec(modelsForSession);
+
+  // Strip image blocks from transcript when the provider doesn't support image input.
+  const initialMessages: ChatMessage[] = sanitizeTranscriptForProvider(
+    [system, ...effectiveHistory],
+    imageBlockCodec,
+  );
 
   const model: SessionToolLoopModelClient = createSessionToolLoopModelClient({
     toolClient,
@@ -227,8 +265,6 @@ export async function executeSessionAgentTurn(
 
   const creds = sessionCreds(input.session.runtimeUid, input.session.runtimeGid);
   const orchestratorEnv = mergeOrchestratorEnv(input.config, input.env);
-
-  const imageBlockCodec = resolveImageBlockCodec(modelsForSession);
 
   const executor = createMcpRoutingToolExecutor({
     aggregated: mcpCtx.aggregated,
@@ -368,5 +404,12 @@ export async function executeSessionAgentTurn(
     });
   }
 
-  return { failoverMeta, latestAssistantText };
+  // --- Extract show tool attachments from this turn ---
+  const showAttachments = extractTurnShowAttachments(input.db, input.sessionId, ctxSeg, seqBefore);
+
+  return {
+    failoverMeta,
+    latestAssistantText,
+    showAttachments: showAttachments.length > 0 ? showAttachments : undefined,
+  };
 }

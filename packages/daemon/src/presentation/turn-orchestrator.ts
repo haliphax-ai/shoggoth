@@ -2,7 +2,7 @@ import type { ShoggothConfig } from "@shoggoth/shared";
 import type { MessageAttachment } from "@shoggoth/messaging";
 import type { ImageBlockCodec, ChatContentPart } from "@shoggoth/models";
 import type { SessionToolLoopFailoverState } from "../sessions/session-tool-loop-model-client.js";
-import type { PlatformAdapter, StreamHandle } from "./platform-adapter.js";
+import type { PlatformAdapter, StreamHandle, OutboundAttachment } from "./platform-adapter.js";
 import type { InboundSessionTurnInput } from "../messaging/inbound-session-turn.js";
 import {
   runInboundSessionTurn,
@@ -160,8 +160,17 @@ export class PresentationTurnOrchestrator {
       formatAssistantReply: (latestText: string, failoverMeta: SessionToolLoopFailoverState | undefined) =>
         formatAssistantReply(config, sessionId, env, latestText, failoverMeta),
       formatErrorReply: (err: unknown) => `${errorPrefix}${formatErrorUserText(err)}`,
-      sendAssistantBody: (body: string) => adapter.sendBody(sessionId, body, { replyTo: replyToMessageId }),
+      sendAssistantBody: (body: string, opts?: { attachments?: readonly OutboundAttachment[] }) =>
+        adapter.sendBody(sessionId, body, {
+          replyTo: replyToMessageId,
+          attachments: opts?.attachments as OutboundAttachment[] | undefined,
+        }),
       sendErrorBody: (body: string) => adapter.sendError(sessionId, body, { replyTo: replyToMessageId }),
+      // Follow-up message for attachments when streaming (stream edits can't carry files).
+      sendAttachments: (attachments: readonly OutboundAttachment[]) =>
+        adapter.sendBody(sessionId, "", {
+          attachments: attachments as OutboundAttachment[],
+        }),
       mcpLifecycle,
       logContext,
       onTurnExecutionFailed,

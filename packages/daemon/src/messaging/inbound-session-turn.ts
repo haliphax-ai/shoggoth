@@ -4,6 +4,7 @@ import {
   type ExecuteSessionAgentTurnInput,
   type SessionAgentTurnResult,
 } from "../sessions/session-agent-turn";
+import type { OutboundAttachment } from "../presentation/platform-adapter";
 import { getLogger } from "../logging";
 
 const log = getLogger("inbound-session-turn");
@@ -75,8 +76,13 @@ export interface RunInboundSessionTurnOptions {
   ) => string;
   readonly formatErrorReply: (err: unknown) => string;
   /** Used when not streaming, or when streaming failed to start. */
-  readonly sendAssistantBody: (body: string) => Promise<void>;
+  readonly sendAssistantBody: (body: string, opts?: { attachments?: readonly OutboundAttachment[] }) => Promise<void>;
   readonly sendErrorBody: (body: string) => Promise<void>;
+  /**
+   * Send attachments as a follow-up message (used after streaming, where the
+   * streamed message cannot carry file attachments).
+   */
+  readonly sendAttachments?: (attachments: readonly OutboundAttachment[]) => Promise<void>;
   readonly mcpLifecycle?: {
     readonly onTurnBegin?: () => void;
     readonly onTurnEnd?: () => void;
@@ -133,11 +139,21 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       formatAssistantReply(turnResult.latestAssistantText, turnResult.failoverMeta),
     );
 
+    const attachments = turnResult.showAttachments;
+
     if (streamPusher && streamSink) {
       await streamPusher.flush();
       await streamSink.setFullContent(body);
+      // Streaming edits can't carry file attachments — send as follow-up.
+      if (attachments?.length && options.sendAttachments) {
+        try {
+          await options.sendAttachments(attachments);
+        } catch (e) {
+          log.warn("inbound_session_turn.show_attachment_followup_failed", { ...ctx, err: String(e) });
+        }
+      }
     } else {
-      await options.sendAssistantBody(body);
+      await options.sendAssistantBody(body, attachments?.length ? { attachments } : undefined);
     }
   } catch (e) {
     options.onTurnExecutionFailed?.(e);

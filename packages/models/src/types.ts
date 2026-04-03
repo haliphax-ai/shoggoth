@@ -31,6 +31,8 @@ export interface ImageBlockCodec {
   decode(part: unknown): ImageBlock | null;
   /** Whether this provider supports URL-based image sources. */
   readonly supportsUrl: boolean;
+  /** Whether this provider accepts image content in messages. */
+  readonly supportsImageInput: boolean;
 }
 
 export interface ChatMessage {

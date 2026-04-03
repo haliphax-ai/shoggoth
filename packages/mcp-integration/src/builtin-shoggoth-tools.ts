@@ -214,7 +214,7 @@ const sessionSendArgs = {
         "If true, do not post the assistant reply to the session bound channel; turn still runs internally",
     },
     session_id: { type: "string", description: "Target session URN (omit if agent_id is set)" },
-    agent_id: { type: "string", description: "Logical agent id; targets that agent’s bootstrap main session" },
+    agent_id: { type: "string", description: "Logical agent id; targets that agent's bootstrap main session" },
     platform_user_id: { type: "string", description: "When not silent, optional outbound user id for messaging_surface" },
     reply_to_message_id: { type: "string", description: "When not silent, optional reply reference" },
   },
@@ -311,6 +311,40 @@ const sessionQueryArgs = {
   },
 } as const;
 
+const showToolArgs = {
+  type: "object",
+  description:
+    "Display content blocks (images, etc.) to the user. Use this tool to explicitly surface visual content. Provide at least one of path, url, or base64.",
+  properties: {
+    type: {
+      type: "string",
+      enum: ["image"],
+      description: "Block type discriminator.",
+    },
+    path: {
+      type: "string",
+      description: "Local file path (workspace-relative).",
+    },
+    url: {
+      type: "string",
+      description: "Remote URL to fetch the image from.",
+    },
+    base64: {
+      type: "string",
+      description: "Raw base64-encoded bytes.",
+    },
+    mediaType: {
+      type: "string",
+      description: "MIME type (e.g. image/png). Required with base64; inferred for path/url.",
+    },
+    filename: {
+      type: "string",
+      description: "Display filename. Inferred from path/url if omitted.",
+    },
+  },
+  required: ["type"],
+} as const;
+
 /** Canonical builtin source id. */
 export const BUILTIN_SOURCE_ID = "builtin";
 
@@ -348,7 +382,7 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
       {
         name: "subagent",
         description:
-          "Unified subagent control: spawn (one_shot or persistent), inspect this session’s children, steer/abort/kill child sessions (or abort own in-flight turn). Requires spawnSubagents in config when using agent token.",
+          "Unified subagent control: spawn (one_shot or persistent), inspect this session's children, steer/abort/kill child sessions (or abort own in-flight turn). Requires spawnSubagents in config when using agent token.",
         inputSchema: subagentToolArgs,
       },
       {
@@ -392,6 +426,12 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
         description:
           "Show the current daemon configuration (sensitive fields are redacted).",
         inputSchema: { type: "object" as const, properties: {} },
+      },
+      {
+        name: "show",
+        description:
+          "Display images or other content blocks to the user. Use this tool when you want to surface visual content (e.g. a generated chart, a screenshot, a fetched image). Provide at least one of path, url, or base64.",
+        inputSchema: showToolArgs,
       },
       buildWorkflowToolDescriptor() as McpToolDescriptor,
     ],
