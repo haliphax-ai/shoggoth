@@ -1,4 +1,6 @@
 import type Database from "better-sqlite3";
+import { getLogger } from "../logging";
+const log = getLogger("transcript-to-chat");
 import type { ChatMessage, ChatToolCall, ChatContentPart } from "@shoggoth/models";
 import type { TranscriptMessageRow } from "./transcript-store";
 import { createTranscriptStore } from "./transcript-store";
@@ -12,6 +14,10 @@ export function parseTranscriptContent(raw: string): string | ChatContentPart[] 
     try {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0]?.type === "string") {
+        const imageCount = parsed.filter((p: any) => p.type === "image").length;
+        if (imageCount > 0) {
+          log.debug("parseTranscriptContent.image_blocks_detected", { imageCount, totalParts: parsed.length });
+        }
         return parsed as ChatContentPart[];
       }
     } catch { /* fall through */ }

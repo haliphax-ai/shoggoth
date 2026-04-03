@@ -662,17 +662,6 @@ export function createAnthropicMessagesProvider(
       if (system !== undefined) body.system = system;
       applyAnthropicMessagesRequestExtensions(body, input);
 
-      // DEBUG: log image blocks in anthropic wire payload
-      for (const m of anthropicMessages as any[]) {
-        const c = m?.content;
-        if (Array.isArray(c)) {
-          for (const part of c) {
-            if (part?.type === 'image') {
-              console.log('[DEBUG-IMAGE] anthropic wire payload image block:', JSON.stringify(part).slice(0, 300));
-            }
-          }
-        }
-      }
       const res = await resilientFetch(url, {
         method: "POST",
         headers,
@@ -757,17 +746,6 @@ export function createAnthropicMessagesProvider(
         stream: input.stream === true,
         temperature: input.temperature,
       };
-      // DEBUG: log image blocks in anthropic completeWithTools wire payload
-      for (const m of anthropicMessages as any[]) {
-        const c = m?.content;
-        if (Array.isArray(c)) {
-          for (const part of c) {
-            if (part?.type === 'image') {
-              console.log('[DEBUG-IMAGE] anthropic completeWithTools wire payload image block:', JSON.stringify(part).slice(0, 300));
-            }
-          }
-        }
-      }
       if (system !== undefined) body.system = system;
       /** Anthropic and some compatible gateways reject `tool_choice` when `tools` is empty or absent. */
       if (anthropicTools.length > 0) {

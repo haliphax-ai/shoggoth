@@ -124,6 +124,12 @@ export class PresentationTurnOrchestrator {
       const turn = await buildTurn();
 
       const attachments = input.attachments;
+      log.debug("turn_orchestrator.wrappedBuildTurn", {
+        hasAttachments: Boolean(attachments?.length),
+        attachmentCount: attachments?.length ?? 0,
+        hasCodec: Boolean(input.imageBlockCodec),
+        codecSupportsUrl: input.imageBlockCodec?.supportsUrl,
+      });
       if (!attachments || attachments.length === 0) {
         return turn;
       }
