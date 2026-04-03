@@ -5,5 +5,6 @@ export default defineConfig({
     include: ["packages/*/test/**/*.test.ts"],
     testTimeout: 30_000,
     onConsoleLog: () => false,
+    setupFiles: ["./test/setup.ts"],
   },
 });
