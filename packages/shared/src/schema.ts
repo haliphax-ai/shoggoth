@@ -672,6 +672,8 @@ export const shoggothAgentsConfigSchema = z
     contextLevel: contextLevelSchema.optional(),
     /** Default context level for subagent sessions. Default: "light". */
     subagentContextLevel: contextLevelSchema.optional(),
+    /** Use streaming for internal (non-user-facing) model calls (e.g. workflow tasks, subagents). Default: true. */
+    internalStreaming: z.boolean().optional(),
   })
   .strict();
 

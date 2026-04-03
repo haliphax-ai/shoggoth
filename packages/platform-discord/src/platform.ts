@@ -519,7 +519,7 @@ export async function startDiscordPlatform(
           }
         : undefined;
 
-    const executeTurn = (afterHitlQueued?: (row: PendingActionRow) => void | Promise<void>) =>
+    const executeTurn = (afterHitlQueued?: (row: PendingActionRow) => void | Promise<void>, streamOverride?: { streamModel: boolean }) =>
       executeSessionAgentTurn({
         db: opts.db,
         sessionId: sid,
@@ -563,6 +563,7 @@ export async function startDiscordPlatform(
         loopImpl,
         createToolCallingClient: createToolClient,
         resolveMcpContext: mcpRuntime.resolveContext,
+        ...(streamOverride ? { stream: streamOverride } : {}),
       });
 
     if (input.delivery.kind === "messaging_surface") {
@@ -624,7 +625,8 @@ export async function startDiscordPlatform(
     }
 
     opts.logger.debug("platform.executeTurn_calling", { sessionId: sid, delivery: input.delivery.kind });
-    turnResult = await executeTurn(internalAfterHitlQueued);
+    const internalStreamModel = (opts.configRef?.current ?? opts.config).agents?.internalStreaming !== false;
+    turnResult = await executeTurn(internalAfterHitlQueued, { streamModel: internalStreamModel });
     });
     return turnResult;
   }
