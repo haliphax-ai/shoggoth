@@ -33,10 +33,15 @@ function makeCodec(supportsUrl: boolean): ImageBlockCodec {
 }
 
 describe("ingestAttachmentImage", () => {
-  describe("URL passthrough (supportsUrl: true)", () => {
-    it("returns URL-only ImageBlock without fetching", async () => {
+  describe("always fetches and base64-encodes (even when supportsUrl: true)", () => {
+    it("fetches and returns base64 ImageBlock even with supportsUrl codec", async () => {
       const codec = makeCodec(true);
-      const fetchImpl = vi.fn();
+      const imgBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+      const fetchImpl = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers(),
+        arrayBuffer: () => Promise.resolve(imgBytes.buffer.slice(imgBytes.byteOffset, imgBytes.byteOffset + imgBytes.byteLength)),
+      });
       const attachment = makeAttachment();
 
       const result = await ingestAttachmentImage(attachment, {
@@ -47,41 +52,58 @@ describe("ingestAttachmentImage", () => {
       expect(result).toEqual({
         type: "image",
         mediaType: "image/png",
-        url: "https://cdn.example.com/photo.png",
+        base64: imgBytes.toString("base64"),
       });
-      expect(result!.base64).toBeUndefined();
-      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(fetchImpl).toHaveBeenCalledWith(attachment.url);
     });
 
     it("infers MIME from filename when contentType is missing", async () => {
       const codec = makeCodec(true);
+      const imgBytes = Buffer.from([0xff, 0xd8]);
+      const fetchImpl = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers(),
+        arrayBuffer: () => Promise.resolve(imgBytes.buffer.slice(imgBytes.byteOffset, imgBytes.byteOffset + imgBytes.byteLength)),
+      });
       const attachment = makeAttachment({
         contentType: undefined,
         filename: "screenshot.jpeg",
       });
 
-      const result = await ingestAttachmentImage(attachment, { codec });
+      const result = await ingestAttachmentImage(attachment, {
+        codec,
+        fetchImpl: fetchImpl as any,
+      });
 
       expect(result).toEqual({
         type: "image",
         mediaType: "image/jpeg",
-        url: "https://cdn.example.com/photo.png",
+        base64: imgBytes.toString("base64"),
       });
     });
 
     it("infers MIME from .jpg extension", async () => {
       const codec = makeCodec(true);
+      const imgBytes = Buffer.from([0xff, 0xd8]);
+      const fetchImpl = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers(),
+        arrayBuffer: () => Promise.resolve(imgBytes.buffer.slice(imgBytes.byteOffset, imgBytes.byteOffset + imgBytes.byteLength)),
+      });
       const attachment = makeAttachment({
         contentType: undefined,
         filename: "pic.jpg",
       });
 
-      const result = await ingestAttachmentImage(attachment, { codec });
+      const result = await ingestAttachmentImage(attachment, {
+        codec,
+        fetchImpl: fetchImpl as any,
+      });
 
       expect(result).toEqual({
         type: "image",
         mediaType: "image/jpeg",
-        url: attachment.url,
+        base64: imgBytes.toString("base64"),
       });
     });
   });

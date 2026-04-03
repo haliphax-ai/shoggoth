@@ -18,8 +18,7 @@ export interface ImageIngestOptions {
  *
  * - Determines MIME type from `attachment.contentType` or infers from filename extension.
  * - Returns `null` for non-image attachments.
- * - When `codec.supportsUrl` is true, returns a URL-only ImageBlock (no fetch).
- * - When `codec.supportsUrl` is false, fetches the URL, base64-encodes, and returns a base64 ImageBlock.
+ * - Always fetches the URL and base64-encodes (URL passthrough disabled for gateway compatibility).
  * - Returns `null` on fetch failure or oversized images.
  */
 export async function ingestAttachmentImage(
@@ -29,12 +28,8 @@ export async function ingestAttachmentImage(
   const mediaType = resolveMediaType(attachment);
   if (!mediaType) return null;
 
-  // URL passthrough — no fetch needed
-  if (options.codec.supportsUrl) {
-    return { type: "image", mediaType, url: attachment.url };
-  }
-
-  // Base64 fallback — fetch and encode
+  // Always fetch and base64-encode. URL passthrough is not reliable through
+  // gateways (e.g. kiro-gateway) that may not support URL-based image sources.
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const fetchFn = options.fetchImpl ?? globalThis.fetch;
 
