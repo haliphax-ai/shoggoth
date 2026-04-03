@@ -18,7 +18,7 @@ import {
 function fakeSessionManager(overrides: Partial<DaemonSpawnAdapterDeps["sessionManager"]> = {}) {
   return {
     spawn: overrides.spawn ?? (() => ({
-      sessionId: "agent:main:discord:abc:child-uuid",
+      sessionId: "agent:main:discord:channel:abc:child-uuid",
       agentToken: "tok",
       agentTokenEnvName: "SHOGGOTH_AGENT_TOKEN" as const,
     })),
@@ -80,7 +80,7 @@ describe("createDaemonSpawnAdapter", () => {
       spawn: (input: unknown) => {
         spawnCalls.push(input);
         return {
-          sessionId: "agent:main:discord:abc:child-1",
+          sessionId: "agent:main:discord:channel:abc:child-1",
           agentToken: "tok",
           agentTokenEnvName: "SHOGGOTH_AGENT_TOKEN" as const,
         };
@@ -94,21 +94,21 @@ describe("createDaemonSpawnAdapter", () => {
     const adapter = createDaemonSpawnAdapter({
       sessionManager: sm,
       sessions,
-      parentSessionId: "agent:main:discord:abc",
+      parentSessionId: "agent:main:discord:channel:abc",
       runSessionModelTurn: turn.fn,
     });
 
     const key = await adapter.spawn({
       taskId: 1,
       prompt: "do the thing",
-      replyTo: "agent:main:discord:abc",
+      replyTo: "agent:main:discord:channel:abc",
       timeoutMs: 30_000,
     });
 
-    assert.equal(key, "agent:main:discord:abc:child-1");
+    assert.equal(key, "agent:main:discord:channel:abc:child-1");
     assert.equal(spawnCalls.length, 1);
     const spawnInput = spawnCalls[0] as Record<string, unknown>;
-    assert.equal(spawnInput.parentSessionId, "agent:main:discord:abc");
+    assert.equal(spawnInput.parentSessionId, "agent:main:discord:channel:abc");
   });
 
   it("fires off the model turn asynchronously with the task prompt", async () => {
@@ -119,14 +119,14 @@ describe("createDaemonSpawnAdapter", () => {
     const adapter = createDaemonSpawnAdapter({
       sessionManager: sm,
       sessions,
-      parentSessionId: "agent:main:discord:abc",
+      parentSessionId: "agent:main:discord:channel:abc",
       runSessionModelTurn: turn.fn,
     });
 
     await adapter.spawn({
       taskId: 2,
       prompt: "analyze data",
-      replyTo: "agent:main:discord:abc",
+      replyTo: "agent:main:discord:channel:abc",
       timeoutMs: 60_000,
     });
 
@@ -134,7 +134,7 @@ describe("createDaemonSpawnAdapter", () => {
     await new Promise((r) => setTimeout(r, 10));
     assert.equal(turn.calls.length, 1);
     const turnInput = turn.calls[0] as Record<string, unknown>;
-    assert.equal(turnInput.sessionId, "agent:main:discord:abc:child-uuid");
+    assert.equal(turnInput.sessionId, "agent:main:discord:channel:abc:child-uuid");
     assert.equal(turnInput.userContent, "analyze data");
   });
 
@@ -147,7 +147,7 @@ describe("createDaemonSpawnAdapter", () => {
     const adapter = createDaemonSpawnAdapter({
       sessionManager: sm,
       sessions,
-      parentSessionId: "agent:main:discord:abc",
+      parentSessionId: "agent:main:discord:channel:abc",
       runSessionModelTurn: turn.fn,
       requestTurnAbort: (id: string) => { abortedIds.push(id); return true; },
     });
@@ -155,7 +155,7 @@ describe("createDaemonSpawnAdapter", () => {
     const childId = await adapter.spawn({
       taskId: 1,
       prompt: "long task",
-      replyTo: "agent:main:discord:abc",
+      replyTo: "agent:main:discord:channel:abc",
       timeoutMs: 60_000,
     });
 
@@ -171,7 +171,7 @@ describe("createDaemonSpawnAdapter", () => {
     const adapter = createDaemonSpawnAdapter({
       sessionManager: sm,
       sessions,
-      parentSessionId: "agent:main:discord:abc",
+      parentSessionId: "agent:main:discord:channel:abc",
       runSessionModelTurn: turn.fn,
     });
 
@@ -187,14 +187,14 @@ describe("createDaemonSpawnAdapter", () => {
     const adapter = createDaemonSpawnAdapter({
       sessionManager: sm,
       sessions,
-      parentSessionId: "agent:main:discord:abc",
+      parentSessionId: "agent:main:discord:channel:abc",
       runSessionModelTurn: turn.fn,
     });
 
     const childId = await adapter.spawn({
       taskId: 1,
       prompt: "quick task",
-      replyTo: "agent:main:discord:abc",
+      replyTo: "agent:main:discord:channel:abc",
       timeoutMs: 60_000,
     });
 
@@ -332,7 +332,7 @@ describe("createDaemonMessageAdapter", () => {
         },
       }),
       resolveChannelId: () => "channel-abc",
-      sessionId: "agent:main:discord:abc",
+      sessionId: "agent:main:discord:channel:abc",
     });
 
     const result = await adapter.postMessage("hello world");
@@ -354,7 +354,7 @@ describe("createDaemonMessageAdapter", () => {
         },
       }),
       resolveChannelId: () => "channel-abc",
-      sessionId: "agent:main:discord:abc",
+      sessionId: "agent:main:discord:channel:abc",
     });
 
     const ok = await adapter.editMessage("msg-123", "updated content");
@@ -372,7 +372,7 @@ describe("createDaemonMessageAdapter", () => {
         execute: async () => { throw new Error("edit failed"); },
       }),
       resolveChannelId: () => "channel-abc",
-      sessionId: "agent:main:discord:abc",
+      sessionId: "agent:main:discord:channel:abc",
     });
 
     const ok = await adapter.editMessage("msg-123", "updated");
@@ -383,7 +383,7 @@ describe("createDaemonMessageAdapter", () => {
     const adapter = createDaemonMessageAdapter({
       getMessageContext: () => undefined,
       resolveChannelId: () => "channel-abc",
-      sessionId: "agent:main:discord:abc",
+      sessionId: "agent:main:discord:channel:abc",
     });
 
     const result = await adapter.postMessage("hello");
@@ -396,7 +396,7 @@ describe("createDaemonMessageAdapter", () => {
     const adapter = createDaemonMessageAdapter({
       getMessageContext: () => undefined,
       resolveChannelId: () => "channel-abc",
-      sessionId: "agent:main:discord:abc",
+      sessionId: "agent:main:discord:channel:abc",
     });
 
     const ok = await adapter.editMessage("msg-123", "updated");

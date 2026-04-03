@@ -79,7 +79,7 @@ describe("discordInteractionCreateToEvent", () => {
       member: { user: { id: "user-1" } },
       data: {
         name: "abort",
-        options: [{ name: "session_id", type: 3, value: "agent:main:discord:abc" }],
+        options: [{ name: "session_id", type: 3, value: "agent:main:discord:channel:abc" }],
       },
     });
     assert.ok(ev);
@@ -91,7 +91,7 @@ describe("discordInteractionCreateToEvent", () => {
     assert.strictEqual(ev!.guildId, "g-1");
     assert.strictEqual(ev!.userId, "user-1");
     assert.strictEqual(ev!.data.name, "abort");
-    assert.strictEqual(ev!.data.options?.[0]?.value, "agent:main:discord:abc");
+    assert.strictEqual(ev!.data.options?.[0]?.value, "agent:main:discord:channel:abc");
   });
 
   it("maps DM interaction (user at top level, no member)", () => {

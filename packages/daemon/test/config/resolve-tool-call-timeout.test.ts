@@ -11,18 +11,18 @@ describe("resolveToolCallTimeoutMs", () => {
   });
 
   it("returns default when nothing is configured", () => {
-    assert.equal(resolveToolCallTimeoutMs(base, "agent:main:discord:123"), DEFAULT_TOOL_CALL_TIMEOUT_MS);
+    assert.equal(resolveToolCallTimeoutMs(base, "agent:main:discord:channel:123"), DEFAULT_TOOL_CALL_TIMEOUT_MS);
   });
 
   it("uses runtime.toolCallTimeoutMs when set", () => {
     const cfg = { ...base, runtime: { toolCallTimeoutMs: 30_000 } };
-    assert.equal(resolveToolCallTimeoutMs(cfg, "agent:main:discord:123"), 30_000);
+    assert.equal(resolveToolCallTimeoutMs(cfg, "agent:main:discord:channel:123"), 30_000);
   });
 
   it("env SHOGGOTH_TOOL_CALL_TIMEOUT_MS wins over runtime config", () => {
     process.env.SHOGGOTH_TOOL_CALL_TIMEOUT_MS = "5000";
     const cfg = { ...base, runtime: { toolCallTimeoutMs: 30_000 } };
-    assert.equal(resolveToolCallTimeoutMs(cfg, "agent:main:discord:123"), 5000);
+    assert.equal(resolveToolCallTimeoutMs(cfg, "agent:main:discord:channel:123"), 5000);
   });
 
   it("per-agent toolCallTimeoutMs wins over everything", () => {
@@ -32,7 +32,7 @@ describe("resolveToolCallTimeoutMs", () => {
       runtime: { toolCallTimeoutMs: 30_000 },
       agents: { list: { main: { toolCallTimeoutMs: 120_000 } } },
     };
-    assert.equal(resolveToolCallTimeoutMs(cfg, "agent:main:discord:123"), 120_000);
+    assert.equal(resolveToolCallTimeoutMs(cfg, "agent:main:discord:channel:123"), 120_000);
   });
 
   it("falls back to global when agent entry has no override", () => {
@@ -41,7 +41,7 @@ describe("resolveToolCallTimeoutMs", () => {
       runtime: { toolCallTimeoutMs: 45_000 },
       agents: { list: { main: { displayName: "Main" } } },
     };
-    assert.equal(resolveToolCallTimeoutMs(cfg, "agent:main:discord:123"), 45_000);
+    assert.equal(resolveToolCallTimeoutMs(cfg, "agent:main:discord:channel:123"), 45_000);
   });
 
   it("returns default for unparseable session URN", () => {

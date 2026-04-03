@@ -28,7 +28,7 @@ describe("resolveSessionTargetFromCliArg", () => {
   } as ReturnType<typeof defaultConfig>;
 
   it("returns a full session URN unchanged", () => {
-    const urn = "agent:dev:discord:1111111111111111111";
+    const urn = "agent:dev:discord:channel:1111111111111111111";
     assert.equal(resolveSessionTargetFromCliArg(urn, cfg), urn);
   });
 
@@ -41,7 +41,7 @@ describe("resolveSessionTargetFromCliArg", () => {
       const out = resolveSessionTargetFromCliArg("myagent", cfg);
       assert.equal(
         out,
-        `agent:myagent:discord:${SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID.toLowerCase()}`,
+        `agent:myagent:discord:channel:${SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID.toLowerCase()}`,
       );
     } finally {
       if (prev !== undefined) process.env.SHOGGOTH_PRIMARY_CHANNEL_ID = prev;
@@ -56,7 +56,7 @@ describe("resolveSessionTargetFromCliArg", () => {
     try {
       process.env.SHOGGOTH_PRIMARY_CHANNEL_ID = "1487579255616573533";
       const out = resolveSessionTargetFromCliArg("a1", cfg);
-      assert.equal(out, "agent:a1:discord:1487579255616573533");
+      assert.equal(out, "agent:a1:discord:channel:1487579255616573533");
     } finally {
       if (prev !== undefined) process.env.SHOGGOTH_PRIMARY_CHANNEL_ID = prev;
       else delete process.env.SHOGGOTH_PRIMARY_CHANNEL_ID;

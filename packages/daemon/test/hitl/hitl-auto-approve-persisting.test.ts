@@ -21,7 +21,7 @@ describe("createPersistingHitlAutoApproveGate", () => {
       const hitlRef = { value: { ...DEFAULT_HITL_CONFIG, ...baseCfg.hitl } };
       const log = createLogger({ component: "t", minLevel: "error" });
 
-      const sessionId = "agent:main:discord:10000000-0000-4000-8000-000000000001";
+      const sessionId = "agent:main:discord:channel:10000000-0000-4000-8000-000000000001";
 
       {
         const db = new Database(dbPath);

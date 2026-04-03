@@ -46,7 +46,7 @@ describe("handleDiscordHitlReactionAdd", () => {
       const id = "pend-r1";
       pending.enqueue({
         id,
-        sessionId: "agent:main:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:main:discord:channel:10000000-0000-4000-8000-000000000001",
         toolName: "builtin-write",
         payload: {},
         riskTier: "caution",
@@ -57,7 +57,7 @@ describe("handleDiscordHitlReactionAdd", () => {
         "ch99",
         "msg99",
         id,
-        "agent:main:discord:10000000-0000-4000-8000-000000000001",
+        "agent:main:discord:channel:10000000-0000-4000-8000-000000000001",
         "builtin-write",
       );
       const autoApprove = createHitlAutoApproveGate();

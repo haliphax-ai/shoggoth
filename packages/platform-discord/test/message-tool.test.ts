@@ -69,7 +69,7 @@ describe("executeDiscordMessageToolAction", () => {
     });
     const r = await executeDiscordMessageToolAction(
       { capabilities: caps, transport, sessionToChannel: () => "chan-a" },
-      "agent:x:discord:00000000-0000-4000-8000-000000000001",
+      "agent:x:discord:channel:00000000-0000-4000-8000-000000000001",
       { action: "post", content: "hello" },
     );
     assert.deepEqual(r, { ok: true, message_id: "m1", channel_id: "chan-a" });

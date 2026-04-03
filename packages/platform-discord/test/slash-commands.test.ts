@@ -120,14 +120,14 @@ describe("createDiscordInteractionHandler", () => {
       userId: "u-1",
       data: {
         name: "abort",
-        options: [{ name: "session_id", type: 3, value: "agent:main:discord:abc" }],
+        options: [{ name: "session_id", type: 3, value: "agent:main:discord:channel:abc" }],
       },
     };
 
     handler(ev);
     await new Promise((r) => setTimeout(r, 50));
 
-    assert.deepStrictEqual(abortCalls, ["agent:main:discord:abc"]);
+    assert.deepStrictEqual(abortCalls, ["agent:main:discord:channel:abc"]);
   });
 
   it("ignores non-APPLICATION_COMMAND interactions", async () => {

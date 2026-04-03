@@ -39,7 +39,7 @@ describe("effective agent config for session", () => {
     },
   };
 
-  const sid = formatAgentSessionUrn("alice", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+  const sid = formatAgentSessionUrn("alice", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
 
   it("returns global models when no agents.list match", () => {
     const m = resolveEffectiveModelsConfig(base, sid);

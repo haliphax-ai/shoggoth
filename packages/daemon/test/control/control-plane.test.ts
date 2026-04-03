@@ -721,7 +721,7 @@ describe("control plane (unix socket + JSONL)", () => {
     const db = new Database(dbPath);
     migrate(db, defaultMigrationsDir());
     const pending = createPendingActionsStore(db);
-    const sid = formatAgentSessionUrn("aghitl", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const sid = formatAgentSessionUrn("aghitl", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
     createSessionStore(db).create({ id: sid, workspacePath: "/w", status: "active" });
     pending.enqueue({
       id: "hp-cl1",
@@ -797,7 +797,7 @@ describe("control plane (unix socket + JSONL)", () => {
     const db = new Database(dbPath);
     migrate(db, defaultMigrationsDir());
     const pending = createPendingActionsStore(db);
-    const sid = formatAgentSessionUrn("agx", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const sid = formatAgentSessionUrn("agx", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
     createSessionStore(db).create({ id: sid, workspacePath: "/w", status: "active" });
 
     await withControlPlaneSession(
@@ -836,7 +836,7 @@ describe("control plane (unix socket + JSONL)", () => {
     const db = new Database(dbPath);
     migrate(db, defaultMigrationsDir());
     const pending = createPendingActionsStore(db);
-    const sid = formatAgentSessionUrn("wipeme", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const sid = formatAgentSessionUrn("wipeme", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
     createSessionStore(db).create({ id: sid, workspacePath: "/w", status: "active" });
     pending.enqueue({
       id: "hp-wipe",
@@ -1045,9 +1045,9 @@ describe("control plane (unix socket + JSONL)", () => {
         assert.ok(rowsF.some((r) => r.id === "sess-list-z"));
         assert.ok(!rowsF.some((r) => r.id === "sess-list-a"));
 
-        const alfA = formatAgentSessionUrn("alf", "discord", randomUUID());
-        const alfB = formatAgentSessionUrn("alf", "discord", randomUUID());
-        const bobA = formatAgentSessionUrn("bob", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+        const alfA = formatAgentSessionUrn("alf", "discord", "channel", randomUUID());
+        const alfB = formatAgentSessionUrn("alf", "discord", "channel", randomUUID());
+        const bobA = formatAgentSessionUrn("bob", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
         createSessionStore(db).create({ id: alfA, workspacePath: "/wa", status: "active" });
         createSessionStore(db).create({ id: alfB, workspacePath: "/wb", status: "active" });
         createSessionStore(db).create({ id: bobA, workspacePath: "/wc", status: "active" });
@@ -1082,9 +1082,9 @@ describe("control plane (unix socket + JSONL)", () => {
     migrate(db, defaultMigrationsDir());
     const sessions = createSessionStore(db);
     const tokens = createSqliteAgentTokenStore(db);
-    const sidA = formatAgentSessionUrn("scoped", "discord", randomUUID());
-    const sidB = formatAgentSessionUrn("scoped", "discord", randomUUID());
-    const sidOther = formatAgentSessionUrn("other", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const sidA = formatAgentSessionUrn("scoped", "discord", "channel", randomUUID());
+    const sidB = formatAgentSessionUrn("scoped", "discord", "channel", randomUUID());
+    const sidOther = formatAgentSessionUrn("other", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
     sessions.create({ id: sidA, workspacePath: "/w1", status: "active" });
     sessions.create({ id: sidB, workspacePath: "/w2", status: "active" });
     sessions.create({ id: sidOther, workspacePath: "/w3", status: "active" });
@@ -1126,7 +1126,7 @@ describe("control plane (unix socket + JSONL)", () => {
     const dbPath = join(dir, "state.db");
     const db = new Database(dbPath);
     migrate(db, defaultMigrationsDir());
-    const target = formatAgentSessionUrn("snd", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const target = formatAgentSessionUrn("snd", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
     createSessionStore(db).create({ id: target, workspacePath: "/w", status: "active" });
 
     let deliveryKind: string | undefined;
@@ -1178,9 +1178,9 @@ describe("control plane (unix socket + JSONL)", () => {
     migrate(db, defaultMigrationsDir());
     const sessions = createSessionStore(db);
     const tokens = createSqliteAgentTokenStore(db);
-    const sidA = formatAgentSessionUrn("scoped", "discord", randomUUID());
-    const sidB = formatAgentSessionUrn("scoped", "discord", randomUUID());
-    const sidOther = formatAgentSessionUrn("other", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const sidA = formatAgentSessionUrn("scoped", "discord", "channel", randomUUID());
+    const sidB = formatAgentSessionUrn("scoped", "discord", "channel", randomUUID());
+    const sidOther = formatAgentSessionUrn("other", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
     sessions.create({ id: sidA, workspacePath: "/w1", status: "active" });
     sessions.create({ id: sidB, workspacePath: "/w2", status: "active" });
     sessions.create({ id: sidOther, workspacePath: "/w3", status: "active" });
@@ -1287,7 +1287,7 @@ describe("control plane (unix socket + JSONL)", () => {
     const dbPath = join(dir, "state.db");
     const db = new Database(dbPath);
     migrate(db, defaultMigrationsDir());
-    const parentId = formatAgentSessionUrn("par", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const parentId = formatAgentSessionUrn("par", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
     createSessionStore(db).create({
       id: parentId,
       workspacePath: "/tmp/w",
@@ -1332,7 +1332,7 @@ describe("control plane (unix socket + JSONL)", () => {
           const r = res.result as { session_id: string; reply: string; mode: string };
           assert.equal(r.mode, "one_shot");
           assert.equal(r.reply, "SUBAGENT_REPLY");
-          assert.match(r.session_id, /^agent:par:discord:/);
+          assert.match(r.session_id, /^agent:par:discord:channel:/);
           const child = createSessionStore(db).getById(r.session_id);
           assert.equal(child?.status, "terminated");
           assert.deepStrictEqual(child?.modelSelection, {
@@ -1379,7 +1379,7 @@ describe("control plane (unix socket + JSONL)", () => {
     migrate(db, defaultMigrationsDir());
     const sessions = createSessionStore(db);
     const tokens = createSqliteAgentTokenStore(db);
-    const parentId = formatAgentSessionUrn("par", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const parentId = formatAgentSessionUrn("par", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
     sessions.create({
       id: parentId,
       workspacePath: "/tmp/w",
@@ -1431,7 +1431,7 @@ describe("control plane (unix socket + JSONL)", () => {
     migrate(db, defaultMigrationsDir());
     const sessions = createSessionStore(db);
     const tokens = createSqliteAgentTokenStore(db);
-    const parentId = formatAgentSessionUrn("par", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const parentId = formatAgentSessionUrn("par", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
     sessions.create({
       id: parentId,
       workspacePath: "/tmp/w",
@@ -1486,7 +1486,7 @@ describe("control plane (unix socket + JSONL)", () => {
     migrate(db, defaultMigrationsDir());
     const sessions = createSessionStore(db);
     const tokens = createSqliteAgentTokenStore(db);
-    const sid = formatAgentSessionUrn("insp", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const sid = formatAgentSessionUrn("insp", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
     sessions.create({ id: sid, workspacePath: "/w", status: "active" });
     tokens.register(sid, "tok-insp-off");
     await withControlPlaneSession(
@@ -1521,8 +1521,8 @@ describe("control plane (unix socket + JSONL)", () => {
     migrate(db, defaultMigrationsDir());
     const sessions = createSessionStore(db);
     const tokens = createSqliteAgentTokenStore(db);
-    const parentId = formatAgentSessionUrn("st", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
-    const childId = formatAgentSessionUrn("st", "discord", randomUUID());
+    const parentId = formatAgentSessionUrn("st", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const childId = formatAgentSessionUrn("st", "discord", "channel", randomUUID());
     sessions.create({ id: parentId, workspacePath: "/wp", status: "active" });
     sessions.create({ id: childId, workspacePath: "/wc", status: "active" });
     sessions.update(childId, { parentSessionId: parentId, subagentMode: "persistent" });
@@ -1571,9 +1571,9 @@ describe("control plane (unix socket + JSONL)", () => {
     migrate(db, defaultMigrationsDir());
     const sessions = createSessionStore(db);
     const tokens = createSqliteAgentTokenStore(db);
-    const callerId = formatAgentSessionUrn("caller", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
-    const otherParent = formatAgentSessionUrn("otherp", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
-    const childId = formatAgentSessionUrn("otherp", "discord", randomUUID());
+    const callerId = formatAgentSessionUrn("caller", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const otherParent = formatAgentSessionUrn("otherp", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const childId = formatAgentSessionUrn("otherp", "discord", "channel", randomUUID());
     sessions.create({ id: callerId, workspacePath: "/w1", status: "active" });
     sessions.create({ id: otherParent, workspacePath: "/w2", status: "active" });
     sessions.create({ id: childId, workspacePath: "/w3", status: "active" });

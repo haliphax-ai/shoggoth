@@ -22,8 +22,8 @@ describe("subagent HITL auto-approve inheritance", () => {
         const hitlRef = { value: { ...DEFAULT_HITL_CONFIG, ...baseCfg.hitl } };
         const log = createLogger({ component: "t", minLevel: "error" });
 
-        const mainSessionId = "agent:main:discord:10000000-0000-4000-8000-000000000001";
-        const subagentSessionId = "agent:main:discord:10000000-0000-4000-8000-000000000001:aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee";
+        const mainSessionId = "agent:main:discord:channel:10000000-0000-4000-8000-000000000001";
+        const subagentSessionId = "agent:main:discord:channel:10000000-0000-4000-8000-000000000001:aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee";
 
         const db = new Database(dbPath);
         db.pragma("foreign_keys = ON");
@@ -65,8 +65,8 @@ describe("subagent HITL auto-approve inheritance", () => {
         const hitlRef = { value: { ...DEFAULT_HITL_CONFIG, ...baseCfg.hitl } };
         const log = createLogger({ component: "t", minLevel: "error" });
 
-        const mainSessionA = "agent:alpha:discord:10000000-0000-4000-8000-000000000001";
-        const subagentSessionB = "agent:beta:discord:20000000-0000-4000-8000-000000000001:aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee";
+        const mainSessionA = "agent:alpha:discord:channel:10000000-0000-4000-8000-000000000001";
+        const subagentSessionB = "agent:beta:discord:channel:20000000-0000-4000-8000-000000000001:aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee";
 
         const db = new Database(dbPath);
         db.pragma("foreign_keys = ON");
@@ -102,7 +102,7 @@ describe("subagent HITL auto-approve inheritance", () => {
         const hitlRef = { value: { ...DEFAULT_HITL_CONFIG, ...baseCfg.hitl } };
         const log = createLogger({ component: "t", minLevel: "error" });
 
-        const subagentSessionId = "agent:main:discord:10000000-0000-4000-8000-000000000001:aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee";
+        const subagentSessionId = "agent:main:discord:channel:10000000-0000-4000-8000-000000000001:aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee";
 
         const db = new Database(dbPath);
         db.pragma("foreign_keys = ON");
@@ -138,7 +138,7 @@ describe("subagent HITL auto-approve inheritance", () => {
         const hitlRef = { value: { ...DEFAULT_HITL_CONFIG, ...baseCfg.hitl } };
         const log = createLogger({ component: "t", minLevel: "error" });
 
-        const subagentSessionId = "agent:main:discord:10000000-0000-4000-8000-000000000001:aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee";
+        const subagentSessionId = "agent:main:discord:channel:10000000-0000-4000-8000-000000000001:aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee";
 
         const db = new Database(dbPath);
         db.pragma("foreign_keys = ON");
@@ -168,8 +168,8 @@ describe("subagent HITL auto-approve inheritance", () => {
   describe("createHitlAutoApproveGate (in-memory)", () => {
     it("subagent inherits session-scoped auto-approve from main session", () => {
       const gate = createHitlAutoApproveGate();
-      const mainSessionId = "agent:main:discord:10000000-0000-4000-8000-000000000001";
-      const subagentSessionId = "agent:main:discord:10000000-0000-4000-8000-000000000001:aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee";
+      const mainSessionId = "agent:main:discord:channel:10000000-0000-4000-8000-000000000001";
+      const subagentSessionId = "agent:main:discord:channel:10000000-0000-4000-8000-000000000001:aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee";
 
       gate.enableSessionTool(mainSessionId, "builtin-write");
 
@@ -180,8 +180,8 @@ describe("subagent HITL auto-approve inheritance", () => {
 
     it("subagent does not inherit from a different agent's main session", () => {
       const gate = createHitlAutoApproveGate();
-      const mainSessionA = "agent:alpha:discord:10000000-0000-4000-8000-000000000001";
-      const subagentSessionB = "agent:beta:discord:20000000-0000-4000-8000-000000000001:aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee";
+      const mainSessionA = "agent:alpha:discord:channel:10000000-0000-4000-8000-000000000001";
+      const subagentSessionB = "agent:beta:discord:channel:20000000-0000-4000-8000-000000000001:aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee";
 
       gate.enableSessionTool(mainSessionA, "builtin-write");
 
@@ -190,8 +190,8 @@ describe("subagent HITL auto-approve inheritance", () => {
 
     it("top-level session does not inherit from subagent", () => {
       const gate = createHitlAutoApproveGate();
-      const mainSessionId = "agent:main:discord:10000000-0000-4000-8000-000000000001";
-      const subagentSessionId = "agent:main:discord:10000000-0000-4000-8000-000000000001:aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee";
+      const mainSessionId = "agent:main:discord:channel:10000000-0000-4000-8000-000000000001";
+      const subagentSessionId = "agent:main:discord:channel:10000000-0000-4000-8000-000000000001:aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee";
 
       gate.enableSessionTool(subagentSessionId, "builtin-write");
 

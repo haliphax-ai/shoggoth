@@ -74,13 +74,13 @@ export function assertDiscordRoutesDefaultPrimaryUuidMatchesAgent(
   const list = multiAgent?.agentsList ?? [];
 
   if (!list.length) {
-    const expected = formatAgentSessionUrn(aid0, plat0, SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
     for (let i = 0; i < routes.length; i++) {
       const p = parseAgentSessionUrn(routes[i]!.sessionId);
       if (!p) continue;
       if (p.uuidChain.length !== 1) continue;
       if (p.uuidChain[0] !== DEFAULT_PRIMARY_UUID_LOWER) continue;
       if (p.agentId === aid0 && p.platform === plat0) continue;
+      const expected = formatAgentSessionUrn(aid0, plat0, p.resourceType, SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
       throw new Error(
         `discord route[${i}] sessionId uses reserved primary UUID (${SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID}) but ` +
           `agent:platform ${JSON.stringify(p.agentId)}:${JSON.stringify(p.platform)} do not match ` +
@@ -146,7 +146,7 @@ export function resolveDiscordBootstrapPrimarySessionUrn(
 ): string {
   const ch = options?.primaryChannelId?.trim();
   if (ch && DISCORD_SNOWFLAKE_RE.test(ch)) {
-    return formatAgentSessionUrn(agentId, platform, ch);
+    return formatAgentSessionUrn(agentId, platform, "channel", ch);
   }
-  return formatAgentSessionUrn(agentId, platform, SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+  return formatAgentSessionUrn(agentId, platform, "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
 }

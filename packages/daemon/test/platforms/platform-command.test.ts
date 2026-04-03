@@ -8,10 +8,10 @@ import {
 
 describe("parsePlatformCommand", () => {
   it("parses /abort with a session_id option", () => {
-    const cmd = parsePlatformCommand("abort", { session_id: "agent:main:discord:abc" });
+    const cmd = parsePlatformCommand("abort", { session_id: "agent:main:discord:channel:abc" });
     assert.deepStrictEqual(cmd, {
       name: "abort",
-      options: { session_id: "agent:main:discord:abc" },
+      options: { session_id: "agent:main:discord:channel:abc" },
     });
   });
 
@@ -30,12 +30,12 @@ describe("translateCommandToControlOp", () => {
   it("translates abort command to session_abort control op", () => {
     const cmd: PlatformCommand = {
       name: "abort",
-      options: { session_id: "agent:main:discord:abc" },
+      options: { session_id: "agent:main:discord:channel:abc" },
     };
     const op = translateCommandToControlOp(cmd);
     assert.deepStrictEqual(op, {
       op: "session_abort",
-      payload: { session_id: "agent:main:discord:abc" },
+      payload: { session_id: "agent:main:discord:channel:abc" },
     });
   });
 

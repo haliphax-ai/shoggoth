@@ -159,7 +159,7 @@ describe("systemContext adoption: subagent_spawn one_shot", () => {
     const dbPath = join(dir, "state.db");
     const db = new Database(dbPath);
     migrate(db, defaultMigrationsDir());
-    const parentId = formatAgentSessionUrn("ag", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const parentId = formatAgentSessionUrn("ag", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
     createSessionStore(db).create({ id: parentId, workspacePath: "/tmp/w", status: "active" });
 
     const { ext, calls } = capturingSubagentRuntimeExtension();
@@ -218,7 +218,7 @@ describe("systemContext adoption: subagent_spawn persistent", () => {
     const dbPath = join(dir, "state.db");
     const db = new Database(dbPath);
     migrate(db, defaultMigrationsDir());
-    const parentId = formatAgentSessionUrn("ag", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const parentId = formatAgentSessionUrn("ag", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
     createSessionStore(db).create({ id: parentId, workspacePath: "/tmp/w", status: "active" });
 
     const { ext, calls } = capturingSubagentRuntimeExtension();
@@ -277,7 +277,7 @@ describe("systemContext adoption: session_send", () => {
     const dbPath = join(dir, "state.db");
     const db = new Database(dbPath);
     migrate(db, defaultMigrationsDir());
-    const targetId = formatAgentSessionUrn("ag", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const targetId = formatAgentSessionUrn("ag", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
     createSessionStore(db).create({ id: targetId, workspacePath: "/w", status: "active" });
 
     const { ext, calls } = capturingSubagentRuntimeExtension();
@@ -332,8 +332,8 @@ describe("systemContext adoption: session_steer", () => {
     migrate(db, defaultMigrationsDir());
     const sessions = createSessionStore(db);
     const tokens = createSqliteAgentTokenStore(db);
-    const parentId = formatAgentSessionUrn("ag", "discord", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
-    const childId = formatAgentSessionUrn("ag", "discord", randomUUID());
+    const parentId = formatAgentSessionUrn("ag", "discord", "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+    const childId = formatAgentSessionUrn("ag", "discord", "channel", randomUUID());
     sessions.create({ id: parentId, workspacePath: "/wp", status: "active" });
     sessions.create({ id: childId, workspacePath: "/wc", status: "active" });
     sessions.update(childId, { parentSessionId: parentId, subagentMode: "persistent" });
@@ -431,7 +431,7 @@ describe("systemContext adoption: workflow task spawning", () => {
     };
     const sessionManager = {
       spawn: () => ({
-        sessionId: "agent:main:discord:child-1",
+        sessionId: "agent:main:discord:channel:child-1",
         agentToken: "tok",
         agentTokenEnvName: "SHOGGOTH_AGENT_TOKEN" as const,
       }),
@@ -440,14 +440,14 @@ describe("systemContext adoption: workflow task spawning", () => {
     const adapter = createDaemonSpawnAdapter({
       sessionManager,
       sessions,
-      parentSessionId: "agent:main:discord:abc",
+      parentSessionId: "agent:main:discord:channel:abc",
       runSessionModelTurn: captured.fn,
     });
 
     await adapter.spawn({
       taskId: 42,
       prompt: "analyze data",
-      replyTo: "agent:main:discord:abc",
+      replyTo: "agent:main:discord:channel:abc",
       timeoutMs: 30_000,
       workflowId: "wf-789",
     });

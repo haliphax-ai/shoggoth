@@ -192,7 +192,7 @@ describe("discord-hitl-notifier", () => {
   function row(overrides: Partial<PendingActionRow>): PendingActionRow {
     return {
       id: "pend-1",
-      sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       correlationId: undefined,
       toolName: "builtin-write",
       resourceSummary: undefined,
@@ -241,7 +241,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     db = new Database(dbPath);
     db.pragma("foreign_keys = ON");
     migrate(db, defaultMigrationsDir());
-    createSessionStore(db).create({ id: "agent:test:discord:10000000-0000-4000-8000-000000000001", workspacePath: tmp });
+    createSessionStore(db).create({ id: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001", workspacePath: tmp });
     setTurnQueue(new TieredTurnQueue());
   });
 
@@ -294,7 +294,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     const sent: { body: string }[] = [];
     const typingSessions: string[] = [];
     const bus = createAgentToAgentBus();
-    const sessionUrn = "agent:test:discord:10000000-0000-4000-8000-000000000001";
+    const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
     const discord: DiscordMessagingRuntime = {
       stop: async () => {},
       gateway: stubDiscordGatewaySession,
@@ -381,7 +381,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       capabilities: discordCapabilityDescriptor(),
       registerPlatformThreadBinding: () => () => {},
       notifyAgentTypingForSession: stubNotifyAgentTyping,
-      routes: [{ channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" }],
+      routes: [{ channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" }],
     };
 
     const platform = await startDiscordPlatform({
@@ -402,10 +402,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     });
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d1",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "ping",
       }),
@@ -440,7 +440,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       capabilities: discordCapabilityDescriptor(),
       registerPlatformThreadBinding: () => () => {},
       notifyAgentTypingForSession: stubNotifyAgentTyping,
-      routes: [{ channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" }],
+      routes: [{ channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" }],
     };
 
     const platform = await startDiscordPlatform({
@@ -465,10 +465,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     });
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d1",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "ping",
       }),
@@ -510,7 +510,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       capabilities: discordCapabilityDescriptor(),
       registerPlatformThreadBinding: () => () => {},
       notifyAgentTypingForSession: stubNotifyAgentTyping,
-      routes: [{ channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" }],
+      routes: [{ channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" }],
     };
 
     const cfg = defaultConfig(tmp);
@@ -551,7 +551,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       };
     };
 
-    createSessionStore(db).create({ id: "agent:test:discord:10000000-0000-4000-8000-000000000002", workspacePath: tmp });
+    createSessionStore(db).create({ id: "agent:test:discord:channel:10000000-0000-4000-8000-000000000002", workspacePath: tmp });
 
     const bus = createAgentToAgentBus();
     const discord: DiscordMessagingRuntime = {
@@ -568,8 +568,8 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       registerPlatformThreadBinding: () => () => {},
       notifyAgentTypingForSession: stubNotifyAgentTyping,
       routes: [
-        { channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" },
-        { channelId: "c2", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000002" },
+        { channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" },
+        { channelId: "c2", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000002" },
       ],
     };
 
@@ -597,10 +597,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     assert.equal(connectCalls, 0);
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d1",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "a",
       }),
@@ -609,10 +609,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     assert.equal(connectCalls, 1);
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d2",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "b",
       }),
@@ -621,10 +621,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     assert.equal(connectCalls, 1);
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000002",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000002",
       createInboundMessage({
         id: "d3",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000002",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000002",
         createdAt: new Date().toISOString(),
         body: "c",
       }),
@@ -662,7 +662,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       capabilities: discordCapabilityDescriptor(),
       registerPlatformThreadBinding: () => () => {},
       notifyAgentTypingForSession: stubNotifyAgentTyping,
-      routes: [{ channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" }],
+      routes: [{ channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" }],
     };
 
     const cfg = defaultConfig(tmp);
@@ -688,10 +688,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     });
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d1",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "a",
       }),
@@ -702,10 +702,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     await new Promise((r) => setTimeout(r, 120));
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d2",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "b",
       }),
@@ -743,7 +743,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       capabilities: discordCapabilityDescriptor(),
       registerPlatformThreadBinding: () => () => {},
       notifyAgentTypingForSession: stubNotifyAgentTyping,
-      routes: [{ channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" }],
+      routes: [{ channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" }],
     };
 
     const cfg = defaultConfig(tmp);
@@ -769,10 +769,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     });
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d1",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "a",
       }),
@@ -783,10 +783,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     await new Promise((r) => setTimeout(r, 120));
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d2",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "b",
       }),
@@ -810,7 +810,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       };
     };
 
-    createSessionStore(db).create({ id: "agent:test:discord:10000000-0000-4000-8000-000000000002", workspacePath: tmp });
+    createSessionStore(db).create({ id: "agent:test:discord:channel:10000000-0000-4000-8000-000000000002", workspacePath: tmp });
 
     const bus = createAgentToAgentBus();
     const discord: DiscordMessagingRuntime = {
@@ -827,8 +827,8 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       registerPlatformThreadBinding: () => () => {},
       notifyAgentTypingForSession: stubNotifyAgentTyping,
       routes: [
-        { channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" },
-        { channelId: "c2", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000002" },
+        { channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" },
+        { channelId: "c2", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000002" },
       ],
     };
 
@@ -860,10 +860,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     assert.deepStrictEqual(connectLog[0]!.ids, ["g"]);
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d1",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "a",
       }),
@@ -873,10 +873,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     assert.deepStrictEqual(connectLog[1]!.ids, ["p"]);
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d2",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "b",
       }),
@@ -885,10 +885,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     assert.equal(connectLog.length, 2);
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000002",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000002",
       createInboundMessage({
         id: "d3",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000002",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000002",
         createdAt: new Date().toISOString(),
         body: "c",
       }),
@@ -915,7 +915,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       };
     };
 
-    createSessionStore(db).create({ id: "agent:test:discord:10000000-0000-4000-8000-000000000002", workspacePath: tmp });
+    createSessionStore(db).create({ id: "agent:test:discord:channel:10000000-0000-4000-8000-000000000002", workspacePath: tmp });
 
     const bus = createAgentToAgentBus();
     const discord: DiscordMessagingRuntime = {
@@ -932,8 +932,8 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       registerPlatformThreadBinding: () => () => {},
       notifyAgentTypingForSession: stubNotifyAgentTyping,
       routes: [
-        { channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" },
-        { channelId: "c2", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000002" },
+        { channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" },
+        { channelId: "c2", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000002" },
       ],
     };
 
@@ -975,10 +975,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     );
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d1",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "a",
       }),
@@ -991,10 +991,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     );
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d2",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "b",
       }),
@@ -1003,10 +1003,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     assert.equal(connectCalls, 2);
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000002",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000002",
       createInboundMessage({
         id: "d3",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000002",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000002",
         createdAt: new Date().toISOString(),
         body: "c",
       }),
@@ -1050,7 +1050,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       capabilities: discordCapabilityDescriptor(),
       registerPlatformThreadBinding: () => () => {},
       notifyAgentTypingForSession: stubNotifyAgentTyping,
-      routes: [{ channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" }],
+      routes: [{ channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" }],
     };
 
     const cfg = defaultConfig(tmp);
@@ -1083,10 +1083,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     );
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d1",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "hi",
       }),
@@ -1126,10 +1126,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       capabilities: discordCapabilityDescriptor(),
       registerPlatformThreadBinding: () => () => {},
       notifyAgentTypingForSession: stubNotifyAgentTyping,
-      routes: [{ channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" }],
+      routes: [{ channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" }],
     };
 
-    const approveP = approveFirstPendingWhenQueued(hitlStack, "agent:test:discord:10000000-0000-4000-8000-000000000001");
+    const approveP = approveFirstPendingWhenQueued(hitlStack, "agent:test:discord:channel:10000000-0000-4000-8000-000000000001");
 
     const platform = await startDiscordPlatform({
       db,
@@ -1145,10 +1145,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     });
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d-hitl-ch",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "trigger hitl",
       }),
@@ -1163,7 +1163,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     assert.match(opMsgs[0]!.content, /HITL/);
     assert.match(opMsgs[0]!.content, /builtin-write/);
     assert.match(opMsgs[0]!.content, /shoggoth hitl approve/);
-    assert.match(opMsgs[0]!.content, /agent:test:discord:10000000-0000-4000-8000-000000000001/);
+    assert.match(opMsgs[0]!.content, /agent:test:discord:channel:10000000-0000-4000-8000-000000000001/);
     assert.match(opMsgs[0]!.content, /payload \(truncated\):/);
     assert.match(opMsgs[0]!.content, /hitl-notify\.txt/);
   });
@@ -1198,11 +1198,11 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       capabilities: discordCapabilityDescriptor(),
       registerPlatformThreadBinding: () => () => {},
       notifyAgentTypingForSession: stubNotifyAgentTyping,
-      routes: [{ channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" }],
+      routes: [{ channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" }],
     };
 
     const targetDmUser = "347033761822801922";
-    const approveP = approveFirstPendingWhenQueued(hitlStack, "agent:test:discord:10000000-0000-4000-8000-000000000001");
+    const approveP = approveFirstPendingWhenQueued(hitlStack, "agent:test:discord:channel:10000000-0000-4000-8000-000000000001");
 
     const platform = await startDiscordPlatform({
       db,
@@ -1218,10 +1218,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     });
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d-hitl-dm",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "trigger hitl dm",
       }),
@@ -1264,10 +1264,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         capabilities: discordCapabilityDescriptor(),
         registerPlatformThreadBinding: () => () => {},
         notifyAgentTypingForSession: stubNotifyAgentTyping,
-        routes: [{ channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" }],
+        routes: [{ channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" }],
       };
 
-      const approveP = approveFirstPendingWhenQueued(hitlStack, "agent:test:discord:10000000-0000-4000-8000-000000000001");
+      const approveP = approveFirstPendingWhenQueued(hitlStack, "agent:test:discord:channel:10000000-0000-4000-8000-000000000001");
 
       const platform = await startDiscordPlatform({
         db,
@@ -1282,10 +1282,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       });
 
       bus.deliver(
-        "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createInboundMessage({
           id: "d-hitl-wh",
-          sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+          sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
           createdAt: new Date().toISOString(),
           body: "trigger hitl webhook",
         }),
@@ -1309,7 +1309,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         payloadPreview: string | null;
       };
       assert.equal(parsed.event, "hitl.pending_queued");
-      assert.equal(parsed.sessionId, "agent:test:discord:10000000-0000-4000-8000-000000000001");
+      assert.equal(parsed.sessionId, "agent:test:discord:channel:10000000-0000-4000-8000-000000000001");
       assert.equal(parsed.tool, "builtin-write");
       assert.equal(parsed.riskTier, "caution");
       assert.ok(typeof parsed.pendingId === "string" && parsed.pendingId.length > 0);
@@ -1357,10 +1357,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         capabilities: discordCapabilityDescriptor(),
         registerPlatformThreadBinding: () => () => {},
         notifyAgentTypingForSession: stubNotifyAgentTyping,
-        routes: [{ channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" }],
+        routes: [{ channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" }],
       };
 
-      const approveP = approveFirstPendingWhenQueued(hitlStack, "agent:test:discord:10000000-0000-4000-8000-000000000001");
+      const approveP = approveFirstPendingWhenQueued(hitlStack, "agent:test:discord:channel:10000000-0000-4000-8000-000000000001");
 
       const platform = await startDiscordPlatform({
         db,
@@ -1380,10 +1380,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       });
 
       bus.deliver(
-        "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createInboundMessage({
           id: "d-hitl-both",
-          sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+          sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
           createdAt: new Date().toISOString(),
           body: "trigger both",
         }),
@@ -1444,10 +1444,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         capabilities: discordCapabilityDescriptor(),
         registerPlatformThreadBinding: () => () => {},
         notifyAgentTypingForSession: stubNotifyAgentTyping,
-        routes: [{ channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" }],
+        routes: [{ channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" }],
       };
 
-      const approveP = approveFirstPendingWhenQueued(hitlStack, "agent:test:discord:10000000-0000-4000-8000-000000000001");
+      const approveP = approveFirstPendingWhenQueued(hitlStack, "agent:test:discord:channel:10000000-0000-4000-8000-000000000001");
 
       const platform = await startDiscordPlatform({
         db,
@@ -1463,10 +1463,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       });
 
       bus.deliver(
-        "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createInboundMessage({
           id: "d-hitl-none",
-          sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+          sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
           createdAt: new Date().toISOString(),
           body: "hitl no notify",
         }),
@@ -1503,10 +1503,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       capabilities: discordCapabilityDescriptor(),
       registerPlatformThreadBinding: () => () => {},
       notifyAgentTypingForSession: stubNotifyAgentTyping,
-      routes: [{ channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" }],
+      routes: [{ channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" }],
     };
 
-    const approveP = approveFirstPendingWhenQueued(hitlStack, "agent:test:discord:10000000-0000-4000-8000-000000000001");
+    const approveP = approveFirstPendingWhenQueued(hitlStack, "agent:test:discord:channel:10000000-0000-4000-8000-000000000001");
 
     const platform = await startDiscordPlatform({
       db,
@@ -1528,10 +1528,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     });
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d-hitl-in-thread",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "trigger hitl in thread",
       }),
@@ -1544,7 +1544,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     const hitlBodies = outboundBodies.filter((b) => b.includes("HITL") && b.includes("shoggoth hitl approve"));
     assert.ok(hitlBodies.length >= 1, "expected at least one outbound HITL notice");
     assert.match(hitlBodies[0]!, /builtin-write/);
-    assert.match(hitlBodies[0]!, /agent:test:discord:10000000-0000-4000-8000-000000000001/);
+    assert.match(hitlBodies[0]!, /agent:test:discord:channel:10000000-0000-4000-8000-000000000001/);
     assert.match(hitlBodies[0]!, /hitl-notify\.txt/);
   });
 
@@ -1568,10 +1568,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       capabilities: discordCapabilityDescriptor(),
       registerPlatformThreadBinding: () => () => {},
       notifyAgentTypingForSession: stubNotifyAgentTyping,
-      routes: [{ channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" }],
+      routes: [{ channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" }],
     };
 
-    const approveP = approveFirstPendingWhenQueued(hitlStack, "agent:test:discord:10000000-0000-4000-8000-000000000001");
+    const approveP = approveFirstPendingWhenQueued(hitlStack, "agent:test:discord:channel:10000000-0000-4000-8000-000000000001");
 
     const platform = await startDiscordPlatform({
       db,
@@ -1593,10 +1593,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     });
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d-hitl-no-in-thread",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "trigger hitl no in-thread",
       }),
@@ -1630,10 +1630,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       capabilities: discordCapabilityDescriptor(),
       registerPlatformThreadBinding: () => () => {},
       notifyAgentTypingForSession: stubNotifyAgentTyping,
-      routes: [{ channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" }],
+      routes: [{ channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" }],
     };
 
-    const approveP = approveFirstPendingWhenQueued(hitlStack, "agent:test:discord:10000000-0000-4000-8000-000000000001");
+    const approveP = approveFirstPendingWhenQueued(hitlStack, "agent:test:discord:channel:10000000-0000-4000-8000-000000000001");
     const cfg = { ...defaultConfig(tmp), platforms: { discord: { enabled: true, hitlReplyInSession: false as const } } };
 
     const platform = await startDiscordPlatform({
@@ -1656,10 +1656,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     });
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d-hitl-config-off",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "trigger hitl config off",
       }),
@@ -1692,7 +1692,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       capabilities: discordCapabilityDescriptor(),
       registerPlatformThreadBinding: () => () => {},
       notifyAgentTypingForSession: stubNotifyAgentTyping,
-      routes: [{ channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" }],
+      routes: [{ channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" }],
     };
 
     const ownerId = "111111111111111111";
@@ -1713,10 +1713,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     });
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d-nonowner",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "hi",
         extensions: {
@@ -1757,7 +1757,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       capabilities: discordCapabilityDescriptor(),
       registerPlatformThreadBinding: () => () => {},
       notifyAgentTypingForSession: stubNotifyAgentTyping,
-      routes: [{ channelId: "c1", sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001" }],
+      routes: [{ channelId: "c1", sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001" }],
     };
 
     const ownerId = "111111111111111111";
@@ -1778,10 +1778,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     });
 
     bus.deliver(
-      "agent:test:discord:10000000-0000-4000-8000-000000000001",
+      "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
       createInboundMessage({
         id: "d-owner",
-        sessionId: "agent:test:discord:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
         createdAt: new Date().toISOString(),
         body: "hi",
         extensions: {
@@ -1805,8 +1805,8 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
   });
 
   it("subagent runSessionModelTurn with messaging_surface delivery fires afterHitlQueued and hitlNotifier", async () => {
-    const parentSessionId = "agent:test:discord:10000000-0000-4000-8000-000000000001";
-    const subagentSessionId = "agent:test:discord:10000000-0000-4000-8000-000000000001:bbbbbbbb-bbbb-4ccc-dddd-eeeeeeeeeeee";
+    const parentSessionId = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
+    const subagentSessionId = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001:bbbbbbbb-bbbb-4ccc-dddd-eeeeeeeeeeee";
     createSessionStore(db).create({ id: subagentSessionId, workspacePath: tmp });
     createSessionStore(db).update(subagentSessionId, {
       parentSessionId,
@@ -1892,8 +1892,8 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
   });
 
   it("subagent runSessionModelTurn with internal delivery fires afterHitlQueued using parent session channel", async () => {
-    const parentSessionId = "agent:test:discord:10000000-0000-4000-8000-000000000099";
-    const subagentSessionId = "agent:test:discord:10000000-0000-4000-8000-000000000099:cccccccc-cccc-4ccc-dddd-eeeeeeeeeeee";
+    const parentSessionId = "agent:test:discord:channel:10000000-0000-4000-8000-000000000099";
+    const subagentSessionId = "agent:test:discord:channel:10000000-0000-4000-8000-000000000099:cccccccc-cccc-4ccc-dddd-eeeeeeeeeeee";
     createSessionStore(db).create({ id: parentSessionId, workspacePath: tmp });
     createSessionStore(db).create({ id: subagentSessionId, workspacePath: tmp });
     createSessionStore(db).update(subagentSessionId, {

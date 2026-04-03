@@ -9,7 +9,7 @@ import {
 describe("session-mcp-tool-context", () => {
   it("strips builtin.subagent for subagent session URNs only", () => {
     const base = buildBuiltinOnlySessionMcpToolContext();
-    const top = formatAgentSessionUrn("main", "discord", "40000000-0000-4000-8000-000000000099");
+    const top = formatAgentSessionUrn("main", "discord", "channel", "40000000-0000-4000-8000-000000000099");
     const sub = mintSubagentSessionUrnFromParent(top, "50000000-0000-4000-8000-000000000088");
 
     const topCtx = omitBuiltinSubagentToolForSubagentSession(base, top);

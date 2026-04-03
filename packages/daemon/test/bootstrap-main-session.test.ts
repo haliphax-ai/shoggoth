@@ -54,7 +54,7 @@ function makeConfig(overrides: Partial<ShoggothConfig> = {}): ShoggothConfig {
               routes: [
                 {
                   channelId: "1234567890123456789",
-                  sessionId: "agent:main:discord:1234567890123456789",
+                  sessionId: "agent:main:discord:channel:1234567890123456789",
                   guildId: "9876543210987654321",
                 },
               ],
@@ -87,9 +87,9 @@ describe("bootstrapMainSession", () => {
       bootstrapMainSession({ db, config: makeConfig() });
 
       const store = createSessionStore(db);
-      const session = store.getById("agent:main:discord:1234567890123456789");
+      const session = store.getById("agent:main:discord:channel:1234567890123456789");
       assert.ok(session, "session should exist");
-      assert.equal(session!.id, "agent:main:discord:1234567890123456789");
+      assert.equal(session!.id, "agent:main:discord:channel:1234567890123456789");
 
       const created = stub.logs.find((l) => l.msg === "bootstrap.main_session.created");
       assert.ok(created, "should log session creation");
@@ -136,7 +136,7 @@ describe("bootstrapMainSession", () => {
       // Create a different session first
       const store = createSessionStore(db);
       store.create({
-        id: "agent:main:discord:9999999999999999999",
+        id: "agent:main:discord:channel:9999999999999999999",
         workspacePath: TMP,
         status: "active",
         runtimeUid: 901,
@@ -151,7 +151,7 @@ describe("bootstrapMainSession", () => {
       assert.ok(warn, "should warn about missing session in existing DB");
       assert.equal(warn!.level, "warn");
 
-      const session = store.getById("agent:main:discord:1234567890123456789");
+      const session = store.getById("agent:main:discord:channel:1234567890123456789");
       assert.ok(session, "should still create the session");
 
       db.close();
@@ -172,7 +172,7 @@ describe("bootstrapMainSession", () => {
 
       const store = createSessionStore(db);
       // Platform is derived from agent bindings (discord)
-      const session = store.getById("agent:main:discord:1234567890123456789");
+      const session = store.getById("agent:main:discord:channel:1234567890123456789");
       assert.ok(session, "should derive platform from agent bindings");
 
       db.close();

@@ -114,7 +114,7 @@ describe("createSessionManager", () => {
       agentId: "parent",
       mintToken: () => "sub-session-token",
     });
-    const parent = formatAgentSessionUrn("parent", "discord", "20000000-0000-4000-8000-000000000001");
+    const parent = formatAgentSessionUrn("parent", "discord", "channel", "20000000-0000-4000-8000-000000000001");
     sessions.create({
       id: parent,
       workspacePath: join(workspacesRoot, "parent"),

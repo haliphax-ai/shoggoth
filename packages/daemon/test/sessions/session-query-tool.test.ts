@@ -48,7 +48,7 @@ function makeToolCallClient(toolArgs: Record<string, unknown>) {
 describe("session.query tool handler", { concurrency: false }, () => {
   let db: InstanceType<typeof Database>;
   let tmp: string;
-  const sessionId = "agent:alice:discord:00000000-0000-0000-0000-000000000001";
+  const sessionId = "agent:alice:discord:channel:00000000-0000-0000-0000-000000000001";
 
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "shoggoth-sq-"));
@@ -140,7 +140,7 @@ describe("session.query tool handler", { concurrency: false }, () => {
   });
 
   it("allows querying another agent when configured globally", async () => {
-    const bobSessionId = "agent:bob:discord:00000000-0000-0000-0000-000000000002";
+    const bobSessionId = "agent:bob:discord:channel:00000000-0000-0000-0000-000000000002";
     createSessionStore(db).create({ id: bobSessionId, workspacePath: tmp });
     const bobSeg = createSessionStore(db).getById(bobSessionId)!.contextSegmentId;
     createTranscriptStore(db).append({

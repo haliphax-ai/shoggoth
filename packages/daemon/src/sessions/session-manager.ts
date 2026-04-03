@@ -37,12 +37,14 @@ export interface SessionManagerOptions {
 
 export interface SpawnSessionInput {
   /**
-   * Top-level only: agent owning the workspace. Defaults to the manager’s `agentId`.
-   * Ignored when `parentSessionId` is set (workspace follows the parent URN’s agent id).
+   * Top-level only: agent owning the workspace. Defaults to the manager's `agentId`.
+   * Ignored when `parentSessionId` is set (workspace follows the parent URN's agent id).
    */
   readonly agentId?: string;
   readonly platform?: string;
-  /** When set, mints `agent:…:<parent-leaf-uuid>:<new uuid>` under the parent’s agent + platform. */
+  /** Resource type segment for the URN (e.g. "channel", "dm"). Defaults to "channel". */
+  readonly resourceType?: string;
+  /** When set, mints `agent:…:<parent-leaf-uuid>:<new uuid>` under the parent's agent + platform. */
   readonly parentSessionId?: string;
   readonly modelSelection?: unknown;
   readonly lightContext?: boolean;
@@ -103,7 +105,7 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
             `no session platform specified and no platform bindings configured for agent "${aid}" (add platforms under agents.list.${aid}.platforms)`,
           );
         }
-        id = mintAgentSessionUrn(aid, platform);
+        id = mintAgentSessionUrn(aid, platform, input.resourceType ?? "channel");
         dirAgentId = aid;
       }
       const wsPath = resolveAgentWorkspacePath(options.workspacesRoot, dirAgentId);
