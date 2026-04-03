@@ -234,7 +234,11 @@ export class Orchestrator {
     const scheduleNext = () => {
       if (!this.workflow || !this.opts) return;
       this.pollingTimer = setTimeout(async () => {
-        await this.tick();
+        try {
+          await this.tick();
+        } catch (err) {
+          log.error("tick failed", { workflowId: this.workflow?.id, error: String(err) });
+        }
         if (this.pollingTimer !== null) scheduleNext();
       }, this.opts.pollingIntervalMs);
     };
