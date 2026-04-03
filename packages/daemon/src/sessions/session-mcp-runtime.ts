@@ -18,6 +18,7 @@ import {
   buildBuiltinOnlySessionMcpToolContext,
   buildMixedSessionMcpToolContext,
   buildSessionMcpToolContext,
+  createContextLevelToolFinalizer,
   type SessionMcpToolContext,
 } from "./session-mcp-tool-context";
 
@@ -72,6 +73,9 @@ function buildMcpPoolConnectOptions(
 export async function createSessionMcpRuntime(
   opts: CreateSessionMcpRuntimeOptions,
 ): Promise<SessionMcpRuntime> {
+  // Register context-level tool filtering finalizer (config-aware).
+  registerContextFinalizer(createContextLevelToolFinalizer(opts.config));
+
   const mcpServers = opts.config.mcp?.servers ?? [];
   const mcpPoolScope = opts.config.mcp?.poolScope ?? "global";
   const connectMcpPool = opts.deps?.connectShoggothMcpServers ?? connectShoggothMcpServers;

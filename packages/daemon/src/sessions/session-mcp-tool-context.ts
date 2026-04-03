@@ -6,7 +6,14 @@ import type {
   MessageToolPlatformSlice,
 } from "@shoggoth/mcp-integration";
 import { buildMessageToolDescriptor } from "@shoggoth/mcp-integration";
-import { isSubagentSessionUrn } from "@shoggoth/shared";
+import {
+  isSubagentSessionUrn,
+  parseAgentSessionUrn,
+  resolveContextLevel,
+  type ContextLevel,
+  type ContextLevelToolOverride,
+  type ShoggothConfig,
+} from "@shoggoth/shared";
 import { messageToolContextRef } from "../messaging/message-tool-context-ref";
 import {
   buildAggregatedMcpCatalog,
@@ -158,4 +165,101 @@ export function subagentToolStripFinalizer(
   sessionId: string,
 ): SessionMcpToolContext {
   return omitBuiltinSubagentToolForSubagentSession(ctx, sessionId);
+}
+
+// ---------------------------------------------------------------------------
+// Context-level tool filtering
+// ---------------------------------------------------------------------------
+
+/**
+ * Default tool exclusions per context level. Uses namespaced names (e.g. `builtin-subagent`).
+ * `none` is handled specially (excludes everything).
+ */
+const DEFAULT_EXCLUSIONS_BY_LEVEL: Record<ContextLevel, ReadonlySet<string>> = {
+  none: new Set(), // handled specially — all tools excluded
+  minimal: new Set([
+    "builtin-workflow",
+    "builtin-subagent",
+    "builtin-session-list",
+    "builtin-session-history",
+    "builtin-session-spawn",
+  ]),
+  light: new Set(),
+  full: new Set(),
+};
+
+/**
+ * Filter tools based on the resolved context level and optional config overrides.
+ *
+ * Flow:
+ * 1. `none` → exclude everything (config `allow` can re-add specific tools)
+ * 2. Start with default exclusions for the level
+ * 3. Add `contextLevelTools[level].exclude` from config
+ * 4. Remove `contextLevelTools[level].allow` from config
+ * 5. Filter the tool list
+ */
+export function filterToolsByContextLevel(
+  tools: readonly AggregatedTool[],
+  level: ContextLevel,
+  config?: ShoggothConfig,
+): readonly AggregatedTool[] {
+  const override: ContextLevelToolOverride | undefined = config?.contextLevelTools?.[level];
+
+  if (level === "none") {
+    // Exclude everything by default; config `allow` can re-add specific tools
+    const allowed = new Set(override?.allow ?? []);
+    if (allowed.size === 0) return [];
+    return tools.filter((t) => allowed.has(t.namespacedName));
+  }
+
+  const excluded = new Set(DEFAULT_EXCLUSIONS_BY_LEVEL[level]);
+
+  // Apply config exclusions (additive)
+  if (override?.exclude) {
+    for (const name of override.exclude) excluded.add(name);
+  }
+
+  // Apply config allows (subtractive from exclusions)
+  if (override?.allow) {
+    for (const name of override.allow) excluded.delete(name);
+  }
+
+  if (excluded.size === 0) return tools;
+  return tools.filter((t) => !excluded.has(t.namespacedName));
+}
+
+/**
+ * Apply context-level tool filtering to a {@link SessionMcpToolContext}.
+ * Returns the context unchanged when no tools are removed.
+ */
+export function applyContextLevelToolFilter(
+  ctx: SessionMcpToolContext,
+  level: ContextLevel,
+  config?: ShoggothConfig,
+): SessionMcpToolContext {
+  const filtered = filterToolsByContextLevel(ctx.aggregated.tools, level, config);
+  if (filtered.length === ctx.aggregated.tools.length) return ctx;
+  const aggregated: AggregateMcpCatalogResult = { tools: filtered };
+  return {
+    aggregated,
+    toolsOpenAi: openAiToolsFromCatalog(aggregated),
+    toolsLoop: mcpToolsForToolLoop(aggregated),
+    external: ctx.external,
+  };
+}
+
+/**
+ * Creates a context finalizer that filters tools based on the resolved context level.
+ * The returned finalizer resolves the context level from the session URN and config.
+ */
+export function createContextLevelToolFinalizer(
+  config: ShoggothConfig,
+): (ctx: SessionMcpToolContext, sessionId: string) => SessionMcpToolContext {
+  return (ctx, sessionId) => {
+    const parsed = parseAgentSessionUrn(sessionId);
+    const agentId = parsed?.agentId ?? "";
+    const isSubagent = isSubagentSessionUrn(sessionId);
+    const level = resolveContextLevel(config, agentId, undefined, isSubagent);
+    return applyContextLevelToolFilter(ctx, level, config);
+  };
 }
