@@ -248,14 +248,26 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         const requiresReview = !decision.allow && decision.reason === "requires_review";
 
         if (!decision.allow && !requiresReview) {
-          options.toolRuns.markFailed(options.runId, `policy_denied:${decision.reason}`);
-          throw new Error(decision.reason);
+          log.warn("tool call policy denied", { toolName: compoundResource, toolCallId: tc.id, sessionId: options.sessionId, reason: decision.reason });
+          const errBody = JSON.stringify({ error: "policy_denied", tool: compoundResource, message: `Tool call denied by policy: ${decision.reason}` });
+          options.audit.record({ phase: "policy_denied", tool: compoundResource, toolCallId: tc.id, reason: decision.reason });
+          options.model.pushToolMessage?.({ toolCallId: tc.id, content: errBody });
+          if (options.transcript) {
+            appendTx({ role: "tool", content: errBody, toolCallId: tc.id, metadata: { tool: tc.name } });
+          }
+          continue;
         }
 
         if (requiresReview && !options.hitl) {
           // No HITL configured — treat requires_review as a block
-          options.toolRuns.markFailed(options.runId, `policy_denied:${decision.reason}`);
-          throw new Error(decision.reason);
+          log.warn("tool call requires review but no HITL configured", { toolName: compoundResource, toolCallId: tc.id, sessionId: options.sessionId });
+          const errBody = JSON.stringify({ error: "review_required", tool: compoundResource, message: `Tool call requires human approval but no review system is configured.` });
+          options.audit.record({ phase: "review_unavailable", tool: compoundResource, toolCallId: tc.id });
+          options.model.pushToolMessage?.({ toolCallId: tc.id, content: errBody });
+          if (options.transcript) {
+            appendTx({ role: "tool", content: errBody, toolCallId: tc.id, metadata: { tool: tc.name } });
+          }
+          continue;
         }
 
         if (options.hitl) {

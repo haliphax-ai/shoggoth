@@ -389,7 +389,15 @@ export async function executeSessionAgentTurn(
         extractLatestTranscriptAssistantText(input.db, input.sessionId, ctxSeg) ?? "_Aborted._";
       return { failoverMeta, latestAssistantText };
     }
-    throw e;
+    // Catch-all: log the error and return whatever partial response exists
+    // rather than killing the turn entirely.
+    const errMsg = e instanceof Error ? e.message : String(e);
+    log.error("tool loop unexpected error", { sessionId: input.sessionId, error: errMsg });
+    pushSystemContext(input.sessionId, `Previous turn encountered an error: ${errMsg}`);
+    const failoverMeta2 = model.getSessionToolLoopFailoverState();
+    const latestAssistantText2 =
+      extractLatestTranscriptAssistantText(input.db, input.sessionId, ctxSeg) ?? `_Turn failed: ${errMsg}_`;
+    return { failoverMeta: failoverMeta2, latestAssistantText: latestAssistantText2 };
   } finally {
     endTurnAbortScope();
   }
