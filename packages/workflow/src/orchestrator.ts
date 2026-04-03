@@ -246,6 +246,7 @@ export class Orchestrator {
       pollingIntervalMs: opts.pollingIntervalMs,
       createdAt: Date.now(),
       ...(opts.concurrency ? { concurrency: opts.concurrency } : {}),
+      ...(opts.runtimeLimitMs ? { runtimeLimitMs: opts.runtimeLimitMs } : {}),
     };
 
     this.workflow = workflow;

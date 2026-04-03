@@ -16,6 +16,7 @@ export interface SerializedWorkflow {
   pollingIntervalMs: number;
   createdAt: number;
   concurrency?: number;
+  runtimeLimitMs?: number;
 }
 
 function serializeGraph(graph: DependencyGraph): SerializedGraph {
@@ -43,6 +44,7 @@ function serialize(wf: TaskList): SerializedWorkflow {
     pollingIntervalMs: wf.pollingIntervalMs,
     createdAt: wf.createdAt,
     ...(wf.concurrency ? { concurrency: wf.concurrency } : {}),
+    ...(wf.runtimeLimitMs ? { runtimeLimitMs: wf.runtimeLimitMs } : {}),
   };
 }
 
@@ -55,6 +57,7 @@ function deserialize(raw: SerializedWorkflow): TaskList {
     pollingIntervalMs: raw.pollingIntervalMs,
     createdAt: raw.createdAt,
     ...(raw.concurrency ? { concurrency: raw.concurrency } : {}),
+    ...(raw.runtimeLimitMs ? { runtimeLimitMs: raw.runtimeLimitMs } : {}),
   };
 }
 

@@ -113,6 +113,8 @@ export interface TaskList {
   createdAt: number;
   /** Max number of simultaneously in_progress tasks. undefined/0 = unlimited. */
   concurrency?: number;
+  /** Default per-task runtime limit in ms. Persisted for resume. */
+  runtimeLimitMs?: number;
 }
 
 // Template reference types
