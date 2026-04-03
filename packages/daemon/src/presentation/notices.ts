@@ -1,4 +1,4 @@
-export type NoticeResolver = (key: string, vars?: Record<string, string>) => string;
+type NoticeResolver = (key: string, vars?: Record<string, string>) => string;
 
 let _resolver: NoticeResolver | undefined;
 

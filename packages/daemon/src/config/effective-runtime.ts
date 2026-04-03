@@ -52,14 +52,6 @@ export function resolveShoggothAgentId(cfg: ShoggothConfig): string {
   return cfg.runtime?.agentId?.trim() || "main";
 }
 
-/** Env `SHOGGOTH_PLATFORM_OWNER_USER_ID` wins; else layered platform `ownerUserId`. */
-export function resolvePlatformOwnerUserId(cfg: ShoggothConfig, platform: string): string | undefined {
-  const e = process.env.SHOGGOTH_PLATFORM_OWNER_USER_ID?.trim();
-  if (e) return e;
-  const pc = resolvePlatformConfig(cfg, platform);
-  return (pc?.ownerUserId as string | undefined)?.trim() || undefined;
-}
-
 /**
  * Model endpoint health probe base URL. Env `ANTHROPIC_BASE_URL` (origin) is checked first for
  * Anthropic-style stacks; then `OPENAI_BASE_URL` / `OLLAMA_HOST`, then config.

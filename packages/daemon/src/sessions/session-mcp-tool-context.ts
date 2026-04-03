@@ -42,7 +42,7 @@ export function openAiToolsFromCatalog(aggregated: AggregateMcpCatalogResult): O
 /**
  * Appends `builtin-message` when a messaging runtime registers a capability slice.
  */
-export function augmentSessionMcpToolContextWithMessageTool(
+function augmentSessionMcpToolContextWithMessageTool(
   base: SessionMcpToolContext,
   slice: MessageToolPlatformSlice | undefined,
 ): SessionMcpToolContext {
@@ -232,7 +232,7 @@ export function filterToolsByContextLevel(
  * Apply context-level tool filtering to a {@link SessionMcpToolContext}.
  * Returns the context unchanged when no tools are removed.
  */
-export function applyContextLevelToolFilter(
+function applyContextLevelToolFilter(
   ctx: SessionMcpToolContext,
   level: ContextLevel,
   config?: ShoggothConfig,

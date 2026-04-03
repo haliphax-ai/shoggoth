@@ -5,7 +5,7 @@ const log = getLogger("acpx");
 
 export type AcpxSpawnFn = (command: string, args: string[], options: SpawnOptions) => ChildProcess;
 
-export type TrackedAcpxProcess = {
+type TrackedAcpxProcess = {
   readonly pid: number;
   readonly shoggothSessionId: string;
   readonly startedAtMs: number;
@@ -21,7 +21,7 @@ export class AcpxSupervisorError extends Error {
   }
 }
 
-export type AcpxProcessSupervisorOptions = {
+type AcpxProcessSupervisorOptions = {
   readonly spawn?: AcpxSpawnFn;
 };
 

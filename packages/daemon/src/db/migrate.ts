@@ -5,14 +5,14 @@ import type Database from "better-sqlite3";
 
 const MIGRATION_FILE = /^(\d{4})_(.+)\.sql$/;
 
-export interface MigrationInfo {
+interface MigrationInfo {
   readonly version: number;
   readonly name: string;
   readonly filename: string;
   readonly sql: string;
 }
 
-export interface MigrateResult {
+interface MigrateResult {
   readonly appliedVersions: readonly number[];
 }
 

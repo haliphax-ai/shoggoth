@@ -251,7 +251,7 @@ export function createDaemonMessageAdapter(deps: DaemonMessageAdapterDeps): Mess
 // NotifyAdapter (workflow completion notification)
 // ---------------------------------------------------------------------------
 
-export interface WorkflowNotifierDeps {
+interface WorkflowNotifierDeps {
   /** Lazy getter — the runtime extension may not be available at construction time. */
   readonly getRunSessionModelTurn: () =>
     | ((input: {

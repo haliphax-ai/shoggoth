@@ -1,4 +1,4 @@
-export interface ParsedFrontmatter {
+interface ParsedFrontmatter {
   readonly fields: Readonly<Record<string, string>>;
   readonly body: string;
 }

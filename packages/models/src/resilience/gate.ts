@@ -7,7 +7,7 @@ export interface ResilienceOptions {
   providerKind?: string;
 }
 
-export interface ResilienceGlobalDefaults {
+interface ResilienceGlobalDefaults {
   maxRetries?: number;
   baseDelayMs?: number;
   maxDelayMs?: number;

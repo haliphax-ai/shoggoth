@@ -11,7 +11,7 @@ import { compactSessionTranscript, loadSessionTranscript } from "./transcript-co
 import type { Logger } from "./logging";
 import { getSessionContextSegmentId } from "./sessions/session-store";
 
-export interface TranscriptAutoCompactTickOptions {
+interface TranscriptAutoCompactTickOptions {
   readonly env?: NodeJS.ProcessEnv;
   /** Cap how many sessions are considered per tick (ordered by id). */
   readonly maxSessionsPerTick?: number;

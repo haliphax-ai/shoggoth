@@ -3,8 +3,6 @@ import { formatAgentIdentityPrefix } from "@shoggoth/shared";
 import { ModelHttpError } from "@shoggoth/models";
 import { daemonNotice } from "./notices.js";
 
-export { formatAgentIdentityPrefix };
-
 // ---------------------------------------------------------------------------
 // Minimal local interface — avoids importing the full session-tool-loop types.
 // ---------------------------------------------------------------------------

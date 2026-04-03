@@ -53,7 +53,7 @@ export const DEFINED_CONTROL_OPS = [
   "procman_restart",
   "procman_stop",
 ] as const;
-export type DefinedControlOp = (typeof DEFINED_CONTROL_OPS)[number];
+type DefinedControlOp = (typeof DEFINED_CONTROL_OPS)[number];
 
 export function isDefinedControlOp(op: string): op is DefinedControlOp {
   return (DEFINED_CONTROL_OPS as readonly string[]).includes(op);

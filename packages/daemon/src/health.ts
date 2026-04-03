@@ -11,7 +11,7 @@ export interface DependencyCheck {
   latencyMs?: number;
 }
 
-export interface DependencyProbe {
+interface DependencyProbe {
   readonly name: string;
   check(): Promise<DependencyCheck>;
 }
@@ -214,7 +214,7 @@ function buildModelProbeAuthHeaders(
  * Fetch model metadata from the Gemini models API.
  * Returns inputTokenLimit/outputTokenLimit on success, undefined on failure.
  */
-export async function fetchGeminiModelMetadata(
+async function fetchGeminiModelMetadata(
   baseUrl: string,
   apiVersion: string,
   model: string,
@@ -278,7 +278,7 @@ export async function fetchGeminiMetadataForProviders(
  * Some providers (Ollama, vLLM, LiteLLM) return context window info; the official
  * OpenAI API does not. Falls back to a static lookup table of known OpenAI models.
  */
-export async function fetchOpenAIModelMetadata(
+async function fetchOpenAIModelMetadata(
   baseUrl: string,
   model: string,
   apiKey: string,

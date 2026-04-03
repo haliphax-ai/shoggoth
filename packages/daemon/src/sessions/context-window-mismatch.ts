@@ -6,7 +6,7 @@ const log = getLogger("context-window-mismatch");
 
 const warnedProviders = new Set<string>();
 
-export interface ContextWindowMismatchInput {
+interface ContextWindowMismatchInput {
   readonly providerId: string;
   readonly configContextWindow: number | undefined;
   readonly providerContextWindow: number | undefined;
@@ -43,9 +43,4 @@ export function checkContextWindowMismatch(input: ContextWindowMismatchInput): v
       `⚠️ Context window mismatch for provider \`${input.providerId}\`: config says ${input.configContextWindow} tokens, provider reports ${input.providerContextWindow} tokens.`,
     );
   }
-}
-
-/** Reset the warned set (for testing). */
-export function resetContextWindowMismatchWarnings(): void {
-  warnedProviders.clear();
 }

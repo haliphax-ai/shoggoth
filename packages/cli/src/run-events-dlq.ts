@@ -7,7 +7,7 @@ import {
   openStateDb,
 } from "@shoggoth/daemon/lib";
 
-export interface RunEventsDlqOptions {
+interface RunEventsDlqOptions {
   readonly configDir: string;
   readonly limit: number;
 }

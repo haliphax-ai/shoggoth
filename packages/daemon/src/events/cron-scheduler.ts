@@ -11,7 +11,7 @@ export function parseEverySchedule(scheduleExpr: string): number | null {
   return n;
 }
 
-export interface UpsertCronJobInput {
+interface UpsertCronJobInput {
   readonly id: string;
   readonly scheduleExpr: string;
   readonly payload?: unknown;
@@ -53,7 +53,7 @@ export function upsertCronJob(db: Database.Database, input: UpsertCronJobInput):
   });
 }
 
-export interface CronJobRow {
+interface CronJobRow {
   readonly id: string;
   readonly schedule_expr: string;
   readonly payload_json: string | null;

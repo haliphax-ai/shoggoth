@@ -32,7 +32,7 @@ export interface PendingActionRow {
   readonly resolverPrincipal: string | undefined;
 }
 
-export type PendingActionsStoreHooks = {
+type PendingActionsStoreHooks = {
   onResolved?: (input: {
     id: string;
     status: Exclude<PendingActionStatus, "pending">;
@@ -92,7 +92,7 @@ function rowToPending(r: {
   };
 }
 
-export type CreatePendingActionsStoreOptions = {
+type CreatePendingActionsStoreOptions = {
   readonly hooks?: PendingActionsStoreHooks;
 };
 

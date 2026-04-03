@@ -1,8 +1,8 @@
 import { getLogger } from "./logging";
 
-export type SignalName = NodeJS.Signals;
+type SignalName = NodeJS.Signals;
 
-export interface SignalHandlerOptions {
+interface SignalHandlerOptions {
   signals?: SignalName[];
   onSignal: (signal: SignalName) => void | Promise<void>;
   proc?: Pick<NodeJS.Process, "on" | "off" | "pid">;

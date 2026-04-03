@@ -3,7 +3,7 @@ import { installSignalHandlers } from "./signals";
 import { ShutdownCoordinator, type ShutdownOptions } from "./shutdown";
 import { HealthRegistry, type HealthSnapshot } from "./health";
 
-export interface DaemonRuntimeOptions {
+interface DaemonRuntimeOptions {
   component?: string;
   logLevel?: string;
   shutdown: Omit<ShutdownOptions, "logger">;

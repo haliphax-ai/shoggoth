@@ -12,7 +12,7 @@ import { rememberSubagentHandles } from "./subagent-disposables";
 import type { SubagentRuntimeExtension } from "./subagent-extension-ref";
 import { terminatePersistentSubagentSession } from "./subagent-kill";
 
-export type ReconcilePersistentSubagentsResult = {
+type ReconcilePersistentSubagentsResult = {
   readonly restored: number;
   readonly expiredKilled: number;
 };

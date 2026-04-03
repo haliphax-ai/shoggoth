@@ -14,10 +14,10 @@ import { getProcessManager } from "../process-manager-singleton";
 import type { ShoggothMcpConfig, ShoggothMcpServerEntry } from "@shoggoth/shared";
 import type { ExternalMcpInvoke } from "./tool-loop-mcp";
 
-export type EffectiveMcpPoolScope = "global" | "per_session";
+type EffectiveMcpPoolScope = "global" | "per_session";
 
 /** Resolve `entry.poolScope ?? "inherit"` then map `inherit` → top-level `mcp.poolScope`. */
-export function effectiveMcpPoolScope(
+function effectiveMcpPoolScope(
   entry: ShoggothMcpServerEntry,
   topLevelPoolScope: ShoggothMcpConfig["poolScope"],
 ): EffectiveMcpPoolScope {

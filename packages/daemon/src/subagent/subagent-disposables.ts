@@ -1,6 +1,6 @@
 /** Runtime handles for persistent subagents (thread routing, bus subscription, TTL). */
 
-export type SubagentRuntimeHandles = {
+type SubagentRuntimeHandles = {
   readonly unregisterThread: () => void;
   readonly unsubscribeBus: () => void;
   readonly clearTtl: () => void;
@@ -32,8 +32,4 @@ export function disposeSubagentRuntime(sessionId: string): void {
     /* ignore */
   }
   bySession.delete(sid);
-}
-
-export function hasSubagentRuntimeHandles(sessionId: string): boolean {
-  return bySession.has(sessionId.trim());
 }

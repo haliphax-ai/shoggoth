@@ -26,6 +26,4 @@ export const CONFIG_RESTART_REQUIRED_KEYS = [
 
 export type ConfigRestartRequiredKey = (typeof CONFIG_RESTART_REQUIRED_KEYS)[number];
 
-export function configKeyRequiresRestart(key: string): key is ConfigRestartRequiredKey {
-  return (CONFIG_RESTART_REQUIRED_KEYS as readonly string[]).includes(key);
-}
+

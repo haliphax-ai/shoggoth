@@ -68,13 +68,13 @@ const shoggothGeminiProviderSchema = z
   })
   .strict();
 
-export const shoggothModelProviderEntrySchema = z.discriminatedUnion("kind", [
+const shoggothModelProviderEntrySchema = z.discriminatedUnion("kind", [
   shoggothOpenAiCompatibleProviderSchema,
   shoggothAnthropicMessagesProviderSchema,
   shoggothGeminiProviderSchema,
 ]);
 
-export type ShoggothModelProviderEntry = z.infer<typeof shoggothModelProviderEntrySchema>;
+type ShoggothModelProviderEntry = z.infer<typeof shoggothModelProviderEntrySchema>;
 
 const shoggothModelThinkingSchema = z
   .object({
@@ -113,7 +113,7 @@ export const shoggothModelsCompactionSchema = z
 
 export type ShoggothModelsCompaction = z.infer<typeof shoggothModelsCompactionSchema>;
 
-export const shoggothModelsCompactionPartialSchema = shoggothModelsCompactionSchema.partial();
+const shoggothModelsCompactionPartialSchema = shoggothModelsCompactionSchema.partial();
 
 /** Per-agent model stack / invocation / compaction overrides (merged with global `models`). */
 export const shoggothAgentModelsOverrideSchema = z
@@ -158,11 +158,11 @@ export const shoggothRetentionConfigSchema = z
 
 export type ShoggothRetentionConfig = z.infer<typeof shoggothRetentionConfigSchema>;
 
-export const shoggothReactionsConfigSchema = z.object({
+const shoggothReactionsConfigSchema = z.object({
   globalPassthrough: z.array(z.string().min(1)).optional(),
   maxAgeMinutes: z.number().int().positive().optional(),
 }).strict();
-export type ShoggothReactionsConfig = z.infer<typeof shoggothReactionsConfigSchema>;
+type ShoggothReactionsConfig = z.infer<typeof shoggothReactionsConfigSchema>;
 
 export const hitlRiskTierSchema = z.enum(["safe", "caution", "critical", "never"]);
 
@@ -212,14 +212,14 @@ const operatorMapEntrySchema = z
   .strict();
 
 /** Layered operator UID map (merged with later JSON files); combined with DB `operator_uid_map` in the daemon. */
-export const shoggothOperatorMapLayerSchema = z
+const shoggothOperatorMapLayerSchema = z
   .object({
     defaultOperator: operatorMapEntrySchema.optional(),
     byUid: z.record(z.string(), operatorMapEntrySchema).optional(),
   })
   .strict();
 
-export type ShoggothOperatorMapLayer = z.infer<typeof shoggothOperatorMapLayerSchema>;
+type ShoggothOperatorMapLayer = z.infer<typeof shoggothOperatorMapLayerSchema>;
 
 /** Per-principal allow/deny lists for tools or control ops. Deny wins; empty allow + no `*` → default-deny. */
 export const shoggothToolRulesSchema = z
@@ -330,13 +330,6 @@ export const DEFAULT_MEMORY_CONFIG: ShoggothMemoryConfig = {
   embeddings: { enabled: false },
 };
 
-export const DEFAULT_REACTIONS_CONFIG = {
-  globalPassthrough: ["👍", "👎", "✅", "❌"],
-  maxAgeMinutes: 30,
-} as const;
-
-export const DEFAULT_MINIMAL_CONTEXT_TAIL_MESSAGES = 2;
-
 /** Default tool call timeout: 10 minutes. */
 export const DEFAULT_TOOL_CALL_TIMEOUT_MS = 600_000;
 
@@ -446,7 +439,7 @@ export const shoggothMcpConfigSchema = z
 export type ShoggothMcpConfig = z.infer<typeof shoggothMcpConfigSchema>;
 
 /** Optional defaults for `acpx_agent_start` when payload omits `acpx_args`. */
-export const shoggothAcpxConfigSchema = z
+const shoggothAcpxConfigSchema = z
   .object({
     /** Path or name resolved on `PATH` (default `acpx`). */
     binary: z.string().min(1).optional(),
@@ -455,7 +448,7 @@ export const shoggothAcpxConfigSchema = z
   })
   .strict();
 
-export type ShoggothAcpxConfig = z.infer<typeof shoggothAcpxConfigSchema>;
+type ShoggothAcpxConfig = z.infer<typeof shoggothAcpxConfigSchema>;
 
 /**
  * Common platform config fields validated by core. Platform-specific extension fields pass through
@@ -688,7 +681,7 @@ export const DEFAULT_SKILLS_CONFIG: ShoggothSkillsConfig = {
 // Declarative sidecar process definitions (Phase 4 — procman)
 // ---------------------------------------------------------------------------
 
-export const processDeclarationHealthSchema = z
+const processDeclarationHealthSchema = z
   .object({
     kind: z.enum(["tcp", "http", "stdout-match"]),
     /** Port for tcp, URL for http, pattern for stdout-match. */

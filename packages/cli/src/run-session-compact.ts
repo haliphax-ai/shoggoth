@@ -12,7 +12,7 @@ import {
   openStateDb,
 } from "@shoggoth/daemon/lib";
 
-export interface RunSessionCompactOptions {
+interface RunSessionCompactOptions {
   readonly stateDbPath: string;
   readonly models: ShoggothModelsConfig | undefined;
   readonly sessionId: string;

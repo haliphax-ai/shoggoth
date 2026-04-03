@@ -17,13 +17,13 @@ export interface MemoryHit {
 // ---------------------------------------------------------------------------
 
 /** Describes a single file change during ingest. */
-export interface IngestFileChange {
+interface IngestFileChange {
   readonly path: string;
   readonly status: "added" | "updated" | "removed";
 }
 
 /** Result returned by ingestMemoryRoots. */
-export interface IngestResult {
+interface IngestResult {
   /** Number of files added, updated, or removed. */
   readonly changed: number;
   /** Detailed list of affected files. Always populated internally; caller decides whether to expose it. */
@@ -501,7 +501,7 @@ export function searchMemoryWithOptionalEmbedding(
 // Snippet extraction
 // ---------------------------------------------------------------------------
 
-export interface SnippetOptions {
+interface SnippetOptions {
   /** Maximum character length of the snippet. */
   readonly maxChars: number;
   /** String to wrap matched terms with (e.g. "**"). Empty string disables highlighting. */

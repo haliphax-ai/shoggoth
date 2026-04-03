@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 
-export interface OpenStateDbOptions {
+interface OpenStateDbOptions {
   readonly busyTimeoutMs?: number;
 }
 

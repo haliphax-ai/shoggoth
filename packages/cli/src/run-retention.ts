@@ -7,7 +7,7 @@ import {
   runRetentionJobs,
 } from "@shoggoth/daemon/lib";
 
-export interface RunRetentionOptions {
+interface RunRetentionOptions {
   readonly configDir: string;
 }
 

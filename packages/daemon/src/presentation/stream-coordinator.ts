@@ -5,11 +5,11 @@
  * is called at most once per `minIntervalMs`.
  */
 
-export interface StreamCoordinatorConfig {
+interface StreamCoordinatorConfig {
   minIntervalMs: number;
 }
 
-export interface CoalescingStreamPusher {
+interface CoalescingStreamPusher {
   push(text: string): void;
   flush(): Promise<void>;
 }

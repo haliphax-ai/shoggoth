@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 
 // TODO: total_cost — requires per-model pricing tables
 
-export interface SessionStats {
+interface SessionStats {
   readonly sessionId: string;
   readonly turnCount: number;
   readonly compactionCount: number;
@@ -57,45 +57,6 @@ export function getSessionStats(db: Database.Database, sessionId: string): Sessi
     )
     .get({ sessionId }) as SessionStatsRow | undefined;
   return row ? rowToStats(row) : null;
-}
-
-/** Record a completed agent turn. Upserts the row, incrementing turn_count and adding token usage. */
-export function recordAgentTurn(
-  db: Database.Database,
-  sessionId: string,
-  input: {
-    inputTokens: number;
-    outputTokens: number;
-    contextWindowTokens?: number;
-    transcriptMessageCount: number;
-  },
-): void {
-  db.prepare(
-    `INSERT INTO session_stats (
-       session_id, turn_count, input_tokens, output_tokens,
-       context_window_tokens, first_turn_at, last_turn_at,
-       transcript_message_count, updated_at
-     ) VALUES (
-       @sessionId, 1, @inputTokens, @outputTokens,
-       @contextWindowTokens, datetime('now'), datetime('now'),
-       @transcriptMessageCount, datetime('now')
-     )
-     ON CONFLICT(session_id) DO UPDATE SET
-       turn_count = turn_count + 1,
-       input_tokens = input_tokens + @inputTokens,
-       output_tokens = output_tokens + @outputTokens,
-       context_window_tokens = COALESCE(@contextWindowTokens, context_window_tokens),
-       first_turn_at = COALESCE(first_turn_at, datetime('now')),
-       last_turn_at = datetime('now'),
-       transcript_message_count = @transcriptMessageCount,
-       updated_at = datetime('now')`,
-  ).run({
-    sessionId,
-    inputTokens: input.inputTokens,
-    outputTokens: input.outputTokens,
-    contextWindowTokens: input.contextWindowTokens ?? null,
-    transcriptMessageCount: input.transcriptMessageCount,
-  });
 }
 
 /** Record a completed compaction. Increments compaction_count and updates transcript_message_count. */
@@ -165,7 +126,7 @@ export function estimateCurrentContextFill(
   return total;
 }
 
-export interface FormattedSessionStats {
+interface FormattedSessionStats {
   readonly contextFill: string;
   readonly contextWindowSuffix: string;
   readonly turns: number;
@@ -247,19 +208,4 @@ export function incrementTurnCount(db: Database.Database, sessionId: string): vo
        last_turn_at = datetime('now'),
        updated_at = datetime('now')`,
   ).run({ sessionId });
-}
-
-/** Update context_window_tokens for a session. */
-export function setContextWindowTokens(
-  db: Database.Database,
-  sessionId: string,
-  tokens: number,
-): void {
-  db.prepare(
-    `INSERT INTO session_stats (session_id, context_window_tokens, updated_at)
-     VALUES (@sessionId, @tokens, datetime('now'))
-     ON CONFLICT(session_id) DO UPDATE SET
-       context_window_tokens = @tokens,
-       updated_at = datetime('now')`,
-  ).run({ sessionId, tokens });
 }

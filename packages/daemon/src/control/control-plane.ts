@@ -50,7 +50,7 @@ import { dispatchMcpHttpCancelRequest } from "../mcp/mcp-http-cancel-registry";
 
 export type ReadPeerCredFn = (socket: Socket) => PeerCredentials;
 
-export type ControlPlaneOptions = {
+type ControlPlaneOptions = {
   config: ShoggothConfig;
   /**
    * When set, used for control-socket authz instead of building a fresh engine from
@@ -79,7 +79,7 @@ export type ControlPlaneOptions = {
   cancelMcpHttpRequest?: IntegrationOpsContext["cancelMcpHttpRequest"];
 };
 
-export type ControlPlaneHandle = {
+type ControlPlaneHandle = {
   socketPath: string;
   close: () => Promise<void>;
 };

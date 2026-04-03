@@ -154,5 +154,3 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
     options.mcpLifecycle?.onTurnEnd?.();
   }
 }
-
-export type { SessionAgentTurnResult };

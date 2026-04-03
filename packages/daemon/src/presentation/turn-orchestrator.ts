@@ -15,7 +15,7 @@ import {
 // Per-turn input provided by the caller
 // ---------------------------------------------------------------------------
 
-export interface OrchestrateTurnInput {
+interface OrchestrateTurnInput {
   readonly sessionId: string;
   readonly replyToMessageId?: string;
   readonly buildTurn: () => Promise<InboundSessionTurnInput>;
@@ -28,7 +28,7 @@ export interface OrchestrateTurnInput {
 // Orchestrator
 // ---------------------------------------------------------------------------
 
-export interface PresentationTurnOrchestratorDeps {
+interface PresentationTurnOrchestratorDeps {
   readonly config: ShoggothConfig;
   readonly env?: NodeJS.ProcessEnv;
   readonly adapter: PlatformAdapter;

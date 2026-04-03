@@ -1,4 +1,4 @@
-export interface ModelMetadataEntry {
+interface ModelMetadataEntry {
   /** Context window size in tokens. */
   contextWindowTokens: number;
   /** Where this value came from. */
@@ -57,7 +57,7 @@ export function setModelMetadataFromProvider(
  * Set a default value for a model (e.g. known Anthropic defaults).
  * Only sets if no value exists yet (doesn't overwrite config or provider values).
  */
-export function setModelMetadataDefault(
+function setModelMetadataDefault(
   providerId: string,
   model: string,
   contextWindowTokens: number,
@@ -77,46 +77,6 @@ export function getModelContextWindowTokens(
   model: string,
 ): number | undefined {
   return store.get(makeKey(providerId, model))?.contextWindowTokens;
-}
-
-/**
- * Get the full metadata entry for a model.
- */
-export function getModelMetadata(
-  providerId: string,
-  model: string,
-): ModelMetadataEntry | undefined {
-  return store.get(makeKey(providerId, model));
-}
-
-/**
- * Register static context window defaults for known Anthropic models.
- * Only sets values where no config or provider value exists yet.
- */
-export function registerAnthropicDefaults(): void {
-  const models200k = [
-    // Claude 4 family
-    "claude-sonnet-4-20250514",
-    "claude-opus-4-20250514",
-    // Claude 3.5 family
-    "claude-3-5-sonnet-20240620",
-    "claude-3-5-sonnet-20241022",
-    "claude-3-5-sonnet-latest",
-    "claude-3-5-haiku-20241022",
-    "claude-3-5-haiku-latest",
-    // Claude 3 family
-    "claude-3-opus-20240229",
-    "claude-3-opus-latest",
-    "claude-3-sonnet-20240229",
-    "claude-3-haiku-20240307",
-  ];
-
-  for (const model of models200k) {
-    // Use wildcard providerId — defaults apply regardless of which provider id is configured.
-    // setModelMetadataDefault is keyed on providerId:model, so we register for all anthropic-messages
-    // providers found in the failover chain. Fall back to a well-known provider id.
-    setModelMetadataDefault("anthropic", model, 200_000);
-  }
 }
 
 /**
@@ -223,11 +183,4 @@ export function registerOpenAIDefaultsForProviders(
       setModelMetadataDefault(hop.providerId, hop.model, ctx);
     }
   }
-}
-
-/**
- * Clear the store (for testing).
- */
-export function resetModelMetadata(): void {
-  store.clear();
 }

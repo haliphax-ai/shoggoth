@@ -13,7 +13,7 @@ import { resolveBootstrapPrimarySessionUrn } from "@shoggoth/messaging";
 import { pushSystemContext } from "./sessions/system-context-buffer";
 import { getLogger } from "./logging";
 
-export interface BootstrapMainSessionOptions {
+interface BootstrapMainSessionOptions {
   readonly db: Database.Database;
   readonly config: ShoggothConfig;
 }

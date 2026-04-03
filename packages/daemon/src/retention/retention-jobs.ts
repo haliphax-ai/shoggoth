@@ -193,7 +193,7 @@ function purgeTranscriptBySessionCap(db: Database.Database, keepPerSession: numb
   return Number(info.changes);
 }
 
-export interface RunRetentionJobsOptions {
+interface RunRetentionJobsOptions {
   readonly correlationId?: string;
 }
 

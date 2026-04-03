@@ -11,7 +11,7 @@ export function insertSessionToolAutoApprove(
   ).run({ session_id: sessionId.trim(), tool_name: toolName.trim() });
 }
 
-export function sessionHasToolAutoApprove(
+function sessionHasToolAutoApprove(
   db: Database.Database,
   sessionId: string,
   toolName: string,

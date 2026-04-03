@@ -1,6 +1,6 @@
 import { getLogger } from "./logging";
 
-export type DrainFn = () => void | Promise<void>;
+type DrainFn = () => void | Promise<void>;
 
 export interface ShutdownOptions {
   drainTimeoutMs: number;

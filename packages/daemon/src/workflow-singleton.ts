@@ -22,7 +22,7 @@ let server: WorkflowServer | undefined;
 let controlPlane: ControlPlane | undefined;
 let stateDir: string | undefined;
 
-export interface WorkflowSingletonOptions {
+interface WorkflowSingletonOptions {
   /** Base directory for workflow state files. */
   stateDir: string;
   spawner: SpawnAdapter;

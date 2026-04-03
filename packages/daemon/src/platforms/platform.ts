@@ -63,22 +63,6 @@ export interface PlatformHandle {
 }
 
 // ---------------------------------------------------------------------------
-// PlatformErrorFormatter
-// ---------------------------------------------------------------------------
-
-/**
- * Platform-specific error formatting. Each platform maps thrown values to
- * user-facing copy (no stack traces) and enforces message-body length limits.
- */
-export interface PlatformErrorFormatter {
-  /** Map a thrown value to a short, platform-safe user-facing error string. */
-  formatErrorUserText(e: unknown): string;
-
-  /** Truncate a message body to the platform's maximum allowed length. */
-  sliceMessageBody(text: string): string;
-}
-
-// ---------------------------------------------------------------------------
 // PlatformAssistantDeps
 // ---------------------------------------------------------------------------
 
@@ -87,7 +71,7 @@ export interface PlatformErrorFormatter {
  * and MCP server connectivity. Production platforms use real implementations;
  * tests may override individual pieces.
  */
-export interface PlatformAssistantDeps {
+interface PlatformAssistantDeps {
   /** Factory for the failover-capable tool-calling model client. */
   readonly createToolCallingClient: (
     models: ShoggothConfig["models"],
@@ -102,64 +86,6 @@ export interface PlatformAssistantDeps {
 }
 
 // ---------------------------------------------------------------------------
-// PlatformProbe
-// ---------------------------------------------------------------------------
-
-/**
- * Result of a single platform health-check probe.
- */
-export interface PlatformProbeResult {
-  readonly name: string;
-  readonly status: "pass" | "fail" | "skipped";
-  readonly detail?: string;
-}
-
-/**
- * Health-check probe for a platform's external dependencies (API reachability,
- * token validity, etc.). Registered with {@link HealthRegistry} at startup.
- */
-export interface PlatformProbe {
-  /** Human-readable probe name (e.g. `"discord"`, `"slack"`). */
-  readonly name: string;
-
-  /** Execute the health check and return the result. */
-  check(): Promise<PlatformProbeResult>;
-}
-
-// ---------------------------------------------------------------------------
-// PlatformHitlAdapter
-// ---------------------------------------------------------------------------
-
-/**
- * Platform-specific human-in-the-loop interaction adapter.
- *
- * Platforms use their own UX patterns to capture operator approval — emoji
- * reactions, buttons, slash commands, etc. This interface captures the concept
- * of "platform-specific HITL interaction" without assuming any particular mechanism.
- */
-export interface PlatformHitlAdapter {
-  /**
-   * Register a HITL notice so the platform can map inbound approval events
-   * (reactions, button clicks, etc.) back to the pending tool-call row.
-   *
-   * @param pendingId  Unique id of the pending HITL action.
-   * @param sessionId  Session that owns the pending action.
-   * @param toolName   Name of the tool awaiting approval.
-   * @param ref        Platform-specific reference (e.g. message id + channel id).
-   */
-  registerNotice(pendingId: string, sessionId: string, toolName: string, ref: unknown): void;
-
-  /**
-   * Handle an inbound approval event from the platform (e.g. a reaction add,
-   * a button click, a slash-command response). The adapter resolves the event
-   * to a pending id and applies the approval/denial.
-   *
-   * @param event  Platform-specific event payload.
-   */
-  onInboundApprovalEvent(event: unknown): void;
-}
-
-// ---------------------------------------------------------------------------
 // PlatformOptions
 // ---------------------------------------------------------------------------
 
@@ -167,7 +93,7 @@ export interface PlatformHitlAdapter {
  * Common configuration and dependencies passed to a platform's `start*` factory.
  * Each concrete platform extends this with transport-specific fields.
  */
-export interface PlatformOptions {
+interface PlatformOptions {
   /** SQLite database handle for sessions, transcripts, tool runs, and HITL state. */
   readonly db: Database.Database;
 

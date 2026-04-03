@@ -9,7 +9,7 @@ import { getLogger } from "./logging";
 
 const log = getLogger("config-hot-reload");
 
-export type PolicyEngineRef = { engine: PolicyEngine };
+type PolicyEngineRef = { engine: PolicyEngine };
 
 export type HitlConfigRef = { value: ShoggothConfig["hitl"] };
 
@@ -32,7 +32,7 @@ export function diffRestartRequiredKeys(
   return changed;
 }
 
-export type StartConfigHotReloadOptions = {
+type StartConfigHotReloadOptions = {
   configDirectory: string;
   /** Snapshot of the last successfully applied layered config (mutated on success). */
   configRef: { current: ShoggothConfig };
