@@ -370,21 +370,23 @@ export class Orchestrator {
     for (const task of newlyFailed) {
       task.failureHandled = true;
 
-      // Send failure notification (fire-and-forget — don't block the tick cycle)
-      this.routeFailureNotification(task).catch((err) => {
-        log.error("failure notification failed", { workflowId: wf.id, taskId: task.taskDef.id, error: String(err) });
-      });
-
       // Apply failure behavior
       const behavior = task.taskDef.failureBehavior;
 
       if (behavior === "abort") {
+        // Don't notify — the workflow is being aborted
         await this.abortWorkflow(task);
         return; // abort is terminal, stop processing
       } else if (behavior === "pause") {
         this.paused = true;
       }
       // "continue" — no special action, markBlockedTasks handles downstream
+
+      // Send failure notification (fire-and-forget — don't block the tick cycle)
+      // Only for non-abort behaviors; abort suppresses all notifications
+      this.routeFailureNotification(task).catch((err) => {
+        log.error("failure notification failed", { workflowId: wf.id, taskId: task.taskDef.id, error: String(err) });
+      });
     }
   }
 
