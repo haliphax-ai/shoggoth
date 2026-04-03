@@ -2,8 +2,6 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import {
   createOutboundMessage,
-  MESSAGING_FEATURE,
-  messagingCapabilitiesHasFeature,
   type InternalMessage,
 } from "@shoggoth/messaging";
 import {
@@ -24,7 +22,6 @@ import {
   parseSessionSegmentInlineCommand,
   sessionSegmentStartupUserContent,
   resolveSessionBypassUpTo,
-  runInboundSessionTurn,
   executeSessionAgentTurn,
   buildSessionSystemContext,
   createSessionMcpRuntime,
@@ -35,49 +32,25 @@ import {
   routeReaction,
   formatGlobalReactionEventContext,
   formatAdhocReactionEventContext,
+  PresentationTurnOrchestrator,
   type TieredTurnQueue,
   type HitlPendingStack,
   type PolicyEngine,
   type HitlConfigRef,
   type SessionAgentTurnResult,
-  type SessionToolLoopFailoverState,
   type SessionModelTurnDelivery,
   type PlatformAssistantDeps,
 } from "@shoggoth/daemon/lib";
 import type { HitlNotifier, PendingActionRow, Logger, HitlAutoApproveGate } from "./daemon-types";
 import { daemonNotice } from "./notices";
 import type { DiscordMessagingRuntime } from "./bridge";
-import type { DiscordStreamHandle } from "./streaming";
 import { mergeOrchestratorEnv, resolveDiscordOwnerUserId } from "./config";
 import { registerDiscordHitlNoticeAndAddReactions } from "./hitl/reaction-wiring";
 import type { HitlDiscordNoticeRegistry } from "./hitl/notice-registry";
 import { buildHitlQueuedNoticeLines, createDiscordHitlNotifier } from "./hitl/notifier";
 import { sliceDiscordPlatformMessageBody } from "./errors";
-import { splitDiscordMessage } from "./split-message";
 import { formatAttachmentMetadata } from "./attachment-metadata";
-
-/** Discord typing indicator lasts ~10s; renew while the model formulates a reply. */
-const DISCORD_TYPING_RENEWAL_MS = 8000;
-
-async function withAgentTypingWhile(
-  discord: DiscordPlatformOptions["discord"],
-  sessionId: string,
-  work: () => Promise<void>,
-): Promise<void> {
-  if (!messagingCapabilitiesHasFeature(discord.capabilities, MESSAGING_FEATURE.TYPING_NOTIFICATION)) {
-    await work();
-    return;
-  }
-  await discord.notifyAgentTypingForSession(sessionId);
-  const id = setInterval(() => {
-    void discord.notifyAgentTypingForSession(sessionId);
-  }, DISCORD_TYPING_RENEWAL_MS);
-  try {
-    await work();
-  } finally {
-    clearInterval(id);
-  }
-}
+import { DiscordPlatformAdapter } from "./discord-platform-adapter";
 
 function pickDiscordAssistantDeps(
   input?: Partial<PlatformAssistantDeps> & { readonly hitlNotifier?: HitlNotifier },
@@ -130,6 +103,8 @@ export interface DiscordPlatformHandle {
     readonly emoji: string;
     readonly userId: string;
   }) => Promise<void>;
+  /** The PlatformAdapter instance for this Discord platform. */
+  readonly adapter: DiscordPlatformAdapter;
 }
 
 export async function startDiscordPlatform(
@@ -174,6 +149,32 @@ export async function startDiscordPlatform(
   const turnQueue: TieredTurnQueue = getTurnQueue();
   const chainTail = new Map<string, Promise<void>>();
   const subagentBusUnsubs: (() => void)[] = [];
+
+  // Create the PlatformAdapter for Discord
+  const adapter = new DiscordPlatformAdapter({
+    discord: opts.discord,
+    logger: opts.logger,
+    hitlDiscordNoticeRegistry: opts.hitlDiscordNoticeRegistry,
+  });
+
+  // Create the PresentationTurnOrchestrator — delegates formatting, streaming,
+  // and error presentation to the presentation layer.
+  const streamEnabled = () => env.SHOGGOTH_DISCORD_STREAM === "1";
+  const streamMinMs = () => {
+    const raw = Number(env.SHOGGOTH_DISCORD_STREAM_MIN_MS ?? 400);
+    return Number.isFinite(raw) ? Math.max(0, raw) : 400;
+  };
+
+  const orchestrator = new PresentationTurnOrchestrator({
+    config: opts.config,
+    configRef: opts.configRef,
+    env,
+    adapter,
+    get streamingIntervalMs() {
+      return streamEnabled() ? streamMinMs() : 0;
+    },
+    errorReplyPrefix: "⚠️ ",
+  });
 
   const unsubs = opts.discord.routes.map((route) =>
     opts.discord.bus.subscribe(route.sessionId, (msg) => {
@@ -294,14 +295,8 @@ export async function startDiscordPlatform(
     extraUserMetadata: Record<string, unknown>,
   ): Promise<void> {
     // Fire-and-forget: push to the turn queue (synchronous) and return immediately.
-    // The turn queue handles serialization; awaiting here would block dispatchChained
-    // and prevent subsequent messages from being enqueued.
     void turnQueue.enqueue(msg.sessionId, "user", "user message", async () => {
     const hitlReplyInSession = env.SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION !== "0";
-    const streamEnabled = env.SHOGGOTH_DISCORD_STREAM === "1";
-    const streamingOutbound = streamEnabled ? opts.discord.streamingForSession(msg.sessionId) : undefined;
-    const rawStreamMin = Number(env.SHOGGOTH_DISCORD_STREAM_MIN_MS ?? 400);
-    const streamMinMs = Number.isFinite(rawStreamMin) ? Math.max(0, rawStreamMin) : 400;
 
     const mcpLifecycle =
       mcpRuntime.trackPerSessionIdle
@@ -331,69 +326,32 @@ export async function startDiscordPlatform(
 
     // If streaming is enabled, post the placeholder ("…") BEFORE starting the
     // typing indicator. Discord cancels typing when a bot posts a message, so
-    // posting the placeholder inside withAgentTypingWhile would kill the indicator.
-    let preStartedStreamHandle: DiscordStreamHandle | undefined;
-    if (streamingOutbound) {
-      try {
-        preStartedStreamHandle = await streamingOutbound.start();
-      } catch (e) {
-        opts.logger.warn("discord.platform.stream_start_failed", { err: String(e) });
+    // posting the placeholder inside withTypingIndicator would kill the indicator.
+    let preStartedStreamHandle: { setFullContent: (text: string) => Promise<void> } | undefined;
+    if (streamEnabled()) {
+      const streamingOutbound = opts.discord.streamingForSession(msg.sessionId);
+      if (streamingOutbound) {
+        try {
+          const raw = await streamingOutbound.start();
+          preStartedStreamHandle = { setFullContent: (text: string) => raw.setFullContent(text) };
+        } catch (e) {
+          opts.logger.warn("discord.platform.stream_start_failed", { err: String(e) });
+        }
       }
     }
 
-    await withAgentTypingWhile(opts.discord, msg.sessionId, async () => {
-      await runInboundSessionTurn({
-        logContext: { sessionId: msg.sessionId },
-        mcpLifecycle,
-        streaming:
-          preStartedStreamHandle !== undefined
-            ? {
-                minIntervalMs: streamMinMs,
-                start: () => Promise.resolve(preStartedStreamHandle!),
-                onStartFailed: (errMsg) => {
-                  opts.logger.warn("discord.platform.stream_start_failed", { err: errMsg });
-                },
-              }
-            : undefined,
-        sliceDisplayText: sliceDiscordPlatformMessageBody,
-        formatAssistantReply: (latest, meta) => {
-          const cfg = opts.configRef?.current ?? opts.config;
-          return formatAssistantReply(cfg, msg.sessionId, env, latest, meta);
+    await adapter.withTypingIndicator(msg.sessionId, async () => {
+      await orchestrator.orchestrateInboundTurn({
+        sessionId: msg.sessionId,
+        replyToMessageId: msg.id,
+        preStartedStreamHandle,
+        onStreamStartFailed: (errMsg) => {
+          opts.logger.warn("discord.platform.stream_start_failed", { err: errMsg });
         },
-        formatErrorReply: (e) => `⚠️ ${formatErrorUserText(e)}`,
+        mcpLifecycle,
+        logContext: { sessionId: msg.sessionId },
         onTurnExecutionFailed: (e) => {
           opts.logger.warn("discord.platform.turn_failed", { err: String(e), sessionId: msg.sessionId });
-        },
-        sendAssistantBody: async (body) => {
-          const chunks = splitDiscordMessage(body);
-          for (let i = 0; i < chunks.length; i++) {
-            await opts.discord.outbound.sendDiscord(
-              createOutboundMessage({
-                id: randomUUID(),
-                sessionId: msg.sessionId,
-                userId: msg.userId,
-                createdAt: new Date().toISOString(),
-                body: chunks[i],
-                extensions: i === 0 ? { replyToMessageId: msg.id } : {},
-              }),
-            );
-          }
-        },
-        sendErrorBody: async (body) => {
-          try {
-            await opts.discord.outbound.sendDiscord(
-              createOutboundMessage({
-                id: randomUUID(),
-                sessionId: msg.sessionId,
-                userId: msg.userId,
-                createdAt: new Date().toISOString(),
-                body,
-                extensions: { replyToMessageId: msg.id },
-              }),
-            );
-          } catch (sendErr) {
-            opts.logger.error("discord.platform.error_reply_failed", { err: String(sendErr) });
-          }
         },
         buildTurn: async () => {
           const mcpCtx = await mcpRuntime.resolveContext(msg.sessionId);
@@ -568,24 +526,13 @@ export async function startDiscordPlatform(
 
     if (input.delivery.kind === "messaging_surface") {
       const delivery = input.delivery;
-      await withAgentTypingWhile(opts.discord, sid, async () => {
-        turnResult = await executeTurn(buildAfterHitlQueued(delivery));
+      await adapter.withTypingIndicator(sid, async () => {
+        const surfaceStreamModel = env.SHOGGOTH_DISCORD_STREAM === "1";
+        turnResult = await executeTurn(buildAfterHitlQueued(delivery), surfaceStreamModel ? { streamModel: true } : undefined);
         const cfg = opts.configRef?.current ?? opts.config;
         const fullBody =
           formatAssistantReply(cfg, sid, env, turnResult.latestAssistantText, turnResult.failoverMeta);
-        const chunks = splitDiscordMessage(fullBody);
-        for (let i = 0; i < chunks.length; i++) {
-          await opts.discord.outbound.sendDiscord(
-            createOutboundMessage({
-              id: randomUUID(),
-              sessionId: sid,
-              userId: delivery.userId,
-              createdAt: new Date().toISOString(),
-              body: chunks[i],
-              extensions: i === 0 ? { replyToMessageId: delivery.replyToMessageId } : {},
-            }),
-          );
-        }
+        await adapter.sendBody(sid, fullBody, { replyTo: delivery.replyToMessageId });
       });
       return;
     }
@@ -730,5 +677,6 @@ export async function startDiscordPlatform(
     subscribeSubagentSession,
     announcePersistentSubagentSessionEnded,
     handleReactionPassthrough,
+    adapter,
   };
 }

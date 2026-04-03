@@ -32,5 +32,5 @@ export * from "./config";
 // Step 6: Discord health probe
 export * from "./probe";
 
-// Step 7: Discord slash command interaction parsing
-export * from "./interaction";
+// Step 7: Discord platform adapter (presentation layer integration)
+export * from "./discord-platform-adapter";

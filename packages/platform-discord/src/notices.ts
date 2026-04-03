@@ -1,6 +1,10 @@
 /**
- * Configurable notice resolver for platform-discord.
- * The daemon registers the real `daemonNotice` implementation at startup.
+ * Notice resolver for platform-discord.
+ *
+ * Delegates to the presentation layer's notice resolver. The daemon registers
+ * the real implementation at startup via `setPresentationNoticeResolver`.
+ * This module re-exports a thin wrapper so existing platform-discord code
+ * can continue calling `daemonNotice(key, vars)` without change.
  */
 import type { NoticeResolver } from "./daemon-types";
 

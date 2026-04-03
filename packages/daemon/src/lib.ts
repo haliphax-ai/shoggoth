@@ -232,3 +232,20 @@ export {
 export {
   setNoticeResolver as setPresentationNoticeResolver,
 } from "./presentation/notices";
+
+// --- Presentation layer: platform adapter interface ---
+export type {
+  PlatformAdapter,
+  PlatformCapabilities,
+  StreamHandle,
+  HitlNoticeData,
+} from "./presentation/platform-adapter";
+export {
+  PresentationTurnOrchestrator,
+  type OrchestrateTurnInput,
+  type PresentationTurnOrchestratorDeps,
+} from "./presentation/turn-orchestrator";
+export {
+  ReactionQueue,
+  type QueuedReaction,
+} from "./presentation/reaction-queue";
