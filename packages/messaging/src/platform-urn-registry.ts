@@ -32,38 +32,15 @@ export interface MessagingPlatformUrnPolicy {
   ): string;
 }
 
-import { registerPlatform, getPlatformRegistration } from "./platform-registry";
-
-/**
- * @deprecated Use {@link registerPlatform} instead. Thin wrapper for backward compatibility.
- */
-export function registerMessagingPlatformUrnPolicy(policy: MessagingPlatformUrnPolicy): void {
-  const k = policy.platformId.trim().toLowerCase();
-  if (!k) throw new Error("MessagingPlatformUrnPolicy.platformId must be non-empty");
-  // If already registered via the new registry, skip; otherwise register a minimal PlatformRegistration.
-  if (!getPlatformRegistration(k)) {
-    registerPlatform({
-      platformId: policy.platformId,
-      resourceTypes: ["unknown"],
-      urnPolicy: policy,
-    });
-  }
-}
-
-/**
- * @deprecated Use {@link getPlatformRegistration} instead. Thin wrapper for backward compatibility.
- */
-export function getMessagingPlatformUrnPolicy(platformId: string): MessagingPlatformUrnPolicy | undefined {
-  return getPlatformRegistration(platformId)?.urnPolicy;
-}
+import { getPlatformRegistration } from "./platform-registry";
 
 export function resolveBootstrapPrimarySessionUrn(
   agentId: string,
   platform: string,
   options?: BootstrapPrimarySessionUrnOptions,
 ): string {
-  const p = getMessagingPlatformUrnPolicy(platform.trim().toLowerCase());
-  if (p) return p.resolveBootstrapPrimarySessionUrn(agentId, platform, options);
+  const reg = getPlatformRegistration(platform.trim().toLowerCase());
+  if (reg) return reg.urnPolicy.resolveBootstrapPrimarySessionUrn(agentId, platform, options);
   return formatAgentSessionUrn(agentId, platform, "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
 }
 
@@ -71,5 +48,5 @@ export function parseFirstChannelIdFromRoutesJson(
   platform: string,
   raw: string | undefined,
 ): string | undefined {
-  return getMessagingPlatformUrnPolicy(platform.trim().toLowerCase())?.parseFirstChannelIdFromRoutesJson(raw);
+  return getPlatformRegistration(platform.trim().toLowerCase())?.urnPolicy.parseFirstChannelIdFromRoutesJson(raw);
 }

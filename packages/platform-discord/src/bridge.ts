@@ -18,7 +18,7 @@ import { createDiscordRestTransport } from "./rest-transport";
 import type { DiscordRestTransport } from "./transport";
 import { fetchDiscordBotUserId } from "./bot-user";
 import { DiscordRoutesConfigurationError } from "./messaging-urn-policy";
-import { getMessagingPlatformUrnPolicy } from "@shoggoth/messaging";
+import { getPlatformRegistration } from "@shoggoth/messaging";
 
 /** Minimal logger surface for the Discord bridge (daemon `Logger` is structurally compatible). */
 export interface DiscordBridgeLogger {
@@ -74,9 +74,9 @@ export function parseDiscordRoutesWithMeta(raw: string): {
     if (!isValidAgentSessionUrn(o.sessionId)) continue;
     const parsed = parseAgentSessionUrn(o.sessionId);
     if (!parsed) continue;
-    const policy = getMessagingPlatformUrnPolicy(parsed.platform);
-    if (!policy) continue;
-    const urnCheck = policy.checkRouteSessionUrn(parsed, o.channelId);
+    const reg = getPlatformRegistration(parsed.platform);
+    if (!reg) continue;
+    const urnCheck = reg.urnPolicy.checkRouteSessionUrn(parsed, o.channelId);
     if (typeof urnCheck === "object" && "fatal" in urnCheck) {
       throw new DiscordRoutesConfigurationError(urnCheck.fatal);
     }
@@ -190,9 +190,9 @@ export async function startDiscordMessagingIfConfigured(
   if (opts.routeGuard) {
     try {
       const plat = "discord";
-      const pol = getMessagingPlatformUrnPolicy(plat);
-      if (pol) {
-        pol.assertRoutesDefaultPrimaryUuidMatchesAgent(
+      const reg = getPlatformRegistration(plat);
+      if (reg) {
+        reg.urnPolicy.assertRoutesDefaultPrimaryUuidMatchesAgent(
           routes,
           opts.routeGuard.resolvedAgentId,
           plat,
