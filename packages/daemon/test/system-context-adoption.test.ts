@@ -413,7 +413,7 @@ describe("systemContext adoption: workflow completion notification", () => {
     const sc = captured.calls[0].systemContext;
     assert.ok(sc, "systemContext must be present");
     assert.equal(sc.kind, "workflow.complete");
-    assert.ok(sc.summary.includes("failures"), "summary should mention failures");
+    assert.ok(sc.summary.includes("failed"), "summary should mention failure");
     assert.equal(sc.data!.workflow_id, "wf-456");
     assert.equal(sc.data!.success, false);
   });

@@ -31,7 +31,7 @@ describe("buildMessageToolDescriptor", () => {
     assert.ok(action && "enum" in action && Array.isArray(action.enum));
     assert.deepEqual(action.enum, [
       "post", "get", "edit", "delete", "create_thread", "delete_thread",
-      "react", "reactions", "search", "attachment-download",
+      "react", "choice", "reactions", "search", "attachment-download",
     ]);
     assert.deepEqual(d!.inputSchema.required, ["action"]);
     assert.ok(d!.inputSchema.properties?.attachments);

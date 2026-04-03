@@ -123,7 +123,7 @@ describe("session.query tool handler", { concurrency: false }, () => {
   }
 
   it("returns own session messages with default args", async () => {
-    const { toolResult } = await runWithToolArgs({});
+    const { toolResult } = await runWithToolArgs({ order: "asc" });
     assert.ok(toolResult);
     assert.ok(Array.isArray(toolResult.messages));
     // Should have at least the 3 seeded messages plus the "query test" user message
@@ -167,7 +167,7 @@ describe("session.query tool handler", { concurrency: false }, () => {
 
   it("respects offset parameter for pagination", async () => {
     // Seed messages have seq 1, 2, 3. Offset=2 should skip the first two.
-    const { toolResult } = await runWithToolArgs({ offset: 2, limit: 1 });
+    const { toolResult } = await runWithToolArgs({ offset: 2, limit: 1, order: "asc" });
     assert.ok(toolResult);
     assert.equal(toolResult.messages.length, 1);
     assert.equal(toolResult.messages[0].content, "how are you");
@@ -276,7 +276,7 @@ describe("session.query tool handler", { concurrency: false }, () => {
   it("queryRegex respects offset and limit on filtered results", async () => {
     // Regex matching "h" should match "hello", "hi there", "how are you"
     // With offset=1 (skip seq 1), limit=1, should get "hi there" (seq 2)
-    const { toolResult } = await runWithToolArgs({ queryRegex: "^h", offset: 1, limit: 1 });
+    const { toolResult } = await runWithToolArgs({ queryRegex: "^h", offset: 1, limit: 1, order: "asc" });
     assert.ok(toolResult);
     assert.ok(!toolResult.error, `unexpected error: ${toolResult?.error}`);
     assert.equal(toolResult.messages.length, 1);
@@ -288,7 +288,7 @@ describe("session.query tool handler", { concurrency: false }, () => {
   // -----------------------------------------------------------------------
 
   it("includes _meta when includeMetadata is true", async () => {
-    const { toolResult } = await runWithToolArgs({ includeMetadata: true, limit: 3 });
+    const { toolResult } = await runWithToolArgs({ includeMetadata: true, limit: 3, order: "asc" });
     assert.ok(toolResult);
     assert.ok(!toolResult.error, `unexpected error: ${toolResult?.error}`);
     for (const m of toolResult.messages) {

@@ -26,7 +26,7 @@ import {
   setTurnQueue,
   setPresentationNoticeResolver,
 } from "@shoggoth/daemon/lib";
-import { formatDiscordPlatformErrorUserText } from "../src/errors";
+import { formatErrorUserText } from "@shoggoth/daemon/lib";
 import {
   formatDiscordPlatformDegradedPrefix,
   formatDiscordPlatformModelTagFooter,
@@ -142,24 +142,24 @@ describe("discord platform helpers", () => {
   });
 });
 
-describe("formatDiscordPlatformErrorUserText", () => {
+describe("formatErrorUserText", () => {
   it("maps ModelHttpError statuses to friendly copy", () => {
-    assert.match(formatDiscordPlatformErrorUserText(new ModelHttpError(429, "x")), /rate-limited/i);
+    assert.match(formatErrorUserText(new ModelHttpError(429, "x")), /rate-limited/i);
     assert.match(
-      formatDiscordPlatformErrorUserText(new ModelHttpError(503, "x")),
+      formatErrorUserText(new ModelHttpError(503, "x")),
       /unavailable/i,
     );
-    assert.match(formatDiscordPlatformErrorUserText(new ModelHttpError(500, "x")), /500/i);
-    assert.match(formatDiscordPlatformErrorUserText(new ModelHttpError(401, "x")), /401/i);
-    assert.match(formatDiscordPlatformErrorUserText(new ModelHttpError(418, "x")), /418/);
+    assert.match(formatErrorUserText(new ModelHttpError(500, "x")), /500/i);
+    assert.match(formatErrorUserText(new ModelHttpError(401, "x")), /401/i);
+    assert.match(formatErrorUserText(new ModelHttpError(418, "x")), /418/);
     assert.match(
-      formatDiscordPlatformErrorUserText(
+      formatErrorUserText(
         new ModelHttpError(400, "Bad Request", "invalid_request: tool schema"),
       ),
       /400/i,
     );
     assert.match(
-      formatDiscordPlatformErrorUserText(
+      formatErrorUserText(
         new ModelHttpError(400, "Bad Request", "invalid_request: tool schema"),
       ),
       /tool schema/i,
@@ -168,13 +168,13 @@ describe("formatDiscordPlatformErrorUserText", () => {
 
   it("maps fetch-like TypeError to a network hint", () => {
     assert.match(
-      formatDiscordPlatformErrorUserText(new TypeError("fetch failed")),
+      formatErrorUserText(new TypeError("fetch failed")),
       /Network error/i,
     );
   });
 
   it("maps hitl_pending to approval copy with id, not stack", () => {
-    const t = formatDiscordPlatformErrorUserText(
+    const t = formatErrorUserText(
       new Error("hitl_pending:pend-uuid-1\n    at foo (bar.js:1:1)"),
     );
     assert.match(t, /pend-uuid-1/);
@@ -183,7 +183,7 @@ describe("formatDiscordPlatformErrorUserText", () => {
   });
 
   it("truncates generic Error to first line", () => {
-    const t = formatDiscordPlatformErrorUserText(new Error("line1\nline2\nline3"));
+    const t = formatErrorUserText(new Error("line1\nline2\nline3"));
     assert.match(t, /^line1$/);
   });
 });
