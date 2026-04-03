@@ -1,7 +1,10 @@
-# Workflow Task Types
+---
+date: 2026-04-01
+status: in-progress
+completed: never
+---
 
-**Date:** 2026-04-01
-**Status:** Planned
+# Workflow Task Types
 
 ## Summary
 
@@ -35,10 +38,10 @@ interface AgentTaskDef extends TaskDefBase {
 
 interface ToolTaskDef extends TaskDefBase {
   kind: "tool";
-  /** Tool name (e.g., "builtin.exec", "builtin.read_file"). */
+  /** Tool name (e.g., "builtin-exec", "builtin-read"). */
   tool: string;
-  /** Tool arguments. Supports {{task:N:output}} template refs. */
-  args: Record<string, unknown>;
+  /** Tool arguments. Supports {{task:N:output}} template refs. Optional — some tools take no args. */
+  args?: Record<string, unknown>;
 }
 
 interface GateTaskDef extends TaskDefBase {
@@ -53,7 +56,15 @@ interface TransformTaskDef extends TaskDefBase {
   template: string;
 }
 
-type TaskDef = AgentTaskDef | ToolTaskDef | GateTaskDef | TransformTaskDef;
+interface MessageTaskDef extends TaskDefBase {
+  kind: "message";
+  /** Message body to post. Supports {{task:N:output}} / {{task:N:success}} refs. */
+  message: string;
+  /** Target channel. Defaults to the workflow's replyTo session. */
+  channel?: string;
+}
+
+type TaskDef = AgentTaskDef | ToolTaskDef | GateTaskDef | TransformTaskDef | MessageTaskDef;
 ```
 
 ### Task Execution by Kind
@@ -64,6 +75,7 @@ The orchestrator's `spawnTask` method becomes a dispatcher:
 - **tool** — resolve template refs in `args`, execute the tool directly (no subagent, no model turn), capture the result as output. On error, mark as failed.
 - **gate** — evaluate `condition` against upstream task outputs. If truthy, mark as done with output `"pass"`. If falsy, mark as done with output `"skip"` and propagate skip to all downstream dependents (new status: `skipped`).
 - **transform** — resolve `template` using `resolveTemplates`, store the result as output, mark as done. Pure string interpolation, no execution.
+- **message** — resolve template refs in `message`, post to the target channel (or replyTo session), mark as done. No model turn.
 
 ### Tool Execution
 
@@ -79,13 +91,13 @@ interface ToolExecutor {
 }
 ```
 
-The daemon wires this to the existing MCP tool infrastructure. Builtin tools:
+The daemon wires this to the existing builtin tool infrastructure. Builtin tools use the `builtin-*` naming convention:
 
-- `builtin.exec` — run a shell command, capture stdout/stderr. Args: `{ argv: string[], timeout?: number, cwd?: string }`.
-- `builtin.read_file` — read a file. Args: `{ path: string }`.
-- `builtin.write_file` — write a file. Args: `{ path: string, content: string }`.
+- `builtin-exec` — run a shell command, capture stdout/stderr. Args: `{ argv: string[], timeout?: number, workdir?: string }`.
+- `builtin-read` — read a file. Args: `{ path: string }`.
+- `builtin-write` — write a file. Args: `{ path: string, content: string }`.
 
-MCP-registered tools are also available by their full name.
+MCP-registered tools are also available by their full `source.tool` name.
 
 ### Gate Conditions
 
@@ -120,8 +132,10 @@ Gates introduce a new task status: `skipped`. When a gate evaluates to falsy:
 This requires changes to:
 - `TaskStatus` type: add `"skipped"`
 - `isTerminal`: treat `skipped` as terminal
+- `isBlocked`: account for skipped dependencies
 - `markBlockedTasks`: propagate skip from gate tasks
 - `formatTaskLine` / `formatSummaryMessage`: handle skipped rendering
+- `hardening.ts`: add `skipped` to `STATUS_ORDER` and valid transitions
 
 ### Output Templates
 
@@ -131,7 +145,7 @@ Any task type can have an optional `outputTemplate` field. When present, the raw
 {
   "id": 3,
   "kind": "tool",
-  "tool": "builtin.exec",
+  "tool": "builtin-exec",
   "args": { "argv": ["npm", "test"] },
   "outputTemplate": "Test result: {{self.output}}",
   "title": "Run tests"
@@ -147,52 +161,39 @@ This runs after task completion, before the output is stored in `TaskState.outpu
 
 ### Tool Descriptor Changes
 
-The tool descriptor's `tasks` array item schema gains a `kind` field and conditional properties:
-
-```json
-{
-  "kind": { "type": "string", "enum": ["agent", "tool", "gate", "transform"], "default": "agent" },
-  "prompt": { "type": "string", "description": "Agent task prompt." },
-  "tool": { "type": "string", "description": "Tool task: tool name." },
-  "args": { "type": "object", "description": "Tool task: tool arguments." },
-  "condition": { "type": "string", "description": "Gate task: condition expression." },
-  "template": { "type": "string", "description": "Transform task: output template." },
-  "output_template": { "type": "string", "description": "Optional: reshape output before downstream consumption." }
-}
-```
-
-`kind` defaults to `"agent"` when not specified — it's the common case and keeps task definitions concise.
+The tool descriptor's `tasks` array item schema already includes `kind` and conditional properties. `kind` defaults to `"agent"` when not specified.
 
 ### Tool Handler Changes
 
 `TaskInput` gains the new fields. `toTaskDefs` maps them to the discriminated union. Validation ensures the right fields are present for each kind:
 
 - `agent` requires `prompt`
-- `tool` requires `tool` and `args`
+- `tool` requires `tool` (args optional)
 - `gate` requires `condition`
 - `transform` requires `template`
+- `message` requires `message`
 
 ## Implementation Phases
 
-### Phase 1: TaskDef Union
+### Phase 1: TaskDef Union ✅
 
-- Refactor `TaskDef` into the discriminated union
+- Refactored `TaskDef` into the discriminated union with `agent`, `tool`, `gate`, `transform`, and `message` kinds
 - Default `kind` to `"agent"` when not specified
-- Update all existing references to `taskDef.prompt` to use type narrowing
-- Update tool descriptor and handler for the new task kinds
+- Updated all existing references to `taskDef.prompt` to use type narrowing via `getTaskPromptOrLabel`
+- Updated tool descriptor and handler for the new task kinds
+- Non-agent tasks currently fail at spawn time with `unsupported task kind`
 
-**Files:**
+**Files touched:**
 - `packages/workflow/src/types.ts`
 - `packages/workflow/src/tool-handler.ts`
 - `packages/workflow/src/tool-descriptor.ts`
 - `packages/workflow/src/orchestrator.ts`
 - `packages/workflow/src/status-message.ts`
-- `packages/workflow/src/state.ts` (serialization)
 
 ### Phase 2: Tool Tasks
 
 - Add `ToolExecutor` interface to orchestrator
-- Implement tool task dispatch in the orchestrator's tick loop
+- Implement tool task dispatch in the orchestrator's `spawnReadyTasks` (synchronous execution, no subagent)
 - Wire `ToolExecutor` in the daemon (builtin tools + MCP bridge)
 - Template ref resolution in tool args
 - Tests for tool task execution, failure handling, output capture
@@ -200,14 +201,14 @@ The tool descriptor's `tasks` array item schema gains a `kind` field and conditi
 **Files:**
 - `packages/workflow/src/orchestrator.ts`
 - `packages/workflow/src/types.ts`
-- `packages/daemon/src/workflow-singleton.ts`
-- `packages/daemon/src/index.ts`
+- `packages/daemon/src/workflow-singleton.ts` (or equivalent wiring)
 
-### Phase 3: Transform Tasks
+### Phase 3: Transform & Message Tasks
 
 - Implement transform task dispatch (resolve template, store output)
+- Implement message task dispatch (resolve template refs in message, post to channel)
 - Reuse existing `resolveTemplates` infrastructure
-- Tests for template resolution, edge cases
+- Tests for template resolution, message posting, edge cases
 
 **Files:**
 - `packages/workflow/src/orchestrator.ts`
@@ -216,6 +217,7 @@ The tool descriptor's `tasks` array item schema gains a `kind` field and conditi
 ### Phase 4: Gate Tasks + Skipped Status
 
 - Add `skipped` to `TaskStatus`
+- Add `skipped` to `STATUS_ORDER` in `hardening.ts`
 - Implement gate condition evaluator (safe expression parser)
 - Implement skip propagation in the orchestrator
 - Update status message rendering (⏭️ emoji)
@@ -226,7 +228,7 @@ The tool descriptor's `tasks` array item schema gains a `kind` field and conditi
 - `packages/workflow/src/types.ts`
 - `packages/workflow/src/orchestrator.ts`
 - `packages/workflow/src/status-message.ts`
-- `packages/workflow/src/hardening.ts` (valid transitions)
+- `packages/workflow/src/hardening.ts`
 - New: `packages/workflow/src/gate-eval.ts`
 
 ### Phase 5: Output Templates
@@ -241,25 +243,15 @@ The tool descriptor's `tasks` array item schema gains a `kind` field and conditi
 - `packages/workflow/src/orchestrator.ts`
 - `packages/workflow/src/templates.ts`
 
-### Phase 6: Builtin Tools
-
-- Implement `builtin.exec` (shell execution with timeout, stdout/stderr capture)
-- Implement `builtin.read_file` and `builtin.write_file`
-- Security: validate tool names, enforce allowlists, sandbox exec
-- Tests for each builtin
-
-**Files:**
-- New: `packages/workflow/src/builtin-tools.ts`
-- `packages/daemon/src/index.ts` (wiring)
-
 ## Testing Strategy
 
 Each phase includes unit tests for the new functionality. Integration tests should cover:
 
-- Mixed-type workflows (agent + tool + gate + transform in one graph)
+- Mixed-type workflows (agent + tool + gate + transform + message in one graph)
 - Gate skip propagation across complex dependency graphs
 - Template resolution chains (transform output feeding into agent prompt)
 - Tool failure → failure notification → parent delivery
+- Message task posting to correct channel
 
 ## Migration
 
@@ -267,6 +259,6 @@ None. Existing workflow state files on disk are invalidated — wipe `workflow-s
 
 ## Security Considerations
 
-- **Tool execution:** `builtin.exec` must respect the same sandboxing as agent tool calls. No arbitrary command execution without the same guardrails.
+- **Tool execution:** `builtin-exec` must respect the same sandboxing as agent tool calls. No arbitrary command execution without the same guardrails.
 - **Gate conditions:** No `eval()`. Purpose-built expression parser only.
 - **Template injection:** Output templates should not allow recursive template expansion (no template refs in template output).
