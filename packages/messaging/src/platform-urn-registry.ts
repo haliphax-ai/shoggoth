@@ -32,16 +32,29 @@ export interface MessagingPlatformUrnPolicy {
   ): string;
 }
 
-const policiesByPlatform = new Map<string, MessagingPlatformUrnPolicy>();
+import { registerPlatform, getPlatformRegistration } from "./platform-registry";
 
+/**
+ * @deprecated Use {@link registerPlatform} instead. Thin wrapper for backward compatibility.
+ */
 export function registerMessagingPlatformUrnPolicy(policy: MessagingPlatformUrnPolicy): void {
   const k = policy.platformId.trim().toLowerCase();
   if (!k) throw new Error("MessagingPlatformUrnPolicy.platformId must be non-empty");
-  policiesByPlatform.set(k, policy);
+  // If already registered via the new registry, skip; otherwise register a minimal PlatformRegistration.
+  if (!getPlatformRegistration(k)) {
+    registerPlatform({
+      platformId: policy.platformId,
+      resourceTypes: ["unknown"],
+      urnPolicy: policy,
+    });
+  }
 }
 
+/**
+ * @deprecated Use {@link getPlatformRegistration} instead. Thin wrapper for backward compatibility.
+ */
 export function getMessagingPlatformUrnPolicy(platformId: string): MessagingPlatformUrnPolicy | undefined {
-  return policiesByPlatform.get(platformId.trim().toLowerCase());
+  return getPlatformRegistration(platformId)?.urnPolicy;
 }
 
 export function resolveBootstrapPrimarySessionUrn(
@@ -51,7 +64,7 @@ export function resolveBootstrapPrimarySessionUrn(
 ): string {
   const p = getMessagingPlatformUrnPolicy(platform.trim().toLowerCase());
   if (p) return p.resolveBootstrapPrimarySessionUrn(agentId, platform, options);
-  return formatAgentSessionUrn(agentId, platform, SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
+  return formatAgentSessionUrn(agentId, platform, "channel", SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID);
 }
 
 export function parseFirstChannelIdFromRoutesJson(
