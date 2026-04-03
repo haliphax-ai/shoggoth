@@ -23,6 +23,8 @@ interface TaskDefBase {
   failureBehavior: FailureBehavior;
   failureNotification: FailureNotification;
   runtimeLimitMs?: number;
+  /** Optional template to reshape task output before downstream consumption. */
+  outputTemplate?: string;
 }
 
 /** Agent task — spawns a subagent session with a prompt. */

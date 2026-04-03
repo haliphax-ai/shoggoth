@@ -17,6 +17,7 @@ interface TaskInput {
   args?: Record<string, unknown>;
   condition?: string;
   template?: string;
+  output_template?: string;
 }
 
 export interface WorkflowToolArgs {
@@ -84,6 +85,7 @@ function toTaskDefs(inputs: TaskInput[]): TaskDef[] {
       failureBehavior: (t.failure_behavior ?? "continue") as FailureBehavior,
       failureNotification: normalizeFailureNotification(t.failure_notification),
       runtimeLimitMs: t.runtime_limit_ms,
+      ...(t.output_template ? { outputTemplate: t.output_template } : {}),
     };
 
     switch (kind) {

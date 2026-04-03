@@ -57,6 +57,7 @@ const workflowToolArgs = {
           args: { type: "object", description: "Tool task: tool arguments." },
           condition: { type: "string", description: "Gate task: condition expression." },
           template: { type: "string", description: "Transform task: template string." },
+          output_template: { type: "string", description: "Optional: reshape task output before downstream consumption. Supports {{self.output}}, {{self.error}}." },
         },
         required: ["id"],
       },

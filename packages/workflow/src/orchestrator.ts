@@ -137,6 +137,19 @@ function getTransitiveDependents(taskId: number, graph: DependencyGraph): Set<nu
   return visited;
 }
 
+/** Resolve outputTemplate for a completed task, replacing self.* refs. */
+function applyOutputTemplate(task: TaskState): void {
+  if (!task.taskDef.outputTemplate || task.status !== "done") return;
+  const tpl = task.taskDef.outputTemplate;
+  const resolved = tpl
+    .replace(/{{self.output}}/g, task.output ?? "")
+    .replace(/{{self.error}}/g, task.error ?? "")
+    .replace(/{{self.exitCode}}/g, "");
+  task.output = resolved;
+  // Clear to prevent re-application on subsequent ticks
+  (task.taskDef as { outputTemplate?: string }).outputTemplate = undefined;
+}
+
 function formatFailureMessage(task: TaskState): string {
   const desc = getTaskPromptOrLabel(task.taskDef).slice(0, 100);
   return `Task ${task.taskDef.id} failed: "${desc}" — ${task.error ?? "unknown error"}`;
@@ -278,6 +291,11 @@ export class Orchestrator {
     if (!this.paused) {
       // Spawn newly ready tasks
       await this.spawnReadyTasks();
+    }
+
+    // Apply output templates to newly completed tasks
+    for (const task of this.workflow!.tasks) {
+      applyOutputTemplate(task);
     }
 
     // Persist state
