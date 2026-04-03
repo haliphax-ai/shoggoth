@@ -17,7 +17,7 @@
     "install": "node-gyp-build",
     "build:native": "node-gyp-build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "npm run build:native && node --import tsx/esm --test --test-isolation=process --test-concurrency=true $(find test -name '*.test.ts' | sort)"
+    "test": "npm run build:native && vitest --run"
   },
   "dependencies": {
     "node-gyp-build": "^4.8.4"
