@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { AuthenticatedPrincipal } from "@shoggoth/authn";
-import type { ChatMessage, ImageBlockCodec } from "@shoggoth/models";
+import type { ChatMessage, ImageBlockCodec, OpenAIToolFunctionDefinition } from "@shoggoth/models";
 import {
   createFailoverToolCallingClientFromModelsConfig,
   getImageBlockCodec,
@@ -55,6 +55,7 @@ import { drainSystemContext, pushSystemContext } from "./system-context-buffer";
 import type { OutboundAttachment } from "../presentation/platform-adapter";
 import { extractShowBlocks } from "../presentation/show-blocks";
 import { createTranscriptStore } from "./transcript-store";
+import { evaluateTriggers, resolveToolDiscoveryConfig, createToolDiscoveryFinalizer } from "./session-tool-discovery";
 import { getLogger } from "../logging";
 
 
@@ -185,6 +186,12 @@ export async function executeSessionAgentTurn(
     ? wrapWithSystemContext(sanitizedUserContent, input.systemContext, sessionToken ?? (() => { throw new Error("systemContextToken is required when systemContext is provided"); })())
     : sanitizedUserContent;
 
+  // --- Tool discovery: evaluate trigger phrases before MCP context resolution ---
+  const discoveryConfig = resolveToolDiscoveryConfig(input.config, input.sessionId);
+  if (discoveryConfig.enabled) {
+    evaluateTriggers(input.config, input.sessionId, effectiveContent, input.db);
+  }
+
   if (!input.minimalContext) {
     input.transcript.append({
       sessionId: input.sessionId,
@@ -218,7 +225,7 @@ export async function executeSessionAgentTurn(
   };
 
   log.debug("resolving mcp context", { sessionId: input.sessionId });
-  const mcpCtx = await input.resolveMcpContext(input.sessionId);
+  let mcpCtx = await input.resolveMcpContext(input.sessionId);
   log.debug("mcp context resolved", { sessionId: input.sessionId, toolCount: mcpCtx.toolsLoop.length });
 
   const createToolClient =
@@ -237,10 +244,13 @@ export async function executeSessionAgentTurn(
     imageBlockCodec,
   );
 
+  // --- Mutable tools ref for mid-loop refresh (tool discovery) ---
+  let currentToolsOpenAi: readonly OpenAIToolFunctionDefinition[] = mcpCtx.toolsOpenAi;
+
   const model: SessionToolLoopModelClient = createSessionToolLoopModelClient({
     toolClient,
     initialMessages,
-    tools: mcpCtx.toolsOpenAi,
+    tools: () => currentToolsOpenAi,
     modelInvocation,
     streamModel: Boolean(input.stream?.streamModel),
     onModelTextDelta: input.stream?.onModelTextDelta,
@@ -267,7 +277,7 @@ export async function executeSessionAgentTurn(
   const orchestratorEnv = mergeOrchestratorEnv(input.config, input.env);
 
   const executor = createMcpRoutingToolExecutor({
-    aggregated: mcpCtx.aggregated,
+    aggregated: mcpCtx.fullAggregated ?? mcpCtx.aggregated,
     ...(mcpCtx.external ? { external: mcpCtx.external } : {}),
     builtin: async ({ originalName, argsJson }) => {
       try {
@@ -348,6 +358,28 @@ export async function executeSessionAgentTurn(
           updateTranscriptMessageCount(input.db, input.sessionId, update.transcriptMessageCount);
         }
       },
+      // --- Mid-loop tool refresh for tool discovery ---
+      refreshTools: discoveryConfig.enabled
+        ? () => {
+            // Synchronously re-resolve: the finalizer reads updated session_tool_state
+            // We can't await here, but the finalizer pipeline is sync (DB reads only).
+            // Re-run the finalizer chain by calling resolveMcpContext would be async,
+            // so instead we import and call the finalizer directly.
+            // For now, re-resolve via the same async path isn't possible in the sync callback.
+            // The tool loop will pick up changes on the next turn if we can't refresh synchronously.
+            // However, the discovery finalizer IS synchronous (just DB reads), so we can
+            // build a lightweight refresh here.
+            
+            const baseMcpCtx = mcpCtx.fullAggregated
+              ? { ...mcpCtx, aggregated: mcpCtx.fullAggregated }
+              : mcpCtx;
+            const finalizer = createToolDiscoveryFinalizer(input.config, input.db);
+            const refreshed = finalizer(baseMcpCtx, input.sessionId);
+            currentToolsOpenAi = refreshed.toolsOpenAi;
+            mcpCtx = refreshed;
+            return refreshed.toolsLoop;
+          }
+        : undefined,
     });
   } catch (e) {
     if (e instanceof TurnAbortedError) {

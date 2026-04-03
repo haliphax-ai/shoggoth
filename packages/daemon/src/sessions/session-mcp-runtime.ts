@@ -1,4 +1,5 @@
 import type { McpSourceCatalog } from "@shoggoth/mcp-integration";
+import type Database from "better-sqlite3";
 import {
   SHOGGOTH_DEFAULT_PER_SESSION_MCP_IDLE_MS,
   type ShoggothConfig,
@@ -22,6 +23,7 @@ import {
   createWebSearchToolFinalizer,
   type SessionMcpToolContext,
 } from "./session-mcp-tool-context";
+import { createToolDiscoveryFinalizer } from "./session-tool-discovery";
 
 const log = getLogger("session-mcp");
 
@@ -40,6 +42,7 @@ function runContextFinalizers(ctx: SessionMcpToolContext, sessionId: string): Se
 export interface CreateSessionMcpRuntimeOptions {
   readonly config: ShoggothConfig;
   readonly env: NodeJS.ProcessEnv;
+  readonly db: Database.Database;
   readonly deps?: {
     readonly connectShoggothMcpServers?: typeof connectShoggothMcpServers;
   };
@@ -76,6 +79,8 @@ export async function createSessionMcpRuntime(
 ): Promise<SessionMcpRuntime> {
   // Register context-level tool filtering finalizer (config-aware).
   registerContextFinalizer(createContextLevelToolFinalizer(opts.config));
+  // Register tool discovery finalizer (after context-level, before web-search).
+  registerContextFinalizer(createToolDiscoveryFinalizer(opts.config, opts.db));
   // Register web-search tool finalizer (adds builtin-web-search when SearXNG is configured).
   registerContextFinalizer(createWebSearchToolFinalizer(opts.config));
 

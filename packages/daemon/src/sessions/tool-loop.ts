@@ -11,6 +11,7 @@ import type { TranscriptStore } from "./transcript-store";
 import type { ToolRunStore } from "./tool-run-store";
 import { TurnAbortedError } from "./session-turn-abort";
 import { estimateTokens } from "./session-stats-store";
+import { toolRefreshNeeded } from "./session-tool-discovery";
 import { getLogger } from "../logging";
 
 export { TurnAbortedError } from "./session-turn-abort";
@@ -102,6 +103,11 @@ export interface RunToolLoopOptions {
   readonly toolCallTimeoutMs?: number;
   /** Called after each model.complete() and tool execution for incremental stats updates. */
   readonly onStatsUpdate?: (update: ToolLoopStatsUpdate) => void;
+  /**
+   * When set, called to refresh the tool name allowlist after a tool discovery change.
+   * Returns the new tool list; the loop updates its internal `names` set.
+   */
+  readonly refreshTools?: () => ReadonlyArray<{ name: string }>;
 }
 
 /** Callback payload for incremental stats updates during the tool loop. */
@@ -138,7 +144,7 @@ function abortPromise(signal: AbortSignal | undefined): Promise<never> {
 
 export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
   void options.db;
-  const names = allowedNames(options.tools);
+  let names = allowedNames(options.tools);
   const ctxSeg = options.contextSegmentId?.trim() ?? "";
   if (options.transcript && !ctxSeg) {
     throw new Error("runToolLoop: contextSegmentId is required when transcript is set");
@@ -412,6 +418,14 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
             metadata: { tool: tc.name },
           });
           emitStats?.({ transcriptMessageCount: getTranscriptCount() });
+        }
+
+        // --- Mid-loop tool refresh (tool discovery) ---
+        if (toolRefreshNeeded.get(options.sessionId) && options.refreshTools) {
+          toolRefreshNeeded.delete(options.sessionId);
+          const refreshed = options.refreshTools();
+          names = allowedNames(refreshed);
+          log.debug("tool list refreshed mid-loop", { sessionId: options.sessionId, toolCount: refreshed.length });
         }
       }
     }

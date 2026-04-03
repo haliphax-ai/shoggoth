@@ -26,6 +26,12 @@ export type SessionMcpToolContext = {
   readonly toolsOpenAi: OpenAIToolFunctionDefinition[];
   readonly toolsLoop: ReturnType<typeof mcpToolsForToolLoop>;
   readonly external?: ExternalMcpInvoke;
+  /**
+   * When tool discovery is active, holds the complete unfiltered catalog (all tools)
+   * so the executor can route to any tool once enabled mid-loop.
+   * Undefined when discovery is not active.
+   */
+  readonly fullAggregated?: AggregateMcpCatalogResult;
 };
 
 export function openAiToolsFromCatalog(aggregated: AggregateMcpCatalogResult): OpenAIToolFunctionDefinition[] {

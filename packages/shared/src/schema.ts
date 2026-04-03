@@ -594,6 +594,45 @@ export const shoggothSubagentSpawnAllowSchema = z
 
 export type ShoggothSubagentSpawnAllowConfig = z.infer<typeof shoggothSubagentSpawnAllowSchema>;
 
+// ---------------------------------------------------------------------------
+// Tool Discovery
+// ---------------------------------------------------------------------------
+
+const toolDiscoveryTriggerSchema = z
+  .object({
+    /** Case-insensitive substring or /regex/ pattern to match in user messages. */
+    match: z.string().min(1),
+    /** Tool IDs to auto-enable when matched. */
+    tools: z.array(z.string().min(1)),
+  })
+  .strict();
+
+export const shoggothToolDiscoveryConfigSchema = z
+  .object({
+    /** When true, tool discovery/collapse is active. Default: false (all tools advertised). */
+    enabled: z.boolean().optional(),
+    /** Tool IDs that are never collapsed (always in the tools array). */
+    alwaysOn: z.array(z.string().min(1)).optional(),
+    /** Trigger phrases: when a user message contains the match string (case-insensitive), the listed tool IDs are auto-enabled for that turn. */
+    triggers: z.array(toolDiscoveryTriggerSchema).optional(),
+  })
+  .strict();
+
+export type ShoggothToolDiscoveryConfig = z.infer<typeof shoggothToolDiscoveryConfigSchema>;
+
+export const shoggothAgentToolDiscoveryConfigSchema = z
+  .object({
+    /** Per-agent always-on additions (merged with global). */
+    alwaysOn: z.array(z.string().min(1)).optional(),
+    /** Per-agent trigger additions (merged with global). */
+    triggers: z.array(toolDiscoveryTriggerSchema).optional(),
+    /** Per-agent override: set false to disable discovery for this agent even when globally enabled. */
+    enabled: z.boolean().optional(),
+  })
+  .strict();
+
+export type ShoggothAgentToolDiscoveryConfig = z.infer<typeof shoggothAgentToolDiscoveryConfigSchema>;
+
 const shoggothAgentIdKeySchema = z
   .string()
   .min(1)
@@ -658,6 +697,8 @@ export const shoggothAgentEntrySchema = z
     contextLevel: contextLevelSchema.optional(),
     /** Context level for subagents spawned by this agent. */
     subagentContextLevel: contextLevelSchema.optional(),
+    /** Per-agent tool discovery overrides (merged with global `toolDiscovery`). */
+    toolDiscovery: shoggothAgentToolDiscoveryConfigSchema.optional(),
   })
   .strict();
 
@@ -746,6 +787,8 @@ export const shoggothSearxngConfigSchema = z
 
 export type ShoggothSearxngConfig = z.infer<typeof shoggothSearxngConfigSchema>;
 
+
+
 /** Layered JSON fragments must satisfy this shape after merge; defaults fill the rest. */
 export const shoggothConfigFragmentSchema = z
   .object({
@@ -823,6 +866,8 @@ export const shoggothConfigFragmentSchema = z
     dynamicConfigDirectory: z.string().min(1).optional(),
     /** SearXNG web search integration. */
     searxng: shoggothSearxngConfigSchema.optional(),
+    /** Dynamic tool discovery / collapse configuration. */
+    toolDiscovery: shoggothToolDiscoveryConfigSchema.optional(),
   })
   .strict();
 
@@ -871,6 +916,8 @@ export const shoggothConfigSchema = z
     dynamicConfigDirectory: z.string().min(1).optional(),
     /** SearXNG web search integration. */
     searxng: shoggothSearxngConfigSchema.optional(),
+    /** Dynamic tool discovery / collapse configuration. */
+    toolDiscovery: shoggothToolDiscoveryConfigSchema.optional(),
   })
   .strict();
 

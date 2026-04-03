@@ -27,7 +27,11 @@ export interface SessionToolLoopFailoverState {
 export function createSessionToolLoopModelClient(input: {
   readonly toolClient: FailoverToolCallingClient;
   readonly initialMessages: readonly ChatMessage[];
-  readonly tools: readonly OpenAIToolFunctionDefinition[];
+  /**
+   * Tool list for each `complete()` call. Accepts a static array (backward-compatible)
+   * or a getter function for mid-loop refresh (tool discovery).
+   */
+  readonly tools: readonly OpenAIToolFunctionDefinition[] | (() => readonly OpenAIToolFunctionDefinition[]);
   /** Per-turn parameters forwarded to each `completeWithTools` (merged with stream options). */
   readonly modelInvocation?: ModelInvocationParams;
   /**
@@ -55,6 +59,9 @@ export function createSessionToolLoopModelClient(input: {
   let hasUsage = false;
   /** Model reply text from earlier `complete()` rounds that returned tool calls (for streaming display). */
   let priorRoundsStreamText = "";
+
+  const resolveTools = (): readonly OpenAIToolFunctionDefinition[] =>
+    typeof input.tools === "function" ? input.tools() : input.tools;
 
   return {
     getSessionToolLoopFailoverState() {
@@ -85,7 +92,7 @@ export function createSessionToolLoopModelClient(input: {
       const inv = input.modelInvocation ?? {};
       const out = await input.toolClient.completeWithTools({
         messages,
-        tools: input.tools,
+        tools: resolveTools(),
         maxOutputTokens: inv.maxOutputTokens,
         temperature: inv.temperature,
         thinking: inv.thinking,
