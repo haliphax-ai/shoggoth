@@ -264,7 +264,7 @@ How it works:
 
 The DB remains the source of truth for crash recovery — the in-memory heap is a runtime optimization. If the daemon crashes and restarts, `restore()` picks up where it left off with no timers lost.
 
-**Duration parsing:** Relative durations support `Xs` (seconds), `Xm` (minutes), `Xh` (hours), `Xd` (days). Parsed relative to `Date.now()` at set time. Maximum duration: 30 days.
+**Duration parsing:** Relative durations support `Xs` (seconds), `Xm` (minutes), `Xh` (hours), `Xd` (days). Parsed relative to `Date.now()` at set time. Minimum duration: 5 seconds. Maximum duration: 30 days.
 
 **Results:**
 
@@ -284,7 +284,7 @@ The DB remains the source of truth for crash recovery — the in-memory heap is 
 - Timer fires for a terminated session: marked as fired, no delivery. Logged to audit.
 - Daemon restart: `restore()` rescans on startup. Past-due timers fire immediately. No timers are lost.
 - Duplicate labels: allowed. Each timer gets a unique ID.
-- Very short timers (e.g. "5s"): supported. The `setTimeout` approach handles sub-second precision natively.
+- Minimum duration: timers shorter than 5 seconds are rejected with an error. Prevents tight-loop abuse and avoids unrealistic expectations about delivery precision.
 - Many timers: only one `setTimeout` is active at a time (the soonest). 10,000 pending timers cost heap memory but zero OS timer resources beyond the single active one.
 
 ### Tool naming
