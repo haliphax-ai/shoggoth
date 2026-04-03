@@ -53,6 +53,11 @@ export interface OrchestrateTurnInput {
    * (caller is expected to have already handled them in userContent).
    */
   readonly formatAttachmentMetadata?: (attachments: readonly MessageAttachment[]) => string;
+  /**
+   * When true and the codec supports URL sources, pass image URLs directly
+   * to the provider instead of fetching and base64-encoding. Default false.
+   */
+  readonly imageUrlPassthrough?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -150,6 +155,7 @@ export class PresentationTurnOrchestrator {
         attachments,
         input.imageBlockCodec,
         input.formatAttachmentMetadata,
+        input.imageUrlPassthrough,
       );
     };
 
@@ -183,13 +189,14 @@ async function enrichTurnWithImageAttachments(
   attachments: readonly MessageAttachment[],
   codec: ImageBlockCodec,
   formatFallback?: (attachments: readonly MessageAttachment[]) => string,
+  imageUrlPassthrough?: boolean,
 ): Promise<InboundSessionTurnInput> {
   const imageBlocks: ChatContentPart[] = [];
   const nonImageAttachments: MessageAttachment[] = [];
 
   const results = await Promise.all(
     attachments.map((att) =>
-      ingestAttachmentImage(att, { codec }).then(
+      ingestAttachmentImage(att, { codec, imageUrlPassthrough }).then(
         (block) => ({ attachment: att, block }),
         (err) => {
           log.warn("turn_orchestrator.image_ingest_error", {

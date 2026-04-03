@@ -108,7 +108,76 @@ describe("ingestAttachmentImage", () => {
     });
   });
 
-  describe("base64 fallback (supportsUrl: false)", () => {
+  describe("imageUrlPassthrough option", () => {
+    it("returns URL-only ImageBlock when imageUrlPassthrough is true and codec supports URLs", async () => {
+      const codec = makeCodec(true);
+      const fetchImpl = vi.fn();
+      const attachment = makeAttachment();
+
+      const result = await ingestAttachmentImage(attachment, {
+        codec,
+        fetchImpl: fetchImpl as any,
+        imageUrlPassthrough: true,
+      });
+
+      expect(result).toEqual({
+        type: "image",
+        mediaType: "image/png",
+        url: "https://cdn.example.com/photo.png",
+      });
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it("fetches when imageUrlPassthrough is true but codec does not support URLs", async () => {
+      const codec = makeCodec(false);
+      const imgBytes = Buffer.from([0x89, 0x50]);
+      const fetchImpl = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers(),
+        arrayBuffer: () => Promise.resolve(imgBytes.buffer.slice(imgBytes.byteOffset, imgBytes.byteOffset + imgBytes.byteLength)),
+      });
+      const attachment = makeAttachment();
+
+      const result = await ingestAttachmentImage(attachment, {
+        codec,
+        fetchImpl: fetchImpl as any,
+        imageUrlPassthrough: true,
+      });
+
+      expect(result).toEqual({
+        type: "image",
+        mediaType: "image/png",
+        base64: imgBytes.toString("base64"),
+      });
+      expect(fetchImpl).toHaveBeenCalled();
+    });
+
+    it("fetches when imageUrlPassthrough is false even if codec supports URLs", async () => {
+      const codec = makeCodec(true);
+      const imgBytes = Buffer.from([0x89, 0x50]);
+      const fetchImpl = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers(),
+        arrayBuffer: () => Promise.resolve(imgBytes.buffer.slice(imgBytes.byteOffset, imgBytes.byteOffset + imgBytes.byteLength)),
+      });
+      const attachment = makeAttachment();
+
+      const result = await ingestAttachmentImage(attachment, {
+        codec,
+        fetchImpl: fetchImpl as any,
+        imageUrlPassthrough: false,
+      });
+
+      expect(result).toEqual({
+        type: "image",
+        mediaType: "image/png",
+        base64: imgBytes.toString("base64"),
+      });
+      expect(fetchImpl).toHaveBeenCalled();
+    });
+  });
+
+    describe("base64 fallback (supportsUrl: false)", () => {
     it("fetches and returns base64 ImageBlock", async () => {
       const codec = makeCodec(false);
       const imageBytes = Buffer.from("fake-png-data");

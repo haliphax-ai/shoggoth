@@ -38,6 +38,8 @@ const shoggothOpenAiCompatibleProviderSchema = z
     baseUrl: z.string().min(1),
     apiKey: z.string().min(1).optional(),
     apiKeyEnv: z.string().min(1).optional(),
+    /** When true, pass image URLs directly to the provider instead of fetching and base64-encoding. Only effective when the provider supports URL-based image sources. Default false. */
+    imageUrlPassthrough: z.boolean().optional(),
   })
   .strict();
 
@@ -52,6 +54,8 @@ const shoggothAnthropicMessagesProviderSchema = z
     anthropicVersion: z.string().min(1).optional(),
     /** Default `x-api-key`; `bearer` sets `Authorization: Bearer`. */
     auth: z.enum(["x-api-key", "bearer"]).optional(),
+    /** When true, pass image URLs directly to the provider instead of fetching and base64-encoding. Only effective when the provider supports URL-based image sources. Default false. */
+    imageUrlPassthrough: z.boolean().optional(),
   })
   .strict();
 

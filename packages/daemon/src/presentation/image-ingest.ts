@@ -11,6 +11,13 @@ export interface ImageIngestOptions {
   readonly codec: ImageBlockCodec;
   readonly maxBytes?: number;
   readonly fetchImpl?: typeof fetch;
+  /**
+   * When true AND the codec supports URL sources, pass the attachment URL
+   * directly instead of fetching and base64-encoding. Only enable for
+   * direct provider access (e.g. Anthropic API); gateways may not support it.
+   * Default false.
+   */
+  readonly imageUrlPassthrough?: boolean;
 }
 
 /**
@@ -18,7 +25,8 @@ export interface ImageIngestOptions {
  *
  * - Determines MIME type from `attachment.contentType` or infers from filename extension.
  * - Returns `null` for non-image attachments.
- * - Always fetches the URL and base64-encodes (URL passthrough disabled for gateway compatibility).
+ * - When `imageUrlPassthrough` is true and the codec supports URLs, returns a URL-only ImageBlock.
+ * - Otherwise fetches the URL, base64-encodes, and returns a base64 ImageBlock.
  * - Returns `null` on fetch failure or oversized images.
  */
 export async function ingestAttachmentImage(
@@ -28,8 +36,12 @@ export async function ingestAttachmentImage(
   const mediaType = resolveMediaType(attachment);
   if (!mediaType) return null;
 
-  // Always fetch and base64-encode. URL passthrough is not reliable through
-  // gateways (e.g. kiro-gateway) that may not support URL-based image sources.
+  // URL passthrough: only when explicitly enabled AND the codec supports it.
+  if (options.imageUrlPassthrough && options.codec.supportsUrl) {
+    return { type: "image", mediaType, url: attachment.url };
+  }
+
+  // Default: always fetch and base64-encode for gateway compatibility.
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const fetchFn = options.fetchImpl ?? globalThis.fetch;
 

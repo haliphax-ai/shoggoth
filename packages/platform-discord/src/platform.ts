@@ -367,6 +367,16 @@ export async function startDiscordPlatform(
           }
           return undefined;
         })(),
+        imageUrlPassthrough: (() => {
+          const cfg = opts.configRef?.current ?? opts.config;
+          const mc = resolveEffectiveModelsConfig(cfg, msg.sessionId) ?? cfg.models;
+          if (!mc?.providers?.length) return false;
+          const chain = mc.failoverChain;
+          const provider = chain?.length
+            ? mc.providers.find((p) => p.id === chain[0].providerId)
+            : mc.providers[0];
+          return (provider as any)?.imageUrlPassthrough === true;
+        })(),
         formatAttachmentMetadata,
         buildTurn: async () => {
           const mcpCtx = await mcpRuntime.resolveContext(msg.sessionId);
