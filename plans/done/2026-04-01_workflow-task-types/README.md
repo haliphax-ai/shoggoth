@@ -1,7 +1,7 @@
 ---
 date: 2026-04-01
-status: in-progress
-completed: never
+status: complete
+completed: 2026-04-03
 ---
 
 # Workflow Task Types
