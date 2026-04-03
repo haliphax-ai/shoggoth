@@ -18,8 +18,8 @@ const pathArg = {
 const writeArgs = {
   type: "object",
   properties: {
-    path: { type: "string" },
-    content: { type: "string" },
+    path: { type: "string", description: "File path relative to session workspace" },
+    content: { type: "string", description: "Content to write to the file" },
   },
   required: ["path", "content"],
 } as const;
