@@ -212,7 +212,7 @@ interface TimerToolParams {
   readonly action: "set" | "cancel" | "list";
   /** Human-readable label. Required for set. */
   readonly label: string;
-  /** When to fire. Required for set. ISO 8601 datetime or relative duration string (e.g. "2h", "30m", "1d"). */
+  /** When to fire. Required for set. ISO 8601 datetime or relative duration string (e.g. "2h", "30m", "90s", "1d"). */
   readonly at?: string;
   /** Message content delivered when the timer fires. Default: the label. */
   readonly message?: string;
@@ -236,9 +236,35 @@ CREATE TABLE IF NOT EXISTS timers (
 CREATE INDEX IF NOT EXISTS idx_timers_fire ON timers (fired, fire_at);
 ```
 
-**Execution:** A new periodic job (similar to retention) polls for due timers and injects them as user-turn messages into the target session via `injectSessionTurn` (or equivalent internal message delivery). The timer message is wrapped in trusted system context so the agent knows it's a timer event, not a user message.
+**Execution — in-process scheduler (not polling):**
 
-**Duration parsing:** Relative durations support `Xm` (minutes), `Xh` (hours), `Xd` (days). Parsed relative to `Date.now()` at set time. Maximum duration: 30 days.
+Instead of a periodic poll job, timers use an in-process `setTimeout`-based scheduler with a min-heap priority queue. This gives millisecond-resolution delivery with zero wasted work.
+
+```ts
+interface TimerScheduler {
+  /** Schedule a new timer. Inserts into DB and adds to the in-memory heap. */
+  schedule(timer: TimerRecord): void;
+  /** Cancel a timer by ID. Marks fired in DB and removes from heap. */
+  cancel(id: string): boolean;
+  /** Restore state on startup: fire any past-due timers, schedule the rest. */
+  restore(db: Database.Database): Promise<void>;
+  /** Tear down — clear all pending timeouts. */
+  shutdown(): void;
+}
+```
+
+How it works:
+
+1. A min-heap orders pending timers by `fire_at` ascending.
+2. A single `setTimeout` handle points at the soonest timer in the heap.
+3. When the timeout fires: deliver the message to the target session, mark `fired = 1` in the DB, pop the heap, and schedule the next `setTimeout` for the new heap head.
+4. When a new timer is inserted with a `fire_at` earlier than the current heap head, the existing `setTimeout` is cleared and rescheduled to the new earlier time.
+5. When a timer is cancelled, it's removed from the heap. If it was the head, the `setTimeout` is rescheduled to the next entry.
+6. On daemon startup, `restore()` queries all unfired timers from the DB. Any with `fire_at <= now` are fired immediately (in order). The rest are inserted into the heap and the first `setTimeout` is armed.
+
+The DB remains the source of truth for crash recovery — the in-memory heap is a runtime optimization. If the daemon crashes and restarts, `restore()` picks up where it left off with no timers lost.
+
+**Duration parsing:** Relative durations support `Xs` (seconds), `Xm` (minutes), `Xh` (hours), `Xd` (days). Parsed relative to `Date.now()` at set time. Maximum duration: 30 days.
 
 **Results:**
 
@@ -256,8 +282,10 @@ CREATE INDEX IF NOT EXISTS idx_timers_fire ON timers (fired, fire_at);
 **Edge cases:**
 - Timer fires while session is in a turn: queued as a pending user message.
 - Timer fires for a terminated session: marked as fired, no delivery. Logged to audit.
-- Daemon restart: timer poll job rescans on startup. No timers are lost.
+- Daemon restart: `restore()` rescans on startup. Past-due timers fire immediately. No timers are lost.
 - Duplicate labels: allowed. Each timer gets a unique ID.
+- Very short timers (e.g. "5s"): supported. The `setTimeout` approach handles sub-second precision natively.
+- Many timers: only one `setTimeout` is active at a time (the soonest). 10,000 pending timers cost heap memory but zero OS timer resources beyond the single active one.
 
 ### Tool naming
 
@@ -316,15 +344,16 @@ Requires a DB migration for the `kv_store` table.
 
 ### Phase 5: `builtin-timer` — deferred actions
 
-Requires a DB migration, a periodic poll job, and session message injection.
+Requires a DB migration, an in-process timer scheduler, and session message injection.
 
 **Files:**
 - `packages/daemon/src/sessions/builtin-handlers/timer-handler.ts` — new: timer handler
 - `packages/daemon/src/sessions/builtin-handlers/index.ts` — register
 - `packages/mcp-integration/src/builtin-shoggoth-tools.ts` — tool schema definition
 - `packages/daemon/src/migrations/` — new migration: `timers` table
-- `packages/daemon/src/timers/timer-poll.ts` — new: periodic poll job, message injection
-- `packages/daemon/src/index.ts` — wire timer poll into daemon lifecycle
+- `packages/daemon/src/timers/timer-scheduler.ts` — new: min-heap scheduler with `setTimeout`, `TimerScheduler` interface
+- `packages/daemon/src/timers/timer-heap.ts` — new: min-heap data structure for timer ordering
+- `packages/daemon/src/index.ts` — instantiate scheduler, call `restore()` on startup, `shutdown()` on SIGTERM
 
 ## Testing Strategy
 
@@ -332,15 +361,17 @@ Requires a DB migration, a periodic poll job, and session message injection.
 - **`builtin-fs`:** move file, copy file, rename file, delete file, delete empty dir, delete non-empty dir without recursive (error), delete recursive, stat file, stat directory, chmod, path outside workspace rejected, dest outside workspace rejected, move overwrites existing.
 - **`builtin-fetch`:** GET 200, GET 404, POST with JSON body (auto Content-Type), custom headers, response truncation at maxResponseBytes, timeout, private IP blocked, redirect not followed by default, redirect followed with cap, binary response as base64, policy denial returns error result.
 - **`builtin-kv`:** set + get round-trip, get missing key returns null, delete existing, delete missing, list all, list with prefix, list with limit, value size cap enforced, key length cap enforced, workspace scoping (two workspaces don't collide), retention eviction.
-- **`builtin-timer`:** set with ISO datetime, set with relative duration ("2h"), cancel, list, fire delivery (mock clock), fire into busy session (queued), fire into terminated session (no-op), daemon restart rescans, max duration enforced, audit logging on fire.
+- **`builtin-timer`:** set with ISO datetime, set with relative duration ("2h", "90s"), cancel, list, fire delivery (mock `setTimeout` via fake timers), fire into busy session (queued), fire into terminated session (no-op), `restore()` fires past-due timers on startup, `restore()` schedules future timers, heap reordering when earlier timer inserted, cancel of heap head reschedules, max duration enforced, per-session cap enforced, audit logging on fire, `shutdown()` clears pending timeout.
+- **Timer heap:** insert ordering, extract-min, remove-by-id, peek, empty heap edge cases.
 
 ## Considerations
 
 - **`builtin-fetch` and SSRF:** Private IP blocking is a baseline defense. For deployments behind a VPN or with internal APIs, the allowlist config is essential. Consider adding an explicit `allowInternalUrls` config flag that defaults to `false`.
 - **`builtin-fetch` response size:** Returning 1MB of response body to the model consumes significant context. The default cap should be conservative. Consider a `jq`-style extraction parameter in a future iteration to let the model request only the fields it needs from JSON responses.
 - **`builtin-kv` vs memory:** These serve different purposes. KV is for structured, machine-readable state. Memory is for unstructured, human-readable notes. The system prompt should make this distinction clear.
-- **`builtin-timer` reliability:** Timers are best-effort. If the daemon is down when a timer fires, it will fire on the next poll after restart. There's no guarantee of exact-time delivery. The poll interval (default 60s) determines the resolution.
-- **`builtin-timer` abuse:** An agent could create thousands of timers. A per-session cap (default 50 active timers) prevents runaway scheduling. Expired/fired timers are cleaned up by retention.
+- **`builtin-timer` reliability:** Timers are best-effort. If the daemon is down when a timer is due, it fires on the next startup via `restore()`. Delivery is not guaranteed to be exact — Node.js `setTimeout` has inherent jitter (typically <10ms), which is negligible for this use case.
+- **`builtin-timer` abuse:** An agent could create many timers. A per-session cap (default 50 active timers) prevents runaway scheduling. Expired/fired timers are cleaned up by retention.
+- **`builtin-timer` memory:** The min-heap holds one entry per unfired timer. Each entry is ~200 bytes. 10,000 timers ≈ 2MB — negligible. Only one OS-level `setTimeout` is active at any time regardless of heap size.
 - **`builtin-fs` and `rename` vs `move`:** `rename` is intentionally limited to same-directory renames to match the semantic of "change the name." Cross-directory moves use `move`. This avoids confusion about whether `rename` preserves the directory.
 - **Phase ordering:** Phases 1–3 are independent and could run in parallel. Phase 4 and 5 each need a migration and are best done sequentially to avoid migration ordering conflicts.
 
