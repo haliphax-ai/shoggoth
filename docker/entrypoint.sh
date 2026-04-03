@@ -27,7 +27,7 @@ if [ -d /etc/shoggoth/config.d/dynamic ]; then
   fix_dir /etc/shoggoth/config.d/dynamic 0700 shoggoth shoggoth
 fi
 fix_dir /var/lib/shoggoth/state 0700 shoggoth shoggoth
-# Workspaces root: setgid (2…) so new session dirs inherit group `agent`; agent UID 901 matches group perms.
+# Workspaces root: setgid (2…) so new session dirs inherit group `agent`; agent UID 900 matches group perms.
 fix_dir /var/lib/shoggoth/workspaces 2770 shoggoth agent
 # Heal trees created before setgid / wrong umask (bootstrap runs as shoggoth: agent could not write).
 # Only fix the workspaces root and immediate agent workspace dirs — deeper contents are the agent's responsibility.
@@ -43,7 +43,7 @@ if [ -d /run/secrets ]; then
   chmod 0700 /run/secrets 2>/dev/null || true
 fi
 
-# gosu drops all capabilities on setuid; builtins need CAP_SETUID/CAP_SETGID on the daemon to spawn as agent (901).
+# gosu drops all capabilities on setuid; builtins need CAP_SETUID/CAP_SETGID on the daemon to spawn as agent (900).
 # Compose must set cap_add: SETUID, SETGID. setpriv keeps them in inh+ambient across the reuid/regid drop.
 exec setpriv --reuid shoggoth --regid shoggoth --init-groups \
   --inh-caps +setuid,+setgid \

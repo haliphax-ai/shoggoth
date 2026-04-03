@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { join } from "node:path";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import {
@@ -93,8 +94,8 @@ export function bootstrapMainSession(opts: BootstrapMainSessionOptions): void {
     id,
     workspacePath: dir,
     status: "active",
-    runtimeUid: 901,
-    runtimeGid: 901,
+    runtimeUid: Number(execSync("id -u agent", { encoding: "utf8" }).trim()),
+    runtimeGid: Number(execSync("id -g agent", { encoding: "utf8" }).trim()),
   });
 
   pushSystemContext(id, "Fresh session. No prior conversation history.");
