@@ -1,3 +1,8 @@
+---
+date: 2026-03-31
+completed: 2026-03-31
+---
+
 # Plan: Stateful Session Stats
 
 Track session-level metadata as persistent counters/accumulators in SQLite, updated inline as events occur. Read path is a single row lookup — no aggregation queries.

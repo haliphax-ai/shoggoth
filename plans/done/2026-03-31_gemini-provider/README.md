@@ -1,3 +1,8 @@
+---
+date: 2026-03-31
+completed: 2026-03-31
+---
+
 # Plan: `gemini` model provider type
 
 Add a first-class `gemini` provider kind to `@shoggoth/models`, encapsulating Google's Gemini REST API behind the existing `ModelProvider` interface. Same pattern as the `anthropic-messages` provider addition.

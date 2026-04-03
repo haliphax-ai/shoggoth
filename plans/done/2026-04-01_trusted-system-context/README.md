@@ -1,3 +1,8 @@
+---
+date: 2026-04-01
+completed: 2026-04-01
+---
+
 # Trusted System Context for Session Turns
 
 Add a `systemContext` field to `runSessionModelTurn` that provides a trusted, system-generated metadata channel for system-to-agent communication. This replaces the current pattern of stuffing system metadata into `userMetadata` (which the agent never sees) or embedding it in `userContent` (which the agent can't distinguish from user input).

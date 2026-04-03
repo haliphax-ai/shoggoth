@@ -1,3 +1,8 @@
+---
+date: 2026-04-02
+completed: 2026-04-02
+---
+
 # Model Resilience Layer — Implementation Plan
 
 ## Problem

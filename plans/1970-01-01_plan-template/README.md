@@ -1,6 +1,5 @@
 ---
 date: 2026-04-01
-status: planned
 completed: never
 ---
 
@@ -15,7 +14,6 @@ completed: never
 ```yaml
 ---
 date: 2026-04-01       # Date the plan was created (YYYY-MM-DD)
-status: planned         # planned | in-progress | complete | abandoned
 completed: never        # Date completed (YYYY-MM-DD), or "never" if not yet done
 ---
 ```

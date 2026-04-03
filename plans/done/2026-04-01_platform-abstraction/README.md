@@ -1,3 +1,8 @@
+---
+date: 2026-04-01
+completed: 2026-04-01
+---
+
 # Platform Abstraction Refactor
 
 ## Goal

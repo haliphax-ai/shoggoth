@@ -1,3 +1,8 @@
+---
+date: 2026-03-31
+completed: 2026-03-31
+---
+
 # Plan: Process Manager Layer
 
 A centralized subsystem for spawning, monitoring, communicating with, and reaping subprocesses on behalf of other Shoggoth components. Enables tools, plugins, MCP servers, and future extensions to be backed by long-running daemons.

@@ -1,7 +1,9 @@
-# Session Turn Queue — Priority Tiers
+---
+date: 2026-04-01
+completed: 2026-04-01
+---
 
-**Date:** 2026-04-01
-**Status:** Planned
+# Session Turn Queue — Priority Tiers
 
 ## Summary
 

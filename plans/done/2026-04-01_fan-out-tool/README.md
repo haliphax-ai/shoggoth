@@ -1,3 +1,8 @@
+---
+date: 2026-03-31
+completed: 2026-04-01
+---
+
 # Fan-out Tool
 
 A tool for breaking projects into tasks and executing them via subagents while keeping context tight. Spawns subagents both sequentially and in parallel according to a task dependency graph. Uses the Shoggoth process manager to run a long-lived server that handles the lifecycle of task workflows.

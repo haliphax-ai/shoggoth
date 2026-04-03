@@ -1,3 +1,8 @@
+---
+date: 2026-03-28
+completed: 2026-03-29
+---
+
 # Agent Orchestration Platform
 
 An AI orchestration platform with Discord (or other message platform) as its primary interface. Organizes tool-calling LLMs and coding assistants into "agents" that cooperate to complete tasks for the user, in chat or behind the scenes.
