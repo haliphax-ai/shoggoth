@@ -30,9 +30,9 @@ fix_dir /var/lib/shoggoth/state 0700 shoggoth shoggoth
 # Workspaces root: setgid (2…) so new session dirs inherit group `agent`; agent UID 901 matches group perms.
 fix_dir /var/lib/shoggoth/workspaces 2770 shoggoth agent
 # Heal trees created before setgid / wrong umask (bootstrap runs as shoggoth: agent could not write).
-find /var/lib/shoggoth/workspaces -mindepth 1 -exec chown shoggoth:agent {} + 2>/dev/null || true
-find /var/lib/shoggoth/workspaces -type d -exec chmod 2770 {} + 2>/dev/null || true
-find /var/lib/shoggoth/workspaces -type f -exec chmod 660 {} + 2>/dev/null || true
+# Only fix the workspaces root and immediate agent workspace dirs — deeper contents are the agent's responsibility.
+find /var/lib/shoggoth/workspaces -maxdepth 1 -exec chown shoggoth:agent {} + 2>/dev/null || true
+find /var/lib/shoggoth/workspaces -maxdepth 1 -type d -exec chmod 2770 {} + 2>/dev/null || true
 fix_dir /var/lib/shoggoth/operator 0700 shoggoth shoggoth
 fix_dir /var/lib/shoggoth/media/inbound 0750 shoggoth shoggoth
 fix_dir /run/shoggoth 0750 shoggoth shoggoth

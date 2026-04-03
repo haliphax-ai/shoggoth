@@ -13,7 +13,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --import tsx/esm --test --test-concurrency=true $(find test -name '*.test.ts' | sort)"
+    "test": "npx vitest --run"
   },
   "dependencies": {
     "@shoggoth/procman": "*"
