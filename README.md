@@ -24,7 +24,7 @@ TypeScript monorepo for the **daemon** and **operator CLI**, with Docker/Compose
 | `/run/shoggoth`                    | shoggoth        | 0750              | Control socket directory                   |
 | `/run/secrets`                     | root            | 0700              | Docker secrets; entrypoint never loosens     |
 
-Users: **`shoggoth`** (daemon), **`agent`** (worker pool UID 901) — see `Dockerfile`.
+Users: **`shoggoth`** (daemon, default UID 1000), **`agent`** (worker pool, default UID 900) — configurable via `SHOGGOTH_UID`/`AGENT_UID` build args in `Dockerfile`.
 
 ## Config
 

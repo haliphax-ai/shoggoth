@@ -8,7 +8,7 @@ This document complements the [filesystem layout](../README.md#filesystem-layout
 - **Ownership:** keep secret files **not readable** by the **agent** worker UID/GID (`agent` in the reference image). In practice:
   - Mount secrets with root-owned **`0700`** directories, or
   - Use Compose `secrets` and ensure the **entrypoint** copies or maps them into a path owned by `shoggoth` with **`0640`** and group `shoggoth`, while the `agent` user is not in that group.
-- **`/var/lib/shoggoth/operator`** (volume `shoggoth-operator` in Compose): created **0700** `shoggoth:shoggoth` by `docker/entrypoint.sh`. Use for plaintext copies of tokens the daemon must read as user `shoggoth`; the **agent** UID/GID (`901`) is not in group `shoggoth` and cannot traverse `state` / `operator` / socket dirs.
+- **`/var/lib/shoggoth/operator`** (volume `shoggoth-operator` in Compose): created **0700** `shoggoth:shoggoth` by `docker/entrypoint.sh`. Use for plaintext copies of tokens the daemon must read as user `shoggoth`; the **agent** user is not in group `shoggoth` and cannot traverse `state` / `operator` / socket dirs.
 - **`/var/lib/shoggoth/...`** layout: operator-only paths (`state`, `operator`, config overlays that contain sensitive data) must stay **0700** / `shoggoth:shoggoth` as in `docker/entrypoint.sh`. Do not place raw API tokens under **`workspaces`** roots without session-scoped **0700** subdirs.
 
 See commented **`secrets:`** stubs in `docker-compose.yml` for wiring a secret such as `discord_token` into the container; adjust user/copy steps so only the daemon identity can read them.
