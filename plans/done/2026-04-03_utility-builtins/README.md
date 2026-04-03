@@ -1,6 +1,6 @@
 ---
 date: 2026-04-03
-completed: never
+completed: 2026-04-03
 ---
 
 # Utility builtins — fetch, fs ops, directory listing, KV store, timers
