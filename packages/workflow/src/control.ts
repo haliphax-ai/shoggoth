@@ -38,6 +38,7 @@ function countStatuses(wf: TaskList): Record<TaskStatus, number> {
     done: 0,
     failed: 0,
     paused: 0,
+    skipped: 0,
   };
   for (const t of wf.tasks) {
     counts[t.status]++;

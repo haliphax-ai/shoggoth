@@ -18,6 +18,7 @@ export type {
   TemplateRef,
   TaskOutputRef,
   TaskSuccessRef,
+  ToolExecutor,
 } from "./types.js";
 export { getTaskPromptOrLabel } from "./types.js";
 

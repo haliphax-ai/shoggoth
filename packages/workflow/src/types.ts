@@ -1,5 +1,5 @@
 // Task status lifecycle
-export type TaskStatus = "pending" | "in_progress" | "done" | "failed" | "paused";
+export type TaskStatus = "pending" | "in_progress" | "done" | "failed" | "paused" | "skipped";
 
 // What to do when a task fails
 export type FailureBehavior = "abort" | "pause" | "continue";
@@ -74,6 +74,15 @@ export function getTaskPromptOrLabel(td: TaskDef): string {
     case "message":
       return td.title ?? td.message;
   }
+}
+
+/** Adapter for executing tool calls directly (no subagent session). */
+export interface ToolExecutor {
+  execute(tool: string, args: Record<string, unknown>): Promise<{
+    ok: boolean;
+    output: string;
+    error?: string;
+  }>;
 }
 
 // Task runtime state

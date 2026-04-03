@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { TaskDef, TaskState, TaskList, DependencyGraph } from "./types.js";
+import type { TaskDef, TaskState, TaskList, DependencyGraph, ToolExecutor } from "./types.js";
 import { getTaskPromptOrLabel } from "./types.js";
 import { parseGraph, validateGraph } from "./graph.js";
 import { parseTemplateRefs, validateTemplateRefs, resolveTemplates } from "./templates.js";
 import { canSpawn } from "./depth.js";
 import { saveWorkflow, loadWorkflow } from "./state.js";
+import { buildGateContext, evaluateGateCondition } from "./gate-eval.js";
 import type { StatusManager } from "./status-manager.js";
 import { getLogger } from "@shoggoth/shared";
 const log = getLogger("workflow");
@@ -47,6 +48,11 @@ export interface KillAdapter {
   kill(sessionKey: string): Promise<void>;
 }
 
+/** Posts a message to a session/channel. Used by message tasks. */
+export interface MessagePoster {
+  post(sessionId: string, message: string): Promise<void>;
+}
+
 export interface OrchestratorOptions {
   stateDir: string;
   currentDepth: number;
@@ -62,7 +68,7 @@ export interface OrchestratorOptions {
 // --- Helpers ---
 
 function isTerminal(status: TaskState["status"]): boolean {
-  return status === "done" || status === "failed";
+  return status === "done" || status === "failed" || status === "skipped";
 }
 
 function taskMap(tasks: TaskState[]): Map<number, TaskState> {
@@ -89,9 +95,65 @@ function isBlocked(taskId: number, graph: DependencyGraph, tasks: Map<number, Ta
   return false;
 }
 
+/**
+ * Check if a task should be skipped because at least one dependency was skipped.
+ */
+function shouldSkip(taskId: number, graph: DependencyGraph, tasks: Map<number, TaskState>): boolean {
+  const deps = graph.get(taskId);
+  if (!deps || deps.size === 0) return false;
+
+  for (const depId of deps) {
+    const dep = tasks.get(depId);
+    if (!dep) continue;
+    if (dep.status === "skipped") return true;
+    if (dep.status === "pending" && shouldSkip(depId, graph, tasks)) return true;
+  }
+  return false;
+}
+
+/**
+ * Get all transitive dependents of a task (tasks that depend on it, directly or transitively).
+ */
+function getTransitiveDependents(taskId: number, graph: DependencyGraph): Set<number> {
+  // Build reverse graph: for each task, which tasks depend on it
+  const reverse = new Map<number, Set<number>>();
+  for (const [tid, deps] of graph) {
+    for (const depId of deps) {
+      if (!reverse.has(depId)) reverse.set(depId, new Set());
+      reverse.get(depId)!.add(tid);
+    }
+  }
+
+  const visited = new Set<number>();
+  const stack = [...(reverse.get(taskId) ?? [])];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    for (const dep of reverse.get(current) ?? []) {
+      stack.push(dep);
+    }
+  }
+  return visited;
+}
+
 function formatFailureMessage(task: TaskState): string {
   const desc = getTaskPromptOrLabel(task.taskDef).slice(0, 100);
   return `Task ${task.taskDef.id} failed: "${desc}" — ${task.error ?? "unknown error"}`;
+}
+
+/** Extract the template-bearing string from a task def for ref validation. */
+function getTemplateSources(task: TaskDef): string[] {
+  switch (task.kind) {
+    case "agent":
+      return [task.prompt];
+    case "transform":
+      return [task.template];
+    case "message":
+      return [task.message];
+    default:
+      return [];
+  }
 }
 
 // --- Orchestrator ---
@@ -103,6 +165,8 @@ export class Orchestrator {
   private readonly statusManager: StatusManager | null;
   private readonly notifications: NotificationAdapter | null;
   private readonly killer: KillAdapter | null;
+  private readonly messagePoster: MessagePoster | null;
+  private readonly toolExecutor: ToolExecutor | null;
 
   private workflow: TaskList | null = null;
   private opts: OrchestratorOptions | null = null;
@@ -117,6 +181,8 @@ export class Orchestrator {
     statusManager?: StatusManager,
     notifications?: NotificationAdapter,
     killer?: KillAdapter,
+    messagePoster?: MessagePoster,
+    toolExecutor?: ToolExecutor,
   ) {
     this.spawner = spawner;
     this.poller = poller;
@@ -124,6 +190,8 @@ export class Orchestrator {
     this.statusManager = statusManager ?? null;
     this.notifications = notifications ?? null;
     this.killer = killer ?? null;
+    this.messagePoster = messagePoster ?? null;
+    this.toolExecutor = toolExecutor ?? null;
   }
 
   /** Start a new workflow. Returns the workflow ID. */
@@ -140,8 +208,9 @@ export class Orchestrator {
 
     // Validate template refs for each task
     for (const task of tasks) {
-      if (task.kind === "agent") {
-        const refs = parseTemplateRefs(task.prompt);
+      const sources = getTemplateSources(task);
+      for (const source of sources) {
+        const refs = parseTemplateRefs(source);
         if (refs.length > 0) {
           validateTemplateRefs(task.id, refs, graph);
         }
@@ -436,7 +505,16 @@ export class Orchestrator {
     const tm = taskMap(wf.tasks);
 
     for (const task of wf.tasks) {
-      if (task.status === "pending" && isBlocked(task.taskDef.id, wf.graph, tm)) {
+      if (task.status !== "pending") continue;
+
+      // Check for skipped dependencies first — skip takes priority over block
+      if (shouldSkip(task.taskDef.id, wf.graph, tm)) {
+        task.status = "skipped";
+        task.completedAt = Date.now();
+        continue;
+      }
+
+      if (isBlocked(task.taskDef.id, wf.graph, tm)) {
         task.status = "failed";
         task.error = "blocked: dependency failed";
         task.completedAt = Date.now();
@@ -470,13 +548,134 @@ export class Orchestrator {
 
       if (!allDepsDone) continue;
 
-      // Only agent tasks can be spawned; fail other kinds until later phases implement them
-      if (task.taskDef.kind !== "agent") {
-        task.status = "failed";
-        task.error = `unsupported task kind: ${task.taskDef.kind}`;
-        task.completedAt = Date.now();
+      // --- Dispatch by task kind ---
+
+      if (task.taskDef.kind === "gate") {
+        // Evaluate gate condition synchronously
+        const now = Date.now();
+        task.startedAt = now;
+        try {
+          const ctx = buildGateContext(tm);
+          const result = evaluateGateCondition(task.taskDef.condition, ctx);
+          if (result) {
+            task.output = "pass";
+            task.status = "done";
+            task.completedAt = Date.now();
+            log.debug("gate task passed", { workflowId: wf.id, taskId: task.taskDef.id });
+          } else {
+            task.output = "skip";
+            task.status = "done";
+            task.completedAt = Date.now();
+            log.debug("gate task skipped", { workflowId: wf.id, taskId: task.taskDef.id });
+
+            // Propagate: mark all transitive dependents as skipped
+            const dependents = getTransitiveDependents(task.taskDef.id, wf.graph);
+            for (const depId of dependents) {
+              const depTask = tm.get(depId);
+              if (depTask && depTask.status === "pending") {
+                depTask.status = "skipped";
+                depTask.completedAt = Date.now();
+              }
+            }
+          }
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          task.status = "failed";
+          task.error = errorMsg;
+          task.completedAt = Date.now();
+        }
         continue;
       }
+
+      if (task.taskDef.kind === "transform") {
+        // Pure string interpolation — no subagent, no I/O
+        const now = Date.now();
+        task.startedAt = now;
+        try {
+          const resolved = resolveTemplates(task.taskDef.template, tm);
+          task.output = resolved;
+          task.status = "done";
+          task.completedAt = Date.now();
+          log.debug("transform task completed", { workflowId: wf.id, taskId: task.taskDef.id });
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          task.status = "failed";
+          task.error = errorMsg;
+          task.completedAt = Date.now();
+        }
+        continue;
+      }
+
+      if (task.taskDef.kind === "message") {
+        // Post a message to a channel — requires MessagePoster
+        const now = Date.now();
+        task.startedAt = now;
+        if (!this.messagePoster) {
+          task.status = "failed";
+          task.error = "message task requires a MessagePoster but none was provided";
+          task.completedAt = Date.now();
+          continue;
+        }
+        try {
+          const resolvedMessage = resolveTemplates(task.taskDef.message, tm);
+          const target = task.taskDef.channel ?? opts.replyTo;
+          await this.messagePoster.post(target, resolvedMessage);
+          task.output = resolvedMessage;
+          task.status = "done";
+          task.completedAt = Date.now();
+          log.debug("message task completed", { workflowId: wf.id, taskId: task.taskDef.id, target });
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          task.status = "failed";
+          task.error = errorMsg;
+          task.completedAt = Date.now();
+        }
+        continue;
+      }
+
+      if (task.taskDef.kind === "tool") {
+        const now = Date.now();
+        task.startedAt = now;
+        if (!this.toolExecutor) {
+          task.status = "failed";
+          task.error = "tool task requires a ToolExecutor but none was provided";
+          task.completedAt = Date.now();
+          continue;
+        }
+        try {
+          const resolveArgsDeep = (val: unknown): unknown => {
+            if (typeof val === "string") return resolveTemplates(val, tm);
+            if (Array.isArray(val)) return val.map(resolveArgsDeep);
+            if (val !== null && typeof val === "object") {
+              const out: Record<string, unknown> = {};
+              for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+                out[k] = resolveArgsDeep(v);
+              }
+              return out;
+            }
+            return val;
+          };
+          const resolvedArgs = resolveArgsDeep(task.taskDef.args ?? {}) as Record<string, unknown>;
+          const result = await this.toolExecutor.execute(task.taskDef.tool, resolvedArgs);
+          if (result.ok) {
+            task.output = result.output;
+            task.status = "done";
+          } else {
+            task.status = "failed";
+            task.error = result.error ?? "tool execution failed";
+          }
+          task.completedAt = Date.now();
+          log.debug("tool task completed", { workflowId: wf.id, taskId: task.taskDef.id, ok: result.ok });
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          task.status = "failed";
+          task.error = errorMsg;
+          task.completedAt = Date.now();
+        }
+        continue;
+      }
+
+      // --- Agent task: spawn subagent ---
 
       // Resolve templates in prompt (agent tasks only)
       const resolvedPrompt = resolveTemplates(task.taskDef.prompt, tm);

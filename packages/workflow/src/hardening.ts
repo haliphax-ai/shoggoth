@@ -14,16 +14,17 @@ const STATUS_ORDER: Record<TaskStatus, number> = {
   in_progress: 1,
   done: 2,
   failed: 2,
+  skipped: 2,
 };
 
 /**
  * Check whether a status transition is valid (forward-only).
- * Terminal states (done, failed) cannot transition to anything.
+ * Terminal states (done, failed, skipped) cannot transition to anything.
  */
 export function isValidTransition(from: TaskStatus, to: TaskStatus): boolean {
   if (from === to) return false;
   // Terminal states cannot transition
-  if (from === "done" || from === "failed") return false;
+  if (from === "done" || from === "failed" || from === "skipped") return false;
   return STATUS_ORDER[to] >= STATUS_ORDER[from];
 }
 

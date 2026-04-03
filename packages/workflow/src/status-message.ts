@@ -8,6 +8,7 @@ const STATUS_EMOJI: Record<TaskState["status"], string> = {
   paused: "⏸️",
   done: "✅",
   failed: "❌",
+  skipped: "⏭️",
 };
 
 function taskDisplayName(task: TaskState): string {
@@ -54,7 +55,8 @@ export function formatStatusMessage(wf: TaskList, now?: number): string {
 export function formatSummaryMessage(wf: TaskList): string {
   const total = wf.tasks.length;
   const failed = wf.tasks.filter((t) => t.status === "failed");
-  const completed = total - failed.length;
+  const skipped = wf.tasks.filter((t) => t.status === "skipped");
+  const completed = total - failed.length - skipped.length;
 
   // Total duration: createdAt → last completedAt
   const lastCompleted = Math.max(...wf.tasks.map((t) => t.completedAt ?? 0));
@@ -65,6 +67,10 @@ export function formatSummaryMessage(wf: TaskList): string {
     `⏱️ **Duration:** ${totalDuration}`,
     `✅ **Completed:** ${completed}/${total}`,
   ];
+
+  if (skipped.length > 0) {
+    lines.push(`⏭️ **Skipped:** ${skipped.length}/${total}`);
+  }
 
   if (failed.length > 0) {
     lines.push(`❌ **Failed:** ${failed.length}/${total}`);
