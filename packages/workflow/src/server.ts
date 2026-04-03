@@ -54,7 +54,7 @@ export class WorkflowServer {
         maxDepth: 2,
         replyTo: "",
         pollingIntervalMs: wf.pollingIntervalMs,
-        runtimeLimitMs: wf.runtimeLimitMs ?? this.baseOpts.runtimeLimitMs ?? 600_000,
+        runtimeLimitMs: wf.runtimeLimitMs ?? 600_000,
       });
       orch.startPolling();
       this.orchestrators.set(wf.id, orch);

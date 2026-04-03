@@ -239,6 +239,7 @@ export type {
   PlatformCapabilities,
   StreamHandle,
   HitlNoticeData,
+  OutboundAttachment,
 } from "./presentation/platform-adapter";
 export {
   PresentationTurnOrchestrator,
