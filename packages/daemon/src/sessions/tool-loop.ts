@@ -172,7 +172,10 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
   try {
     for (;;) {
       assertNotAborted(options.turnAbortSignal);
-      const turn = await options.model.complete();
+      const turn = await Promise.race([
+        options.model.complete(),
+        abortPromise(options.turnAbortSignal),
+      ]);
 
       if (turn.toolCalls.length === 0) {
         if (options.transcript && turn.content) {
