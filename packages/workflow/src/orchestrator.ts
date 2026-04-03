@@ -280,8 +280,8 @@ export class Orchestrator {
     // Check runtime limits
     await this.enforceRuntimeLimits();
 
-    // Handle failures from this tick
-    await this.handleFailures();
+    // Handle failures from this tick (collects notifications, doesn't send them yet)
+    const pendingNotifications = await this.handleFailures();
 
     // Mark blocked pending tasks as failed (always, even when paused —
     // blocked tasks can never run regardless of pause state)
@@ -309,6 +309,14 @@ export class Orchestrator {
       if (allTerminal || hasInProgress || !this.paused) {
         await this.statusManager.updateStatus(this.workflow);
       }
+    }
+
+    // Dispatch failure notifications AFTER status post is updated
+    const wfId = this.workflow.id;
+    for (const task of pendingNotifications) {
+      this.routeFailureNotification(task).catch((err) => {
+        log.error("failure notification failed", { workflowId: wfId, taskId: task.taskDef.id, error: String(err) });
+      });
     }
 
     // Check for completion
@@ -442,9 +450,10 @@ export class Orchestrator {
   }
 
   /** Process failure behaviors and notifications for any newly failed tasks. */
-  private async handleFailures(): Promise<void> {
+  private async handleFailures(): Promise<TaskState[]> {
     const wf = this.workflow!;
     const opts = this.opts!;
+    const notifyTasks: TaskState[] = [];
 
     // Collect tasks that just failed this tick (have completedAt set recently and are failed)
     // We process all failed tasks that haven't been handled yet.
@@ -463,18 +472,17 @@ export class Orchestrator {
       if (behavior === "abort") {
         // Don't notify — the workflow is being aborted
         await this.abortWorkflow(task);
-        return; // abort is terminal, stop processing
+        return []; // abort is terminal, no notifications
       } else if (behavior === "pause") {
         this.paused = true;
       }
       // "continue" — no special action, markBlockedTasks handles downstream
 
-      // Send failure notification (fire-and-forget — don't block the tick cycle)
-      // Only for non-abort behaviors; abort suppresses all notifications
-      this.routeFailureNotification(task).catch((err) => {
-        log.error("failure notification failed", { workflowId: wf.id, taskId: task.taskDef.id, error: String(err) });
-      });
+      // Collect for notification after status post updates
+      notifyTasks.push(task);
     }
+
+    return notifyTasks;
   }
 
   private async routeFailureNotification(task: TaskState): Promise<void> {
