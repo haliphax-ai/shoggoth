@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package.json package-lock.json* tsconfig.base.json ./
 COPY packages ./packages
 RUN npm ci
-RUN npm run build && npm prune --omit=dev
+RUN npm prune --omit=dev
 
 # Extract short git commit hash from build context
 COPY .git/HEAD ./.git-meta/HEAD
