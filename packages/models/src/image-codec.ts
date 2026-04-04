@@ -1,4 +1,4 @@
-import type { ImageBlock, ImageBlockCodec, ModelCapabilities } from "./types";
+import type { ImageBlock, ImageBlockCodec } from "./types";
 
 // ---------------------------------------------------------------------------
 // OpenAI-compatible codec
@@ -137,41 +137,6 @@ export function getImageBlockCodec(
 ): ImageBlockCodec {
   const codec = codecs[kind];
   if (!codec) throw new Error(`Unknown image block codec kind: ${kind}`);
-  return codec;
-}
-
-// ---------------------------------------------------------------------------
-// Capability-aware wrapper
-// ---------------------------------------------------------------------------
-
-/**
- * Wraps an ImageBlockCodec to respect ModelCapabilities.imageInput.
- * When imageInput is false, encoding will throw an error.
- * When imageInput is true or undefined, returns the original codec unchanged.
- */
-export function wrapCodecWithCapabilities(
-  codec: ImageBlockCodec,
-  capabilities: ModelCapabilities,
-): ImageBlockCodec {
-  // If imageInput is explicitly false, wrap the codec
-  if (capabilities.imageInput === false) {
-    return {
-      supportsUrl: codec.supportsUrl,
-      supportsImageInput: false,
-
-      encode(block: ImageBlock): unknown {
-        throw new Error(
-          "This model does not support image input. Cannot encode ImageBlock.",
-        );
-      },
-
-      decode(part: unknown): ImageBlock | null {
-        return codec.decode(part);
-      },
-    };
-  }
-
-  // Otherwise return the original codec
   return codec;
 }
 

@@ -1,7 +1,6 @@
 import { isFailoverEligibleError } from "./classify";
 import type {
   ChatMessage,
-  ModelCapabilities,
   ModelCompleteInput,
   ModelCompleteOutput,
   ModelInvocationParams,
@@ -12,8 +11,6 @@ import type { ModelProvider } from "./types";
 export interface FailoverChainEntry {
   readonly provider: ModelProvider;
   readonly model: string;
-  /** Per-hop capability overrides that merge with provider capabilities. */
-  readonly capabilities?: ModelCapabilities;
 }
 
 export interface FailoverCompleteInput extends ModelInvocationParams {
@@ -32,16 +29,6 @@ export interface FailoverCompleteOutput extends ModelCompleteOutput {
 
 export interface FailoverModelClient {
   complete(input: FailoverCompleteInput): Promise<FailoverCompleteOutput>;
-  /** Merged capabilities from the first hop (provider + hop overrides). */
-  readonly capabilities: ModelCapabilities | undefined;
-}
-
-function mergeCapabilities(
-  providerCaps: ModelCapabilities | undefined,
-  hopCaps: ModelCapabilities | undefined,
-): ModelCapabilities | undefined {
-  if (!providerCaps && !hopCaps) return undefined;
-  return { ...providerCaps, ...hopCaps };
 }
 
 export function createFailoverModelClient(
@@ -51,15 +38,7 @@ export function createFailoverModelClient(
     throw new Error("failover chain must not be empty");
   }
 
-  // Compute capabilities from the first hop (primary)
-  const firstEntry = chain[0]!;
-  const capabilities = mergeCapabilities(
-    firstEntry.provider.capabilities,
-    firstEntry.capabilities,
-  );
-
   return {
-    capabilities,
     async complete(input) {
       let lastErr: unknown;
       for (let i = 0; i < chain.length; i++) {

@@ -1,8 +1,3 @@
-/**
- * Helper script for previewing the assembled system prompt.
- * Not part of the Shoggoth runtime — used for development and debugging only.
- * Usage: npx tsx scripts/preview-system-prompt.ts
- */
 #!/usr/bin/env -S npx tsx
 /**
  * Dev tool: prints the dynamically-generated session system prompt to stdout
@@ -136,6 +131,8 @@ const tmpWorkspace = mkdtempSync(join(tmpdir(), "shoggoth-preview-"));
 try {
   // Copy default agent workspace templates into the temp directory
   cpSync(TEMPLATES_DIR, tmpWorkspace, { recursive: true });
+  // Remove BOOTSTRAP.md
+  rmSync(`${tmpWorkspace}/BOOTSTRAP.md`);
 
   const systemPrompt = buildSessionSystemContext({
     workspacePath: tmpWorkspace,

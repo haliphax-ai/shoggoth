@@ -166,6 +166,10 @@ async function handleOneLine(
       return { v: WIRE_VERSION, id: req.id, ok: true, result: health };
     }
 
+  if (!req.auth) {
+      return { v: WIRE_VERSION, id: req.id, ok: false, error: { code: "ERR_AUTH_REQUIRED", message: "authentication required" } };
+    }
+
   try {
     const principal = resolveAuthenticatedPrincipal(req.auth, {
       operatorTokenSecret: deps.operatorTokenSecret,

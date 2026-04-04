@@ -144,7 +144,7 @@ export function createFailoverClientFromModelsConfig(
     if (!provider) {
       throw new Error(`Unknown model provider id "${hop.providerId}" in failoverChain`);
     }
-    return { provider, model: hop.model, capabilities: hop.capabilities };
+    return { provider, model: hop.model };
   });
 
   return createFailoverModelClient(entries);
@@ -170,7 +170,7 @@ export function createFailoverToolCallingClientFromModelsConfig(
     if (!provider) {
       throw new Error(`Unknown model provider id "${hop.providerId}" in failoverChain`);
     }
-    return { provider, model: hop.model, capabilities: hop.capabilities };
+    return { provider, model: hop.model };
   });
 
   return createFailoverToolCallingClient(entries);

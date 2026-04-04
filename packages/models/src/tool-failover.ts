@@ -1,6 +1,6 @@
 import { isFailoverEligibleError } from "./classify";
 import type { FailoverChainEntry } from "./failover";
-import type { ModelCapabilities, ModelToolCompleteInput, ModelToolCompleteOutput } from "./types";
+import type { ModelToolCompleteInput, ModelToolCompleteOutput } from "./types";
 
 export type FailoverToolCompleteOutput = ModelToolCompleteOutput & {
   readonly usedProviderId: string;
@@ -10,16 +10,6 @@ export type FailoverToolCompleteOutput = ModelToolCompleteOutput & {
 
 export interface FailoverToolCallingClient {
   completeWithTools(input: ModelToolCompleteInput): Promise<FailoverToolCompleteOutput>;
-  /** Merged capabilities from the first hop (provider + hop overrides). */
-  readonly capabilities: ModelCapabilities | undefined;
-}
-
-function mergeCapabilities(
-  providerCaps: ModelCapabilities | undefined,
-  hopCaps: ModelCapabilities | undefined,
-): ModelCapabilities | undefined {
-  if (!providerCaps && !hopCaps) return undefined;
-  return { ...providerCaps, ...hopCaps };
 }
 
 export function createFailoverToolCallingClient(
@@ -29,15 +19,7 @@ export function createFailoverToolCallingClient(
     throw new Error("failover chain must not be empty");
   }
 
-  // Compute capabilities from the first hop (primary)
-  const firstEntry = chain[0]!;
-  const capabilities = mergeCapabilities(
-    firstEntry.provider.capabilities,
-    firstEntry.capabilities,
-  );
-
   return {
-    capabilities,
     async completeWithTools(input) {
       let lastErr: unknown;
       for (let i = 0; i < chain.length; i++) {
