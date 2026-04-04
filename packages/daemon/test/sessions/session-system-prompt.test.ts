@@ -93,7 +93,7 @@ describe("buildSessionSystemContext", () => {
     }
   });
 
-  it("injects workspace files in OpenClaw-aligned order and SOUL guidance when SOUL.md present", () => {
+  it("ignores SOUL.md even when present in workspace", () => {
     writeFileSync(join(dir, "SOUL.md"), "persona: test");
     writeFileSync(join(dir, "AGENTS.md"), "do the thing");
     const s = buildSessionSystemContext({
@@ -101,13 +101,10 @@ describe("buildSessionSystemContext", () => {
       sessionId: "s2",
       toolNames: [],
     });
-    assert.match(s, /## SOUL\.md guidance/);
+    assert.doesNotMatch(s, /--- workspace: SOUL\.md ---/);
+    assert.doesNotMatch(s, /persona: test/);
     assert.match(s, /--- workspace: AGENTS\.md ---/);
     assert.match(s, /do the thing/);
-    const ag = s.indexOf("--- workspace: AGENTS.md ---");
-    const so = s.indexOf("--- workspace: SOUL.md ---");
-    assert.ok(ag >= 0 && so >= 0 && ag < so, "AGENTS before SOUL");
-    assert.match(s, /persona: test/);
   });
 
   it("appends SHOGGOTH_SESSION_SYSTEM_PROMPT", () => {
@@ -172,11 +169,9 @@ describe("buildSessionSystemContext — context levels", () => {
     opDir = mkdtempSync(join(tmpdir(), "shoggoth-ctx-op-"));
     // Populate workspace template files
     writeFileSync(join(dir, "AGENTS.md"), "agents-body");
-    writeFileSync(join(dir, "SOUL.md"), "soul-body");
     writeFileSync(join(dir, "TOOLS.md"), "tools-body");
     writeFileSync(join(dir, "IDENTITY.md"), "identity-body");
     writeFileSync(join(dir, "USER.md"), "user-body");
-    writeFileSync(join(dir, "HEARTBEAT.md"), "heartbeat-body");
     writeFileSync(join(dir, "BOOTSTRAP.md"), "bootstrap-body");
     writeFileSync(join(dir, "MEMORY.md"), "memory-body");
     // Operator global
@@ -256,7 +251,6 @@ describe("buildSessionSystemContext — context levels", () => {
     const s = build("minimal");
     assert.doesNotMatch(s, /--- workspace:/);
     assert.doesNotMatch(s, /agents-body/);
-    assert.doesNotMatch(s, /soul-body/);
     assert.doesNotMatch(s, /tools-body/);
   });
 
@@ -330,23 +324,21 @@ describe("buildSessionSystemContext — context levels", () => {
     assert.match(build("light"), /env-appendix-body/);
   });
 
-  it("light: includes filtered template files (AGENTS.md, TOOLS.md, HEARTBEAT.md)", () => {
+  it("light: includes filtered template files (AGENTS.md, TOOLS.md)", () => {
     const s = build("light");
     assert.match(s, /--- workspace: AGENTS\.md ---/);
     assert.match(s, /agents-body/);
     assert.match(s, /--- workspace: TOOLS\.md ---/);
     assert.match(s, /tools-body/);
-    assert.match(s, /--- workspace: HEARTBEAT\.md ---/);
-    assert.match(s, /heartbeat-body/);
   });
 
-  it("light: excludes personality/bootstrap/memory template files", () => {
+  it("light: excludes personality/bootstrap/memory/heartbeat template files", () => {
     const s = build("light");
-    assert.doesNotMatch(s, /--- workspace: SOUL\.md ---/);
     assert.doesNotMatch(s, /--- workspace: IDENTITY\.md ---/);
     assert.doesNotMatch(s, /--- workspace: USER\.md ---/);
     assert.doesNotMatch(s, /--- workspace: BOOTSTRAP\.md ---/);
     assert.doesNotMatch(s, /--- workspace: MEMORY\.md ---/);
+    assert.doesNotMatch(s, /--- workspace: HEARTBEAT\.md ---/);
   });
 
   it("light: excludes memory hint", () => {
@@ -369,16 +361,28 @@ describe("buildSessionSystemContext — context levels", () => {
     assert.match(s, /## Runtime/);
   });
 
-  it("full: includes all template files", () => {
+  it("full: when BOOTSTRAP.md is present, only BOOTSTRAP.md is injected", () => {
+    const s = build("full");
+    assert.match(s, /--- workspace: BOOTSTRAP\.md ---/);
+    assert.match(s, /bootstrap-body/);
+    assert.doesNotMatch(s, /--- workspace: AGENTS\.md ---/);
+    assert.doesNotMatch(s, /--- workspace: TOOLS\.md ---/);
+    assert.doesNotMatch(s, /--- workspace: IDENTITY\.md ---/);
+    assert.doesNotMatch(s, /--- workspace: USER\.md ---/);
+    assert.doesNotMatch(s, /--- workspace: HEARTBEAT\.md ---/);
+    assert.doesNotMatch(s, /--- workspace: MEMORY\.md ---/);
+  });
+
+  it("full: when BOOTSTRAP.md is absent, all template files except SOUL.md are injected", () => {
+    rmSync(join(dir, "BOOTSTRAP.md"), { force: true });
     const s = build("full");
     assert.match(s, /--- workspace: AGENTS\.md ---/);
-    assert.match(s, /--- workspace: SOUL\.md ---/);
     assert.match(s, /--- workspace: TOOLS\.md ---/);
     assert.match(s, /--- workspace: IDENTITY\.md ---/);
     assert.match(s, /--- workspace: USER\.md ---/);
-    assert.match(s, /--- workspace: HEARTBEAT\.md ---/);
-    assert.match(s, /--- workspace: BOOTSTRAP\.md ---/);
     assert.match(s, /--- workspace: MEMORY\.md ---/);
+    assert.doesNotMatch(s, /--- workspace: SOUL\.md ---/);
+    assert.doesNotMatch(s, /--- workspace: BOOTSTRAP\.md ---/);
   });
 
   it("full: includes operator global", () => {
@@ -409,7 +413,7 @@ describe("buildSessionSystemContext — context levels", () => {
     // Both should include all sections — check a few key markers
     assert.match(withDefault, /## Shoggoth CLI and reference docs/);
     assert.match(withDefault, /## Heartbeats/);
-    assert.match(withDefault, /--- workspace: AGENTS\.md ---/);
+    assert.match(withDefault, /--- workspace: BOOTSTRAP\.md ---/);
   });
 
   // -- TEMPLATE_FILES_BY_LEVEL constant --
@@ -419,18 +423,17 @@ describe("buildSessionSystemContext — context levels", () => {
     assert.strictEqual(TEMPLATE_FILES_BY_LEVEL.minimal.size, 0);
   });
 
-  it("TEMPLATE_FILES_BY_LEVEL: light contains exactly AGENTS.md, TOOLS.md, HEARTBEAT.md", () => {
+  it("TEMPLATE_FILES_BY_LEVEL: light contains exactly AGENTS.md, TOOLS.md", () => {
     const light = TEMPLATE_FILES_BY_LEVEL.light;
-    assert.strictEqual(light.size, 3);
+    assert.strictEqual(light.size, 2);
     assert.ok(light.has("AGENTS.md"));
     assert.ok(light.has("TOOLS.md"));
-    assert.ok(light.has("HEARTBEAT.md"));
   });
 
   it("TEMPLATE_FILES_BY_LEVEL: full contains all workspace template files", () => {
     const full = TEMPLATE_FILES_BY_LEVEL.full;
-    assert.strictEqual(full.size, 8);
-    for (const f of ["AGENTS.md", "SOUL.md", "TOOLS.md", "IDENTITY.md", "USER.md", "HEARTBEAT.md", "BOOTSTRAP.md", "MEMORY.md"]) {
+    assert.strictEqual(full.size, 6);
+    for (const f of ["AGENTS.md", "TOOLS.md", "IDENTITY.md", "USER.md", "BOOTSTRAP.md", "MEMORY.md"]) {
       assert.ok(full.has(f), `full should contain ${f}`);
     }
   });

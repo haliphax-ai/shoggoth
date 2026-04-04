@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { WORKSPACE_TEMPLATE_FILES } from "../sessions/session-system-prompt";
 
 /**
- * Directory of default `AGENTS.md` / `SOUL.md` / … copies (image: `/app/templates/agent-workspace`).
+ * Directory of default `AGENTS.md` / `IDENTITY.md` / … copies (image: `/app/templates/agent-workspace`).
  * Override for custom packs: `SHOGGOTH_AGENT_TEMPLATE_DIR`.
  */
 export function resolveAgentTemplateDir(): string {

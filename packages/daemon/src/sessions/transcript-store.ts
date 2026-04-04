@@ -14,6 +14,7 @@ export interface TranscriptMessageRow {
   readonly toolCallId: string | null;
   readonly toolCalls?: readonly ToolCallEntry[];
   readonly metadata?: unknown;
+  readonly createdAt?: string;
 }
 
 export interface AppendTranscriptInput {
@@ -25,6 +26,7 @@ export interface AppendTranscriptInput {
   readonly toolCallId?: string | null;
   readonly toolCalls?: readonly ToolCallEntry[];
   readonly metadata?: unknown;
+  readonly createdAt?: string;
   /** Raw trusted system context, stored separately for structured access. */
   readonly systemContext?: unknown;
 }
@@ -53,7 +55,7 @@ export function createTranscriptStore(db: Database.Database): TranscriptStore {
   `);
 
   const selectPage = db.prepare(`
-    SELECT seq, role, content, tool_call_id, tool_calls_json, metadata_json
+    SELECT seq, role, content, tool_call_id, tool_calls_json, metadata_json, created_at
     FROM transcript_messages
     WHERE session_id = @session_id AND context_segment_id = @context_segment_id AND seq > @after_seq
     ORDER BY seq ASC
@@ -158,6 +160,7 @@ export function createTranscriptStore(db: Database.Database): TranscriptStore {
         tool_call_id: string | null;
         tool_calls_json: string | null;
         metadata_json: string | null;
+        created_at: string;
       }[];
 
       const messages: TranscriptMessageRow[] = rows.map((r) => ({
@@ -169,6 +172,7 @@ export function createTranscriptStore(db: Database.Database): TranscriptStore {
           ? (JSON.parse(r.tool_calls_json) as ToolCallEntry[])
           : undefined,
         metadata: r.metadata_json ? (JSON.parse(r.metadata_json) as unknown) : undefined,
+        createdAt: r.created_at,
       }));
 
       const last = messages[messages.length - 1];

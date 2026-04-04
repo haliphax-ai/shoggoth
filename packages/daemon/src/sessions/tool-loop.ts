@@ -13,6 +13,7 @@ import { TurnAbortedError } from "./session-turn-abort";
 import { estimateTokens } from "./session-stats-store";
 import { toolRefreshNeeded } from "./session-tool-discovery";
 import { getLogger } from "../logging";
+import { validateToolArgs } from "./validate-tool-args";
 
 export { TurnAbortedError } from "./session-turn-abort";
 
@@ -87,7 +88,7 @@ export interface RunToolLoopOptions {
   readonly policy: ToolLoopPolicy;
   readonly audit: ToolLoopAudit;
   readonly model: ModelClient;
-  readonly tools: ReadonlyArray<{ name: string }>;
+  readonly tools: ReadonlyArray<{ name: string; inputSchema?: Record<string, unknown> }>;
   readonly executor: ToolExecutor;
   readonly toolRuns: ToolRunStore;
   readonly transcript?: TranscriptStore;
@@ -107,7 +108,7 @@ export interface RunToolLoopOptions {
    * When set, called to refresh the tool name allowlist after a tool discovery change.
    * Returns the new tool list; the loop updates its internal `names` set.
    */
-  readonly refreshTools?: () => ReadonlyArray<{ name: string }>;
+  readonly refreshTools?: () => ReadonlyArray<{ name: string; inputSchema?: Record<string, unknown> }>;
 }
 
 /** Callback payload for incremental stats updates during the tool loop. */
@@ -121,6 +122,12 @@ export interface ToolLoopStatsUpdate {
 }
 
 const allowedNames = (tools: ReadonlyArray<{ name: string }>) => new Set(tools.map((t) => t.name));
+
+const buildSchemaMap = (tools: ReadonlyArray<{ name: string; inputSchema?: Record<string, unknown> }>) => {
+  const m = new Map<string, Record<string, unknown>>();
+  for (const t of tools) { if (t.inputSchema) m.set(t.name, t.inputSchema); }
+  return m;
+};
 
 const HITL_EXPIRE_POLL_MS = 1000;
 
@@ -145,6 +152,7 @@ function abortPromise(signal: AbortSignal | undefined): Promise<never> {
 export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
   void options.db;
   let names = allowedNames(options.tools);
+  let schemas = buildSchemaMap(options.tools);
   const ctxSeg = options.contextSegmentId?.trim() ?? "";
   if (options.transcript && !ctxSeg) {
     throw new Error("runToolLoop: contextSegmentId is required when transcript is set");
@@ -225,7 +233,35 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         }
 
         // Resolve compound resource (e.g. exec → exec:curl) for policy/HITL checks.
-        const toolArgs = (() => { try { return JSON.parse(tc.argsJson) as Record<string, unknown>; } catch { return {}; } })();
+        // Parse and validate tool call arguments.
+        let toolArgs: Record<string, unknown>;
+        try {
+          toolArgs = JSON.parse(tc.argsJson) as Record<string, unknown>;
+        } catch {
+          log.warn("tool call args parse failed", { toolName: tc.name, toolCallId: tc.id, sessionId: options.sessionId });
+          const errBody = JSON.stringify({ error: "invalid_arguments", tool: tc.name, message: "Tool call arguments are not valid JSON." });
+          options.audit.record({ phase: "args_parse_error", tool: tc.name, toolCallId: tc.id });
+          options.model.pushToolMessage?.({ toolCallId: tc.id, content: errBody });
+          if (options.transcript) {
+            appendTx({ role: "tool", content: errBody, toolCallId: tc.id, metadata: { tool: tc.name } });
+          }
+          continue;
+        }
+        const toolSchema = schemas.get(tc.name);
+        if (toolSchema) {
+          const validationErrors = validateToolArgs(toolArgs, toolSchema);
+          if (validationErrors.length > 0) {
+            const detail = validationErrors.map((e) => `${e.field}: ${e.message}`).join("; ");
+            log.warn("tool call args validation failed", { toolName: tc.name, toolCallId: tc.id, sessionId: options.sessionId, detail });
+            const errBody = JSON.stringify({ error: "invalid_arguments", tool: tc.name, message: `Argument validation failed: ${detail}` });
+            options.audit.record({ phase: "args_validation_error", tool: tc.name, toolCallId: tc.id, detail });
+            options.model.pushToolMessage?.({ toolCallId: tc.id, content: errBody });
+            if (options.transcript) {
+              appendTx({ role: "tool", content: errBody, toolCallId: tc.id, metadata: { tool: tc.name } });
+            }
+            continue;
+          }
+        }
         const compoundResource = options.subResourceRegistry
           ? resolveCompoundResource(tc.name, toolArgs, options.subResourceRegistry)
           : tc.name;
@@ -443,6 +479,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
           toolRefreshNeeded.delete(options.sessionId);
           const refreshed = options.refreshTools();
           names = allowedNames(refreshed);
+          schemas = buildSchemaMap(refreshed);
           log.debug("tool list refreshed mid-loop", { sessionId: options.sessionId, toolCount: refreshed.length });
         }
       }

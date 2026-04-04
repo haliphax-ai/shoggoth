@@ -32,8 +32,8 @@ export function buildAggregatedMcpCatalog(
 }
 
 /** `RunToolLoopOptions.tools` entries using MCP-style `source.tool` names. */
-export function mcpToolsForToolLoop(aggregated: AggregateMcpCatalogResult): ReadonlyArray<{ name: string }> {
-  return aggregated.tools.map((t) => ({ name: t.namespacedName }));
+export function mcpToolsForToolLoop(aggregated: AggregateMcpCatalogResult): ReadonlyArray<{ name: string; inputSchema?: Record<string, unknown> }> {
+  return aggregated.tools.map((t) => ({ name: t.namespacedName, inputSchema: t.inputSchema as Record<string, unknown> }));
 }
 
 /**

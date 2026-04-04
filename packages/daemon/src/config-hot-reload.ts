@@ -95,7 +95,7 @@ export function startConfigHotReload(options: StartConfigHotReloadOptions): () =
   };
 
   try {
-    watcher = watch(dir, { persistent: false }, () => {
+    watcher = watch(dir, { persistent: false, recursive: true }, () => {
       schedule();
     });
   } catch (e) {

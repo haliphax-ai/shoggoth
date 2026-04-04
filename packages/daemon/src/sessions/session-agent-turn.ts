@@ -169,9 +169,17 @@ export async function executeSessionAgentTurn(
 
   // Drain any buffered system context entries and append to the system prompt.
   const buffered = drainSystemContext(input.sessionId);
-  const effectiveSystemPrompt = buffered.length > 0
+  // Prepend a human-readable timestamp to the system prompt so the model knows the current date/time.
+  const now = new Date();
+  const weekday = now.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+  const datePart = now.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
+  const timePart = now.toISOString().slice(11, 19);
+  const systemTimestamp = `Current date and time: ${weekday}, ${datePart} - ${timePart}+00:00 (UTC)`;
+
+  const baseSystemPrompt = buffered.length > 0
     ? input.systemPrompt + "\n\n" + buffered.join("\n")
     : input.systemPrompt;
+  const effectiveSystemPrompt = `${systemTimestamp}\n\n${baseSystemPrompt}`;
 
   const loopImpl = input.loopImpl ?? runToolLoop;
   const ctxSeg = input.session.contextSegmentId.trim();

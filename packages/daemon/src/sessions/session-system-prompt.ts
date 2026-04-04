@@ -36,11 +36,9 @@ const SHOGGOTH_REFERENCE_DOCS_DIR = "/app/docs";
 /** Basenames injected into the system prompt when present under the session workspace (OpenClaw order). */
 export const WORKSPACE_TEMPLATE_FILES = [
   "AGENTS.md",
-  "SOUL.md",
   "TOOLS.md",
   "IDENTITY.md",
   "USER.md",
-  "HEARTBEAT.md",
   "BOOTSTRAP.md",
   "MEMORY.md",
 ] as const;
@@ -54,7 +52,7 @@ export const WORKSPACE_TEMPLATE_FILES = [
 export const TEMPLATE_FILES_BY_LEVEL: Record<ContextLevel, Set<string>> = {
   none: new Set(),
   minimal: new Set(),
-  light: new Set(["AGENTS.md", "TOOLS.md", "HEARTBEAT.md"]),
+  light: new Set(["AGENTS.md", "TOOLS.md"]),
   full: new Set(WORKSPACE_TEMPLATE_FILES),
 };
 
@@ -283,7 +281,6 @@ function buildMemoryConfigHint(
 function buildProjectContextSection(
   operatorGlobal: string | undefined,
   fileBlocks: string[],
-  soulPresent: boolean,
 ): string | undefined {
   if (!operatorGlobal && fileBlocks.length === 0) return undefined;
   let s = daemonPrompt("system-project-context-title");
@@ -294,9 +291,6 @@ function buildProjectContextSection(
 
   if (fileBlocks.length > 0) {
     s += `\n\n${daemonPrompt("system-project-workspace-intro")}`;
-    if (soulPresent) {
-      s += `\n\n${daemonPrompt("system-soul-guidance")}`;
-    }
     s += `\n\n${daemonPrompt("system-workspace-files-heading")}\n\n${fileBlocks.join("\n")}\n--- end workspace files ---`;
   }
 
@@ -446,9 +440,21 @@ export function buildSessionSystemContext(input: BuildSessionSystemContextInput)
   }
 
   // --- Workspace template files (filtered by level) ---
-  const allowedFiles = TEMPLATE_FILES_BY_LEVEL[level];
+  let allowedFiles = TEMPLATE_FILES_BY_LEVEL[level];
   const fileBlocks: string[] = [];
-  let soulPresent = false;
+
+  // When BOOTSTRAP.md is present at full context level, inject only BOOTSTRAP.md to encourage
+  // the agent to start a conversation with the operator to fill out template files.
+  // For non-full context levels, BOOTSTRAP.md is never injected.
+  if (root && level === "full") {
+    const bootstrapBody = safeReadWorkspaceTemplate(root, "BOOTSTRAP.md", DEFAULT_MAX_BYTES_PER_FILE);
+    if (bootstrapBody) {
+      allowedFiles = new Set(["BOOTSTRAP.md"]);
+    }
+  }
+  if (level !== "full") {
+    allowedFiles = new Set([...allowedFiles].filter((f) => f !== "BOOTSTRAP.md"));
+  }
 
   if (root && allowedFiles.size > 0) {
     for (const name of WORKSPACE_TEMPLATE_FILES) {
@@ -458,7 +464,6 @@ export function buildSessionSystemContext(input: BuildSessionSystemContextInput)
       const perFileCap = Math.min(DEFAULT_MAX_BYTES_PER_FILE, remaining);
       const body = safeReadWorkspaceTemplate(root, name, perFileCap);
       if (!body) continue;
-      if (name === "SOUL.md") soulPresent = true;
 
       const payloadBytes = Buffer.byteLength(body, "utf8");
       totalPayloadBytes += payloadBytes;
@@ -490,7 +495,7 @@ export function buildSessionSystemContext(input: BuildSessionSystemContextInput)
     // Workspace root: light+
     workspaceBody,
     // Project context (operator global + template files): light+
-    atLeast("light") ? buildProjectContextSection(operatorGlobal, fileBlocks, soulPresent) : undefined,
+    atLeast("light") ? buildProjectContextSection(operatorGlobal, fileBlocks) : undefined,
     // Heartbeats: light+
     atLeast("light") ? buildHeartbeatsSection() : undefined,
     // Silent replies: light+

@@ -519,4 +519,129 @@ describe("runToolLoop", () => {
     assert.equal(row.status, "completed");
   });
 
+  it("feeds parse error back to model when argsJson is not valid JSON", async () => {
+    const pushed: { toolCallId: string; content: string }[] = [];
+    const exec = vi.fn(async () => ({ resultJson: "{}" }));
+    let step = 0;
+    const model: ModelClient = {
+      async complete() {
+        step += 1;
+        if (step === 1) {
+          return {
+            content: null,
+            toolCalls: [{ id: "p1", name: "read", argsJson: "{bad json" }],
+          };
+        }
+        return { content: "recovered", toolCalls: [] };
+      },
+      pushToolMessage(msg) {
+        pushed.push(msg);
+      },
+    };
+    const toolRuns = createToolRunStore(db);
+    await runToolLoop({
+      db,
+      sessionId: "sess",
+      runId: "run-parse",
+      principalId: "p",
+      policy: { check: () => ({ allow: true }) },
+      audit: { record: () => {} },
+      model,
+      tools: [{ name: "read" }],
+      executor: { execute: exec },
+      toolRuns,
+    });
+    assert.equal(exec.mock.calls.length, 0);
+    assert.equal(pushed.length, 1);
+    const parsed = JSON.parse(pushed[0]!.content);
+    assert.equal(parsed.error, "invalid_arguments");
+    assert.ok(parsed.message.includes("not valid JSON"));
+  });
+
+  it("feeds validation error back to model when args fail schema check", async () => {
+    const pushed: { toolCallId: string; content: string }[] = [];
+    const exec = vi.fn(async () => ({ resultJson: "{}" }));
+    let step = 0;
+    const model: ModelClient = {
+      async complete() {
+        step += 1;
+        if (step === 1) {
+          return {
+            content: null,
+            toolCalls: [{ id: "v1", name: "read", argsJson: '{"limit": "not-a-number"}' }],
+          };
+        }
+        return { content: "recovered", toolCalls: [] };
+      },
+      pushToolMessage(msg) {
+        pushed.push(msg);
+      },
+    };
+    const toolRuns = createToolRunStore(db);
+    const schema = {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        limit: { type: "number" },
+      },
+      required: ["path"],
+    };
+    await runToolLoop({
+      db,
+      sessionId: "sess",
+      runId: "run-validate",
+      principalId: "p",
+      policy: { check: () => ({ allow: true }) },
+      audit: { record: () => {} },
+      model,
+      tools: [{ name: "read", inputSchema: schema }],
+      executor: { execute: exec },
+      toolRuns,
+    });
+    assert.equal(exec.mock.calls.length, 0);
+    assert.equal(pushed.length, 1);
+    const parsed = JSON.parse(pushed[0]!.content);
+    assert.equal(parsed.error, "invalid_arguments");
+    assert.ok(parsed.message.includes("path"));
+    assert.ok(parsed.message.includes("limit"));
+  });
+
+  it("executes normally when args pass schema validation", async () => {
+    const exec = vi.fn(async () => ({ resultJson: "{}" }));
+    let step = 0;
+    const model: ModelClient = {
+      async complete() {
+        step += 1;
+        if (step === 1) {
+          return {
+            content: null,
+            toolCalls: [{ id: "ok1", name: "read", argsJson: '{"path":"/tmp/foo","limit":10}' }],
+          };
+        }
+        return { content: "done", toolCalls: [] };
+      },
+    };
+    const toolRuns = createToolRunStore(db);
+    const schema = {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        limit: { type: "number" },
+      },
+      required: ["path"],
+    };
+    await runToolLoop({
+      db,
+      sessionId: "sess",
+      runId: "run-valid",
+      principalId: "p",
+      policy: { check: () => ({ allow: true }) },
+      audit: { record: () => {} },
+      model,
+      tools: [{ name: "read", inputSchema: schema }],
+      executor: { execute: exec },
+      toolRuns,
+    });
+    assert.equal(exec.mock.calls.length, 1);
+  });
 });

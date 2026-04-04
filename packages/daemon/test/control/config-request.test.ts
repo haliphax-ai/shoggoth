@@ -86,14 +86,17 @@ describe("config_request control op", { concurrency: false }, () => {
       acpxSupervisor: undefined,
       recordIntegrationAudit: () => {},
     };
-    const fragment = { logLevel: "debug" };
-    const req = makeWireRequest("config_request", { fragment });
+    const req = makeWireRequest("config_request", { key: "logLevel", fragment: "debug" });
     const result = (await handleIntegrationControlOp(req, agentPrincipal, ctx)) as {
       ok: boolean;
       path: string;
+      key: string;
+      mode: string;
     };
     assert.strictEqual(result.ok, true);
-    assert.strictEqual(result.path, join(dynDir, `${process.pid}.json`));
+    assert.strictEqual(result.path, join(dynDir, "logLevel.json"));
+    assert.strictEqual(result.key, "logLevel");
+    assert.strictEqual(result.mode, "merge");
     const written = JSON.parse(readFileSync(result.path, "utf8"));
     assert.deepStrictEqual(written, { logLevel: "debug" });
   });
@@ -111,7 +114,7 @@ describe("config_request control op", { concurrency: false }, () => {
       acpxSupervisor: undefined,
       recordIntegrationAudit: () => {},
     };
-    const req = makeWireRequest("config_request", { fragment: { logLevel: "banana" } });
+    const req = makeWireRequest("config_request", { key: "logLevel", fragment: "banana" });
     await assert.rejects(
       () => handleIntegrationControlOp(req, agentPrincipal, ctx),
       (err: Error & { code?: string }) => {
@@ -133,7 +136,7 @@ describe("config_request control op", { concurrency: false }, () => {
       acpxSupervisor: undefined,
       recordIntegrationAudit: () => {},
     };
-    const req = makeWireRequest("config_request", { fragment: { logLevel: "debug" } });
+    const req = makeWireRequest("config_request", { key: "logLevel", fragment: "debug" });
     await assert.rejects(
       () => handleIntegrationControlOp(req, agentPrincipal, ctx),
       (err: Error & { code?: string }) => {
@@ -156,7 +159,7 @@ describe("config_request control op", { concurrency: false }, () => {
       acpxSupervisor: undefined,
       recordIntegrationAudit: () => {},
     };
-    const req = makeWireRequest("config_request", { fragment: { logLevel: "debug" } });
+    const req = makeWireRequest("config_request", { key: "logLevel", fragment: "debug" });
     await assert.rejects(
       () => handleIntegrationControlOp(req, operatorPrincipal, ctx),
       (err: Error & { code?: string }) => {
@@ -179,14 +182,13 @@ describe("config_request control op", { concurrency: false }, () => {
       acpxSupervisor: undefined,
       recordIntegrationAudit: () => {},
     };
-    const fragment = { logLevel: "warn" };
-    const req = makeWireRequest("config_request", { fragment });
+    const req = makeWireRequest("config_request", { key: "logLevel", fragment: "warn" });
     const result = (await handleIntegrationControlOp(req, agentPrincipal, ctx)) as {
       ok: boolean;
       path: string;
     };
     const written = JSON.parse(readFileSync(result.path, "utf8"));
-    // Must be the fragment only — no stateDbPath, socketPath, etc.
+    // Must be the wrapped key only — no stateDbPath, socketPath, etc.
     assert.deepStrictEqual(written, { logLevel: "warn" });
     assert.strictEqual(written.stateDbPath, undefined);
   });
@@ -214,8 +216,7 @@ describe("config_request control op", { concurrency: false }, () => {
     // (already covered above). For merged validation failure, we'd need the base config to be
     // in a state where the overlay breaks it — which is hard to construct.
     // Instead, verify that an unrecognized key in strict mode fails fragment validation.
-    const fragment = { unknownField: true };
-    const req = makeWireRequest("config_request", { fragment });
+    const req = makeWireRequest("config_request", { key: "unknownField", fragment: true });
     await assert.rejects(
       () => handleIntegrationControlOp(req, agentPrincipal, ctx),
       (err: Error & { code?: string }) => {

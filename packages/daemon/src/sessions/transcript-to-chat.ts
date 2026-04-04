@@ -24,9 +24,19 @@ export function transcriptRowsToModelChatMessages(
   messages: readonly TranscriptMessageRow[],
 ): ChatMessage[] {
   const out: ChatMessage[] = [];
+  let seenUser = false;
   for (const m of messages) {
     if (m.role === "user") {
-      const content = m.content ? parseTranscriptContent(m.content) : "";
+      let content = m.content ? parseTranscriptContent(m.content) : "";
+      if (m.createdAt && seenUser) {
+        const ts = `[${m.createdAt}Z]`;
+        if (typeof content === "string") {
+          content = `${ts} ${content}`;
+        } else {
+          content = [{ type: "text" as const, text: ts }, ...content];
+        }
+      }
+      seenUser = true;
       out.push({ role: "user", content });
       continue;
     }

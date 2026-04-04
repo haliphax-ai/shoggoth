@@ -129,6 +129,7 @@ import { subagentRuntimeExtensionRef } from "./subagent/subagent-extension-ref";
 import { TimerScheduler } from "./timers/timer-scheduler";
 import { setTimerScheduler } from "./sessions/builtin-handlers/timer-handler";
 
+process.umask(0o007);
 loadDaemonPrompts();
 loadDaemonNotices();
 setPresentationNoticeResolver(daemonNotice);

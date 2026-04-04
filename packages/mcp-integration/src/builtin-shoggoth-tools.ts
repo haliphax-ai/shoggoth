@@ -260,12 +260,20 @@ const pollArgs = {
 const configRequestArgs = {
   type: "object",
   properties: {
+    key: {
+      type: "string",
+      description: "Top-level config key (e.g. \"toolDiscovery\", \"hitl\", \"agents\"). Used as the filename in the dynamic config directory. Only one key per request.",
+    },
     fragment: {
-      type: "object",
-      description: "Partial configuration fragment to merge",
+      description: "The value to set for the given key. Can be any valid value for that config key (object, array, string, etc.).",
+    },
+    mode: {
+      type: "string",
+      enum: ["merge", "overwrite"],
+      description: "merge (default): deep-merge with existing fragment for this key. overwrite: replace the entire key's value.",
     },
   },
-  required: ["fragment"],
+  required: ["key", "fragment"],
 } as const;
 
 const skillsToolArgs = {
@@ -588,14 +596,22 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
       {
         name: "config-request",
         description:
-          "Request a configuration change. The fragment is validated against the config schema and written to the daemon's dynamic config directory.",
+          "Request a configuration change for a single top-level config key. The fragment (value for that key) is validated and written to the dynamic config directory as <key>.json. Use mode=merge (default) to deep-merge with existing values, or mode=overwrite to replace entirely.",
         inputSchema: configRequestArgs,
       },
       {
         name: "config-show",
         description:
           "Show the current daemon configuration (sensitive fields are redacted).",
-        inputSchema: { type: "object" as const, properties: {} },
+        inputSchema: {
+          type: "object" as const,
+          properties: {
+            dynamic: {
+              type: "boolean",
+              description: "When true, show only dynamic configuration fragments (written by config-request) instead of the full merged config.",
+            },
+          },
+        },
       },
       {
         name: "show",
