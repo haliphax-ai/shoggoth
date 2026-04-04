@@ -118,6 +118,59 @@ Thinking blocks are stored in the transcript as part of the serialized `ChatCont
 
 This reuses the same `sanitizeTranscriptForProvider` pattern from the `show` tool plan — a pass that strips content parts by type based on provider capabilities.
 
+### Display: `thinkingDisplay`
+
+Controls how thinking text is presented to the user on the chat platform. Configurable globally and per-agent:
+
+```ts
+type ThinkingDisplay = "full" | "indicator" | "none";
+```
+
+- `"full"` — Thinking text is streamed/posted as blockquoted text prefixed with 💭. Treated like normal response text (streamed if streaming is configured, static otherwise). The platform adapter handles 2000-char splitting as usual.
+- `"indicator"` — A single `> 💭 Thinking...` line is posted when thinking begins. The actual thinking content is not shown.
+- `"none"` — Thinking text is stripped from outbound entirely. The user sees only the response.
+
+**Formatting:** Thinking text is rendered in a blockquote with a 💭 prefix:
+
+```
+> 💭 The user is asking about the config schema. Let me check
+> the current failover hop structure to see where capabilities
+> are defined...
+
+Here's what I found in the config schema:
+```
+
+When thinking ends and response text begins, the blockquote ends and normal response text continues in the same message flow. Thinking text is never removed or replaced — it persists in the message history.
+
+For `"indicator"` mode, the indicator line persists as well:
+
+```
+> 💭 Thinking...
+
+Here's what I found in the config schema:
+```
+
+**Config example:**
+
+```json
+{
+  "thinkingDisplay": "full"
+}
+```
+
+Per-agent override:
+
+```json
+{
+  "agents": {
+    "list": {
+      "main": { "thinkingDisplay": "none" },
+      "researcher": { "thinkingDisplay": "full" }
+    }
+  }
+}
+```
+
 ### Edge cases
 
 - **Malformed tags**: unclosed `<thinking>` without `</thinking>` — treat everything after the open tag as thinking until end of content. Log a warning.
@@ -173,6 +226,17 @@ Strip thinking blocks from transcript messages before replaying to the model, re
 - `packages/daemon/src/sessions/transcript-to-chat.ts` — strip thinking blocks on replay
 - `packages/daemon/src/sessions/transcript-compact.ts` — strip thinking blocks before compaction summarization
 
+### Phase 6: Platform display
+
+Wire `thinkingDisplay` config into the platform adapter's outbound path. When the adapter receives content parts containing thinking blocks, format them according to the display mode before streaming/posting.
+
+**Files:**
+- `packages/shared/src/schema.ts` — add `thinkingDisplay` to global and per-agent config schema
+- `packages/daemon/src/presentation/turn-orchestrator.ts` — pass `thinkingDisplay` setting to the platform adapter
+- `packages/daemon/src/presentation/platform-adapter.ts` — format thinking blocks based on display mode (blockquote for `full`, indicator for `indicator`, strip for `none`)
+- `packages/platform-discord/src/streaming.ts` — handle thinking→response transition in streamed output (end blockquote, begin normal text)
+- `packages/platform-discord/src/outbound.ts` — handle thinking formatting in non-streamed output
+
 ## Testing Strategy
 
 - **Extraction**: content with single/multiple/nested/unclosed/empty thinking tags all produce correct `ChatContentPart[]`. Content without thinking tags returns the original string. Only assistant content is processed.
@@ -180,6 +244,10 @@ Strip thinking blocks from transcript messages before replaying to the model, re
 - **Adapter integration**: GLM-5 response with `<thinking>` tags produces canonical thinking content parts. Claude response with native thinking passes through unchanged. Model with `thinkingFormat: "none"` is not processed.
 - **Transcript replay**: thinking blocks are stripped from all roles before model call. Compaction strips thinking before summarization.
 - **Config propagation**: `thinkingFormat` from hop config reaches the adapter via capabilities. Per-model override takes precedence over provider default.
+- **Display full**: thinking blocks are formatted as `> 💭 ...` blockquotes. Response text follows after the blockquote ends. 2000-char splitting works correctly across thinking→response transitions.
+- **Display indicator**: thinking blocks are replaced with `> 💭 Thinking...`. Response text follows after the indicator. Indicator persists in message history.
+- **Display none**: thinking blocks are stripped from outbound. Only response text is sent.
+- **Per-agent override**: agent-level `thinkingDisplay` overrides global setting.
 
 ## Considerations
 
