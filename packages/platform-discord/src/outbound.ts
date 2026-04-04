@@ -1,5 +1,6 @@
 import type { MessagingAdapterCapabilities, InternalMessage } from "@shoggoth/messaging";
 import type { DiscordCreateMessageBody, DiscordRestTransport, DiscordMessageUploadFile } from "./transport";
+import { formatMessageWithThinking, type ThinkingDisplayMode } from "./thinking-formatter";
 
 export interface OutboundAttachmentFile {
   readonly filename: string;
@@ -11,6 +12,7 @@ export interface OutboundSenderConfig {
   readonly capabilities: MessagingAdapterCapabilities;
   readonly transport: DiscordRestTransport;
   readonly sessionToChannel: (sessionId: string) => string | undefined;
+  readonly thinkingDisplay?: ThinkingDisplayMode;
 }
 
 export interface SentMessageRef {
@@ -38,18 +40,25 @@ function assertExtensionsAllowed(
   }
 }
 
-function toDiscordBody(msg: InternalMessage): DiscordCreateMessageBody {
+function toDiscordBody(msg: InternalMessage, thinkingDisplay?: ThinkingDisplayMode): DiscordCreateMessageBody {
+  let content = msg.body;
+  
+  // Apply thinking display formatting if configured
+  if (thinkingDisplay) {
+    content = formatMessageWithThinking(content, thinkingDisplay);
+  }
+
   if (msg.extensions.replyToMessageId) {
     return {
-      content: msg.body,
+      content,
       message_reference: { message_id: msg.extensions.replyToMessageId },
     };
   }
-  return { content: msg.body };
+  return { content };
 }
 
 export function createOutboundSender(config: OutboundSenderConfig): OutboundSender {
-  const { capabilities, transport, sessionToChannel } = config;
+  const { capabilities, transport, sessionToChannel, thinkingDisplay } = config;
 
   return {
     async sendDiscord(msg: InternalMessage, opts?: { attachments?: OutboundAttachmentFile[] }): Promise<SentMessageRef> {
@@ -67,13 +76,13 @@ export function createOutboundSender(config: OutboundSenderConfig): OutboundSend
         }));
         const res = await transport.createMessageWithFiles(
           channelId,
-          toDiscordBody(msg),
+          toDiscordBody(msg, thinkingDisplay),
           uploadFiles,
         );
         return { channelId, messageId: res.id };
       }
 
-      const res = await transport.createMessage(channelId, toDiscordBody(msg));
+      const res = await transport.createMessage(channelId, toDiscordBody(msg, thinkingDisplay));
       return { channelId, messageId: res.id };
     },
   };
