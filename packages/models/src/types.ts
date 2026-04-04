@@ -1,1 +1,142 @@
-export type ChatRole = \"system\" | \"user\" | \"assistant\" | \"tool\";\n\n/** One function tool call from the model (OpenAI `tool_calls[]` item, flattened). */\nexport interface ChatToolCall {\n  readonly id: string;\n  readonly name: string;\n  readonly arguments: string;\n}\n\n/** Provider-agnostic image content block. At least one of base64 or url must be present. */\nexport interface ImageBlock {\n  readonly type: \"image\";\n  /** e.g. \"image/jpeg\", \"image/png\", \"image/gif\", \"image/webp\" */\n  readonly mediaType: string;\n  /** Raw image bytes, base64-encoded (no data-URI prefix). */\n  readonly base64?: string;\n  /** Source URL for the image. */\n  readonly url?: string;\n}\n\n/** A single content part in a structured message. */\nexport type ChatContentPart =\n  | { readonly type: \"text\"; readonly text: string }\n  | ImageBlock;\n\n/** Codec for translating between canonical ImageBlock and provider wire format. */\nexport interface ImageBlockCodec {\n  /** Canonical ImageBlock → provider wire JSON content part. */\n  encode(block: ImageBlock): unknown;\n  /** Provider wire content part → canonical ImageBlock, or null if not an image part. */\n  decode(part: unknown): ImageBlock | null;\n  /** Whether this provider supports URL-based image sources. */\n  readonly supportsUrl: boolean;\n  /** Whether this provider accepts image content in messages. */\n  readonly supportsImageInput: boolean;\n}\n\nexport interface ChatMessage {\n  readonly role: ChatRole;\n  /** Empty string is sent when omitted for non-tool assistant turns; use null only with toolCalls. */\n  readonly content?: string | ChatContentPart[] | null;\n  readonly name?: string;\n  readonly toolCallId?: string;\n  readonly toolCalls?: readonly ChatToolCall[];\n}\n\n/** OpenAI `tools` array entry (`type: function`). */\nexport interface OpenAIToolFunctionDefinition {\n  readonly type: \"function\";\n  readonly function: {\n    readonly name: string;\n    readonly description?: string;\n    readonly parameters: Record<string, unknown>;\n  };\n}\n\n/** Optional callback for streaming assistant text (`stream: true` on OpenAI-compatible providers). */\nexport type ModelStreamTextDeltaCallback = (delta: string, accumulated: string) => void;\n\n/**\n * Extended thinking (Anthropic Messages `thinking` block). When `enabled`, providers that support it\n * send `budget_tokens` (default applied in the Anthropic adapter when omitted).\n */\nexport interface ModelThinkingOptions {\n  readonly enabled: boolean;\n  readonly budgetTokens?: number;\n}\n\n/**\n * Model capabilities describing provider-specific feature support.\n */\nexport interface ModelCapabilities {\n  /** Whether this provider accepts image content in messages. */\n  readonly imageInput?: boolean;\n  /**\n   * Format for extended thinking output when supported by the provider.\n   * - `\"native\"`: Provider returns thinking in its native format (e.g., Anthropic `thinking` blocks).\n   * - `\"xml-tags\"`: Provider wraps thinking in XML tags like `<thinking>...</thinking>`.\n   * - `\"none\"`: Provider does not support extended thinking or it is disabled.\n   * Defaults to undefined (treated as `\"none\"`).\n   */\n  readonly thinkingFormat?: \"native\" | \"xml-tags\" | \"none\";\n}\n\n/**\n * Cross-provider knobs merged into HTTP JSON bodies where the upstream supports them.\n * Configure globally under `models.defaultInvocation` and per-session via `sessions.model_selection`.\n */\nexport interface ModelInvocationParams {\n  readonly maxOutputTokens?: number;\n  readonly temperature?: number;\n  readonly thinking?: ModelThinkingOptions;\n  /** OpenAI-style chat completions `reasoning_effort` when the gateway honors it. */\n  readonly reasoningEffort?: string;\n  /** Shallow-merged into the provider request object after built-in fields (escape hatch). */\n  readonly requestExtras?: Record<string, unknown>;\n}\n\nexport interface ModelToolCompleteInput extends ModelInvocationParams {\n  readonly model?: string;\n  readonly messages: readonly ChatMessage[];\n  readonly tools: readonly OpenAIToolFunctionDefinition[];\n  /** When true, request SSE (`stream: true`); omitted or false keeps JSON non-streaming behavior. */\n  readonly stream?: boolean;\n  readonly onTextDelta?: ModelStreamTextDeltaCallback;\n}\n\n/** Token usage metadata returned by model providers (when available). */\nexport interface ModelUsage {\n  readonly inputTokens: number;\n  readonly outputTokens: number;\n  /** Model's maximum context window size (when reported by the provider). */\n  readonly contextWindowTokens?: number;\n}\n\nexport interface ModelToolCompleteOutput {\n  readonly content: string | null;\n  readonly toolCalls: readonly ChatToolCall[];\n  readonly usage?: ModelUsage;\n}\n\nexport interface ModelCompleteInput extends ModelInvocationParams {\n  readonly model: string;\n  readonly messages: readonly ChatMessage[];\n  readonly stream?: boolean;\n  readonly onTextDelta?: ModelStreamTextDeltaCallback;\n}\n\nexport interface ModelCompleteOutput {\n  readonly content: string;\n  readonly usage?: ModelUsage;\n}\n\nexport interface ModelProvider {\n  readonly id: string;\n  readonly capabilities?: ModelCapabilities;\n  complete(input: ModelCompleteInput): Promise<ModelCompleteOutput>;\n  /** OpenAI-style chat completions with `tools` + `tool_calls` / tool messages. */\n  completeWithTools(input: ModelToolCompleteInput): Promise<ModelToolCompleteOutput>;\n}\n
+export type ChatRole = "system" | "user" | "assistant" | "tool";
+
+/** One function tool call from the model (OpenAI `tool_calls[]` item, flattened). */
+export interface ChatToolCall {
+  readonly id: string;
+  readonly name: string;
+  readonly arguments: string;
+}
+
+/** Provider-agnostic image content block. At least one of base64 or url must be present. */
+export interface ImageBlock {
+  readonly type: "image";
+  /** e.g. "image/jpeg", "image/png", "image/gif", "image/webp" */
+  readonly mediaType: string;
+  /** Raw image bytes, base64-encoded (no data-URI prefix). */
+  readonly base64?: string;
+  /** Source URL for the image. */
+  readonly url?: string;
+}
+
+/** A single content part in a structured message. */
+export type ChatContentPart =
+  | { readonly type: "text"; readonly text: string }
+  | ImageBlock;
+
+/** Codec for translating between canonical ImageBlock and provider wire format. */
+export interface ImageBlockCodec {
+  /** Canonical ImageBlock → provider wire JSON content part. */
+  encode(block: ImageBlock): unknown;
+  /** Provider wire content part → canonical ImageBlock, or null if not an image part. */
+  decode(part: unknown): ImageBlock | null;
+  /** Whether this provider supports URL-based image sources. */
+  readonly supportsUrl: boolean;
+  /** Whether this provider accepts image content in messages. */
+  readonly supportsImageInput: boolean;
+}
+
+export interface ChatMessage {
+  readonly role: ChatRole;
+  /** Empty string is sent when omitted for non-tool assistant turns; use null only with toolCalls. */
+  readonly content?: string | ChatContentPart[] | null;
+  readonly name?: string;
+  readonly toolCallId?: string;
+  readonly toolCalls?: readonly ChatToolCall[];
+}
+
+/** OpenAI `tools` array entry (`type: function`). */
+export interface OpenAIToolFunctionDefinition {
+  readonly type: "function";
+  readonly function: {
+    readonly name: string;
+    readonly description?: string;
+    readonly parameters: Record<string, unknown>;
+  };
+}
+
+/** Optional callback for streaming assistant text (`stream: true` on OpenAI-compatible providers). */
+export type ModelStreamTextDeltaCallback = (delta: string, accumulated: string) => void;
+
+/**
+ * Extended thinking (Anthropic Messages `thinking` block). When `enabled`, providers that support it
+ * send `budget_tokens` (default applied in the Anthropic adapter when omitted).
+ */
+export interface ModelThinkingOptions {
+  readonly enabled: boolean;
+  readonly budgetTokens?: number;
+}
+
+/**
+ * Model capabilities describing provider-specific feature support.
+ */
+export interface ModelCapabilities {
+  /** Whether this provider accepts image content in messages. */
+  readonly imageInput?: boolean;
+  /**
+   * Format for extended thinking output when supported by the provider.
+   * - `"native"`: Provider returns thinking in its native format (e.g., Anthropic `thinking` blocks).
+   * - `"xml-tags"`: Provider wraps thinking in XML tags like `<thinking>...</thinking>`.
+   * - `"none"`: Provider does not support extended thinking or it is disabled.
+   * Defaults to undefined (treated as `"none"`).
+   */
+  readonly thinkingFormat?: "native" | "xml-tags" | "none";
+}
+
+/**
+ * Cross-provider knobs merged into HTTP JSON bodies where the upstream supports them.
+ * Configure globally under `models.defaultInvocation` and per-session via `sessions.model_selection`.
+ */
+export interface ModelInvocationParams {
+  readonly maxOutputTokens?: number;
+  readonly temperature?: number;
+  readonly thinking?: ModelThinkingOptions;
+  /** OpenAI-style chat completions `reasoning_effort` when the gateway honors it. */
+  readonly reasoningEffort?: string;
+  /** Format for extended thinking output from the active provider. */
+  readonly thinkingFormat?: "native" | "xml-tags" | "none";
+  /** Shallow-merged into the provider request object after built-in fields (escape hatch). */
+  readonly requestExtras?: Record<string, unknown>;
+}
+
+export interface ModelToolCompleteInput extends ModelInvocationParams {
+  readonly model?: string;
+  readonly messages: readonly ChatMessage[];
+  readonly tools: readonly OpenAIToolFunctionDefinition[];
+  /** When true, request SSE (`stream: true`); omitted or false keeps JSON non-streaming behavior. */
+  readonly stream?: boolean;
+  readonly onTextDelta?: ModelStreamTextDeltaCallback;
+}
+
+/** Token usage metadata returned by model providers (when available). */
+export interface ModelUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  /** Model's maximum context window size (when reported by the provider). */
+  readonly contextWindowTokens?: number;
+}
+
+export interface ModelToolCompleteOutput {
+  readonly content: string | null;
+  readonly toolCalls: readonly ChatToolCall[];
+  readonly usage?: ModelUsage;
+}
+
+export interface ModelCompleteInput extends ModelInvocationParams {
+  readonly model: string;
+  readonly messages: readonly ChatMessage[];
+  readonly stream?: boolean;
+  readonly onTextDelta?: ModelStreamTextDeltaCallback;
+}
+
+export interface ModelCompleteOutput {
+  readonly content: string;
+  readonly usage?: ModelUsage;
+}
+
+export interface ModelProvider {
+  readonly id: string;
+  readonly capabilities?: ModelCapabilities;
+  complete(input: ModelCompleteInput): Promise<ModelCompleteOutput>;
+  /** OpenAI-style chat completions with `tools` + `tool_calls` / tool messages. */
+  completeWithTools(input: ModelToolCompleteInput): Promise<ModelToolCompleteOutput>;
+}
