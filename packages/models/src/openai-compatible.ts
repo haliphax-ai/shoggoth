@@ -1,6 +1,7 @@
 import { ModelHttpError } from "./errors";
 import { openaiImageBlockCodec } from "./image-codec";
 import { getResilienceGate, parseRateLimitHeaders } from "./resilience";
+import { normalizeThinkingBlocks } from "./thinking-normalize";
 import type {
   ChatContentPart,
   ChatMessage,
@@ -301,7 +302,10 @@ export function createOpenAICompatibleProvider(
         if (streamed === null) {
           throw new ModelHttpError(502, "missing streamed assistant content", "");
         }
-        return { content: streamed, usage };
+        const thinkingFormat = input.thinkingFormat ?? "none";
+        const normalized = normalizeThinkingBlocks(streamed, thinkingFormat);
+        const content = typeof normalized === "string" ? normalized : JSON.stringify(normalized);
+        return { content, usage };
       }
 
       const text = await res.text();
@@ -336,7 +340,10 @@ export function createOpenAICompatibleProvider(
         throw new ModelHttpError(502, "missing choices[0].message.content", text.slice(0, 200));
       }
 
-      return { content, usage: extractOpenAIUsage(json) };
+      const thinkingFormat = input.thinkingFormat ?? "none";
+      const normalized = normalizeThinkingBlocks(content, thinkingFormat);
+      const finalContent = typeof normalized === "string" ? normalized : JSON.stringify(normalized);
+      return { content: finalContent, usage: extractOpenAIUsage(json) };
     },
 
     async completeWithTools(input: ModelToolCompleteInput): Promise<ModelToolCompleteOutput> {
@@ -387,7 +394,10 @@ export function createOpenAICompatibleProvider(
           throw new ModelHttpError(502, "missing assistant content and tool_calls", "");
         }
 
-        return { content, toolCalls, usage };
+        const thinkingFormat = input.thinkingFormat ?? "none";
+        const normalized = content ? normalizeThinkingBlocks(content, thinkingFormat) : null;
+        const finalContent = normalized === null ? null : typeof normalized === "string" ? normalized : JSON.stringify(normalized);
+        return { content: finalContent, toolCalls, usage };
       }
 
       const text = await res.text();
@@ -446,7 +456,10 @@ export function createOpenAICompatibleProvider(
         );
       }
 
-      return { content, toolCalls, usage: extractOpenAIUsage(json) };
+      const thinkingFormat = input.thinkingFormat ?? "none";
+      const normalized = content ? normalizeThinkingBlocks(content, thinkingFormat) : null;
+      const finalContent = normalized === null ? null : typeof normalized === "string" ? normalized : JSON.stringify(normalized);
+      return { content: finalContent, toolCalls, usage: extractOpenAIUsage(json) };
     },
   };
 }
