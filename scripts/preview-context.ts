@@ -1,9 +1,12 @@
 #!/usr/bin/env -S npx tsx
 /**
- * Dev tool: prints the dynamically-generated session system prompt to stdout
- * using realistic example values and an in-memory SQLite database for stats.
+ * Dev tool: prints the literal wire-format payload (system prompt, tools, and
+ * messages) that would be sent to the model on the first user turn.
  *
- * Usage:  npx tsx scripts/preview-system-prompt.ts
+ * Uses real internal methods — no mocked tool descriptors or hand-built
+ * envelopes. External MCP tools are omitted (builtins only).
+ *
+ * Usage:  npx tsx scripts/preview-context.ts
  */
 
 import Database from "better-sqlite3";
@@ -12,14 +15,23 @@ import { join, resolve as resolvePath } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { buildSessionSystemContext } from "@shoggoth/daemon/lib";
+import {
+  builtinShoggothToolsCatalog,
+  aggregateMcpCatalogs,
+} from "@shoggoth/mcp-integration";
+import {
+  defaultConfig,
+  type ShoggothConfig,
+  wrapWithSystemContext,
+  generateSystemContextToken,
+  type SystemContext,
+} from "@shoggoth/shared";
+import type { MessagingAdapterCapabilities } from "@shoggoth/messaging";
 
 const __dirname = resolvePath(fileURLToPath(import.meta.url), "..");
 const TEMPLATES_DIR = resolvePath(__dirname, "..", "templates", "agent-workspace");
-import { defaultConfig, type ShoggothConfig } from "@shoggoth/shared";
-import type { MessagingAdapterCapabilities } from "@shoggoth/messaging";
 
 // --- 1. In-memory SQLite with session_stats table + example data ---
-// Prompts auto-load lazily from disk on first access inside buildSessionSystemContext.
 const db = new Database(":memory:");
 db.exec(`
   CREATE TABLE sessions (id TEXT PRIMARY KEY);
@@ -61,7 +73,7 @@ db.prepare(`
   transcriptMessageCount: 120,
 });
 
-// --- 3. Build a realistic ShoggothConfig ---
+// --- 2. Build a realistic ShoggothConfig ---
 const config: ShoggothConfig = {
   ...defaultConfig("/etc/shoggoth/config.d"),
   models: {
@@ -83,7 +95,7 @@ const config: ShoggothConfig = {
   },
 };
 
-// --- 4. Example messaging capabilities (Discord-like) ---
+// --- 3. Example messaging capabilities (Discord-like) ---
 const messagingCapabilities: MessagingAdapterCapabilities = {
   platform: "discord",
   supports: { markdown: true, directMessages: true, groupChannels: true },
@@ -112,55 +124,74 @@ const messagingCapabilities: MessagingAdapterCapabilities = {
   },
 };
 
-// --- 5. Example tool names ---
-const toolNames = [
-  "builtin-read",
-  "builtin-write",
-  "builtin-exec",
-  "builtin-message",
-  "builtin-subagent",
-  "builtin-memory-search",
-  "builtin-session-list",
-  "builtin-session-send",
-  "mcp-hass-get_state",
-  "mcp-hass-call_service",
+// --- 4. Tool descriptors from real builtin catalog ---
+const aggregated = aggregateMcpCatalogs([builtinShoggothToolsCatalog()]);
+const tools = aggregated.tools.map((t) => ({
+  type: "function" as const,
+  function: {
+    name: t.namespacedName,
+    description: t.description ?? `${t.sourceId}-${t.originalName}`,
+    parameters: (t.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>,
+  },
+}));
+
+// --- 5. System context envelope (real wrapping) ---
+const systemContextToken = generateSystemContextToken();
+
+const exampleSystemContext: SystemContext = {
+  kind: "inbound.message",
+  summary: "User message from Discord #general channel",
+  data: {
+    sender: "exampleUser#1234",
+    channel: "discord",
+    chat_type: "channel",
+    message_id: "1234567890",
+  },
+};
+
+const rawUserContent = "Hello, can you help me with a coding question about TypeScript generics?";
+const wrappedUserContent = wrapWithSystemContext(rawUserContent, exampleSystemContext, systemContextToken);
+
+// --- 6. Transcript: system message + single wrapped user message ---
+const transcriptMessages: Array<{ role: string; content: string }> = [
+  { role: "system", content: "You are a helpful assistant running inside Shoggoth." },
+  { role: "user", content: wrappedUserContent },
 ];
 
-// --- 6. Build and print ---
+// Tool names for the system prompt (derived from the real catalog)
+const toolNames = aggregated.tools.map((t) => t.namespacedName);
+
+// --- 7. Build and print full wire format ---
 const tmpWorkspace = mkdtempSync(join(tmpdir(), "shoggoth-preview-"));
 try {
-  // Copy default agent workspace templates into the temp directory
   cpSync(TEMPLATES_DIR, tmpWorkspace, { recursive: true });
-  // Remove BOOTSTRAP.md
   rmSync(`${tmpWorkspace}/BOOTSTRAP.md`);
 
   const systemPrompt = buildSessionSystemContext({
     workspacePath: tmpWorkspace,
-  config,
-  env: {
-    ...process.env,
-    SHOGGOTH_MODEL: "anthropic/claude-sonnet-4-20250514",
-  },
-  sessionId: SESSION_ID,
-  contextSegmentId: "seg-001",
-  channel: "discord",
-  messagingCapabilities,
-  toolNames,
-  sandbox: { runtimeUid: 1000, runtimeGid: 1000 },
-  stateDb: db,
-  transcriptMessages: [
-    { role: "system", content: "You are a helpful assistant running inside Shoggoth." },
-    { role: "user", content: "Hello, can you help me with a coding question about TypeScript generics?" },
-    { role: "assistant", content: "Of course! TypeScript generics are a powerful feature that lets you write reusable, type-safe code. They allow you to create components that work with a variety of types rather than a single one. What specifically would you like to know?" },
-    { role: "user", content: "How do I constrain a generic type parameter to only accept objects with a specific property?" },
-    { role: "assistant", content: "You can use the `extends` keyword to constrain generic types. For example:\n\n```typescript\nfunction getProperty<T extends { name: string }>(obj: T): string {\n  return obj.name;\n}\n```\n\nThis ensures that `T` must have a `name` property of type `string`. You can also use interfaces:\n\n```typescript\ninterface HasId {\n  id: number;\n}\n\nfunction findById<T extends HasId>(items: T[], id: number): T | undefined {\n  return items.find(item => item.id === id);\n}\n```" },
-    { role: "user", content: "That makes sense. Can I use multiple constraints?" },
-    { role: "assistant", content: "Yes! You can intersect multiple constraints using `&`:\n\n```typescript\ninterface HasName { name: string; }\ninterface HasAge { age: number; }\n\nfunction greet<T extends HasName & HasAge>(person: T): string {\n  return `Hello ${person.name}, you are ${person.age} years old.`;\n}\n```\n\nYou can also use conditional types and mapped types for more advanced constraint patterns." },
-    { role: "user", content: "What about constraining a generic to be one of several specific types?" },
-  ],
-});
+    config,
+    env: {
+      ...process.env,
+      SHOGGOTH_MODEL: "anthropic/claude-sonnet-4-20250514",
+    },
+    sessionId: SESSION_ID,
+    contextSegmentId: "seg-001",
+    channel: "discord",
+    messagingCapabilities,
+    toolNames,
+    sandbox: { runtimeUid: 1000, runtimeGid: 1000 },
+    stateDb: db,
+    transcriptMessages,
+    systemContextToken,
+  });
 
-  console.log(systemPrompt);
+  const wireFormat = {
+    system: systemPrompt,
+    tools,
+    messages: transcriptMessages,
+  };
+
+  console.log(JSON.stringify(wireFormat, null, 2));
 } finally {
   rmSync(tmpWorkspace, { recursive: true, force: true });
 }

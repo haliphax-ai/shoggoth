@@ -423,8 +423,6 @@ export function buildSessionSystemContext(input: BuildSessionSystemContextInput)
     // Project context (operator global + template files): light+
     atLeast("light") ? buildProjectContextSection(operatorGlobal, fileBlocks) : undefined,
     // Heartbeats: light+
-    // Reaction guidance: light+
-    atLeast("light") ? buildReactionGuidanceSection() : undefined,
     // Runtime: minimal+
     buildRuntimeSection({
       sessionId: input.sessionId,

@@ -262,10 +262,6 @@ describe("buildSessionSystemContext — context levels", () => {
     assert.doesNotMatch(build("minimal"), /## Silent Replies/);
   });
 
-  it("minimal: excludes reaction guidance", () => {
-    assert.doesNotMatch(build("minimal"), /## Reaction Turns/);
-  });
-
   it("minimal: excludes memory hint", () => {
     assert.doesNotMatch(build("minimal"), /memory\.paths/);
   });
@@ -310,10 +306,6 @@ describe("buildSessionSystemContext — context levels", () => {
 
   it("light: includes silent replies", () => {
     assert.match(build("light"), /## Silent Replies/);
-  });
-
-  it("light: includes reaction guidance", () => {
-    assert.match(build("light"), /## Reaction Turns/);
   });
 
   it("light: includes runtime", () => {
