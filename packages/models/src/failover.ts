@@ -25,6 +25,8 @@ export interface FailoverCompleteOutput extends ModelCompleteOutput {
   readonly usedModel: string;
   /** True when a later entry in the chain produced the response. */
   readonly degraded: boolean;
+  /** Thinking format from the active failover hop's provider capabilities. */
+  readonly thinkingFormat?: "native" | "xml-tags" | "none";
 }
 
 export interface FailoverModelClient {
@@ -62,6 +64,7 @@ export function createFailoverModelClient(
             usedProviderId: entry.provider.id,
             usedModel: model,
             degraded: i > 0,
+            thinkingFormat: entry.provider.capabilities?.thinkingFormat,
           };
         } catch (e) {
           lastErr = e;

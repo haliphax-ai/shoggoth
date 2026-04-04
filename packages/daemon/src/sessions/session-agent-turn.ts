@@ -6,6 +6,7 @@ import {
   createFailoverToolCallingClientFromModelsConfig,
   getImageBlockCodec,
   mergeModelInvocationParams,
+  ModelHttpError,
   type CreateFailoverFromConfigOptions,
   type FailoverToolCallingClient,
 } from "@shoggoth/models";
@@ -400,7 +401,8 @@ export async function executeSessionAgentTurn(
     // Catch-all: log the error and return whatever partial response exists
     // rather than killing the turn entirely.
     const errMsg = e instanceof Error ? e.message : String(e);
-    log.error("tool loop unexpected error", { sessionId: input.sessionId, error: errMsg });
+    const bodySnippet = e instanceof ModelHttpError ? e.bodySnippet : undefined;
+    log.error("tool loop unexpected error", { sessionId: input.sessionId, error: errMsg, ...(bodySnippet ? { bodySnippet } : {}) });
     pushSystemContext(input.sessionId, `Previous turn encountered an error: ${errMsg}`);
     const failoverMeta2 = model.getSessionToolLoopFailoverState();
     const latestAssistantText2 =

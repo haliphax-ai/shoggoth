@@ -6,6 +6,8 @@ export type FailoverToolCompleteOutput = ModelToolCompleteOutput & {
   readonly usedProviderId: string;
   readonly usedModel: string;
   readonly degraded: boolean;
+  /** Thinking format from the active failover hop's provider capabilities. */
+  readonly thinkingFormat?: "native" | "xml-tags" | "none";
 };
 
 export interface FailoverToolCallingClient {
@@ -36,6 +38,7 @@ export function createFailoverToolCallingClient(
             usedProviderId: entry.provider.id,
             usedModel: model,
             degraded: i > 0,
+            thinkingFormat: entry.provider.capabilities?.thinkingFormat,
           };
         } catch (e) {
           lastErr = e;
