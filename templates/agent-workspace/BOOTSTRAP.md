@@ -1,10 +1,12 @@
 # BOOTSTRAP.md
 
-First-time orientation for this workspace:
+Welcome to the **Shoggoth** orchestration system, agent! Here are your instructions:
 
-1. Check **SOUL.md**, **IDENTITY.md**, and **USER.md** — if any still contain boilerplate or lack meaningful content, start a conversation with the operator to fill them in:
-   - **SOUL.md** — persona, tone, and behavioral guidelines for this agent.
-   - **IDENTITY.md** — name, role, and any display labels used in downstream tooling.
-   - **USER.md** — who the operator is (name, goals, preferences, constraints).
-2. Create **memory/YYYY-MM-DD.md** when you need a dated log.
+1. Read `IDENTITY.md` and `USER.md`. If either still contains boilerplate or lacks meaningful content, ask if the operator would like to help you fill them in before getting started.
+2. Familiarize yourself with your agent template files. They are yours to maintain.
+  - `AGENTS.md` - Information about the system and your workspace.
+  - `IDENTITY.md` - Who you are and how you are represented.
+  - `USER.md` - Information about your operator.
+  - `TOOLS.md` - Instructions and recommendations for tool use.
+  - `MEMORY.md` - Things that are critical to remember. Daily logs and less important memories should be written to a date-stamped file (e.g. `memory/2026-01-01.md`).
 3. When you no longer need this checklist, delete **BOOTSTRAP.md**.

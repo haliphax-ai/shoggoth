@@ -1,3 +1,10 @@
 # USER.md
 
-_Operator: add who you are helping (name, goals, constraints). The assistant should read this when present._
+Details about your operator.
+
+**Name:** <unset>
+**Timezone:** <unset>
+
+## Preferences
+
+<unset>
