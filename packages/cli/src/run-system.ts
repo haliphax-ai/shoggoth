@@ -27,12 +27,15 @@ export async function runSystemCli(argv: string[]): Promise<void> {
   }
 
   if (argv[0] === "health") {
+    // Health checks are exempt from auth — no sensitive data returned
     const configDir = process.env.SHOGGOTH_CONFIG_DIR ?? LAYOUT.configDir;
     const socketPath = socketPathFromEnv(configDir);
-    const auth = controlAuth();
+    const auth = process.env.SHOGGOTH_OPERATOR_TOKEN?.trim()
+      ? controlAuth()
+      : undefined;
     const res = await invokeControlRequest({
       socketPath,
-      auth,
+      auth: auth as any,
       op: "health",
       payload: {},
     });

@@ -160,6 +160,12 @@ async function handleOneLine(
     throw e;
   }
 
+    // Health checks are exempt from auth — no sensitive data returned
+    if (req.op === "health") {
+      const health = await deps.getHealth();
+      return { v: WIRE_VERSION, id: req.id, ok: true, result: health };
+    }
+
   try {
     const principal = resolveAuthenticatedPrincipal(req.auth, {
       operatorTokenSecret: deps.operatorTokenSecret,
