@@ -102,6 +102,7 @@ export const shoggothModelFailoverHopSchema = z
     providerId: z.string().min(1),
     model: z.string().min(1),
     contextWindowTokens: z.number().int().positive().optional(),
+    thinkingFormat: z.enum(["native", "xml-tags", "none"]).optional(),
   })
   .strict();
 
