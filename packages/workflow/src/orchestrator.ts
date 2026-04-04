@@ -772,12 +772,6 @@ export class Orchestrator {
 
     if (allTerminal && !this.completed) {
       this.completed = true;
-      // Fire one final status update before stopping timers
-      if (this.statusManager) {
-        await this.statusManager.updateStatus(wf).catch((err) => {
-          log.error("final updateStatus failed", { workflowId: wf.id, error: String(err) });
-        });
-      }
       this.stopPolling();
 
       // Clean up any remaining subagent sessions
