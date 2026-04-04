@@ -34,7 +34,8 @@ RUN userdel node 2>/dev/null; groupdel node 2>/dev/null; \
   (groupadd --system --gid ${SHOGGOTH_UID} shoggoth || true) \
   && useradd --system --uid ${SHOGGOTH_UID} --gid shoggoth --home-dir /var/lib/shoggoth --shell /usr/sbin/nologin shoggoth \
   && groupadd --system --gid ${AGENT_UID} agent \
-  && useradd --system --uid ${AGENT_UID} --gid agent --home-dir /var/lib/shoggoth/agent-stub --shell /usr/sbin/nologin agent
+  && useradd --system --uid ${AGENT_UID} --gid agent --home-dir /var/lib/shoggoth/agent-stub --shell /usr/sbin/nologin agent \
+  && usermod -aG agent shoggoth
 
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules

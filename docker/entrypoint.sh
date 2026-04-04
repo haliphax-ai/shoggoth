@@ -45,6 +45,7 @@ fi
 
 # gosu drops all capabilities on setuid; builtins need CAP_SETUID/CAP_SETGID on the daemon to spawn as agent.
 # Compose must set cap_add: SETUID, SETGID. setpriv keeps them in inh+ambient across the reuid/regid drop.
+umask 002
 exec setpriv --reuid shoggoth --regid shoggoth --init-groups \
   --inh-caps +setuid,+setgid \
   --ambient-caps +setuid,+setgid \
