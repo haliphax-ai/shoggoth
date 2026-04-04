@@ -30,7 +30,7 @@ FROM node:22-bookworm-slim
 ARG SHOGGOTH_UID=1000
 ARG AGENT_UID=900
 RUN userdel node 2>/dev/null; groupdel node 2>/dev/null; \
-  groupadd --system --gid ${SHOGGOTH_UID} shoggoth \
+  (groupadd --system --gid ${SHOGGOTH_UID} shoggoth || true) \
   && useradd --system --uid ${SHOGGOTH_UID} --gid shoggoth --home-dir /var/lib/shoggoth --shell /usr/sbin/nologin shoggoth \
   && groupadd --system --gid ${AGENT_UID} agent \
   && useradd --system --uid ${AGENT_UID} --gid agent --home-dir /var/lib/shoggoth/agent-stub --shell /usr/sbin/nologin agent
@@ -49,9 +49,12 @@ RUN chmod -R a+rX /app
 COPY docker/entrypoint.sh /usr/local/bin/shoggoth-entrypoint.sh
 COPY docker/shoggoth-wrapper.sh /usr/local/bin/shoggoth
 # Strip inherited ACLs from build context (cp without --preserve drops them), then set clean permissions
+# shoggoth wrapper is operator-only: root:shoggoth 0750 so agent (UID 900) cannot execute it
 RUN cp /usr/local/bin/shoggoth-entrypoint.sh /tmp/_ep && mv /tmp/_ep /usr/local/bin/shoggoth-entrypoint.sh \
     && cp /usr/local/bin/shoggoth /tmp/_sh && mv /tmp/_sh /usr/local/bin/shoggoth \
-    && chmod 0755 /usr/local/bin/shoggoth-entrypoint.sh /usr/local/bin/shoggoth
+    && chown root:shoggoth /usr/local/bin/shoggoth \
+    && chmod 0755 /usr/local/bin/shoggoth-entrypoint.sh \
+    && chmod 0750 /usr/local/bin/shoggoth
 
 ENV NODE_ENV=production
 USER root
