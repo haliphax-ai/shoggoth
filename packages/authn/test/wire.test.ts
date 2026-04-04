@@ -14,11 +14,11 @@ describe("JSONL wire", () => {
       v: WIRE_VERSION,
       id: "r1",
       op: "ping",
-      auth: { kind: "operator_peercred" },
+      auth: { kind: "operator_token", token: "tok" },
     });
     const req = parseRequestLine(line);
     assert.strictEqual(req.op, "ping");
-    assert.strictEqual(req.auth.kind, "operator_peercred");
+    assert.strictEqual(req.auth.kind, "operator_token");
   });
 
   it("roundtrips response", () => {
@@ -40,7 +40,7 @@ describe("JSONL wire", () => {
             v: 99,
             id: "x",
             op: "ping",
-            auth: { kind: "operator_peercred" },
+            auth: { kind: "operator_token", token: "t" },
           }),
         ),
       WireParseError,
@@ -56,6 +56,21 @@ describe("JSONL wire", () => {
             id: "x",
             op: "x",
             auth: { kind: "agent", token: "t" },
+          }),
+        ),
+      WireParseError,
+    );
+  });
+
+  it("rejects unknown auth kind", () => {
+    assert.throws(
+      () =>
+        parseRequestLine(
+          JSON.stringify({
+            v: WIRE_VERSION,
+            id: "x",
+            op: "ping",
+            auth: { kind: "operator_peercred" },
           }),
         ),
       WireParseError,

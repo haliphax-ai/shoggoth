@@ -133,7 +133,7 @@ CREATE INDEX idx_audit_correlation ON audit_log (correlation_id);
 CREATE INDEX idx_audit_session ON audit_log (session_id);
 
 -- ---------------------------------------------------------------------------
--- Operator identity (SO_PEERCRED)
+-- Operator identity map (UID → operator_id)
 -- ---------------------------------------------------------------------------
 CREATE TABLE operator_uid_map (
   uid INTEGER PRIMARY KEY,

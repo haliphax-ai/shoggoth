@@ -1,16 +1,14 @@
-import type { AuthenticatedPrincipal, OperatorPrincipal } from "@shoggoth/authn";
+import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 
 /**
- * Values stored in `audit_log.source` (SHOGGOTH-PLAN: cli_socket, agent, system; plus operator token path).
+ * Values stored in `audit_log.source`.
  */
-export type AuditLogSource = "cli_socket" | "cli_operator_token" | "agent" | "system";
+export type AuditLogSource = "cli_operator_token" | "agent" | "system";
 
 export function auditSourceForPrincipal(principal: AuthenticatedPrincipal): AuditLogSource {
   if (principal.kind === "system") return "system";
   if (principal.kind === "agent") return "agent";
-  const op = principal as OperatorPrincipal;
-  if (op.source === "cli_operator_token") return "cli_operator_token";
-  return "cli_socket";
+  return "cli_operator_token";
 }
 
 export function principalAuditFields(principal: AuthenticatedPrincipal): {
@@ -26,9 +24,6 @@ export function principalAuditFields(principal: AuthenticatedPrincipal): {
     return {
       principalKind: "operator",
       principalId: principal.operatorId,
-      peerUid: principal.peer?.uid,
-      peerGid: principal.peer?.gid,
-      peerPid: principal.peer?.pid,
     };
   }
   if (principal.kind === "agent") {

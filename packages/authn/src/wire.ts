@@ -62,7 +62,7 @@ export function parseRequestLine(line: string): WireRequest {
     throw new WireParseError("missing auth");
   const auth = r.auth as Record<string, unknown>;
   const kind = auth.kind;
-  if (kind !== "operator_peercred" && kind !== "operator_token" && kind !== "agent") {
+  if (kind !== "operator_token" && kind !== "agent") {
     throw new WireParseError(`unknown auth.kind: ${String(kind)}`);
   }
   if (kind === "operator_token") {

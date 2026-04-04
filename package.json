@@ -3,17 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Shoggoth agent orchestration platform — monorepo (daemon + CLI)",
+  "description": "Shoggoth agent orchestration platform",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build:native",
-    "build:native": "npm run build:native -w @shoggoth/authn",
     "clean": "rm -rf packages/*/dist dist",
     "cli": "node --import tsx/esm packages/cli/src/cli.ts",
     "daemon": "node --import tsx/esm packages/daemon/src/index.ts",
-    "pretest": "npm run build:native",
     "reinstall": "rm -rf node_modules **/node_modules && npm ci",
     "test": "vitest run",
     "test:ci-agent-isolation": "SHOGGOTH_CI_STRICT_AGENT_TESTS=1 npx vitest run packages/os-exec",

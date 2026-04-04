@@ -210,23 +210,6 @@ export const shoggothMemoryConfigSchema = z
 
 export type ShoggothMemoryConfig = z.infer<typeof shoggothMemoryConfigSchema>;
 
-const operatorMapEntrySchema = z
-  .object({
-    operatorId: z.string().min(1),
-    roles: z.array(z.string()).default([]),
-  })
-  .strict();
-
-/** Layered operator UID map (merged with later JSON files); combined with DB `operator_uid_map` in the daemon. */
-const shoggothOperatorMapLayerSchema = z
-  .object({
-    defaultOperator: operatorMapEntrySchema.optional(),
-    byUid: z.record(z.string(), operatorMapEntrySchema).optional(),
-  })
-  .strict();
-
-type ShoggothOperatorMapLayer = z.infer<typeof shoggothOperatorMapLayerSchema>;
-
 /** Per-principal allow/deny lists for tools or control ops. Deny wins; empty allow + no `*` → default-deny. */
 export const shoggothToolRulesSchema = z
   .object({
@@ -800,12 +783,8 @@ export const shoggothConfigFragmentSchema = z
     /** If both uid and gid are set, `chown` the socket after listen (requires privileges when not self). */
     controlSocketUid: z.number().int().nonnegative().optional(),
     controlSocketGid: z.number().int().nonnegative().optional(),
-    /** JSON operator UID map file; chained after DB and layered `operatorMap`. */
-    operatorMapPath: z.string().min(1).optional(),
     /** Optional operator token file (trimmed); same constant-time validation as `SHOGGOTH_OPERATOR_TOKEN`. */
     operatorTokenPath: z.string().min(1).optional(),
-    /** Layered operator UID entries + default (deep-merged across config fragments). */
-    operatorMap: shoggothOperatorMapLayerSchema.optional(),
     workspacesRoot: z.string().min(1).optional(),
     secretsDirectory: z.string().min(1).optional(),
     inboundMediaRoot: z.string().min(1).optional(),
@@ -881,9 +860,7 @@ export const shoggothConfigSchema = z
     controlSocketMode: z.number().int().optional(),
     controlSocketUid: z.number().int().nonnegative().optional(),
     controlSocketGid: z.number().int().nonnegative().optional(),
-    operatorMapPath: z.string().min(1).optional(),
     operatorTokenPath: z.string().min(1).optional(),
-    operatorMap: shoggothOperatorMapLayerSchema.optional(),
     workspacesRoot: z.string().min(1),
     secretsDirectory: z.string().min(1),
     inboundMediaRoot: z.string().min(1),

@@ -2,12 +2,10 @@ import { invokeControlRequest, resolveSessionTargetFromCliArg } from "@shoggoth/
 import { loadLayeredConfig, LAYOUT, resolveEffectiveModelsConfig, VERSION } from "@shoggoth/shared";
 import { runSessionCompact } from "./run-session-compact";
 
-function controlAuth():
-  | { kind: "operator_token"; token: string }
-  | { kind: "operator_peercred" } {
+function controlAuth(): { kind: "operator_token"; token: string } {
   const token = process.env.SHOGGOTH_OPERATOR_TOKEN?.trim();
-  if (token) return { kind: "operator_token", token };
-  return { kind: "operator_peercred" };
+  if (!token) throw new Error("SHOGGOTH_OPERATOR_TOKEN is required");
+  return { kind: "operator_token", token };
 }
 
 function socketPathFromEnv(configPath: string): string {

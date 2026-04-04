@@ -47,7 +47,7 @@ describe("config-hot-reload", () => {
       kind: "operator",
       operatorId: "x",
       roles: ["admin"],
-      source: "cli_socket",
+      source: "cli_operator_token",
       peer: { uid: 1, gid: 1, pid: 1 },
     };
     const r = del.check({ principal: op, action: "control.invoke", resource: "version" });

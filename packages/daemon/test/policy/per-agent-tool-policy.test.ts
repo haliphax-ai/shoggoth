@@ -154,7 +154,7 @@ describe("policy engine – per-agent tool rules via config", () => {
         kind: "operator",
         operatorId: "op",
         roles: [],
-        source: "cli_socket",
+        source: "cli_operator_token",
       },
       action: "tool.invoke",
       resource: "builtin-exec:bash",

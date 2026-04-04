@@ -1,19 +1,12 @@
 import {
-  ERR_PEERCRED_NOT_IMPLEMENTED,
   MemoryAgentTokenStore,
-  chainOperatorMaps,
-  loadOperatorMapFromPath,
-  operatorMapFromFileJson,
   parseRequestLine,
-  readPeerCredFromSocket,
   resolveAuthenticatedPrincipal,
   serializeResponse,
   WireParseError,
   WIRE_VERSION,
   type AgentTokenStore,
   type AuthenticatedPrincipal,
-  type OperatorMap,
-  type PeerCredentials,
   type WireRequest,
   type WireResponse,
 } from "@shoggoth/authn";
@@ -25,7 +18,6 @@ import { dirname } from "node:path";
 import { appendAuditRow, type AppendAuditRowInput } from "../audit/append-audit";
 import { readOperatorTokenSecret } from "../auth/read-operator-secret";
 import { createSqliteAgentTokenStore } from "../auth/sqlite-agent-tokens";
-import { createSqliteOperatorMap } from "../auth/sqlite-operator-map";
 import type { HealthSnapshot } from "../health";
 import { getLogger } from "../logging";
 import { auditSourceForPrincipal, principalAuditFields } from "../policy/audit-source";
@@ -48,8 +40,6 @@ import {
 import { createInProcessAgentIntegrationInvoker } from "./integration-invoke";
 import { dispatchMcpHttpCancelRequest } from "../mcp/mcp-http-cancel-registry";
 
-export type ReadPeerCredFn = (socket: Socket) => PeerCredentials;
-
 type ControlPlaneOptions = {
   config: ShoggothConfig;
   /**
@@ -60,13 +50,8 @@ type ControlPlaneOptions = {
   shutdown: ShutdownCoordinator;
   getHealth: () => Promise<HealthSnapshot>;
   version: string;
-  /** When set, `agent_tokens` and `operator_uid_map` are backed by SQLite. */
+  /** When set, `agent_tokens` are backed by SQLite. */
   stateDb?: Database.Database;
-  /**
-   * Defaults to `readPeerCredFromSocket` (Linux N-API SO_PEERCRED). Override for tests or
-   * non-Linux hosts where the native stub rejects peercred auth.
-   */
-  readPeerCred?: ReadPeerCredFn;
   /** When true (default), register a shutdown drain that closes the listener. */
   registerShutdownDrain?: boolean;
   /** Test hook: override `child_process.spawn` for `acpx_agent_start`. */
@@ -91,37 +76,6 @@ class ControlOpError extends Error {
   ) {
     super(message);
   }
-}
-
-function layeredOperatorMapHasEntries(
-  om: ShoggothConfig["operatorMap"],
-): om is NonNullable<ShoggothConfig["operatorMap"]> {
-  if (!om) return false;
-  if (om.defaultOperator) return true;
-  return Boolean(om.byUid && Object.keys(om.byUid).length > 0);
-}
-
-function buildOperatorMap(config: ShoggothConfig, stateDb?: Database.Database): OperatorMap {
-  const layers: OperatorMap[] = [];
-  if (stateDb) layers.push(createSqliteOperatorMap(stateDb));
-  if (layeredOperatorMapHasEntries(config.operatorMap)) {
-    layers.push(
-      operatorMapFromFileJson({
-        defaultOperator: config.operatorMap.defaultOperator,
-        byUid: config.operatorMap.byUid,
-      }),
-    );
-  }
-  if (config.operatorMapPath) layers.push(loadOperatorMapFromPath(config.operatorMapPath));
-  layers.push(
-    operatorMapFromFileJson({
-      defaultOperator: {
-        operatorId: "local-operator",
-        roles: ["admin"],
-      },
-    }),
-  );
-  return chainOperatorMaps(layers);
 }
 
 function recordControlPlaneAudit(
@@ -169,10 +123,8 @@ async function dispatchOp(
 
 async function handleOneLine(
   line: string,
-  socket: Socket,
+  _socket: Socket,
   deps: {
-    readPeer: ReadPeerCredFn;
-    operatorMap: OperatorMap;
     operatorTokenSecret: string | undefined;
     agentStore: AgentTokenStore;
     getHealth: () => Promise<HealthSnapshot>;
@@ -209,10 +161,7 @@ async function handleOneLine(
   }
 
   try {
-    const peer = deps.readPeer(socket);
     const principal = resolveAuthenticatedPrincipal(req.auth, {
-      peer,
-      operatorMap: deps.operatorMap,
       operatorTokenSecret: deps.operatorTokenSecret,
       agentTokenStore: deps.agentStore,
     });
@@ -311,21 +260,6 @@ async function handleOneLine(
     });
     return { v: WIRE_VERSION, id: req.id, ok: true, result };
   } catch (e) {
-    if (e instanceof Error && (e as NodeJS.ErrnoException).code === ERR_PEERCRED_NOT_IMPLEMENTED) {
-      return {
-        v: WIRE_VERSION,
-        id: req.id,
-        ok: false,
-        error: {
-          code: ERR_PEERCRED_NOT_IMPLEMENTED,
-          message: e.message,
-          details: {
-            followUp:
-              "Wire Linux SO_PEERCRED via getsockopt (native addon); see packages/authn/README.md",
-          },
-        },
-      };
-    }
     if (e instanceof ControlOpError) {
       return {
         v: WIRE_VERSION,
@@ -358,7 +292,6 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
     getHealth,
     version,
     stateDb,
-    readPeerCred,
     registerShutdownDrain = true,
     acpxSpawn,
     hitlPending: hitlPendingOpt,
@@ -367,8 +300,6 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
   } = opts;
 
   const logger = getLogger("control-plane");
-  const readPeer = readPeerCred ?? readPeerCredFromSocket;
-  const operatorMap = buildOperatorMap(config, stateDb);
   const acpxStore = stateDb ? createSqliteAcpxBindingStore(stateDb) : undefined;
   const agentStore = stateDb
     ? createSqliteAgentTokenStore(stateDb)
@@ -443,8 +374,6 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
         chain = chain
           .then(() =>
             handleOneLine(captured, socket, {
-              readPeer,
-              operatorMap,
               operatorTokenSecret,
               agentStore,
               getHealth,

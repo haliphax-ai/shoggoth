@@ -41,7 +41,7 @@ describe("policy engine", () => {
       kind: "operator",
       operatorId: "op",
       roles: ["admin"],
-      source: "cli_socket",
+      source: "cli_operator_token",
       peer: { uid: 1, gid: 1, pid: 1 },
     };
     const agent: AuthenticatedPrincipal = {
@@ -109,7 +109,7 @@ describe("policy engine", () => {
       kind: "operator",
       operatorId: "op",
       roles: [],
-      source: "cli_socket",
+      source: "cli_operator_token",
     };
     assert.deepStrictEqual(
       engine.check({ principal: operator, action: "control.invoke", resource: "ping" }),

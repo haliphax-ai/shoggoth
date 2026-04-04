@@ -328,7 +328,7 @@ void (async () => {
             v: WIRE_VERSION,
             id: randomUUID(),
             op,
-            auth: { kind: "operator_peercred" as const },
+            auth: { kind: "operator_token" as const, token: "__internal__" },
             payload,
           };
           const principal = { kind: "operator" as const, operatorId: "discord-slash", roles: ["admin"], source: "cli_operator_token" as const };

@@ -1,5 +1,4 @@
 import {
-  ERR_PEERCRED_NOT_IMPLEMENTED,
   parseResponseLine,
   WIRE_VERSION,
 } from "@shoggoth/authn";
@@ -23,7 +22,7 @@ import { createSessionStore, getSessionContextSegmentId } from "../../src/sessio
 import { createTranscriptStore } from "../../src/sessions/transcript-store";
 import { insertSessionToolAutoApprove } from "../../src/hitl/hitl-session-tool-auto-store";
 import { createPendingActionsStore } from "../../src/hitl/pending-actions-store";
-import { startControlPlane, type ReadPeerCredFn } from "../../src/control/control-plane";
+import { startControlPlane } from "../../src/control/control-plane";
 import type { IntegrationOpsContext } from "../../src/control/integration-ops";
 import { createPersistingHitlAutoApproveGate } from "../../src/hitl/hitl-auto-approve-persisting";
 import {
@@ -35,6 +34,19 @@ import {
   type ShoggothConfig,
 } from "@shoggoth/shared";
 import { setSubagentRuntimeExtension } from "../../src/subagent/subagent-extension-ref";
+import { beforeAll, afterAll } from "vitest";
+
+let prevOperatorToken: string | undefined;
+beforeAll(() => {
+  prevOperatorToken = process.env.SHOGGOTH_OPERATOR_TOKEN;
+  process.env.SHOGGOTH_OPERATOR_TOKEN = "test-op-token";
+});
+afterAll(() => {
+  if (prevOperatorToken === undefined) delete process.env.SHOGGOTH_OPERATOR_TOKEN;
+  else process.env.SHOGGOTH_OPERATOR_TOKEN = prevOperatorToken;
+});
+
+const TEST_OPERATOR_TOKEN = "test-op-token";
 
 function minimalConfig(socketPath: string): ShoggothConfig {
   return {
@@ -68,7 +80,6 @@ function fakeChildProcess(pid: number): ChildProcess {
 async function jsonlRoundTrip(
   body: Record<string, unknown>,
   options?: {
-    readPeerCred?: ReadPeerCredFn;
     stateDb?: Database.Database;
     config?: ShoggothConfig;
     acpxSpawn?: AcpxSpawnFn;
@@ -93,7 +104,6 @@ async function jsonlRoundTrip(
     getHealth: () => health.snapshot(),
     version: "test-0",
     registerShutdownDrain: false,
-    readPeerCred: options?.readPeerCred,
     stateDb: options?.stateDb,
     acpxSpawn: options?.acpxSpawn,
   });
@@ -122,7 +132,6 @@ async function jsonlRoundTrip(
 
 async function withControlPlaneSession(
   options: {
-    readPeerCred?: ReadPeerCredFn;
     stateDb?: Database.Database;
     config?: ShoggothConfig;
     acpxSpawn?: AcpxSpawnFn;
@@ -155,7 +164,6 @@ async function withControlPlaneSession(
     getHealth: () => health.snapshot(),
     version: "test-0",
     registerShutdownDrain: false,
-    readPeerCred: options.readPeerCred,
     stateDb: options.stateDb,
     acpxSpawn: options.acpxSpawn,
     hitlPending: options.hitlPending,
@@ -189,63 +197,13 @@ async function withControlPlaneSession(
 }
 
 describe("control plane (unix socket + JSONL)", () => {
-  it("returns ERR_PEERCRED_NOT_IMPLEMENTED when readPeerCred throws that code", async () => {
-    const line = await jsonlRoundTrip(
-      {
-        v: WIRE_VERSION,
-        id: "a1",
-        op: "ping",
-        auth: { kind: "operator_peercred" },
-      },
-      {
-        readPeerCred: () => {
-          const err = new Error("SO_PEERCRED unavailable in test") as NodeJS.ErrnoException;
-          err.code = ERR_PEERCRED_NOT_IMPLEMENTED;
-          throw err;
-        },
-      },
-    );
-    const res = parseResponseLine(line);
-    assert.equal(res.ok, false);
-    assert.equal(res.error?.code, ERR_PEERCRED_NOT_IMPLEMENTED);
-    const details = res.error?.details as { followUp?: string } | undefined;
-    assert.match(String(details?.followUp ?? ""), /SO_PEERCRED/);
-  });
-
-  it("ping succeeds with default readPeerCredFromSocket on Linux (native SO_PEERCRED)", async () => {
-    if (process.platform !== "linux") return;
-
+  it("ping succeeds with operator_token", async () => {
     const line = await jsonlRoundTrip({
       v: WIRE_VERSION,
-      id: "native-peer",
+      id: "p1",
       op: "ping",
-      auth: { kind: "operator_peercred" },
+      auth: { kind: "operator_token", token: TEST_OPERATOR_TOKEN },
     });
-    const res = parseResponseLine(line);
-    assert.deepStrictEqual(res, {
-      v: WIRE_VERSION,
-      id: "native-peer",
-      ok: true,
-      result: { pong: true },
-    });
-  });
-
-  it("ping succeeds when readPeerCred is injected", async () => {
-    const line = await jsonlRoundTrip(
-      {
-        v: WIRE_VERSION,
-        id: "p1",
-        op: "ping",
-        auth: { kind: "operator_peercred" },
-      },
-      {
-        readPeerCred: () => ({
-          uid: process.getuid(),
-          gid: process.getgid(),
-          pid: process.pid,
-        }),
-      },
-    );
     const res = parseResponseLine(line);
     assert.deepStrictEqual(res, {
       v: WIRE_VERSION,
@@ -261,14 +219,8 @@ describe("control plane (unix socket + JSONL)", () => {
         v: WIRE_VERSION,
         id: "v1",
         op: "version",
-        auth: { kind: "operator_peercred" },
-      },
-      {
-        readPeerCred: () => ({
-          uid: process.getuid(),
-          gid: process.getgid(),
-          pid: 0,
-        }),
+        auth: { kind: "operator_token", token: "test-op-token" },
+      }
       },
     );
     const v = parseResponseLine(vLine);
@@ -280,14 +232,8 @@ describe("control plane (unix socket + JSONL)", () => {
         v: WIRE_VERSION,
         id: "h1",
         op: "health",
-        auth: { kind: "operator_peercred" },
-      },
-      {
-        readPeerCred: () => ({
-          uid: process.getuid(),
-          gid: process.getgid(),
-          pid: 0,
-        }),
+        auth: { kind: "operator_token", token: "test-op-token" },
+      }
       },
     );
     const h = parseResponseLine(hLine);
@@ -301,14 +247,8 @@ describe("control plane (unix socket + JSONL)", () => {
         v: WIRE_VERSION,
         id: "op1",
         op: "agent_ping",
-        auth: { kind: "operator_peercred" },
-      },
-      {
-        readPeerCred: () => ({
-          uid: process.getuid(),
-          gid: process.getgid(),
-          pid: 0,
-        }),
+        auth: { kind: "operator_token", token: "test-op-token" },
+      }
       },
     );
     const res = parseResponseLine(line);
@@ -333,11 +273,6 @@ describe("control plane (unix socket + JSONL)", () => {
       },
       {
         stateDb: db,
-        readPeerCred: () => ({
-          uid: process.getuid(),
-          gid: process.getgid(),
-          pid: 0,
-        }),
       },
     );
     const res = parseResponseLine(line);
@@ -362,11 +297,6 @@ describe("control plane (unix socket + JSONL)", () => {
       },
       {
         stateDb: db,
-        readPeerCred: () => ({
-          uid: process.getuid(),
-          gid: process.getgid(),
-          pid: 0,
-        }),
       },
     );
     const res = parseResponseLine(line);
@@ -396,11 +326,6 @@ describe("control plane (unix socket + JSONL)", () => {
       },
       {
         config,
-        readPeerCred: () => ({
-          uid: process.getuid(),
-          gid: process.getgid(),
-          pid: 0,
-        }),
       },
     );
     const res = parseResponseLine(line);
@@ -429,11 +354,6 @@ describe("control plane (unix socket + JSONL)", () => {
       getHealth: () => health.snapshot(),
       version: "x",
       registerShutdownDrain: false,
-      readPeerCred: () => ({
-        uid: process.getuid(),
-        gid: process.getgid(),
-        pid: 0,
-      }),
     });
     try {
       const st = await stat(socketPath);
@@ -461,15 +381,10 @@ describe("control plane (unix socket + JSONL)", () => {
         v: WIRE_VERSION,
         id: "pd1",
         op: "ping",
-        auth: { kind: "operator_peercred" },
+        auth: { kind: "operator_token", token: "test-op-token" },
       },
       {
         config,
-        readPeerCred: () => ({
-          uid: process.getuid(),
-          gid: process.getgid(),
-          pid: 0,
-        }),
       },
     );
     const res = parseResponseLine(line);
@@ -485,22 +400,17 @@ describe("control plane (unix socket + JSONL)", () => {
         v: WIRE_VERSION,
         id: "aud1",
         op: "ping",
-        auth: { kind: "operator_peercred" },
+        auth: { kind: "operator_token", token: "test-op-token" },
       },
       {
         stateDb: db,
-        readPeerCred: () => ({
-          uid: process.getuid(),
-          gid: process.getgid(),
-          pid: 42,
-        }),
       },
     );
     const res = parseResponseLine(line);
     assert.equal(res.ok, true);
     const row = db
       .prepare(
-        `SELECT source, correlation_id, action, resource, outcome, peer_pid, principal_kind
+        `SELECT source, correlation_id, action, resource, outcome, principal_kind
          FROM audit_log WHERE correlation_id = ?`,
       )
       .get("aud1") as {
@@ -509,15 +419,13 @@ describe("control plane (unix socket + JSONL)", () => {
       action: string;
       resource: string;
       outcome: string;
-      peer_pid: number;
       principal_kind: string;
     };
-    assert.strictEqual(row.source, "cli_socket");
+    assert.strictEqual(row.source, "cli_operator_token");
     assert.strictEqual(row.correlation_id, "aud1");
     assert.strictEqual(row.action, "authz.control");
     assert.strictEqual(row.resource, "ping");
     assert.strictEqual(row.outcome, "allowed");
-    assert.strictEqual(row.peer_pid, 42);
     assert.strictEqual(row.principal_kind, "operator");
     db.close();
   });
@@ -534,20 +442,15 @@ describe("control plane (unix socket + JSONL)", () => {
       {
         stateDb: db,
         acpxSpawn,
-        readPeerCred: () => ({
-          uid: process.getuid(),
-          gid: process.getgid(),
-          pid: 0,
-        }),
       },
       async (send) => {
-        const peer = { kind: "operator_peercred" } as const;
+        const opAuth = { kind: "operator_token", token: "test-op-token" } as const;
 
         const lineBind = await send({
           v: WIRE_VERSION,
           id: "b1",
           op: "acpx_bind_set",
-          auth: peer,
+          auth: opAuth,
           payload: {
             acp_workspace_root: "/acp/ws1",
             shoggoth_session_id: "acpx-sess",
@@ -560,7 +463,7 @@ describe("control plane (unix socket + JSONL)", () => {
           v: WIRE_VERSION,
           id: "s1",
           op: "acpx_agent_start",
-          auth: peer,
+          auth: opAuth,
           payload: {
             acp_workspace_root: "/acp/ws1",
             acpx_args: ["openclaw", "exec", "noop"],
@@ -574,7 +477,7 @@ describe("control plane (unix socket + JSONL)", () => {
           v: WIRE_VERSION,
           id: "s2",
           op: "acpx_agent_start",
-          auth: peer,
+          auth: opAuth,
           payload: {
             acp_workspace_root: "/acp/ws1",
             acpx_args: ["x"],
@@ -588,7 +491,7 @@ describe("control plane (unix socket + JSONL)", () => {
           v: WIRE_VERSION,
           id: "l1",
           op: "acpx_agent_list",
-          auth: peer,
+          auth: opAuth,
           payload: {},
         });
         const listRes = parseResponseLine(lineList);
@@ -599,7 +502,7 @@ describe("control plane (unix socket + JSONL)", () => {
           v: WIRE_VERSION,
           id: "t1",
           op: "acpx_agent_stop",
-          auth: peer,
+          auth: opAuth,
           payload: { acp_workspace_root: "/acp/ws1" },
         });
         const stopRes = parseResponseLine(lineStop);
@@ -637,18 +540,17 @@ describe("control plane (unix socket + JSONL)", () => {
 
     await withControlPlaneSession(
       {
-        readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
         stateDb: db,
         config: minimalConfig(sock),
         hitlPending: pending,
       },
       async (send) => {
-        const peer = { kind: "operator_peercred" } as const;
+        const opAuth = { kind: "operator_token", token: "test-op-token" } as const;
         const lineList = await send({
           v: WIRE_VERSION,
           id: "hl1",
           op: "hitl_pending_list",
-          auth: peer,
+          auth: opAuth,
           payload: {},
         });
         const listRes = parseResponseLine(lineList);
@@ -660,7 +562,7 @@ describe("control plane (unix socket + JSONL)", () => {
           v: WIRE_VERSION,
           id: "ha1",
           op: "hitl_pending_approve",
-          auth: peer,
+          auth: opAuth,
           payload: { id: "hp1" },
         });
         const appRes = parseResponseLine(lineApprove);
@@ -671,7 +573,7 @@ describe("control plane (unix socket + JSONL)", () => {
           v: WIRE_VERSION,
           id: "hg1",
           op: "hitl_pending_get",
-          auth: peer,
+          auth: opAuth,
           payload: { id: "hp1" },
         });
         const getRes = parseResponseLine(lineGet);
@@ -690,7 +592,7 @@ describe("control plane (unix socket + JSONL)", () => {
           v: WIRE_VERSION,
           id: "hd1",
           op: "hitl_pending_deny",
-          auth: peer,
+          auth: opAuth,
           payload: { id: "hp2" },
         });
         const denyRes = parseResponseLine(lineDeny);
@@ -700,7 +602,7 @@ describe("control plane (unix socket + JSONL)", () => {
           v: WIRE_VERSION,
           id: "hg2",
           op: "hitl_pending_get",
-          auth: peer,
+          auth: opAuth,
           payload: { id: "hp2" },
         });
         const get2 = parseResponseLine(lineGet2);
@@ -742,18 +644,17 @@ describe("control plane (unix socket + JSONL)", () => {
 
     await withControlPlaneSession(
       {
-        readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
         stateDb: db,
         config: minimalConfig(sock),
         hitlPending: pending,
       },
       async (send) => {
-        const peer = { kind: "operator_peercred" } as const;
+        const opAuth = { kind: "operator_token", token: "test-op-token" } as const;
         const lineNoAuto = await send({
           v: WIRE_VERSION,
           id: "hc-na",
           op: "hitl_clear",
-          auth: peer,
+          auth: opAuth,
           payload: { agent_id: "aghitl", no_auto: true },
         });
         const resNoAuto = parseResponseLine(lineNoAuto);
@@ -775,7 +676,7 @@ describe("control plane (unix socket + JSONL)", () => {
           v: WIRE_VERSION,
           id: "hc-sid",
           op: "hitl_clear",
-          auth: peer,
+          auth: opAuth,
           payload: { agent_id: "aghitl", session_id: sid },
         });
         const resSess = parseResponseLine(lineSess);
@@ -802,18 +703,17 @@ describe("control plane (unix socket + JSONL)", () => {
 
     await withControlPlaneSession(
       {
-        readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
         stateDb: db,
         config: minimalConfig(sock),
         hitlPending: pending,
       },
       async (send) => {
-        const peer = { kind: "operator_peercred" } as const;
+        const opAuth = { kind: "operator_token", token: "test-op-token" } as const;
         const line = await send({
           v: WIRE_VERSION,
           id: "hc-need",
           op: "hitl_clear",
-          auth: peer,
+          auth: opAuth,
           payload: { agent_id: "agx" },
         });
         const res = parseResponseLine(line);
@@ -866,7 +766,6 @@ describe("control plane (unix socket + JSONL)", () => {
 
     await withControlPlaneSession(
       {
-        readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
         stateDb: db,
         config: testConfig,
         hitlPending: pending,
@@ -878,12 +777,12 @@ describe("control plane (unix socket + JSONL)", () => {
         },
       },
       async (send) => {
-        const peer = { kind: "operator_peercred" } as const;
+        const opAuth = { kind: "operator_token", token: "test-op-token" } as const;
         const line = await send({
           v: WIRE_VERSION,
           id: "hc-all",
           op: "hitl_clear",
-          auth: peer,
+          auth: opAuth,
           payload: { agent_id: "all" },
         });
         const res = parseResponseLine(line);
@@ -896,7 +795,7 @@ describe("control plane (unix socket + JSONL)", () => {
           v: WIRE_VERSION,
           id: "hc-li",
           op: "hitl_pending_list",
-          auth: peer,
+          auth: opAuth,
           payload: {},
         });
         assert.equal((parseResponseLine(lineList).result as { pending: unknown[] }).pending.length, 0);
@@ -939,17 +838,16 @@ describe("control plane (unix socket + JSONL)", () => {
 
     await withControlPlaneSession(
       {
-        readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
         stateDb: db,
         config: minimalConfig(sock),
       },
       async (send) => {
-        const peer = { kind: "operator_peercred" } as const;
+        const opAuth = { kind: "operator_token", token: "test-op-token" } as const;
         const lineNew = await send({
           v: WIRE_VERSION,
           id: "scn1",
           op: "session_context_new",
-          auth: peer,
+          auth: opAuth,
           payload: { session_id: "sess-cx" },
         });
         const newRes = parseResponseLine(lineNew);
@@ -976,7 +874,7 @@ describe("control plane (unix socket + JSONL)", () => {
           v: WIRE_VERSION,
           id: "scr1",
           op: "session_context_reset",
-          auth: peer,
+          auth: opAuth,
           payload: { session_id: "sess-cx" },
         });
         const resetRes = parseResponseLine(lineReset);
@@ -1011,17 +909,16 @@ describe("control plane (unix socket + JSONL)", () => {
 
     await withControlPlaneSession(
       {
-        readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
         stateDb: db,
         config: minimalConfig(sock),
       },
       async (send) => {
-        const peer = { kind: "operator_peercred" } as const;
+        const opAuth = { kind: "operator_token", token: "test-op-token" } as const;
         const line = await send({
           v: WIRE_VERSION,
           id: "sl1",
           op: "session_list",
-          auth: peer,
+          auth: opAuth,
           payload: {},
         });
         const res = parseResponseLine(line);
@@ -1034,7 +931,7 @@ describe("control plane (unix socket + JSONL)", () => {
           v: WIRE_VERSION,
           id: "sl2",
           op: "session_list",
-          auth: peer,
+          auth: opAuth,
           payload: { status: "terminated" },
         });
         const resF = parseResponseLine(lineF);
@@ -1056,7 +953,7 @@ describe("control plane (unix socket + JSONL)", () => {
           v: WIRE_VERSION,
           id: "sl3",
           op: "session_list",
-          auth: peer,
+          auth: opAuth,
           payload: { agent: "alf" },
         });
         const resAg = parseResponseLine(lineAg);
@@ -1093,7 +990,6 @@ describe("control plane (unix socket + JSONL)", () => {
 
     await withControlPlaneSession(
       {
-        readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
         stateDb: db,
         config: minimalConfig(sock),
       },
@@ -1141,17 +1037,16 @@ describe("control plane (unix socket + JSONL)", () => {
     try {
       await withControlPlaneSession(
         {
-          readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
           stateDb: db,
           config: minimalConfig(sock),
         },
         async (send) => {
-          const peer = { kind: "operator_peercred" } as const;
+          const opAuth = { kind: "operator_token", token: "test-op-token" } as const;
           const line = await send({
             v: WIRE_VERSION,
             id: "ss1",
             op: "session_send",
-            auth: peer,
+            auth: opAuth,
             payload: { session_id: target, message: "hello operator", silent: true },
           });
           const res = parseResponseLine(line);
@@ -1199,7 +1094,6 @@ describe("control plane (unix socket + JSONL)", () => {
       const base = minimalConfig(sock);
       await withControlPlaneSession(
         {
-          readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
           stateDb: db,
           config: base,
         },
@@ -1231,7 +1125,6 @@ describe("control plane (unix socket + JSONL)", () => {
 
       await withControlPlaneSession(
         {
-          readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
           stateDb: db,
           config: { ...base, agentToAgent: { allow: ["other"] } },
         },
@@ -1252,7 +1145,6 @@ describe("control plane (unix socket + JSONL)", () => {
 
       await withControlPlaneSession(
         {
-          readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
           stateDb: db,
           config: {
             ...base,
@@ -1310,17 +1202,16 @@ describe("control plane (unix socket + JSONL)", () => {
     try {
       await withControlPlaneSession(
         {
-          readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
           stateDb: db,
           config: minimalConfig(sock),
         },
         async (send) => {
-          const peer = { kind: "operator_peercred" } as const;
+          const opAuth = { kind: "operator_token", token: "test-op-token" } as const;
           const line = await send({
             v: WIRE_VERSION,
             id: "sub1",
             op: "subagent_spawn",
-            auth: peer,
+            auth: opAuth,
             payload: {
               parent_session_id: parentId,
               prompt: "do the thing",
@@ -1344,7 +1235,7 @@ describe("control plane (unix socket + JSONL)", () => {
             v: WIRE_VERSION,
             id: "sub2",
             op: "subagent_spawn",
-            auth: peer,
+            auth: opAuth,
             payload: {
               parent_session_id: parentId,
               prompt: "overlay temp",
@@ -1398,7 +1289,6 @@ describe("control plane (unix socket + JSONL)", () => {
     try {
       await withControlPlaneSession(
         {
-          readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
           stateDb: db,
           config: { ...minimalConfig(sock), spawnSubagents: false },
         },
@@ -1450,7 +1340,6 @@ describe("control plane (unix socket + JSONL)", () => {
     try {
       await withControlPlaneSession(
         {
-          readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
           stateDb: db,
           config: {
             ...minimalConfig(sock),
@@ -1491,7 +1380,6 @@ describe("control plane (unix socket + JSONL)", () => {
     tokens.register(sid, "tok-insp-off");
     await withControlPlaneSession(
       {
-        readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
         stateDb: db,
         config: { ...minimalConfig(sock), spawnSubagents: false },
       },
@@ -1538,7 +1426,6 @@ describe("control plane (unix socket + JSONL)", () => {
     try {
       await withControlPlaneSession(
         {
-          readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
           stateDb: db,
           config: minimalConfig(sock),
         },
@@ -1590,7 +1477,6 @@ describe("control plane (unix socket + JSONL)", () => {
     try {
       await withControlPlaneSession(
         {
-          readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 1 }),
           stateDb: db,
           config: minimalConfig(sock),
         },
@@ -1619,7 +1505,6 @@ describe("control plane (unix socket + JSONL)", () => {
     let seen: { sessionId: string; sourceId: string; requestId: number } | undefined;
     await withControlPlaneSession(
       {
-        readPeerCred: () => ({ uid: process.getuid(), gid: process.getgid(), pid: 0 }),
         cancelMcpHttpRequest: (input) => {
           seen = input;
           return true;
@@ -1630,7 +1515,7 @@ describe("control plane (unix socket + JSONL)", () => {
           v: WIRE_VERSION,
           id: "mc1",
           op: "mcp_http_cancel_request",
-          auth: { kind: "operator_peercred" },
+          auth: { kind: "operator_token", token: "test-op-token" },
           payload: { session_id: "s1", source_id: "srv", request_id: 7 },
         });
         const res = parseResponseLine(line);

@@ -5,8 +5,18 @@
  * `systemContext` with the expected `kind`, `summary`, and `data` fields.
  */
 
-import { describe, it, beforeEach, afterEach } from "vitest";
+import { describe, it, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 import assert from "node:assert/strict";
+
+let prevOperatorToken: string | undefined;
+beforeAll(() => {
+  prevOperatorToken = process.env.SHOGGOTH_OPERATOR_TOKEN;
+  process.env.SHOGGOTH_OPERATOR_TOKEN = "test-op-token";
+});
+afterAll(() => {
+  if (prevOperatorToken === undefined) delete process.env.SHOGGOTH_OPERATOR_TOKEN;
+  else process.env.SHOGGOTH_OPERATOR_TOKEN = prevOperatorToken;
+});
 import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import { mkdtemp } from "node:fs/promises";
@@ -27,7 +37,7 @@ import { createSessionStore } from "../src/sessions/session-store.js";
 import { createSqliteAgentTokenStore } from "../src/auth/sqlite-agent-tokens.js";
 import { migrate, defaultMigrationsDir } from "../src/db/migrate.js";
 import { setSubagentRuntimeExtension } from "../src/subagent/subagent-extension-ref.js";
-import { startControlPlane, type ReadPeerCredFn } from "../src/control/control-plane.js";
+import { startControlPlane } from "../src/control/control-plane.js";
 import { createLogger } from "../src/logging.js";
 import { HealthRegistry } from "../src/health.js";
 import { ShutdownCoordinator } from "../src/shutdown.js";
@@ -92,7 +102,6 @@ function capturingSubagentRuntimeExtension() {
 
 async function withControlPlaneSession(
   options: {
-    readPeerCred?: ReadPeerCredFn;
     stateDb?: Database.Database;
     config?: ShoggothConfig;
   },
@@ -118,7 +127,6 @@ async function withControlPlaneSession(
     getHealth: () => health.snapshot(),
     version: "test-0",
     registerShutdownDrain: false,
-    readPeerCred: options?.readPeerCred,
     stateDb: options?.stateDb,
   });
 
@@ -167,7 +175,6 @@ describe("systemContext adoption: subagent_spawn one_shot", () => {
     try {
       await withControlPlaneSession(
         {
-          readPeerCred: () => ({ uid: process.getuid!(), gid: process.getgid!(), pid: 1 }),
           stateDb: db,
           config: minimalConfig(sock),
         },
@@ -176,7 +183,7 @@ describe("systemContext adoption: subagent_spawn one_shot", () => {
             v: WIRE_VERSION,
             id: "sc-os-1",
             op: "subagent_spawn",
-            auth: { kind: "operator_peercred" },
+            auth: { kind: "operator_token", token: "test-op-token" },
             payload: {
               parent_session_id: parentId,
               prompt: "do the thing",
@@ -226,7 +233,6 @@ describe("systemContext adoption: subagent_spawn persistent", () => {
     try {
       await withControlPlaneSession(
         {
-          readPeerCred: () => ({ uid: process.getuid!(), gid: process.getgid!(), pid: 1 }),
           stateDb: db,
           config: minimalConfig(sock),
         },
@@ -235,7 +241,7 @@ describe("systemContext adoption: subagent_spawn persistent", () => {
             v: WIRE_VERSION,
             id: "sc-ps-1",
             op: "subagent_spawn",
-            auth: { kind: "operator_peercred" },
+            auth: { kind: "operator_token", token: "test-op-token" },
             payload: {
               parent_session_id: parentId,
               prompt: "persistent task",
@@ -285,7 +291,6 @@ describe("systemContext adoption: session_send", () => {
     try {
       await withControlPlaneSession(
         {
-          readPeerCred: () => ({ uid: process.getuid!(), gid: process.getgid!(), pid: 1 }),
           stateDb: db,
           config: minimalConfig(sock),
         },
@@ -294,7 +299,7 @@ describe("systemContext adoption: session_send", () => {
             v: WIRE_VERSION,
             id: "sc-ss-1",
             op: "session_send",
-            auth: { kind: "operator_peercred" },
+            auth: { kind: "operator_token", token: "test-op-token" },
             payload: { session_id: targetId, message: "hello", silent: true },
           });
           const res = parseResponseLine(line);
@@ -344,7 +349,6 @@ describe("systemContext adoption: session_steer", () => {
     try {
       await withControlPlaneSession(
         {
-          readPeerCred: () => ({ uid: process.getuid!(), gid: process.getgid!(), pid: 1 }),
           stateDb: db,
           config: minimalConfig(sock),
         },
