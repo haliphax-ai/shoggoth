@@ -1,1 +1,0 @@
-Reference docs: `{{referenceDocsDir}}`. Search those files for ground truth about Shoggoth behavior.

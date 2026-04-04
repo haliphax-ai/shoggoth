@@ -219,7 +219,6 @@ function formatPrimaryModelLabel(
 
 
 function buildShoggothCliAndDocsSection(): string {
-  return daemonPrompt("system-cli-docs", { referenceDocsDir: SHOGGOTH_REFERENCE_DOCS_DIR });
 }
 
 

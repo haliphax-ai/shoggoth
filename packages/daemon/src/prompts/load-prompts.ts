@@ -7,7 +7,6 @@ const PROMPTS_DIR = dirname(fileURLToPath(import.meta.url));
 export const REQUIRED_PROMPT_KEYS: readonly string[] = [
   "session-segment-startup-new",
   "session-segment-startup-reset",
-  "system-cli-docs",
   "system-env-session-appendix",
   "system-heartbeats",
   "system-project-context-title",
