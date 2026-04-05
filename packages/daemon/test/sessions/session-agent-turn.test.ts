@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
-import { DEFAULT_HITL_CONFIG } from "@shoggoth/shared";
+import { DEFAULT_HITL_CONFIG, shoggothModelsCompactionSchema } from "@shoggoth/shared";
 import { defaultConfig } from "@shoggoth/shared";
 import { migrate, defaultMigrationsDir } from "../../src/db/migrate";
 import { createHitlPendingResolutionStack } from "../../src/hitl/hitl-pending-stack";
@@ -104,7 +104,7 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
       compaction: {
         maxContextChars: 80_000,
         preserveRecentMessages: 2,
-        contextWindowThresholdPercent: 1, // 1% of 100 tokens = triggers immediately
+        contextWindowReserveTokens: 99_999, // reserve larger than window → triggers immediately
       },
     };
 
@@ -221,4 +221,16 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
     assert.ok(result);
     assert.equal(result.latestAssistantText, "CODEC_TEST_REPLY");
   });
+});
+
+describe("shoggothModelsCompactionSchema – contextWindowReserveTokens", () => {
+  it("accepts contextWindowReserveTokens", () => {
+    const result = shoggothModelsCompactionSchema.safeParse({
+      maxContextChars: 80_000,
+      preserveRecentMessages: 2,
+      contextWindowReserveTokens: 20_000,
+    });
+    assert.ok(result.success, `expected success: ${JSON.stringify(result.error?.issues)}`);
+  });
+
 });

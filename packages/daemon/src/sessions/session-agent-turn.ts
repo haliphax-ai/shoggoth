@@ -261,14 +261,13 @@ export async function executeSessionAgentTurn(
     const chain = modelsForSession?.failoverChain;
     const ctxWindowTokens = chain?.[0]?.contextWindowTokens;
     if (ctxWindowTokens) {
-      const thresholdPct = modelsForSession?.compaction?.contextWindowThresholdPercent ?? 50;
+      const reserveTokens = modelsForSession?.compaction?.contextWindowReserveTokens ?? 20_000;
       const systemChars = effectiveSystemPrompt.length;
       const toolSchemaChars = JSON.stringify(mcpCtx.toolsOpenAi).length;
       const transcriptChars = initialMessages.reduce((n, m) => n + (m.content?.length ?? 0), 0);
       const estimatedTokens = (systemChars + toolSchemaChars + transcriptChars) / 4;
-      const fillPct = (estimatedTokens / ctxWindowTokens) * 100;
-      if (fillPct > thresholdPct) {
-        log.debug("inline compaction triggered", { sessionId: input.sessionId, fillPct: fillPct.toFixed(1), thresholdPct, estimatedTokens: Math.round(estimatedTokens), ctxWindowTokens });
+      if (estimatedTokens > ctxWindowTokens - reserveTokens) {
+        log.debug("inline compaction triggered", { sessionId: input.sessionId, estimatedTokens: Math.round(estimatedTokens), ctxWindowTokens, reserveTokens });
         try {
           const policy = resolveCompactionPolicyFromModelsConfig(modelsForSession);
           const compactionClient = createFailoverClientFromModelsConfig(modelsForSession, { env: input.env });

@@ -123,8 +123,8 @@ export const shoggothModelsCompactionSchema = z
     maxContextChars: z.number().int().positive(),
     preserveRecentMessages: z.number().int().nonnegative(),
     summaryMaxOutputTokens: z.number().int().positive().optional(),
-    /** Trigger inline compaction when estimated token usage exceeds this percentage of the model's context window. Default 50. */
-    contextWindowThresholdPercent: z.number().min(1).max(100).optional(),
+    /** Trigger inline compaction when estimated token usage exceeds (contextWindow − reserveTokens). Default 20 000. */
+    contextWindowReserveTokens: z.number().int().positive().optional(),
   })
   .strict();
 
