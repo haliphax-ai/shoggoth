@@ -608,7 +608,11 @@ export const shoggothToolDiscoveryConfigSchema = z
     /** When true, tool discovery/collapse is active. Default: false (all tools advertised). */
     enabled: z.boolean().optional(),
     /** Tool IDs that are never collapsed (always in the tools array). */
-    alwaysOn: z.array(z.string().min(1)).optional(),
+    alwaysOn: z.array(z.string().min(1)).default([
+      "read", "write", "exec", "memory-search", "session-query",
+      "poll", "skills", "show", "fs", "ls", "fetch", "kv", "timer",
+      "search-replace",
+    ]),
     /** Trigger phrases: when a user message contains the match string (case-insensitive), the listed tool IDs are auto-enabled for that turn. */
     triggers: z.array(toolDiscoveryTriggerSchema).optional(),
   })
