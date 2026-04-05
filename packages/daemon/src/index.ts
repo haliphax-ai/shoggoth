@@ -593,7 +593,24 @@ void (async () => {
         },
         sessionId,
       }),
-      createMessagePoster: createDaemonMessagePoster,
+      createMessagePoster: (sessionId: string) => createDaemonMessagePoster({
+        getMessageContext: () => {
+          const messaging = discordMessaging;
+          if (!messaging) return undefined;
+          return {
+            execute: async (target: string, args: Record<string, unknown>) => {
+              const action = args.action as string;
+              const content = args.content as string;
+              if (action === "post" && content) {
+                await messaging.sendMessage(target, content);
+                return { ok: true };
+              }
+              return { ok: false, error: "unsupported action" };
+            },
+          };
+        },
+        logger: getLogger("workflow-message-poster"),
+      }),
 
   
       createToolExecutor: (sessionId: string) => createDaemonToolExecutor({
