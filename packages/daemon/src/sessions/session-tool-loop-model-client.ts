@@ -1,3 +1,4 @@
+import type Database from "better-sqlite3";
 import type {
   ChatMessage,
   FailoverToolCallingClient,
@@ -5,7 +6,17 @@ import type {
   ModelUsage,
   OpenAIToolFunctionDefinition,
 } from "@shoggoth/models";
+import {
+  resolveCompactionPolicyFromModelsConfig,
+  createFailoverClientFromModelsConfig,
+} from "@shoggoth/models";
+import type { ShoggothModelsConfig } from "@shoggoth/shared";
+import { compactSessionTranscript } from "../transcript-compact";
+import { loadSessionTranscriptAsModelChat } from "./transcript-to-chat";
+import { getLogger } from "../logging";
 import type { ModelClient } from "./tool-loop";
+
+const log = getLogger("session-tool-loop-model-client");
 
 export interface SessionToolLoopModelClient extends ModelClient {
   /** Best-effort failover metadata from the most recent `completeWithTools` hop. */
@@ -49,6 +60,18 @@ export function createSessionToolLoopModelClient(input: {
    * Use for incremental stats persistence so mid-turn queries see up-to-date numbers.
    */
   readonly onUsageDelta?: (delta: ModelUsage) => void;
+  /** Optional: enables mid-turn context compaction before each model call. */
+  readonly compaction?: {
+    readonly db: Database.Database;
+    readonly sessionId: string;
+    readonly contextSegmentId: string;
+    readonly ctxWindowTokens: number;
+    readonly reserveTokens: number;
+    readonly modelsConfig: ShoggothModelsConfig | undefined;
+    readonly env: Record<string, string | undefined>;
+    readonly systemPromptChars: number;
+    readonly toolSchemaChars: number;
+  };
 }): SessionToolLoopModelClient {
   let messages: ChatMessage[] = [...input.initialMessages];
   let banner: SessionToolLoopFailoverState | undefined;
@@ -78,6 +101,43 @@ export function createSessionToolLoopModelClient(input: {
     },
 
     async complete() {
+      // --- Mid-turn compaction check ---
+      if (input.compaction) {
+        const c = input.compaction;
+        let textChars = 0;
+        let jsonChars = 0;
+        for (const m of messages) {
+          const contentLen = typeof m.content === "string" ? m.content.length
+            : Array.isArray(m.content) ? m.content.reduce((n, p) => n + ("text" in p && typeof p.text === "string" ? p.text.length : 0), 0)
+            : 0;
+          if (m.role === "tool") {
+            jsonChars += contentLen;
+          } else {
+            textChars += contentLen;
+          }
+          if (m.toolCalls) {
+            for (const tc of m.toolCalls) jsonChars += tc.arguments.length;
+          }
+        }
+        const estimatedTokens = (c.systemPromptChars / 4) + (c.toolSchemaChars / 2) + (textChars / 4) + (jsonChars / 2);
+        if (estimatedTokens > c.ctxWindowTokens - c.reserveTokens) {
+          log.debug("mid-turn compaction triggered", { sessionId: c.sessionId, estimatedTokens: Math.round(estimatedTokens), ctxWindowTokens: c.ctxWindowTokens, reserveTokens: c.reserveTokens });
+          try {
+            const policy = resolveCompactionPolicyFromModelsConfig(c.modelsConfig);
+            const compactionClient = createFailoverClientFromModelsConfig(c.modelsConfig, { env: c.env });
+            const { compacted } = await compactSessionTranscript(c.db, c.sessionId, policy, compactionClient, { modelsConfig: c.modelsConfig, force: true });
+            if (compacted) {
+              const reloaded = loadSessionTranscriptAsModelChat(c.db, c.sessionId, c.contextSegmentId);
+              const systemMsg = messages.find((m) => m.role === "system");
+              messages = systemMsg ? [systemMsg, ...reloaded] : [...reloaded];
+              log.debug("mid-turn compaction completed", { sessionId: c.sessionId });
+            }
+          } catch (e) {
+            log.warn("mid-turn compaction failed, proceeding with current messages", { sessionId: c.sessionId, err: String(e) });
+          }
+        }
+      }
+
       const streamOpts =
         input.streamModel === true
           ? {

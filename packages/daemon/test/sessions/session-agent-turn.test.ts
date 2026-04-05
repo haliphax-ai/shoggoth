@@ -88,7 +88,7 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
     assert.equal(result.failoverMeta?.degraded, false);
   });
 
-  it("proceeds normally when inline compaction fails (e.g. no real model)", async () => {
+  it("proceeds normally when mid-turn compaction fails (e.g. no real model)", async () => {
     const config = defaultConfig(tmp);
     // Configure a model with a tiny context window so the threshold is exceeded.
     config.models = {

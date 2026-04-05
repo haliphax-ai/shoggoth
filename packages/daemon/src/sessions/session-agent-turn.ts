@@ -3,16 +3,13 @@ import type Database from "better-sqlite3";
 import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import type { ChatMessage, ImageBlockCodec, OpenAIToolFunctionDefinition } from "@shoggoth/models";
 import {
-  createFailoverClientFromModelsConfig,
   createFailoverToolCallingClientFromModelsConfig,
   getImageBlockCodec,
   mergeModelInvocationParams,
-  resolveCompactionPolicyFromModelsConfig,
   ModelHttpError,
   type CreateFailoverFromConfigOptions,
   type FailoverToolCallingClient,
 } from "@shoggoth/models";
-import { compactSessionTranscript } from "../transcript-compact";
 import type { AgentCredentials } from "@shoggoth/os-exec";
 import type { ShoggothConfig, ShoggothModelsConfig } from "@shoggoth/shared";
 import {
@@ -256,52 +253,12 @@ export async function executeSessionAgentTurn(
     imageBlockCodec,
   );
 
-  // --- Inline context-window-aware compaction check ---
-  if (!input.minimalContext) {
-    const chain = modelsForSession?.failoverChain;
-    const ctxWindowTokens = chain?.[0]?.contextWindowTokens;
-    if (ctxWindowTokens) {
-      const reserveTokens = modelsForSession?.compaction?.contextWindowReserveTokens ?? 20_000;
-      const systemChars = effectiveSystemPrompt.length;
-      const toolSchemaChars = JSON.stringify(mcpCtx.toolsOpenAi).length;
-      // Split token estimation: text ≈ chars/4, JSON-heavy content ≈ chars/2
-      let textChars = 0;
-      let jsonChars = 0;
-      for (const m of initialMessages) {
-        const contentLen = typeof m.content === "string" ? m.content.length
-          : Array.isArray(m.content) ? m.content.reduce((n, p) => n + ("text" in p && typeof p.text === "string" ? p.text.length : 0), 0)
-          : 0;
-        if (m.role === "tool") {
-          jsonChars += contentLen;
-        } else {
-          textChars += contentLen;
-        }
-        if (m.toolCalls) {
-          for (const tc of m.toolCalls) jsonChars += tc.arguments.length;
-        }
-      }
-      const estimatedTokens = (systemChars / 4) + (toolSchemaChars / 2) + (textChars / 4) + (jsonChars / 2);
-      if (estimatedTokens > ctxWindowTokens - reserveTokens) {
-        log.debug("inline compaction triggered", { sessionId: input.sessionId, estimatedTokens: Math.round(estimatedTokens), textChars, jsonChars, ctxWindowTokens, reserveTokens });
-        try {
-          const policy = resolveCompactionPolicyFromModelsConfig(modelsForSession);
-          const compactionClient = createFailoverClientFromModelsConfig(modelsForSession, { env: input.env });
-          const { compacted } = await compactSessionTranscript(input.db, input.sessionId, policy, compactionClient, { modelsConfig: modelsForSession, force: true });
-          if (compacted) {
-            log.info("inline compaction completed", { sessionId: input.sessionId });
-            const reloadedHistory = loadSessionTranscriptAsModelChat(input.db, input.sessionId, ctxSeg);
-            effectiveHistory = reloadedHistory;
-            initialMessages = sanitizeTranscriptForProvider([system, ...effectiveHistory], imageBlockCodec);
-          }
-        } catch (e) {
-          log.warn("inline compaction failed, proceeding with full context", { sessionId: input.sessionId, err: String(e) });
-        }
-      }
-    }
-  }
-
   // --- Mutable tools ref for mid-loop refresh (tool discovery) ---
   let currentToolsOpenAi: readonly OpenAIToolFunctionDefinition[] = mcpCtx.toolsOpenAi;
+
+  const ctxWindowTokens = !input.minimalContext
+    ? modelsForSession?.failoverChain?.[0]?.contextWindowTokens
+    : undefined;
 
   const model: SessionToolLoopModelClient = createSessionToolLoopModelClient({
     toolClient,
@@ -313,6 +270,17 @@ export async function executeSessionAgentTurn(
     onUsageDelta: (delta) => {
       incrementTokenUsage(input.db, input.sessionId, delta);
     },
+    compaction: ctxWindowTokens ? {
+      db: input.db,
+      sessionId: input.sessionId,
+      contextSegmentId: ctxSeg,
+      ctxWindowTokens,
+      reserveTokens: modelsForSession?.compaction?.contextWindowReserveTokens ?? 20_000,
+      modelsConfig: modelsForSession,
+      env: input.env,
+      systemPromptChars: effectiveSystemPrompt.length,
+      toolSchemaChars: JSON.stringify(mcpCtx.toolsOpenAi).length,
+    } : undefined,
   });
 
   const principal: AuthenticatedPrincipal = {
