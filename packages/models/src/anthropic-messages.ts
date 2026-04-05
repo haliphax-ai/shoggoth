@@ -1,6 +1,7 @@
 import { ModelHttpError } from "./errors";
 import { anthropicImageBlockCodec } from "./image-codec";
 import { getResilienceGate, parseRateLimitHeaders } from "./resilience";
+import { stripXmlThinkingTags } from "./thinking-normalize";
 import type {
   ChatContentPart,
   ChatMessage,
@@ -222,9 +223,7 @@ export function mapChatMessagesToAnthropicPayload(
       while (i < messages.length && messages[i]!.role === "tool") {
         const tm = messages[i]!;
         toolResults.push({
-          type: "tool_result",
-          tool_use_id: tm.toolCallId ?? "",
-          content: tm.content != null ? String(tm.content) : "",
+          type: "tool_result", tool_use_id: tm.toolCallId ?? "", content: tm.content != null ? String(tm.content) : "",
         });
         i += 1;
       }
@@ -303,6 +302,7 @@ function parseAnthropicErrorBody(text: string): string {
 function contentBlocksToModelOutput(
   content: unknown,
   anthropicToOpenAiToolName?: ReadonlyMap<string, string>,
+  thinkingFormat?: "native" | "xml-tags" | "none",
 ): { text: string | null; toolCalls: ChatToolCall[] } {
   if (!Array.isArray(content)) {
     throw new ModelHttpError(502, "Anthropic response missing content array", String(content).slice(0, 200));
@@ -328,7 +328,8 @@ function contentBlocksToModelOutput(
       }
       if (id && name) {
         const openAiName = anthropicToOpenAiToolName?.get(name) ?? name;
-        toolCalls.push({ id, name: openAiName, arguments: argsStr });
+        const strippedArgs = thinkingFormat === "xml-tags" ? stripXmlThinkingTags(argsStr) : argsStr;
+        toolCalls.push({ id, name: openAiName, arguments: strippedArgs });
       }
     }
   }
@@ -344,6 +345,7 @@ type AnthropicBlockState =
 
 export interface ConsumeAnthropicMessagesStreamOptions {
   readonly accumulateTools: boolean;
+  readonly thinkingFormat?: "native" | "xml-tags" | "none";
   readonly onTextDelta?: ModelStreamTextDeltaCallback;
   /** Map Anthropic-safe tool names back to OpenAI/MCP names (e.g. `builtin_read` → `builtin-read`). */
   readonly anthropicToOpenAiToolName?: ReadonlyMap<string, string>;
@@ -394,7 +396,8 @@ export async function consumeAnthropicMessagesStream(
     }
     if (state.id && state.name) {
       const openAiName = options.anthropicToOpenAiToolName?.get(state.name) ?? state.name;
-      toolCallsByIndex.push({ index, call: { id: state.id, name: openAiName, arguments: argsStr } });
+      const strippedArgs = options.thinkingFormat === "xml-tags" ? stripXmlThinkingTags(argsStr) : argsStr;
+      toolCallsByIndex.push({ index, call: { id: state.id, name: openAiName, arguments: strippedArgs } });
     }
     state.finalized = true;
   };
@@ -683,6 +686,7 @@ export function createAnthropicMessagesProvider(
         }
         const { content: streamed, toolCalls, usage } = await consumeAnthropicMessagesStream(res.body, {
           accumulateTools: false,
+          thinkingFormat: input.thinkingFormat,
           onTextDelta: input.onTextDelta,
         });
         if (toolCalls.length > 0) {
@@ -711,7 +715,7 @@ export function createAnthropicMessagesProvider(
       }
 
       const content = (json as { content?: unknown }).content;
-      const { text: outText, toolCalls } = contentBlocksToModelOutput(content);
+      const { text: outText, toolCalls } = contentBlocksToModelOutput(content, undefined, input.thinkingFormat);
       if (toolCalls.length > 0) {
         throw new ModelHttpError(
           502,
@@ -775,6 +779,7 @@ export function createAnthropicMessagesProvider(
         }
         const { content: outText, toolCalls, usage } = await consumeAnthropicMessagesStream(res.body, {
           accumulateTools: true,
+          thinkingFormat: input.thinkingFormat,
           onTextDelta: input.onTextDelta,
           anthropicToOpenAiToolName: anthropicToOpenAi,
         });
@@ -803,7 +808,7 @@ export function createAnthropicMessagesProvider(
       }
 
       const content = (json as { content?: unknown }).content;
-      const { text: outText, toolCalls } = contentBlocksToModelOutput(content, anthropicToOpenAi);
+      const { text: outText, toolCalls } = contentBlocksToModelOutput(content, anthropicToOpenAi, input.thinkingFormat);
 
       if (toolCalls.length === 0 && (outText === null || outText === "")) {
         throw new ModelHttpError(

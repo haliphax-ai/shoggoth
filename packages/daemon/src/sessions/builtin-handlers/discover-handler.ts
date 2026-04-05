@@ -1,11 +1,12 @@
 // ---------------------------------------------------------------------------
-// builtin-discover — dynamic tool enable/disable/list
+// builtin-discover — dynamic tool enable/disable/list/reset
 // ---------------------------------------------------------------------------
 
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
 import {
   getSessionToolState,
   setSessionToolState,
+  clearSessionToolState,
   resolveToolDiscoveryConfig,
   toolRefreshNeeded,
   toolCatalogCache,
@@ -26,17 +27,27 @@ async function discoverHandler(
 
   const enable = Array.isArray(args.enable) ? (args.enable as string[]) : [];
   const disable = Array.isArray(args.disable) ? (args.disable as string[]) : [];
+  const reset = args.reset === true;
   const list = args.list === true;
 
-  const currentState = getSessionToolState(ctx.db, ctx.sessionId);
-
-  const applied: { enabled: string[]; disabled: string[]; rejected: Array<{ id: string; reason: string }> } = {
+  const applied: {
+    enabled: string[];
+    disabled: string[];
+    reset?: boolean;
+    rejected: Array<{ id: string; reason: string }>;
+  } = {
     enabled: [],
     disabled: [],
     rejected: [],
   };
 
-  // Process enables
+  // Process reset first (clears all session tool state)
+  if (reset) {
+    clearSessionToolState(ctx.db, ctx.sessionId);
+    applied.reset = true;
+  }
+
+  // Process enables (after reset, so these apply to clean state)
   for (const id of enable) {
     if (typeof id !== "string" || !id) {
       applied.rejected.push({ id: String(id), reason: "invalid_id" });
@@ -46,7 +57,7 @@ async function discoverHandler(
     applied.enabled.push(id);
   }
 
-  // Process disables
+  // Process disables (after reset and enables)
   for (const id of disable) {
     if (typeof id !== "string" || !id) {
       applied.rejected.push({ id: String(id), reason: "invalid_id" });
@@ -61,7 +72,7 @@ async function discoverHandler(
   }
 
   // Signal refresh needed if any state changed
-  if (applied.enabled.length > 0 || applied.disabled.length > 0) {
+  if (applied.enabled.length > 0 || applied.disabled.length > 0 || applied.reset) {
     toolRefreshNeeded.set(ctx.sessionId, true);
   }
 

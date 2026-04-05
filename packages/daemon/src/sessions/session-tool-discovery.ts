@@ -47,6 +47,13 @@ export function getSessionToolState(
   return map;
 }
 
+export function clearSessionToolState(
+  db: Database.Database,
+  sessionId: string,
+): void {
+  db.prepare(`DELETE FROM session_tool_state WHERE session_id = ?`).run(sessionId);
+}
+
 export function setSessionToolState(
   db: Database.Database,
   sessionId: string,
@@ -104,7 +111,7 @@ export function resolveToolDiscoveryConfig(
 // ---------------------------------------------------------------------------
 
 const DISCOVER_TOOL_BASE_DESCRIPTION =
-  "Manage which tools are active. Call with enable/disable arrays of tool IDs, or list: true to see the full catalog.";
+  "Manage which tools are active. Call with enable/disable arrays of tool IDs, reset: true to restore defaults, or list: true to see the full catalog.";
 
 const DISCOVER_TOOL_INPUT_SCHEMA = {
   type: "object" as const,
@@ -118,6 +125,10 @@ const DISCOVER_TOOL_INPUT_SCHEMA = {
       type: "array",
       items: { type: "string" },
       description: "Tool IDs to disable (collapse) for this session.",
+    },
+    reset: {
+      type: "boolean",
+      description: "When true, reset all tool state to defaults (clear session state, keep alwaysOn tools).",
     },
     list: {
       type: "boolean",

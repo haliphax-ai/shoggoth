@@ -1,7 +1,7 @@
 import { ModelHttpError } from "./errors";
 import { geminiImageBlockCodec } from "./image-codec";
 import { getResilienceGate, parseRateLimitHeaders } from "./resilience";
-import { normalizeThinkingBlocks } from "./thinking-normalize";
+import { normalizeThinkingBlocks, stripXmlThinkingTags } from "./thinking-normalize";
 import type {
   ChatContentPart,
   ChatMessage,
@@ -269,7 +269,8 @@ function parseGeminiResponse(
       } catch {
         throw new ModelHttpError(502, "functionCall args not JSON-serializable", "");
       }
-      toolCalls.push({ id, name, arguments: argsStr });
+      const strippedArgs = thinkingFormat === "xml-tags" ? stripXmlThinkingTags(argsStr) : argsStr;
+      toolCalls.push({ id, name, arguments: strippedArgs });
       callIndex += 1;
     }
   }
@@ -371,7 +372,8 @@ export async function consumeGeminiStream(
           } catch {
             throw new ModelHttpError(502, "functionCall args not JSON-serializable in stream", "");
           }
-          toolCalls.push({ id, name, arguments: argsStr });
+          const strippedArgs = options.thinkingFormat === "xml-tags" ? stripXmlThinkingTags(argsStr) : argsStr;
+          toolCalls.push({ id, name, arguments: strippedArgs });
           callIndex += 1;
         }
       }

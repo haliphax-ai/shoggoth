@@ -1,7 +1,7 @@
 import { ModelHttpError } from "./errors";
 import { openaiImageBlockCodec } from "./image-codec";
 import { getResilienceGate, parseRateLimitHeaders } from "./resilience";
-import { normalizeThinkingBlocks } from "./thinking-normalize";
+import { normalizeThinkingBlocks, stripXmlThinkingTags } from "./thinking-normalize";
 import type {
   ChatContentPart,
   ChatMessage,
@@ -110,13 +110,18 @@ function applyToolCallDeltas(map: Map<number, ToolCallPartial>, deltas: unknown)
   }
 }
 
-function finalizeToolCalls(map: Map<number, ToolCallPartial>): ChatToolCall[] {
+function finalizeToolCalls(
+  map: Map<number, ToolCallPartial>,
+  thinkingFormat?: "native" | "xml-tags" | "none",
+): ChatToolCall[] {
   const keys = [...map.keys()].sort((a, b) => a - b);
   const out: ChatToolCall[] = [];
   for (const k of keys) {
     const t = map.get(k)!;
     if (t.id && t.name) {
-      out.push({ id: t.id, name: t.name, arguments: t.arguments || "{}" });
+      const args = t.arguments || "{}";
+      const strippedArgs = thinkingFormat === "xml-tags" ? stripXmlThinkingTags(args) : args;
+      out.push({ id: t.id, name: t.name, arguments: strippedArgs });
     }
   }
   return out;
@@ -124,6 +129,7 @@ function finalizeToolCalls(map: Map<number, ToolCallPartial>): ChatToolCall[] {
 
 interface ConsumeStreamOptions {
   readonly accumulateTools: boolean;
+  readonly thinkingFormat?: "native" | "xml-tags" | "none";
   readonly onTextDelta?: (delta: string, accumulated: string) => void;
 }
 
@@ -207,7 +213,7 @@ async function consumeOpenAIChatCompletionStream(
 
   return {
     content,
-    toolCalls: options.accumulateTools ? finalizeToolCalls(toolPartials) : [],
+    toolCalls: options.accumulateTools ? finalizeToolCalls(toolPartials, options.thinkingFormat) : [],
     usage,
   };
 }
@@ -374,6 +380,8 @@ export function createOpenAICompatibleProvider(
         body: JSON.stringify(body),
       });
 
+      const thinkingFormat = input.thinkingFormat ?? "none";
+
       if (input.stream === true) {
         if (!res.ok) {
           const errText = await res.text();
@@ -388,6 +396,7 @@ export function createOpenAICompatibleProvider(
         }
         const { content, toolCalls, usage } = await consumeOpenAIChatCompletionStream(res.body, {
           accumulateTools: true,
+          thinkingFormat,
           onTextDelta: input.onTextDelta,
         });
 
@@ -395,7 +404,6 @@ export function createOpenAICompatibleProvider(
           throw new ModelHttpError(502, "missing assistant content and tool_calls", "");
         }
 
-        const thinkingFormat = input.thinkingFormat ?? "none";
         const normalized = content ? normalizeThinkingBlocks(content, thinkingFormat) : null;
         const finalContent = normalized === null ? null : typeof normalized === "string" ? normalized : JSON.stringify(normalized);
         return { content: finalContent, toolCalls, usage };
@@ -441,10 +449,11 @@ export function createOpenAICompatibleProvider(
           if (!fn || typeof fn !== "object") continue;
           const name =
             typeof (fn as { name?: unknown }).name === "string" ? (fn as { name: string }).name : "";
-          const args =
+          const rawArgs =
             typeof (fn as { arguments?: unknown }).arguments === "string"
               ? (fn as { arguments: string }).arguments
               : "{}";
+          const args = thinkingFormat === "xml-tags" ? stripXmlThinkingTags(rawArgs) : rawArgs;
           if (id && name) toolCalls.push({ id, name, arguments: args });
         }
       }
@@ -457,7 +466,6 @@ export function createOpenAICompatibleProvider(
         );
       }
 
-      const thinkingFormat = input.thinkingFormat ?? "none";
       const normalized = content ? normalizeThinkingBlocks(content, thinkingFormat) : null;
       const finalContent = normalized === null ? null : typeof normalized === "string" ? normalized : JSON.stringify(normalized);
       return { content: finalContent, toolCalls, usage: extractOpenAIUsage(json) };
