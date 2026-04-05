@@ -84,12 +84,11 @@ import {
   handleDiscordHitlReactionAdd,
   createHitlDiscordNoticeRegistry,
   type HitlDiscordNoticeRegistry,
-  executeDiscordMessageToolAction,
   discordPlatformRegistration,
   createDiscordProbe,
   resolveDiscordOwnerUserId,
 } from "@shoggoth/platform-discord";
-import { registerPlatform as registerMessagingPlatform } from "@shoggoth/messaging";
+import { registerPlatform as registerMessagingPlatform, executeMessageToolAction } from "@shoggoth/messaging";
 import { registerPlatform, stopAllPlatforms } from "./platforms/platform-registry";
 import { reconcilePersistentSubagents } from "./subagent/reconcile-persistent-subagents";
 import {
@@ -711,7 +710,7 @@ void (async () => {
     messageToolContextRef.current = {
       slice: messageToolSliceFromCapabilities(dm.capabilities),
       execute: (sessionId, args) =>
-        executeDiscordMessageToolAction(
+        executeMessageToolAction(
           {
             capabilities: dm.capabilities,
             transport: dm.discordRestTransport,

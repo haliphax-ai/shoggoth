@@ -7,3 +7,7 @@ export * from "./platform-registry";
 export * from "./model";
 export * from "./a2a";
 export * from "./capabilities";
+
+// --- Platform-agnostic message tool handler ---
+export * from "./message-tool-transport";
+export * from "./message-tool-handler";

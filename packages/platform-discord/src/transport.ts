@@ -1,40 +1,21 @@
+import type {
+  CreateMessageBody,
+  EditMessageBody,
+  MessageUploadFile,
+  ChannelMessagesQuery,
+  SearchQuery,
+} from "@shoggoth/messaging";
+
 /**
  * Injectable Discord REST surface for tests and daemon wiring.
+ * Body / query types alias the platform-agnostic definitions in @shoggoth/messaging.
  */
 
-export interface DiscordCreateMessageBody {
-  readonly content: string;
-  readonly message_reference?: { readonly message_id: string };
-  readonly allowed_mentions?: { readonly parse: readonly string[] };
-}
-
-export interface DiscordEditMessageBody {
-  readonly content: string;
-}
-
-/** Multipart file part for {@link DiscordRestTransport.createMessageWithFiles}. */
-export interface DiscordMessageUploadFile {
-  readonly filename: string;
-  readonly data: Uint8Array;
-}
-
-/** Query for GET `/channels/{id}/messages` (at most one of before / after / around). */
-export interface DiscordChannelMessagesQuery {
-  readonly limit?: number;
-  readonly before?: string;
-  readonly after?: string;
-  readonly around?: string;
-}
-
-/** Query for GET `/guilds/{id}/messages/search`. */
-export interface DiscordSearchQuery {
-  readonly content?: string;
-  readonly author_id?: string | readonly string[];
-  readonly channel_id?: string | readonly string[];
-  readonly min_id?: string;
-  readonly max_id?: string;
-  readonly limit?: number;
-}
+export type DiscordCreateMessageBody = CreateMessageBody;
+export type DiscordEditMessageBody = EditMessageBody;
+export type DiscordMessageUploadFile = MessageUploadFile;
+export type DiscordChannelMessagesQuery = ChannelMessagesQuery;
+export type DiscordSearchQuery = SearchQuery;
 
 export interface DiscordRestTransport {
   /** POST `/users/@me/channels` — returns the DM channel id for `createMessage`. */
