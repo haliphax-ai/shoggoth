@@ -86,14 +86,16 @@ export function recordCompaction(
   });
 }
 
-/** Reset per-segment counters (turn_count, input_tokens, output_tokens, transcript_message_count). Called on context new/reset. */
+/** Reset per-segment counters (turn_count, compaction_count, input_tokens, output_tokens, transcript_message_count). Called on context new/reset. */
 export function resetSegmentStats(db: Database.Database, sessionId: string): void {
   db.prepare(
     `UPDATE session_stats SET
        turn_count = 0,
+       compaction_count = 0,
        input_tokens = 0,
        output_tokens = 0,
        transcript_message_count = 0,
+       last_compacted_at = NULL,
        updated_at = datetime('now')
      WHERE session_id = @sessionId`,
   ).run({ sessionId });
