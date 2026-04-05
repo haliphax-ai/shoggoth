@@ -101,3 +101,9 @@ export async function executeWorkflowToolCall(
     maxDepth: sessionContext.maxDepth,
   });
 }
+
+/** Reset the singleton state. For testing only. */
+export function resetWorkflowSingleton(): void {
+  server = undefined;
+  controlPlane = undefined;
+}

@@ -113,6 +113,10 @@ import {
   createDaemonPollAdapter,
   createDaemonKillAdapter,
   createDaemonMessageAdapter,
+  createDaemonMessagePoster,
+  createDaemonToolExecutor,
+
+  
   type CompletionMap,
 } from "./workflow-adapters";
 import { createSessionManager } from "./sessions/session-manager";
@@ -588,6 +592,18 @@ void (async () => {
           return discordMessaging.resolveOutboundChannelIdForSession(sessionId);
         },
         sessionId,
+      }),
+      createMessagePoster: createDaemonMessagePoster,
+
+  
+      createToolExecutor: (sessionId: string) => createDaemonToolExecutor({
+        getToolContext: async () => {
+          const { default: { getSessionMcpRuntime } } = await import("./sessions/session-mcp-runtime.js");
+          const runtime = getSessionMcpRuntime();
+          if (!runtime) return undefined;
+          return runtime.resolveContext(sessionId);
+        },
+        logger: getLogger("workflow-tool-executor"),
       }),
       createNotificationAdapter: (replyToSessionId: string) => ({
         async sendNotification(target: string, message: string): Promise<void> {
