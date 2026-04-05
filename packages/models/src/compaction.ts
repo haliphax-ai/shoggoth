@@ -47,6 +47,60 @@ function splitSystemPrefix(
   return { prefix, rest: messages.slice(i) };
 }
 
+const SUMMARY_TEMPLATE = `<summary-template>
+# Compaction Summary
+
+## Goal
+
+## Constraints / Preferences
+
+## Progress
+
+### Done
+
+### In Progress
+
+### Blocked
+
+## Key Decisions
+
+## Next Steps
+
+## Critical Context
+
+## Opaque Identifiers
+</summary-template>`;
+
+/**
+ * Extract the content of a <summary> block from a string, if present.
+ * Returns the content between <summary> and </summary> tags, or null if not found.
+ */
+function extractSummaryBlock(content: string): string | null {
+  const startTag = "<summary>";
+  const endTag = "</summary>";
+  const startIdx = content.indexOf(startTag);
+  const endIdx = content.indexOf(endTag);
+  if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
+    return null;
+  }
+  return content.slice(startIdx + startTag.length, endIdx);
+}
+
+/**
+ * Find the first assistant message in the transcript and extract its <summary> block if present.
+ */
+function findPreviousSummary(messages: readonly ChatMessage[]): string | null {
+  for (const m of messages) {
+    if (m.role === "assistant" && typeof m.content === "string") {
+      const summary = extractSummaryBlock(m.content);
+      if (summary !== null) {
+        return summary;
+      }
+    }
+  }
+  return null;
+}
+
 export async function compactTranscriptIfNeeded(
   messages: readonly ChatMessage[],
   policy: CompactionPolicy,
@@ -77,13 +131,28 @@ export async function compactTranscriptIfNeeded(
     .map((m) => `${m.role}: ${m.content ?? ""}`)
     .join("\n\n");
 
+  const previousSummary = findPreviousSummary(messages);
+
+  let systemContent: string;
+  if (previousSummary !== null) {
+    systemContent = `Summarize the following conversation excerpt for later context. Be concise; output summary text only. Preserve all opaque identifiers exactly as written (no shortening or reconstruction), including UUIDs, hashes, IDs, tokens, API keys, hostnames, IPs, ports, URLs, and file names. Merge this information with the previous summary; add/edit/move to-do items, include new key decisions and updated next steps, etc.
+
+<previous-summary>
+${previousSummary}
+</previous-summary>`;
+  } else {
+    systemContent = `Summarize the following conversation excerpt for later context. Be concise; output summary text only. Preserve all opaque identifiers exactly as written (no shortening or reconstruction), including UUIDs, hashes, IDs, tokens, API keys, hostnames, IPs, ports, URLs, and file names.
+
+${SUMMARY_TEMPLATE}`;
+  }
+
+  const userContent = `<conversation>
+${excerpt}
+</conversation>`;
+
   const summarizerMessages: ChatMessage[] = [
-    {
-      role: "system",
-      content:
-        "Summarize the following conversation excerpt for later context. Be concise; output summary text only.",
-    },
-    { role: "user", content: excerpt },
+    { role: "system", content: systemContent },
+    { role: "user", content: userContent },
   ];
 
   const inv = options.modelInvocation ?? {};
@@ -98,7 +167,9 @@ export async function compactTranscriptIfNeeded(
 
   const summaryBlock: ChatMessage = {
     role: "assistant",
-    content: `[Compacted context]\n${summaryOut.content.trim()}`,
+    content: `<summary>
+${summaryOut.content.trim()}
+</summary>`,
   };
 
   return {
