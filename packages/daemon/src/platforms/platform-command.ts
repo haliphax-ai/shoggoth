@@ -46,6 +46,22 @@ const COMMAND_TO_OP: Record<string, (opts: Readonly<Record<string, string>>) => 
     op: "session_context_status",
     payload: opts.session_id ? { session_id: opts.session_id } : {},
   }),
+  model: (opts) => {
+    const payload: Record<string, unknown> = {};
+    if (opts.session_id) {
+      payload.session_id = opts.session_id;
+    } else if (opts.agent_id) {
+      payload.agent_id = opts.agent_id;
+    }
+    if (opts.model_selection !== undefined) {
+      try {
+        payload.model_selection = JSON.parse(opts.model_selection);
+      } catch {
+        payload.model_selection = opts.model_selection;
+      }
+    }
+    return { op: "session_model", payload };
+  },
   queue: (opts) => {
     const payload: Record<string, unknown> = {
       action: opts.action ?? "list",

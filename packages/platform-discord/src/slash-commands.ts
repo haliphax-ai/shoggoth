@@ -51,6 +51,15 @@ const GLOBAL_SLASH_COMMANDS = [
     ],
   },
   {
+    name: "model",
+    description: "Get or set the session model selection",
+    options: [
+      { name: "session_id", type: 3, description: "Session URN", required: false },
+      { name: "agent_id", type: 3, description: "Agent ID (alternative to session_id)", required: false },
+      { name: "model_selection", type: 3, description: "Model selection JSON (omit to view current)", required: false },
+    ],
+  },
+  {
     name: "queue",
     description: "Manage the session turn queue",
     options: [
@@ -232,6 +241,59 @@ async function handleInteraction(
       await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
         type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
         data: { content: `⚠️ Status failed: ${String(err)}` },
+      });
+    }
+    return;
+  }
+
+  if (controlOp.op === "session_model") {
+    try {
+      const payload = { ...controlOp.payload };
+      if (!payload.session_id && deps.resolveSessionForChannel) {
+        const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
+        if (resolved) payload.session_id = resolved;
+      }
+      if (!payload.session_id) {
+        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+          data: { content: "⚠️ No session bound to this channel. Provide a session_id or agent_id." },
+        });
+        return;
+      }
+      const res = await deps.invokeControlOp(controlOp.op, payload);
+      let content: string;
+      if (res.ok && res.result) {
+        const r = res.result as Record<string, unknown>;
+        const sessionId = r.session_id as string;
+        const modelSelection = r.model_selection;
+        const effectiveModels = r.effective_models as Record<string, unknown> | null;
+        const lines: string[] = [
+          `🎯 **Model Configuration**`,
+          `Session: \`${sessionId}\``,
+        ];
+        if (modelSelection !== null && modelSelection !== undefined) {
+          lines.push(`Selection: \`${JSON.stringify(modelSelection)}\``);
+        } else {
+          lines.push(`Selection: (using default)`);
+        }
+        if (effectiveModels) {
+          const provider = effectiveModels.providerId as string | undefined;
+          const model = effectiveModels.model as string | undefined;
+          if (provider) lines.push(`Provider: ${provider}`);
+          if (model) lines.push(`Model: ${model}`);
+        }
+        content = lines.join("\n");
+      } else {
+        content = `⚠️ Failed to get model: ${res.error ?? "unknown error"}`;
+      }
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content },
+      });
+    } catch (err) {
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content: `⚠️ Model command failed: ${String(err)}` },
       });
     }
     return;

@@ -53,4 +53,93 @@ describe("translateCommandToControlOp", () => {
       payload: {},
     });
   });
+
+  it("translates model command with session_id", () => {
+    const cmd: PlatformCommand = {
+      name: "model",
+      options: { session_id: "agent:main:discord:channel:abc" },
+    };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "session_model",
+      payload: { session_id: "agent:main:discord:channel:abc" },
+    });
+  });
+
+  it("translates model command with agent_id", () => {
+    const cmd: PlatformCommand = {
+      name: "model",
+      options: { agent_id: "my-agent" },
+    };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "session_model",
+      payload: { agent_id: "my-agent" },
+    });
+  });
+
+  it("translates model command with model_selection as JSON string", () => {
+    const cmd: PlatformCommand = {
+      name: "model",
+      options: {
+        session_id: "agent:main:discord:channel:abc",
+        model_selection: '{"providerId":"anthropic","model":"claude-3-5-sonnet"}',
+      },
+    };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "session_model",
+      payload: {
+        session_id: "agent:main:discord:channel:abc",
+        model_selection: { providerId: "anthropic", model: "claude-3-5-sonnet" },
+      },
+    });
+  });
+
+  it("translates model command with invalid JSON in model_selection (falls back to string)", () => {
+    const cmd: PlatformCommand = {
+      name: "model",
+      options: {
+        session_id: "agent:main:discord:channel:abc",
+        model_selection: "not-json",
+      },
+    };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "session_model",
+      payload: {
+        session_id: "agent:main:discord:channel:abc",
+        model_selection: "not-json",
+      },
+    });
+  });
+
+  it("translates model command with no session_id or agent_id", () => {
+    const cmd: PlatformCommand = {
+      name: "model",
+      options: {},
+    };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "session_model",
+      payload: {},
+    });
+  });
+
+  it("translates model command with both session_id and agent_id (session_id takes precedence)", () => {
+    const cmd: PlatformCommand = {
+      name: "model",
+      options: {
+        session_id: "agent:main:discord:channel:abc",
+        agent_id: "my-agent",
+      },
+    };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "session_model",
+      payload: {
+        session_id: "agent:main:discord:channel:abc",
+      },
+    });
+  });
 });
