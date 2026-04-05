@@ -61,7 +61,7 @@ export function transcriptRowsToModelChatMessages(
           arguments: tc.argsJson,
         }));
         let content = m.content ? parseTranscriptContent(m.content) : m.content;
-        content = stripThinkingBlocks(content);
+        content = content != null ? stripThinkingBlocks(content) : content;
         out.push({
           role: "assistant",
           content,

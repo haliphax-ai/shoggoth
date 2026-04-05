@@ -1,1 +1,92 @@
-/**\n * Platform adapter interface for messaging platforms (Discord, Slack, IRC, etc.).\n *\n * Any platform that wants to integrate with the presentation layer must\n * provide an implementation of {@link PlatformAdapter}.\n */\n\nimport type { ThinkingDisplay } from \"@shoggoth/shared\";\n\n// ---------------------------------------------------------------------------\n// Outbound attachment — binary file delivered alongside a message\n// ---------------------------------------------------------------------------\n\nexport interface OutboundAttachment {\n  readonly filename: string;\n  readonly contentType: string;\n  readonly data: Buffer;\n}\n\n// ---------------------------------------------------------------------------\n// Stream handle – returned by startStream for incremental message updates\n// ---------------------------------------------------------------------------\n\nexport interface StreamHandle {\n  /** Replace the current message content with the full text. */\n  setFullContent(text: string): Promise<void>;\n}\n\n// ---------------------------------------------------------------------------\n// HITL notice data – payload for human-in-the-loop approval prompts\n// ---------------------------------------------------------------------------\n\nexport interface HitlNoticeData {\n  pendingId: string;\n  sessionId: string;\n  toolName: string;\n  riskTier: string;\n  /** Human-readable description lines for the notice. */\n  lines: string[];\n}\n\n// ---------------------------------------------------------------------------\n// Platform capabilities – optional feature flags / helpers\n// ---------------------------------------------------------------------------\n\nexport interface PlatformCapabilities {\n  reactions?: {\n    addReaction(channelId: string, messageId: string, emoji: string): Promise<void>;\n    removeReaction(channelId: string, messageId: string, emoji: string): Promise<void>;\n  };\n  threads?: boolean;\n  embeds?: boolean;\n  typing?: {\n    start(sessionId: string): void;\n    stop(sessionId: string): void;\n  };\n}\n\n// ---------------------------------------------------------------------------\n// Platform adapter – the contract every platform must satisfy\n// ---------------------------------------------------------------------------\n\nexport interface PlatformAdapter {\n  /** Send a normal message body to the session's bound channel. */\n  sendBody(\n    sessionId: string,\n    body: string,\n    opts?: { replyTo?: string; attachments?: OutboundAttachment[]; thinkingDisplay?: ThinkingDisplay },\n  ): Promise<void>;\n\n  /** Send an error message to the session's bound channel. */\n  sendError(\n    sessionId: string,\n    body: string,\n    opts?: { replyTo?: string; attachments?: OutboundAttachment[]; thinkingDisplay?: ThinkingDisplay },\n  ): Promise<void>;\n\n  /** Begin a streaming message that can be updated incrementally. */\n  startStream?(sessionId: string, opts?: { replyTo?: string }): Promise<StreamHandle>;\n\n  /** Post a HITL approval notice (platform may render buttons, reactions, etc.). */\n  sendHitlNotice?(\n    sessionId: string,\n    notice: HitlNoticeData,\n  ): Promise<{ channelId: string; messageId: string } | void>;\n\n  /** Maximum character length the platform supports per message. */\n  readonly maxBodyLength: number;\n\n  /** Declared capabilities of this platform. */\n  readonly capabilities: PlatformCapabilities;\n}\n"
+/**
+ * Platform adapter interface for messaging platforms (Discord, Slack, IRC, etc.).
+ *
+ * Any platform that wants to integrate with the presentation layer must
+ * provide an implementation of {@link PlatformAdapter}.
+ */
+
+import type { ThinkingDisplay } from "@shoggoth/shared";
+
+// ---------------------------------------------------------------------------
+// Outbound attachment — binary file delivered alongside a message
+// ---------------------------------------------------------------------------
+
+export interface OutboundAttachment {
+  readonly filename: string;
+  readonly contentType: string;
+  readonly data: Buffer;
+}
+
+// ---------------------------------------------------------------------------
+// Stream handle — returned by startStream for incremental message updates
+// ---------------------------------------------------------------------------
+
+export interface StreamHandle {
+  /** Replace the current message content with the full text. */
+  setFullContent(text: string): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// HITL notice data — payload for human-in-the-loop approval prompts
+// ---------------------------------------------------------------------------
+
+export interface HitlNoticeData {
+  pendingId: string;
+  sessionId: string;
+  toolName: string;
+  riskTier: string;
+  /** Human-readable description lines for the notice. */
+  lines: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Platform capabilities — optional feature flags / helpers
+// ---------------------------------------------------------------------------
+
+export interface PlatformCapabilities {
+  reactions?: {
+    addReaction(channelId: string, messageId: string, emoji: string): Promise<void>;
+    removeReaction(channelId: string, messageId: string, emoji: string): Promise<void>;
+  };
+  threads?: boolean;
+  embeds?: boolean;
+  typing?: {
+    start(sessionId: string): void;
+    stop(sessionId: string): void;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Platform adapter — the contract every platform must satisfy
+// ---------------------------------------------------------------------------
+
+export interface PlatformAdapter {
+  /** Send a normal message body to the session's bound channel. */
+  sendBody(
+    sessionId: string,
+    body: string,
+    opts?: { replyTo?: string; attachments?: OutboundAttachment[]; thinkingDisplay?: ThinkingDisplay },
+  ): Promise<void>;
+
+  /** Send an error message to the session's bound channel. */
+  sendError(
+    sessionId: string,
+    body: string,
+    opts?: { replyTo?: string; attachments?: OutboundAttachment[]; thinkingDisplay?: ThinkingDisplay },
+  ): Promise<void>;
+
+  /** Begin a streaming message that can be updated incrementally. */
+  startStream?(sessionId: string, opts?: { replyTo?: string }): Promise<StreamHandle>;
+
+  /** Post a HITL approval notice (platform may render buttons, reactions, etc.). */
+  sendHitlNotice?(
+    sessionId: string,
+    notice: HitlNoticeData,
+  ): Promise<{ channelId: string; messageId: string } | void>;
+
+  /** Maximum character length the platform supports per message. */
+  readonly maxBodyLength: number;
+
+  /** Declared capabilities of this platform. */
+  readonly capabilities: PlatformCapabilities;
+}

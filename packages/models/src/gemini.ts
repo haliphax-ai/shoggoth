@@ -78,6 +78,8 @@ export function mapChatMessagesToGeminiPayload(messages: readonly ChatMessage[])
         for (const p of m.content as ChatContentPart[]) {
           if (p.type === "text") {
             parts.push({ text: p.text });
+          } else if (p.type === "thinking") {
+            // Skip thinking blocks in Gemini serialization
           } else {
             // ImageBlock — use Gemini codec
             parts.push(geminiImageBlockCodec.encode(p));

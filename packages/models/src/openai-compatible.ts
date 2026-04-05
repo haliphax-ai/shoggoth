@@ -56,6 +56,7 @@ function serializeContentParts(parts: ChatContentPart[]): unknown[] {
     if (p.type === "text") {
       return { type: "text", text: p.text };
     }
+    if (p.type === "thinking") return { type: "text", text: "" };
     // ImageBlock — use OpenAI codec
     return openaiImageBlockCodec.encode(p);
   });

@@ -261,7 +261,7 @@ export async function executeSessionAgentTurn(
     const chain = modelsForSession?.failoverChain;
     const ctxWindowTokens = chain?.[0]?.contextWindowTokens;
     if (ctxWindowTokens) {
-      const thresholdPct = modelsForSession?.compaction?.contextWindowThresholdPercent ?? 60;
+      const thresholdPct = modelsForSession?.compaction?.contextWindowThresholdPercent ?? 50;
       const systemChars = effectiveSystemPrompt.length;
       const toolSchemaChars = JSON.stringify(mcpCtx.toolsOpenAi).length;
       const transcriptChars = initialMessages.reduce((n, m) => n + (m.content?.length ?? 0), 0);
