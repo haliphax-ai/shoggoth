@@ -147,7 +147,12 @@ export function createFailoverClientFromModelsConfig(
     return { provider, model: hop.model };
   });
 
-  return createFailoverModelClient(entries);
+  const client = createFailoverModelClient(entries);
+  const hopCaps = chain[0]?.capabilities;
+  if (hopCaps) {
+    return Object.assign(client, { capabilities: hopCaps });
+  }
+  return client;
 }
 
 export function createFailoverToolCallingClientFromModelsConfig(
@@ -173,7 +178,12 @@ export function createFailoverToolCallingClientFromModelsConfig(
     return { provider, model: hop.model };
   });
 
-  return createFailoverToolCallingClient(entries);
+  const client = createFailoverToolCallingClient(entries);
+  const hopCaps = chain[0]?.capabilities;
+  if (hopCaps) {
+    return Object.assign(client, { capabilities: hopCaps });
+  }
+  return client;
 }
 
 const DEFAULT_MAX_CONTEXT_CHARS = 80_000;

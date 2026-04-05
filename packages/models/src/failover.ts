@@ -6,6 +6,7 @@ import type {
   ModelInvocationParams,
   ModelStreamTextDeltaCallback,
 } from "./types";
+import type { ModelCapabilities } from "./types";
 import type { ModelProvider } from "./types";
 
 export interface FailoverChainEntry {
@@ -30,6 +31,7 @@ export interface FailoverCompleteOutput extends ModelCompleteOutput {
 }
 
 export interface FailoverModelClient {
+  readonly capabilities?: ModelCapabilities;
   complete(input: FailoverCompleteInput): Promise<FailoverCompleteOutput>;
 }
 

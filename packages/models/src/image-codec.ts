@@ -1,4 +1,4 @@
-import type { ImageBlock, ImageBlockCodec } from "./types";
+import type { ImageBlock, ImageBlockCodec, ModelCapabilities } from "./types";
 
 // ---------------------------------------------------------------------------
 // OpenAI-compatible codec
@@ -138,6 +138,27 @@ export function getImageBlockCodec(
   const codec = codecs[kind];
   if (!codec) throw new Error(`Unknown image block codec kind: ${kind}`);
   return codec;
+}
+
+// ---------------------------------------------------------------------------
+// wrapCodecWithCapabilities
+// ---------------------------------------------------------------------------
+
+export function wrapCodecWithCapabilities(
+  codec: ImageBlockCodec,
+  capabilities: ModelCapabilities,
+): ImageBlockCodec {
+  if (capabilities.imageInput !== false) return codec;
+  return {
+    supportsUrl: codec.supportsUrl,
+    supportsImageInput: false,
+    encode(): unknown {
+      throw new Error("Model does not support image input");
+    },
+    decode(part: unknown): ImageBlock | null {
+      return codec.decode(part);
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

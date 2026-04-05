@@ -222,7 +222,7 @@ function formatPrimaryModelLabel(
 
 
 function buildTrustedSystemContextGuidance(token: string): string {
-  return "# System Context\n\n" + daemonPrompt("system-trusted-context").replaceAll("{{token}}", token);
+  return "# System Context\n\n" + daemonPrompt("system-trusted-context", { token });
 }
 
 function buildWorkspaceSection(

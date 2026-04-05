@@ -81,6 +81,7 @@ export {
   openaiImageBlockCodec,
   anthropicImageBlockCodec,
   geminiImageBlockCodec,
+  wrapCodecWithCapabilities,
 } from "./image-codec";
 export {
   extractXmlThinkingBlocks,

@@ -109,6 +109,10 @@ export const shoggothModelFailoverHopSchema = z
     model: z.string().min(1),
     contextWindowTokens: z.number().int().positive().optional(),
     thinkingFormat: z.enum(["native", "xml-tags", "none"]).optional(),
+    capabilities: z.object({
+      imageInput: z.boolean().optional(),
+      thinkingFormat: z.enum(["native", "xml-tags", "none"]).optional(),
+    }).strict().optional(),
   })
   .strict();
 

@@ -1,6 +1,6 @@
 import { isFailoverEligibleError } from "./classify";
 import type { FailoverChainEntry } from "./failover";
-import type { ModelToolCompleteInput, ModelToolCompleteOutput } from "./types";
+import type { ModelCapabilities, ModelToolCompleteInput, ModelToolCompleteOutput } from "./types";
 
 export type FailoverToolCompleteOutput = ModelToolCompleteOutput & {
   readonly usedProviderId: string;
@@ -11,6 +11,7 @@ export type FailoverToolCompleteOutput = ModelToolCompleteOutput & {
 };
 
 export interface FailoverToolCallingClient {
+  readonly capabilities?: ModelCapabilities;
   completeWithTools(input: ModelToolCompleteInput): Promise<FailoverToolCompleteOutput>;
 }
 
