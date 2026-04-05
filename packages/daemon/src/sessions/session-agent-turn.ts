@@ -478,3 +478,11 @@ export async function executeSessionAgentTurn(
     showAttachments: showAttachments.length > 0 ? showAttachments : undefined,
   };
 }
+
+
+/**
+ * Export the builtin tool registry for use by workflow tool executor.
+ */
+export function getBuiltinToolRegistry(): BuiltinToolRegistry {
+  return builtinRegistry;
+}

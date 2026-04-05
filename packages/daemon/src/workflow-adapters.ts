@@ -12,15 +12,31 @@ import type {
   PollResult,
   KillAdapter,
   MessageAdapter,
+  MessagePoster,
   NotifyAdapter,
+  ToolExecutor,
 } from "@shoggoth/workflow";
 import type { ContextLevel } from "@shoggoth/shared";
 import type { SessionManager } from "./sessions/session-manager.js";
 import type { SessionStore, SessionRow } from "./sessions/session-store.js";
+import type { SessionMcpRuntime } from "./sessions/session-mcp-runtime.js";
+import type { BuiltinToolRegistry } from "./sessions/builtin-tool-registry.js";
 import { pushSystemContext } from "./sessions/system-context-buffer";
 import { getLogger } from "./logging";
 
 const log = getLogger("workflow-adapters");
+
+// ---------------------------------------------------------------------------
+// Logger adapter: convert daemon Logger to workflow logger interface
+// ---------------------------------------------------------------------------
+
+function adaptLogger(daemonLogger: ReturnType<typeof getLogger>): { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void; debug: (...args: unknown[]) => void } {
+  return {
+    info: (msg: unknown, fields?: unknown) => daemonLogger.info(String(msg), fields as Record<string, unknown>),
+    warn: (msg: unknown, fields?: unknown) => daemonLogger.warn(String(msg), fields as Record<string, unknown>),
+    debug: (msg: unknown, fields?: unknown) => daemonLogger.debug(String(msg), fields as Record<string, unknown>),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Completion tracking for spawned subagent turns
@@ -248,83 +264,245 @@ export function createDaemonMessageAdapter(deps: DaemonMessageAdapterDeps): Mess
 }
 
 // ---------------------------------------------------------------------------
-// NotifyAdapter (workflow completion notification)
+// MessagePoster (for workflow message tasks)
 // ---------------------------------------------------------------------------
 
-interface WorkflowNotifierDeps {
-  /** Lazy getter — the runtime extension may not be available at construction time. */
-  readonly getRunSessionModelTurn: () =>
-    | ((input: {
-        readonly sessionId: string;
-        readonly userContent: string;
-        readonly userMetadata?: Record<string, unknown>;
-        readonly systemContext?: { kind: string; summary: string; data?: Record<string, unknown>; guidance?: string };
-        readonly delivery: { kind: string; userId?: string };
-      }) => Promise<{ latestAssistantText: string; failoverMeta?: unknown }>)
+export interface DaemonMessagePosterDeps {
+  /** Lazy getter — messaging context may not be available at construction time. */
+  readonly getMessageContext: () =>
+    | { execute: (sessionId: string, args: Record<string, unknown>) => Promise<Record<string, unknown>> }
     | undefined;
-  /** Resolve the delivery descriptor for a target session. Defaults to internal when not provided. */
-  readonly resolveDelivery?: (sessionId: string) => { kind: string; userId?: string };
-  readonly logger: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void; debug: (...args: unknown[]) => void };
+  readonly logger: ReturnType<typeof getLogger>;
 }
 
-export function createWorkflowNotifier(deps: WorkflowNotifierDeps): NotifyAdapter {
+export function createDaemonMessagePoster(deps: DaemonMessagePosterDeps): MessagePoster {
+  const logger = adaptLogger(deps.logger);
   return {
-    async notify(workflowId: string, success: boolean, context?: { replyTo: string; aborted?: boolean }): Promise<void> {
-      deps.logger.info("workflow completed", { workflowId, success, aborted: context?.aborted ?? false, replyTo: context?.replyTo ?? null });
+    async post(target: string, message: string): Promise<void> {
+      const ctx = deps.getMessageContext();
+      logger.debug("message task posting", { target, messageLen: message.length });
+      if (!ctx) {
+        logger.warn("message task: no message context available");
+        return;
+      }
+
       try {
-        const sessionId = context?.replyTo;
-        if (!sessionId) { deps.logger.warn("workflow notify: no replyTo in context"); return; }
+        const result = await ctx.execute(target, {
+          action: "post",
+          content: message,
+          target,
+        });
 
-        const runTurn = deps.getRunSessionModelTurn();
-        if (!runTurn) { deps.logger.warn("workflow notify: subagent runtime not available"); return; }
-
-        let status: string;
-        let message: string;
-        let guidance: string;
-
-        if (success) {
-          status = "✅ completed successfully";
-          message = `**Workflow ${status}:** \`${workflowId}\``;
-          guidance = "The user can already see task statuses, durations, total duration, and workflow completion in the automated status post. Surface any meaningful information beyond that, or simply acknowledge completion in your own voice.";
-        } else if (context?.aborted) {
-          status = "🛑 aborted";
-          message = `**Workflow ${status}:** \`${workflowId}\``;
-          guidance = [
-            "This workflow was aborted, not just failed. If you aborted it yourself, explain why.",
-            "If you did not abort it (e.g. the operator or a system process did), inform the user that the workflow was aborted and ask how they would like to proceed.",
-            "Do NOT blindly restart the workflow. Review the task statuses and errors in the status post first.",
-            "If you were not given specific instructions for handling aborts, ask the user what they want to do next.",
-          ].join(" ");
-        } else {
-          status = "❌ failed";
-          message = `**Workflow ${status}:** \`${workflowId}\``;
-          guidance = [
-            "This workflow failed. Do NOT blindly restart it.",
-            "Review the task statuses and errors in the status post to understand what went wrong.",
-            "If you were given specific instructions for handling failures, follow them.",
-            "Otherwise, inform the user of the failure and ask how they would like to proceed.",
-            "Do not attempt to fix or retry tasks without understanding the root cause first.",
-          ].join(" ");
+        const res = result as { ok?: boolean; error?: string };
+        if (res.ok === false) {
+          logger.warn("message task post failed", { target, error: res.error });
+          return;
         }
 
-        deps.logger.debug("workflow notify: delivering to session", { sessionId });
-        const delivery = deps.resolveDelivery?.(sessionId) ?? { kind: "internal" };
-        deps.logger.debug("workflow notify: resolved delivery", { sessionId, deliveryKind: delivery.kind });
-        await runTurn({
-          sessionId,
-          userContent: message,
-          userMetadata: { workflow_notify: true, workflow_id: workflowId, success, aborted: context?.aborted ?? false },
-          systemContext: {
-            kind: "workflow.complete",
-            summary: `Workflow ${success ? "completed successfully" : context?.aborted ? "was aborted" : "failed"}.`,
-            guidance,
-            data: { workflow_id: workflowId, success, aborted: context?.aborted ?? false },
-          },
-          delivery,
-        });
-        deps.logger.debug("workflow notify: delivered");
+        logger.debug("message task posted", { target });
       } catch (e) {
-        deps.logger.warn("workflow completion notification failed", { workflowId, err: String(e) });
+        logger.warn("message task post threw", { target, err: String(e) });
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// WorkflowToolExecutorAdapter (converts daemon tool context to workflow ToolExecutor)
+// ---------------------------------------------------------------------------
+
+export interface WorkflowToolExecutorAdapterDeps {
+  readonly sessionId: string;
+  readonly getToolContext: () => Promise<import("./sessions/session-mcp-tool-context").SessionMcpToolContext | undefined>;
+  readonly logger: ReturnType<typeof getLogger>;
+}
+
+/**
+ * Adapter that converts the daemon's tool context interface to the workflow ToolExecutor interface.
+ * Workflow tasks call execute(tool, args) and expect { ok, output, error }.
+ * The daemon's tool context expects { name, argsJson, toolCallId } and returns { resultJson }.
+ */
+export function createWorkflowToolExecutorAdapter(deps: WorkflowToolExecutorAdapterDeps): ToolExecutor {
+  const logger = adaptLogger(deps.logger);
+
+  return {
+    async execute(tool: string, args: Record<string, unknown>) {
+      const argsJson = JSON.stringify(args);
+      const toolCallId = `workflow-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+      logger.debug("workflow tool task executing", { tool, sessionId: deps.sessionId, argsLen: argsJson.length });
+
+      try {
+        const context = await deps.getToolContext();
+        if (!context) {
+          logger.warn("workflow tool task: no context available", { tool, sessionId: deps.sessionId });
+          return { ok: false, output: "", error: "Tool context not available" };
+        }
+
+        const result = await context.execute({ name: tool, argsJson, toolCallId });
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(result.resultJson);
+        } catch (e) {
+          logger.warn("workflow tool task: failed to parse result", { tool, sessionId: deps.sessionId, error: String(e) });
+          return { ok: false, output: "", error: "Tool returned invalid JSON" };
+        }
+
+        // Check if the result indicates an error
+        if (parsed.error) {
+          const errorMsg = (parsed.message as string | undefined) || (parsed.error as string);
+          logger.debug("workflow tool task: tool returned error", { tool, sessionId: deps.sessionId, error: errorMsg });
+          return { ok: false, output: "", error: errorMsg };
+        }
+
+        logger.debug("workflow tool task completed", { tool, sessionId: deps.sessionId });
+        return { ok: true, output: result.resultJson };
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        logger.warn("workflow tool task failed", { tool, sessionId: deps.sessionId, error: errMsg });
+        return { ok: false, output: "", error: errMsg };
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// ToolExecutor (for workflow tool tasks)
+// ---------------------------------------------------------------------------
+
+export interface DaemonToolExecutorFactoryDeps {
+  readonly builtinRegistry: BuiltinToolRegistry;
+  readonly sessionMcpRuntime: SessionMcpRuntime;
+  readonly logger: ReturnType<typeof getLogger>;
+  readonly db: import("better-sqlite3").Database;
+  readonly config: import("@shoggoth/shared").ShoggothConfig;
+  readonly env: NodeJS.ProcessEnv;
+  readonly workspacePath: string;
+  readonly creds: import("@shoggoth/os-exec").AgentCredentials;
+  readonly orchestratorEnv: NodeJS.ProcessEnv;
+  readonly getAgentIntegrationInvoker: () => import("./control/integration-invoke").AgentIntegrationInvoker | undefined;
+  readonly getProcessManager: () => import("@shoggoth/procman").ProcessManager | undefined;
+  readonly messageToolCtx: import("./sessions/builtin-tool-registry").MessageToolCtx | undefined;
+  readonly memoryConfig: import("@shoggoth/shared").ShoggothMemoryConfig;
+  readonly runtimeOpenaiBaseUrl: string | undefined;
+  readonly imageBlockCodec?: import("@shoggoth/models").ImageBlockCodec;
+}
+
+/**
+ * Creates a factory function that produces a ToolExecutor for a given session.
+ * The executor properly routes tool calls through builtin and external MCP tools.
+ */
+export function createDaemonToolExecutorFactory(
+  deps: DaemonToolExecutorFactoryDeps,
+): (sessionId: string) => ToolExecutor {
+  const logger = adaptLogger(deps.logger);
+
+  return (sessionId: string): ToolExecutor => {
+    let resolvedContext: import("./sessions/session-mcp-tool-context").SessionMcpToolContext | undefined;
+    let contextPromise: Promise<import("./sessions/session-mcp-tool-context").SessionMcpToolContext> | undefined;
+
+    const getContext = async () => {
+      if (resolvedContext) return resolvedContext;
+      if (!contextPromise) {
+        contextPromise = deps.sessionMcpRuntime.resolveContext(sessionId);
+      }
+      resolvedContext = await contextPromise;
+      return resolvedContext;
+    };
+
+    return {
+      async execute({ name, argsJson, toolCallId }) {
+        logger.debug("workflow tool task executing", { tool: name, toolCallId, sessionId, argsKeys: Object.keys(JSON.parse(argsJson)) });
+
+        try {
+          const mcp = await getContext();
+          const { createWorkflowToolExecutor } = await import("./sessions/builtin-handlers/workflow-tool-executor.js");
+
+          const executor = createWorkflowToolExecutor(sessionId, {
+            db: deps.db,
+            config: deps.config,
+            env: deps.env,
+            workspacePath: deps.workspacePath,
+            creds: deps.creds,
+            orchestratorEnv: deps.orchestratorEnv,
+            getAgentIntegrationInvoker: deps.getAgentIntegrationInvoker,
+            getProcessManager: deps.getProcessManager,
+            messageToolCtx: deps.messageToolCtx,
+            memoryConfig: deps.memoryConfig,
+            runtimeOpenaiBaseUrl: deps.runtimeOpenaiBaseUrl,
+            isSubagentSession: true,
+            imageBlockCodec: deps.imageBlockCodec,
+            builtinRegistry: deps.builtinRegistry,
+            sessionMcpContext: mcp,
+          });
+
+          const result = await executor.execute({ name, argsJson, toolCallId });
+          logger.debug("workflow tool task completed", { tool: name, toolCallId, sessionId });
+          return result;
+        } catch (e) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          logger.warn("workflow tool task execution failed", { tool: name, toolCallId, sessionId, error: errMsg });
+          return {
+            resultJson: JSON.stringify({
+              error: "tool_execution_failed",
+              tool: name,
+              message: errMsg,
+            }),
+          };
+        }
+      },
+    };
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Simplified ToolExecutor for workflow tasks (lazy-loaded context)
+// ---------------------------------------------------------------------------
+
+export interface DaemonToolExecutorDeps {
+  readonly getToolContext: () => Promise<import("./sessions/session-mcp-tool-context").SessionMcpToolContext | undefined>;
+  readonly logger: ReturnType<typeof getLogger>;
+}
+
+/**
+ * Creates a ToolExecutor with lazy-loaded context.
+ * Used for workflow tool tasks where context may not be available at construction time.
+ */
+export function createDaemonToolExecutor(deps: DaemonToolExecutorDeps): ToolExecutor {
+  const logger = adaptLogger(deps.logger);
+
+  return {
+    async execute({ name, argsJson, toolCallId }) {
+      logger.debug("tool executor: executing", { tool: name, toolCallId });
+
+      try {
+        const context = await deps.getToolContext();
+        if (!context) {
+          logger.warn("tool executor: no context available", { tool: name, toolCallId });
+          return {
+            resultJson: JSON.stringify({
+              error: "no_context",
+              tool: name,
+              message: "Tool context not available",
+            }),
+          };
+        }
+
+        logger.debug("tool executor: context resolved", { tool: name, toolCallId });
+        // Execute tool through context
+        const result = await context.execute({ name, argsJson, toolCallId });
+        logger.debug("tool executor: execution completed", { tool: name, toolCallId });
+        return result;
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        logger.warn("tool executor: execution failed", { tool: name, toolCallId, error: errMsg });
+        return {
+          resultJson: JSON.stringify({
+            error: "execution_failed",
+            tool: name,
+            message: errMsg,
+          }),
+        };
       }
     },
   };

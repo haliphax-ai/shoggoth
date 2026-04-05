@@ -7,6 +7,7 @@ import {
   WorkflowServer,
   ControlPlane,
   StatusManager,
+  GenericMessagePoster,
   handleWorkflowToolCall,
   type WorkflowToolArgs,
   type WorkflowToolResult,
@@ -16,6 +17,8 @@ import {
   type NotificationAdapter,
   type KillAdapter,
   type MessageAdapter,
+  type MessagePoster,
+  type ToolExecutor,
 } from "@shoggoth/workflow";
 
 let server: WorkflowServer | undefined;
@@ -33,6 +36,10 @@ interface WorkflowSingletonOptions {
   createMessageAdapter?: (sessionId: string) => MessageAdapter;
   /** Factory to create a per-workflow NotificationAdapter for task failure delivery. */
   createNotificationAdapter?: (sessionId: string) => NotificationAdapter;
+  /** Factory to create a per-workflow MessagePoster for message tasks. */
+  createMessagePoster?: (sessionId: string) => MessagePoster;
+  /** Factory to create a per-workflow ToolExecutor for tool tasks. */
+  createToolExecutor?: (sessionId: string) => ToolExecutor;
 }
 
 /** Initialize the workflow singleton. Call once at daemon startup. */
@@ -53,6 +60,8 @@ export function initWorkflow(opts: WorkflowSingletonOptions): { server: Workflow
     notifier: opts.notifier,
     createStatusManager,
     createNotificationAdapter: opts.createNotificationAdapter,
+    createMessagePoster: opts.createMessagePoster,
+    createToolExecutor: opts.createToolExecutor,
   });
 
   controlPlane = new ControlPlane({

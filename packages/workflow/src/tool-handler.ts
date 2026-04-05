@@ -7,7 +7,7 @@ import type { OrchestratorOptions } from "./orchestrator.js";
 
 interface TaskInput {
   id: number;
-  kind?: "agent" | "tool" | "gate" | "transform";
+  kind?: "agent" | "tool" | "gate" | "transform" | "message";
   prompt?: string;
   title?: string;
   failure_behavior?: "abort" | "pause" | "continue";
@@ -17,6 +17,8 @@ interface TaskInput {
   args?: Record<string, unknown>;
   condition?: string;
   template?: string;
+  message?: string;
+  channel?: string;
   output_template?: string;
 }
 
@@ -105,6 +107,10 @@ function toTaskDefs(inputs: TaskInput[]): TaskDef[] {
       case "transform": {
         const template = requireField(t.template, `tasks[${t.id}].template (required for transform task)`);
         return { ...base, kind: "transform" as const, template };
+      }
+      case "message": {
+        const message = requireField(t.message, `tasks[${t.id}].message (required for message task)`);
+        return { ...base, kind: "message" as const, message, ...(t.channel ? { channel: t.channel } : {}) };
       }
       default:
         throw new Error(`Unknown task kind: ${kind}`);

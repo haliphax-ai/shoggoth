@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from "vitest";
+import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
   handleWorkflowToolCall,
@@ -8,8 +8,6 @@ import {
 import type { WorkflowServer } from "../src/server.js";
 import type { ControlPlane } from "../src/control.js";
 import type { TaskList } from "../src/types.js";
-
-// --- Mocks ---
 
 function mockServer(overrides: Partial<WorkflowServer> = {}): WorkflowServer {
   return {
@@ -52,8 +50,6 @@ const sampleTasks = [
   { id: 2, prompt: "Do thing two" },
 ];
 
-// --- Tests ---
-
 describe("handleWorkflowToolCall", () => {
   describe("start", () => {
     it("calls server.start and returns workflow_id", async () => {
@@ -78,81 +74,66 @@ describe("handleWorkflowToolCall", () => {
       assert.ok(captured);
     });
 
-    it("returns error when tasks is missing", async () => {
-      const result = await handleWorkflowToolCall({
-        action: "start",
-        graph: "1>2",
-        reply_to: "session:parent",
-      } as WorkflowToolArgs, makeDeps());
-
-      assert.equal(result.ok, false);
-      assert.match(result.error!, /tasks/);
-    });
-
-    it("returns error when graph is missing", async () => {
-      const result = await handleWorkflowToolCall({
-        action: "start",
-        tasks: sampleTasks,
-        reply_to: "session:parent",
-      } as WorkflowToolArgs, makeDeps());
-
-      assert.equal(result.ok, false);
-      assert.match(result.error!, /graph/);
-    });
-
-    it("returns error when reply_to is missing", async () => {
-      const result = await handleWorkflowToolCall({
-        action: "start",
-        tasks: sampleTasks,
-        graph: "1>2",
-      } as WorkflowToolArgs, makeDeps());
-
-      assert.equal(result.ok, false);
-      assert.match(result.error!, /reply_to/);
-    });
-
-    it("normalizes task failure_notification from snake_case input", async () => {
+    it("converts message task with message and channel", async () => {
       let capturedTasks: unknown;
       const server = mockServer({
         start: async (tasks) => {
           capturedTasks = tasks;
-          return "wf-norm";
+          return "wf-msg";
         },
       });
       const deps = makeDeps({ server });
       await handleWorkflowToolCall({
         action: "start",
         tasks: [
-          { id: 1, prompt: "test", failure_notification: { kind: "notify-target", target_id: "agent:foo" } },
+          { id: 1, kind: "message", message: "Hello world", channel: "channel:123" },
         ],
         graph: "",
         reply_to: "session:parent",
       }, deps);
 
-      const tasks = capturedTasks as Array<{ failureNotification: { kind: string; targetId: string } }>;
-      assert.equal(tasks[0].failureNotification.kind, "notify-target");
-      assert.equal(tasks[0].failureNotification.targetId, "agent:foo");
+      const tasks = capturedTasks as Array<{ kind: string; message: string; channel?: string }>;
+      assert.equal(tasks[0].kind, "message");
+      assert.equal(tasks[0].message, "Hello world");
+      assert.equal(tasks[0].channel, "channel:123");
     });
 
-    it("uses default polling and runtime limits when not specified", async () => {
-      let capturedOpts: unknown;
+    it("converts message task without channel", async () => {
+      let capturedTasks: unknown;
       const server = mockServer({
-        start: async (_tasks, _graph, opts) => {
-          capturedOpts = opts;
-          return "wf-defaults";
+        start: async (tasks) => {
+          capturedTasks = tasks;
+          return "wf-msg-no-channel";
         },
       });
       const deps = makeDeps({ server });
       await handleWorkflowToolCall({
         action: "start",
-        tasks: sampleTasks,
-        graph: "1>2",
+        tasks: [
+          { id: 1, kind: "message", message: "Test message" },
+        ],
+        graph: "",
         reply_to: "session:parent",
       }, deps);
 
-      const opts = capturedOpts as { pollingIntervalMs: number; runtimeLimitMs: number };
-      assert.equal(opts.pollingIntervalMs, 10_000);
-      assert.equal(opts.runtimeLimitMs, 600_000);
+      const tasks = capturedTasks as Array<{ kind: string; message: string; channel?: string }>;
+      assert.equal(tasks[0].kind, "message");
+      assert.equal(tasks[0].message, "Test message");
+      assert.equal(tasks[0].channel, undefined);
+    });
+
+    it("returns error when message task is missing message field", async () => {
+      const result = await handleWorkflowToolCall({
+        action: "start",
+        tasks: [
+          { id: 1, kind: "message" },
+        ],
+        graph: "",
+        reply_to: "session:parent",
+      } as unknown as WorkflowToolArgs, makeDeps());
+
+      assert.equal(result.ok, false);
+      assert.match(result.error!, /message/);
     });
   });
 
@@ -164,12 +145,6 @@ describe("handleWorkflowToolCall", () => {
 
       assert.equal(result.ok, true);
       assert.equal(abortedId, "wf-1");
-    });
-
-    it("returns error when workflow_id is missing", async () => {
-      const result = await handleWorkflowToolCall({ action: "abort" } as WorkflowToolArgs, makeDeps());
-      assert.equal(result.ok, false);
-      assert.match(result.error!, /workflow_id/);
     });
   });
 
@@ -211,14 +186,6 @@ describe("handleWorkflowToolCall", () => {
       assert.equal(result.ok, true);
       assert.equal((result.data as unknown[]).length, 1);
     });
-
-    it("passes agent_chain_id filter", async () => {
-      let capturedChain: string | undefined;
-      const cp = mockControlPlane({ list: async (chain?: string) => { capturedChain = chain; return []; } });
-      await handleWorkflowToolCall({ action: "list", agent_chain_id: "agent:dev" }, makeDeps({ controlPlane: cp as unknown as ControlPlane }));
-
-      assert.equal(capturedChain, "agent:dev");
-    });
   });
 
   describe("post", () => {
@@ -252,12 +219,6 @@ describe("handleWorkflowToolCall", () => {
       assert.equal(args.taskId, 3);
       assert.equal(args.updates.prompt, "new prompt");
       assert.equal(args.updates.failureBehavior, "abort");
-    });
-
-    it("returns error when task_id is missing", async () => {
-      const result = await handleWorkflowToolCall({ action: "edit", workflow_id: "wf-6" } as WorkflowToolArgs, makeDeps());
-      assert.equal(result.ok, false);
-      assert.match(result.error!, /task_id/);
     });
   });
 

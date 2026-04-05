@@ -24,6 +24,14 @@ export function buildGateContext(tasks: Map<number, TaskState>): GateContext {
   return ctx;
 }
 
+/**
+ * Resolve template references in a gate condition.
+ * Converts `{{task:N:field}}` syntax to `task.N.field` dot notation.
+ */
+function resolveGateTemplates(condition: string): string {
+  return condition.replace(/\{\{task:(\d+):(output|success)\}\}/g, "task.$1.$2");
+}
+
 // --- Tokenizer ---
 
 type TokenType =
@@ -39,9 +47,7 @@ type TokenType =
 interface Token {
   type: TokenType;
   value: string;
-  /** For TASK_REF: the parsed task id */
   taskId?: number;
-  /** For TASK_REF: "output" or "success" */
   field?: string;
 }
 
@@ -50,27 +56,22 @@ function tokenize(expr: string): Token[] {
   let i = 0;
 
   while (i < expr.length) {
-    // Skip whitespace
     if (/\s/.test(expr[i])) { i++; continue; }
 
-    // Parentheses
     if (expr[i] === "(") { tokens.push({ type: "LPAREN", value: "(" }); i++; continue; }
     if (expr[i] === ")") { tokens.push({ type: "RPAREN", value: ")" }); i++; continue; }
 
-    // Two-char operators
     if (expr[i] === "=" && expr[i + 1] === "=") { tokens.push({ type: "OP", value: "==" }); i += 2; continue; }
     if (expr[i] === "!" && expr[i + 1] === "=") { tokens.push({ type: "OP", value: "!=" }); i += 2; continue; }
     if (expr[i] === "&" && expr[i + 1] === "&") { tokens.push({ type: "OP", value: "&&" }); i += 2; continue; }
     if (expr[i] === "|" && expr[i + 1] === "|") { tokens.push({ type: "OP", value: "||" }); i += 2; continue; }
 
-    // Single-char ! (negation)
     if (expr[i] === "!") { tokens.push({ type: "OP", value: "!" }); i++; continue; }
 
-    // String literals
     if (expr[i] === '"' || expr[i] === "'") {
       const quote = expr[i];
       let str = "";
-      i++; // skip opening quote
+      i++;
       while (i < expr.length && expr[i] !== quote) {
         if (expr[i] === "\\" && i + 1 < expr.length) {
           str += expr[i + 1];
@@ -80,13 +81,12 @@ function tokenize(expr: string): Token[] {
           i++;
         }
       }
-      if (i >= expr.length) throw new Error(`Unterminated string literal in gate condition`);
-      i++; // skip closing quote
+      if (i >= expr.length) throw new Error("Unterminated string literal in gate condition");
+      i++;
       tokens.push({ type: "STRING", value: str });
       continue;
     }
 
-    // Keywords and task refs: task.N.field, true, false, contains
     if (/[a-zA-Z_]/.test(expr[i])) {
       let word = "";
       while (i < expr.length && /[a-zA-Z0-9_.]/.test(expr[i])) {
@@ -119,14 +119,6 @@ function tokenize(expr: string): Token[] {
   return tokens;
 }
 
-// --- Recursive descent parser ---
-// Grammar (precedence low→high):
-//   expr     → or
-//   or       → and ( "||" and )*
-//   and      → unary ( "&&" unary )*
-//   unary    → "!" unary | primary ( ("==" | "!=" | "contains") primary )?
-//   primary  → TASK_REF | BOOL | STRING | "(" expr ")"
-
 type Value = string | boolean;
 
 function resolveRef(token: Token, ctx: GateContext): Value {
@@ -141,7 +133,8 @@ function resolveRef(token: Token, ctx: GateContext): Value {
  * Returns true (pass) or false (skip).
  *
  * Supported syntax:
- * - `task.N.success`, `task.N.output` — references to upstream task results
+ * - `{{task:N:success}}`, `{{task:N:output}}` — template references (converted to dot notation)
+ * - `task.N.success`, `task.N.output` — dot notation references to upstream task results
  * - `==`, `!=` — equality comparisons
  * - `contains` — string containment check
  * - `&&`, `||`, `!` — logical operators
@@ -150,7 +143,8 @@ function resolveRef(token: Token, ctx: GateContext): Value {
  * - Parentheses for grouping
  */
 export function evaluateGateCondition(expr: string, ctx: GateContext): boolean {
-  const tokens = tokenize(expr);
+  const normalized = resolveGateTemplates(expr);
+  const tokens = tokenize(normalized);
   let pos = 0;
 
   function peek(): Token { return tokens[pos]; }

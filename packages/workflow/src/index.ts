@@ -69,6 +69,10 @@ export { formatStatusMessage, formatSummaryMessage } from "./status-message.js";
 export type { MessageAdapter } from "./message-adapter.js";
 export { StatusManager } from "./status-manager.js";
 
+// Message posting
+export type { MessagePoster } from "./message-poster.js";
+export { GenericMessagePoster } from "./message-poster.js";
+
 // Control plane
 export { ControlPlane, type ControlPlaneOptions, type WorkflowSummary } from "./control.js";
 
@@ -91,8 +95,6 @@ export {
   type WorkflowToolResult,
   type WorkflowToolHandlerDeps,
 } from "./tool-handler.js";
-
-// Workflow logger
 
 // Hardening
 export {

@@ -6,9 +6,11 @@ import {
   type PollAdapter,
   type NotifyAdapter,
   type NotificationAdapter,
+  type MessagePoster,
   type OrchestratorOptions,
 } from "./orchestrator.js";
 import type { StatusManager } from "./status-manager.js";
+import type { ToolExecutor } from "./types.js";
 import { listIncompleteWorkflows } from "./state.js";
 
 const PROCESS_ID = "workflow-orchestrator";
@@ -22,6 +24,10 @@ export interface WorkflowServerOptions {
   createStatusManager?: (sessionId: string) => StatusManager;
   /** Factory to create a per-workflow NotificationAdapter for task failure delivery. */
   createNotificationAdapter?: (sessionId: string) => NotificationAdapter;
+  /** Factory to create a per-workflow MessagePoster for message tasks. */
+  createMessagePoster?: (sessionId: string) => MessagePoster;
+  /** Factory to create a per-workflow ToolExecutor for tool tasks. */
+  createToolExecutor?: (sessionId: string) => ToolExecutor;
 }
 
 /**
@@ -46,7 +52,16 @@ export class WorkflowServer {
     const resumed: string[] = [];
 
     for (const wf of incomplete) {
-      const orch = new Orchestrator(this.opts.spawner, this.opts.poller, this.opts.notifier);
+      const orch = new Orchestrator(
+        this.opts.spawner,
+        this.opts.poller,
+        this.opts.notifier,
+        undefined,
+        undefined,
+        undefined,
+        this.opts.createMessagePoster?.(""),
+        undefined,
+      );
       // Restore workflow state into the orchestrator and start polling
       orch.restore(wf, {
         stateDir: this.opts.stateDir,
@@ -70,7 +85,16 @@ export class WorkflowServer {
     graphDsl: string,
     opts: OrchestratorOptions,
   ): Promise<string> {
-    const orch = new Orchestrator(this.opts.spawner, this.opts.poller, this.opts.notifier, this.opts.createStatusManager?.(opts.replyTo), this.opts.createNotificationAdapter?.(opts.replyTo));
+    const orch = new Orchestrator(
+      this.opts.spawner,
+      this.opts.poller,
+      this.opts.notifier,
+      this.opts.createStatusManager?.(opts.replyTo),
+      this.opts.createNotificationAdapter?.(opts.replyTo),
+      undefined,
+      this.opts.createMessagePoster?.(opts.replyTo),
+      this.opts.createToolExecutor?.(opts.replyTo),
+    );
     const wfId = await orch.start(tasks, graphDsl, opts);
     orch.startPolling();
     this.orchestrators.set(wfId, orch);
