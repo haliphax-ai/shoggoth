@@ -7,12 +7,30 @@ interface ProcessResult {
   text?: string;
 }
 
+/** Opening tags recognized as thinking block starts. */
+const OPEN_TAGS = ['<thinking>', '<think>'];
+/** Closing tags recognized as thinking block ends. */
+const CLOSE_TAGS = ['</thinking>', '</think>'];
+/** Max buffer needed to identify the longest tag. */
+const MAX_TAG_LEN = Math.max(...OPEN_TAGS.map(t => t.length), ...CLOSE_TAGS.map(t => t.length));
+
+function isOpenTag(buf: string): boolean {
+  return OPEN_TAGS.includes(buf);
+}
+
+function isCloseTag(buf: string): boolean {
+  return CLOSE_TAGS.includes(buf);
+}
+
+function couldBeTag(buf: string): boolean {
+  return [...OPEN_TAGS, ...CLOSE_TAGS].some(tag => tag.startsWith(buf));
+}
+
 export class ThinkingStreamNormalizer {
   private state: State = 'text';
   private buffer: string = '';
   private thinkingContent: string = '';
   private textContent: string = '';
-  private readonly MAX_BUFFER_SIZE = 11; // Length of "</thinking>"
 
   processChunk(chunk: string): ProcessResult {
     const result: ProcessResult = {};
@@ -35,21 +53,22 @@ export class ThinkingStreamNormalizer {
         case 'buffering-tag':
           this.buffer += char;
 
-          if (this.buffer === '<thinking>') {
+          if (isOpenTag(this.buffer)) {
             this.state = 'in-thinking';
             this.buffer = '';
-          } else if (this.buffer === '</thinking>') {
+          } else if (isCloseTag(this.buffer)) {
             this.state = 'text';
             this.buffer = '';
-            // Flush accumulated thinking content
             if (this.thinkingContent) {
               result.thinking = this.thinkingContent;
               this.thinkingContent = '';
             }
-          } else if (this.buffer.length >= this.MAX_BUFFER_SIZE) {
-            // Buffer exceeded, not a tag we're looking for
-            this.textContent += this.buffer;
-            this.state = 'text';
+          } else if (!couldBeTag(this.buffer) || this.buffer.length >= MAX_TAG_LEN) {
+            // Not a prefix of any known tag, or exceeded max length
+            if (this.state === 'buffering-tag') {
+              this.textContent += this.buffer;
+              this.state = 'text';
+            }
             this.buffer = '';
           }
           i++;
@@ -78,7 +97,6 @@ export class ThinkingStreamNormalizer {
   flush(): ProcessResult {
     const result: ProcessResult = {};
 
-    // Handle any remaining buffer content
     if (this.buffer) {
       if (this.state === 'in-thinking') {
         this.thinkingContent += this.buffer;
@@ -88,7 +106,6 @@ export class ThinkingStreamNormalizer {
       this.buffer = '';
     }
 
-    // Return any accumulated content
     if (this.thinkingContent) {
       result.thinking = this.thinkingContent;
       this.thinkingContent = '';
@@ -99,29 +116,30 @@ export class ThinkingStreamNormalizer {
       this.textContent = '';
     }
 
-    // Reset state
     this.state = 'text';
 
     return result;
   }
 }
 
+/** Regex matching both `<thinking>` and `<think>` tag variants. */
+const THINKING_BLOCK_RE = /<(?:thinking|think)>([\s\S]*?)<\/(?:thinking|think)>/g;
+
 /**
  * Extracts thinking blocks from content that uses XML-style tags.
+ * Recognizes both `<thinking>...</thinking>` and `<think>...</think>`.
  * Returns an array of ChatContentPart if thinking tags are found,
  * otherwise returns the original string unchanged.
  */
 export function extractXmlThinkingBlocks(
   content: string,
 ): string | ChatContentPart[] {
-  const regex = /<thinking>([\s\S]*?)<\/thinking>/g;
+  const regex = new RegExp(THINKING_BLOCK_RE.source, THINKING_BLOCK_RE.flags);
 
-  // Quick check: if no matches, return original string
   if (!regex.test(content)) {
     return content;
   }
 
-  // Reset regex state for iteration
   regex.lastIndex = 0;
 
   const parts: ChatContentPart[] = [];
@@ -129,13 +147,11 @@ export function extractXmlThinkingBlocks(
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(content)) !== null) {
-    // Add text before this thinking block
     const before = content.slice(lastIndex, match.index).trim();
     if (before) {
       parts.push({ type: "text", text: before });
     }
 
-    // Add thinking block (skip if empty after trim)
     const thinkingText = match[1].trim();
     if (thinkingText) {
       parts.push({ type: "thinking", text: thinkingText });
@@ -144,13 +160,11 @@ export function extractXmlThinkingBlocks(
     lastIndex = regex.lastIndex;
   }
 
-  // Add any remaining text after the last thinking block
   const after = content.slice(lastIndex).trim();
   if (after) {
     parts.push({ type: "text", text: after });
   }
 
-  // If we only have one text part, return it as a string
   if (parts.length === 1 && parts[0].type === "text") {
     return parts[0].text;
   }
@@ -176,10 +190,11 @@ export function normalizeThinkingBlocks(
 }
 
 /**
- * Strips `<thinking>...</thinking>` tags from a string, returning only the
- * non-thinking text. Useful for cleaning tool call arguments when the model
- * leaks thinking tags into structured output.
+ * Strips thinking XML tags from a string, returning only the non-thinking text.
+ * Recognizes both `<thinking>...</thinking>` and `<think>...</think>`.
+ * Useful for cleaning tool call arguments when the model leaks thinking tags
+ * into structured output.
  */
 export function stripXmlThinkingTags(content: string): string {
-  return content.replace(/<thinking>[\s\S]*?<\/thinking>/g, "").trim();
+  return content.replace(THINKING_BLOCK_RE, "").trim();
 }
