@@ -13,6 +13,9 @@ export const IMAGE_EXTENSION_TO_MIME: Record<string, string> = {
   ".webp": "image/webp",
 };
 
+/** Maximum bytes for an image block included in model context. */
+export const MAX_IMAGE_BLOCK_BYTES = 5 * 1024 * 1024; // 5 MB
+
 export const IMAGE_MIME_TO_EXTENSION: Record<string, string> = {
   "image/jpeg": ".jpg",
   "image/png": ".png",

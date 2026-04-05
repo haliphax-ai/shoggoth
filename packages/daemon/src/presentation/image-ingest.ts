@@ -1,11 +1,9 @@
 import type { MessageAttachment } from "@shoggoth/messaging";
 import type { ImageBlock, ImageBlockCodec } from "@shoggoth/models";
-import { IMAGE_MIME_TYPES, IMAGE_EXTENSION_TO_MIME } from "@shoggoth/shared";
+import { IMAGE_MIME_TYPES, IMAGE_EXTENSION_TO_MIME, MAX_IMAGE_BLOCK_BYTES } from "@shoggoth/shared";
 import { getLogger } from "../logging.js";
 
 const log = getLogger("image-ingest");
-
-const DEFAULT_MAX_BYTES = 20 * 1024 * 1024; // 20 MB
 
 export interface ImageIngestOptions {
   readonly codec: ImageBlockCodec;
@@ -42,7 +40,7 @@ export async function ingestAttachmentImage(
   }
 
   // Default: always fetch and base64-encode for gateway compatibility.
-  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+  const maxBytes = options.maxBytes ?? MAX_IMAGE_BLOCK_BYTES;
   const fetchFn = options.fetchImpl ?? globalThis.fetch;
 
   try {

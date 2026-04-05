@@ -323,8 +323,8 @@ describe("fs-handlers image read", () => {
   it("returns error for oversized image", async () => {
     const ws = makeTmpWorkspace();
     try {
-      // Create a file just over 10 MB
-      const big = Buffer.alloc(10 * 1024 * 1024 + 1, 0x42);
+      // Create a file just over 5 MB
+      const big = Buffer.alloc(5 * 1024 * 1024 + 1, 0x42);
       writeFileSync(join(ws, "huge.png"), big);
       const reg = new BuiltinToolRegistry();
       registerFs(reg);

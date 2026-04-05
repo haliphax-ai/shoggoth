@@ -4,12 +4,10 @@
 
 import { extname } from "node:path";
 import { toolRead, toolReadBinary, toolWrite } from "@shoggoth/os-exec";
-import { IMAGE_EXTENSION_TO_MIME } from "@shoggoth/shared";
+import { IMAGE_EXTENSION_TO_MIME, MAX_IMAGE_BLOCK_BYTES } from "@shoggoth/shared";
 import type { ChatContentPart } from "@shoggoth/models";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
 import { truncateToolOutput } from "./truncate-output";
-
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB
 
 export function register(registry: BuiltinToolRegistry): void {
   registry.register("read", readHandler);
@@ -34,11 +32,11 @@ async function readHandler(
       };
     }
     const buf = await toolReadBinary(ctx.workspacePath, path, ctx.creds);
-    if (buf.length > MAX_IMAGE_BYTES) {
+    if (buf.length > MAX_IMAGE_BLOCK_BYTES) {
       const sizeMB = (buf.length / (1024 * 1024)).toFixed(1);
       return {
         resultJson: JSON.stringify({
-          error: `Image too large to include in context (${sizeMB} MB, limit ${MAX_IMAGE_BYTES / (1024 * 1024)} MB). Consider resizing.`,
+          error: `Image too large to include in context (${sizeMB} MB, limit ${MAX_IMAGE_BLOCK_BYTES / (1024 * 1024)} MB). Consider resizing.`,
           path,
         }),
       };

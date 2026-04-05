@@ -9,10 +9,9 @@ import { detectMediaTypeFromBytes } from "./image-ingest.js";
 import type { OutboundAttachment } from "./platform-adapter.js";
 import type { TranscriptMessageRow } from "../sessions/transcript-store.js";
 import { getLogger } from "../logging.js";
+import { MAX_IMAGE_BLOCK_BYTES } from "@shoggoth/shared";
 
 const log = getLogger("show-blocks");
-
-const DEFAULT_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,9 +81,9 @@ async function resolveImage(
       throw new Error(`fetch_failed: HTTP ${res.status} for ${params.url}`);
     }
     const contentLength = res.headers.get("content-length");
-    if (contentLength && Number(contentLength) > DEFAULT_MAX_BYTES) {
+    if (contentLength && Number(contentLength) > MAX_IMAGE_BLOCK_BYTES) {
       throw new Error(
-        `oversized: ${Number(contentLength)} bytes exceeds ${DEFAULT_MAX_BYTES} byte limit`,
+        `oversized: ${Number(contentLength)} bytes exceeds ${MAX_IMAGE_BLOCK_BYTES} byte limit`,
       );
     }
     buf = Buffer.from(await res.arrayBuffer());
@@ -99,10 +98,10 @@ async function resolveImage(
     throw new Error("at least one of path, url, or base64 must be provided");
   }
 
-  if (buf.byteLength > DEFAULT_MAX_BYTES) {
+  if (buf.byteLength > MAX_IMAGE_BLOCK_BYTES) {
     const sizeMB = (buf.byteLength / (1024 * 1024)).toFixed(1);
     throw new Error(
-      `oversized: ${sizeMB} MB exceeds ${DEFAULT_MAX_BYTES / (1024 * 1024)} MB limit`,
+      `oversized: ${sizeMB} MB exceeds ${MAX_IMAGE_BLOCK_BYTES / (1024 * 1024)} MB limit`,
     );
   }
 
