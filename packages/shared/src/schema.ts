@@ -485,7 +485,6 @@ export const shoggothRuntimeConfigSchema = z
     cronTickIntervalMs: z.number().int().positive().optional(),
     heartbeatBatchSize: z.number().int().positive().optional(),
     heartbeatConcurrency: z.number().int().positive().optional(),
-    transcriptAutoCompactIntervalMs: z.number().int().nonnegative().optional(),
     retentionScheduleIntervalMs: z.number().int().nonnegative().optional(),
     /** When false, in-process config hot-reload is disabled unless `SHOGGOTH_CONFIG_HOT_RELOAD=0` already disables. */
     configHotReload: z.boolean().optional(),

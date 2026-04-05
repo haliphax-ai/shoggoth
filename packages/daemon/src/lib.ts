@@ -38,10 +38,6 @@ export {
 } from "./retention/retention-jobs";
 export type { RetentionRunSummary } from "./retention/retention-jobs";
 export {
-  runTranscriptAutoCompactTick,
-  transcriptAutoCompactIntervalMs,
-} from "./transcript-auto-compact";
-export {
   parseMarkdownForMemory,
   buildFtsQuery,
   ingestMemoryRoots,

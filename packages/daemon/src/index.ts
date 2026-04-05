@@ -24,9 +24,6 @@ import { runCronTick } from "./events/cron-scheduler";
 import { runBootReconciliation } from "./events/boot-reconciliation";
 import { runRetentionJobs, retentionScheduleIntervalMs } from "./retention/retention-jobs";
 import {
-  runTranscriptAutoCompactTick,
-  transcriptAutoCompactIntervalMs,
-} from "./transcript-auto-compact";
 import {
   createDefaultHeartbeatHandlers,
   runHeartbeatBatch,
@@ -803,23 +800,12 @@ void (async () => {
         }, retentionMs)
       : undefined;
 
-  const compactMs = transcriptAutoCompactIntervalMs(configRef.current);
-  const compactTimer =
-    compactMs > 0
-      ? setInterval(() => {
-          void runTranscriptAutoCompactTick(db, config, {
-            logger: getLogger("auto-compact"),
-          }).catch((e) => {
-            getLogger("events").error("transcript auto-compact tick failed", { err: String(e) });
-          });
-        }, compactMs)
       : undefined;
 
   stopEventLoops = () => {
     clearInterval(hbTimer);
     clearInterval(cronTimer);
     if (retentionTimer) clearInterval(retentionTimer);
-    if (compactTimer) clearInterval(compactTimer);
   };
 })();
 
