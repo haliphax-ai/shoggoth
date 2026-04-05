@@ -48,6 +48,7 @@ export function createFailoverModelClient(
       for (let i = 0; i < chain.length; i++) {
         const entry = chain[i]!;
         const model = entry.model;
+        const thinkingFormat = input.thinkingFormat ?? entry.provider.capabilities?.thinkingFormat;
         const req: ModelCompleteInput = {
           model,
           messages: input.messages,
@@ -58,7 +59,7 @@ export function createFailoverModelClient(
           thinking: input.thinking,
           reasoningEffort: input.reasoningEffort,
           requestExtras: input.requestExtras,
-          thinkingFormat: entry.provider.capabilities?.thinkingFormat,
+          thinkingFormat,
         };
         try {
           const out = await entry.provider.complete(req);
@@ -67,7 +68,7 @@ export function createFailoverModelClient(
             usedProviderId: entry.provider.id,
             usedModel: model,
             degraded: i > 0,
-            thinkingFormat: entry.provider.capabilities?.thinkingFormat,
+            thinkingFormat,
           };
         } catch (e) {
           lastErr = e;

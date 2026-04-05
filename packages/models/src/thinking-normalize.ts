@@ -174,3 +174,12 @@ export function normalizeThinkingBlocks(
 
   return extractXmlThinkingBlocks(content);
 }
+
+/**
+ * Strips `<thinking>...</thinking>` tags from a string, returning only the
+ * non-thinking text. Useful for cleaning tool call arguments when the model
+ * leaks thinking tags into structured output.
+ */
+export function stripXmlThinkingTags(content: string): string {
+  return content.replace(/<thinking>[\s\S]*?<\/thinking>/g, "").trim();
+}
