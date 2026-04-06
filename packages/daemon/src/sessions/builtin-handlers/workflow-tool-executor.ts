@@ -24,6 +24,7 @@ export interface WorkflowToolExecutorDeps {
   readonly config: ShoggothConfig;
   readonly env: NodeJS.ProcessEnv;
   readonly workspacePath: string;
+  readonly workingDirectory?: string;
   readonly creds: AgentCredentials;
   readonly orchestratorEnv: NodeJS.ProcessEnv;
   readonly getAgentIntegrationInvoker: () => AgentIntegrationInvoker | undefined;
@@ -51,6 +52,7 @@ export function createWorkflowToolExecutor(
     config: deps.config,
     env: deps.env,
     workspacePath: deps.workspacePath,
+    workingDirectory: deps.workingDirectory,
     creds: deps.creds,
     orchestratorEnv: deps.orchestratorEnv,
     getAgentIntegrationInvoker: deps.getAgentIntegrationInvoker,

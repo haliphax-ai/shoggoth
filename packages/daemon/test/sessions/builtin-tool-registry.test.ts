@@ -2,6 +2,7 @@ import { describe, it } from "vitest";
 import assert from "node:assert";
 import {
   BuiltinToolRegistry,
+  resolveUserPath,
   type BuiltinToolContext,
   type BuiltinToolHandler,
 } from "../../src/sessions/builtin-tool-registry";
@@ -85,5 +86,27 @@ describe("BuiltinToolRegistry", () => {
     const rb = await reg.execute("b", {}, stubCtx());
     assert.strictEqual(JSON.parse(ra.resultJson), "a");
     assert.strictEqual(JSON.parse(rb.resultJson), "b");
+  });
+});
+
+describe("resolveUserPath", () => {
+  it("returns absolute paths unchanged", () => {
+    const ctx = stubCtx({ workspacePath: "/ws", workingDirectory: "/ws/sub" });
+    assert.strictEqual(resolveUserPath(ctx, "/ws/other/file.txt"), "/ws/other/file.txt");
+  });
+
+  it("resolves relative paths against workingDirectory when set", () => {
+    const ctx = stubCtx({ workspacePath: "/ws", workingDirectory: "/ws/sub" });
+    assert.strictEqual(resolveUserPath(ctx, "file.txt"), "/ws/sub/file.txt");
+  });
+
+  it("resolves relative paths against workspacePath when workingDirectory is undefined", () => {
+    const ctx = stubCtx({ workspacePath: "/ws", workingDirectory: undefined });
+    assert.strictEqual(resolveUserPath(ctx, "file.txt"), "/ws/file.txt");
+  });
+
+  it("resolves .. relative to workingDirectory", () => {
+    const ctx = stubCtx({ workspacePath: "/ws", workingDirectory: "/ws/a/b" });
+    assert.strictEqual(resolveUserPath(ctx, "../c.txt"), "/ws/a/c.txt");
   });
 });

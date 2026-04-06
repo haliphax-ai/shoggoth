@@ -31,6 +31,8 @@ export interface SessionRow {
   readonly systemContextToken: string | undefined;
   /** Graduated context level controlling system prompt content and tool surface. */
   readonly contextLevel: ContextLevel | undefined;
+  /** Per-session working directory override. undefined means workspace root. */
+  readonly workingDirectory: string | undefined;
 }
 
 export interface CreateSessionInput {
@@ -61,6 +63,7 @@ export interface UpdateSessionInput {
   readonly subagentExpiresAtMs?: number | null;
   readonly systemContextToken?: string;
   readonly contextLevel?: ContextLevel | null;
+  readonly workingDirectory?: string | null;
 }
 
 function rowToSession(r: {
@@ -82,6 +85,7 @@ function rowToSession(r: {
   updated_at?: string | null;
   system_context_token?: string | null;
   context_level?: string | null;
+  working_directory?: string | null;
 }): SessionRow {
   let model: unknown = undefined;
   if (r.model_selection_json) {
@@ -126,6 +130,7 @@ function rowToSession(r: {
     updatedAt: r.updated_at ?? "",
     systemContextToken: r.system_context_token?.trim() || undefined,
     contextLevel: (r.context_level?.trim() || undefined) as ContextLevel | undefined,
+    workingDirectory: r.working_directory?.trim() || undefined,
   };
 }
 
@@ -187,7 +192,7 @@ export function createSessionStore(db: Database.Database): SessionStore {
     SELECT id, agent_profile_id, workspace_path, status, context_segment_id, model_selection_json,
            light_context, prompt_stack_json, runtime_uid, runtime_gid,
            parent_session_id, subagent_mode, subagent_platform_thread_id, subagent_expires_at_ms,
-           created_at, updated_at, system_context_token, context_level
+           created_at, updated_at, system_context_token, context_level, working_directory
     FROM sessions WHERE id = @id
   `);
 
@@ -236,6 +241,7 @@ export function createSessionStore(db: Database.Database): SessionStore {
             subagent_expires_at_ms: number | null;
             system_context_token: string | null;
             context_level: string | null;
+            working_directory: string | null;
           }
         | undefined;
       return r ? rowToSession(r) : undefined;
@@ -264,6 +270,10 @@ export function createSessionStore(db: Database.Database): SessionStore {
         patch.contextLevel === undefined
           ? cur.contextLevel ?? null
           : patch.contextLevel;
+      const nextWorkingDirectory =
+        patch.workingDirectory === undefined
+          ? cur.workingDirectory ?? null
+          : patch.workingDirectory;
       const next = {
         agent_profile_id: patch.agentProfileId ?? cur.agentProfileId ?? null,
         workspace_path: cur.workspacePath,
@@ -286,6 +296,7 @@ export function createSessionStore(db: Database.Database): SessionStore {
         subagent_expires_at_ms: nextExp,
         system_context_token: nextToken,
         context_level: nextContextLevel,
+        working_directory: nextWorkingDirectory,
       };
       db.prepare(
         `
@@ -305,6 +316,7 @@ export function createSessionStore(db: Database.Database): SessionStore {
           subagent_expires_at_ms = @subagent_expires_at_ms,
           system_context_token = @system_context_token,
           context_level = @context_level,
+          working_directory = @working_directory,
           updated_at = datetime('now')
         WHERE id = @id
       `,
@@ -320,7 +332,7 @@ export function createSessionStore(db: Database.Database): SessionStore {
       const cols = `id, agent_profile_id, workspace_path, status, context_segment_id, model_selection_json,
                  light_context, prompt_stack_json, runtime_uid, runtime_gid,
                  parent_session_id, subagent_mode, subagent_platform_thread_id, subagent_expires_at_ms,
-                 created_at, updated_at, system_context_token, context_level`;
+                 created_at, updated_at, system_context_token, context_level, working_directory`;
 
       // --- Map sortBy to DB column ---
       const sortByMap: Record<string, string> = {

@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import type Database from "better-sqlite3";
+import { isAbsolute, resolve } from "node:path";
 import type { ShoggothConfig, ShoggothMemoryConfig } from "@shoggoth/shared";
 import type { AgentCredentials } from "@shoggoth/os-exec";
 import type { ProcessManager } from "@shoggoth/procman";
@@ -27,6 +28,8 @@ export interface BuiltinToolContext {
   readonly config: ShoggothConfig;
   readonly env: NodeJS.ProcessEnv;
   readonly workspacePath: string;
+  /** Resolved working directory for this session (defaults to workspacePath). */
+  readonly workingDirectory?: string;
   readonly creds: AgentCredentials;
 
   /** Merged orchestrator env (config + process env). */
@@ -91,4 +94,18 @@ export class BuiltinToolRegistry {
     }
     return handler(args, ctx);
   }
+}
+
+/**
+ * Resolve a user-supplied path against the session's working directory.
+ * Absolute paths pass through unchanged. Relative paths are resolved
+ * against `ctx.workingDirectory` (falling back to `ctx.workspacePath`).
+ * The result is always an absolute path suitable for passing to
+ * `resolvePathForRead` / `resolvePathForWrite` with `ctx.workspacePath`
+ * as the security boundary.
+ */
+export function resolveUserPath(ctx: BuiltinToolContext, userPath: string): string {
+  if (isAbsolute(userPath)) return userPath;
+  const base = ctx.workingDirectory ?? ctx.workspacePath;
+  return resolve(base, userPath);
 }

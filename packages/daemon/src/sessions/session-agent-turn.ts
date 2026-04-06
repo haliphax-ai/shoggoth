@@ -321,6 +321,7 @@ export async function executeSessionAgentTurn(
           config: input.config,
           env: input.env,
           workspacePath: input.session.workspacePath,
+          workingDirectory: input.session.workingDirectory ?? undefined,
           creds,
           orchestratorEnv,
           getAgentIntegrationInvoker,

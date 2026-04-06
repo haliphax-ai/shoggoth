@@ -6,6 +6,7 @@ import { realpathSync } from "node:fs";
 import { relative, resolve, isAbsolute, sep } from "node:path";
 import { runAsUser } from "@shoggoth/os-exec";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
+import { resolveUserPath } from "../builtin-tool-registry";
 
 export function register(registry: BuiltinToolRegistry): void {
   registry.register("ls", lsHandler);
@@ -155,7 +156,8 @@ async function lsHandler(
   const limit = typeof args.limit === "number" ? Math.max(1, Math.min(args.limit, 500)) : 500;
 
   // Resolve and sandbox-check the target directory
-  const { rootReal, abs } = resolveAndGuard(ctx.workspacePath, userPath);
+  const resolvedPath = resolveUserPath(ctx, userPath);
+  const { rootReal, abs } = resolveAndGuard(ctx.workspacePath, resolvedPath);
 
   // Also verify the real path stays inside workspace (catches symlink escapes)
   let realAbs: string;

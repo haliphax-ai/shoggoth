@@ -6,6 +6,7 @@ import { realpathSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { resolvePathForRead, resolvePathForWrite, runAsUser } from "@shoggoth/os-exec";
 import type { BuiltinToolRegistry, BuiltinToolContext, BuiltinToolResult } from "../builtin-tool-registry";
+import { resolveUserPath } from "../builtin-tool-registry";
 
 type FsAction = "move" | "copy" | "delete" | "stat" | "chmod" | "rename" | "mkdir";
 
@@ -48,12 +49,12 @@ async function runScript(
 
 /** Resolve a user-supplied path for read (must exist, symlinks resolved inside workspace). */
 function resolveSrc(ctx: BuiltinToolContext, userPath: string): string {
-  return resolvePathForRead(ctx.workspacePath, userPath);
+  return resolvePathForRead(ctx.workspacePath, resolveUserPath(ctx, userPath));
 }
 
 /** Resolve a user-supplied path for write (parent must resolve inside workspace). */
 function resolveDst(ctx: BuiltinToolContext, userPath: string): string {
-  return resolvePathForWrite(ctx.workspacePath, userPath);
+  return resolvePathForWrite(ctx.workspacePath, resolveUserPath(ctx, userPath));
 }
 
 /** Return a workspace-relative path for display. */

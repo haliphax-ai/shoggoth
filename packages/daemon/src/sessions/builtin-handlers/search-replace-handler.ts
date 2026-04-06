@@ -6,6 +6,7 @@ import { realpathSync, statSync } from "node:fs";
 import { relative, resolve, isAbsolute, sep, dirname, basename } from "node:path";
 import { runAsUser } from "@shoggoth/os-exec";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
+import { resolveUserPath } from "../builtin-tool-registry";
 
 export function register(registry: BuiltinToolRegistry): void {
   registry.register("search-replace", searchReplaceHandler);
@@ -45,7 +46,7 @@ async function handleSearch(
 
   let searchPath: string;
   try {
-    searchPath = resolveAndGuard(ctx.workspacePath, String(args.path ?? "."));
+    searchPath = resolveAndGuard(ctx.workspacePath, resolveUserPath(ctx, String(args.path ?? ".")));
   } catch {
     return { resultJson: JSON.stringify({ error: "path escapes workspace" }) };
   }
@@ -117,7 +118,7 @@ async function handleReplace(
 
   let absPath: string;
   try {
-    absPath = resolveAndGuard(ctx.workspacePath, file);
+    absPath = resolveAndGuard(ctx.workspacePath, resolveUserPath(ctx, file));
   } catch {
     return { resultJson: JSON.stringify({ error: "path escapes workspace" }) };
   }

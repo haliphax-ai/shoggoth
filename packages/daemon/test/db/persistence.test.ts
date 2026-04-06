@@ -92,6 +92,52 @@ describe(
     }
   });
 
+  it("creates provider_failures table for model failover tracking", () => {
+    const db = openStateDb(dbPath);
+    try {
+      migrate(db, defaultMigrationsDir());
+
+      // Check table exists
+      const tableExists = db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='provider_failures'",
+        )
+        .get();
+      assert.ok(tableExists, "provider_failures table should exist");
+
+      // Check columns
+      const columns = db
+        .prepare("PRAGMA table_info(provider_failures)")
+        .all() as { cid: number; name: string; type: string; notnull: number; dflt_value: string | null; pk: number }[];
+
+      const colMap = new Map(columns.map((c) => [c.name, c]));
+
+      // provider_id TEXT PRIMARY KEY
+      const providerId = colMap.get("provider_id");
+      assert.ok(providerId, "provider_id column should exist");
+      assert.equal(providerId.type, "TEXT", "provider_id should be TEXT");
+      assert.equal(providerId.pk, 1, "provider_id should be PRIMARY KEY");
+
+      // failed_at TEXT
+      const failedAt = colMap.get("failed_at");
+      assert.ok(failedAt, "failed_at column should exist");
+      assert.equal(failedAt.type, "TEXT", "failed_at should be TEXT");
+
+      // error TEXT
+      const error = colMap.get("error");
+      assert.ok(error, "error column should exist");
+      assert.equal(error.type, "TEXT", "error should be TEXT");
+
+      // retry_count INTEGER DEFAULT 0
+      const retryCount = colMap.get("retry_count");
+      assert.ok(retryCount, "retry_count column should exist");
+      assert.equal(retryCount.type, "INTEGER", "retry_count should be INTEGER");
+      assert.equal(retryCount.dflt_value, "0", "retry_count should have DEFAULT 0");
+    } finally {
+      db.close();
+    }
+  });
+
   it("rejects duplicate migration versions in the same directory", () => {
     const badDir = join(dir, "bad-migrations");
     mkdirSync(badDir, { recursive: true });

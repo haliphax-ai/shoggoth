@@ -20,6 +20,7 @@ import { routeMcpToolInvocation } from "@shoggoth/mcp-integration";
 import type { ContextLevel } from "@shoggoth/shared";
 import type { SessionManager } from "./sessions/session-manager.js";
 import type { SessionStore, SessionRow } from "./sessions/session-store.js";
+import { createSessionStore } from "./sessions/session-store.js";
 import type { SessionMcpRuntime } from "./sessions/session-mcp-runtime.js";
 import type { BuiltinToolRegistry } from "./sessions/builtin-tool-registry.js";
 import { pushSystemContext } from "./sessions/system-context-buffer";
@@ -399,6 +400,7 @@ export function createDaemonToolExecutorFactory(
             config: deps.config,
             env: deps.env,
             workspacePath: deps.workspacePath,
+            workingDirectory: createSessionStore(deps.db).getById(sessionId)?.workingDirectory ?? undefined,
             creds: deps.creds,
             orchestratorEnv: deps.orchestratorEnv,
             getAgentIntegrationInvoker: deps.getAgentIntegrationInvoker,

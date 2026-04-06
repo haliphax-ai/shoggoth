@@ -11,6 +11,11 @@ export function register(registry: BuiltinToolRegistry): void {
   registry.register("poll", pollHandler);
 }
 
+/** Effective root for exec: workingDirectory if set, else workspacePath. */
+function execRoot(ctx: BuiltinToolContext): string {
+  return ctx.workingDirectory ?? ctx.workspacePath;
+}
+
 async function execHandler(
   args: Record<string, unknown>,
   ctx: BuiltinToolContext,
@@ -42,7 +47,7 @@ async function execHandlerInner(
     const command = (argv as string[]).map(a =>
       /[^a-zA-Z0-9_\-./=:]/.test(a) ? `'${a.replace(/'/g, "'\\''")}'` : a
     ).join(" ");
-    const r = await toolExecExtended(ctx.workspacePath, {
+    const r = await toolExecExtended(execRoot(ctx), {
       command,
       timeout: typeof args.timeout === "number" ? args.timeout : undefined,
       stdin: typeof args.stdin === "string" ? args.stdin : undefined,
@@ -85,7 +90,7 @@ async function execHandlerInner(
       }),
     };
   }
-  const r = await toolExec(ctx.workspacePath, argv as string[], ctx.creds);
+  const r = await toolExec(execRoot(ctx), argv as string[], ctx.creds);
   return {
     resultJson: JSON.stringify({
       exitCode: r.exitCode,

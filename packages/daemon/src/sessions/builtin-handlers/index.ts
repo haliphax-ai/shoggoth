@@ -22,6 +22,7 @@ import { register as registerKv } from "./kv-handler";
 import { register as registerTimer } from "./timer-handler";
 import { register as registerDiscover } from "./discover-handler";
 import { register as registerSearchReplace } from "./search-replace-handler";
+import { register as registerCd } from "./cd-handler";
 
 /**
  * Register all builtin tool handlers on the given registry.
@@ -45,4 +46,5 @@ export function registerAllBuiltinHandlers(registry: BuiltinToolRegistry): void 
   registerTimer(registry);
   registerDiscover(registry);
   registerSearchReplace(registry);
+  registerCd(registry);
 }
