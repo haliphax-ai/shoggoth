@@ -6,4 +6,14 @@
 - **Read** a file before you start writing to it.
 - **Carefully** inspect tool descriptors for syntax and required arguments **before** using tools.
 - If a tool throws an exception, summarize the failure and suggest a fix or ask for guidance.
-- **Do NOT use** grep, sed, awk, mv, cp, ls, etc. if there are built-in tools available to do the job.
+
+Before using `builtin-exec`, which is a very risky tool, use these instead:
+
+| Tool | Commands it replaces |
+|---|---|
+| builtin-fs | mv, cp, rm, stat, chmod |
+| builtin-ls | ls, find |
+| builtin-read | cat |
+| builtin-serach-replace | grep, sed |
+| builtin-timer | sleep |
+| builtin-write | any command chain that writes to a file, e.g. `echo "x" > y.txt` |
