@@ -693,6 +693,21 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
           required: ["action"],
         },
       },
+      {
+        name: "cd",
+        description:
+          "Change the session working directory. Relative paths resolve against the current working directory. Empty path resets to workspace root. Path must stay within the workspace.",
+        inputSchema: {
+          type: "object" as const,
+          properties: {
+            path: {
+              type: "string",
+              description:
+                "Directory to change to. Absolute or relative to current working directory. Empty/omitted resets to workspace root.",
+            },
+          },
+        },
+      },
       buildWorkflowToolDescriptor() as McpToolDescriptor,
     ],
   };
