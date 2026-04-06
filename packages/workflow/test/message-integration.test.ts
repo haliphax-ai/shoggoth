@@ -1,8 +1,8 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { Orchestrator } from "../src/orchestrator.js";
-import type { SpawnAdapter, PollAdapter, NotifyAdapter, MessagePoster, ToolExecutor } from "../src/orchestrator.js";
-import type { TaskDef } from "../src/types.js";
+import type { SpawnAdapter, PollAdapter, NotifyAdapter, MessagePoster } from "../src/orchestrator.js";
+import type { TaskDef, ToolExecutor } from "../src/types.js";
 
 describe("Message task integration with all task types", () => {
   it("executes workflow with agent, tool, gate, transform, and message tasks", async () => {
@@ -37,9 +37,9 @@ describe("Message task integration with all task types", () => {
     };
 
     const toolExecutor: ToolExecutor = {
-      execute: async (tool, args) => {
-        executedTasks.push(`tool:${tool}`);
-        return { ok: true, output: `tool-output-${tool}` };
+      execute: async (call: { name: string; argsJson: string; toolCallId: string }) => {
+        executedTasks.push(`tool:${call.name}`);
+        return { resultJson: JSON.stringify({ output: `tool-output-${call.name}` }) };
       },
     };
 
@@ -141,8 +141,7 @@ describe("Message task integration with all task types", () => {
 
     const toolExecutor: ToolExecutor = {
       execute: async () => ({
-        ok: true,
-        output: "tool-output",
+        resultJson: JSON.stringify({ output: "tool-output" }),
       }),
     };
 

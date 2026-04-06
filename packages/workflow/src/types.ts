@@ -80,11 +80,7 @@ export function getTaskPromptOrLabel(td: TaskDef): string {
 
 /** Adapter for executing tool calls directly (no subagent session). */
 export interface ToolExecutor {
-  execute(tool: string, args: Record<string, unknown>): Promise<{
-    ok: boolean;
-    output: string;
-    error?: string;
-  }>;
+  execute(call: { name: string; argsJson: string; toolCallId: string }): Promise<{ resultJson: string }>;
 }
 
 // Task runtime state

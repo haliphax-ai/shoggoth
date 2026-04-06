@@ -6,6 +6,7 @@ import {
   resolvePlatformConfig,
   VERSION,
 } from "@shoggoth/shared";
+import { routeMcpToolInvocation } from "@shoggoth/mcp-integration";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -100,6 +101,7 @@ import { daemonNotice, loadDaemonNotices } from "./notices/load-notices";
 import { setNoticeResolver as setPresentationNoticeResolver } from "./presentation/notices";
 import { loadDaemonPrompts } from "./prompts/load-prompts";
 import { registerContextFinalizer, getSessionMcpRuntimeRef } from "./sessions/session-mcp-runtime";
+import { getBuiltinToolRegistry } from "./sessions/session-agent-turn";
 import type { PlatformAdapter } from "./presentation/platform-adapter";
 
 const platformAdapterRef: { current?: PlatformAdapter } = { current: undefined };
@@ -606,12 +608,37 @@ void (async () => {
       }),
 
   
-      createToolExecutor: createDaemonToolExecutorFactory({
-        sessionMcpRuntime: { resolveContext: (sid: string) => getSessionMcpRuntimeRef()?.resolveContext(sid) },
-        db,
-        config: cfg,
-        env: process.env as Record<string, string>,
-        workspacePath: cfg.runtime?.workspacePath ?? process.cwd(),
+      createToolExecutor: (sessionId: string) => ({
+        async execute({ name, argsJson, toolCallId }) {
+          const runtime = getSessionMcpRuntimeRef();
+          if (!runtime) throw new Error("MCP runtime not available");
+          const ctx = await runtime.resolveContext(sessionId);
+          if (!ctx) throw new Error("no MCP context for session " + sessionId);
+          const routed = routeMcpToolInvocation(ctx.aggregated, name);
+          if ("error" in routed) throw new Error(routed.error);
+          if (routed.tool.sourceId === "builtin") {
+            const registry = getBuiltinToolRegistry();
+            const toolCtx = {
+              sessionId,
+              db,
+              config: configRef.current,
+              env: process.env,
+              workspacePath: configRef.current.workspacesRoot ?? LAYOUT.workspacesRoot,
+              creds: { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 },
+              orchestratorEnv: process.env,
+              getAgentIntegrationInvoker: () => undefined,
+              getProcessManager: () => procman,
+              messageToolCtx: messageToolContextRef.current ?? undefined,
+              memoryConfig: configRef.current.memory ?? {},
+              runtimeOpenaiBaseUrl: configRef.current.runtime?.openaiBaseUrl,
+              isSubagentSession: true,
+            };
+            const result = await registry.execute(routed.tool.originalName, JSON.parse(argsJson), toolCtx);
+            return { resultJson: result.resultJson };
+          }
+          if (!ctx.external) throw new Error("no external MCP transport for session " + sessionId);
+          return ctx.external({ sourceId: routed.tool.sourceId, originalName: routed.tool.originalName, argsJson, toolCallId });
+        },
       }),
       createNotificationAdapter: (replyToSessionId: string) => ({
         async sendNotification(target: string, message: string): Promise<void> {

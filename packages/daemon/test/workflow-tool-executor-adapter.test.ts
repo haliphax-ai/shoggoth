@@ -28,11 +28,26 @@ function fakeLogger() {
   };
 }
 
-function fakeToolContext(overrides: Partial<SessionMcpToolContext> = {}): SessionMcpToolContext {
+/** Build an aggregated entry so routeMcpToolInvocation can find it by namespacedName. */
+function aggTool(namespacedName: string, sourceId = "external", originalName?: string) {
   return {
-    execute: overrides.execute ?? (async () => ({ resultJson: "{}" })),
-    aggregated: overrides.aggregated ?? { tools: [] },
-    external: overrides.external ?? { tools: [] },
+    name: originalName ?? namespacedName,
+    namespacedName,
+    sourceId,
+    originalName: originalName ?? namespacedName,
+    inputSchema: { type: "object" as const },
+  };
+}
+
+function fakeToolContext(
+  toolNames: string[],
+  externalFn?: (input: { sourceId: string; originalName: string; argsJson: string; toolCallId: string }) => Promise<{ resultJson: string }>,
+): SessionMcpToolContext {
+  return {
+    aggregated: { tools: toolNames.map((n) => aggTool(n)) },
+    toolsOpenAi: [],
+    toolsLoop: { tools: [], nameMap: new Map() },
+    external: externalFn ?? (async () => ({ resultJson: "{}" })),
   };
 }
 
@@ -43,13 +58,11 @@ function fakeToolContext(overrides: Partial<SessionMcpToolContext> = {}): Sessio
 describe("createWorkflowToolExecutorAdapter", () => {
   describe("interface conversion", () => {
     it("converts workflow tool call to daemon format and executes", async () => {
-      const executeCalls: Array<{ name: string; argsJson: string; toolCallId: string }> = [];
+      const externalCalls: Array<{ sourceId: string; originalName: string; argsJson: string; toolCallId: string }> = [];
       const logger = fakeLogger();
-      const context = fakeToolContext({
-        execute: async (input) => {
-          executeCalls.push(input);
-          return { resultJson: JSON.stringify({ result: "success" }) };
-        },
+      const context = fakeToolContext(["builtin-exec"], async (input) => {
+        externalCalls.push(input);
+        return { resultJson: JSON.stringify({ result: "success" }) };
       });
 
       const adapter = createWorkflowToolExecutorAdapter({
@@ -62,21 +75,19 @@ describe("createWorkflowToolExecutorAdapter", () => {
 
       assert.equal(result.ok, true);
       assert.equal(result.output, JSON.stringify({ result: "success" }));
-      assert.equal(executeCalls.length, 1);
-      const call = executeCalls[0];
-      assert.equal(call.name, "builtin-exec");
+      assert.equal(externalCalls.length, 1);
+      const call = externalCalls[0];
+      assert.equal(call.originalName, "builtin-exec");
       assert.deepEqual(JSON.parse(call.argsJson), { command: "echo hello" });
       assert.match(call.toolCallId, /^workflow-/);
     });
 
     it("generates unique toolCallIds for each execution", async () => {
-      const executeCalls: Array<{ toolCallId: string }> = [];
+      const externalCalls: Array<{ toolCallId: string }> = [];
       const logger = fakeLogger();
-      const context = fakeToolContext({
-        execute: async (input) => {
-          executeCalls.push({ toolCallId: input.toolCallId });
-          return { resultJson: "{}" };
-        },
+      const context = fakeToolContext(["tool-a", "tool-b"], async (input) => {
+        externalCalls.push({ toolCallId: input.toolCallId });
+        return { resultJson: "{}" };
       });
 
       const adapter = createWorkflowToolExecutorAdapter({
@@ -88,18 +99,16 @@ describe("createWorkflowToolExecutorAdapter", () => {
       await adapter.execute("tool-a", {});
       await adapter.execute("tool-b", {});
 
-      assert.equal(executeCalls.length, 2);
-      assert.notEqual(executeCalls[0].toolCallId, executeCalls[1].toolCallId);
+      assert.equal(externalCalls.length, 2);
+      assert.notEqual(externalCalls[0].toolCallId, externalCalls[1].toolCallId);
     });
 
     it("passes complex nested arguments correctly", async () => {
-      const executeCalls: Array<{ argsJson: string }> = [];
+      const externalCalls: Array<{ argsJson: string }> = [];
       const logger = fakeLogger();
-      const context = fakeToolContext({
-        execute: async (input) => {
-          executeCalls.push({ argsJson: input.argsJson });
-          return { resultJson: "{}" };
-        },
+      const context = fakeToolContext(["complex-tool"], async (input) => {
+        externalCalls.push({ argsJson: input.argsJson });
+        return { resultJson: "{}" };
       });
 
       const adapter = createWorkflowToolExecutorAdapter({
@@ -118,18 +127,16 @@ describe("createWorkflowToolExecutorAdapter", () => {
 
       await adapter.execute("complex-tool", complexArgs);
 
-      assert.equal(executeCalls.length, 1);
-      assert.deepEqual(JSON.parse(executeCalls[0].argsJson), complexArgs);
+      assert.equal(externalCalls.length, 1);
+      assert.deepEqual(JSON.parse(externalCalls[0].argsJson), complexArgs);
     });
   });
 
   describe("error handling", () => {
     it("returns error when tool execution throws", async () => {
       const logger = fakeLogger();
-      const context = fakeToolContext({
-        execute: async () => {
-          throw new Error("Tool crashed");
-        },
+      const context = fakeToolContext(["failing-tool"], async () => {
+        throw new Error("Tool crashed");
       });
 
       const adapter = createWorkflowToolExecutorAdapter({
@@ -149,10 +156,8 @@ describe("createWorkflowToolExecutorAdapter", () => {
 
     it("returns error when tool returns invalid JSON", async () => {
       const logger = fakeLogger();
-      const context = fakeToolContext({
-        execute: async () => {
-          return { resultJson: "not valid json {" };
-        },
+      const context = fakeToolContext(["bad-json-tool"], async () => {
+        return { resultJson: "not valid json {" };
       });
 
       const adapter = createWorkflowToolExecutorAdapter({
@@ -164,22 +169,20 @@ describe("createWorkflowToolExecutorAdapter", () => {
       const result = await adapter.execute("bad-json-tool", {});
 
       assert.equal(result.ok, false);
-      assert.match(result.error, /invalid JSON/i);
+      assert.match(result.error!, /invalid JSON/i);
       assert.equal(result.output, "");
       assert.equal(logger.calls.warn.length, 1);
     });
 
     it("returns error when tool result contains error field", async () => {
       const logger = fakeLogger();
-      const context = fakeToolContext({
-        execute: async () => {
-          return {
-            resultJson: JSON.stringify({
-              error: "tool_error",
-              message: "Something went wrong",
-            }),
-          };
-        },
+      const context = fakeToolContext(["error-tool"], async () => {
+        return {
+          resultJson: JSON.stringify({
+            error: "tool_error",
+            message: "Something went wrong",
+          }),
+        };
       });
 
       const adapter = createWorkflowToolExecutorAdapter({
@@ -197,14 +200,12 @@ describe("createWorkflowToolExecutorAdapter", () => {
 
     it("uses error field as message when message field is missing", async () => {
       const logger = fakeLogger();
-      const context = fakeToolContext({
-        execute: async () => {
-          return {
-            resultJson: JSON.stringify({
-              error: "generic_error",
-            }),
-          };
-        },
+      const context = fakeToolContext(["error-tool"], async () => {
+        return {
+          resultJson: JSON.stringify({
+            error: "generic_error",
+          }),
+        };
       });
 
       const adapter = createWorkflowToolExecutorAdapter({
@@ -233,7 +234,7 @@ describe("createWorkflowToolExecutorAdapter", () => {
       const result = await adapter.execute("some-tool", {});
 
       assert.equal(result.ok, false);
-      assert.match(result.error, /not available/i);
+      assert.match(result.error!, /not available/i);
       assert.equal(result.output, "");
       assert.equal(logger.calls.warn.length, 1);
       assert.match(logger.calls.warn[0].msg, /no context/);
@@ -301,7 +302,7 @@ describe("createWorkflowToolExecutorAdapter", () => {
   describe("logging", () => {
     it("logs debug message when execution starts", async () => {
       const logger = fakeLogger();
-      const context = fakeToolContext();
+      const context = fakeToolContext(["test-tool"]);
 
       const adapter = createWorkflowToolExecutorAdapter({
         sessionId: "sess-1",
@@ -320,7 +321,7 @@ describe("createWorkflowToolExecutorAdapter", () => {
 
     it("logs debug message when execution completes", async () => {
       const logger = fakeLogger();
-      const context = fakeToolContext();
+      const context = fakeToolContext(["test-tool"]);
 
       const adapter = createWorkflowToolExecutorAdapter({
         sessionId: "sess-1",
@@ -336,15 +337,13 @@ describe("createWorkflowToolExecutorAdapter", () => {
 
     it("logs debug message when tool returns error", async () => {
       const logger = fakeLogger();
-      const context = fakeToolContext({
-        execute: async () => {
-          return {
-            resultJson: JSON.stringify({
-              error: "tool_error",
-              message: "Tool failed",
-            }),
-          };
-        },
+      const context = fakeToolContext(["error-tool"], async () => {
+        return {
+          resultJson: JSON.stringify({
+            error: "tool_error",
+            message: "Tool failed",
+          }),
+        };
       });
 
       const adapter = createWorkflowToolExecutorAdapter({
@@ -364,10 +363,8 @@ describe("createWorkflowToolExecutorAdapter", () => {
   describe("successful execution", () => {
     it("returns ok=true with output for successful execution", async () => {
       const logger = fakeLogger();
-      const context = fakeToolContext({
-        execute: async () => {
-          return { resultJson: JSON.stringify({ status: "ok", data: [1, 2, 3] }) };
-        },
+      const context = fakeToolContext(["list-tool"], async () => {
+        return { resultJson: JSON.stringify({ status: "ok", data: [1, 2, 3] }) };
       });
 
       const adapter = createWorkflowToolExecutorAdapter({
@@ -385,10 +382,8 @@ describe("createWorkflowToolExecutorAdapter", () => {
 
     it("returns empty error field on success", async () => {
       const logger = fakeLogger();
-      const context = fakeToolContext({
-        execute: async () => {
-          return { resultJson: JSON.stringify({ result: "done" }) };
-        },
+      const context = fakeToolContext(["tool"], async () => {
+        return { resultJson: JSON.stringify({ result: "done" }) };
       });
 
       const adapter = createWorkflowToolExecutorAdapter({

@@ -72,14 +72,19 @@ function mockNotifyAdapter(): NotifyAdapter & { calls: Array<{ workflowId: strin
 }
 
 function mockToolExecutor(
-  handler: (tool: string, args: Record<string, unknown>) => Promise<{ ok: boolean; output: string; error?: string }>,
+  handler: (name: string, args: Record<string, unknown>) => Promise<{ ok: boolean; output: string; error?: string }>,
 ): ToolExecutor & { calls: Array<{ tool: string; args: Record<string, unknown> }> } {
   const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
   return {
     calls,
-    async execute(tool: string, args: Record<string, unknown>) {
-      calls.push({ tool, args });
-      return handler(tool, args);
+    async execute(call: { name: string; argsJson: string; toolCallId: string }) {
+      const args = JSON.parse(call.argsJson) as Record<string, unknown>;
+      calls.push({ tool: call.name, args });
+      const result = await handler(call.name, args);
+      if (result.ok) {
+        return { resultJson: JSON.stringify({ output: result.output }) };
+      }
+      return { resultJson: JSON.stringify({ error: result.error ?? "tool execution failed" }) };
     },
   };
 }

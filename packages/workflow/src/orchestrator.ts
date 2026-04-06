@@ -701,16 +701,18 @@ export class Orchestrator {
             return val;
           };
           const resolvedArgs = resolveArgsDeep(task.taskDef.args ?? {}) as Record<string, unknown>;
-          const result = await this.toolExecutor.execute(task.taskDef.tool, resolvedArgs);
-          if (result.ok) {
-            task.output = result.output;
-            task.status = "done";
-          } else {
+          const toolCallId = randomUUID();
+          const result = await this.toolExecutor.execute({ name: task.taskDef.tool, argsJson: JSON.stringify(resolvedArgs), toolCallId });
+          const parsed = JSON.parse(result.resultJson);
+          if (parsed.error) {
             task.status = "failed";
-            task.error = result.error ?? "tool execution failed";
+            task.error = parsed.error;
+          } else {
+            task.output = typeof parsed.output === "string" ? parsed.output : result.resultJson;
+            task.status = "done";
           }
           task.completedAt = Date.now();
-          log.debug("tool task completed", { workflowId: wf.id, taskId: task.taskDef.id, ok: result.ok });
+          log.debug("tool task completed", { workflowId: wf.id, taskId: task.taskDef.id, status: task.status });
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
           task.status = "failed";

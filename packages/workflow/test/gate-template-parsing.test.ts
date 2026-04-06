@@ -10,7 +10,7 @@ describe("gate template parsing", () => {
       [
         1,
         {
-          taskDef: { id: 1, kind: "agent" as const, prompt: "task 1" },
+          taskDef: { id: 1, kind: "agent" as const, prompt: "task 1", failureBehavior: "continue" as const, failureNotification: "silent" as const },
           status: "done" as const,
           output: "success",
         },
@@ -18,7 +18,7 @@ describe("gate template parsing", () => {
       [
         2,
         {
-          taskDef: { id: 2, kind: "agent" as const, prompt: "task 2" },
+          taskDef: { id: 2, kind: "agent" as const, prompt: "task 2", failureBehavior: "continue" as const, failureNotification: "silent" as const },
           status: "done" as const,
           output: "result_value",
         },
@@ -26,7 +26,7 @@ describe("gate template parsing", () => {
       [
         3,
         {
-          taskDef: { id: 3, kind: "agent" as const, prompt: "task 3" },
+          taskDef: { id: 3, kind: "agent" as const, prompt: "task 3", failureBehavior: "continue" as const, failureNotification: "silent" as const },
           status: "failed" as const,
           error: "task failed",
         },
@@ -129,7 +129,7 @@ describe("gate template parsing", () => {
       [
         1,
         {
-          taskDef: { id: 1, kind: "agent" as const, prompt: "task 1" },
+          taskDef: { id: 1, kind: "agent" as const, prompt: "task 1", failureBehavior: "continue" as const, failureNotification: "silent" as const },
           status: "done" as const,
           output: "",
         },

@@ -86,7 +86,7 @@ describe("WorkflowServer", () => {
       const factoryCalls: string[] = [];
       const mockExecutor: ToolExecutor = {
         async execute() {
-          return { ok: true, output: "test" };
+          return { resultJson: JSON.stringify({ output: "test" }) };
         },
       };
 
@@ -113,8 +113,8 @@ describe("WorkflowServer", () => {
 
     it("passes the executor returned by factory to Orchestrator", async () => {
       const mockExecutor: ToolExecutor = {
-        async execute(tool: string, args: Record<string, unknown>) {
-          return { ok: true, output: `executed ${tool}` };
+        async execute(call: { name: string; argsJson: string; toolCallId: string }) {
+          return { resultJson: JSON.stringify({ output: `executed ${call.name}` }) };
         },
       };
 
@@ -145,7 +145,7 @@ describe("WorkflowServer", () => {
       const factoryCalls: string[] = [];
       const mockExecutor: ToolExecutor = {
         async execute() {
-          return { ok: true, output: "test" };
+          return { resultJson: JSON.stringify({ output: "test" }) };
         },
       };
 
@@ -195,7 +195,7 @@ describe("WorkflowServer", () => {
       const receivedSessionIds: string[] = [];
       const mockExecutor: ToolExecutor = {
         async execute() {
-          return { ok: true, output: "test" };
+          return { resultJson: JSON.stringify({ output: "test" }) };
         },
       };
 
@@ -224,7 +224,7 @@ describe("WorkflowServer", () => {
       const callOrder: string[] = [];
       const mockExecutor: ToolExecutor = {
         async execute() {
-          return { ok: true, output: "test" };
+          return { resultJson: JSON.stringify({ output: "test" }) };
         },
       };
 

@@ -16,6 +16,7 @@ import type {
   NotifyAdapter,
   ToolExecutor,
 } from "@shoggoth/workflow";
+import { routeMcpToolInvocation } from "@shoggoth/mcp-integration";
 import type { ContextLevel } from "@shoggoth/shared";
 import type { SessionManager } from "./sessions/session-manager.js";
 import type { SessionStore, SessionRow } from "./sessions/session-store.js";
@@ -461,8 +462,10 @@ export function createDaemonToolExecutor(deps: DaemonToolExecutorDeps): ToolExec
         }
 
         logger.debug("tool executor: context resolved", { tool: name, toolCallId });
-        // Execute tool through context
-        const result = await context.execute({ name, argsJson, toolCallId });
+        if (!context.external) throw new Error("no external MCP transport available");
+        const routed = routeMcpToolInvocation(context.aggregated, name);
+        if ("error" in routed) throw new Error(routed.error);
+        const result = await context.external({ sourceId: routed.tool.sourceId, originalName: routed.tool.originalName, argsJson, toolCallId });
         logger.debug("tool executor: execution completed", { tool: name, toolCallId });
         return result;
       } catch (e) {
@@ -514,8 +517,10 @@ export function createWorkflowToolExecutorAdapter(deps: WorkflowToolExecutorAdap
         const toolCallId = `workflow-${randomUUID()}`;
         const argsJson = JSON.stringify(args);
         
-        // Execute tool through context
-        const result = await context.execute({ name: toolName, argsJson, toolCallId });
+        if (!context.external) throw new Error("no external MCP transport available");
+        const routed = routeMcpToolInvocation(context.aggregated, toolName);
+        if ("error" in routed) throw new Error(routed.error);
+        const result = await context.external({ sourceId: routed.tool.sourceId, originalName: routed.tool.originalName, argsJson, toolCallId });
         
         // Parse the result
         let parsed: Record<string, unknown>;
