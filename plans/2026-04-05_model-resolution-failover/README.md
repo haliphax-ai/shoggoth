@@ -42,7 +42,7 @@ const providerSchema = z.object({
   apiKeyEnv: z.string().optional(),
   apiKey: z.string().optional(),
   apiVersion: z.string().optional(),
-  models: z.array(providerModelSchema).optional(), // NEW
+  models: z.array(providerModelSchema).optional(),
   // Retry/failure config (per-provider, overrides global)
   maxRetries: z.number().int().nonneg().optional(),
   retryDelayMs: z.number().int().nonneg().optional(),
@@ -55,7 +55,6 @@ const failoverChainEntrySchema = z.union([
   z.string().min(1), // "providerId/model"
   z.object({
     ref: z.string().min(1), // "providerId/model"
-    // Per-hop invocation overrides (temperature, etc.) if needed
   }),
 ]);
 
@@ -187,8 +186,6 @@ Agent failover chains become simple reference lists:
 }
 ```
 
-The `primary` shorthand is removed. Agent chains override the global chain order but model properties always resolve from the provider's model definitions — no more silent property loss.
-
 `resolveEffectiveModelsConfig` merges the agent chain with the global providers. The agent can only reorder/subset the chain; model definitions are immutable at the provider level.
 
 ## Implementation Phases
@@ -199,7 +196,7 @@ Define the new schema types and add the `provider_failures` table.
 
 - Add `models` array to provider schema
 - Add `providerModelSchema` for model definitions
-- Simplify failover chain entry schema to string refs (keep backward compat with object form during transition)
+- Simplify failover chain entry schema to string refs
 - Add `modelsRetrySchema` for global retry config
 - Add per-provider retry/failure fields to provider schema
 - Add `provider_failures` table migration
@@ -273,28 +270,13 @@ Update all code that reads model properties from failover chain entries to use t
 - `packages/platform-discord/src/platform.ts`
 - `packages/cli/src/run-session.ts`
 
-### Phase 6: Config Migration & Backward Compatibility
-
-Support both old and new config formats during transition.
-
-- If a failover chain entry has inline model properties (old format), extract them into the provider's `models` list at config load time with a deprecation warning
-- If `primary` is set on an agent's models config, convert to a single-entry failover chain ref
-- Update config validation to accept both formats
-- Update docs
-
-**Files:**
-- `packages/shared/src/schema.ts` (migration logic)
-- `packages/shared/src/config-compat.ts` (new, optional)
-- `docs/models.md`
-
 ## Testing Strategy
 
-- **Phase 1:** Schema validation tests — new fields accepted, old fields still work
+- **Phase 1:** Schema validation tests — new fields accepted
 - **Phase 2:** Provider failure store — mark, clear, stale detection, concurrent access
 - **Phase 3:** Model resolution — chain walking, failure skipping, stale clearing, exhaustion, edge cases (empty chain, unknown provider, unknown model)
 - **Phase 4:** Failover client integration — retry exhaustion marks failure, success clears failure, DB state persists across calls
-- **Phase 5:** Consumer integration — `contextWindowTokens` resolves correctly for agent overrides, compaction triggers for agents with `primary` model overrides
-- **Phase 6:** Config migration — old format auto-converts, deprecation warnings logged
+- **Phase 5:** Consumer integration — `contextWindowTokens` resolves correctly for agent overrides, compaction triggers for agents with model overrides
 
 All phases use red/green TDD.
 
@@ -302,13 +284,11 @@ All phases use red/green TDD.
 
 - **Performance:** The resolution helper hits the DB on every `complete()` call to check provider failures. This is a single-row lookup by primary key on a tiny table — negligible overhead. If it becomes a concern, an in-memory cache with short TTL could be added.
 - **Race conditions:** Multiple sessions may try to mark/clear the same provider simultaneously. SQLite's serialized writes handle this, but the `INSERT OR REPLACE` pattern should be used for idempotency.
-- **Backward compatibility:** The old inline-property format must work during transition. The migration logic in Phase 6 handles this transparently.
-- **`primary` shorthand removal:** Agents currently use `primary: { providerId, model }` as a shorthand for a single-entry chain. This becomes `failoverChain: ["providerId/model"]`. The old format is auto-converted.
 - **Environment fallback:** The env-var-based single-hop fallback (`OPENAI_BASE_URL`, etc.) should continue to work when no config is present. The synthetic provider it creates should include a model definition with sensible defaults.
 - **Deferred:** Per-model retry config (as opposed to per-provider) is not included in this plan. If needed, it can be added later by extending the model definition schema.
 
 ## Migration
 
 - **DB:** New `provider_failures` table added via migration. No existing data affected.
-- **Config:** Old failover chain format (inline model properties) auto-converts at load time. No manual config changes required immediately, but a deprecation warning is logged. The old `primary` shorthand on agent models config is also auto-converted.
+- **Config:** New format only. The old inline-property format and `primary` shorthand are not supported.
 - **State:** No state files invalidated. The provider failure table starts empty — all providers are assumed healthy on first boot after upgrade.
