@@ -723,8 +723,102 @@ describe("ControlPlane", () => {
         "1",
       );
 
-      // Task 1 is in_progress, not failed
-      await assert.rejects(() => cp.retry(wfId, 1), /not failed/i);
+      // Task 1 is in_progress — not retriable
+      await assert.rejects(() => cp.retry(wfId, 1), /not retriable/i);
+    });
+
+    it("resets a done task to pending when retried", async () => {
+      const { cp, orch, wfId, spawner, pollResults } = await setupWorkflow(
+        baseDir,
+        [makeTask(1), makeTask(2)],
+        "1>2",
+      );
+
+      // Complete task 1
+      pollResults.set("session-1", { status: "done", output: "result1" });
+      await orch.tick();
+
+      const wfBefore = orch.getWorkflowStatus()!;
+      assert.equal(wfBefore.tasks.find((t) => t.taskDef.id === 1)!.status, "done");
+
+      // Retry the done task
+      await cp.retry(wfId, 1);
+
+      const wfAfter = orch.getWorkflowStatus()!;
+      const task1 = wfAfter.tasks.find((t) => t.taskDef.id === 1)!;
+      assert.equal(task1.status, "pending");
+      assert.equal(task1.error, undefined);
+      assert.equal(task1.output, undefined);
+      assert.equal(task1.startedAt, undefined);
+      assert.equal(task1.completedAt, undefined);
+    });
+
+    it("cascade resets downstream done tasks when retrying a done task", async () => {
+      const { cp, orch, wfId, pollResults } = await setupWorkflow(
+        baseDir,
+        [makeTask(1), makeTask(2), makeTask(3)],
+        "1>2>3",
+      );
+
+      // Complete the whole chain
+      pollResults.set("session-1", { status: "done", output: "ok1" });
+      await orch.tick();
+      pollResults.set("session-2", { status: "done", output: "ok2" });
+      await orch.tick();
+      pollResults.set("session-3", { status: "done", output: "ok3" });
+      await orch.tick();
+
+      // All done — retry task 1 with cascade
+      await cp.retry(wfId, 1, true);
+
+      const wfAfter = orch.getWorkflowStatus()!;
+      assert.equal(wfAfter.tasks.find((t) => t.taskDef.id === 1)!.status, "pending");
+      assert.equal(wfAfter.tasks.find((t) => t.taskDef.id === 2)!.status, "pending");
+      assert.equal(wfAfter.tasks.find((t) => t.taskDef.id === 3)!.status, "pending");
+    });
+
+    it("retrying a done task without cascade leaves downstream done tasks intact", async () => {
+      const { cp, orch, wfId, pollResults } = await setupWorkflow(
+        baseDir,
+        [makeTask(1), makeTask(2)],
+        "1>2",
+      );
+
+      // Complete both tasks
+      pollResults.set("session-1", { status: "done", output: "ok1" });
+      await orch.tick();
+      pollResults.set("session-2", { status: "done", output: "ok2" });
+      await orch.tick();
+
+      // Retry task 1 without cascade
+      await cp.retry(wfId, 1);
+
+      const wfAfter = orch.getWorkflowStatus()!;
+      assert.equal(wfAfter.tasks.find((t) => t.taskDef.id === 1)!.status, "pending");
+      // Task 2 should remain done (no cascade, not failed)
+      assert.equal(wfAfter.tasks.find((t) => t.taskDef.id === 2)!.status, "done");
+    });
+
+    it("rejects retry for in_progress tasks", async () => {
+      const { cp, wfId } = await setupWorkflow(
+        baseDir,
+        [makeTask(1)],
+        "1",
+      );
+
+      // Task 1 is in_progress
+      await assert.rejects(() => cp.retry(wfId, 1), /not retriable/i);
+    });
+
+    it("rejects retry for pending tasks", async () => {
+      const { cp, wfId } = await setupWorkflow(
+        baseDir,
+        [makeTask(1), makeTask(2)],
+        "1>2",
+      );
+
+      // Task 2 is pending (blocked by task 1)
+      await assert.rejects(() => cp.retry(wfId, 2), /not retriable/i);
     });
   });
 });

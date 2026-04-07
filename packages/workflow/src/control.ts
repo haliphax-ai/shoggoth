@@ -295,8 +295,8 @@ export class ControlPlane {
     const task = wf.tasks.find((t) => t.taskDef.id === taskId);
     if (!task) throw new Error(`Task ${taskId} not found in workflow ${workflowId}`);
 
-    if (task.status !== "failed") {
-      throw new Error(`Cannot retry task ${taskId}: task is not failed (status: ${task.status})`);
+    if (task.status !== "failed" && task.status !== "done") {
+      throw new Error(`Cannot retry task ${taskId}: status "${task.status}" is not retriable (must be failed or done)`);
     }
 
     // Reset the target task
