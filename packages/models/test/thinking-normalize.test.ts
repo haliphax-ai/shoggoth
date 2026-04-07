@@ -456,3 +456,27 @@ The actual result data
     assert.strictEqual((parts[4] as { type: "text"; text: string }).text, "end");
   });
 });
+
+describe("Gemma-style <think> tag support", () => {
+  it("extracts <think> blocks the same as <thinking>", () => {
+    const content = "Before <think>Gemma reasoning</think> After";
+    const result = extractXmlThinkingBlocks(content);
+    assert(Array.isArray(result));
+    assert.deepStrictEqual(result, [
+      { type: "text", text: "Before" },
+      { type: "thinking", text: "Gemma reasoning" },
+      { type: "text", text: "After" },
+    ]);
+  });
+
+  it("handles mixed <think> and <thinking> tags", () => {
+    const content = "<think>Gemma style</think> text <thinking>Standard style</thinking>";
+    const result = extractXmlThinkingBlocks(content);
+    assert(Array.isArray(result));
+    assert.deepStrictEqual(result, [
+      { type: "thinking", text: "Gemma style" },
+      { type: "text", text: "text" },
+      { type: "thinking", text: "Standard style" },
+    ]);
+  });
+});
