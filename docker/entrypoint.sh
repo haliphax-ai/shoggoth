@@ -28,7 +28,7 @@ if [ -d /etc/shoggoth/config.d/dynamic ]; then
 fi
 fix_dir /var/lib/shoggoth/state 0700 shoggoth shoggoth
 # Workspaces root: setgid (2…) so new session dirs inherit group `agent`; agent UID matches group perms.
-fix_dir /var/lib/shoggoth/workspaces 3770 shoggoth agent
+fix_dir /var/lib/shoggoth/workspaces 2770 shoggoth agent
 fix_dir /var/lib/shoggoth/operator 0700 shoggoth shoggoth
 fix_dir /var/lib/shoggoth/media/inbound 0750 shoggoth shoggoth
 fix_dir /run/shoggoth 0750 shoggoth shoggoth
