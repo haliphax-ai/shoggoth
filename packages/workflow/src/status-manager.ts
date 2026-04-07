@@ -33,6 +33,7 @@ export class StatusManager {
     if (this.repostMode) {
       const result = await this.adapter.postMessage(content);
       this.messageId = result.messageId;
+      this.repostMode = false;
       return;
     }
 
