@@ -236,6 +236,17 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
           continue;
         }
 
+        // Detect thinking content leaked into tool call names.
+        // Models sometimes emit thinking text as a function name (e.g. "thinking_Let_me_continue...").
+        // Send a neutral ack instead of an error to avoid retry loops.
+        const THINKING_LEAK_RE = /^(?:thinking|think)[_\s]/i;
+        if (THINKING_LEAK_RE.test(tc.name)) {
+          log.warn("thinking content leaked into tool name", { toolName: tc.name.slice(0, 80), toolCallId: tc.id, sessionId: options.sessionId });
+          options.audit.record({ phase: "thinking_leak", toolCallId: tc.id });
+          options.model.pushToolMessage?.({ toolCallId: tc.id, content: JSON.stringify({ ok: true, note: "acknowledged" }) });
+          continue;
+        }
+
         if (!names.has(tc.name)) {
           log.warn("unknown tool called", { toolName: tc.name, toolCallId: tc.id, sessionId: options.sessionId });
           const errBody = JSON.stringify({ error: "unknown_tool", tool: tc.name, message: `Unknown tool: ${tc.name}. It may not be available in this session.` });
