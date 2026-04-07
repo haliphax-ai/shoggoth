@@ -456,11 +456,13 @@ export async function toolExec(
   workspaceRoot: string,
   argv: string[],
   creds: AgentCredentials,
+  cwdOverride?: string,
 ): Promise<RunAsUserResult> {
   if (argv.length === 0) {
     throw new Error("toolExec requires a non-empty argv");
   }
-  const cwd = realpathSync(workspaceRoot);
+  const home = realpathSync(workspaceRoot);
+  const cwd = cwdOverride ? realpathSync(cwdOverride) : home;
   const file = argv[0]!;
   const args = argv.slice(1);
   return runAsUser({
@@ -469,7 +471,7 @@ export async function toolExec(
     cwd,
     uid: creds.uid,
     gid: creds.gid,
-    env: xdgEnvForWorkspace(cwd),
+    env: xdgEnvForWorkspace(home),
   });
 }
 

@@ -12,8 +12,8 @@ export function register(registry: BuiltinToolRegistry): void {
 }
 
 /** Effective root for exec: workingDirectory if set, else workspacePath. */
-function execRoot(ctx: BuiltinToolContext): string {
-  return ctx.workingDirectory ?? ctx.workspacePath;
+function execCwd(ctx: BuiltinToolContext): string | undefined {
+  return ctx.workingDirectory ?? undefined;
 }
 
 async function execHandler(
@@ -47,11 +47,11 @@ async function execHandlerInner(
     const command = (argv as string[]).map(a =>
       /[^a-zA-Z0-9_\-./=:]/.test(a) ? `'${a.replace(/'/g, "'\\''")}'` : a
     ).join(" ");
-    const r = await toolExecExtended(execRoot(ctx), {
+    const r = await toolExecExtended(ctx.workspacePath, {
       command,
       timeout: typeof args.timeout === "number" ? args.timeout : undefined,
       stdin: typeof args.stdin === "string" ? args.stdin : undefined,
-      workdir: typeof args.workdir === "string" ? args.workdir : undefined,
+      workdir: typeof args.workdir === "string" ? args.workdir : execCwd(ctx),
       env: args.env && typeof args.env === "object" ? args.env as Record<string, string> : undefined,
       splitStreams: typeof args.splitStreams === "boolean" ? args.splitStreams : undefined,
       maxOutput: typeof args.maxOutput === "number" ? args.maxOutput : undefined,
@@ -90,7 +90,7 @@ async function execHandlerInner(
       }),
     };
   }
-  const r = await toolExec(execRoot(ctx), argv as string[], ctx.creds);
+  const r = await toolExec(ctx.workspacePath, argv as string[], ctx.creds, execCwd(ctx));
   return {
     resultJson: JSON.stringify({
       exitCode: r.exitCode,
