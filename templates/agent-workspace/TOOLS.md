@@ -14,6 +14,8 @@ Before using `builtin-exec`, which is a very risky tool, use these instead:
 | builtin-fs | mv, cp, rm, stat, chmod |
 | builtin-ls | ls, find |
 | builtin-read | cat |
-| builtin-serach-replace | grep, sed |
+| builtin-search-replace | grep, sed |
 | builtin-timer | sleep |
 | builtin-write | any command chain that writes to a file, e.g. `echo "x" > y.txt` |
+
+For documentation and specific tool examples, see `/app/docs/<tool name>.md`.
