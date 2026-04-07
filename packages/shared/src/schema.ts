@@ -37,6 +37,35 @@ export const contextLevelToolsConfigSchema = z
   })
   .strict();
 
+// ---------------------------------------------------------------------------
+// Provider Model Definitions
+// ---------------------------------------------------------------------------
+
+export const providerModelSchema = z
+  .object({
+    name: z.string().min(1),
+    contextWindowTokens: z.number().int().positive().optional(),
+    thinkingFormat: z.enum(["native", "xml-tags", "none"]).optional(),
+  })
+  .strict();
+
+export type ProviderModelDefinition = z.infer<typeof providerModelSchema>;
+
+// ---------------------------------------------------------------------------
+// Global Retry / Failure Config
+// ---------------------------------------------------------------------------
+
+export const modelsRetrySchema = z
+  .object({
+    maxRetries: z.number().int().nonnegative().optional(),
+    retryDelayMs: z.number().int().nonnegative().optional(),
+    retryBackoffMultiplier: z.number().positive().optional(),
+    markFailedDurationMs: z.number().int().positive().optional(),
+  })
+  .strict();
+
+export type ModelsRetryConfig = z.infer<typeof modelsRetrySchema>;
+
 const shoggothOpenAiCompatibleProviderSchema = z
   .object({
     id: z.string().min(1),
@@ -46,6 +75,11 @@ const shoggothOpenAiCompatibleProviderSchema = z
     apiKeyEnv: z.string().min(1).optional(),
     /** When true, pass image URLs directly to the provider instead of fetching and base64-encoding. Only effective when the provider supports URL-based image sources. Default false. */
     imageUrlPassthrough: z.boolean().optional(),
+    models: z.array(providerModelSchema).optional(),
+    maxRetries: z.number().int().nonnegative().optional(),
+    retryDelayMs: z.number().int().nonnegative().optional(),
+    retryBackoffMultiplier: z.number().positive().optional(),
+    markFailedDurationMs: z.number().int().positive().optional(),
   })
   .strict();
 
@@ -62,6 +96,11 @@ const shoggothAnthropicMessagesProviderSchema = z
     auth: z.enum(["x-api-key", "bearer"]).optional(),
     /** When true, pass image URLs directly to the provider instead of fetching and base64-encoding. Only effective when the provider supports URL-based image sources. Default false. */
     imageUrlPassthrough: z.boolean().optional(),
+    models: z.array(providerModelSchema).optional(),
+    maxRetries: z.number().int().nonnegative().optional(),
+    retryDelayMs: z.number().int().nonnegative().optional(),
+    retryBackoffMultiplier: z.number().positive().optional(),
+    markFailedDurationMs: z.number().int().positive().optional(),
   })
   .strict();
 
@@ -75,6 +114,11 @@ const shoggothGeminiProviderSchema = z
     apiKeyEnv: z.string().min(1).optional(),
     /** API version path segment (default "v1beta"). */
     apiVersion: z.string().min(1).optional(),
+    models: z.array(providerModelSchema).optional(),
+    maxRetries: z.number().int().nonnegative().optional(),
+    retryDelayMs: z.number().int().nonnegative().optional(),
+    retryBackoffMultiplier: z.number().positive().optional(),
+    markFailedDurationMs: z.number().int().positive().optional(),
   })
   .strict();
 
@@ -103,8 +147,11 @@ const shoggothModelDefaultInvocationSchema = z
   })
   .strict();
 
-export const shoggothModelFailoverHopSchema = z
-  .object({
+export const shoggothModelFailoverHopSchema = z.union([
+  z.string().min(1), // "providerId/model" ref
+  z.object({ ref: z.string().min(1) }).strict(),
+  // Legacy object format (backward compat)
+  z.object({
     providerId: z.string().min(1),
     model: z.string().min(1),
     contextWindowTokens: z.number().int().positive().optional(),
@@ -113,8 +160,8 @@ export const shoggothModelFailoverHopSchema = z
       imageInput: z.boolean().optional(),
       thinkingFormat: z.enum(["native", "xml-tags", "none"]).optional(),
     }).strict().optional(),
-  })
-  .strict();
+  }).strict(),
+]);
 
 export type ShoggothModelFailoverHop = z.infer<typeof shoggothModelFailoverHopSchema>;
 
@@ -156,6 +203,7 @@ export const shoggothModelsConfigSchema = z
     /** Default model call parameters; per-session `model_selection` JSON overrides by field. */
     defaultInvocation: shoggothModelDefaultInvocationSchema.optional(),
     compaction: shoggothModelsCompactionSchema.optional(),
+    retry: modelsRetrySchema.optional(),
   })
   .strict();
 
