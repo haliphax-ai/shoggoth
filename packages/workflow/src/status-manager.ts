@@ -11,7 +11,6 @@ import { formatStatusMessage, formatSummaryMessage } from "./status-message.js";
 export class StatusManager {
   private readonly adapter: MessageAdapter;
   private messageId: string | null = null;
-  private repostMode = false;
 
   constructor(adapter: MessageAdapter) {
     this.adapter = adapter;
@@ -30,16 +29,8 @@ export class StatusManager {
 
     const content = formatStatusMessage(wf);
 
-    if (this.repostMode) {
-      const result = await this.adapter.postMessage(content);
-      this.messageId = result.messageId;
-      this.repostMode = false;
-      return;
-    }
-
     const ok = await this.adapter.editMessage(this.messageId, content);
     if (!ok) {
-      this.repostMode = true;
       const result = await this.adapter.postMessage(content);
       this.messageId = result.messageId;
     }
@@ -49,10 +40,5 @@ export class StatusManager {
   async postSummary(wf: TaskList): Promise<void> {
     const content = formatSummaryMessage(wf);
     await this.adapter.postMessage(content);
-  }
-
-  /** Whether the manager has switched to repost mode. */
-  isRepostMode(): boolean {
-    return this.repostMode;
   }
 }
