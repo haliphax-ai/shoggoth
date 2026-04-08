@@ -14,6 +14,7 @@ import { estimateTokens } from "./session-stats-store";
 import { toolRefreshNeeded } from "./session-tool-discovery";
 import { getLogger } from "../logging";
 import { validateToolArgs } from "./validate-tool-args";
+import { registerSteerChannel, drainSteers } from "./steer-channel";
 
 export { TurnAbortedError } from "./session-turn-abort";
 
@@ -37,6 +38,8 @@ export interface ModelClient {
   }>;
   /** When set, tool results are fed back so the next `complete()` sees OpenAI-style tool messages. */
   pushToolMessage?(input: { toolCallId: string; content: string }): void;
+  /** When set, injects a steer (operator guidance) message into the model context. */
+  pushSteerMessage?(content: string): void;
 }
 
 export interface ToolExecutor {
@@ -177,6 +180,8 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
   };
 
   options.toolRuns.insertRunning({ id: options.runId, sessionId: options.sessionId });
+
+  const steerHandle = registerSteerChannel(options.sessionId);
 
   const emitStats = options.onStatsUpdate;
   const getTranscriptCount = (): number =>
@@ -520,10 +525,17 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
           log.debug("tool list refreshed mid-loop", { sessionId: options.sessionId, toolCount: refreshed.length });
         }
       }
+
+      // --- Mid-loop steer injection ---
+      for (const s of drainSteers(options.sessionId)) {
+        options.model.pushSteerMessage?.(s);
+      }
     }
 
     options.toolRuns.markCompleted(options.runId);
+    steerHandle.unregister();
   } catch (e) {
+    steerHandle.unregister();
     const row = options.db
       .prepare(`SELECT status FROM tool_runs WHERE id = ?`)
       .get(options.runId) as { status: string } | undefined;

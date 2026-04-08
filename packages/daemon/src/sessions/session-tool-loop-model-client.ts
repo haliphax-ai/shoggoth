@@ -248,5 +248,9 @@ export function createSessionToolLoopModelClient(input: {
         },
       ];
     },
+
+    pushSteerMessage(content) {
+      messages = [...messages, { role: "user", content }];
+    },
   };
 }
