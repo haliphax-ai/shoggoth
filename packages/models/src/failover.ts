@@ -13,6 +13,8 @@ export interface FailoverChainEntry {
   readonly provider: ModelProvider;
   readonly model: string;
   readonly thinkingFormat?: "native" | "xml-tags" | "none";
+  /** Override context window from provider model definition. */
+  readonly contextWindowTokens?: number;
 }
 
 export interface FailoverCompleteInput extends ModelInvocationParams {
@@ -31,6 +33,19 @@ export interface FailoverCompleteOutput extends ModelCompleteOutput {
   readonly thinkingFormat?: "native" | "xml-tags" | "none";
 }
 
+/**
+ * Dependency-injection hooks so the daemon can wire DB-backed provider failure
+ * tracking into the failover loop without a direct cross-package dependency.
+ */
+export interface FailoverHooks {
+  /** Return true if the provider should be skipped (marked failed and not stale). */
+  isProviderFailed?(providerId: string): boolean;
+  /** Called after retry exhaustion for a provider. */
+  onProviderExhausted?(providerId: string, error?: string): void;
+  /** Called on successful completion (clears any prior failure record). */
+  onProviderSuccess?(providerId: string): void;
+}
+
 export interface FailoverModelClient {
   readonly capabilities?: ModelCapabilities;
   complete(input: FailoverCompleteInput): Promise<FailoverCompleteOutput>;
@@ -38,6 +53,7 @@ export interface FailoverModelClient {
 
 export function createFailoverModelClient(
   chain: readonly FailoverChainEntry[],
+  hooks?: FailoverHooks,
 ): FailoverModelClient {
   if (chain.length === 0) {
     throw new Error("failover chain must not be empty");
@@ -48,6 +64,12 @@ export function createFailoverModelClient(
       let lastErr: unknown;
       for (let i = 0; i < chain.length; i++) {
         const entry = chain[i]!;
+
+        // Skip providers marked as failed
+        if (hooks?.isProviderFailed?.(entry.provider.id)) {
+          continue;
+        }
+
         const model = entry.model;
         const thinkingFormat = input.thinkingFormat ?? entry.thinkingFormat ?? entry.provider.capabilities?.thinkingFormat;
         const req: ModelCompleteInput = {
@@ -64,6 +86,7 @@ export function createFailoverModelClient(
         };
         try {
           const out = await entry.provider.complete(req);
+          hooks?.onProviderSuccess?.(entry.provider.id);
           return {
             ...out,
             usedProviderId: entry.provider.id,
@@ -74,7 +97,14 @@ export function createFailoverModelClient(
         } catch (e) {
           lastErr = e;
           const more = i < chain.length - 1;
-          if (more && isFailoverEligibleError(e)) continue;
+          if (more && isFailoverEligibleError(e)) {
+            hooks?.onProviderExhausted?.(entry.provider.id, e instanceof Error ? e.message : String(e));
+            continue;
+          }
+          // Last in chain or non-eligible error — mark exhausted and throw
+          if (isFailoverEligibleError(e)) {
+            hooks?.onProviderExhausted?.(entry.provider.id, e instanceof Error ? e.message : String(e));
+          }
           throw e;
         }
       }

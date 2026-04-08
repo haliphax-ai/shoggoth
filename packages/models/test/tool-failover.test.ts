@@ -1,6 +1,7 @@
 import { describe, it } from "vitest";
 import assert from "node:assert";
 import { createFailoverToolCallingClient } from "../src/tool-failover";
+import type { FailoverHooks } from "../src/failover";
 import type { ModelProvider, ModelCapabilities } from "../src/types";
 import { ModelHttpError } from "../src/errors";
 
@@ -141,6 +142,83 @@ describe("createFailoverToolCallingClient", () => {
         tools: [],
       });
       assert.equal(r.thinkingFormat, undefined);
+    });
+  });
+
+  describe("FailoverHooks integration", () => {
+    it("skips providers marked as failed via isProviderFailed", async () => {
+      const hooks: FailoverHooks = {
+        isProviderFailed: (id) => id === "a",
+      };
+      const c = createFailoverToolCallingClient(
+        [
+          { provider: mockToolProvider("a", "ok", "first"), model: "m1" },
+          { provider: mockToolProvider("b", "ok", "second"), model: "m2" },
+        ],
+        hooks,
+      );
+      const r = await c.completeWithTools({
+        messages: [{ role: "user", content: "x" }],
+        tools: [],
+      });
+      assert.equal(r.usedProviderId, "b");
+      assert.equal(r.degraded, true);
+    });
+
+    it("calls onProviderSuccess on successful completion", async () => {
+      const successIds: string[] = [];
+      const hooks: FailoverHooks = {
+        onProviderSuccess: (id) => successIds.push(id),
+      };
+      const c = createFailoverToolCallingClient(
+        [{ provider: mockToolProvider("a", "ok", "x"), model: "m1" }],
+        hooks,
+      );
+      await c.completeWithTools({
+        messages: [{ role: "user", content: "x" }],
+        tools: [],
+      });
+      assert.deepEqual(successIds, ["a"]);
+    });
+
+    it("calls onProviderExhausted when failover skips a provider", async () => {
+      const exhaustedIds: string[] = [];
+      const hooks: FailoverHooks = {
+        onProviderExhausted: (id) => exhaustedIds.push(id),
+      };
+      const c = createFailoverToolCallingClient(
+        [
+          { provider: mockToolProvider("a", "503"), model: "m1" },
+          { provider: mockToolProvider("b", "ok", "backup"), model: "m2" },
+        ],
+        hooks,
+      );
+      await c.completeWithTools({
+        messages: [{ role: "user", content: "x" }],
+        tools: [],
+      });
+      assert.deepEqual(exhaustedIds, ["a"]);
+    });
+
+    it("calls onProviderExhausted on last provider in chain", async () => {
+      const exhaustedIds: string[] = [];
+      const hooks: FailoverHooks = {
+        onProviderExhausted: (id) => exhaustedIds.push(id),
+      };
+      const c = createFailoverToolCallingClient(
+        [
+          { provider: mockToolProvider("a", "503"), model: "m1" },
+          { provider: mockToolProvider("b", "503"), model: "m2" },
+        ],
+        hooks,
+      );
+      await assert.rejects(() =>
+        c.completeWithTools({
+          messages: [{ role: "user", content: "x" }],
+          tools: [],
+        }),
+      );
+      assert.deepEqual(exhaustedIds, ["a", "b"]);
     });
   });
 });

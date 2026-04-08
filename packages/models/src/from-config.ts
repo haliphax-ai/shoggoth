@@ -1,6 +1,6 @@
 import type { ShoggothModelsConfig } from "@shoggoth/shared";
 import { createAnthropicMessagesProvider } from "./anthropic-messages";
-import { createFailoverModelClient, type FailoverModelClient } from "./failover";
+import { createFailoverModelClient, type FailoverModelClient, type FailoverHooks } from "./failover";
 import { createGeminiProvider } from "./gemini";
 import { createOpenAICompatibleProvider, type FetchLike } from "./openai-compatible";
 import type { CompactionPolicy } from "./compaction";
@@ -13,6 +13,7 @@ import {
 export interface CreateFailoverFromConfigOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly fetchImpl?: FetchLike;
+  readonly hooks?: FailoverHooks;
 }
 
 function normalizeOpenAIBaseUrl(raw: string): string {
@@ -120,9 +121,10 @@ function singleHopFromEnv(
 function envBackedFailover(
   env: NodeJS.ProcessEnv,
   fetchImpl?: FetchLike,
+  hooks?: FailoverHooks,
 ): FailoverModelClient {
   const { provider, model } = singleHopFromEnv(env, fetchImpl);
-  return createFailoverModelClient([{ provider, model }]);
+  return createFailoverModelClient([{ provider, model }], hooks);
 }
 
 export function createFailoverClientFromModelsConfig(
@@ -134,7 +136,7 @@ export function createFailoverClientFromModelsConfig(
   const providers = models?.providers;
 
   if (!chain?.length) {
-    return envBackedFailover(env, options.fetchImpl);
+    return envBackedFailover(env, options.fetchImpl, options.hooks);
   }
 
   const byId = modelProvidersById(providers, env, options.fetchImpl);
@@ -144,10 +146,15 @@ export function createFailoverClientFromModelsConfig(
     if (!provider) {
       throw new Error(`Unknown model provider id "${hop.providerId}" in failoverChain`);
     }
-    return { provider, model: hop.model, thinkingFormat: hop.thinkingFormat };
+    return {
+      provider,
+      model: hop.model,
+      thinkingFormat: hop.thinkingFormat,
+      contextWindowTokens: hop.contextWindowTokens,
+    };
   });
 
-  const client = createFailoverModelClient(entries);
+  const client = createFailoverModelClient(entries, options.hooks);
   const hopCaps = chain[0]?.capabilities;
   if (hopCaps) {
     return Object.assign(client, { capabilities: hopCaps });
@@ -165,7 +172,7 @@ export function createFailoverToolCallingClientFromModelsConfig(
 
   if (!chain?.length) {
     const { provider, model } = singleHopFromEnv(env, options.fetchImpl);
-    return createFailoverToolCallingClient([{ provider, model }]);
+    return createFailoverToolCallingClient([{ provider, model }], options.hooks);
   }
 
   const byId = modelProvidersById(providers, env, options.fetchImpl);
@@ -175,10 +182,15 @@ export function createFailoverToolCallingClientFromModelsConfig(
     if (!provider) {
       throw new Error(`Unknown model provider id "${hop.providerId}" in failoverChain`);
     }
-    return { provider, model: hop.model, thinkingFormat: hop.thinkingFormat };
+    return {
+      provider,
+      model: hop.model,
+      thinkingFormat: hop.thinkingFormat,
+      contextWindowTokens: hop.contextWindowTokens,
+    };
   });
 
-  const client = createFailoverToolCallingClient(entries);
+  const client = createFailoverToolCallingClient(entries, options.hooks);
   const hopCaps = chain[0]?.capabilities;
   if (hopCaps) {
     return Object.assign(client, { capabilities: hopCaps });

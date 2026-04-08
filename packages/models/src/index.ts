@@ -28,8 +28,17 @@ export {
   type FailoverChainEntry,
   type FailoverCompleteInput,
   type FailoverCompleteOutput,
+  type FailoverHooks,
   type FailoverModelClient,
 } from "./failover";
+export type {
+  ChatMessage,
+  ChatRole,
+  ChatContentPart,
+  ImageBlock,
+  ImageBlockCodec,
+  ModelProvider,
+  ModelCapabilitie
 export type {
   ChatMessage,
   ChatRole,
