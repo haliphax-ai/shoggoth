@@ -1,6 +1,7 @@
 import { invokeControlRequest, resolveSessionTargetFromCliArg } from "@shoggoth/daemon/lib";
 import { loadLayeredConfig, LAYOUT, resolveEffectiveModelsConfig, VERSION } from "@shoggoth/shared";
 import { runSessionCompact } from "./run-session-compact";
+import { formatModelResult } from "./format-model-result";
 
 function controlAuth(): { kind: "operator_token"; token: string } {
   const token = process.env.SHOGGOTH_OPERATOR_TOKEN?.trim();
@@ -345,15 +346,12 @@ export async function runSessionCli(argv: string[]): Promise<void> {
       op: "session_model",
       payload,
     });
-   
-    const res = await invokeControlRequest({
-      socketPath,
-      auth,
-      op: "session_model",
-      payload,
-    });
-    console.log(JSON.stringify(res, null, 2));
-    if (!res.ok) process.exitCode = 1;
+    if (res.ok) {
+      console.log(formatModelResult(res as Record<string, unknown>));
+    } else {
+      console.error(`Failed: ${(res as Record<string, unknown>).error ?? "unknown error"}`);
+      process.exitCode = 1;
+    }
     return;
   }
 

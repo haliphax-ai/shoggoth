@@ -163,7 +163,7 @@ if (config.dynamicConfigDirectory) {
 
 // Initialize model metadata store from config and register known defaults.
 if (config.models?.failoverChain) {
-  initModelMetadataFromConfig(config.models.failoverChain);
+  initModelMetadataFromConfig(config.models.failoverChain, config.models.providers);
 }
 if (config.models?.providers) {
   registerAnthropicDefaultsForProviders(config.models.providers);

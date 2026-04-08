@@ -208,7 +208,9 @@ function formatPrimaryModelLabel(
   const chain = models?.failoverChain;
   if (chain?.length) {
     const first = chain[0]!;
-    return `${first.model} (provider: ${first.providerId})`;
+    const [firstProviderId, ...modelParts] = first.split("/");
+    const firstModel = modelParts.join("/");
+    return `${firstModel} (provider: ${firstProviderId})`;
   }
   if (env.ANTHROPIC_BASE_URL?.trim()) {
     const model = env.SHOGGOTH_MODEL?.trim() || "claude-3-5-sonnet-20241022";

@@ -19,12 +19,20 @@ const store = new Map<ModelKey, ModelMetadataEntry>();
  * Call once at startup after config is loaded.
  */
 export function initModelMetadataFromConfig(
-  failoverChain: ReadonlyArray<{ providerId: string; model: string; contextWindowTokens?: number }>,
+  failoverChain: ReadonlyArray<string>,
+  providers?: ReadonlyArray<{ id: string; models?: ReadonlyArray<{ name: string; contextWindowTokens?: number }> }>,
 ): void {
   for (const entry of failoverChain) {
-    if (entry.contextWindowTokens != null) {
-      store.set(makeKey(entry.providerId, entry.model), {
-        contextWindowTokens: entry.contextWindowTokens,
+    const slash = entry.indexOf("/");
+    if (slash < 1) continue;
+    const providerId = entry.slice(0, slash);
+    const model = entry.slice(slash + 1);
+    const providerConfig = providers?.find((p) => p.id === providerId);
+    const modelConfig = providerConfig?.models?.find((m) => m.name === model);
+    const contextWindowTokens = modelConfig?.contextWindowTokens;
+    if (contextWindowTokens != null) {
+      store.set(makeKey(providerId, model), {
+        contextWindowTokens,
         source: "config",
       });
     }
@@ -170,17 +178,21 @@ export function getOpenAIKnownContextWindow(model: string): number | undefined {
  */
 export function registerOpenAIDefaultsForProviders(
   providers: ReadonlyArray<{ id: string; kind: string }>,
-  failoverChain: ReadonlyArray<{ providerId: string; model: string }>,
+  failoverChain: ReadonlyArray<string>,
 ): void {
   const openaiIds = new Set(
     providers.filter((p) => p.kind === "openai-compatible").map((p) => p.id),
   );
 
-  for (const hop of failoverChain) {
-    if (!openaiIds.has(hop.providerId)) continue;
-    const ctx = OPENAI_KNOWN_CONTEXT_WINDOWS[hop.model];
+  for (const entry of failoverChain) {
+    const slash = entry.indexOf("/");
+    if (slash < 1) continue;
+    const providerId = entry.slice(0, slash);
+    const model = entry.slice(slash + 1);
+    if (!openaiIds.has(providerId)) continue;
+    const ctx = OPENAI_KNOWN_CONTEXT_WINDOWS[model];
     if (ctx != null) {
-      setModelMetadataDefault(hop.providerId, hop.model, ctx);
+      setModelMetadataDefault(providerId, model, ctx);
     }
   }
 }

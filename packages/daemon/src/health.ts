@@ -245,7 +245,7 @@ async function fetchGeminiModelMetadata(
  */
 export async function fetchGeminiMetadataForProviders(
   providers: ReadonlyArray<{ id: string; kind: string; baseUrl?: string; apiKey?: string; apiKeyEnv?: string; apiVersion?: string }>,
-  failoverChain: ReadonlyArray<{ providerId: string; model: string }>,
+  failoverChain: ReadonlyArray<string>,
   env: NodeJS.ProcessEnv,
   logger: { warn(msg: string, meta?: Record<string, unknown>): void },
 ): Promise<void> {
@@ -255,8 +255,12 @@ export async function fetchGeminiMetadataForProviders(
       .map((p) => [p.id, p]),
   );
 
-  for (const hop of failoverChain) {
-    const provider = geminiProviders.get(hop.providerId);
+  for (const entry of failoverChain) {
+    const slash = entry.indexOf("/");
+    if (slash < 1) continue;
+    const providerId = entry.slice(0, slash);
+    const model = entry.slice(slash + 1);
+    const provider = geminiProviders.get(providerId);
     if (!provider) continue;
 
     const apiKey = provider.apiKey ?? (provider.apiKeyEnv ? env[provider.apiKeyEnv] : undefined);
@@ -265,9 +269,9 @@ export async function fetchGeminiMetadataForProviders(
     const baseUrl = provider.baseUrl ?? "https://generativelanguage.googleapis.com";
     const apiVersion = provider.apiVersion ?? "v1beta";
 
-    const meta = await fetchGeminiModelMetadata(baseUrl, apiVersion, hop.model, apiKey);
+    const meta = await fetchGeminiModelMetadata(baseUrl, apiVersion, model, apiKey);
     if (meta?.inputTokenLimit != null) {
-      const warning = setModelMetadataFromProvider(hop.providerId, hop.model, meta.inputTokenLimit);
+      const warning = setModelMetadataFromProvider(providerId, model, meta.inputTokenLimit);
       if (warning) logger.warn(warning);
     }
   }
@@ -322,7 +326,7 @@ async function fetchOpenAIModelMetadata(
  */
 export async function fetchOpenAIMetadataForProviders(
   providers: ReadonlyArray<{ id: string; kind: string; baseUrl?: string; apiKey?: string; apiKeyEnv?: string }>,
-  failoverChain: ReadonlyArray<{ providerId: string; model: string }>,
+  failoverChain: ReadonlyArray<string>,
   env: NodeJS.ProcessEnv,
   logger: { warn(msg: string, meta?: Record<string, unknown>): void },
 ): Promise<void> {
@@ -332,17 +336,21 @@ export async function fetchOpenAIMetadataForProviders(
       .map((p) => [p.id, p]),
   );
 
-  for (const hop of failoverChain) {
-    const provider = openaiProviders.get(hop.providerId);
+  for (const entry of failoverChain) {
+    const slash = entry.indexOf("/");
+    if (slash < 1) continue;
+    const providerId = entry.slice(0, slash);
+    const model = entry.slice(slash + 1);
+    const provider = openaiProviders.get(providerId);
     if (!provider) continue;
 
     const apiKey = provider.apiKey ?? (provider.apiKeyEnv ? env[provider.apiKeyEnv] : undefined) ?? "";
     const baseUrl = provider.baseUrl;
     if (!baseUrl) continue;
 
-    const meta = await fetchOpenAIModelMetadata(baseUrl, hop.model, apiKey);
+    const meta = await fetchOpenAIModelMetadata(baseUrl, model, apiKey);
     if (meta?.contextWindow != null) {
-      const warning = setModelMetadataFromProvider(hop.providerId, hop.model, meta.contextWindow);
+      const warning = setModelMetadataFromProvider(providerId, model, meta.contextWindow);
       if (warning) logger.warn(warning);
     }
   }

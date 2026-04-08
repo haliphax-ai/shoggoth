@@ -1282,8 +1282,9 @@ export async function handleIntegrationControlOp(
             const chain = modelsConfig?.failoverChain;
             if (chain && chain.length > 0) {
               const first = chain[0];
-              if (!providerId) providerId = first.providerId ?? null;
-              if (!modelName) modelName = first.model ?? null;
+              const [parsedProviderId, ...modelParts] = first.split("/");
+              if (!providerId) providerId = parsedProviderId ?? null;
+              if (!modelName) modelName = modelParts.join("/") || null;
             }
           }
           modelData = { providerId, model: modelName };
