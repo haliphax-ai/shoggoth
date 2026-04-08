@@ -801,7 +801,9 @@ export class Orchestrator {
 
       const allSuccess = wf.tasks.every((t) => t.status === "done");
       const wasAborted = wf.tasks.some((t) => t.error?.startsWith("aborted:"));
-      this.notifier.notify(wf.id, allSuccess, { replyTo: this.opts?.replyTo ?? "", aborted: wasAborted });
+      if (!wasAborted) {
+        this.notifier.notify(wf.id, allSuccess, { replyTo: this.opts?.replyTo ?? "" });
+      }
       if (allSuccess) {
         log.info("workflow completed", { workflowId: wf.id });
       } else {
