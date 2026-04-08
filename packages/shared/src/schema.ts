@@ -37,6 +37,25 @@ export const contextLevelToolsConfigSchema = z
   })
   .strict();
 
+export const providerModelSchema = z
+  .object({
+    name: z.string().min(1),
+    contextWindowTokens: z.number().int().positive().optional(),
+    thinkingFormat: z.enum(["native", "xml-tags", "none"]).optional(),
+  })
+  .strict();
+
+export type ProviderModel = z.infer<typeof providerModelSchema>;
+
+/** Per-provider retry / failure fields shared across all provider kinds. */
+const providerRetryFields = {
+  models: z.array(providerModelSchema).optional(),
+  maxRetries: z.number().int().nonnegative().optional(),
+  retryDelayMs: z.number().int().nonnegative().optional(),
+  retryBackoffMultiplier: z.number().positive().optional(),
+  markFailedDurationMs: z.number().int().positive().optional(),
+};
+
 const shoggothOpenAiCompatibleProviderSchema = z
   .object({
     id: z.string().min(1),
@@ -46,6 +65,7 @@ const shoggothOpenAiCompatibleProviderSchema = z
     apiKeyEnv: z.string().min(1).optional(),
     /** When true, pass image URLs directly to the provider instead of fetching and base64-encoding. Only effective when the provider supports URL-based image sources. Default false. */
     imageUrlPassthrough: z.boolean().optional(),
+    ...providerRetryFields,
   })
   .strict();
 
@@ -62,6 +82,7 @@ const shoggothAnthropicMessagesProviderSchema = z
     auth: z.enum(["x-api-key", "bearer"]).optional(),
     /** When true, pass image URLs directly to the provider instead of fetching and base64-encoding. Only effective when the provider supports URL-based image sources. Default false. */
     imageUrlPassthrough: z.boolean().optional(),
+    ...providerRetryFields,
   })
   .strict();
 
@@ -75,6 +96,7 @@ const shoggothGeminiProviderSchema = z
     apiKeyEnv: z.string().min(1).optional(),
     /** API version path segment (default "v1beta"). */
     apiVersion: z.string().min(1).optional(),
+    ...providerRetryFields,
   })
   .strict();
 
@@ -118,6 +140,26 @@ export const shoggothModelFailoverHopSchema = z
 
 export type ShoggothModelFailoverHop = z.infer<typeof shoggothModelFailoverHopSchema>;
 
+/** Simplified failover chain entry: string ref like 'providerId/model' or object with ref. */
+export const failoverChainEntrySchema = z.union([
+  z.string().min(1),
+  z.object({ ref: z.string().min(1) }),
+]);
+
+export type FailoverChainEntry = z.infer<typeof failoverChainEntrySchema>;
+
+/** Global retry / failure configuration for model resolution. */
+export const modelsRetrySchema = z
+  .object({
+    maxRetries: z.number().int().nonnegative().optional(),
+    retryDelayMs: z.number().int().nonnegative().optional(),
+    retryBackoffMultiplier: z.number().positive().optional(),
+    markFailedDurationMs: z.number().int().positive().optional(),
+  })
+  .strict();
+
+export type ModelsRetry = z.infer<typeof modelsRetrySchema>;
+
 export const shoggothModelsCompactionSchema = z
   .object({
     maxContextChars: z.number().int().positive(),
@@ -152,10 +194,12 @@ export type ShoggothAgentModelsOverride = z.infer<typeof shoggothAgentModelsOver
 export const shoggothModelsConfigSchema = z
   .object({
     providers: z.array(shoggothModelProviderEntrySchema).optional(),
-    failoverChain: z.array(shoggothModelFailoverHopSchema).optional(),
+    failoverChain: z.array(failoverChainEntrySchema).optional(),
     /** Default model call parameters; per-session `model_selection` JSON overrides by field. */
     defaultInvocation: shoggothModelDefaultInvocationSchema.optional(),
     compaction: shoggothModelsCompactionSchema.optional(),
+    /** Global retry / failure configuration for model resolution. */
+    retry: modelsRetrySchema.optional(),
   })
   .strict();
 

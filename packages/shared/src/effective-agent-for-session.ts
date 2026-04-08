@@ -98,7 +98,7 @@ export function resolveEffectiveModelsConfig(
 
   return {
     ...(global ?? {}),
-    ...(chain && chain.length > 0 ? { failoverChain: chain } : {}),
+    ...(chain && chain.length > 0 ? { failoverChain: chain as unknown as ShoggothModelsConfig["failoverChain"] } : {}),
     ...(defaultInvocation !== undefined ? { defaultInvocation } : {}),
     ...(compaction !== undefined ? { compaction } : {}),
   };
