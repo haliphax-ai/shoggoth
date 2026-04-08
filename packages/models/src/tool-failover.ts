@@ -1,7 +1,6 @@
 import { isFailoverEligibleError } from "./classify";
 import type { FailoverChainEntry } from "./failover";
 import type { ModelCapabilities, ModelToolCompleteInput, ModelToolCompleteOutput } from "./types";
-import { stripXmlThinkingTags } from "./thinking-normalize";
 
 export type FailoverToolCompleteOutput = ModelToolCompleteOutput & {
   readonly usedProviderId: string;
@@ -35,13 +34,9 @@ export function createFailoverToolCallingClient(
         };
         try {
           const out = await entry.provider.completeWithTools(req);
-          const thinkingFormat = input.thinkingFormat ?? entry.provider.capabilities?.thinkingFormat;
-          const toolCalls = thinkingFormat === "xml-tags"
-            ? out.toolCalls.map((tc) => ({ ...tc, arguments: stripXmlThinkingTags(tc.arguments) }))
-            : out.toolCalls;
+          const thinkingFormat = input.thinkingFormat ?? entry.thinkingFormat ?? entry.provider.capabilities?.thinkingFormat;
           return {
             ...out,
-            toolCalls,
             usedProviderId: entry.provider.id,
             usedModel: model,
             degraded: i > 0,

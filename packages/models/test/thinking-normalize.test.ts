@@ -1,6 +1,6 @@
 import { describe, it } from "vitest";
 import assert from "node:assert";
-import { normalizeThinkingBlocks, extractXmlThinkingBlocks } from "../src/thinking-normalize";
+import { normalizeThinkingBlocks, extractXmlThinkingBlocks, stripXmlThinkingTags } from "../src/thinking-normalize";
 import type { ChatContentPart } from "../src/types";
 
 describe("extractXmlThinkingBlocks", () => {
@@ -478,5 +478,69 @@ describe("Gemma-style <think> tag support", () => {
       { type: "text", text: "text" },
       { type: "thinking", text: "Standard style" },
     ]);
+  });
+});
+
+describe("stripXmlThinkingTags", () => {
+  it("strips thinking tags from a string and returns only text", () => {
+    assert.strictEqual(
+      stripXmlThinkingTags("<thinking>reasoning here</thinking>actual content"),
+      "actual content",
+    );
+  });
+
+  it("strips think tags (Gemma-style)", () => {
+    assert.strictEqual(
+      stripXmlThinkingTags("<think>reasoning</think>actual content"),
+      "actual content",
+    );
+  });
+
+  it("returns original string when no thinking tags present", () => {
+    const s = '{"file":"test.ts","match":"foo"}';
+    assert.strictEqual(stripXmlThinkingTags(s), s);
+  });
+
+  it("strips thinking tags from tool call argument JSON", () => {
+    const dirty = '<thinking>Let me figure out the args</thinking>{"file":"test.ts","match":"foo","replacement":"bar"}';
+    assert.strictEqual(
+      stripXmlThinkingTags(dirty),
+      '{"file":"test.ts","match":"foo","replacement":"bar"}',
+    );
+  });
+
+  it("strips thinking tags embedded mid-argument", () => {
+    const dirty = '{"file":"test.ts",<thinking>I need to set match</thinking>"match":"foo"}';
+    assert.strictEqual(
+      stripXmlThinkingTags(dirty),
+      '{"file":"test.ts","match":"foo"}',
+    );
+  });
+
+  it("strips multiple thinking blocks from arguments", () => {
+    const dirty = '<thinking>first thought</thinking>{"key":<thinking>second thought</thinking>"value"}';
+    assert.strictEqual(
+      stripXmlThinkingTags(dirty),
+      '{"key":"value"}',
+    );
+  });
+
+  it("strips multiline thinking blocks from arguments", () => {
+    const dirty = `<thinking>
+Let me analyze this carefully.
+The file needs to be updated.
+</thinking>{"file":"src/index.ts"}`;
+    assert.strictEqual(
+      stripXmlThinkingTags(dirty),
+      '{"file":"src/index.ts"}',
+    );
+  });
+
+  it("handles empty string", () => {
+    assert.strictEqual(stripXmlThinkingTags(""), "");
+  });
+
+  it("handles string that is only a thinking block", () => {
+    assert.strictEqual(stripXmlThinkingTags("<thinking>all thinking no content</thinking>"), "");
   });
 });

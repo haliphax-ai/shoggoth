@@ -256,7 +256,7 @@ function parseGeminiResponse(
     const p = part as Record<string, unknown>;
 
     if (typeof p.text === "string") {
-      textParts.push(p.text);
+      textParts.push(thinkingFormat === "xml-tags" ? stripXmlThinkingTags(p.text) : p.text);
     }
 
     if (p.functionCall && typeof p.functionCall === "object") {
@@ -409,7 +409,8 @@ export async function consumeGeminiStream(
     throw new ModelHttpError(502, "unexpected functionCall in non-tool Gemini stream", "");
   }
 
-  let content: string | ChatContentPart[] | null = accumulatedText.length > 0 ? accumulatedText : null;
+  const strippedText = options.thinkingFormat === "xml-tags" ? stripXmlThinkingTags(accumulatedText) : accumulatedText;
+  let content: string | ChatContentPart[] | null = strippedText.length > 0 ? strippedText : null;
 
   // Normalize thinking blocks if thinkingFormat is specified and content is not null
   if (content !== null && options.thinkingFormat) {

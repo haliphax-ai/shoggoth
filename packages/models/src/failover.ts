@@ -12,6 +12,7 @@ import type { ModelProvider } from "./types";
 export interface FailoverChainEntry {
   readonly provider: ModelProvider;
   readonly model: string;
+  readonly thinkingFormat?: "native" | "xml-tags" | "none";
 }
 
 export interface FailoverCompleteInput extends ModelInvocationParams {
@@ -48,7 +49,7 @@ export function createFailoverModelClient(
       for (let i = 0; i < chain.length; i++) {
         const entry = chain[i]!;
         const model = entry.model;
-        const thinkingFormat = input.thinkingFormat ?? entry.provider.capabilities?.thinkingFormat;
+        const thinkingFormat = input.thinkingFormat ?? entry.thinkingFormat ?? entry.provider.capabilities?.thinkingFormat;
         const req: ModelCompleteInput = {
           model,
           messages: input.messages,

@@ -87,6 +87,51 @@ describe("createFailoverToolCallingClient", () => {
       assert.equal(r.degraded, true);
     });
 
+    it("propagates thinkingFormat from chain entry over provider capabilities", async () => {
+      const c = createFailoverToolCallingClient([
+        {
+          provider: mockToolProvider("a", "ok", "x", [], { thinkingFormat: "none" }),
+          model: "m1",
+          thinkingFormat: "xml-tags",
+        },
+      ]);
+      const r = await c.completeWithTools({
+        messages: [{ role: "user", content: "x" }],
+        tools: [],
+      });
+      assert.equal(r.thinkingFormat, "xml-tags");
+    });
+
+    it("falls back to provider capabilities when chain entry has no thinkingFormat", async () => {
+      const c = createFailoverToolCallingClient([
+        {
+          provider: mockToolProvider("a", "ok", "x", [], { thinkingFormat: "xml-tags" }),
+          model: "m1",
+        },
+      ]);
+      const r = await c.completeWithTools({
+        messages: [{ role: "user", content: "x" }],
+        tools: [],
+      });
+      assert.equal(r.thinkingFormat, "xml-tags");
+    });
+
+    it("input thinkingFormat takes priority over chain entry and provider", async () => {
+      const c = createFailoverToolCallingClient([
+        {
+          provider: mockToolProvider("a", "ok", "x", [], { thinkingFormat: "none" }),
+          model: "m1",
+          thinkingFormat: "none",
+        },
+      ]);
+      const r = await c.completeWithTools({
+        messages: [{ role: "user", content: "x" }],
+        tools: [],
+        thinkingFormat: "xml-tags",
+      });
+      assert.equal(r.thinkingFormat, "xml-tags");
+    });
+
     it("returns undefined thinkingFormat when provider has none", async () => {
       const c = createFailoverToolCallingClient([
         { provider: mockToolProvider("a", "ok", "x"), model: "m1" },

@@ -316,7 +316,7 @@ function contentBlocksToModelOutput(
     const b = block as Record<string, unknown>;
     const type = b.type;
     if (type === "text" && typeof b.text === "string") {
-      textParts.push(b.text);
+      textParts.push(thinkingFormat === "xml-tags" ? stripXmlThinkingTags(b.text) : b.text);
     } else if (type === "tool_use") {
       const id = typeof b.id === "string" ? b.id : "";
       const name = typeof b.name === "string" ? b.name : "";
@@ -589,7 +589,9 @@ export async function consumeAnthropicMessagesStream(
   const textParts: string[] = [];
   for (const idx of sortedIndices) {
     const st = blocks.get(idx);
-    if (st?.kind === "text" && st.text.length > 0) textParts.push(st.text);
+    if (st?.kind === "text" && st.text.length > 0) {
+      textParts.push(options.thinkingFormat === "xml-tags" ? stripXmlThinkingTags(st.text) : st.text);
+    }
   }
   const joinedText = textParts.join("");
   const content = joinedText.length > 0 ? joinedText : null;

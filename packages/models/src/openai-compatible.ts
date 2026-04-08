@@ -394,11 +394,12 @@ export function createOpenAICompatibleProvider(
         if (!res.body) {
           throw new ModelHttpError(502, "missing response body for stream", undefined);
         }
-        const { content, toolCalls, usage } = await consumeOpenAIChatCompletionStream(res.body, {
+        const { content: rawContent, toolCalls, usage } = await consumeOpenAIChatCompletionStream(res.body, {
           accumulateTools: true,
           thinkingFormat,
           onTextDelta: input.onTextDelta,
         });
+        const content = rawContent && thinkingFormat === "xml-tags" ? stripXmlThinkingTags(rawContent) : rawContent;
 
         if (toolCalls.length === 0 && (content === null || content === "")) {
           throw new ModelHttpError(502, "missing assistant content and tool_calls", "");
@@ -434,7 +435,7 @@ export function createOpenAICompatibleProvider(
 
       let content: string | null = null;
       if (message && typeof message.content === "string") {
-        content = message.content;
+        content = thinkingFormat === "xml-tags" ? stripXmlThinkingTags(message.content) : message.content;
       } else if (message && message.content === null) {
         content = null;
       }
