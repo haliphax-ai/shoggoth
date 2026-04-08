@@ -161,8 +161,9 @@ async function handleReplace(
     return { resultJson: JSON.stringify({ error: "match not found in file" }) };
   }
 
-  // Step 2a: count-limited replacement — read, replace in JS, write back
-  if (hasCount) {
+  // Step 2a: count-limited or multiline replacement — read, replace in JS, write back
+  // (rg --passthru doesn't handle multiline replacements correctly)
+  if (hasCount || multiline) {
     const readResult = await runAsUser({
       file: process.execPath,
       args: ["-e", `process.stdout.write(require("fs").readFileSync(${JSON.stringify(absPath)}, "utf8"))`],
@@ -175,7 +176,7 @@ async function handleReplace(
     }
 
     const count = args.count as number;
-    const maxReplacements = count === 0 ? Infinity : count;
+    const maxReplacements = hasCount ? (count === 0 ? Infinity : count) : Infinity;
     let replacements = 0;
     const regexFlags = multiline ? "gs" : "g";
     const result = readResult.stdout.replace(new RegExp(regexPattern, regexFlags), (m, ...rest) => {
