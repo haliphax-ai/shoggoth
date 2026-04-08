@@ -61,6 +61,7 @@ import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref"
 import { terminatePersistentSubagentSession } from "../subagent/subagent-kill";
 import { extractLatestTranscriptAssistantText } from "../sessions/transcript-to-chat";
 import { pushSystemContext } from "../sessions/system-context-buffer";
+import { pushSteer } from "../sessions/steer-channel";
 import { getTurnQueue } from "../sessions/session-turn-queue-singleton";
 
 export class IntegrationOpError extends Error {
@@ -1456,6 +1457,15 @@ export async function handleIntegrationControlOp(
           "ERR_FORBIDDEN",
           "agent may only steer direct child subagents",
         );
+      }
+      // --- Split path: inject directly into active tool loop if one exists ---
+      if (pushSteer(sessionId, prompt)) {
+        ctx.recordIntegrationAudit({
+          action: "session.steer",
+          resource: sessionId,
+          outcome: "injected",
+        });
+        return { injected: true };
       }
       const platformUserIdRaw = pl.platform_user_id;
       const platformUserId =
