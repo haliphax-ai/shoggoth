@@ -179,6 +179,7 @@ export function createSessionToolLoopModelClient(input: {
         maxOutputTokens: inv.maxOutputTokens,
         temperature: inv.temperature,
         thinking: inv.thinking,
+        thinkingFormat: inv.thinkingFormat,
         reasoningEffort: inv.reasoningEffort,
         requestExtras: inv.requestExtras,
         ...streamOpts,
