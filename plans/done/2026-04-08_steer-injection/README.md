@@ -1,6 +1,6 @@
 ---
 date: 2026-04-08
-completed: never
+completed: 2026-04-08
 ---
 
 # Direct Steer Injection Into Active Tool Loops
