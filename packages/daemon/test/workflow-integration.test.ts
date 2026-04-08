@@ -1,12 +1,22 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { initWorkflow, resetWorkflowSingleton } from '../src/workflow-singleton';
 import type { WorkflowSingletonOptions } from '../src/workflow-singleton';
 import type { MessagePoster } from '@shoggoth/workflow';
 
 describe('Workflow Integration', () => {
+  let tempDir: string;
+
   beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'shoggoth-workflow-int-'));
     vi.clearAllMocks();
     resetWorkflowSingleton();
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
   });
 
   it('should accept createMessagePoster factory in options', () => {
@@ -17,7 +27,7 @@ describe('Workflow Integration', () => {
     const mockKiller = { async kill() {} };
 
     const opts: WorkflowSingletonOptions = {
-      stateDir: '/tmp/test',
+      stateDir: tempDir,
       spawner: mockSpawner,
       poller: mockPoller,
       notifier: mockNotifier,
@@ -38,7 +48,7 @@ describe('Workflow Integration', () => {
     const mockKiller = { async kill() {} };
 
     const opts: WorkflowSingletonOptions = {
-      stateDir: '/tmp/test',
+      stateDir: tempDir,
       spawner: mockSpawner,
       poller: mockPoller,
       notifier: mockNotifier,
@@ -60,7 +70,7 @@ describe('Workflow Integration', () => {
     const mockKiller = { async kill() {} };
 
     const opts: WorkflowSingletonOptions = {
-      stateDir: '/tmp/test',
+      stateDir: tempDir,
       spawner: mockSpawner,
       poller: mockPoller,
       notifier: mockNotifier,
@@ -94,7 +104,7 @@ describe('Workflow Integration', () => {
     const mockKiller = { async kill() {} };
 
     const opts: WorkflowSingletonOptions = {
-      stateDir: '/tmp/test',
+      stateDir: tempDir,
       spawner: mockSpawner as any,
       poller: mockPoller,
       notifier: mockNotifier,
@@ -117,7 +127,7 @@ describe('Workflow Integration', () => {
       ],
       '1',
       {
-        stateDir: '/tmp/test',
+        stateDir: tempDir,
         currentDepth: 0,
         maxDepth: 2,
         replyTo: 'agent:test',

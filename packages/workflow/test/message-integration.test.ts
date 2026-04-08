@@ -1,10 +1,23 @@
-import { describe, it } from "vitest";
+import { describe, it, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import { Orchestrator } from "../src/orchestrator.js";
 import type { SpawnAdapter, PollAdapter, NotifyAdapter, MessagePoster } from "../src/orchestrator.js";
 import type { TaskDef, ToolExecutor } from "../src/types.js";
 
 describe("Message task integration with all task types", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "shoggoth-msg-int-"));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
   it("executes workflow with agent, tool, gate, transform, and message tasks", async () => {
     const executedTasks: string[] = [];
     const postedMessages: Array<{ target: string; message: string }> = [];
@@ -75,7 +88,7 @@ describe("Message task integration with all task types", () => {
     const graphDsl = "1 2,3>4>5";
 
     const workflowId = await orchestrator.start(tasks, graphDsl, {
-      stateDir: "/tmp/test-workflow",
+      stateDir: tempDir,
       currentDepth: 0,
       maxDepth: 2,
       replyTo: "session:parent",
@@ -172,7 +185,7 @@ describe("Message task integration with all task types", () => {
     const graphDsl = "1,2>3";
 
     await orchestrator.start(tasks, graphDsl, {
-      stateDir: "/tmp/test-workflow-2",
+      stateDir: tempDir,
       currentDepth: 0,
       maxDepth: 2,
       replyTo: "session:parent",
