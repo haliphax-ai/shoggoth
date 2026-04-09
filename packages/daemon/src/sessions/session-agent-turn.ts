@@ -244,8 +244,24 @@ export async function executeSessionAgentTurn(
 
   const createToolClient =
     input.createToolCallingClient ?? createFailoverToolCallingClientFromModelsConfig;
-  const modelsForSession =
+  let modelsForSession =
     resolveEffectiveModelsConfig(input.config, input.sessionId) ?? input.config.models;
+
+  // If the session's modelSelection specifies a "providerId/model" string, prepend it
+  // to the failover chain so it becomes the primary while keeping failover intact.
+  // This is how subagentModel config takes effect.
+  const selModel =
+    input.session.modelSelection &&
+    typeof input.session.modelSelection === "object" &&
+    !Array.isArray(input.session.modelSelection)
+      ? (input.session.modelSelection as Record<string, unknown>).model
+      : undefined;
+  if (typeof selModel === "string" && selModel.includes("/") && modelsForSession) {
+    const existingChain = modelsForSession.failoverChain ?? [];
+    const filtered = existingChain.filter((e) => e !== selModel);
+    modelsForSession = { ...modelsForSession, failoverChain: [selModel, ...filtered] };
+  }
+
   const toolClient = createToolClient(modelsForSession, { env: input.env });
 
   const modelInvocation = mergeModelInvocationParams(modelsForSession, input.session.modelSelection);
@@ -349,7 +365,8 @@ export async function executeSessionAgentTurn(
     },
   });
 
-  const resolvedModelInfo = resolveModel(input.db, input.config, { sessionId: input.sessionId });
+  const effectiveModel = selModel
+    ?? resolveModel(input.db, input.config, { sessionId: input.sessionId })?.ref;
   log.debug("model call started", {
     sessionId: input.sessionId,
     messageCount: initialMessages.length,
@@ -357,8 +374,7 @@ export async function executeSessionAgentTurn(
     systemPromptLen: input.systemPrompt.length,
     totalContentLen: initialMessages.reduce((n, m) => n + (m.content?.length ?? 0), 0),
     model: (modelInvocation as Record<string, unknown>)?.model
-      ?? (resolvedModelInfo ? `default (${resolvedModelInfo.ref})` : "default"),
-    providerId: resolvedModelInfo?.provider?.id ?? null,
+      ?? (effectiveModel ? `default (${effectiveModel})` : "default"),
     isSubagent: isSubagentSessionUrn(input.sessionId),
   });
   log.debug("user message", {
@@ -450,8 +466,7 @@ export async function executeSessionAgentTurn(
 
   log.debug("model response received", {
     sessionId: input.sessionId,
-    providerId: failoverMeta?.usedProviderId ?? null,
-    model: failoverMeta?.usedModel ?? null,
+    model: failoverMeta ? `${failoverMeta.usedProviderId}/${failoverMeta.usedModel}` : null,
     contentLength: latestAssistantText.length,
     degraded: failoverMeta?.degraded,
   });
