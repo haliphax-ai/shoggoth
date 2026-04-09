@@ -11,8 +11,9 @@
 plans/
   2026-04-15_my-feature/
     README.md              # Primary plan document
-    schema.json            # Supporting asset
-    architecture.md        # Complementary document
+    spec.md                # Specification document
+    architecture.svg       # Supporting asset
+    glossary.md            # Complementary document
 ```
 
 ## Frontmatter
@@ -23,7 +24,7 @@ Every plan README must include YAML frontmatter:
 
 ```yaml
 ---
-date: 2026-04-15       # Date the plan was created (YYYY-MM-DD)
+date: 2026-04-15        # Date the plan was created (YYYY-MM-DD)
 completed: never        # Date completed (YYYY-MM-DD), or "never"
 ---
 ```
@@ -33,7 +34,7 @@ completed: never        # Date completed (YYYY-MM-DD), or "never"
 - Break plans into chunked phases so they are easier to delegate to subagents.
 - Each phase should be independently shippable and testable.
 - List the files each phase will touch.
-- Include type signatures and interfaces in the design section.
+- Include type signatures and interfaces in a separate `spec.md` document.
 - Binary assets (images, etc.) should be kept small to avoid bloating the git repo.
 
 ## Updating a Plan
