@@ -6,11 +6,11 @@ This is Shoggoth, an agent orchestration platform that is Docker-first with a st
 
 ## Plan Ahead
 
-Significant or complex changes to the codebase should be planned first. See [`plans/AGENTS.md`](plans/AGENTS.md) for instructions on creating, updating, and completing plan documents.
+Significant or complex changes to the codebase should be planned first. See [`plans/AGENTS.md`](plans/AGENTS.md) for instructions on creating, updating, and completing plan documents. If you are a subagent who is doing a simple task that does not involve a plan document, DO NOT waste tokens looking around in there.
 
 ## Tests Before Code
 
-Contributions to this codebase must use red/green TDD.
+Contributions to this codebase must use red/green TDD. Changes that affect existing behavior or integrations with existing system parts should be tested as well as the added/changed code.
 
 ## Commit Early, Commit Often
 
@@ -30,4 +30,4 @@ Message platform code should maintain separation between a platform implementati
 
 Platforms should plug into system internals using hook points so that the implementation remains packaged and separate.
 
-Discord is currently the only available platform, but it should not be treated as such--future platform development and layers of abstraction should always be considered when making changes to the messaging system.
+Discord is currently the only available platform, but it should not be treated as such--future platform development and layers of abstraction should always be considered when making changes to the messaging system. Platform capabilities and transport should be registered and routed through the presentation layer.
