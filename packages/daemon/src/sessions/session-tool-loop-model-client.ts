@@ -136,7 +136,7 @@ export function createSessionToolLoopModelClient(input: {
                 if (provider) {
                   compactionModelsConfig = {
                     providers: [provider],
-                    failoverChain: [{ providerId, model: modelName }],
+                    failoverChain: [providerId + "/" + modelName],
                   } as unknown as ShoggothModelsConfig;
                 }
               }

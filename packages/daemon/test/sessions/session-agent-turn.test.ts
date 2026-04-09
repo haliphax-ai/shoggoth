@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
 import { DEFAULT_HITL_CONFIG } from "@shoggoth/shared";
 import { defaultConfig } from "@shoggoth/shared";
+import type { ShoggothModelsConfig } from "@shoggoth/shared";
 import { migrate, defaultMigrationsDir } from "../../src/db/migrate";
 import { createHitlPendingResolutionStack } from "../../src/hitl/hitl-pending-stack";
 import { createPolicyEngine } from "../../src/policy/engine";
@@ -307,6 +308,310 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
         }),
       { message: "Bad Gateway" },
     );
+  });
+});
+
+/**
+ * Phase 3 RED tests: executeSessionAgentTurn should read the primary model
+ * from the session row (via getSessionPrimaryModelRef) instead of re-deriving
+ * it from config. These tests capture the `models` arg passed to
+ * createToolCallingClient and assert on the failover chain shape.
+ */
+describe("executeSessionAgentTurn — Phase 3: session row as primary model source", { concurrency: false }, () => {
+  let db: Database.Database;
+  let tmp: string;
+
+  function makeHitl() {
+    const hitlStack = createHitlPendingResolutionStack(db);
+    return {
+      bypassUpTo: "safe" as const,
+      pending: hitlStack.pending,
+      clock: { nowMs: () => Date.now() },
+      newPendingId: () => randomUUID(),
+      waitForHitlResolution: hitlStack.waitForHitlResolution,
+    };
+  }
+
+  function stubToolClient() {
+    return {
+      async completeWithTools() {
+        return {
+          content: "PHASE3_REPLY",
+          toolCalls: [],
+          usedModel: "stub",
+          usedProviderId: "stub",
+          degraded: false,
+        };
+      },
+    };
+  }
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "shoggoth-phase3-"));
+    const dbPath = join(tmp, "s.db");
+    db = new Database(dbPath);
+    db.pragma("foreign_keys = ON");
+    migrate(db, defaultMigrationsDir());
+    createSessionStore(db).create({ id: "sess-p3", workspacePath: tmp });
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("prepends session modelSelection.model to the failover chain (deduped)", async () => {
+    const config = defaultConfig(tmp);
+    config.models = {
+      providers: [
+        { id: "provA", kind: "openai-compatible" as const, baseUrl: "http://localhost:1/v1", apiKey: "k" },
+        { id: "provB", kind: "anthropic-messages" as const, baseUrl: "http://localhost:2", apiKey: "k" },
+      ],
+      failoverChain: ["provA/modelA", "provB/modelB"],
+    };
+
+    const sessions = createSessionStore(db);
+    sessions.update("sess-p3", { modelSelection: { model: "provB/modelB", temperature: 0.5 } });
+    const session = sessions.getById("sess-p3")!;
+
+    let capturedModels: ShoggothModelsConfig | undefined;
+    await executeSessionAgentTurn({
+      db,
+      sessionId: "sess-p3",
+      session,
+      transcript: createTranscriptStore(db),
+      toolRuns: createToolRunStore(db),
+      userContent: "test",
+      userMetadata: undefined,
+      systemPrompt: "test",
+      env: process.env,
+      config,
+      policyEngine: createPolicyEngine(config.policy),
+      getHitlConfig: () => ({ ...DEFAULT_HITL_CONFIG, ...config.hitl }),
+      hitl: makeHitl(),
+      loopImpl: runToolLoop,
+      createToolCallingClient: (models) => { capturedModels = models; return stubToolClient(); },
+      resolveMcpContext: async () => buildBuiltinOnlySessionMcpToolContext(),
+    });
+
+    assert.ok(capturedModels, "createToolCallingClient should have been called");
+    const chain = capturedModels!.failoverChain!;
+    // Phase 3: session model ref must be first in the chain
+    assert.strictEqual(chain[0], "provB/modelB", "session model ref should be first in chain");
+    // It must be deduped — only one occurrence
+    const count = chain.filter((e: unknown) => e === "provB/modelB").length;
+    assert.strictEqual(count, 1, "session model ref should appear exactly once (deduped)");
+  });
+
+  it("falls back to config chain when session has no model in modelSelection", async () => {
+    const config = defaultConfig(tmp);
+    config.models = {
+      providers: [
+        { id: "provA", kind: "openai-compatible" as const, baseUrl: "http://localhost:1/v1", apiKey: "k" },
+      ],
+      failoverChain: ["provA/modelA"],
+    };
+
+    const sessions = createSessionStore(db);
+    sessions.update("sess-p3", { modelSelection: { temperature: 0.7 } });
+    const session = sessions.getById("sess-p3")!;
+
+    let capturedModels: ShoggothModelsConfig | undefined;
+    await executeSessionAgentTurn({
+      db,
+      sessionId: "sess-p3",
+      session,
+      transcript: createTranscriptStore(db),
+      toolRuns: createToolRunStore(db),
+      userContent: "test",
+      userMetadata: undefined,
+      systemPrompt: "test",
+      env: process.env,
+      config,
+      policyEngine: createPolicyEngine(config.policy),
+      getHitlConfig: () => ({ ...DEFAULT_HITL_CONFIG, ...config.hitl }),
+      hitl: makeHitl(),
+      loopImpl: runToolLoop,
+      createToolCallingClient: (models) => { capturedModels = models; return stubToolClient(); },
+      resolveMcpContext: async () => buildBuiltinOnlySessionMcpToolContext(),
+    });
+
+    assert.ok(capturedModels);
+    const chain = capturedModels!.failoverChain!;
+    assert.strictEqual(chain[0], "provA/modelA", "config chain should be used as-is when no session model");
+    assert.strictEqual(chain.length, 1, "chain length should match config");
+  });
+
+  it("ignores bare model names (no /) in session modelSelection", async () => {
+    const config = defaultConfig(tmp);
+    config.models = {
+      providers: [
+        { id: "provA", kind: "openai-compatible" as const, baseUrl: "http://localhost:1/v1", apiKey: "k" },
+      ],
+      failoverChain: ["provA/modelA"],
+    };
+
+    const sessions = createSessionStore(db);
+    sessions.update("sess-p3", { modelSelection: { model: "bare-model-name" } });
+    const session = sessions.getById("sess-p3")!;
+
+    let capturedModels: ShoggothModelsConfig | undefined;
+    await executeSessionAgentTurn({
+      db,
+      sessionId: "sess-p3",
+      session,
+      transcript: createTranscriptStore(db),
+      toolRuns: createToolRunStore(db),
+      userContent: "test",
+      userMetadata: undefined,
+      systemPrompt: "test",
+      env: process.env,
+      config,
+      policyEngine: createPolicyEngine(config.policy),
+      getHitlConfig: () => ({ ...DEFAULT_HITL_CONFIG, ...config.hitl }),
+      hitl: makeHitl(),
+      loopImpl: runToolLoop,
+      createToolCallingClient: (models) => { capturedModels = models; return stubToolClient(); },
+      resolveMcpContext: async () => buildBuiltinOnlySessionMcpToolContext(),
+    });
+
+    assert.ok(capturedModels);
+    const chain = capturedModels!.failoverChain!;
+    const hasBare = chain.some((e: unknown) => e === "bare-model-name");
+    assert.strictEqual(hasBare, false, "bare model name should not appear in failover chain");
+    assert.strictEqual(chain[0], "provA/modelA", "config chain should be used unchanged");
+  });
+
+  it("resolves image block codec from session primary provider, not config chain head", async () => {
+    const config = defaultConfig(tmp);
+    config.models = {
+      providers: [
+        { id: "provOai", kind: "openai-compatible" as const, baseUrl: "http://localhost:1/v1", apiKey: "k" },
+        { id: "provAnth", kind: "anthropic-messages" as const, baseUrl: "http://localhost:2", apiKey: "k" },
+      ],
+      failoverChain: ["provOai/gpt-test", "provAnth/claude-test"],
+    };
+
+    const sessions = createSessionStore(db);
+    // Session primary model is on the anthropic provider, but config chain head is openai
+    sessions.update("sess-p3", { modelSelection: { model: "provAnth/claude-test" } });
+    const session = sessions.getById("sess-p3")!;
+
+    let capturedModels: ShoggothModelsConfig | undefined;
+    await executeSessionAgentTurn({
+      db,
+      sessionId: "sess-p3",
+      session,
+      transcript: createTranscriptStore(db),
+      toolRuns: createToolRunStore(db),
+      userContent: "test codec",
+      userMetadata: undefined,
+      systemPrompt: "test",
+      env: process.env,
+      config,
+      policyEngine: createPolicyEngine(config.policy),
+      getHitlConfig: () => ({ ...DEFAULT_HITL_CONFIG, ...config.hitl }),
+      hitl: makeHitl(),
+      loopImpl: runToolLoop,
+      createToolCallingClient: (models) => { capturedModels = models; return stubToolClient(); },
+      resolveMcpContext: async () => buildBuiltinOnlySessionMcpToolContext(),
+    });
+
+    assert.ok(capturedModels);
+    const chain = capturedModels!.failoverChain!;
+    // Phase 3: session model (anthropic) must be first so resolveImageBlockCodec
+    // picks up anthropic-messages codec, not openai-compatible.
+    assert.strictEqual(chain[0], "provAnth/claude-test",
+      "session model should be first in chain so image codec resolves from anthropic provider");
+    const firstProviderId = (chain[0] as string).split("/")[0];
+    const firstProvider = capturedModels!.providers!.find((p) => p.id === firstProviderId);
+    assert.ok(firstProvider);
+    assert.strictEqual(firstProvider!.kind, "anthropic-messages",
+      "image codec should resolve from session provider kind (anthropic-messages), not config chain head (openai-compatible)");
+  });
+
+  it("prepends session model even when it is absent from the config failover chain", async () => {
+    const config = defaultConfig(tmp);
+    config.models = {
+      providers: [
+        { id: "provA", kind: "openai-compatible" as const, baseUrl: "http://localhost:1/v1", apiKey: "k" },
+        { id: "provB", kind: "anthropic-messages" as const, baseUrl: "http://localhost:2", apiKey: "k" },
+      ],
+      failoverChain: ["provA/modelA"],
+    };
+
+    const sessions = createSessionStore(db);
+    // provB/modelB is NOT in the config chain
+    sessions.update("sess-p3", { modelSelection: { model: "provB/modelB" } });
+    const session = sessions.getById("sess-p3")!;
+
+    let capturedModels: ShoggothModelsConfig | undefined;
+    await executeSessionAgentTurn({
+      db,
+      sessionId: "sess-p3",
+      session,
+      transcript: createTranscriptStore(db),
+      toolRuns: createToolRunStore(db),
+      userContent: "test",
+      userMetadata: undefined,
+      systemPrompt: "test",
+      env: process.env,
+      config,
+      policyEngine: createPolicyEngine(config.policy),
+      getHitlConfig: () => ({ ...DEFAULT_HITL_CONFIG, ...config.hitl }),
+      hitl: makeHitl(),
+      loopImpl: runToolLoop,
+      createToolCallingClient: (models) => { capturedModels = models; return stubToolClient(); },
+      resolveMcpContext: async () => buildBuiltinOnlySessionMcpToolContext(),
+    });
+
+    assert.ok(capturedModels);
+    const chain = capturedModels!.failoverChain!;
+    assert.strictEqual(chain.length, 2, "chain should have session model + config entry");
+    assert.strictEqual(chain[0], "provB/modelB", "session model should be first");
+    assert.strictEqual(chain[1], "provA/modelA", "config entry should follow");
+  });
+
+  it("ignores malformed model refs (/model, provider/, empty) in session modelSelection", async () => {
+    const config = defaultConfig(tmp);
+    config.models = {
+      providers: [
+        { id: "provA", kind: "openai-compatible" as const, baseUrl: "http://localhost:1/v1", apiKey: "k" },
+      ],
+      failoverChain: ["provA/modelA"],
+    };
+
+    for (const badModel of ["/modelOnly", "providerOnly/", ""]) {
+      const sessions = createSessionStore(db);
+      sessions.update("sess-p3", { modelSelection: { model: badModel } });
+      const session = sessions.getById("sess-p3")!;
+
+      let capturedModels: ShoggothModelsConfig | undefined;
+      await executeSessionAgentTurn({
+        db,
+        sessionId: "sess-p3",
+        session,
+        transcript: createTranscriptStore(db),
+        toolRuns: createToolRunStore(db),
+        userContent: `test malformed ${badModel}`,
+        userMetadata: undefined,
+        systemPrompt: "test",
+        env: process.env,
+        config,
+        policyEngine: createPolicyEngine(config.policy),
+        getHitlConfig: () => ({ ...DEFAULT_HITL_CONFIG, ...config.hitl }),
+        hitl: makeHitl(),
+        loopImpl: runToolLoop,
+        createToolCallingClient: (models) => { capturedModels = models; return stubToolClient(); },
+        resolveMcpContext: async () => buildBuiltinOnlySessionMcpToolContext(),
+      });
+
+      assert.ok(capturedModels, `createToolCallingClient called for badModel="${badModel}"`);
+      const chain = capturedModels!.failoverChain!;
+      const hasBad = chain.some((e: unknown) => e === badModel);
+      assert.strictEqual(hasBad, false, `malformed model "${badModel}" should not appear in failover chain`);
+      assert.strictEqual(chain[0], "provA/modelA", `config chain should be used unchanged for malformed model "${badModel}"`);
+    }
   });
 });
 

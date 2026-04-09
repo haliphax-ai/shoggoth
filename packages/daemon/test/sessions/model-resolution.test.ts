@@ -5,7 +5,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { migrate, defaultMigrationsDir } from "../../src/db/migrate";
 import { markProviderFailed } from "../../src/sessions/provider-failure-store";
-import { resolveModel, resolveRetryConfig } from "../../src/sessions/model-resolution";
+import { resolveModel, resolveRetryConfig, resolveBootstrapModelRef, getSessionPrimaryModelRef } from "../../src/sessions/model-resolution";
 import type { ShoggothConfig } from "@shoggoth/shared";
 
 const TMP = join(import.meta.dirname ?? ".", ".tmp-model-resolution-test");
@@ -194,14 +194,6 @@ describe("model-resolution", () => {
           },
         },
       });
-      // Agent override produces a failoverChain with { providerId, model } entries.
-      // resolveEffectiveModelsConfig merges these into the global config, producing
-      // entries that look like ShoggothModelFailoverHop (not string refs).
-      // Our entryToRef handles both string and { ref } shapes, but the effective
-      // config from resolveEffectiveModelsConfig converts agent hops into the
-      // global failoverChain format. The effective chain entry will be
-      // { providerId: "anthropic", model: "claude-sonnet" } which our code
-      // needs to handle via the providerId/model shape.
       const result = resolveModel(db, config, { sessionId: "agent:main:discord:channel:123:abc" });
       assert.ok(result);
       assert.strictEqual(result.ref, "anthropic/claude-sonnet");
@@ -218,7 +210,6 @@ describe("model-resolution", () => {
           failoverChain: ["openai/gpt-4o", "anthropic/claude-sonnet"],
         },
       });
-      // Insert a failure 2 seconds ago — stale for openai's 1000ms duration
       db.prepare(
         `INSERT OR REPLACE INTO provider_failures (provider_id, failed_at, error, retry_count)
          VALUES (@providerId, datetime('now', '-2 seconds'), @error, 1)`,
@@ -276,6 +267,116 @@ describe("model-resolution", () => {
         retryDelayMs: 500,
         retryBackoffMultiplier: 3,
       });
+    });
+  });
+
+  describe("resolveBootstrapModelRef", () => {
+    it("returns providerId/model from the first failover chain entry", () => {
+      const config = makeConfig();
+      const result = resolveBootstrapModelRef(config);
+      assert.strictEqual(result, "openai/gpt-4o");
+    });
+
+    it("returns agent-specific ref when sessionId matches a per-agent override", () => {
+      const config = makeConfig({
+        agents: {
+          list: {
+            main: {
+              models: {
+                failoverChain: [
+                  { providerId: "anthropic", model: "claude-sonnet" },
+                ],
+              },
+            },
+          },
+        },
+      });
+      const result = resolveBootstrapModelRef(config, "agent:main:discord:channel:123:abc");
+      assert.strictEqual(result, "anthropic/claude-sonnet");
+    });
+
+    it("returns undefined when no models config", () => {
+      const config = makeConfig({ models: undefined });
+      const result = resolveBootstrapModelRef(config);
+      assert.strictEqual(result, undefined);
+    });
+
+    it("returns undefined when failover chain is empty", () => {
+      const config = makeConfig({
+        models: {
+          providers: [
+            { id: "openai", kind: "openai-compatible" as const, baseUrl: "https://api.openai.com/v1", models: [{ name: "gpt-4o" }] },
+          ],
+          failoverChain: [],
+        },
+      });
+      const result = resolveBootstrapModelRef(config);
+      assert.strictEqual(result, undefined);
+    });
+
+    it("returns undefined when first chain entry is a bare name without /", () => {
+      const config = makeConfig({
+        models: {
+          providers: [
+            { id: "openai", kind: "openai-compatible" as const, baseUrl: "https://api.openai.com/v1", models: [{ name: "gpt-4o" }] },
+          ],
+          failoverChain: ["gpt-4o"],
+        },
+      });
+      const result = resolveBootstrapModelRef(config);
+      assert.strictEqual(result, undefined);
+    });
+  });
+
+  describe("getSessionPrimaryModelRef", () => {
+    it("extracts model from a valid object with providerId/model format", () => {
+      const result = getSessionPrimaryModelRef({ model: "openai/gpt-4o" });
+      assert.strictEqual(result, "openai/gpt-4o");
+    });
+
+    it("returns undefined for bare model names without /", () => {
+      const result = getSessionPrimaryModelRef({ model: "gpt-4o" });
+      assert.strictEqual(result, undefined);
+    });
+
+    it("returns undefined for null", () => {
+      const result = getSessionPrimaryModelRef(null);
+      assert.strictEqual(result, undefined);
+    });
+
+    it("returns undefined for undefined", () => {
+      const result = getSessionPrimaryModelRef(undefined);
+      assert.strictEqual(result, undefined);
+    });
+
+    it("returns undefined for arrays", () => {
+      const result = getSessionPrimaryModelRef(["openai/gpt-4o"]);
+      assert.strictEqual(result, undefined);
+    });
+
+    it("returns undefined for non-object values", () => {
+      const result = getSessionPrimaryModelRef("openai/gpt-4o" as any);
+      assert.strictEqual(result, undefined);
+    });
+
+    it("returns undefined when model key is missing", () => {
+      const result = getSessionPrimaryModelRef({ temperature: 0.7 });
+      assert.strictEqual(result, undefined);
+    });
+
+    it("returns undefined when model is empty string", () => {
+      const result = getSessionPrimaryModelRef({ model: "" });
+      assert.strictEqual(result, undefined);
+    });
+
+    it("returns undefined when model has empty part before /", () => {
+      const result = getSessionPrimaryModelRef({ model: "/gpt-4o" });
+      assert.strictEqual(result, undefined);
+    });
+
+    it("returns undefined when model has empty part after /", () => {
+      const result = getSessionPrimaryModelRef({ model: "openai/" });
+      assert.strictEqual(result, undefined);
     });
   });
 });

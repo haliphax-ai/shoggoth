@@ -52,7 +52,7 @@ import { messageToolContextRef } from "../messaging/message-tool-context-ref";
 import { incrementTokenUsage, updateTranscriptMessageCount, incrementTurnCount } from "./session-stats-store";
 import { checkContextWindowMismatch } from "./context-window-mismatch";
 import { getModelContextWindowTokens } from "../model-metadata";
-import { resolveModel } from "./model-resolution";
+import { getSessionPrimaryModelRef, resolveModel } from "./model-resolution";
 import { drainSystemContext, pushSystemContext } from "./system-context-buffer";
 import type { OutboundAttachment } from "../presentation/platform-adapter";
 import { extractShowBlocks } from "../presentation/show-blocks";
@@ -117,8 +117,16 @@ const IMAGE_CODEC_PROVIDER_KINDS = new Set(["openai-compatible", "anthropic-mess
  */
 function resolveImageBlockCodec(
   modelsConfig: ShoggothModelsConfig | undefined,
+  primaryProviderId?: string,
 ): ImageBlockCodec | undefined {
   if (!modelsConfig?.providers?.length) return undefined;
+  // When a primary provider id is given (from session model ref), try it first.
+  if (primaryProviderId) {
+    const provider = modelsConfig.providers.find((p) => p.id === primaryProviderId);
+    if (provider && IMAGE_CODEC_PROVIDER_KINDS.has(provider.kind)) {
+      return getImageBlockCodec(provider.kind as "openai-compatible" | "anthropic-messages" | "gemini");
+    }
+  }
   const chain = modelsConfig.failoverChain;
   if (chain?.length) {
     const entry = chain[0];
@@ -247,26 +255,22 @@ export async function executeSessionAgentTurn(
   let modelsForSession =
     resolveEffectiveModelsConfig(input.config, input.sessionId) ?? input.config.models;
 
-  // If the session's modelSelection specifies a "providerId/model" string, prepend it
+  // If the session's modelSelection specifies a valid "providerId/model" ref, prepend it
   // to the failover chain so it becomes the primary while keeping failover intact.
-  // This is how subagentModel config takes effect.
-  const selModel =
-    input.session.modelSelection &&
-    typeof input.session.modelSelection === "object" &&
-    !Array.isArray(input.session.modelSelection)
-      ? (input.session.modelSelection as Record<string, unknown>).model
-      : undefined;
-  if (typeof selModel === "string" && selModel.includes("/") && modelsForSession) {
+  // This is how subagentModel config and session_model op take effect.
+  const sessionModelRef = getSessionPrimaryModelRef(input.session.modelSelection);
+  if (sessionModelRef && modelsForSession) {
     const existingChain = modelsForSession.failoverChain ?? [];
-    const filtered = existingChain.filter((e) => e !== selModel);
-    modelsForSession = { ...modelsForSession, failoverChain: [selModel, ...filtered] };
+    const filtered = existingChain.filter((e) => e !== sessionModelRef);
+    modelsForSession = { ...modelsForSession, failoverChain: [sessionModelRef, ...filtered] };
   }
 
   const toolClient = createToolClient(modelsForSession, { env: input.env });
 
   const modelInvocation = mergeModelInvocationParams(modelsForSession, input.session.modelSelection);
 
-  const imageBlockCodec = resolveImageBlockCodec(modelsForSession);
+  const sessionPrimaryProviderId = sessionModelRef ? sessionModelRef.slice(0, sessionModelRef.indexOf("/")) : undefined;
+  const imageBlockCodec = resolveImageBlockCodec(modelsForSession, sessionPrimaryProviderId);
 
   // Strip image blocks from transcript when the provider doesn't support image input.
   let initialMessages: ChatMessage[] = sanitizeTranscriptForProvider(
@@ -277,9 +281,17 @@ export async function executeSessionAgentTurn(
   // --- Mutable tools ref for mid-loop refresh (tool discovery) ---
   let currentToolsOpenAi: readonly OpenAIToolFunctionDefinition[] = mcpCtx.toolsOpenAi;
 
-  const ctxWindowTokens = !input.minimalContext
-    ? resolveModel(input.db, input.config, { sessionId: input.sessionId })?.model?.contextWindowTokens
-    : undefined;
+  let ctxWindowTokens: number | undefined;
+  if (!input.minimalContext) {
+    if (sessionModelRef) {
+      const slashIdx = sessionModelRef.indexOf("/");
+      const primaryProviderId = sessionModelRef.slice(0, slashIdx);
+      const primaryModelName = sessionModelRef.slice(slashIdx + 1);
+      ctxWindowTokens = getModelContextWindowTokens(primaryProviderId, primaryModelName);
+    } else {
+      ctxWindowTokens = resolveModel(input.db, input.config, { sessionId: input.sessionId })?.model?.contextWindowTokens;
+    }
+  }
 
   const { signal: turnAbortSignal, end: endTurnAbortScope } = beginSessionTurnAbortScope(
     input.sessionId,
@@ -365,7 +377,7 @@ export async function executeSessionAgentTurn(
     },
   });
 
-  const effectiveModel = selModel
+  const effectiveModel = sessionModelRef
     ?? resolveModel(input.db, input.config, { sessionId: input.sessionId })?.ref;
   log.debug("model call started", {
     sessionId: input.sessionId,

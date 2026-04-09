@@ -185,6 +185,38 @@ export function resolveModel(
 /**
  * Merge retry config: provider-level overrides global-level, both override defaults.
  */
+/**
+ * Resolve the primary model ref from config at bootstrap time.
+ * Returns a "providerId/model" string, or undefined if anything is missing/invalid.
+ */
+export function resolveBootstrapModelRef(config: ShoggothConfig, sessionId?: string): string | undefined {
+  const effectiveModels = sessionId
+    ? resolveEffectiveModelsConfig(config, sessionId) ?? config.models
+    : config.models;
+
+  if (!effectiveModels) return undefined;
+
+  const chain = effectiveModels.failoverChain as ReadonlyArray<FailoverChainEntry | { providerId: string; model: string }> | undefined;
+  if (!chain?.length) return undefined;
+
+  const ref = entryToRef(chain[0]);
+  if (!parseRef(ref)) return undefined;
+
+  return ref;
+}
+
+/**
+ * Extract the primary model ref from a session's modelSelection blob.
+ * Returns the "providerId/model" string, or undefined if missing/invalid.
+ */
+export function getSessionPrimaryModelRef(modelSelection: unknown): string | undefined {
+  if (modelSelection == null || typeof modelSelection !== "object" || Array.isArray(modelSelection)) return undefined;
+  const model = (modelSelection as Record<string, unknown>).model;
+  if (typeof model !== "string") return undefined;
+  if (!parseRef(model)) return undefined;
+  return model;
+}
+
 export function resolveRetryConfig(
   globalRetry: Partial<RetryConfig> | undefined,
   providerRetry: Partial<RetryConfig> | undefined,

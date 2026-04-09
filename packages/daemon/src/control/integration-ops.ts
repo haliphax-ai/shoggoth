@@ -805,11 +805,11 @@ export async function handleIntegrationControlOp(
       // Only applies when per-spawn model_options doesn't already set a model.
       let effectiveBase = parent.modelSelection;
       const hasSpawnModel = modelOptions && typeof modelOptions.model === "string" && modelOptions.model.trim();
+      const parentAgentId = parseAgentSessionUrn(parentSessionId)?.agentId;
+      const perAgent = parentAgentId ? ctx.config.agents?.list?.[parentAgentId]?.subagentModel : undefined;
+      const globalDefault = ctx.config.agents?.subagentModel;
+      const configSubagentModel = perAgent ?? globalDefault;
       if (!hasSpawnModel) {
-        const parentAgentId = parseAgentSessionUrn(parentSessionId)?.agentId;
-        const perAgent = parentAgentId ? ctx.config.agents?.list?.[parentAgentId]?.subagentModel : undefined;
-        const globalDefault = ctx.config.agents?.subagentModel;
-        const configSubagentModel = perAgent ?? globalDefault;
         if (configSubagentModel) {
           const base =
             effectiveBase && typeof effectiveBase === "object" && !Array.isArray(effectiveBase)
@@ -820,7 +820,12 @@ export async function handleIntegrationControlOp(
         }
       }
 
-      const modelSelection = mergeSubagentSpawnModelSelection(effectiveBase, modelOptions);
+      // Determine explicit model ref: spawn model_options.model > config subagentModel > undefined (inherit as-is).
+      const explicitModelRef = hasSpawnModel
+        ? String(modelOptions!.model).trim()
+        : configSubagentModel ?? undefined;
+
+      const modelSelection = mergeSubagentSpawnModelSelection(effectiveBase, modelOptions, explicitModelRef);
 
       // Optional response delivery routing (defaults: respondTo = parent, internal = true).
       const respondToRaw = pl.respond_to;
@@ -1624,6 +1629,15 @@ export async function handleIntegrationControlOp(
       const hasSelection = "model_selection" in pl;
       if (hasSelection) {
         const val = pl.model_selection;
+        if (val != null && typeof val === "object" && !Array.isArray(val)) {
+          const m = (val as Record<string, unknown>).model;
+          if (typeof m === "string") {
+            const parts = m.split("/");
+            if (parts.length !== 2 || !parts[0] || !parts[1]) {
+              throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "model_selection.model must be in providerId/model format");
+            }
+          }
+        }
         const modelSelection = val === null ? undefined : val;
         ctx.sessions.update(sessionId, { modelSelection: modelSelection ?? null });
         const updated = ctx.sessions.getById(sessionId);

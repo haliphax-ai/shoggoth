@@ -131,6 +131,7 @@ function modelInvocationParamsToSessionJson(p: ModelInvocationParams): Record<st
 export function mergeSubagentSpawnModelSelection(
   parentModelSelection: unknown,
   modelOptionsOverlay: unknown | undefined,
+  modelRef?: string,
 ): unknown {
   const base =
     parentModelSelection && typeof parentModelSelection === "object" && !Array.isArray(parentModelSelection)
@@ -147,6 +148,9 @@ export function mergeSubagentSpawnModelSelection(
   );
   const rest = { ...stripInvocationKeys(base), ...stripInvocationKeys(over ?? {}) };
   const invOut = modelInvocationParamsToSessionJson(mergedInv);
-  const out = { ...rest, ...invOut };
+  const out: Record<string, unknown> = { ...rest, ...invOut };
+  if (modelRef && modelRef.trim()) {
+    out.model = modelRef;
+  }
   return Object.keys(out).length > 0 ? out : undefined;
 }

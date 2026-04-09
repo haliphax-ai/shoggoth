@@ -74,3 +74,83 @@ describe("model invocation merge", () => {
     assert.deepEqual(merged, { maxOutputTokens: 2048 });
   });
 });
+
+describe("mergeSubagentSpawnModelSelection with modelRef (Phase 2)", () => {
+  it("modelRef overrides parent model", () => {
+    const merged = mergeSubagentSpawnModelSelection(
+      { model: "parentProvider/parentModel", temperature: 0.5 },
+      undefined,
+      "newProvider/newModel",
+    ) as Record<string, unknown>;
+    assert.equal(merged.model, "newProvider/newModel");
+  });
+
+  it("modelRef overrides overlay model", () => {
+    const merged = mergeSubagentSpawnModelSelection(
+      {},
+      { model: "overlayProvider/overlayModel" },
+      "newProvider/newModel",
+    ) as Record<string, unknown>;
+    assert.equal(merged.model, "newProvider/newModel");
+  });
+
+  it("modelRef overrides both parent and overlay model", () => {
+    const merged = mergeSubagentSpawnModelSelection(
+      { model: "parentProvider/parentModel" },
+      { model: "overlayProvider/overlayModel" },
+      "newProvider/newModel",
+    ) as Record<string, unknown>;
+    assert.equal(merged.model, "newProvider/newModel");
+  });
+
+  it("modelRef with invocation params from parent and overlay still merges correctly", () => {
+    const merged = mergeSubagentSpawnModelSelection(
+      { model: "parentProvider/parentModel", temperature: 0.3, requestExtras: { a: 1 } },
+      { maxOutputTokens: 4096, requestExtras: { b: 2 } },
+      "newProvider/newModel",
+    ) as Record<string, unknown>;
+    assert.equal(merged.model, "newProvider/newModel");
+    assert.equal(merged.temperature, 0.3);
+    assert.equal(merged.maxOutputTokens, 4096);
+    assert.deepEqual(merged.requestExtras, { a: 1, b: 2 });
+  });
+
+  it("undefined modelRef preserves existing behavior — parent model flows through", () => {
+    const merged = mergeSubagentSpawnModelSelection(
+      { model: "parentProvider/parentModel", temperature: 0.5 },
+      { temperature: 0.9 },
+      undefined,
+    ) as Record<string, unknown>;
+    assert.equal(merged.model, "parentProvider/parentModel");
+    assert.equal(merged.temperature, 0.9);
+  });
+
+  it("omitted modelRef preserves existing behavior — overlay model wins", () => {
+    const merged = mergeSubagentSpawnModelSelection(
+      { model: "parentProvider/parentModel" },
+      { model: "overlayProvider/overlayModel" },
+    ) as Record<string, unknown>;
+    assert.equal(merged.model, "overlayProvider/overlayModel");
+  });
+
+  it("modelRef with no parent model selection produces output with model set", () => {
+    const merged = mergeSubagentSpawnModelSelection(
+      undefined,
+      undefined,
+      "newProvider/newModel",
+    ) as Record<string, unknown>;
+    assert.ok(merged, "expected non-undefined output when modelRef is provided");
+    assert.equal(merged.model, "newProvider/newModel");
+  });
+
+  it("modelRef with no parent and invocation overlay merges correctly", () => {
+    const merged = mergeSubagentSpawnModelSelection(
+      undefined,
+      { thinking: { enabled: true, budgetTokens: 8000 }, reasoningEffort: "high" },
+      "newProvider/newModel",
+    ) as Record<string, unknown>;
+    assert.equal(merged.model, "newProvider/newModel");
+    assert.deepEqual(merged.thinking, { enabled: true, budgetTokens: 8000 });
+    assert.equal(merged.reasoningEffort, "high");
+  });
+});

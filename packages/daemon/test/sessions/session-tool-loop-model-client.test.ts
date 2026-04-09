@@ -468,8 +468,7 @@ describe("dedicated compaction model", () => {
     assert.ok(calls.length > 0, "createFailoverClientFromModelsConfig should have been called");
     const passedConfig = calls[0][0] as any;
     assert.equal(passedConfig.failoverChain.length, 1);
-    assert.equal(passedConfig.failoverChain[0].providerId, "local");
-    assert.equal(passedConfig.failoverChain[0].model, "gemma4");
+    assert.equal(passedConfig.failoverChain[0], "local/gemma4");
     assert.equal(passedConfig.providers.length, 1);
     assert.equal(passedConfig.providers[0].id, "local");
   });
