@@ -349,13 +349,16 @@ export async function executeSessionAgentTurn(
     },
   });
 
+  const resolvedModelInfo = resolveModel(input.db, input.config, { sessionId: input.sessionId });
   log.debug("model call started", {
     sessionId: input.sessionId,
     messageCount: initialMessages.length,
     toolCount: mcpCtx.toolsLoop.length,
     systemPromptLen: input.systemPrompt.length,
     totalContentLen: initialMessages.reduce((n, m) => n + (m.content?.length ?? 0), 0),
-    model: (modelInvocation as Record<string, unknown>)?.model ?? "default",
+    model: (modelInvocation as Record<string, unknown>)?.model
+      ?? (resolvedModelInfo ? `default (${resolvedModelInfo.ref})` : "default"),
+    providerId: resolvedModelInfo?.provider?.id ?? null,
     isSubagent: isSubagentSessionUrn(input.sessionId),
   });
   log.debug("user message", {
@@ -447,7 +450,8 @@ export async function executeSessionAgentTurn(
 
   log.debug("model response received", {
     sessionId: input.sessionId,
-    model: failoverMeta?.usedModel,
+    providerId: failoverMeta?.usedProviderId ?? null,
+    model: failoverMeta?.usedModel ?? null,
     contentLength: latestAssistantText.length,
     degraded: failoverMeta?.degraded,
   });
