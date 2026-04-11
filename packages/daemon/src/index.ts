@@ -884,7 +884,17 @@ getLogger("daemon").info("daemon starting", {
   socketPath: config.socketPath,
 });
 
-void rt.getHealth().then((h) => {
+void (async () => {
+  const INITIAL_HEALTH_RETRIES = 4;
+  const INITIAL_HEALTH_RETRY_DELAY_MS = 3000;
+  let h = await rt.getHealth();
+  for (let attempt = 1; attempt < INITIAL_HEALTH_RETRIES; attempt++) {
+    const modelChecks = (h.checks ?? []).filter((c) => c.name === "model");
+    if (modelChecks.length === 0 || modelChecks.some((c) => c.status === "pass")) break;
+    getLogger("daemon").debug("initial health: model probe failed, retrying", { attempt, delay: INITIAL_HEALTH_RETRY_DELAY_MS });
+    await new Promise((r) => setTimeout(r, INITIAL_HEALTH_RETRY_DELAY_MS));
+    h = await rt.getHealth();
+  }
   const checks = h.checks ?? [];
   const sqliteFailed = checks.some((c) => c.name === "sqlite" && c.status === "fail");
   const modelChecks = checks.filter((c) => c.name === "model");
@@ -914,7 +924,7 @@ void rt.getHealth().then((h) => {
       getLogger("daemon"),
     );
   }
-});
+})();
 
 void rt.shutdown.finished.then(() => {
   getLogger("daemon").info("shutdown complete");

@@ -201,7 +201,7 @@ describe("createDiscordInteractionHandler", () => {
         result: {
           session_id: payload.session_id,
           model_selection: null,
-          effective_models: { providerId: "anthropic", model: "claude-3-5-sonnet" },
+          effective_models: { model: "anthropic/claude-3-5-sonnet" },
         },
       }),
     });
@@ -242,8 +242,8 @@ describe("createDiscordInteractionHandler", () => {
         ok: true,
         result: {
           session_id: payload.session_id,
-          model_selection: { providerId: "openai", model: "gpt-4" },
-          effective_models: { providerId: "openai", model: "gpt-4" },
+          model_selection: { model: "openai/gpt-4" },
+          effective_models: { model: "openai/gpt-4" },
         },
       }),
       resolveSessionForChannel: (channelId) => {
@@ -351,7 +351,7 @@ describe("registerDiscordSlashCommands", () => {
     assert.strictEqual(calls[0]!.method, "registerGlobalCommands");
     const [appId, commands] = calls[0]!.args as [string, Array<Record<string, unknown>>];
     assert.strictEqual(appId, "app-123");
-    assert.strictEqual(commands.length, 7);
+    assert.strictEqual(commands.length, 8);
     assert.ok(commands.some((c) => c.name === "abort"));
     assert.ok(commands.some((c) => c.name === "new"));
     assert.ok(commands.some((c) => c.name === "reset"));

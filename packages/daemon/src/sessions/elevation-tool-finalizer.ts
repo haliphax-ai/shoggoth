@@ -44,8 +44,15 @@ export function createElevationToolFinalizer(
   db: Database.Database,
 ): SessionMcpContextFinalizer {
   return (ctx: SessionMcpToolContext, sessionId: string): SessionMcpToolContext => {
-    const store = createElevationStore(db);
-    if (!store.isActive(sessionId)) {
+    let active: boolean;
+    try {
+      const store = createElevationStore(db);
+      active = store.isActive(sessionId);
+    } catch {
+      // DB may be closed (e.g. during test teardown) — treat as inactive.
+      return ctx;
+    }
+    if (!active) {
       // Remove builtin-elevate if somehow present
       const tools = ctx.aggregated.tools.filter((t) => t.namespacedName !== "builtin-elevate");
       if (tools.length === ctx.aggregated.tools.length) return ctx;
