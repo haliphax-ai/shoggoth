@@ -89,7 +89,7 @@ describe("discord platform helpers", () => {
   it("formatDiscordPlatformDegradedPrefix is empty when not degraded", () => {
     assert.equal(formatDiscordPlatformDegradedPrefix(undefined), "");
     assert.equal(
-      formatDiscordPlatformDegradedPrefix({ degraded: false, usedModel: "m", usedProviderId: "p" }),
+      formatDiscordPlatformDegradedPrefix({ degraded: false, usedModel: "m1", usedProviderId: "p1" }),
       "",
     );
   });
@@ -1705,7 +1705,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       deps: {
         createToolCallingClient: () => ({
           async completeWithTools() {
-            return { content: "nope", toolCalls: [], usedModel: "m", usedProviderId: "p" };
+            return { content: "nope", toolCalls: [], usedModel: "m1", usedProviderId: "p1" };
           },
         }),
       },
@@ -1770,7 +1770,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       deps: {
         createToolCallingClient: () => ({
           async completeWithTools() {
-            return { content: "owner reply", toolCalls: [], usedModel: "m", usedProviderId: "p" };
+            return { content: "owner reply", toolCalls: [], usedModel: "m1", usedProviderId: "p1" };
           },
         }),
       },

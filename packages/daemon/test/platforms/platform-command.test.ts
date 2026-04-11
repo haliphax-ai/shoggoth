@@ -91,7 +91,7 @@ describe("translateCommandToControlOp", () => {
       op: "session_model",
       payload: {
         session_id: "agent:main:discord:channel:abc",
-        model_selection: { providerId: "anthropic", model: "claude-3-5-sonnet" },
+        model_selection: { model: "anthropic/claude-3-5-sonnet" },
       },
     });
   });
