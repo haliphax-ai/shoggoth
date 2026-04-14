@@ -2,7 +2,7 @@
 
 ## The Project
 
-This is Shoggoth, an agent orchestration platform that is Docker-first with a strict permission boundary between the system (`root`, UID/GID `0`), the orchestrator daemon (`shoggoth`, UID/GID `900`) and agents (`agent`, UID/GID `901`).
+This is Shoggoth, an agent orchestration platform that is Docker-first with a strict permission boundary between the system (`root`, UID/GID `0`), the orchestrator daemon (`shoggoth`, UID/GID `1000`) and agents (`agent`, UID/GID `900`).
 
 ## Plan Ahead
 
