@@ -1,5 +1,6 @@
 import type { DiscordInboundEvent, DiscordReactionAddEvent } from "./adapter";
 import type { DiscordInteractionEvent } from "./interaction";
+import { getLogger } from "@shoggoth/shared";
 import {
   discordMessageCreateToInboundEvent,
   discordMessageReactionAddToEvent,
@@ -35,6 +36,8 @@ interface GatewayPayload {
   readonly t?: string;
   readonly s?: number | null;
 }
+
+const log = getLogger("discord-gw");
 
 const MAX_RECONNECT_ATTEMPTS = 10;
 const BACKOFF_BASE_MS = 1_000;
@@ -77,6 +80,7 @@ export async function connectDiscordGateway(
   let botUserId: string | undefined;
   let intentionallyStopped = false;
   let consecutiveReconnects = 0;
+  let reconnectPending = false;
 
   // Per-connection mutable state.
   let ws: WebSocket | undefined;
@@ -108,7 +112,7 @@ export async function connectDiscordGateway(
     heartbeatAcked = true;
     heartbeatTimer = setInterval(() => {
       if (!heartbeatAcked) {
-        console.error("[discord-gw] heartbeat ACK missed — zombie connection, reconnecting");
+        log.error("heartbeat ACK missed, reconnecting");
         closeSocket(4000, "zombie");
         return;
       }
@@ -201,6 +205,8 @@ export async function connectDiscordGateway(
         // Post-handshake errors will trigger the close event.
       });
 
+      let reconnectScheduled = false;
+
       socket.addEventListener("close", () => {
         clearHeartbeat();
         if (!handshakeComplete) {
@@ -208,10 +214,13 @@ export async function connectDiscordGateway(
           clearTimeout(handshakeTimeout);
           reject(new Error("Discord gateway WebSocket closed during handshake"));
         }
-        if (!intentionallyStopped) {
-          scheduleReconnect();
-        } else {
-          resolveSessionDone?.();
+        if (!reconnectScheduled) {
+          reconnectScheduled = true;
+          if (!intentionallyStopped) {
+            scheduleReconnect();
+          } else {
+            resolveSessionDone?.();
+          }
         }
       }, { once: true });
 
@@ -248,7 +257,7 @@ export async function connectDiscordGateway(
 
         // op 7 — Reconnect request from Discord
         if (msg.op === 7) {
-          console.log("[discord-gw] received op 7 Reconnect — closing for resume");
+          log.info("received op 7 Reconnect, closing for resume");
           closeSocket(4000, "reconnect requested");
           return;
         }
@@ -256,7 +265,7 @@ export async function connectDiscordGateway(
         // op 9 — Invalid Session
         if (msg.op === 9) {
           const resumable = msg.d === true;
-          console.log(`[discord-gw] received op 9 Invalid Session (resumable=${resumable})`);
+          log.info("received op 9 Invalid Session", { resumable });
           if (!resumable) {
             // Clear resume state so next connect does a fresh identify.
             sessionId = undefined;
@@ -281,14 +290,14 @@ export async function connectDiscordGateway(
   }
 
   function scheduleReconnect(): void {
+    if (reconnectPending) return;
+    reconnectPending = true;
     if (intentionallyStopped) {
       resolveSessionDone?.();
       return;
     }
     if (consecutiveReconnects >= MAX_RECONNECT_ATTEMPTS) {
-      console.error(
-        `[discord-gw] exhausted ${MAX_RECONNECT_ATTEMPTS} reconnect attempts — giving up`,
-      );
+      log.error("exhausted reconnect attempts, giving up", { maxAttempts: MAX_RECONNECT_ATTEMPTS });
       resolveSessionDone?.();
       return;
     }
@@ -296,17 +305,17 @@ export async function connectDiscordGateway(
     consecutiveReconnects++;
     const attempt = consecutiveReconnects;
     const canResume = !!(sessionId && lastSeq !== null);
-    console.log(
-      `[discord-gw] reconnect attempt ${attempt}/${MAX_RECONNECT_ATTEMPTS} in ${delay}ms (resume=${canResume})`,
-    );
+    log.info("scheduling reconnect", { attempt, maxAttempts: MAX_RECONNECT_ATTEMPTS, delayMs: delay, resume: canResume });
     setTimeout(() => {
+      reconnectPending = false;
       if (intentionallyStopped) {
         resolveSessionDone?.();
         return;
       }
       openConnection(canResume).catch((err) => {
-        console.error(`[discord-gw] reconnect attempt ${attempt} failed:`, err);
-        // The close handler drives the next scheduleReconnect call.
+        log.error("reconnect attempt failed", { attempt, error: String(err) });
+        // close event may not fire after a connection-level error; schedule next attempt directly.
+        scheduleReconnect();
       });
     }, delay);
   }
