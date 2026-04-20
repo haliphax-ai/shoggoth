@@ -13,7 +13,8 @@
     "@shoggoth/daemon": "*",
     "@shoggoth/models": "*",
     "@shoggoth/shared": "*",
-    "@shoggoth/skills": "*",\n    "@shoggoth/plugins": "*",
+    "@shoggoth/skills": "*",
+    "@shoggoth/plugins": "*",
     "tsx": "^4.19.3"
   }
 }
