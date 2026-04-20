@@ -138,17 +138,7 @@ The `shoggoth.json` manifest is updated to support the full hook name set and op
 
 ## Implementation Phases
 
-### Phase 1: Add `hooks-plugin` dependency and define hook types
-
-Install `hooks-plugin` in `@shoggoth/plugins`. Define all hook context types and the `ShoggothPluginSystem` class that instantiates the typed hooks.
-
-**Files:**
-- `packages/plugins/package.json` — add `hooks-plugin` dependency
-- `packages/plugins/src/hook-types.ts` — NEW: all hook context type definitions
-- `packages/plugins/src/plugin-system.ts` — NEW: `ShoggothPluginSystem` class wrapping `PluginSystem` from `hooks-plugin`
-- `packages/plugins/src/messaging-platform-plugin.ts` — NEW: `MessagingPlatformPlugin` interface and `defineMessagingPlatformPlugin` helper
-- `packages/plugins/src/index.ts` — re-export new types
-- `packages/plugins/test/plugin-system.test.ts` — NEW: tests for hook registration and firing
+### Phase 1: Add `hooks-plugin` dependency, define hook types, and implement config freeze\n\nInstall `hooks-plugin` in `@shoggoth/plugins`. Define all hook context types and the `ShoggothPluginSystem` class that instantiates the typed hooks. Implement a configuration freeze mechanism: after the `daemon.configure` waterfall completes, the resulting config object is deep-frozen (`Object.freeze`, recursive) to prevent downstream plugins or hooks from mutating it. This mitigates the risk of a misbehaving plugin corrupting config via the waterfall.\n\n**Files:**\n- `packages/plugins/package.json` — add `hooks-plugin` dependency\n- `packages/plugins/src/hook-types.ts` — NEW: all hook context type definitions\n- `packages/plugins/src/plugin-system.ts` — NEW: `ShoggothPluginSystem` class wrapping `PluginSystem` from `hooks-plugin`; includes `freezeConfig` utility that deep-freezes the config object returned from the `daemon.configure` waterfall\n- `packages/plugins/src/messaging-platform-plugin.ts` — NEW: `MessagingPlatformPlugin` interface and `defineMessagingPlatformPlugin` helper\n- `packages/plugins/src/index.ts` — re-export new types\n- `packages/plugins/test/plugin-system.test.ts` — NEW: tests for hook registration, firing, and config freeze (verify mutation after freeze throws in strict mode)
 
 ### Phase 2: Replace `HookRegistry` with `hooks-plugin` internals
 
@@ -204,13 +194,14 @@ Update docs to reflect the new plugin system, hook catalog, and platform plugin 
 
 ## Considerations
 
+- `PlatformStartCtx` groups shared daemon dependencies (hitlStack, policyEngine, hitlConfigRef, hitlAutoApproveGate) into a `deps: PlatformDeps` sub-object to keep the context readable.
 - `hooks-plugin` has a single runtime dependency (`aidly`). Verify it's acceptable for the project.
 - The `PluginSystem.lock()` mechanism can be used after startup to prevent late plugin registration — good for security.
 - Waterfall hooks (`daemon.configure`, `message.outbound`) allow plugins to transform data in a pipeline. Order matters — plugins fire in registration order (FIFO).
 - The `hooks-plugin` `listenError` API provides centralized error handling for hook execution failures, replacing the current try/catch-per-handler pattern.
 - Future platforms (Telegram, Slack) implement `MessagingPlatformPlugin` and drop in as config entries.
 - The `session.turn.before`/`session.turn.after` hooks enable observability plugins (logging, metrics, tracing) without modifying core code.
-- `daemon.configure` as a waterfall hook is powerful but risky — a misbehaving plugin could corrupt config. Consider freezing the config object after the waterfall completes.
+- `daemon.configure` as a waterfall hook is powerful but risky — a misbehaving plugin could corrupt config. The config object is deep-frozen after the waterfall completes (implemented in Phase 1).
 
 ## Plan Assets
 

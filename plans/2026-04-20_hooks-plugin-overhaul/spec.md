@@ -54,10 +54,34 @@ interface PlatformRegisterCtx {
   readonly setPlatformRuntime: (platformId: string, runtime: PlatformRuntime) => void;
 }
 
+/** Grouped platform dependencies — keeps PlatformStartCtx readable. */
+interface PlatformDeps {
+  /** Access the HITL pending stack (shared across platforms). */
+  readonly hitlStack: HitlPendingStack;
+  /** Access the policy engine. */
+  readonly policyEngine: PolicyEngine;
+  /** Access the HITL config ref. */
+  readonly hitlConfigRef: HitlConfigRef;
+  /** Access the HITL auto-approve gate. */
+  readonly hitlAutoApproveGate?: HitlAutoApproveGate;
+}
+
 interface PlatformStartCtx {
   readonly db: Database.Database;
   readonly config: Readonly<ShoggothConfig>;
   readonly configRef: { readonly current: ShoggothConfig };
+  readonly env: NodeJS.ProcessEnv;
+  /** Shared daemon dependencies for platform plugins. */
+  readonly deps: PlatformDeps;
+  /** Register a named drain function for graceful shutdown. */
+  readonly registerDrain: (name: string, fn: () => void | Promise<void>) => void;
+  /** Set the subagent runtime extension (runSessionModelTurn, etc.). */
+  readonly setSubagentRuntimeExtension: (ext: SubagentRuntimeExtension) => void;
+  /** Set the message tool context ref for builtin-message. */
+  readonly setMessageToolContext: (ctx: MessageToolContext) => void;
+  /** Set the platform adapter ref for the presentation layer. */
+  readonly setPlatformAdapter: (adapter: PlatformAdapter) => void;
+};
   readonly env: NodeJS.ProcessEnv;
   /** Register a named drain function for graceful shutdown. */
   readonly registerDrain: (name: string, fn: () => void | Promise<void>) => void;
@@ -465,8 +489,7 @@ await pluginSystem.lifecycle["platform.start"].emit({
   setSubagentRuntimeExtension,
   setMessageToolContext: (ctx) => { messageToolContextRef.current = ctx; },
   setPlatformAdapter: (a) => { platformAdapterRef.current = a; },
-  hitlStack, policyEngine, hitlConfigRef: hitlRef,
-  hitlAutoApproveGate,
+  deps: { hitlStack, policyEngine, hitlConfigRef: hitlRef, hitlAutoApproveGate },
 });
 
 // 10. Fire daemon.startup (async — general plugins)
