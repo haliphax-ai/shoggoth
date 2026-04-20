@@ -5,7 +5,7 @@ import {
   skillAbsolutePathById,
   searchSkills,
   type SkillSearchParams,
-} from "@shoggoth/skills-plugins";
+} from "@shoggoth/skills";
 
 export function formatSkillsListJson(config: ShoggothConfig): string {
   const rows = listSkillsForConfig(config).map((s) => ({

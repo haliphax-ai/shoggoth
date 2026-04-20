@@ -30,7 +30,7 @@
     "@shoggoth/authn": "*",
     "@shoggoth/models": "*",
     "@shoggoth/shared": "*",
-    "@shoggoth/skills-plugins": "*",
+    "@shoggoth/skills": "*",\n    "@shoggoth/plugins": "*",
     "better-sqlite3": "^11.7.0",
     "tsx": "^4.19.3"
   },

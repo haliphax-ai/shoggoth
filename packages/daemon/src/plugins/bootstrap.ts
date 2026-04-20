@@ -3,7 +3,7 @@ import {
   HookRegistry,
   loadAllPluginsFromConfig,
   type PluginAuditEvent,
-} from "@shoggoth/skills-plugins";
+} from "@shoggoth/plugins";
 import type Database from "better-sqlite3";
 import { appendAuditRow, type AppendAuditRowInput } from "../audit/append-audit";
 import type { DaemonRuntime } from "../runtime";

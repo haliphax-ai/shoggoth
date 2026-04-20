@@ -5,7 +5,9 @@
   "type": "module",
   "description": "Shoggoth agent orchestration platform",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "packages/skills",
+    "packages/plugins"
   ],
   "scripts": {
     "clean": "rm -rf packages/*/dist dist",

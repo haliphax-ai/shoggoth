@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { readFileSync } from "node:fs";
-import { listSkillsForConfig, skillAbsolutePathById } from "@shoggoth/skills-plugins";
+import { listSkillsForConfig, skillAbsolutePathById } from "@shoggoth/skills";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
 
 export function register(registry: BuiltinToolRegistry): void {
