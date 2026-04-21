@@ -81,24 +81,6 @@ interface PlatformStartCtx {
   readonly setMessageToolContext: (ctx: MessageToolContext) => void;
   /** Set the platform adapter ref for the presentation layer. */
   readonly setPlatformAdapter: (adapter: PlatformAdapter) => void;
-};
-  readonly env: NodeJS.ProcessEnv;
-  /** Register a named drain function for graceful shutdown. */
-  readonly registerDrain: (name: string, fn: () => void | Promise<void>) => void;
-  /** Set the subagent runtime extension (runSessionModelTurn, etc.). */
-  readonly setSubagentRuntimeExtension: (ext: SubagentRuntimeExtension) => void;
-  /** Set the message tool context ref for builtin-message. */
-  readonly setMessageToolContext: (ctx: MessageToolContext) => void;
-  /** Set the platform adapter ref for the presentation layer. */
-  readonly setPlatformAdapter: (adapter: PlatformAdapter) => void;
-  /** Access the HITL pending stack (shared across platforms). */
-  readonly hitlStack: HitlPendingStack;
-  /** Access the policy engine. */
-  readonly policyEngine: PolicyEngine;
-  /** Access the HITL config ref. */
-  readonly hitlConfigRef: HitlConfigRef;
-  /** Access the HITL auto-approve gate. */
-  readonly hitlAutoApproveGate?: HitlAutoApproveGate;
 }
 
 interface PlatformStopCtx {
@@ -235,7 +217,7 @@ class ShoggothPluginSystem extends PluginSystem<ShoggothHooks> {
 
 ## 3. `MessagingPlatformPlugin` Interface
 
-Defines the required hook contract for any messaging platform plugin. This is a compile-time aid — the runtime validates via manifest + hook presence.
+Defines the required hook contract for any messaging platform plugin. This is a compile-time aid — the runtime validates via `defineMessagingPlatformPlugin` at registration time.
 
 ```ts
 import type { Plugin } from "hooks-plugin";
@@ -288,30 +270,10 @@ function defineMessagingPlatformPlugin(
 
 ## 4. Plugin Manifest Schema
 
+The manifest is metadata-only. Hook registration is dynamic — handled by the exported factory/plugin object.
+
 ```ts
 import { z } from "zod";
-
-const hookNameSchema = z.enum([
-  // Daemon lifecycle
-  "daemon.configure",
-  "daemon.startup",
-  "daemon.ready",
-  "daemon.shutdown",
-  // Platform lifecycle
-  "platform.register",
-  "platform.start",
-  "platform.stop",
-  // Messaging
-  "message.inbound",
-  "message.outbound",
-  "message.reaction",
-  // Session
-  "session.turn.before",
-  "session.turn.after",
-  "session.segment.change",
-  // Health
-  "health.register",
-]);
 
 const pluginKindSchema = z.enum([
   "messaging-platform",
@@ -324,8 +286,7 @@ const shoggothPluginManifestSchema = z
     name: z.string().min(1),
     version: z.string().min(1),
     kind: pluginKindSchema.optional().default("general"),
-    entrypoint: z.string().min(1).optional(),
-    hooks: z.record(hookNameSchema, z.string().min(1)).optional(),
+    entrypoint: z.string().min(1),
   })
   .strict();
 
@@ -340,6 +301,8 @@ function parseShoggothPluginManifest(data: unknown): ShoggothPluginManifest {
 
 ## 5. Plugin Loader
 
+The loader reads the manifest, imports the entrypoint module, and calls the exported factory (or uses the default export directly) to obtain a `Plugin` object. For `messaging-platform` kind plugins, the result is validated against `MessagingPlatformPlugin` requirements before registration.
+
 ```ts
 interface LoadedPluginMeta {
   readonly name: string;
@@ -349,14 +312,16 @@ interface LoadedPluginMeta {
 }
 
 /**
- * Load a plugin from a directory.
+ * Expected entrypoint contract:
  *
- * If `entrypoint` is set in the manifest, the module's default export is
- * a Plugin object (or factory function) passed to `pluginSystem.use()`.
+ * - Default export is a Plugin object, OR
+ * - Default export is a factory function () => Plugin (or async () => Plugin)
  *
- * If no entrypoint, individual hook entries are loaded — each must
- * default-export a handler function, registered on the corresponding
- * lifecycle hook.
+ * The loader calls the factory if it's a function, then passes the
+ * resulting Plugin to pluginSystem.use().
+ *
+ * For kind: "messaging-platform", the plugin is validated via
+ * defineMessagingPlatformPlugin before registration.
  */
 async function loadPluginFromDirectory(
   rootDir: string,
@@ -384,7 +349,7 @@ interface DiscordPluginState {
   reactionPassthroughRef: { current: ((ev: DiscordReactionAddEvent) => void) | undefined };
 }
 
-export function createDiscordPlugin(): MessagingPlatformPlugin {
+export default function createDiscordPlugin(): MessagingPlatformPlugin {
   const state: DiscordPluginState = {
     reactionBotUserIdRef: { current: undefined },
     reactionPassthroughRef: { current: undefined },
@@ -456,7 +421,8 @@ bootstrapMainSession({ db, config });
 // 4. Start control plane, config hot-reload, timer scheduler, procman, etc.
 // ... (unchanged)
 
-// 5. Load plugins from config
+// 5. Load plugins from config (each entrypoint is imported, factory called,
+//    result passed to pluginSystem.use())
 await loadAllPluginsFromConfig({
   config,
   system: pluginSystem,
