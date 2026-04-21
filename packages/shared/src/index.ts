@@ -146,3 +146,13 @@ export {
 export { type Logger, type LogLevel, type LogFields, createLogger, initLogger, getLogger, setRootLogger } from "./logging.js";
 export { IMAGE_MIME_TYPES, IMAGE_EXTENSION_TO_MIME, IMAGE_MIME_TO_EXTENSION, MAX_IMAGE_BLOCK_BYTES } from "./image";
 export { isPrivateIp } from "./network";
+export type {
+  HitlPendingStore,
+  HitlPendingStack,
+  HitlAutoApproveGate,
+  HitlConfigRef,
+  PolicyEngine,
+  SubagentRuntimeExtension,
+  MessageToolContext,
+  PlatformAdapter,
+} from "./plugin-interfaces";

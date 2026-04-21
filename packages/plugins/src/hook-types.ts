@@ -3,35 +3,18 @@
 
 // -------------------------------------------------------------------------------
 
-/** Placeholder for better-sqlite3 Database */
-type Database = any;
-/** Placeholder for ShoggothConfig from @shoggoth/shared */
-type ShoggothConfig = any;
-/** Placeholder for PlatformRegistration from @shoggoth/messaging */
-type PlatformRegistration = any;
-/** Placeholder for InternalMessage from @shoggoth/messaging */
-type InternalMessage = any;
-/** Placeholder for PlatformRuntime from @shoggoth/messaging */
-type PlatformRuntime = any;
-/** Placeholder for HitlPendingStack */
-type HitlPendingStack = any;
-/** Placeholder for PolicyEngine */
-type PolicyEngine = any;
-/** Placeholder for HitlConfigRef */
-type HitlConfigRef = any;
-/** Placeholder for HitlAutoApproveGate */
-type HitlAutoApproveGate = any;
-/** Placeholder for SubagentRuntimeExtension */
-type SubagentRuntimeExtension = any;
-/** Placeholder for MessageToolContext */
-type MessageToolContext = any;
-/** Placeholder for PlatformAdapter */
-type PlatformAdapter = any;
-/** Placeholder for Logger */
-type Logger = any;
-/** Placeholder for PlatformAssistantDeps */
-type PlatformAssistantDeps = any;
-
+import type {
+  ShoggothConfig,
+  Logger,
+  HitlPendingStack,
+  HitlAutoApproveGate,
+  HitlConfigRef,
+  PolicyEngine,
+  SubagentRuntimeExtension,
+  MessageToolContext,
+  PlatformAdapter,
+} from "@shoggoth/shared";
+import type { PlatformRegistration, PlatformRuntime, InternalMessage } from "@shoggoth/messaging";
 import type { PlatformDeliveryRegistry } from "./platform-delivery-registry";
 
 // -------------------------------------------------------------------------------
@@ -44,7 +27,7 @@ export interface DaemonConfigureCtx {
 }
 
 export interface DaemonStartupCtx {
-  readonly db: Database;
+  readonly db: unknown;
   readonly config: Readonly<ShoggothConfig>;
   readonly configRef: { readonly current: ShoggothConfig };
   readonly registerDrain: (name: string, fn: () => void | Promise<void>) => void;
@@ -74,46 +57,34 @@ export interface PlatformRegisterCtx {
  * Platform-agnostic — no Discord/Telegram/etc. specifics leak here.
  */
 export interface PlatformDeps {
-  /** HITL pending stack - created by daemon */
   readonly hitlStack?: HitlPendingStack;
-  /** Policy engine - created by daemon */
   readonly policyEngine: PolicyEngine;
-  /** HITL config ref - created by daemon */
   readonly hitlConfigRef: HitlConfigRef;
-  /** HITL auto-approve gate - created by daemon */
   readonly hitlAutoApproveGate?: HitlAutoApproveGate;
-  /** Logger for platform operations */
   readonly logger: Logger;
-  /** Default platform assistant dependencies */
-  readonly platformAssistantDeps: PlatformAssistantDeps;
-  /** Function to abort a session turn */
+  /** Default platform assistant dependencies (opaque to the plugin system). */
+  readonly platformAssistantDeps: unknown;
   readonly abortSession: (sessionId: string) => Promise<void>;
-  /** Function to invoke a control operation */
-  readonly invokeControlOp: (op: string, payload: any) => Promise<{ ok: boolean; result?: any; error?: string }>;
-  /** Function to register a platform with the daemon's platform registry */
-  readonly registerPlatform: (platformId: string, handle: any) => void;
-  /** Function to stop all platforms */
+  readonly invokeControlOp: (op: string, payload: unknown) => Promise<{ ok: boolean; result?: unknown; error?: string }>;
+  readonly registerPlatform: (platformId: string, handle: unknown) => void;
   readonly stopAllPlatforms: () => Promise<void>;
-  /** Function to reconcile persistent subagents */
   readonly reconcilePersistentSubagents: (input: {
-    readonly db: Database;
+    readonly db: unknown;
     readonly config: ShoggothConfig;
-    readonly ext: any;
+    readonly ext: unknown;
   }) => { restored: number; expiredKilled: number };
-  /** Notice resolver function from daemon */
-  readonly noticeResolver: (key: string, params?: Record<string, any>) => string;
+  readonly noticeResolver: (key: string, params?: Record<string, unknown>) => string;
 }
 
 export interface PlatformStartCtx {
-  readonly db: Database;
+  readonly db: unknown;
   readonly config: Readonly<ShoggothConfig>;
   readonly configRef: { readonly current: ShoggothConfig };
   readonly env: NodeJS.ProcessEnv;
   readonly deps: PlatformDeps;
-  /** Platform delivery registry — plugins register their resolver here */
   readonly deliveryRegistry: PlatformDeliveryRegistry;
   readonly registerDrain: (name: string, fn: () => void | Promise<void>) => void;
-  readonly setSubagentRuntimeExtension: (ext: SubagentRuntimeExtension) => void;
+  readonly setSubagentRuntimeExtension: (ext: SubagentRuntimeExtension | undefined) => void;
   readonly setMessageToolContext: (ctx: MessageToolContext) => void;
   readonly setPlatformAdapter: (adapter: PlatformAdapter) => void;
 }
