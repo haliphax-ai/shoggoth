@@ -13,18 +13,10 @@ import type { ShoggothHitlConfig } from "./schema";
  * Plugins use this to queue/resolve HITL approvals.
  */
 export interface HitlPendingStore {
-  insert(row: {
-    sessionId: string;
-    toolName: string;
-    toolCallId: string;
-    argsJson: string;
-    riskTier: string;
-    subResource?: string;
-  }): string;
-  approve(pendingId: string): void;
-  deny(pendingId: string): void;
-  get(pendingId: string): { id: string; sessionId: string; toolName: string; status: string } | undefined;
-  list(sessionId?: string): readonly { id: string; sessionId: string; toolName: string; status: string }[];
+  approve(id: string, resolverPrincipal: string): boolean;
+  deny(id: string, resolverPrincipal: string): boolean;
+  getById(id: string): { id: string; sessionId: string; toolName: string; status: string } | undefined;
+  listPendingForSession(sessionId: string): readonly { id: string; sessionId: string; toolName: string; status: string }[];
 }
 
 /**

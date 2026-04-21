@@ -23,6 +23,7 @@ import type { PlatformDeliveryRegistry } from "./platform-delivery-registry";
 /** Waterfall: plugins can return a modified config. */
 export interface DaemonConfigureCtx {
   readonly config: ShoggothConfig;
+  [key: string]: unknown;
 }
 
 export interface DaemonStartupCtx {
@@ -107,6 +108,7 @@ export interface MessageOutboundCtx {
   readonly sessionId: string;
   readonly platformId: string;
   readonly replyToMessageId?: string;
+  [key: string]: unknown;
 }
 
 export interface MessageReactionCtx {

@@ -12,7 +12,6 @@ import {
 import { discordPlatformRegistration } from "./platform-registration";
 import { createDiscordProbe } from "./probe";
 import type { DiscordMessagingRuntime } from "./bootstrap";
-import type { DiscordReactionAddEvent } from "./hitl/reaction-handler";
 import { createHitlDiscordNoticeRegistry, type HitlDiscordNoticeRegistry } from "./hitl/notice-registry";
 import type { DiscordPlatformHandle } from "./platform";
 import {
@@ -25,12 +24,20 @@ import {
 import { executeMessageToolAction } from "@shoggoth/messaging";
 import { resolvePlatformConfig } from "@shoggoth/shared";
 
+/** Reaction event shape (matches adapter's DiscordReactionAddEvent). */
+interface ReactionAddEvent {
+  userId: string;
+  channelId: string;
+  messageId: string;
+  emoji: { name?: string; id?: string };
+}
+
 /** State held across the plugin's lifecycle. */
 interface DiscordPluginState {
   messaging?: DiscordMessagingRuntime;
   platform?: DiscordPlatformHandle;
   reactionBotUserIdRef: { current: string | undefined };
-  reactionPassthroughRef: { current: ((ev: DiscordReactionAddEvent) => void) | undefined };
+  reactionPassthroughRef: { current: ((ev: ReactionAddEvent) => void) | undefined };
   getToken: () => string | undefined;
 }
 
@@ -133,7 +140,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           logger,
           config: configRef.current,
           botToken: state.getToken(),
-          noticeResolver,
+          noticeResolver: noticeResolver as any,
           onInteractionCreate: createDiscordInteractionHandler({
             transport: new Proxy({} as DiscordMessagingRuntime["discordRestTransport"], {
               get(_t, prop, receiver) {
@@ -143,26 +150,26 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
             }),
             get applicationId() { return state.reactionBotUserIdRef.current ?? ""; },
             logger,
-            abortSession,
+            abortSession: abortSession as any,
             invokeControlOp,
             resolveSessionForChannel: (channelId, guildId) =>
               resolveSessionForChannel(configRef.current, channelId, guildId),
           }),
           onMessageReactionAdd:
             hitlStack && hitlDiscordNoticeRegistry && hitlAutoApproveGate
-              ? (ev) => {
+              ? (ev: any) => {
                   const consumed = handleDiscordHitlReactionAdd({
                     ev,
-                    pending: hitlStack.pending,
+                    pending: hitlStack.pending as any,
                     registry: hitlDiscordNoticeRegistry,
-                    autoApprove: hitlAutoApproveGate,
+                    autoApprove: hitlAutoApproveGate as any,
                     ownerUserId: resolveDiscordOwnerUserId(configRef.current),
                     botUserIdRef: state.reactionBotUserIdRef,
-                    logger: logger.child?.("reactions") ?? logger,
+                    logger: (logger.child as any)?.("reactions") ?? logger,
                   });
                   if (!consumed) state.reactionPassthroughRef.current?.(ev);
                 }
-              : (ev) => { state.reactionPassthroughRef.current?.(ev); },
+              : (ev: any) => { state.reactionPassthroughRef.current?.(ev); },
           reactionBotUserIdRef: state.reactionBotUserIdRef,
         });
 
@@ -182,22 +189,22 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
 
         // Start Discord platform (sessions, HITL, MCP, orchestrator)
         const discordPlatform = await startDiscordPlatform({
-          db,
+          db: db as any,
           config: configRef.current,
           configRef,
-          policyEngine,
-          hitlConfigRef: platformDeps.hitlConfigRef,
-          hitlPending: hitlStack,
+          policyEngine: policyEngine as any,
+          hitlConfigRef: platformDeps.hitlConfigRef as any,
+          hitlPending: hitlStack as any,
           hitlDiscordNoticeRegistry,
-          hitlAutoApproveGate,
+          hitlAutoApproveGate: hitlAutoApproveGate as any,
           logger,
           discord: discordMessaging,
-          deps: platformAssistantDeps,
+          deps: platformAssistantDeps as any,
         });
 
         state.platform = discordPlatform;
         registerPlatformFn("discord", discordPlatform);
-        setPlatformAdapter(discordPlatform.adapter);
+        setPlatformAdapter(discordPlatform.adapter as any);
 
         // Wire reaction passthrough
         state.reactionPassthroughRef.current = (ev) => {
@@ -253,11 +260,11 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           registerPlatformThreadBinding: discordMessaging.registerPlatformThreadBinding,
           announcePersistentSubagentSessionEnded: discordPlatform.announcePersistentSubagentSessionEnded,
         };
-        setSubagentRuntimeExtension(subagentExt);
+        setSubagentRuntimeExtension(subagentExt as any);
 
         // Build message tool context from capabilities
         const msgCtx = {
-          slice: discordMessaging.capabilities.extensions,
+          slice: discordMessaging.capabilities.extensions as unknown as Record<string, boolean>,
           execute: (sessionId: string, args: any) =>
             executeMessageToolAction(
               {
@@ -267,7 +274,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
                 sessionToGuild: (sid) => discordMessaging.resolveGuildIdForSession?.(sid),
                 getSessionWorkspace: (sid) => {
                   try {
-                    const row = db.prepare("SELECT workspace_path FROM sessions WHERE id = ?").get(sid) as
+                    const row = (db as any).prepare("SELECT workspace_path FROM sessions WHERE id = ?").get(sid) as
                       | { workspace_path: string }
                       | undefined;
                     return row?.workspace_path;
@@ -328,7 +335,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
         ctx.registerProbe(
           createDiscordProbe({
             getToken: state.getToken,
-          }),
+          }) as any,
         );
       },
     },

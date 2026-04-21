@@ -2,27 +2,31 @@
 // daemon-hooks.ts — Orchestrates hook firing in the correct boot sequence
 // -------------------------------------------------------------------------------
 
+import type { ShoggothConfig } from "@shoggoth/shared";
 import type { ShoggothPluginSystem, PlatformDeps, PlatformDeliveryRegistry } from "@shoggoth/plugins";
+import type { PlatformRegistration, PlatformRuntime } from "@shoggoth/messaging";
+import type { SubagentRuntimeExtension, MessageToolContext, PlatformAdapter } from "@shoggoth/shared";
+import type { HealthProbe } from "@shoggoth/plugins";
 
 export interface DaemonHooksContext {
-  config: Record<string, any>;
-  db: any;
-  configRef: { current: any };
+  config: ShoggothConfig;
+  db: unknown;
+  configRef: { current: ShoggothConfig };
   env: NodeJS.ProcessEnv;
-  platforms: Map<string, any>;
+  platforms: Map<string, PlatformRuntime>;
   deliveryRegistry: PlatformDeliveryRegistry;
   registerDrain: (name: string, fn: () => void | Promise<void>) => void;
-  registerPlatform: (reg: any) => void;
-  setPlatformRuntime: (platformId: string, runtime: any) => void;
-  registerProbe: (probe: any) => void;
+  registerPlatform: (reg: PlatformRegistration) => void;
+  setPlatformRuntime: (platformId: string, runtime: PlatformRuntime) => void;
+  registerProbe: (probe: HealthProbe) => void;
   deps: PlatformDeps;
-  setSubagentRuntimeExtension: (ext: any) => void;
-  setMessageToolContext: (ctx: any) => void;
-  setPlatformAdapter: (adapter: any) => void;
+  setSubagentRuntimeExtension: (ext: SubagentRuntimeExtension | undefined) => void;
+  setMessageToolContext: (ctx: MessageToolContext) => void;
+  setPlatformAdapter: (adapter: PlatformAdapter) => void;
 }
 
 export interface DaemonHooksResult {
-  config: Record<string, any>;
+  config: ShoggothConfig;
   drains: {
     platformStop: () => Promise<void>;
     daemonShutdown: () => Promise<void>;

@@ -348,8 +348,8 @@ void (async () => {
     hitlConfigRef: hitlRef,
     hitlAutoApproveGate,
     logger: getLogger("messaging"),
-    platformAssistantDeps: defaultPlatformAssistantDeps,
-    abortSession: async (sessionId) => requestSessionTurnAbort(sessionId ?? ""),
+    platformAssistantDeps: defaultPlatformAssistantDeps as unknown,
+    abortSession: async (sessionId) => { await requestSessionTurnAbort(sessionId ?? ""); },
     invokeControlOp: async (op, payload) => {
       if (!stateDb) return { ok: false, error: "state database unavailable" };
       const sessions = createSessionStore(stateDb);
@@ -375,12 +375,12 @@ void (async () => {
       return { ok: true, result };
     },
     registerPlatform: (platformId, handle) => {
-      registerPlatform(platformId, handle);
+      registerPlatform(platformId, handle as any);
       platformsMap.set(platformId, handle);
     },
     stopAllPlatforms,
-    reconcilePersistentSubagents,
-    noticeResolver: daemonNotice,
+    reconcilePersistentSubagents: reconcilePersistentSubagents as PlatformDeps["reconcilePersistentSubagents"],
+    noticeResolver: daemonNotice as (key: string, params?: Record<string, unknown>) => string,
   };
 
   // Fire daemon hooks — plugins handle platform.start, health.register, etc.
@@ -394,12 +394,11 @@ void (async () => {
     registerDrain: (name, fn) => rt.shutdown.registerDrain(name, fn),
     registerPlatform: (reg) => registerMessagingPlatform(reg),
     setPlatformRuntime: (platformId, runtime) => platformsMap.set(platformId, runtime),
-    registerProbe: (probe) => rt.health.register(probe),
+    registerProbe: (probe) => rt.health.register(probe as any),
     deps: platformDeps,
-    setSubagentRuntimeExtension,
-    setMessageToolContext: (ctx) => { messageToolContextRef.current = ctx; },
-    setPlatformAdapter: (adapter) => { platformAdapterRef.current = adapter; },
-    messageToolContext: undefined,
+    setSubagentRuntimeExtension: (ext) => setSubagentRuntimeExtension(ext as any),
+    setMessageToolContext: (ctx) => { messageToolContextRef.current = ctx as any; },
+    setPlatformAdapter: (adapter) => { platformAdapterRef.current = adapter as any; },
   });
 
   // Register plugin shutdown drains
