@@ -99,18 +99,24 @@ The Discord platform becomes a plugin that satisfies `MessagingPlatformPlugin`:
 
 All of the ~200 lines of Discord glue in `daemon/src/index.ts` move into `platform-discord/src/plugin.ts`.
 
-### Plugin Manifest
+### Plugin Discovery
 
-The `shoggoth.json` manifest carries identity and metadata only. Hook registration is handled dynamically — the entrypoint exports a factory function that returns a typed `Plugin` object (or the object directly), and the daemon passes it to `pluginSystem.use()`. For `messaging-platform` plugins, `defineMessagingPlatformPlugin` validates required hooks at registration time.
+There is no separate `shoggoth.json` manifest. Plugin metadata lives in `package.json` under a `shoggothPlugin` property bag, following the same convention as `jest`, `eslint`, `babel`, etc. The loader reads `name` and `version` from the top-level `package.json` fields and `kind`/`entrypoint` from `shoggothPlugin`:
 
 ```json
 {
-  "name": "platform-discord",
+  "name": "@shoggoth/platform-discord",
   "version": "0.1.0",
-  "kind": "messaging-platform",
-  "entrypoint": "./src/plugin.ts"
+  "shoggothPlugin": {
+    "kind": "messaging-platform",
+    "entrypoint": "./src/plugin.ts"
+  }
 }
 ```
+
+Hook registration is handled dynamically — the entrypoint exports a factory function that returns a typed `Plugin` object (or the object directly), and the daemon passes it to `pluginSystem.use()`. For `messaging-platform` plugins, `defineMessagingPlatformPlugin` validates required hooks at registration time.
+
+The `entrypoint` field is kept explicit rather than inferred from `main`/`exports` — the plugin factory isn't necessarily the package's main export.
 
 ### Daemon Boot Sequence (revised)
 
@@ -145,12 +151,12 @@ Install `hooks-plugin` in `@shoggoth/plugins`. Define all hook context types and
 
 ### Phase 2: Replace `HookRegistry` with `hooks-plugin` internals
 
-Delete the hand-rolled `HookRegistry` and replace all usages with `ShoggothPluginSystem`. Update `loadPluginFromDirectory` and `loadAllPluginsFromConfig` to use the new system. Update the manifest schema to support the new simplified format.
+Delete the hand-rolled `HookRegistry` and replace all usages with `ShoggothPluginSystem`. Update `loadPluginFromDirectory` and `loadAllPluginsFromConfig` to use the new system. Update the manifest schema to read `shoggothPlugin` from `package.json`.
 
 **Files:**
 - `packages/plugins/src/hook-registry.ts` — DELETE (replaced by `ShoggothPluginSystem`)
-- `packages/plugins/src/plugin-loader.ts` — update to use `ShoggothPluginSystem`; import entrypoint module, call factory, pass result to `pluginSystem.use()`
-- `packages/plugins/src/shoggoth-manifest.ts` — update schema: remove `hooks` map, require `entrypoint`, add `kind`
+- `packages/plugins/src/plugin-loader.ts` — update to use `ShoggothPluginSystem`; read `package.json` for `shoggothPlugin` metadata, import entrypoint module, call factory, pass result to `pluginSystem.use()`
+- `packages/plugins/src/shoggoth-manifest.ts` — rewrite: parse `shoggothPlugin` property bag from `package.json` instead of a separate `shoggoth.json`; validate `kind` and `entrypoint`
 - `packages/plugins/test/plugin-loader.test.ts` — update tests
 - `packages/plugins/test/hook-registry.test.ts` — DELETE or rewrite against new system
 - `packages/daemon/src/plugins/bootstrap.ts` — update to create and pass `ShoggothPluginSystem`
@@ -172,7 +178,7 @@ Move all Discord-specific wiring from `daemon/src/index.ts` into `platform-disco
 **Files:**
 - `packages/platform-discord/src/plugin.ts` — NEW: Discord plugin implementing `MessagingPlatformPlugin`; exports `createDiscordPlugin` factory
 - `packages/platform-discord/src/index.ts` — export plugin factory
-- `packages/platform-discord/shoggoth.json` — NEW: manifest (name, version, kind, entrypoint only)
+- `packages/platform-discord/package.json` — add `shoggothPlugin` property bag (`kind: "messaging-platform"`, `entrypoint: "./src/plugin.ts"`)
 - `packages/daemon/src/index.ts` — remove all Discord-specific imports and glue code
 - `packages/daemon/src/plugins/bootstrap.ts` — register built-in platform plugins from config
 - `packages/daemon/test/plugins/discord-plugin.test.ts` — NEW: integration test for Discord plugin lifecycle
@@ -190,7 +196,7 @@ Update docs to reflect the new plugin system, hook catalog, and platform plugin 
 ## Testing Strategy
 
 - Unit tests for `ShoggothPluginSystem`: hook registration, firing order, typed args, waterfall chaining, error handling
-- Unit tests for manifest parsing and validation
+- Unit tests for `shoggothPlugin` property bag parsing and validation
 - Unit tests for `MessagingPlatformPlugin` validation (missing required hooks → error)
 - Integration test for Discord plugin: mock gateway, verify hook firing sequence (register → start → ready → stop → shutdown)
 - Existing test suite must pass unchanged (917+ tests) — the refactor is internal
@@ -205,7 +211,7 @@ Update docs to reflect the new plugin system, hook catalog, and platform plugin 
 - Future platforms (Telegram, Slack) implement `MessagingPlatformPlugin` and drop in as config entries.
 - The `session.turn.before`/`session.turn.after` hooks enable observability plugins (logging, metrics, tracing) without modifying core code.
 - `daemon.configure` as a waterfall hook is powerful but risky — a misbehaving plugin could corrupt config. The config object is deep-frozen after the waterfall completes (implemented in Phase 1).
-- The `shoggoth.json` manifest is metadata-only (name, version, kind, entrypoint). Hooks are registered dynamically via the exported factory/plugin object and `pluginSystem.use()`, eliminating the need to declare hooks in two places.
+- Plugin metadata lives in `package.json` under `shoggothPlugin` — no separate manifest file. `name`/`version` come from the top-level `package.json` fields; `kind`/`entrypoint` from the `shoggothPlugin` bag. Hooks are registered dynamically via the exported factory/plugin object and `pluginSystem.use()`.
 
 ## Plan Assets
 
@@ -217,6 +223,6 @@ Update docs to reflect the new plugin system, hook catalog, and platform plugin 
 
 - No database schema changes.
 - Config format gains an optional `kind` field on plugin entries (for validation only — not required).
-- Existing `shoggoth.json` manifests with `hooks` maps will be ignored — the `hooks` field is removed from the schema. Plugins must export a factory or plugin object from their `entrypoint`.
+- Existing `shoggoth.json` manifest files are no longer read. Plugin metadata moves to `package.json` under the `shoggothPlugin` property bag. Plugins must export a factory or plugin object from their `entrypoint`.
 - The daemon's boot sequence changes internally but produces identical external behavior.
 - State files are unaffected.

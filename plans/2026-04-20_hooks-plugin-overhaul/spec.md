@@ -268,9 +268,9 @@ function defineMessagingPlatformPlugin(
 
 ---
 
-## 4. Plugin Manifest Schema
+## 4. Plugin Discovery Schema
 
-The manifest is metadata-only. Hook registration is dynamic — handled by the exported factory/plugin object.
+Plugin metadata lives in `package.json` under a `shoggothPlugin` property bag. The loader reads `name`/`version` from the top-level fields and `kind`/`entrypoint` from `shoggothPlugin`.
 
 ```ts
 import { z } from "zod";
@@ -281,19 +281,40 @@ const pluginKindSchema = z.enum([
   "general",
 ]);
 
-const shoggothPluginManifestSchema = z
+/** Validates the `shoggothPlugin` property bag from package.json. */
+const shoggothPluginBagSchema = z
   .object({
-    name: z.string().min(1),
-    version: z.string().min(1),
     kind: pluginKindSchema.optional().default("general"),
     entrypoint: z.string().min(1),
   })
   .strict();
 
-type ShoggothPluginManifest = z.infer<typeof shoggothPluginManifestSchema>;
+type ShoggothPluginBag = z.infer<typeof shoggothPluginBagSchema>;
 
-function parseShoggothPluginManifest(data: unknown): ShoggothPluginManifest {
-  return shoggothPluginManifestSchema.parse(data);
+/** Resolved plugin metadata (combined from package.json top-level + shoggothPlugin). */
+interface ShoggothPluginMeta {
+  readonly name: string;
+  readonly version: string;
+  readonly kind: string;
+  readonly entrypoint: string;
+}
+
+function parseShoggothPluginBag(data: unknown): ShoggothPluginBag {
+  return shoggothPluginBagSchema.parse(data);
+}
+
+/**
+ * Read a plugin's package.json and extract metadata.
+ * Throws if `shoggothPlugin` is missing or invalid.
+ */
+function resolvePluginMeta(packageJson: Record<string, unknown>): ShoggothPluginMeta {
+  const bag = parseShoggothPluginBag(packageJson.shoggothPlugin);
+  return {
+    name: z.string().min(1).parse(packageJson.name),
+    version: z.string().min(1).parse(packageJson.version),
+    kind: bag.kind,
+    entrypoint: bag.entrypoint,
+  };
 }
 ```
 
@@ -301,7 +322,7 @@ function parseShoggothPluginManifest(data: unknown): ShoggothPluginManifest {
 
 ## 5. Plugin Loader
 
-The loader reads the manifest, imports the entrypoint module, and calls the exported factory (or uses the default export directly) to obtain a `Plugin` object. For `messaging-platform` kind plugins, the result is validated against `MessagingPlatformPlugin` requirements before registration.
+The loader reads `package.json` from the plugin directory, extracts metadata via `resolvePluginMeta`, imports the entrypoint module, and calls the exported factory (or uses the default export directly) to obtain a `Plugin` object. For `messaging-platform` kind plugins, the result is validated against `MessagingPlatformPlugin` requirements before registration.
 
 ```ts
 interface LoadedPluginMeta {
@@ -333,7 +354,18 @@ async function loadPluginFromDirectory(
 
 ## 6. Discord Plugin Structure
 
-The Discord plugin exports a factory that returns a `MessagingPlatformPlugin`.
+The Discord plugin exports a factory that returns a `MessagingPlatformPlugin`. Its `package.json` declares the `shoggothPlugin` bag:
+
+```json
+{
+  "name": "@shoggoth/platform-discord",
+  "version": "0.1.0",
+  "shoggothPlugin": {
+    "kind": "messaging-platform",
+    "entrypoint": "./src/plugin.ts"
+  }
+}
+```
 
 ```ts
 // packages/platform-discord/src/plugin.ts
@@ -421,8 +453,9 @@ bootstrapMainSession({ db, config });
 // 4. Start control plane, config hot-reload, timer scheduler, procman, etc.
 // ... (unchanged)
 
-// 5. Load plugins from config (each entrypoint is imported, factory called,
-//    result passed to pluginSystem.use())
+// 5. Load plugins from config (each package.json is read for shoggothPlugin
+//    metadata, entrypoint is imported, factory called, result passed to
+//    pluginSystem.use())
 await loadAllPluginsFromConfig({
   config,
   system: pluginSystem,
