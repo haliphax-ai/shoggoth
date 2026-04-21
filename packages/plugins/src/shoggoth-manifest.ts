@@ -1,17 +1,43 @@
 import { z } from "zod";
 
-const hookNameSchema = z.enum(["daemon.startup", "daemon.shutdown"]);
+const pluginKindSchema = z.enum([
+  "messaging-platform",
+  "observability",
+  "general",
+]);
 
-export const shoggothPluginManifestSchema = z
+/** Validates the `shoggothPlugin` property bag from package.json. */
+export const shoggothPluginBagSchema = z
   .object({
-    name: z.string().min(1),
-    version: z.string().min(1),
-    hooks: z.record(hookNameSchema, z.string().min(1)).optional(),
+    kind: pluginKindSchema.optional().default("general"),
+    entrypoint: z.string().min(1),
   })
   .strict();
 
-export type ShoggothPluginManifest = z.infer<typeof shoggothPluginManifestSchema>;
+export type ShoggothPluginBag = z.infer<typeof shoggothPluginBagSchema>;
 
-export function parseShoggothPluginManifest(data: unknown): ShoggothPluginManifest {
-  return shoggothPluginManifestSchema.parse(data);
+/** Resolved plugin metadata (combined from package.json top-level + shoggothPlugin). */
+export interface ShoggothPluginMeta {
+  readonly name: string;
+  readonly version: string;
+  readonly kind: string;
+  readonly entrypoint: string;
+}
+
+export function parseShoggothPluginBag(data: unknown): ShoggothPluginBag {
+  return shoggothPluginBagSchema.parse(data);
+}
+
+/**
+ * Read a plugin's package.json and extract metadata.
+ * Throws if `shoggothPlugin` is missing or invalid.
+ */
+export function resolvePluginMeta(packageJson: Record<string, unknown>): ShoggothPluginMeta {
+  const bag = parseShoggothPluginBag(packageJson.shoggothPlugin);
+  return {
+    name: z.string().min(1).parse(packageJson.name),
+    version: z.string().min(1).parse(packageJson.version),
+    kind: bag.kind,
+    entrypoint: bag.entrypoint,
+  };
 }

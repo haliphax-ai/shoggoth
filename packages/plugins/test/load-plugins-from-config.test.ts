@@ -1,40 +1,54 @@
-import assert from "node:assert";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, test } from "vitest";
+import { describe, test, expect } from "vitest";
 import { fileURLToPath } from "node:url";
 import type { ShoggothConfig } from "@shoggoth/shared";
-import { HookRegistry } from "../src/hook-registry";
+import { ShoggothPluginSystem } from "../src/plugin-system";
 import { loadAllPluginsFromConfig, resolveLocalPluginPath } from "../src/load-plugins-from-config";
 
 describe("resolveLocalPluginPath", () => {
   test("returns absolute paths unchanged", () => {
-    assert.strictEqual(resolveLocalPluginPath("/abs/here", "/cfg"), "/abs/here");
+    expect(resolveLocalPluginPath("/abs/here", "/cfg")).toBe("/abs/here");
   });
 
   test("resolves relative to config directory", () => {
     const r = resolveLocalPluginPath("plugins/x", "/etc/shoggoth");
-    assert.ok(r.includes("plugins"));
-    assert.ok(r.endsWith(join("plugins", "x")));
+    expect(r).toContain("plugins");
+    expect(r).toMatch(/plugins\/x$/);
   });
 });
 
 describe("loadAllPluginsFromConfig", () => {
-  test("audits failure for broken manifest and still loads a second plugin", async () => {
+  test("audits failure for broken package.json and still loads a second plugin", async () => {
+    // Bad plugin: invalid package.json
     const bad = mkdtempSync(join(tmpdir(), "sh-bad-plug-"));
-    writeFileSync(join(bad, "shoggoth.json"), "{ not json");
+    writeFileSync(join(bad, "package.json"), "{ not json");
 
+    // Good plugin: valid package.json with shoggothPlugin bag + entrypoint
     const good = mkdtempSync(join(tmpdir(), "sh-good-plug-"));
     writeFileSync(
-      join(good, "shoggoth.json"),
+      join(good, "package.json"),
       JSON.stringify({
         name: "goodp",
         version: "1.0.0",
-        hooks: { "daemon.startup": "./h.mjs" },
+        shoggothPlugin: {
+          entrypoint: "./plugin.mjs",
+        },
       }),
     );
-    writeFileSync(join(good, "h.mjs"), `export default async () => { globalThis.__goodPlug = 7; };`);
+    writeFileSync(
+      join(good, "plugin.mjs"),
+      `export default function() {
+  return {
+    name: "goodp",
+    hooks: {
+      "daemon.shutdown": async (ctx) => { globalThis.__goodPlug = 7; },
+    },
+  };
+};
+`,
+    );
 
     const cfgDir = mkdtempSync(join(tmpdir(), "sh-cfg-"));
     const config = {
@@ -43,23 +57,24 @@ describe("loadAllPluginsFromConfig", () => {
     } as Pick<ShoggothConfig, "plugins" | "configDirectory">;
 
     const audits: { outcome: string; resource: string }[] = [];
-    const reg = new HookRegistry();
+    const system = new ShoggothPluginSystem();
     const loaded = await loadAllPluginsFromConfig({
       config,
-      registry: reg,
+      system,
       resolveFromFile: fileURLToPath(import.meta.url),
       audit: (e) => audits.push({ outcome: e.outcome, resource: e.resource }),
     });
 
-    assert.deepStrictEqual(loaded, [{ resource: "b", manifestName: "goodp" }]);
-    assert.strictEqual(audits.length, 2);
-    assert.strictEqual(audits[0]!.outcome, "failure");
-    assert.strictEqual(audits[0]!.resource, "a");
-    assert.strictEqual(audits[1]!.outcome, "success");
-    assert.strictEqual(audits[1]!.resource, "b");
+    expect(loaded).toEqual([{ resource: "b", manifestName: "goodp" }]);
+    expect(audits).toHaveLength(2);
+    expect(audits[0]!.outcome).toBe("failure");
+    expect(audits[0]!.resource).toBe("a");
+    expect(audits[1]!.outcome).toBe("success");
+    expect(audits[1]!.resource).toBe("b");
 
-    await reg.run("daemon.startup");
-    assert.strictEqual((globalThis as { __goodPlug?: number }).__goodPlug, 7);
+    // Fire hook through the plugin system to verify the good plugin was registered
+    await system.lifecycle["daemon.shutdown"].emit({ reason: "test" });
+    expect((globalThis as { __goodPlug?: number }).__goodPlug).toBe(7);
     delete (globalThis as { __goodPlug?: number }).__goodPlug;
   });
 });

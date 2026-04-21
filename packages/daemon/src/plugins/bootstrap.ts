@@ -1,6 +1,6 @@
 import type { ShoggothConfig } from "@shoggoth/shared";
 import {
-  HookRegistry,
+  ShoggothPluginSystem,
   loadAllPluginsFromConfig,
   type PluginAuditEvent,
 } from "@shoggoth/plugins";
@@ -37,8 +37,8 @@ function pluginAuditToRow(e: PluginAuditEvent): AppendAuditRowInput {
 }
 
 /**
- * Loads `shoggoth.json` plugins from config, records audit rows, runs startup hooks,
- * registers shutdown hooks + unload audit.
+ * Loads plugins from config using the new ShoggothPluginSystem,
+ * records audit rows, fires daemon.startup, registers shutdown hooks.
  */
 export async function bootstrapPlugins(options: {
   readonly config: ShoggothConfig;
@@ -56,17 +56,25 @@ export async function bootstrapPlugins(options: {
     argsRedactedJson: effectiveConfigAuditPayload(options.config),
   });
 
-  const registry = new HookRegistry();
+  const system = new ShoggothPluginSystem();
   const loaded = await loadAllPluginsFromConfig({
     config: options.config,
-    registry,
+    system,
     resolveFromFile: options.resolveFromFile,
     audit: (e) => appendAuditRow(options.db, pluginAuditToRow(e)),
   });
-  await registry.run("daemon.startup");
+
+  await system.lifecycle["daemon.startup"].emit({
+    db: options.db,
+    config: options.config,
+    configRef: { current: options.config },
+    registerDrain: (name: string, fn: () => void | Promise<void>) => {
+      options.rt.shutdown.registerDrain(name, fn);
+    },
+  });
 
   options.rt.shutdown.registerDrain("plugin-daemon-shutdown-hooks", async () => {
-    await registry.run("daemon.shutdown");
+    await system.lifecycle["daemon.shutdown"].emit({ reason: "shutdown" });
   });
   options.rt.shutdown.registerDrain("plugin-unload-audit", async () => {
     for (const p of loaded) {

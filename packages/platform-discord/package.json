@@ -11,6 +11,10 @@
       "default": "./src/index.ts"
     }
   },
+  "shoggothPlugin": {
+    "kind": "messaging-platform",
+    "entrypoint": "./src/plugin.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node --import tsx/esm --test --test-isolation=process --test-concurrency=true $(find test -name '*.test.ts' | sort)"
@@ -19,6 +23,7 @@
     "@shoggoth/daemon": "*",
     "@shoggoth/messaging": "*",
     "@shoggoth/models": "*",
+    "@shoggoth/plugins": "*",
     "@shoggoth/shared": "*",
     "zod": "^3.24.0"
   },

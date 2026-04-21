@@ -1,213 +1,82 @@
 # Plugins Reference (`@shoggoth/plugins`)
 
-This document is a source-level reference for the `@shoggoth/plugins` package. Plugins are loadable extension packages that hook into the [daemon](daemon.md) lifecycle via a central hook registry.
+The Shoggoth plugin system is built on [`hooks-plugin`](https://www.npmjs.com/package/hooks-plugin), providing typed lifecycle hooks that plugins tap into to extend daemon behavior. Plugins can observe events, transform data via waterfall hooks, and register entirely new messaging platforms.
 
 ---
 
 ## Overview
 
-Plugins are loadable extension packages (local directories or npm packages) that register hook handlers into a central `HookRegistry`, allowing code to run at defined lifecycle points (e.g. daemon startup/shutdown).
+Plugins are loadable extension packages (local directories or npm packages) that register hook handlers into a `ShoggothPluginSystem`. The system defines 14 typed hooks spanning daemon lifecycle, platform lifecycle, messaging, session, and health.
 
 Key characteristics:
 
-- Each plugin is a directory containing a `shoggoth.json` manifest.
-- The manifest declares which hooks the plugin handles and points to the handler modules.
-- Hook handlers are plain functions (sync or async) that are `default`-exported from their module.
-- Plugins are loaded at daemon startup and their hooks are executed sequentially in registration (FIFO) order.
+- Plugin metadata lives in `package.json` under a `shoggothPlugin` property bag — no separate manifest file.
+- The entrypoint exports a plugin object or a factory function that returns one.
+- Hooks are strongly typed — each hook has a defined context type.
+- Waterfall hooks (`daemon.configure`, `message.outbound`) allow plugins to transform data in a pipeline.
+- Plugins fire in registration order (FIFO). The system can be locked after startup to prevent late registration.
 - Loading failures are audited but do not abort the loading of other plugins.
 
 ---
 
-## Plugin Manifest (`shoggoth.json`)
+## How to Create a Plugin
 
-Every plugin directory must contain a `shoggoth.json` file at its root. The manifest is validated with a strict Zod schema:
+### 1. Set up `package.json`
 
 ```json
 {
-  "name": "my-plugin",
+  "name": "shoggoth-plugin-example",
   "version": "1.0.0",
-  "hooks": {
-    "daemon.startup": "./hooks/startup.js",
-    "daemon.shutdown": "./hooks/shutdown.js"
+  "shoggothPlugin": {
+    "kind": "general",
+    "entrypoint": "./src/plugin.ts"
   }
 }
 ```
 
-### Manifest Fields
+The `shoggothPlugin` property bag fields:
 
-| Field     | Type                          | Required | Description |
-|-----------|-------------------------------|----------|-------------|
-| `name`    | `string`                      | Yes      | Plugin name (non-empty). |
-| `version` | `string`                      | Yes      | Plugin version (non-empty). |
-| `hooks`   | `Record<HookName, string>`    | No       | Map of hook names to relative file paths. Each file must default-export a function. |
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `kind` | `"messaging-platform" \| "observability" \| "general"` | No | Defaults to `"general"`. `messaging-platform` plugins must implement required platform hooks. |
+| `entrypoint` | `string` | Yes | Module that exports the plugin factory or plugin object. |
 
-The schema is **strict** — unknown fields cause validation failure.
+### 2. Write the plugin entrypoint
 
----
+Export a factory function (or a plugin object directly):
 
-## Supported Hook Names (v1)
+```ts
+import type { Plugin } from "hooks-plugin";
+import type { ShoggothHooks } from "@shoggoth/plugins";
 
-| Hook Name          | When It Fires |
-|--------------------|---------------|
-| `daemon.startup`   | When the Shoggoth daemon starts up. |
-| `daemon.shutdown`  | When the Shoggoth daemon shuts down. |
-
-The `HookName` type is the union of these string literals.
-
----
-
-## Plugin Loading
-
-Plugins are loaded by `loadPluginFromDirectory()`:
-
-1. Read and parse `shoggoth.json` from the plugin's root directory.
-2. Validate the manifest against the strict Zod schema.
-3. For each entry in `hooks`:
-   - Resolve the relative path to an absolute file URL.
-   - Dynamically `import()` the module.
-   - Verify the module's `default` export is a function.
-   - Register the function as a handler in the `HookRegistry`.
-4. Return `LoadedPluginMeta` (`name`, `version`, `rootDir`).
-
-If the default export is not a function, loading throws an error.
-
-```typescript
-interface LoadedPluginMeta {
-  readonly name: string;
-  readonly version: string;
-  readonly rootDir: string;
+export default function createMyPlugin(): Plugin<ShoggothHooks> {
+  return {
+    name: "my-plugin",
+    hooks: {
+      "daemon.startup": async (ctx) => {
+        console.log("Plugin initialized with config:", ctx.config);
+      },
+      "daemon.shutdown": async (ctx) => {
+        console.log("Shutting down:", ctx.reason);
+      },
+    },
+  };
 }
 ```
 
----
+### 3. Reference in config
 
-## Plugin Resolution (Config-Driven)
-
-`loadAllPluginsFromConfig()` iterates over `config.plugins` entries. Each entry can specify a plugin by:
-
-- **Local path** (`entry.path`): Resolved relative to `config.configDirectory`. Absolute paths are used as-is.
-- **npm package** (`entry.package`): Resolved via `createRequire()` from a reference file, locating the package's `package.json` and using its parent directory as the plugin root.
-
-### Resolution Helpers
-
-| Function | Purpose |
-|----------|---------|
-| `resolveLocalPluginPath(entry, configDir)` | Resolves a local path entry relative to the config directory. |
-| `resolveNpmPluginRoot(entry)` | Resolves an npm package entry to its root directory via `createRequire()`. |
-
-### Audit Events
-
-Each plugin load attempt is audited:
-
-```typescript
-interface PluginAuditEvent {
-  readonly action: "plugin.load" | "plugin.unload";
-  readonly resource: string;       // entry.id ?? entry.path ?? entry.package ?? "unknown"
-  readonly outcome: "success" | "failure";
-  readonly detail?: string;        // Error message on failure
-}
-```
-
-Loading failures are caught and audited — they do **not** abort the loading of subsequent plugins.
-
-Successfully loaded plugins are returned as `LoadedPluginRef[]`:
-
-```typescript
-interface LoadedPluginRef {
-  readonly resource: string;
-  readonly manifestName: string;
-}
-```
-
----
-
-## Hook Registry
-
-The `HookRegistry` is the central dispatch mechanism for plugin hooks.
-
-```typescript
-type HookName = "daemon.startup" | "daemon.shutdown";
-type HookHandler = (ctx?: unknown) => void | Promise<void>;
-```
-
-### API
-
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `register` | `register(name: HookName, handler: HookHandler)` | Append a handler for the given hook. Multiple handlers per hook are supported. |
-| `run` | `run(name: HookName, ctx?: unknown)` | Execute all handlers for a hook **sequentially** in registration order, awaiting each. An optional context object is passed to every handler. |
-| `clear` | `clear(name: HookName)` | Remove all handlers for a specific hook (e.g. during plugin unload). |
-| `reset` | `reset()` | Remove all handlers for all hooks. |
-
-### Execution Model
-
-- Handlers are executed in FIFO order (the order they were registered).
-- Each handler is `await`ed before the next runs — there is no parallel execution.
-- An optional context object passed to `run()` is forwarded to every handler.
-
----
-
-## Package Exports
-
-The public API exported from `@shoggoth/plugins`:
-
-```typescript
-// Plugin loading (config-driven)
-loadAllPluginsFromConfig, resolveLocalPluginPath, resolveNpmPluginRoot
-type LoadedPluginRef, PluginAuditEvent, PluginAuditOutcome
-
-// Hook system
-HookRegistry
-type HookHandler, HookName
-
-// Single-plugin loader
-loadPluginFromDirectory
-type LoadedPluginMeta
-
-// Plugin manifest
-parseShoggothPluginManifest, shoggothPluginManifestSchema
-type ShoggothPluginManifest
-```
-
----
-
-## Quick-Start Examples
-
-### Writing a Plugin
-
-1. Create a directory with a `shoggoth.json`:
-
-```json
-{
-  "name": "my-startup-plugin",
-  "version": "0.1.0",
-  "hooks": {
-    "daemon.startup": "./on-startup.js"
-  }
-}
-```
-
-2. Create the hook handler file (`on-startup.js`):
-
-```javascript
-export default async function onStartup(ctx) {
-  console.log("Shoggoth daemon is starting up!");
-}
-```
-
-### Referencing in Config
-
-Reference a local plugin by path:
+By local path (resolved relative to config directory):
 
 ```json
 {
   "plugins": [
-    { "path": "./plugins/my-startup-plugin" }
+    { "path": "./plugins/shoggoth-plugin-example" }
   ]
 }
 ```
 
-Or reference an npm-published plugin by package name:
+By npm package name:
 
 ```json
 {
@@ -217,39 +86,171 @@ Or reference an npm-published plugin by package name:
 }
 ```
 
-### Multi-Hook Plugin
+---
 
-A plugin can register handlers for multiple lifecycle hooks:
+## Hook Catalog
 
+### Daemon Lifecycle
+
+| Hook | Type | Context | Description |
+|---|---|---|---|
+| `daemon.configure` | `SyncWaterfallHook` | `DaemonConfigureCtx` | After config load, before subsystems start. Plugins can inspect/transform config. |
+| `daemon.startup` | `AsyncHook` | `DaemonStartupCtx` | After DB and core subsystems init. Plugins perform async setup. |
+| `daemon.ready` | `AsyncHook` | `DaemonReadyCtx` | All plugins started, platforms connected. System is live. |
+| `daemon.shutdown` | `AsyncHook` | `DaemonShutdownCtx` | Graceful shutdown. Plugins release resources. |
+
+### Platform Lifecycle
+
+| Hook | Type | Context | Description |
+|---|---|---|---|
+| `platform.register` | `SyncHook` | `PlatformRegisterCtx` | Platforms register URN policy, capabilities, and runtime. |
+| `platform.start` | `AsyncHook` | `PlatformStartCtx` | Platforms connect to external services (gateway, API, webhook). |
+| `platform.stop` | `AsyncHook` | `PlatformStopCtx` | Platforms disconnect gracefully. |
+
+### Messaging
+
+| Hook | Type | Context | Description |
+|---|---|---|---|
+| `message.inbound` | `AsyncHook` | `MessageInboundCtx` | Normalized inbound message ready for dispatch. |
+| `message.outbound` | `AsyncWaterfallHook` | `MessageOutboundCtx` | Outbound message about to be delivered. Plugins can transform content. |
+| `message.reaction` | `AsyncHook` | `MessageReactionCtx` | Reaction event received from a platform. |
+
+### Session
+
+| Hook | Type | Context | Description |
+|---|---|---|---|
+| `session.turn.before` | `AsyncHook` | `SessionTurnBeforeCtx` | Before a model turn executes. |
+| `session.turn.after` | `AsyncHook` | `SessionTurnAfterCtx` | After a model turn completes (success or failure). |
+| `session.segment.change` | `SyncHook` | `SessionSegmentChangeCtx` | Session context segment changes (new/reset). |
+
+### Health
+
+| Hook | Type | Context | Description |
+|---|---|---|---|
+| `health.register` | `SyncHook` | `HealthRegisterCtx` | Plugins register health probes during startup. |
+
+### Hook Types Explained
+
+- `SyncHook` — synchronous, fire-and-forget. Handlers run in order, no return value.
+- `AsyncHook` — async sequential. Each handler is awaited before the next runs.
+- `SyncWaterfallHook` — synchronous pipeline. Each handler receives the context and returns a (possibly modified) version for the next handler.
+- `AsyncWaterfallHook` — async pipeline. Same as waterfall but handlers can be async.
+
+---
+
+## Platform Plugin Guide
+
+To add a new messaging platform (e.g. Slack, Telegram), create a plugin with `kind: "messaging-platform"` and implement the four required hooks.
+
+### Required Hooks
+
+| Hook | Purpose |
+|---|---|
+| `platform.register` | Register URN policy and platform capabilities |
+| `platform.start` | Connect to the external service, wire message handlers |
+| `platform.stop` | Disconnect and clean up resources |
+| `health.register` | Register a health probe for the platform |
+
+### Example
+
+```ts
+import { defineMessagingPlatformPlugin } from "@shoggoth/plugins";
+
+export default function createSlackPlugin() {
+  let client: SlackClient | undefined;
+
+  return defineMessagingPlatformPlugin({
+    name: "platform-slack",
+    version: "0.1.0",
+    hooks: {
+      "platform.register"(ctx) {
+        ctx.registerPlatform({
+          id: "slack",
+          urnPattern: /^slack:/,
+          // ... capabilities
+        });
+      },
+
+      async "platform.start"(ctx) {
+        client = new SlackClient(ctx.env.SLACK_TOKEN);
+        await client.connect();
+        ctx.registerDrain("slack-disconnect", () => client?.disconnect());
+      },
+
+      async "platform.stop"(ctx) {
+        await client?.disconnect();
+        client = undefined;
+      },
+
+      "health.register"(ctx) {
+        ctx.registerProbe({
+          name: "slack",
+          check: async () => ({
+            status: client?.connected ? "pass" : "fail",
+          }),
+        });
+      },
+    },
+  });
+}
+```
+
+**package.json:**
 ```json
 {
-  "name": "lifecycle-logger",
-  "version": "1.0.0",
-  "hooks": {
-    "daemon.startup": "./hooks/startup.js",
-    "daemon.shutdown": "./hooks/shutdown.js"
+  "name": "@shoggoth/platform-slack",
+  "version": "0.1.0",
+  "shoggothPlugin": {
+    "kind": "messaging-platform",
+    "entrypoint": "./src/plugin.ts"
   }
 }
 ```
 
-```javascript
-// hooks/startup.js
-export default async function onStartup(ctx) {
-  console.log("[lifecycle-logger] daemon started");
-}
+`defineMessagingPlatformPlugin` validates that all four required hooks are present at registration time and throws if any are missing.
+
+### `PlatformStartCtx` Dependencies
+
+The `platform.start` context provides shared daemon dependencies via `ctx.deps`:
+
+| Dependency | Type | Description |
+|---|---|---|
+| `hitlStack` | `HitlPendingStack` | Shared HITL pending stack |
+| `policyEngine` | `PolicyEngine` | Policy engine access |
+| `hitlConfigRef` | `HitlConfigRef` | HITL configuration reference |
+| `hitlAutoApproveGate` | `HitlAutoApproveGate?` | Optional HITL auto-approve gate |
+
+Additional setters on the context: `setSubagentRuntimeExtension`, `setMessageToolContext`, `setPlatformAdapter`.
+
+---
+
+## Error Handling
+
+The `ShoggothPluginSystem` provides centralized error handling via `listenError`:
+
+```ts
+system.listenError((event) => {
+  logger.error("Plugin hook error", {
+    hookName: event.name,
+    hookType: event.type,
+    pluginTag: event.tag,
+    error: String(event.error),
+  });
+});
 ```
 
-```javascript
-// hooks/shutdown.js
-export default async function onShutdown(ctx) {
-  console.log("[lifecycle-logger] daemon shutting down");
-}
-```
+Error behavior by hook:
+
+| Hook Phase | Behavior |
+|---|---|
+| `platform.start` | Fatal for that platform, daemon continues without it |
+| `daemon.startup` | Non-fatal — logged and audited |
+| `daemon.shutdown` / `platform.stop` | Logged, does not block shutdown |
 
 ---
 
 ## See Also
 
-- [Daemon](daemon.md) — loads plugins at startup and runs hook handlers
-- [Skills](skills.md) — skill discovery and search (previously co-located with plugins)
+- [Daemon](daemon.md) — boot sequence and plugin loading
+- [Discord Platform](platform-discord.md) — reference platform plugin implementation
 - [Shared](shared.md) — `ShoggothPluginEntry` config schema
