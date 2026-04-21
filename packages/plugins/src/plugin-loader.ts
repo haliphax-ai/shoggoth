@@ -26,7 +26,7 @@ const legacyManifestSchema = z
 
 /**
  * Load a plugin from a directory. Supports two formats:
- * 1. New: package.json with `shoggothPlugin` property bag + factory entrypoint
+ * 1. package.json with `shoggothPlugin` property bag + factory entrypoint
  * 2. Legacy: shoggoth.json with name/version/hooks mapping to individual handler files
  */
 export async function loadPluginFromDirectory(
@@ -36,12 +36,12 @@ export async function loadPluginFromDirectory(
   const pkgPath = join(rootDir, "package.json");
   const legacyPath = join(rootDir, "shoggoth.json");
 
-  // Try new format first (package.json with shoggothPlugin bag)
+  // Try package.json with shoggothPlugin bag first
   if (existsSync(pkgPath)) {
     const raw = readFileSync(pkgPath, "utf8");
     const packageJson = JSON.parse(raw) as Record<string, unknown>;
     if (packageJson.shoggothPlugin) {
-      return loadNewFormat(rootDir, packageJson, system);
+      return loadPackageJsonPlugin(rootDir, packageJson, system);
     }
   }
 
@@ -55,7 +55,7 @@ export async function loadPluginFromDirectory(
   );
 }
 
-async function loadNewFormat(
+async function loadPackageJsonPlugin(
   rootDir: string,
   packageJson: Record<string, unknown>,
   system: ShoggothPluginSystem,

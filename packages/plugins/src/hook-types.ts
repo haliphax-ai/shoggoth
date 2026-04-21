@@ -1,6 +1,6 @@
 // -------------------------------------------------------------------------------
 // Hook Context Types for the Shoggoth Plugin System
-// See: plans/2026-04-20_hooks-plugin-overhaul/spec.md §1
+
 // -------------------------------------------------------------------------------
 
 /** Placeholder for better-sqlite3 Database */
@@ -27,8 +27,6 @@ type SubagentRuntimeExtension = any;
 type MessageToolContext = any;
 /** Placeholder for PlatformAdapter */
 type PlatformAdapter = any;
-/** Placeholder for HitlDiscordNoticeRegistry */
-type HitlDiscordNoticeRegistry = any;
 /** Placeholder for Logger */
 type Logger = any;
 /** Placeholder for PlatformAssistantDeps */
@@ -82,8 +80,6 @@ export interface PlatformDeps {
   readonly hitlConfigRef: HitlConfigRef;
   /** HITL auto-approve gate - created by daemon */
   readonly hitlAutoApproveGate?: HitlAutoApproveGate;
-  /** HITL notice registry - created by daemon */
-  readonly hitlNoticeRegistry?: HitlDiscordNoticeRegistry;
   /** Logger for platform operations */
   readonly logger: Logger;
   /** Default platform assistant dependencies */

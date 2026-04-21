@@ -234,10 +234,8 @@ void (async () => {
     });
   }
 
-  let hitlDiscordNoticeRegistry: any;
   let hitlAutoApproveGate: HitlAutoApproveGate | undefined;
   if (hitlStack && stateDb) {
-    // Note: hitlNoticeRegistry is now created in the plugin via PlatformDeps
     hitlAutoApproveGate = createPersistingHitlAutoApproveGate({
       db: stateDb,
       configDirectory: configRef.current.configDirectory,
@@ -302,6 +300,31 @@ void (async () => {
     });
   }
 
+  // --- Process Manager: init singleton early so MCP stdio spawns go through procman ---
+  const procman = initProcessManager();
+  setProcessManager(procman);
+
+  // --- Turn Queue: init singleton early (needed during hook-triggered turns) ---
+  const starvationThreshold = config.runtime?.turnQueue?.starvationThreshold ?? 2;
+  const maxQueueDepth = config.runtime?.turnQueue?.maxDepth ?? 6;
+  setTurnQueue(new TieredTurnQueue(starvationThreshold, maxQueueDepth));
+
+  // --- Model Resilience Gate: init singleton early ---
+  {
+    const rc = config.runtime?.modelResilience;
+    const gate = new ModelResilienceGate(
+      {
+        maxRetries: rc?.maxRetries,
+        baseDelayMs: rc?.baseDelayMs,
+        maxDelayMs: rc?.maxDelayMs,
+        jitterMs: rc?.jitterMs,
+        defaultConcurrency: rc?.defaultConcurrency,
+      },
+      rc?.providers,
+    );
+    setResilienceGate(gate);
+  }
+
   // Create plugin system and register Discord plugin
   const pluginSystem = new ShoggothPluginSystem();
   const discordPlugin = createDiscordPlugin();
@@ -315,7 +338,6 @@ void (async () => {
     policyEngine,
     hitlConfigRef: hitlRef,
     hitlAutoApproveGate,
-    hitlNoticeRegistry: hitlDiscordNoticeRegistry,
     logger: getLogger("messaging"),
     platformAssistantDeps: defaultPlatformAssistantDeps,
     abortSession: async (sessionId) => requestSessionTurnAbort(sessionId ?? ""),
@@ -376,15 +398,7 @@ void (async () => {
     getBotToken: resolvedDiscordBotToken,
   };
 
-  // Build message tool context - will be passed to plugin
-  // Note: The actual context is built by the plugin after platform.start
-  // This is a placeholder that gets updated after the platform starts
-  const initialMessageToolContext = {
-    slice: { attachments: false, messageEdit: false, messageDelete: false, threadCreate: false, threadDelete: false, replies: false, messageGet: false, react: false, reactions: false, search: false, attachmentDownload: false },
-    execute: async () => { throw new Error("message tool not ready"); },
-  };
-
-  // Fire daemon hooks - this triggers platform.start which runs the Discord plugin
+  // Fire daemon hooks — the Discord plugin builds the real message tool context internally - this triggers platform.start which runs the Discord plugin
   await fireDaemonHooks(pluginSystem, {
     config,
     db,
@@ -399,7 +413,7 @@ void (async () => {
     setSubagentRuntimeExtension,
     setMessageToolContext: (ctx) => { messageToolContextRef.current = ctx; },
     setPlatformAdapter: (adapter) => { platformAdapterRef.current = adapter; },
-    messageToolContext: initialMessageToolContext,
+    messageToolContext: undefined,
   });
 
   // After hooks fire, the plugin has set up everything
@@ -441,30 +455,9 @@ void (async () => {
   rt.shutdown.registerDrain("timer-scheduler", () => {
     timerScheduler.shutdown();
   });
-  // --- Process Manager: init singleton, start boot-time processes, register shutdown ---
-  const procman = initProcessManager();
-  setProcessManager(procman);
+  // --- Process Manager: start boot-time processes, register shutdown ---
 
-  // --- Turn Queue: init singleton ---
-  const starvationThreshold = config.runtime?.turnQueue?.starvationThreshold ?? 2;
-  const maxQueueDepth = config.runtime?.turnQueue?.maxDepth ?? 6;
-  setTurnQueue(new TieredTurnQueue(starvationThreshold, maxQueueDepth));
-
-  // --- Model Resilience Gate: init singleton ---
-  {
-    const rc = config.runtime?.modelResilience;
-    const gate = new ModelResilienceGate(
-      {
-        maxRetries: rc?.maxRetries,
-        baseDelayMs: rc?.baseDelayMs,
-        maxDelayMs: rc?.maxDelayMs,
-        jitterMs: rc?.jitterMs,
-        defaultConcurrency: rc?.defaultConcurrency,
-      },
-      rc?.providers,
-    );
-    setResilienceGate(gate);
-  }
+  // (TurnQueue and ModelResilienceGate initialized earlier, before fireDaemonHooks)
 
   function processDeclarationToSpec(decl: ProcessDeclaration): ProcessSpec {
     return {

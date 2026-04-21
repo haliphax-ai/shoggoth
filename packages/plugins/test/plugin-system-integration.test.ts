@@ -5,7 +5,7 @@ import { describe, test, expect } from "vitest";
 import { ShoggothPluginSystem } from "../src/plugin-system";
 import { loadPluginFromDirectory } from "../src/plugin-loader";
 
-describe("loadPluginFromDirectory (new plugin system)", () => {
+describe("loadPluginFromDirectory", () => {
   test("loads a plugin from package.json with shoggothPlugin bag and fires hook", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-plug-new-"));
 

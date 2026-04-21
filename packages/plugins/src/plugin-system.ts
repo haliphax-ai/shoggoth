@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // ShoggothPluginSystem — wraps hooks-plugin's PluginSystem with typed hooks
-// See: plans/2026-04-20_hooks-plugin-overhaul/spec.md §2
+
 // ---------------------------------------------------------------------------
 
 import {

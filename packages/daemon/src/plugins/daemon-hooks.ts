@@ -1,6 +1,6 @@
 // -------------------------------------------------------------------------------
 // daemon-hooks.ts — Orchestrates hook firing in the correct boot sequence
-// See: plans/2026-04-20_hooks-plugin-overhaul/spec.md §7
+
 // -------------------------------------------------------------------------------
 
 import type { ShoggothPluginSystem, PlatformDeps } from "@shoggoth/plugins";

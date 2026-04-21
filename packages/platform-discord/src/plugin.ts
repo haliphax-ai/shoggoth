@@ -1,6 +1,6 @@
 // -------------------------------------------------------------------------------
 // Discord Platform Plugin — implements MessagingPlatformPlugin
-// See: plans/2026-04-20_hooks-plugin-overhaul/spec.md §6
+
 // -------------------------------------------------------------------------------
 
 import {
@@ -13,7 +13,7 @@ import { discordPlatformRegistration } from "./platform-registration";
 import { createDiscordProbe } from "./probe";
 import type { DiscordMessagingRuntime } from "./bootstrap";
 import type { DiscordReactionAddEvent } from "./hitl/reaction-handler";
-import type { HitlDiscordNoticeRegistry } from "./hitl/notice-registry";
+import { createHitlDiscordNoticeRegistry, type HitlDiscordNoticeRegistry } from "./hitl/notice-registry";
 import type { DiscordPlatformHandle } from "./platform";
 import {
   startDaemonDiscordMessaging,
@@ -59,7 +59,8 @@ export function createDiscordPlugin(): MessagingPlatformPlugin {
         // Get dependencies from context
         const hitlStack = platformDeps.hitlStack;
         const hitlAutoApproveGate = platformDeps.hitlAutoApproveGate;
-        const hitlDiscordNoticeRegistry = platformDeps.hitlNoticeRegistry;
+        // Plugin owns its own notice registry — no dependency on the daemon for this
+        const hitlDiscordNoticeRegistry = hitlStack ? createHitlDiscordNoticeRegistry() : undefined;
         const logger = platformDeps.logger;
         const platformAssistantDeps = platformDeps.platformAssistantDeps;
         const abortSession = platformDeps.abortSession;

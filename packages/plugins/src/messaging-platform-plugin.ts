@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // MessagingPlatformPlugin — interface + validation helper
-// See: plans/2026-04-20_hooks-plugin-overhaul/spec.md §3
+
 // ---------------------------------------------------------------------------
 
 import type { Plugin } from "hooks-plugin";

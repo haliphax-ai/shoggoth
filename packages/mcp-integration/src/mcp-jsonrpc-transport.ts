@@ -306,7 +306,7 @@ export async function connectMcpStdioSession(opts: McpStdioConnectOptions): Prom
 async function connectMcpStdioSessionDirect(opts: McpStdioConnectOptions): Promise<McpJsonRpcSession> {
   const proc = spawn(opts.command, opts.args ? [...opts.args] : [], {
     cwd: opts.cwd,
-    env: opts.env,
+    env: opts.env ? { ...process.env, ...opts.env } : undefined,
     stdio: ["pipe", "pipe", "ignore"],
   });
   const out = proc.stdout;
