@@ -19,43 +19,57 @@ interface BootstrapMainSessionOptions {
 }
 
 /**
- * Ensures the main agent's workspace and primary session row exist.
+ * Ensures every configured agent's workspace and primary session row exist.
  *
- * Session id is pulled from the agent's first configured platform route
- * (`agents.list.<agentId>.platforms.<platform>.routes[0].sessionId`),
- * falling back to `resolveBootstrapPrimarySessionUrn`.
+ * Iterates `config.agents.list` — for each agent:
+ * 1. Creates workspace directory + subdirs (memory, tmp, skills, template files)
+ * 2. Resolves session id from the agent's first platform route
+ * 3. Inserts the session row if missing
  *
- * - New DB (no prior sessions): bootstraps cleanly without warnings.
- * - Existing DB without a matching session: logs a warning, then hydrates.
+ * Backward-compatible: if no agents are configured, falls back to bootstrapping
+ * a single "main" agent using `config.runtime?.agentId`.
  */
 export function bootstrapMainSession(opts: BootstrapMainSessionOptions): void {
   const log = getLogger("bootstrap");
   const { db, config } = opts;
 
-  const agentId = config.runtime?.agentId?.trim() || "main";
+  const agentsList = config.agents?.list;
+  if (agentsList && Object.keys(agentsList).length > 0) {
+    for (const [agentId, agentEntry] of Object.entries(agentsList)) {
+      bootstrapAgent(db, config, agentId, agentEntry, log);
+    }
+  } else {
+    // Fallback: single agent from runtime config
+    const agentId = config.runtime?.agentId?.trim() || "main";
+    const agentEntry = config.agents?.list?.[agentId];
+    bootstrapAgent(db, config, agentId, agentEntry, log);
+  }
+}
 
-  // Always derive platform from the agent's platform bindings.
-  const agentEntry = config.agents?.list?.[agentId];
-  const platformKeys = agentEntry?.platforms ? Object.keys(agentEntry.platforms) : [];
+function bootstrapAgent(
+  db: Database.Database,
+  config: ShoggothConfig,
+  agentId: string,
+  agentEntry: Record<string, unknown> | undefined,
+  log: ReturnType<typeof getLogger>,
+): void {
+  const platformKeys = agentEntry?.platforms
+    ? Object.keys(agentEntry.platforms as Record<string, unknown>)
+    : [];
+
   if (platformKeys.length === 0) {
-    throw new Error(
-      `No platform bindings configured for agent "${agentId}". ` +
-      `Add at least one platform under agents.list.${agentId}.platforms.`,
-    );
-  }
-  const platform = platformKeys[0];
-  if (platformKeys.length > 1) {
-    log.info("bootstrap.main_session.platform_inferred", {
+    log.warn("bootstrap.agent.no_platforms", {
       agentId,
-      platform,
-      available: platformKeys,
-      detail: `Inferred default platform "${platform}" from agent bindings (${platformKeys.length} available).`,
+      detail: `No platform bindings for agent "${agentId}"; skipping session bootstrap.`,
     });
+    return;
   }
+
+  const platform = platformKeys[0];
   const wsRoot = config.workspacesRoot;
   const dir = resolveAgentWorkspacePath(wsRoot, agentId);
 
-  // Resolve session id from the agent's first platform route.
+  // Resolve session id from the agent's first platform route
   const agentPlatform = agentEntry
     ? resolveAgentPlatformConfig(agentEntry, platform)
     : undefined;
@@ -64,40 +78,36 @@ export function bootstrapMainSession(opts: BootstrapMainSessionOptions): void {
     firstRoute?.sessionId?.trim() ||
     resolveBootstrapPrimarySessionUrn(agentId, platform);
 
+  // Create workspace layout (dirs + template files)
   ensureAgentWorkspaceLayout(dir);
-  mkdirSync(join(dir, "memory"), { recursive: true, mode: 0o770 });
 
   const store = createSessionStore(db);
   const existing = store.getById(id);
 
   if (existing) {
-    log.debug("bootstrap.main_session.exists", { sessionId: id, agentId });
+    log.debug("bootstrap.agent.session_exists", { sessionId: id, agentId });
     return;
   }
 
-  // Check if the DB already has sessions (i.e. not a fresh DB).
-  const count = (
-    db.prepare("SELECT COUNT(*) AS n FROM sessions").get() as { n: number }
-  ).n;
-
-  if (count > 0) {
-    log.warn("bootstrap.main_session.missing", {
-      sessionId: id,
-      agentId,
-      existingSessions: count,
-      detail:
-        `Session ${id} not found in existing database (${count} other session(s)). Hydrating anyway.`,
-    });
+  // Resolve agent UID/GID for the session row
+  let runtimeUid: number;
+  let runtimeGid: number;
+  try {
+    runtimeUid = Number(execSync("id -u agent", { encoding: "utf8" }).trim());
+    runtimeGid = Number(execSync("id -g agent", { encoding: "utf8" }).trim());
+  } catch {
+    runtimeUid = 900;
+    runtimeGid = 900;
   }
 
   store.create({
     id,
     workspacePath: dir,
     status: "active",
-    runtimeUid: Number(execSync("id -u agent", { encoding: "utf8" }).trim()),
-    runtimeGid: Number(execSync("id -g agent", { encoding: "utf8" }).trim()),
+    runtimeUid,
+    runtimeGid,
   });
 
   pushSystemContext(id, "Fresh session. No prior conversation history.");
-  log.info("bootstrap.main_session.created", { sessionId: id, agentId, workspacePath: dir });
+  log.info("bootstrap.agent.session_created", { sessionId: id, agentId, workspacePath: dir });
 }

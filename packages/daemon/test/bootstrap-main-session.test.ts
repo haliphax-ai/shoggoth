@@ -104,7 +104,7 @@ describe("bootstrapMainSession", () => {
       assert.ok(session, "session should exist");
       assert.equal(session!.id, "agent:main:discord:channel:1234567890123456789");
 
-      const created = stub.logs.find((l) => l.msg === "bootstrap.main_session.created");
+      const created = stub.logs.find((l) => l.msg === "bootstrap.agent.session_created");
       assert.ok(created, "should log session creation");
 
       db.close();
@@ -127,10 +127,10 @@ describe("bootstrapMainSession", () => {
       setRootLogger(stub.logger as any);
       bootstrapMainSession({ db, config: makeConfig() });
 
-      const exists = stub.logs.find((l) => l.msg === "bootstrap.main_session.exists");
+      const exists = stub.logs.find((l) => l.msg === "bootstrap.agent.session_exists");
       assert.ok(exists, "should log session exists");
       assert.ok(
-        !stub.logs.find((l) => l.msg === "bootstrap.main_session.created"),
+        !stub.logs.find((l) => l.msg === "bootstrap.agent.session_created"),
         "should not log creation",
       );
 
@@ -160,10 +160,7 @@ describe("bootstrapMainSession", () => {
       setRootLogger(stub.logger as any);
       bootstrapMainSession({ db, config: makeConfig() });
 
-      const warn = stub.logs.find((l) => l.msg === "bootstrap.main_session.missing");
-      assert.ok(warn, "should warn about missing session in existing DB");
-      assert.equal(warn!.level, "warn");
-
+      // Session should still be created even if others exist
       const session = store.getById("agent:main:discord:channel:1234567890123456789");
       assert.ok(session, "should still create the session");
 
@@ -194,7 +191,7 @@ describe("bootstrapMainSession", () => {
     }
   });
 
-  it("throws when agent has no platform bindings", () => {
+  it("warns and skips when agent has no platform bindings", () => {
     setup();
     try {
       const db = new Database(":memory:");
@@ -206,10 +203,68 @@ describe("bootstrapMainSession", () => {
         runtime: undefined,
       });
 
-      assert.throws(
-        () => bootstrapMainSession({ db, config: cfg, logger: stub.logger as any }),
-        /No platform bindings configured for agent "main"/,
-      );
+      setRootLogger(stub.logger as any);
+      bootstrapMainSession({ db, config: cfg });
+
+      const warn = stub.logs.find((l) => l.msg === "bootstrap.agent.no_platforms");
+      assert.ok(warn, "should warn about missing platform bindings");
+      assert.equal(warn!.level, "warn");
+
+      db.close();
+    } finally {
+      teardown();
+    }
+  });
+
+  it("bootstraps multiple agents from config", () => {
+    setup();
+    try {
+      const db = new Database(":memory:");
+      migrate(db, defaultMigrationsDir());
+      const stub = stubLogger();
+
+      const cfg = makeConfig({
+        agents: {
+          list: {
+            main: {
+              platforms: {
+                discord: {
+                  routes: [
+                    {
+                      channelId: "1111111111111111111",
+                      sessionId: "agent:main:discord:channel:1111111111111111111",
+                      guildId: "9876543210987654321",
+                    },
+                  ],
+                },
+              },
+            },
+            developer: {
+              platforms: {
+                discord: {
+                  routes: [
+                    {
+                      channelId: "2222222222222222222",
+                      sessionId: "agent:developer:discord:channel:2222222222222222222",
+                      guildId: "9876543210987654321",
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      });
+
+      setRootLogger(stub.logger as any);
+      bootstrapMainSession({ db, config: cfg });
+
+      const store = createSessionStore(db);
+      assert.ok(store.getById("agent:main:discord:channel:1111111111111111111"), "main session should exist");
+      assert.ok(store.getById("agent:developer:discord:channel:2222222222222222222"), "developer session should exist");
+
+      const created = stub.logs.filter((l) => l.msg === "bootstrap.agent.session_created");
+      assert.equal(created.length, 2, "should create both sessions");
 
       db.close();
     } finally {

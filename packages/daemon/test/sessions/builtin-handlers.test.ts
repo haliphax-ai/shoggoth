@@ -96,7 +96,7 @@ describe("config.request handler", () => {
     });
     const result = await reg.execute("config-request", { fragment: "agents" }, ctx);
     assert.deepStrictEqual(JSON.parse(result.resultJson), { ok: true });
-    assert.deepStrictEqual(capturedPayload, { fragment: "agents" });
+    assert.deepStrictEqual(capturedPayload, { key: undefined, fragment: "agents", mode: undefined });
   });
 });
 

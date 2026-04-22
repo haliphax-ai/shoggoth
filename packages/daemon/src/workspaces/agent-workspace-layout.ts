@@ -27,6 +27,7 @@ export function ensureAgentWorkspaceLayout(
   mkdirSync(root, { recursive: true, mode: dmode });
   mkdirSync(join(root, "skills"), { recursive: true, mode: dmode });
   mkdirSync(join(root, "memory"), { recursive: true, mode: dmode });
+  mkdirSync(join(root, "tmp"), { recursive: true, mode: dmode });
 
   const srcDir = opts?.templateDir ?? resolveAgentTemplateDir();
   if (!existsSync(srcDir)) {
