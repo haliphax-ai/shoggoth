@@ -55,7 +55,8 @@ export function handleElevate(
       stdio: ["pipe", "pipe", "pipe"],
     });
     return { resultJson: JSON.stringify({ exitCode: 0, output }) };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any\n  } catch (e: any) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } catch (e: any) {
     const exitCode = e.status ?? 1;
     const output = (e.stdout ?? "") + (e.stderr ?? "");
     return {

@@ -2,7 +2,8 @@
 // session-query, subagent, session-list, session-send handlers
 // ---------------------------------------------------------------------------
 
-import {\n  resolveAgentIdFromSessionId,
+import {
+  resolveAgentIdFromSessionId,
   resolveEffectiveSessionQueryAllowedAgentIds,
 } from "@shoggoth/shared";
 import { IntegrationOpError } from "../../control/integration-ops";

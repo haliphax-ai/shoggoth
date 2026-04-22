@@ -76,7 +76,9 @@ import {
 import { dispatchMcpHttpCancelRequest } from "../mcp/mcp-http-cancel-registry";
 import { SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS } from "../subagent/subagent-constants";
 import { requestSessionTurnAbort } from "../sessions/session-turn-abort";
-import {\n  rememberSubagentHandles,\n} from "../subagent/subagent-disposables";
+import {
+  rememberSubagentHandles,
+} from "../subagent/subagent-disposables";
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
 import { terminatePersistentSubagentSession } from "../subagent/subagent-kill";
 import { extractLatestTranscriptAssistantText } from "../sessions/transcript-to-chat";

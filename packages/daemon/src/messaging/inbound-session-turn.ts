@@ -1,7 +1,8 @@
 import type { SessionToolLoopFailoverState } from "../sessions/session-tool-loop-model-client";
 import {
   executeSessionAgentTurn,
-  type ExecuteSessionAgentTurnInput,\n} from "../sessions/session-agent-turn";
+  type ExecuteSessionAgentTurnInput,
+} from "../sessions/session-agent-turn";
 import type { OutboundAttachment } from "../presentation/platform-adapter";
 import { getLogger } from "../logging";
 
