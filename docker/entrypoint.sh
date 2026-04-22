@@ -34,6 +34,8 @@ fix_dir /var/lib/shoggoth/operator 0700 shoggoth shoggoth
 fix_dir /var/lib/shoggoth/skills 0755 shoggoth shoggoth
 fix_dir /var/lib/shoggoth/media/inbound 0750 shoggoth shoggoth
 fix_dir /run/shoggoth 0750 shoggoth shoggoth
+chown -R agent:agent /var/lib/shoggoth/workspaces/*/.ssh || true
+chmod 600 /var/lib/shoggoth/workspaces/*/.ssh/id_* || true
 # Add agent ACL layer to workspaces
 setfacl -R -m u:agent:rwX /var/lib/shoggoth/workspaces
 
