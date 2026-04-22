@@ -1,6 +1,11 @@
 import { describe, it, vi } from "vitest";
 
 
+vi.mock("../src/workspaces/agent-workspace-layout", () => ({
+  ensureAgentWorkspaceLayout: async () => {},
+  resolveAgentTemplateDir: () => "/tmp/templates",
+}));
+
 vi.mock("node:child_process", async () => {
   const actual =
     await vi.importActual<typeof import("node:child_process")>(
