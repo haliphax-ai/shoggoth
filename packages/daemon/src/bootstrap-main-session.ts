@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
-import { execSync } from "node:child_process";\nimport type { ShoggothConfig } from "@shoggoth/shared";
+import { execSync } from "node:child_process";
+import type { ShoggothConfig } from "@shoggoth/shared";
 import {
   resolveAgentPlatformConfig,
   resolveAgentWorkspacePath,

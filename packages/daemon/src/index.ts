@@ -83,7 +83,9 @@ import {
   stopAllPlatforms,
 } from "./platforms/platform-registry";
 import { reconcilePersistentSubagents } from "./subagent/reconcile-persistent-subagents";
-import {\n  messageToolContextRef,\n} from "./messaging/message-tool-context-ref";
+import {
+  messageToolContextRef,
+} from "./messaging/message-tool-context-ref";
 import {
   setSubagentRuntimeExtension,
   subagentRuntimeExtensionRef,
@@ -121,7 +123,8 @@ import {
   createDaemonPollAdapter,
   createDaemonKillAdapter,
   createDaemonMessageAdapter,
-  createDaemonMessagePoster,\n} from "./workflow-adapters";
+  createDaemonMessagePoster,
+} from "./workflow-adapters";
 import { createSessionManager } from "./sessions/session-manager";
 import { createSqliteAgentTokenStore } from "./auth/sqlite-agent-tokens";
 import { resolveShoggothAgentId } from "./config/effective-runtime";
