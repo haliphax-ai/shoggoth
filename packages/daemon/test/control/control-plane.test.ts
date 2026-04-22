@@ -1,3 +1,10 @@
+import { vi } from "vitest";
+
+vi.mock("../../src/workspaces/agent-workspace-layout", () => ({
+  ensureAgentWorkspaceLayout: async () => {},
+  resolveAgentTemplateDir: () => "/tmp/templates",
+}));
+
 import { parseResponseLine, WIRE_VERSION } from "@shoggoth/authn";
 import assert from "node:assert";
 import { randomUUID } from "node:crypto";

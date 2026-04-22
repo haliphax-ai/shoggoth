@@ -8,7 +8,12 @@
  * 4. Inherit from parent (default)
  */
 
-import { describe, it, beforeAll, afterAll } from "vitest";
+import { describe, it, beforeAll, afterAll, vi } from "vitest";
+
+vi.mock("../../src/workspaces/agent-workspace-layout", () => ({
+  ensureAgentWorkspaceLayout: async () => {},
+  resolveAgentTemplateDir: () => "/tmp/templates",
+}));
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 import { mkdtemp } from "node:fs/promises";

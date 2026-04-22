@@ -10,7 +10,13 @@ import {
   it,
   beforeAll,
   afterAll,
+  vi,
 } from "vitest";
+
+vi.mock("../src/workspaces/agent-workspace-layout", () => ({
+  ensureAgentWorkspaceLayout: async () => {},
+  resolveAgentTemplateDir: () => "/tmp/templates",
+}));
 import assert from "node:assert/strict";
 
 let prevOperatorToken: string | undefined;
