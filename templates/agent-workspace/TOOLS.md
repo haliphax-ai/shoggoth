@@ -18,4 +18,4 @@ Before using `builtin-exec`, which is a very risky tool, use these instead:
 | builtin-timer | sleep |
 | builtin-write | any command chain that writes to a file, e.g. `echo "x" > y.txt` |
 
-For documentation and specific tool examples, see `/app/docs/<tool name>.md`.
+For documentation and specific tool examples, see `/app/docs/tools/<tool name>.md`.
