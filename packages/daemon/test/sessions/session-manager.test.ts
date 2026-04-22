@@ -13,7 +13,7 @@ import { createSessionStore } from "../../src/sessions/session-store";
 import { createSessionManager } from "../../src/sessions/session-manager";
 
 describe("createSessionManager", () => {
-  it("spawn resolves platform from agentsConfig when no explicit platform given", () => {
+  it("spawn resolves platform from agentsConfig when no explicit platform given", async () => {
     const db = new Database(":memory:");
     migrate(db, defaultMigrationsDir());
     const sessions = createSessionStore(db);
@@ -37,7 +37,7 @@ describe("createSessionManager", () => {
       agentsConfig,
       mintToken: () => "fixed-test-token",
     });
-    const out = mgr.spawn({});
+    const out = await mgr.spawn({});
     assert.equal(out.agentTokenEnvName, SHOGGOTH_AGENT_TOKEN_ENV);
     assert.equal(out.agentToken, "fixed-test-token");
     assert.ok(parseAgentSessionUrn(out.sessionId));
@@ -57,7 +57,7 @@ describe("createSessionManager", () => {
     );
   });
 
-  it("spawn with explicit platform uses it instead of agentsConfig", () => {
+  it("spawn with explicit platform uses it instead of agentsConfig", async () => {
     const db = new Database(":memory:");
     migrate(db, defaultMigrationsDir());
     const sessions = createSessionStore(db);
@@ -81,14 +81,14 @@ describe("createSessionManager", () => {
       agentsConfig,
       mintToken: () => "tok",
     });
-    const out = mgr.spawn({ platform: "control" });
+    const out = await mgr.spawn({ platform: "control" });
     assert.ok(
       out.sessionId.includes(":control:"),
       `expected control in URN: ${out.sessionId}`,
     );
   });
 
-  it("spawn throws ERR_NO_PLATFORM when no platform resolvable from agentsConfig", () => {
+  it("spawn throws ERR_NO_PLATFORM when no platform resolvable from agentsConfig", async () => {
     const db = new Database(":memory:");
     migrate(db, defaultMigrationsDir());
     const sessions = createSessionStore(db);
@@ -103,7 +103,7 @@ describe("createSessionManager", () => {
       agentsConfig: { list: { noplat: {} } },
       mintToken: () => "tok",
     });
-    assert.throws(
+    await assert.rejects(
       () => mgr.spawn({}),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (err: any) =>
@@ -111,7 +111,7 @@ describe("createSessionManager", () => {
     );
   });
 
-  it("spawn with parentSessionId mints subagent URN and reuses parent agent workspace", () => {
+  it("spawn with parentSessionId mints subagent URN and reuses parent agent workspace", async () => {
     const db = new Database(":memory:");
     migrate(db, defaultMigrationsDir());
     const sessions = createSessionStore(db);
@@ -137,7 +137,7 @@ describe("createSessionManager", () => {
       status: "active",
     });
     agentTokens.register(parent, "parent-raw");
-    const out = mgr.spawn({ parentSessionId: parent });
+    const out = await mgr.spawn({ parentSessionId: parent });
     const parsed = parseAgentSessionUrn(out.sessionId);
     assert.ok(parsed);
     assert.equal(parsed!.uuidChain.length, 2);
@@ -146,7 +146,7 @@ describe("createSessionManager", () => {
     assert.equal(row!.workspacePath, join(workspacesRoot, "parent"));
   });
 
-  it("spawn resolves platform for a different agentId from agentsConfig", () => {
+  it("spawn resolves platform for a different agentId from agentsConfig", async () => {
     const db = new Database(":memory:");
     migrate(db, defaultMigrationsDir());
     const sessions = createSessionStore(db);
@@ -172,7 +172,7 @@ describe("createSessionManager", () => {
       mintToken: () => "tok",
     });
     // Spawn for a different agent — should resolve platform from that agent's bindings
-    const out = mgr.spawn({ agentId: "secondary" });
+    const out = await mgr.spawn({ agentId: "secondary" });
     assert.ok(
       out.sessionId.includes(":slack:"),
       `expected slack in URN: ${out.sessionId}`,

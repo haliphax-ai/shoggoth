@@ -39,7 +39,7 @@ describe("context level spawn wiring", () => {
     rmSync(workspacesRoot, { recursive: true, force: true });
   });
 
-  it("spawn with explicit contextLevel override persists it on the session row", () => {
+  it("spawn with explicit contextLevel override persists it on the session row", async () => {
     const sessions = createSessionStore(db);
     const agentTokens = createSqliteAgentTokenStore(db);
     const config: ShoggothConfig = { agents: agentsConfig };
@@ -54,13 +54,13 @@ describe("context level spawn wiring", () => {
       mintToken: () => "tok",
     });
 
-    const out = mgr.spawn({ contextLevel: "minimal" });
+    const out = await mgr.spawn({ contextLevel: "minimal" });
     const row = sessions.getById(out.sessionId);
     assert.ok(row);
     assert.equal(row.contextLevel, "minimal");
   });
 
-  it("spawn without override resolves default 'full' for top-level agent", () => {
+  it("spawn without override resolves default 'full' for top-level agent", async () => {
     const sessions = createSessionStore(db);
     const agentTokens = createSqliteAgentTokenStore(db);
     const config: ShoggothConfig = { agents: agentsConfig };
@@ -75,13 +75,13 @@ describe("context level spawn wiring", () => {
       mintToken: () => "tok",
     });
 
-    const out = mgr.spawn({});
+    const out = await mgr.spawn({});
     const row = sessions.getById(out.sessionId);
     assert.ok(row);
     assert.equal(row.contextLevel, "full");
   });
 
-  it("subagent spawn without override resolves default 'light'", () => {
+  it("subagent spawn without override resolves default 'light'", async () => {
     const sessions = createSessionStore(db);
     const agentTokens = createSqliteAgentTokenStore(db);
     const config: ShoggothConfig = { agents: agentsConfig };
@@ -110,13 +110,13 @@ describe("context level spawn wiring", () => {
     });
     agentTokens.register(parent, "parent-tok");
 
-    const out = mgr.spawn({ parentSessionId: parent });
+    const out = await mgr.spawn({ parentSessionId: parent });
     const row = sessions.getById(out.sessionId);
     assert.ok(row);
     assert.equal(row.contextLevel, "light");
   });
 
-  it("subagent spawn with explicit override uses the override", () => {
+  it("subagent spawn with explicit override uses the override", async () => {
     const sessions = createSessionStore(db);
     const agentTokens = createSqliteAgentTokenStore(db);
     const config: ShoggothConfig = { agents: agentsConfig };
@@ -144,13 +144,13 @@ describe("context level spawn wiring", () => {
     });
     agentTokens.register(parent, "parent-tok");
 
-    const out = mgr.spawn({ parentSessionId: parent, contextLevel: "none" });
+    const out = await mgr.spawn({ parentSessionId: parent, contextLevel: "none" });
     const row = sessions.getById(out.sessionId);
     assert.ok(row);
     assert.equal(row.contextLevel, "none");
   });
 
-  it("per-agent config contextLevel is used when no spawn override", () => {
+  it("per-agent config contextLevel is used when no spawn override", async () => {
     const sessions = createSessionStore(db);
     const agentTokens = createSqliteAgentTokenStore(db);
     const config: ShoggothConfig = {
@@ -176,13 +176,13 @@ describe("context level spawn wiring", () => {
       mintToken: () => "tok",
     });
 
-    const out = mgr.spawn({});
+    const out = await mgr.spawn({});
     const row = sessions.getById(out.sessionId);
     assert.ok(row);
     assert.equal(row.contextLevel, "light");
   });
 
-  it("spawn override takes precedence over per-agent config", () => {
+  it("spawn override takes precedence over per-agent config", async () => {
     const sessions = createSessionStore(db);
     const agentTokens = createSqliteAgentTokenStore(db);
     const config: ShoggothConfig = {
@@ -208,7 +208,7 @@ describe("context level spawn wiring", () => {
       mintToken: () => "tok",
     });
 
-    const out = mgr.spawn({ contextLevel: "none" });
+    const out = await mgr.spawn({ contextLevel: "none" });
     const row = sessions.getById(out.sessionId);
     assert.ok(row);
     assert.equal(row.contextLevel, "none");
