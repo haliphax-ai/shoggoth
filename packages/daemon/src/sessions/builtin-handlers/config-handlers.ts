@@ -40,7 +40,7 @@ async function configRequest(
     return { resultJson: JSON.stringify({ error: "config_request_unavailable" }) };
   }
   try {
-    const result = await inv(ctx.sessionId, "config_request", { fragment: args.fragment });
+    const result = await inv(ctx.sessionId, "config_request", { key: args.key, fragment: args.fragment, mode: args.mode });
     return { resultJson: JSON.stringify(result) };
   } catch (e) {
     if (e instanceof IntegrationOpError) {
