@@ -70,6 +70,8 @@ interface ImageGenerateParams {
   kind: "image";
   aspectRatio?: string;
   numberOfImages?: number;
+  /** Workspace-relative path to an input image for editing. */
+  input_image?: string;
 }
 
 interface VideoGenerateParams {
@@ -77,6 +79,8 @@ interface VideoGenerateParams {
   aspectRatio?: string;
   /** Duration in seconds */
   durationSeconds?: number;
+  /** Workspace-relative path to a reference image for image-to-video. */
+  input_image?: string;
 }
 
 interface SpeechGenerateParams {
@@ -151,7 +155,7 @@ For models that use the standard `generateContent` endpoint with `responseModali
 - Gemini Flash TTS: `responseModalities: ["AUDIO"]` + `speechConfig`
 - Lyria 3 Pro / Clip: `responseModalities: ["AUDIO"]`
 
-Request: Standard `generateContent` POST with `generationConfig.responseModalities` set.
+Request: Standard `generateContent` POST with `generationConfig.responseModalities` set. When `input_image` is provided, the image is read from disk, base64-encoded, and included as an `inlineData` part in the user message (same format the chat provider uses for image understanding).
 Response: Parse `inlineData` parts from candidates, base64-decode, write to file.
 
 ```ts
@@ -182,6 +186,8 @@ POST /v1beta/models/{model}:predict
 }
 ```
 
+When `input_image` is provided, the image bytes are included as `instances[].image.bytesBase64Encoded` for editing workflows.
+
 Response: `predictions[].bytesBase64Encoded` → decode and write.
 
 #### GeminiLongRunningAdapter
@@ -199,6 +205,8 @@ POST /v1beta/models/{model}:predictLongRunning
 GET /v1beta/{name}
 → { "done": true, "response": { "generateVideoResponse": { "generatedSamples": [...] } } }
 ```
+
+When `input_image` is provided, the image is included as a reference frame in the instances payload for image-to-video generation.
 
 The adapter polls internally up to `timeout_ms`, then returns either the completed result or an `in_progress` status with the `operation_id` for the caller to poll later via `media_generate_poll`.
 
@@ -397,7 +405,7 @@ Add the CLI subcommand and Discord slash command.
 - **Cost** — media generation is significantly more expensive per call than text. The `caution` HITL tier provides a gate, but operators may want to set it to `critical` for cost control.
 - **File cleanup** — generated media files should be subject to the existing retention system (`inboundMediaMaxAgeDays`). The output directory should be under `inboundMediaRoot` or the agent's workspace `tmp/`.
 - **Streaming** — Nano Banana and TTS support streaming responses, but for simplicity this plan uses non-streaming requests. Streaming could be added later for progress feedback on large generations.
-- **Image editing** — Nano Banana supports image-to-image (editing) by passing an input image. This plan covers text-to-media only; editing could be a follow-up with an `input_image` field on the payload.
+- **Image/video input** — `input_image` is supported on `image` and `video` param types. The existing `image-ingest.ts` MIME detection (magic byte sniffing) and `geminiImageBlockCodec` are reused for encoding. Files are read from the agent's workspace or `inboundMediaRoot`.
 
 ## Migration
 
