@@ -4,6 +4,7 @@ import {
   createGeminiProvider,
   mapChatMessagesToGeminiPayload,
   consumeGeminiStream,
+  sanitizeSchemaForGemini,
 } from "../src/gemini";
 import type { ChatMessage } from "../src/types";
 import { ModelHttpError } from "../src/errors";
@@ -20,9 +21,7 @@ beforeEach(() => {
 
 function geminiTextResponse(text: string) {
   return {
-    candidates: [
-      { content: { parts: [{ text }], role: "model" }, finishReason: "STOP" },
-    ],
+    candidates: [{ content: { parts: [{ text }], role: "model" }, finishReason: "STOP" }],
   };
 }
 
@@ -112,8 +111,7 @@ describe("mapChatMessagesToGeminiPayload", () => {
       { role: "system", content: "Be concise" },
       { role: "user", content: "hi" },
     ];
-    const { systemInstruction, contents } =
-      mapChatMessagesToGeminiPayload(messages);
+    const { systemInstruction, contents } = mapChatMessagesToGeminiPayload(messages);
     assert.deepStrictEqual(systemInstruction, {
       parts: [{ text: "You are helpful" }, { text: "Be concise" }],
     });
@@ -121,16 +119,12 @@ describe("mapChatMessagesToGeminiPayload", () => {
   });
 
   it("returns no systemInstruction when no system messages", () => {
-    const { systemInstruction } = mapChatMessagesToGeminiPayload([
-      { role: "user", content: "hi" },
-    ]);
+    const { systemInstruction } = mapChatMessagesToGeminiPayload([{ role: "user", content: "hi" }]);
     assert.equal(systemInstruction, undefined);
   });
 
   it("maps user messages to role user with text parts", () => {
-    const { contents } = mapChatMessagesToGeminiPayload([
-      { role: "user", content: "hello" },
-    ]);
+    const { contents } = mapChatMessagesToGeminiPayload([{ role: "user", content: "hello" }]);
     assert.deepStrictEqual(contents[0], {
       role: "user",
       parts: [{ text: "hello" }],
@@ -177,24 +171,52 @@ describe("mapChatMessagesToGeminiPayload", () => {
     const { contents } = mapChatMessagesToGeminiPayload([
       { role: "tool", name: "fn", content: '{"key":"val"}' },
     ]);
-    const turn = contents[0] as {
-      parts: Array<{ functionResponse: { response: unknown } }>;
-    };
-    assert.deepStrictEqual(turn.parts[0]!.functionResponse.response, {
-      key: "val",
-    });
+    const turn = contents[0] as { parts: Array<{ functionResponse: { response: unknown } }> };
+    assert.deepStrictEqual(turn.parts[0]!.functionResponse.response, { key: "val" });
   });
 
   it("wraps non-JSON tool content as { result: content }", () => {
     const { contents } = mapChatMessagesToGeminiPayload([
       { role: "tool", name: "fn", content: "plain text output" },
     ]);
-    const turn = contents[0] as {
-      parts: Array<{ functionResponse: { response: unknown } }>;
-    };
+    const turn = contents[0] as { parts: Array<{ functionResponse: { response: unknown } }> };
     assert.deepStrictEqual(turn.parts[0]!.functionResponse.response, {
       result: "plain text output",
     });
+  });
+
+  it("wraps array JSON tool content as { result: array }", () => {
+    const { contents } = mapChatMessagesToGeminiPayload([
+      { role: "tool", name: "fn", content: "[1, 2, 3]" },
+    ]);
+    const turn = contents[0] as { parts: Array<{ functionResponse: { response: unknown } }> };
+    assert.deepStrictEqual(turn.parts[0]!.functionResponse.response, {
+      result: [1, 2, 3],
+    });
+  });
+
+  it("wraps primitive JSON tool content as { result: primitive }", () => {
+    const { contents } = mapChatMessagesToGeminiPayload([
+      { role: "tool", name: "fn", content: "42" },
+    ]);
+    const turn = contents[0] as { parts: Array<{ functionResponse: { response: unknown } }> };
+    assert.deepStrictEqual(turn.parts[0]!.functionResponse.response, { result: 42 });
+  });
+
+  it("wraps null JSON tool content as { result: null }", () => {
+    const { contents } = mapChatMessagesToGeminiPayload([
+      { role: "tool", name: "fn", content: "null" },
+    ]);
+    const turn = contents[0] as { parts: Array<{ functionResponse: { response: unknown } }> };
+    assert.deepStrictEqual(turn.parts[0]!.functionResponse.response, { result: null });
+  });
+
+  it("wraps string JSON tool content as { result: string }", () => {
+    const { contents } = mapChatMessagesToGeminiPayload([
+      { role: "tool", name: "fn", content: '"just a string"' },
+    ]);
+    const turn = contents[0] as { parts: Array<{ functionResponse: { response: unknown } }> };
+    assert.deepStrictEqual(turn.parts[0]!.functionResponse.response, { result: "just a string" });
   });
 
   it("handles empty/null content on user messages", () => {
@@ -209,13 +231,8 @@ describe("mapChatMessagesToGeminiPayload", () => {
   });
 
   it("handles assistant with no content and no tool calls (empty text part)", () => {
-    const { contents } = mapChatMessagesToGeminiPayload([
-      { role: "assistant", content: null },
-    ]);
-    const turn = contents[0] as {
-      role: string;
-      parts: Array<{ text: string }>;
-    };
+    const { contents } = mapChatMessagesToGeminiPayload([{ role: "assistant", content: null }]);
+    const turn = contents[0] as { role: string; parts: Array<{ text: string }> };
     assert.equal(turn.role, "model");
     assert.deepStrictEqual(turn.parts, [{ text: "" }]);
   });
@@ -231,15 +248,131 @@ describe("mapChatMessagesToGeminiPayload", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 1b. sanitizeSchemaForGemini
+// ---------------------------------------------------------------------------
+
+describe("sanitizeSchemaForGemini", () => {
+  it("removes additionalProperties", () => {
+    const result = sanitizeSchemaForGemini({
+      type: "object",
+      properties: { name: { type: "string" } },
+      additionalProperties: false,
+    }) as Record<string, unknown>;
+    assert.equal("additionalProperties" in result, false);
+  });
+
+  it("converts const to single-element string enum", () => {
+    const result = sanitizeSchemaForGemini({
+      type: "string",
+      const: "fixed_value",
+    }) as Record<string, unknown>;
+    assert.deepStrictEqual(result.enum, ["fixed_value"]);
+    assert.equal("const" in result, false);
+  });
+
+  it("converts numeric const to string enum", () => {
+    const result = sanitizeSchemaForGemini({
+      type: "number",
+      const: 42,
+    }) as Record<string, unknown>;
+    assert.deepStrictEqual(result.enum, ["42"]);
+    assert.equal("const" in result, false);
+  });
+
+  it("coerces numeric enum values to strings", () => {
+    const result = sanitizeSchemaForGemini({
+      type: "integer",
+      enum: [60, 1440, 4320, 10080],
+    }) as Record<string, unknown>;
+    assert.deepStrictEqual(result.enum, ["60", "1440", "4320", "10080"]);
+  });
+
+  it("coerces mixed enum values to strings", () => {
+    const result = sanitizeSchemaForGemini({
+      enum: ["a", 2, true],
+    }) as Record<string, unknown>;
+    assert.deepStrictEqual(result.enum, ["a", "2", "true"]);
+  });
+
+  it("recursively sanitizes nested properties", () => {
+    const result = sanitizeSchemaForGemini({
+      type: "object",
+      properties: {
+        inner: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            val: { type: "number", const: 5 },
+          },
+        },
+      },
+    }) as Record<string, unknown>;
+    const inner = (result.properties as Record<string, unknown>).inner as Record<string, unknown>;
+    assert.equal("additionalProperties" in inner, false);
+    const val = (inner.properties as Record<string, unknown>).val as Record<string, unknown>;
+    assert.deepStrictEqual(val.enum, ["5"]);
+    assert.equal("const" in val, false);
+  });
+
+  it("sanitizes items in array schemas", () => {
+    const result = sanitizeSchemaForGemini({
+      type: "array",
+      items: { type: "string", additionalProperties: false },
+    }) as Record<string, unknown>;
+    const items = result.items as Record<string, unknown>;
+    assert.equal("additionalProperties" in items, false);
+  });
+
+  it("sanitizes oneOf/anyOf/allOf variants", () => {
+    const result = sanitizeSchemaForGemini({
+      oneOf: [
+        { type: "string", const: "a" },
+        { type: "number", enum: [1, 2] },
+      ],
+      anyOf: [{ additionalProperties: true, type: "object" }],
+      allOf: [{ const: "x" }],
+    }) as Record<string, unknown>;
+    const oneOf = result.oneOf as Array<Record<string, unknown>>;
+    assert.deepStrictEqual(oneOf[0].enum, ["a"]);
+    assert.equal("const" in oneOf[0], false);
+    assert.deepStrictEqual(oneOf[1].enum, ["1", "2"]);
+    const anyOf = result.anyOf as Array<Record<string, unknown>>;
+    assert.equal("additionalProperties" in anyOf[0], false);
+    const allOf = result.allOf as Array<Record<string, unknown>>;
+    assert.deepStrictEqual(allOf[0].enum, ["x"]);
+  });
+
+  it("passes through null/primitive/array schema unchanged", () => {
+    assert.equal(sanitizeSchemaForGemini(null), null);
+    assert.equal(sanitizeSchemaForGemini(undefined), undefined);
+    assert.equal(sanitizeSchemaForGemini("string"), "string");
+    const arr = [1, 2];
+    assert.strictEqual(sanitizeSchemaForGemini(arr), arr);
+  });
+
+  it("leaves already-clean schemas untouched", () => {
+    const clean = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        count: { type: "integer", enum: ["1", "2", "3"] },
+      },
+    };
+    const result = sanitizeSchemaForGemini(clean) as Record<string, unknown>;
+    assert.equal(result.type, "object");
+    const props = result.properties as Record<string, Record<string, unknown>>;
+    assert.deepStrictEqual(props.count.enum, ["1", "2", "3"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 2. Non-streaming complete()
 // ---------------------------------------------------------------------------
 
 describe("createGeminiProvider complete()", () => {
   it("returns text content from candidates", async () => {
     const fetchImpl = async () =>
-      new Response(JSON.stringify(geminiTextResponse("hello world")), {
-        status: 200,
-      });
+      new Response(JSON.stringify(geminiTextResponse("hello world")), { status: 200 });
 
     const p = createGeminiProvider({ id: "g", fetchImpl });
     const out = await p.complete({
@@ -251,15 +384,13 @@ describe("createGeminiProvider complete()", () => {
 
   it("rejects unexpected functionCall parts", async () => {
     const fetchImpl = async () =>
-      new Response(
-        JSON.stringify(geminiToolCallResponse([{ name: "fn", args: {} }])),
-        { status: 200 },
-      );
+      new Response(JSON.stringify(geminiToolCallResponse([{ name: "fn", args: {} }])), {
+        status: 200,
+      });
 
     const p = createGeminiProvider({ id: "g", fetchImpl });
     await assert.rejects(
-      () =>
-        p.complete({ model: "m", messages: [{ role: "user", content: "x" }] }),
+      () => p.complete({ model: "m", messages: [{ role: "user", content: "x" }] }),
       (e: unknown) =>
         e instanceof ModelHttpError &&
         e.status === 502 &&
@@ -276,52 +407,40 @@ describe("createGeminiProvider complete()", () => {
 
     const p = createGeminiProvider({ id: "g", fetchImpl });
     await assert.rejects(
-      () =>
-        p.complete({ model: "m", messages: [{ role: "user", content: "x" }] }),
+      () => p.complete({ model: "m", messages: [{ role: "user", content: "x" }] }),
       (e: unknown) => e instanceof ModelHttpError && e.status === 400,
     );
   });
 
   it("throws ModelHttpError on HTTP 5xx", async () => {
     const fetchImpl = async () =>
-      new Response("internal error", {
-        status: 500,
-        statusText: "Internal Server Error",
-      });
+      new Response("internal error", { status: 500, statusText: "Internal Server Error" });
 
     const p = createGeminiProvider({ id: "g", fetchImpl });
     await assert.rejects(
-      () =>
-        p.complete({ model: "m", messages: [{ role: "user", content: "x" }] }),
+      () => p.complete({ model: "m", messages: [{ role: "user", content: "x" }] }),
       (e: unknown) => e instanceof ModelHttpError && e.status === 500,
     );
   });
 
   it("throws ModelHttpError on safety-blocked response", async () => {
     const fetchImpl = async () =>
-      new Response(JSON.stringify(geminiSafetyBlockedResponse()), {
-        status: 200,
-      });
+      new Response(JSON.stringify(geminiSafetyBlockedResponse()), { status: 200 });
 
     const p = createGeminiProvider({ id: "g", fetchImpl });
     await assert.rejects(
-      () =>
-        p.complete({ model: "m", messages: [{ role: "user", content: "x" }] }),
+      () => p.complete({ model: "m", messages: [{ role: "user", content: "x" }] }),
       (e: unknown) =>
-        e instanceof ModelHttpError &&
-        e.status === 400 &&
-        String(e.message).includes("safety"),
+        e instanceof ModelHttpError && e.status === 400 && String(e.message).includes("safety"),
     );
   });
 
   it("throws ModelHttpError on malformed JSON response", async () => {
-    const fetchImpl = async () =>
-      new Response("not json at all{{{", { status: 200 });
+    const fetchImpl = async () => new Response("not json at all{{{", { status: 200 });
 
     const p = createGeminiProvider({ id: "g", fetchImpl });
     await assert.rejects(
-      () =>
-        p.complete({ model: "m", messages: [{ role: "user", content: "x" }] }),
+      () => p.complete({ model: "m", messages: [{ role: "user", content: "x" }] }),
       (e: unknown) =>
         e instanceof ModelHttpError &&
         e.status === 502 &&
@@ -341,19 +460,14 @@ describe("createGeminiProvider completeWithTools()", () => {
       function: {
         name: "read_file",
         description: "Read a file",
-        parameters: {
-          type: "object",
-          properties: { path: { type: "string" } },
-        },
+        parameters: { type: "object", properties: { path: { type: "string" } } },
       },
     },
   ];
 
   it("returns text-only response (no tool calls)", async () => {
     const fetchImpl = async () =>
-      new Response(JSON.stringify(geminiTextResponse("just text")), {
-        status: 200,
-      });
+      new Response(JSON.stringify(geminiTextResponse("just text")), { status: 200 });
 
     const p = createGeminiProvider({ id: "g", fetchImpl });
     const out = await p.completeWithTools({
@@ -368,11 +482,7 @@ describe("createGeminiProvider completeWithTools()", () => {
   it("returns tool calls from functionCall parts", async () => {
     const fetchImpl = async () =>
       new Response(
-        JSON.stringify(
-          geminiToolCallResponse([
-            { name: "read_file", args: { path: "a.txt" } },
-          ]),
-        ),
+        JSON.stringify(geminiToolCallResponse([{ name: "read_file", args: { path: "a.txt" } }])),
         { status: 200 },
       );
 
@@ -391,9 +501,7 @@ describe("createGeminiProvider completeWithTools()", () => {
     const fetchImpl = async () =>
       new Response(
         JSON.stringify(
-          geminiMixedResponse("Let me check", [
-            { name: "read_file", args: { path: "b.txt" } },
-          ]),
+          geminiMixedResponse("Let me check", [{ name: "read_file", args: { path: "b.txt" } }]),
         ),
         { status: 200 },
       );
@@ -413,9 +521,7 @@ describe("createGeminiProvider completeWithTools()", () => {
     const fetchImpl = async () =>
       new Response(
         JSON.stringify(
-          geminiToolCallResponse([
-            { name: "read_file", args: { path: "c.txt" }, id: "my-id-123" },
-          ]),
+          geminiToolCallResponse([{ name: "read_file", args: { path: "c.txt" }, id: "my-id-123" }]),
         ),
         { status: 200 },
       );
@@ -453,9 +559,7 @@ describe("createGeminiProvider completeWithTools()", () => {
 
   it("throws on safety-blocked response", async () => {
     const fetchImpl = async () =>
-      new Response(JSON.stringify(geminiSafetyBlockedResponse()), {
-        status: 200,
-      });
+      new Response(JSON.stringify(geminiSafetyBlockedResponse()), { status: 200 });
 
     const p = createGeminiProvider({ id: "g", fetchImpl });
     await assert.rejects(
@@ -466,10 +570,51 @@ describe("createGeminiProvider completeWithTools()", () => {
           tools,
         }),
       (e: unknown) =>
-        e instanceof ModelHttpError &&
-        e.status === 400 &&
-        String(e.message).includes("safety"),
+        e instanceof ModelHttpError && e.status === 400 && String(e.message).includes("safety"),
     );
+  });
+
+  it("sanitizes tool parameters before sending to Gemini", async () => {
+    let capturedBody: string | undefined;
+    const fetchImpl = async (_url: string | URL, init?: RequestInit) => {
+      capturedBody = init?.body as string;
+      return new Response(JSON.stringify(geminiTextResponse("ok")), { status: 200 });
+    };
+
+    const dirtyTools = [
+      {
+        type: "function" as const,
+        function: {
+          name: "test_tool",
+          parameters: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              mode: { type: "string", const: "auto" },
+              timeout: { type: "integer", enum: [60, 1440] },
+            },
+          },
+        },
+      },
+    ];
+
+    const p = createGeminiProvider({ id: "g", fetchImpl });
+    await p.completeWithTools({
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      tools: dirtyTools,
+    });
+
+    const body = JSON.parse(capturedBody ?? "{}") as {
+      tools?: Array<{ functionDeclarations: Array<{ parameters: Record<string, unknown> }> }>;
+    };
+    const params = body.tools?.[0]?.functionDeclarations[0]?.parameters;
+    assert.ok(params);
+    assert.equal("additionalProperties" in params!, false);
+    const props = params!.properties as Record<string, Record<string, unknown>>;
+    assert.deepStrictEqual(props.mode.enum, ["auto"]);
+    assert.equal("const" in props.mode, false);
+    assert.deepStrictEqual(props.timeout.enum, ["60", "1440"]);
   });
 });
 
@@ -504,9 +649,7 @@ describe("streaming complete()", () => {
 
   it("rejects unexpected tool calls in non-tool streaming", async () => {
     const fetchImpl = async () =>
-      sseResponse([
-        JSON.stringify(geminiToolCallResponse([{ name: "fn", args: {} }])),
-      ]);
+      sseResponse([JSON.stringify(geminiToolCallResponse([{ name: "fn", args: {} }]))]);
 
     const p = createGeminiProvider({ id: "g", fetchImpl });
     await assert.rejects(
@@ -524,8 +667,7 @@ describe("streaming complete()", () => {
   });
 
   it("handles empty stream (throws missing content)", async () => {
-    const fetchImpl = async () =>
-      sseResponse([JSON.stringify({ candidates: [] })]);
+    const fetchImpl = async () => sseResponse([JSON.stringify({ candidates: [] })]);
 
     const p = createGeminiProvider({ id: "g", fetchImpl });
     await assert.rejects(
@@ -553,10 +695,7 @@ describe("streaming completeWithTools()", () => {
       type: "function" as const,
       function: {
         name: "read_file",
-        parameters: {
-          type: "object",
-          properties: { path: { type: "string" } },
-        },
+        parameters: { type: "object", properties: { path: { type: "string" } } },
       },
     },
   ];
@@ -565,9 +704,7 @@ describe("streaming completeWithTools()", () => {
     const fetchImpl = async () =>
       sseResponse([
         JSON.stringify(geminiTextResponse("Checking")),
-        JSON.stringify(
-          geminiToolCallResponse([{ name: "read_file", args: { path: "x" } }]),
-        ),
+        JSON.stringify(geminiToolCallResponse([{ name: "read_file", args: { path: "x" } }])),
       ]);
 
     const p = createGeminiProvider({ id: "g", fetchImpl });
@@ -588,12 +725,8 @@ describe("streaming completeWithTools()", () => {
   it("accumulates tool calls across chunks", async () => {
     const fetchImpl = async () =>
       sseResponse([
-        JSON.stringify(
-          geminiToolCallResponse([{ name: "read_file", args: { path: "a" } }]),
-        ),
-        JSON.stringify(
-          geminiToolCallResponse([{ name: "read_file", args: { path: "b" } }]),
-        ),
+        JSON.stringify(geminiToolCallResponse([{ name: "read_file", args: { path: "a" } }])),
+        JSON.stringify(geminiToolCallResponse([{ name: "read_file", args: { path: "b" } }])),
       ]);
 
     const p = createGeminiProvider({ id: "g", fetchImpl });
@@ -618,12 +751,9 @@ describe("streaming completeWithTools()", () => {
 describe("createGeminiProvider factory", () => {
   it("constructs correct non-streaming URL", async () => {
     let capturedUrl: string | undefined;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const fetchImpl = async (url: string | URL, _init?: RequestInit) => {
       capturedUrl = String(url);
-      return new Response(JSON.stringify(geminiTextResponse("ok")), {
-        status: 200,
-      });
+      return new Response(JSON.stringify(geminiTextResponse("ok")), { status: 200 });
     };
 
     const p = createGeminiProvider({
@@ -632,19 +762,12 @@ describe("createGeminiProvider factory", () => {
       apiVersion: "v1",
       fetchImpl,
     });
-    await p.complete({
-      model: "gemini-pro",
-      messages: [{ role: "user", content: "hi" }],
-    });
-    assert.equal(
-      capturedUrl,
-      "https://api.example.com/v1/models/gemini-pro:generateContent",
-    );
+    await p.complete({ model: "gemini-pro", messages: [{ role: "user", content: "hi" }] });
+    assert.equal(capturedUrl, "https://api.example.com/v1/models/gemini-pro:generateContent");
   });
 
   it("constructs correct streaming URL", async () => {
     let capturedUrl: string | undefined;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const fetchImpl = async (url: string | URL, _init?: RequestInit) => {
       capturedUrl = String(url);
       return sseResponse([JSON.stringify(geminiTextResponse("ok"))]);
@@ -671,9 +794,7 @@ describe("createGeminiProvider factory", () => {
     let capturedHeaders: HeadersInit | undefined;
     const fetchImpl = async (_url: string | URL, init?: RequestInit) => {
       capturedHeaders = init?.headers as HeadersInit;
-      return new Response(JSON.stringify(geminiTextResponse("ok")), {
-        status: 200,
-      });
+      return new Response(JSON.stringify(geminiTextResponse("ok")), { status: 200 });
     };
 
     const p = createGeminiProvider({
@@ -681,29 +802,20 @@ describe("createGeminiProvider factory", () => {
       apiKey: "my-secret-key",
       fetchImpl,
     });
-    await p.complete({
-      model: "m",
-      messages: [{ role: "user", content: "hi" }],
-    });
+    await p.complete({ model: "m", messages: [{ role: "user", content: "hi" }] });
     const h = new Headers(capturedHeaders);
     assert.equal(h.get("x-goog-api-key"), "my-secret-key");
   });
 
   it("applies default baseUrl and apiVersion when not specified", async () => {
     let capturedUrl: string | undefined;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const fetchImpl = async (url: string | URL, _init?: RequestInit) => {
       capturedUrl = String(url);
-      return new Response(JSON.stringify(geminiTextResponse("ok")), {
-        status: 200,
-      });
+      return new Response(JSON.stringify(geminiTextResponse("ok")), { status: 200 });
     };
 
     const p = createGeminiProvider({ id: "g", fetchImpl });
-    await p.complete({
-      model: "gemini-pro",
-      messages: [{ role: "user", content: "hi" }],
-    });
+    await p.complete({ model: "gemini-pro", messages: [{ role: "user", content: "hi" }] });
     assert.equal(
       capturedUrl,
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
@@ -714,9 +826,7 @@ describe("createGeminiProvider factory", () => {
     let capturedBody: string | undefined;
     const fetchImpl = async (_url: string | URL, init?: RequestInit) => {
       capturedBody = init?.body as string;
-      return new Response(JSON.stringify(geminiTextResponse("ok")), {
-        status: 200,
-      });
+      return new Response(JSON.stringify(geminiTextResponse("ok")), { status: 200 });
     };
 
     const p = createGeminiProvider({ id: "g", fetchImpl });
@@ -737,9 +847,7 @@ describe("createGeminiProvider factory", () => {
     let capturedBody: string | undefined;
     const fetchImpl = async (_url: string | URL, init?: RequestInit) => {
       capturedBody = init?.body as string;
-      return new Response(JSON.stringify(geminiTextResponse("ok")), {
-        status: 200,
-      });
+      return new Response(JSON.stringify(geminiTextResponse("ok")), { status: 200 });
     };
 
     const p = createGeminiProvider({ id: "g", fetchImpl });
@@ -747,9 +855,7 @@ describe("createGeminiProvider factory", () => {
       model: "m",
       messages: [{ role: "user", content: "hi" }],
       requestExtras: {
-        safetySettings: [
-          { category: "HARM_CATEGORY_DANGEROUS", threshold: "BLOCK_NONE" },
-        ],
+        safetySettings: [{ category: "HARM_CATEGORY_DANGEROUS", threshold: "BLOCK_NONE" }],
       },
     });
     const body = JSON.parse(capturedBody ?? "{}") as {
@@ -761,12 +867,9 @@ describe("createGeminiProvider factory", () => {
 
   it("strips trailing slashes from baseUrl", async () => {
     let capturedUrl: string | undefined;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const fetchImpl = async (url: string | URL, _init?: RequestInit) => {
       capturedUrl = String(url);
-      return new Response(JSON.stringify(geminiTextResponse("ok")), {
-        status: 200,
-      });
+      return new Response(JSON.stringify(geminiTextResponse("ok")), { status: 200 });
     };
 
     const p = createGeminiProvider({
@@ -775,10 +878,7 @@ describe("createGeminiProvider factory", () => {
       apiVersion: "v1",
       fetchImpl,
     });
-    await p.complete({
-      model: "m",
-      messages: [{ role: "user", content: "hi" }],
-    });
+    await p.complete({ model: "m", messages: [{ role: "user", content: "hi" }] });
     assert.ok(capturedUrl?.startsWith("https://api.example.com/v1/"));
   });
 });
@@ -793,9 +893,7 @@ describe("consumeGeminiStream", () => {
     await assert.rejects(
       () => consumeGeminiStream(body, { accumulateTools: false }),
       (e: unknown) =>
-        e instanceof ModelHttpError &&
-        e.status === 400 &&
-        String(e.message).includes("safety"),
+        e instanceof ModelHttpError && e.status === 400 && String(e.message).includes("safety"),
     );
   });
 
@@ -804,9 +902,7 @@ describe("consumeGeminiStream", () => {
     await assert.rejects(
       () => consumeGeminiStream(body, { accumulateTools: false }),
       (e: unknown) =>
-        e instanceof ModelHttpError &&
-        e.status === 502 &&
-        String(e.message).includes("malformed"),
+        e instanceof ModelHttpError && e.status === 502 && String(e.message).includes("malformed"),
     );
   });
 });
@@ -855,9 +951,7 @@ describe("mapChatMessagesToGeminiPayload with ChatContentPart[]", () => {
   });
 
   it("plain string user content still serializes identically", () => {
-    const { contents } = mapChatMessagesToGeminiPayload([
-      { role: "user", content: "hello" },
-    ]);
+    const { contents } = mapChatMessagesToGeminiPayload([{ role: "user", content: "hello" }]);
     assert.deepStrictEqual(contents[0], {
       role: "user",
       parts: [{ text: "hello" }],

@@ -24,23 +24,11 @@ import type { FetchLike } from "./openai-compatible";
 /** Extract usage metadata from a Gemini generateContent response. */
 function extractGeminiUsage(json: unknown): ModelUsage | undefined {
   const u = (
-    json as {
-      usageMetadata?: {
-        promptTokenCount?: number;
-        candidatesTokenCount?: number;
-      };
-    }
+    json as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }
   ).usageMetadata;
-  if (
-    !u ||
-    typeof u.promptTokenCount !== "number" ||
-    typeof u.candidatesTokenCount !== "number"
-  )
+  if (!u || typeof u.promptTokenCount !== "number" || typeof u.candidatesTokenCount !== "number")
     return undefined;
-  return {
-    inputTokens: u.promptTokenCount,
-    outputTokens: u.candidatesTokenCount,
-  };
+  return { inputTokens: u.promptTokenCount, outputTokens: u.candidatesTokenCount };
 }
 
 export interface GeminiProviderOptions {
@@ -72,9 +60,7 @@ function trimSlash(u: string): string {
  * - `role: "assistant"` → `{ role: "model", parts: [...] }` (text + functionCall)
  * - Consecutive `role: "tool"` → batched into one `{ role: "tool", parts: [{ functionResponse }...] }`
  */
-export function mapChatMessagesToGeminiPayload(
-  messages: readonly ChatMessage[],
-): {
+export function mapChatMessagesToGeminiPayload(messages: readonly ChatMessage[]): {
   systemInstruction?: unknown;
   contents: unknown[];
 } {
@@ -154,7 +140,11 @@ export function mapChatMessagesToGeminiPayload(
         const raw = tm.content != null ? String(tm.content) : "";
         let response: unknown;
         try {
-          response = raw.trim() ? JSON.parse(raw) : { result: raw };
+          const parsed = raw.trim() ? JSON.parse(raw) : { result: raw };
+          response =
+            parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+              ? parsed
+              : { result: parsed };
         } catch {
           response = { result: raw };
         }
@@ -170,11 +160,48 @@ export function mapChatMessagesToGeminiPayload(
   }
 
   const systemInstruction =
-    systemParts.length > 0
-      ? { parts: systemParts.map((t) => ({ text: t })) }
-      : undefined;
+    systemParts.length > 0 ? { parts: systemParts.map((t) => ({ text: t })) } : undefined;
 
   return { systemInstruction, contents };
+}
+
+// ---------------------------------------------------------------------------
+// Schema sanitization for Gemini
+// ---------------------------------------------------------------------------
+
+/**
+ * Recursively strip/transform JSON Schema properties that Gemini does not
+ * support: `additionalProperties`, `const`, and non-string `enum` values.
+ */
+export function sanitizeSchemaForGemini(schema: unknown): unknown {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return schema;
+  const s = { ...(schema as Record<string, unknown>) };
+
+  delete s.additionalProperties;
+
+  if ("const" in s) {
+    s.enum = [String(s.const)];
+    delete s.const;
+  }
+
+  if (Array.isArray(s.enum)) {
+    s.enum = s.enum.map((v: unknown) => String(v));
+  }
+
+  if (s.properties && typeof s.properties === "object") {
+    const props: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(s.properties as Record<string, unknown>)) {
+      props[k] = sanitizeSchemaForGemini(v);
+    }
+    s.properties = props;
+  }
+
+  if (s.items) s.items = sanitizeSchemaForGemini(s.items);
+  if (Array.isArray(s.oneOf)) s.oneOf = s.oneOf.map(sanitizeSchemaForGemini);
+  if (Array.isArray(s.anyOf)) s.anyOf = s.anyOf.map(sanitizeSchemaForGemini);
+  if (Array.isArray(s.allOf)) s.allOf = s.allOf.map(sanitizeSchemaForGemini);
+
+  return s;
 }
 
 // ---------------------------------------------------------------------------
@@ -189,10 +216,8 @@ function mapOpenAIToolsToGemini(
     {
       functionDeclarations: tools.map((t) => ({
         name: t.function.name,
-        ...(t.function.description !== undefined
-          ? { description: t.function.description }
-          : {}),
-        parameters: t.function.parameters,
+        ...(t.function.description !== undefined ? { description: t.function.description } : {}),
+        parameters: sanitizeSchemaForGemini(t.function.parameters),
       })),
     },
   ];
@@ -206,8 +231,7 @@ function buildGenerationConfig(
   input: Pick<ModelInvocationParams, "maxOutputTokens" | "temperature">,
 ): Record<string, unknown> | undefined {
   const cfg: Record<string, unknown> = {};
-  if (input.maxOutputTokens !== undefined)
-    cfg.maxOutputTokens = input.maxOutputTokens;
+  if (input.maxOutputTokens !== undefined) cfg.maxOutputTokens = input.maxOutputTokens;
   if (input.temperature !== undefined) cfg.temperature = input.temperature;
   return Object.keys(cfg).length > 0 ? cfg : undefined;
 }
@@ -228,9 +252,7 @@ function applyGeminiRequestExtensions(
 
 function parseGeminiErrorBody(text: string): string {
   try {
-    const j = JSON.parse(text) as {
-      error?: { message?: string; status?: string };
-    };
+    const j = JSON.parse(text) as { error?: { message?: string; status?: string } };
     const msg = j.error?.message;
     if (typeof msg === "string" && msg.length > 0) return msg;
   } catch {
@@ -247,11 +269,7 @@ function parseGeminiResponse(
   toolCalls: ChatToolCall[];
 } {
   if (!json || typeof json !== "object") {
-    throw new ModelHttpError(
-      502,
-      "invalid Gemini response shape",
-      String(json).slice(0, 200),
-    );
+    throw new ModelHttpError(502, "invalid Gemini response shape", String(json).slice(0, 200));
   }
 
   const resp = json as Record<string, unknown>;
@@ -293,38 +311,27 @@ function parseGeminiResponse(
     const p = part as Record<string, unknown>;
 
     if (typeof p.text === "string") {
-      textParts.push(
-        thinkingFormat === "xml-tags" ? stripXmlThinkingTags(p.text) : p.text,
-      );
+      textParts.push(thinkingFormat === "xml-tags" ? stripXmlThinkingTags(p.text) : p.text);
     }
 
     if (p.functionCall && typeof p.functionCall === "object") {
       const fc = p.functionCall as Record<string, unknown>;
       const name = typeof fc.name === "string" ? fc.name : "";
-      const id =
-        typeof fc.id === "string" && fc.id.length > 0
-          ? fc.id
-          : `gemini-call-${callIndex}`;
+      const id = typeof fc.id === "string" && fc.id.length > 0 ? fc.id : `gemini-call-${callIndex}`;
       let argsStr: string;
       try {
         argsStr = JSON.stringify(fc.args ?? {});
       } catch {
-        throw new ModelHttpError(
-          502,
-          "functionCall args not JSON-serializable",
-          "",
-        );
+        throw new ModelHttpError(502, "functionCall args not JSON-serializable", "");
       }
-      const strippedArgs =
-        thinkingFormat === "xml-tags" ? stripXmlThinkingTags(argsStr) : argsStr;
+      const strippedArgs = thinkingFormat === "xml-tags" ? stripXmlThinkingTags(argsStr) : argsStr;
       toolCalls.push({ id, name, arguments: strippedArgs });
       callIndex += 1;
     }
   }
 
   const joined = textParts.join("");
-  let content: string | ChatContentPart[] | null =
-    joined.length > 0 ? joined : null;
+  let content: string | ChatContentPart[] | null = joined.length > 0 ? joined : null;
 
   // Normalize thinking blocks if thinkingFormat is specified and content is not null
   if (content !== null && thinkingFormat) {
@@ -368,20 +375,14 @@ export async function consumeGeminiStream(
   let forbiddenToolUse = false;
   let lastUsage: ModelUsage | undefined;
   const thinkNorm =
-    options.thinkingFormat === "xml-tags"
-      ? new ThinkingStreamNormalizer()
-      : undefined;
+    options.thinkingFormat === "xml-tags" ? new ThinkingStreamNormalizer() : undefined;
 
   const handleDataPayload = (raw: string) => {
     let json: unknown;
     try {
       json = JSON.parse(raw);
     } catch {
-      throw new ModelHttpError(
-        502,
-        "malformed Gemini SSE data JSON",
-        raw.slice(0, 200),
-      );
+      throw new ModelHttpError(502, "malformed Gemini SSE data JSON", raw.slice(0, 200));
     }
     if (!json || typeof json !== "object") return;
 
@@ -433,23 +434,15 @@ export async function consumeGeminiStream(
           const fc = p.functionCall as Record<string, unknown>;
           const name = typeof fc.name === "string" ? fc.name : "";
           const id =
-            typeof fc.id === "string" && fc.id.length > 0
-              ? fc.id
-              : `gemini-call-${callIndex}`;
+            typeof fc.id === "string" && fc.id.length > 0 ? fc.id : `gemini-call-${callIndex}`;
           let argsStr: string;
           try {
             argsStr = JSON.stringify(fc.args ?? {});
           } catch {
-            throw new ModelHttpError(
-              502,
-              "functionCall args not JSON-serializable in stream",
-              "",
-            );
+            throw new ModelHttpError(502, "functionCall args not JSON-serializable in stream", "");
           }
           const strippedArgs =
-            options.thinkingFormat === "xml-tags"
-              ? stripXmlThinkingTags(argsStr)
-              : argsStr;
+            options.thinkingFormat === "xml-tags" ? stripXmlThinkingTags(argsStr) : argsStr;
           toolCalls.push({ id, name, arguments: strippedArgs });
           callIndex += 1;
         }
@@ -470,9 +463,7 @@ export async function consumeGeminiStream(
 
   while (true) {
     const { done, value } = await reader.read();
-    const chunkText = done
-      ? decoder.decode()
-      : decoder.decode(value, { stream: true });
+    const chunkText = done ? decoder.decode() : decoder.decode(value, { stream: true });
     lineBuf += chunkText;
     let nl: number;
     while ((nl = lineBuf.indexOf("\n")) >= 0) {
@@ -485,11 +476,7 @@ export async function consumeGeminiStream(
   if (lineBuf.length > 0) flushLine(lineBuf);
 
   if (forbiddenToolUse) {
-    throw new ModelHttpError(
-      502,
-      "unexpected functionCall in non-tool Gemini stream",
-      "",
-    );
+    throw new ModelHttpError(502, "unexpected functionCall in non-tool Gemini stream", "");
   }
 
   // Flush any remaining buffered thinking content
@@ -505,10 +492,7 @@ export async function consumeGeminiStream(
 
   // Normalize thinking blocks if thinkingFormat is specified and content is not null
   if (content !== null && options.thinkingFormat) {
-    content = normalizeThinkingBlocks(
-      content as string,
-      options.thinkingFormat,
-    );
+    content = normalizeThinkingBlocks(content as string, options.thinkingFormat);
   }
 
   return { content, toolCalls, usage: lastUsage };
@@ -526,28 +510,19 @@ function headersToRecord(h: Headers): Record<string, string | undefined> {
   return rec;
 }
 
-export function createGeminiProvider(
-  options: GeminiProviderOptions,
-): ModelProvider {
+export function createGeminiProvider(options: GeminiProviderOptions): ModelProvider {
   const fetchImpl = options.fetchImpl ?? (globalThis.fetch as FetchLike);
   const baseUrl = trimSlash(options.baseUrl ?? DEFAULT_BASE_URL);
   const apiVersion = options.apiVersion ?? DEFAULT_API_VERSION;
   const id = options.id;
 
-  async function resilientFetch(
-    targetUrl: string,
-    init: RequestInit,
-  ): Promise<Response> {
+  async function resilientFetch(targetUrl: string, init: RequestInit): Promise<Response> {
     try {
       const gate = getResilienceGate();
       return await gate.executeWithResilience(id, async () => {
         const res = await fetchImpl(targetUrl, init);
         try {
-          const parsed = parseRateLimitHeaders(
-            id,
-            headersToRecord(res.headers),
-            "gemini",
-          );
+          const parsed = parseRateLimitHeaders(id, headersToRecord(res.headers), "gemini");
           gate.getOrCreateManager(id).updateCapacity(parsed);
         } catch {
           /* ignore header parse errors */
@@ -588,13 +563,10 @@ export function createGeminiProvider(
 
     async complete(input: ModelCompleteInput) {
       const headers = buildHeaders();
-      const { systemInstruction, contents } = mapChatMessagesToGeminiPayload(
-        input.messages,
-      );
+      const { systemInstruction, contents } = mapChatMessagesToGeminiPayload(input.messages);
 
       const body: Record<string, unknown> = { contents };
-      if (systemInstruction !== undefined)
-        body.systemInstruction = systemInstruction;
+      if (systemInstruction !== undefined) body.systemInstruction = systemInstruction;
       const genConfig = buildGenerationConfig(input);
       if (genConfig) body.generationConfig = genConfig;
       applyGeminiRequestExtensions(body, input);
@@ -616,39 +588,20 @@ export function createGeminiProvider(
           );
         }
         if (!res.body) {
-          throw new ModelHttpError(
-            502,
-            "missing response body for Gemini stream",
-            undefined,
-          );
+          throw new ModelHttpError(502, "missing response body for Gemini stream", undefined);
         }
-        const { content, toolCalls, usage } = await consumeGeminiStream(
-          res.body,
-          {
-            accumulateTools: false,
-            thinkingFormat: input.thinkingFormat,
-            onTextDelta: input.onTextDelta,
-          },
-        );
+        const { content, toolCalls, usage } = await consumeGeminiStream(res.body, {
+          accumulateTools: false,
+          thinkingFormat: input.thinkingFormat,
+          onTextDelta: input.onTextDelta,
+        });
         if (toolCalls.length > 0) {
-          throw new ModelHttpError(
-            502,
-            "unexpected functionCall in non-tool Gemini stream",
-            "",
-          );
+          throw new ModelHttpError(502, "unexpected functionCall in non-tool Gemini stream", "");
         }
         if (content === null) {
-          throw new ModelHttpError(
-            502,
-            "missing streamed assistant content",
-            "",
-          );
+          throw new ModelHttpError(502, "missing streamed assistant content", "");
         }
-        return {
-          content:
-            typeof content === "string" ? content : JSON.stringify(content),
-          usage,
-        };
+        return { content: typeof content === "string" ? content : JSON.stringify(content), usage };
       }
 
       const rawText = await res.text();
@@ -660,10 +613,7 @@ export function createGeminiProvider(
         );
       }
 
-      const text =
-        input.thinkingFormat === "xml-tags"
-          ? stripXmlThinkingTags(rawText)
-          : rawText;
+      const text = input.thinkingFormat === "xml-tags" ? stripXmlThinkingTags(rawText) : rawText;
       let json: unknown;
       try {
         json = JSON.parse(text);
@@ -675,10 +625,7 @@ export function createGeminiProvider(
         );
       }
 
-      const { content, toolCalls } = parseGeminiResponse(
-        json,
-        input.thinkingFormat,
-      );
+      const { content, toolCalls } = parseGeminiResponse(json, input.thinkingFormat);
       if (toolCalls.length > 0) {
         throw new ModelHttpError(
           502,
@@ -694,19 +641,14 @@ export function createGeminiProvider(
         );
       }
       return {
-        content:
-          typeof content === "string" ? content : JSON.stringify(content),
+        content: typeof content === "string" ? content : JSON.stringify(content),
         usage: extractGeminiUsage(json),
       };
     },
 
-    async completeWithTools(
-      input: ModelToolCompleteInput,
-    ): Promise<ModelToolCompleteOutput> {
+    async completeWithTools(input: ModelToolCompleteInput): Promise<ModelToolCompleteOutput> {
       const headers = buildHeaders();
-      const { systemInstruction, contents } = mapChatMessagesToGeminiPayload(
-        input.messages,
-      );
+      const { systemInstruction, contents } = mapChatMessagesToGeminiPayload(input.messages);
 
       if (!input.model) {
         throw new Error("Gemini completeWithTools requires input.model");
@@ -715,8 +657,7 @@ export function createGeminiProvider(
       const geminiTools = mapOpenAIToolsToGemini(input.tools);
 
       const body: Record<string, unknown> = { contents };
-      if (systemInstruction !== undefined)
-        body.systemInstruction = systemInstruction;
+      if (systemInstruction !== undefined) body.systemInstruction = systemInstruction;
       if (geminiTools) body.tools = geminiTools;
       const genConfig = buildGenerationConfig(input);
       if (genConfig) body.generationConfig = genConfig;
@@ -739,30 +680,18 @@ export function createGeminiProvider(
           );
         }
         if (!res.body) {
-          throw new ModelHttpError(
-            502,
-            "missing response body for Gemini stream",
-            undefined,
-          );
+          throw new ModelHttpError(502, "missing response body for Gemini stream", undefined);
         }
-        const { content, toolCalls, usage } = await consumeGeminiStream(
-          res.body,
-          {
-            accumulateTools: true,
-            thinkingFormat: input.thinkingFormat,
-            onTextDelta: input.onTextDelta,
-          },
-        );
+        const { content, toolCalls, usage } = await consumeGeminiStream(res.body, {
+          accumulateTools: true,
+          thinkingFormat: input.thinkingFormat,
+          onTextDelta: input.onTextDelta,
+        });
         if (toolCalls.length === 0 && (content === null || content === "")) {
-          throw new ModelHttpError(
-            502,
-            "missing assistant content and functionCall parts",
-            "",
-          );
+          throw new ModelHttpError(502, "missing assistant content and functionCall parts", "");
         }
         return {
-          content:
-            typeof content === "string" ? content : JSON.stringify(content),
+          content: typeof content === "string" ? content : JSON.stringify(content),
           toolCalls,
           usage,
         };
@@ -777,10 +706,7 @@ export function createGeminiProvider(
         );
       }
 
-      const text =
-        input.thinkingFormat === "xml-tags"
-          ? stripXmlThinkingTags(rawText)
-          : rawText;
+      const text = input.thinkingFormat === "xml-tags" ? stripXmlThinkingTags(rawText) : rawText;
       let json: unknown;
       try {
         json = JSON.parse(text);
@@ -792,10 +718,7 @@ export function createGeminiProvider(
         );
       }
 
-      const { content, toolCalls } = parseGeminiResponse(
-        json,
-        input.thinkingFormat,
-      );
+      const { content, toolCalls } = parseGeminiResponse(json, input.thinkingFormat);
       if (toolCalls.length === 0 && (content === null || content === "")) {
         throw new ModelHttpError(
           502,
@@ -804,8 +727,7 @@ export function createGeminiProvider(
         );
       }
       return {
-        content:
-          typeof content === "string" ? content : JSON.stringify(content),
+        content: typeof content === "string" ? content : JSON.stringify(content),
         toolCalls,
         usage: extractGeminiUsage(json),
       };
