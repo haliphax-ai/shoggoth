@@ -147,9 +147,13 @@ export async function runMediaCli(argv: string[]): Promise<void> {
 
   // --- models (no control socket needed) ---
   if (sub === "models") {
+    const config = loadLayeredConfig(configDir);
+    const operatorMap = config.mediaGeneration?.modelAdapterMap;
+    const merged = operatorMap ? { ...BUILTIN_MEDIA_MODELS, ...operatorMap } : BUILTIN_MEDIA_MODELS;
     const lines: string[] = [];
-    for (const [model, adapter] of Object.entries(BUILTIN_MEDIA_MODELS)) {
-      lines.push(`${model}  →  ${adapter}`);
+    for (const [model, adapter] of Object.entries(merged)) {
+      const source = BUILTIN_MEDIA_MODELS[model] ? "" : "  (config)";
+      lines.push(`${model}  →  ${adapter}${source}`);
     }
     console.log(lines.join("\n"));
     return;

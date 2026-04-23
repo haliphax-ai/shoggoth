@@ -7,8 +7,9 @@ vi.mock("@shoggoth/daemon/lib", () => ({
   invokeControlRequest: (...args: unknown[]) => mockInvoke(...args),
 }));
 
+const mockLoadLayeredConfig = vi.fn().mockReturnValue({ socketPath: "/tmp/test.sock" });
 vi.mock("@shoggoth/shared", () => ({
-  loadLayeredConfig: () => ({ socketPath: "/tmp/test.sock" }),
+  loadLayeredConfig: (...args: unknown[]) => mockLoadLayeredConfig(...args),
   LAYOUT: { configDir: "/tmp/cfg" },
   VERSION: "0.0.0-test",
 }));
@@ -34,6 +35,7 @@ beforeEach(() => {
   process.env.SHOGGOTH_OPERATOR_TOKEN = "test-token";
   process.env.SHOGGOTH_CONTROL_SOCKET = "/tmp/test.sock";
   mockInvoke.mockReset();
+  mockLoadLayeredConfig.mockReset().mockReturnValue({ socketPath: "/tmp/test.sock" });
 });
 
 afterEach(() => {
@@ -338,6 +340,25 @@ describe("runMediaCli models", () => {
   it("does not call control socket", async () => {
     await runMediaCli(["models"]);
     assert.strictEqual(mockInvoke.mock.calls.length, 0);
+  });
+
+  it("includes operator-configured models from mediaGeneration.modelAdapterMap", async () => {
+    mockLoadLayeredConfig.mockReturnValue({
+      socketPath: "/tmp/test.sock",
+      mediaGeneration: {
+        modelAdapterMap: {
+          "my-custom-model": "generateContent",
+        },
+      },
+    });
+
+    await runMediaCli(["models"]);
+
+    const output = logged.join("\n");
+    assert.ok(output.includes("my-custom-model"), `Expected my-custom-model in output: ${output}`);
+    assert.ok(output.includes("(config)"), `Expected (config) tag for operator model: ${output}`);
+    // Built-in models should still be present
+    assert.ok(output.includes("gemini-2.5-flash-image"), `Expected built-in model: ${output}`);
   });
 });
 
