@@ -7,7 +7,7 @@ completed: never
 
 ## Summary
 
-Store inbound platform attachments as files in the agent's workspace (`media/inbound/`) instead of (or in addition to) base64-inlining them into the model's context. A new `attachmentHandling` config controls the behavior at global and per-agent levels with three modes: `download` (default), `inline`, and `hybrid`.
+Store inbound platform attachments as files in the agent's workspace (`media/inbound/`) instead of (or in addition to) base64-inlining them into the model's context. A new `platforms.attachmentHandling` config controls the behavior at global and per-agent levels with three modes: `download` (default), `inline`, and `hybrid`.
 
 ## Motivation
 
@@ -32,9 +32,30 @@ Three modes, configurable globally and per-agent:
 
 ### Config schema
 
-New optional section `attachmentHandling` at the top level and per-agent:
+New optional `attachmentHandling` section under `platforms` (global) and `agents.list.<id>.platforms` (per-agent):
 
-`jsonc\n{\n  // Global default\n  "attachmentHandling": {\n    "mode": "download" // "download" | "inline" | "hybrid"\n  },\n  // Per-agent override\n  "agents": {\n    "list": {\n      "my-agent": {\n        "attachmentHandling": {\n          "mode": "hybrid"\n        }\n      }\n    }\n  }\n}\n`
+```jsonc
+{
+  // Global default
+  "platforms": {
+    "attachmentHandling": {
+      "mode": "download", // "download" | "inline" | "hybrid"
+    },
+  },
+  // Per-agent override
+  "agents": {
+    "list": {
+      "my-agent": {
+        "platforms": {
+          "attachmentHandling": {
+            "mode": "hybrid",
+          },
+        },
+      },
+    },
+  },
+}
+```
 
 Per-agent config takes precedence over global. When neither is set, the default is `download`.
 
@@ -136,7 +157,7 @@ The download logic lives in the daemon's presentation layer, not in `platform-di
 
 ## Migration
 
-No database migration. The `attachmentHandling` config section is new and optional — omitting it preserves the new default (`download`). To restore the previous behavior exactly, set `mode: inline`. The `media/inbound/` directory is created automatically by the workspace layout on next boot.
+No database migration. The `platforms.attachmentHandling` config section is new and optional — omitting it preserves the new default (`download`). To restore the previous behavior exactly, set `mode: inline`. The `media/inbound/` directory is created automatically by the workspace layout on next boot.
 
 ## References
 

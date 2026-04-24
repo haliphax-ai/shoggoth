@@ -14,18 +14,24 @@ interface AttachmentHandlingConfig {
 }
 ```
 
-Added to `ShoggothConfig`:
+Added to `ShoggothConfig` under `platforms`:
 
 ```ts
 interface ShoggothConfig {
   // ... existing fields
-  attachmentHandling?: AttachmentHandlingConfig;
+  platforms?: {
+    // ... existing fields
+    attachmentHandling?: AttachmentHandlingConfig;
+  };
   agents?: {
     list?: Record<
       string,
       {
         // ... existing fields
-        attachmentHandling?: AttachmentHandlingConfig;
+        platforms?: {
+          // ... existing fields
+          attachmentHandling?: AttachmentHandlingConfig;
+        };
       }
     >;
   };
@@ -107,7 +113,8 @@ function formatAttachmentMetadata(attachments: readonly MessageAttachment[]): st
 
 /**
  * Resolve the effective attachment handling mode for a session.
- * Per-agent config takes precedence over global. Default: "download".
+ * Per-agent platforms.attachmentHandling takes precedence over
+ * global platforms.attachmentHandling. Default: "download".
  */
 function resolveAttachmentHandlingMode(
   config: ShoggothConfig,
@@ -124,6 +131,15 @@ function resolveAttachmentHandlingMode(
 const attachmentHandlingSchema = z
   .object({
     mode: z.enum(["download", "inline", "hybrid"]).default("download"),
+  })
+  .strict()
+  .optional();
+
+// Added to the platforms schema (global and per-agent)
+const platformsSchema = z
+  .object({
+    // ... existing fields
+    attachmentHandling: attachmentHandlingSchema,
   })
   .strict()
   .optional();
@@ -153,7 +169,52 @@ workspace/
 
 ### Config examples
 
-`jsonc\n// Default: download only (no inlining)\n{\n  "attachmentHandling": {\n    "mode": "download"\n  }\n}\n\n// Restore previous behavior (base64 inline, no file on disk)\n{\n  "attachmentHandling": {\n    "mode": "inline"\n  }\n}\n\n// Per-agent: vision-heavy agent gets hybrid, others get download\n{\n  "attachmentHandling": {\n    "mode": "download"\n  },\n  "agents": {\n    "list": {\n      "vision-agent": {\n        "attachmentHandling": {\n          "mode": "hybrid"\n        }\n      },\n      "file-processor": {\n        "attachmentHandling": {\n          "mode": "download"\n        }\n      }\n    }\n  }\n}\n`
+```jsonc
+// Default: download only (no inlining)
+{
+  "platforms": {
+    "attachmentHandling": {
+      "mode": "download"
+    }
+  }
+}
+
+// Restore previous behavior (base64 inline, no file on disk)
+{
+  "platforms": {
+    "attachmentHandling": {
+      "mode": "inline"
+    }
+  }
+}
+
+// Per-agent: vision-heavy agent gets hybrid, others get download
+{
+  "platforms": {
+    "attachmentHandling": {
+      "mode": "download"
+    }
+  },
+  "agents": {
+    "list": {
+      "vision-agent": {
+        "platforms": {
+          "attachmentHandling": {
+            "mode": "hybrid"
+          }
+        }
+      },
+      "file-processor": {
+        "platforms": {
+          "attachmentHandling": {
+            "mode": "download"
+          }
+        }
+      }
+    }
+  }
+}
+```
 
 ### Turn orchestrator integration sketch
 

@@ -2,15 +2,14 @@
 
 ## Phase 1: Config schema and mode resolution
 
-Add the `attachmentHandling` config section and the function to resolve the effective mode for a session.
+Add the `platforms.attachmentHandling` config section and the function to resolve the effective mode for a session.\n\n- Add `attachmentHandlingSchema` to the platforms schema in shared config (global and per-agent)
 
-- Add `attachmentHandlingSchema` to the shared config schema (global and per-agent)
 - Add `resolveAttachmentHandlingMode` function that checks per-agent config first, falls back to global, defaults to `download`
 - Unit tests for resolution logic: per-agent wins, global fallback, default when unset, invalid values rejected by zod
 
 **Files:**
 
-- `packages/shared/src/schema.ts` — add `attachmentHandlingSchema` to config and per-agent config
+- `packages/shared/src/schema.ts` — add `attachmentHandlingSchema` to platforms schema (global and per-agent)
 - `packages/daemon/src/presentation/attachment-mode.ts` (new) — `resolveAttachmentHandlingMode`
 - `packages/daemon/test/presentation/attachment-mode.test.ts` (new) — resolution tests
 
@@ -68,8 +67,8 @@ Wire the mode resolution, download step, and conditional image block injection i
 
 Update docs and add config validation tests.
 
-- Update `docs/shared.md` or relevant config docs with `attachmentHandling` section
-- Add config hot-reload support for `attachmentHandling` (mode changes take effect on next inbound message, no restart required)
+- Update `docs/shared.md` or relevant config docs with `platforms.attachmentHandling` section
+- Add config hot-reload support for `platforms.attachmentHandling` (mode changes take effect on next inbound message, no restart required)
 - End-to-end validation: config with all three modes parses correctly, dynamic config update works
 
 **Files:**
