@@ -9,11 +9,30 @@ interface LongRunningRequest extends MediaAdapterRequest {
   timeout_ms?: number;
 }
 
+function inferImageMimeType(filePath: string): string {
+  const ext = filePath.split(".").pop()?.toLowerCase();
+  switch (ext) {
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "webp":
+      return "image/webp";
+    case "gif":
+      return "image/gif";
+    default:
+      return "image/png";
+  }
+}
+
 function buildRequestBody(req: MediaAdapterRequest, inputImageBase64?: string) {
   const instance: Record<string, unknown> = { prompt: req.prompt };
 
   if (inputImageBase64) {
-    instance.referenceImage = { bytesBase64Encoded: inputImageBase64 };
+    const mimeType =
+      req.params.kind === "video" && req.params.input_image
+        ? inferImageMimeType(req.params.input_image)
+        : "image/png";
+    instance.image = { bytesBase64Encoded: inputImageBase64, mimeType };
   }
 
   const parameters: Record<string, unknown> = {};

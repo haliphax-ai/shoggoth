@@ -234,8 +234,18 @@ describe("longRunningAdapter", () => {
     const body = JSON.parse(opts.body);
     const instance = body.instances[0];
     assert.ok(
-      instance.image?.bytesBase64Encoded || instance.referenceImage?.bytesBase64Encoded,
-      "instance should include image data for image-to-video reference frame",
+      instance.image?.bytesBase64Encoded,
+      "instance should include image.bytesBase64Encoded for first-frame conditioning",
+    );
+    assert.strictEqual(
+      instance.image?.mimeType,
+      "image/png",
+      "instance.image should include mimeType",
+    );
+    assert.strictEqual(
+      instance.referenceImage,
+      undefined,
+      "should NOT use the legacy referenceImage field",
     );
   });
 
