@@ -75,10 +75,31 @@ export function initLogger(opts?: { minLevel?: LogLevel }): Logger {
   return _root;
 }
 
-/** Get a child logger scoped to a component. Safe to call at module level. */
+/**
+ * Get a child logger scoped to a component. Safe to call at module level.
+ *
+ * Returns a lazy proxy so that module-level `const log = getLogger("x")`
+ * always delegates to the current root logger. This avoids the init-order
+ * bug where a child created before `initLogger()` permanently captures the
+ * default "info" minLevel and silently drops debug messages.
+ */
 export function getLogger(component: string): Logger {
-  if (!_root) _root = createLogger({ component: "shoggoth" });
-  return _root.child({ component });
+  function current(): Logger {
+    if (!_root) _root = createLogger({ component: "shoggoth" });
+    return _root;
+  }
+
+  function makeProxy(fields: LogFields): Logger {
+    return {
+      debug: (msg, f) => current().child(fields).debug(msg, f),
+      info: (msg, f) => current().child(fields).info(msg, f),
+      warn: (msg, f) => current().child(fields).warn(msg, f),
+      error: (msg, f) => current().child(fields).error(msg, f),
+      child: (extra) => makeProxy({ ...fields, ...extra }),
+    };
+  }
+
+  return makeProxy({ component });
 }
 
 /** Replace the root logger (for testing). */
