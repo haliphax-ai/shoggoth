@@ -21,11 +21,11 @@ export interface MessageToolDeps {
   readonly sessionToGuild?: (sessionId: string) => string | undefined;
   readonly downloadFile?: (url: string, destPath: string) => Promise<number>;
   readonly getSessionWorkspace?: (sessionId: string) => string | undefined;
+  readonly readWorkspaceFile?: (sessionId: string, relativePath: string) => Promise<Buffer>;
 }
 
 function str(v: unknown, field: string): string {
-  if (typeof v !== "string" || !v.trim())
-    throw new Error(`${field} must be a non-empty string`);
+  if (typeof v !== "string" || !v.trim()) throw new Error(`${field} must be a non-empty string`);
   return v.trim();
 }
 
@@ -35,9 +35,7 @@ function optStr(v: unknown): string | undefined {
   return t || undefined;
 }
 
-export function summarizeApiMessage(
-  raw: Record<string, unknown>,
-): Record<string, unknown> {
+export function summarizeApiMessage(raw: Record<string, unknown>): Record<string, unknown> {
   const author = raw.author;
   let authorId: string | undefined;
   let authorUsername: string | undefined;
@@ -75,14 +73,12 @@ export function summarizeApiMessage(
 }
 
 function clampGetLimit(v: unknown): number {
-  if (typeof v === "number" && Number.isFinite(v))
-    return Math.min(100, Math.max(1, Math.trunc(v)));
+  if (typeof v === "number" && Number.isFinite(v)) return Math.min(100, Math.max(1, Math.trunc(v)));
   return 10;
 }
 
 function clampSearchLimit(v: unknown): number {
-  if (typeof v === "number" && Number.isFinite(v))
-    return Math.min(25, Math.max(1, Math.trunc(v)));
+  if (typeof v === "number" && Number.isFinite(v)) return Math.min(25, Math.max(1, Math.trunc(v)));
   return 25;
 }
 
@@ -102,18 +98,21 @@ function decodeBase64File(raw: string, filename: string): MessageUploadFile {
   try {
     b = Buffer.from(raw, "base64");
   } catch {
-    throw new Error(
-      `attachments[].content_base64 for ${filename} is not valid base64`,
-    );
+    throw new Error(`attachments[].content_base64 for ${filename} is not valid base64`);
   }
   if (b.length === 0)
-    throw new Error(
-      `attachments[].content_base64 for ${filename} decoded to empty buffer`,
-    );
+    throw new Error(`attachments[].content_base64 for ${filename} decoded to empty buffer`);
   const max = 24 * 1024 * 1024;
-  if (b.length > max)
-    throw new Error(`attachment ${filename} exceeds size limit`);
+  if (b.length > max) throw new Error(`attachment ${filename} exceeds size limit`);
   return { filename, data: new Uint8Array(b) };
+}
+
+function decodePathFile(buf: Buffer, filename: string): MessageUploadFile {
+  if (buf.length === 0)
+    throw new Error(`attachments[].content_path for ${filename} read empty file`);
+  const max = 24 * 1024 * 1024;
+  if (buf.length > max) throw new Error(`attachment ${filename} exceeds size limit`);
+  return { filename, data: new Uint8Array(buf) };
 }
 
 export async function executeMessageToolAction(
@@ -126,22 +125,19 @@ export async function executeMessageToolAction(
   const boundChannel = deps.sessionToChannel(sid);
 
   const action = args.action;
-  if (typeof action !== "string" || !action.trim())
-    return { ok: false, error: "action required" };
+  if (typeof action !== "string" || !action.trim()) return { ok: false, error: "action required" };
   const a = action.trim();
   const { capabilities: caps, transport: t } = deps;
   const x = caps.extensions;
 
   try {
     if (a === "get") {
-      if (!x.messageGet)
-        return { ok: false, error: "get not supported on this platform" };
+      if (!x.messageGet) return { ok: false, error: "get not supported on this platform" };
       const targetChannel = optStr(args.channel_id) ?? boundChannel;
       if (!targetChannel) {
         return {
           ok: false,
-          error:
-            "get needs a channel: set channel_id or use a session bound to a channel",
+          error: "get needs a channel: set channel_id or use a session bound to a channel",
           sessionId: sid,
         };
       }
@@ -162,8 +158,7 @@ export async function executeMessageToolAction(
         if (dirRaw !== "before" && dirRaw !== "after" && dirRaw !== "around") {
           return {
             ok: false,
-            error:
-              "anchor_message_id requires list_direction: before | after | around",
+            error: "anchor_message_id requires list_direction: before | after | around",
           };
         }
         const q: {
@@ -197,8 +192,7 @@ export async function executeMessageToolAction(
       };
     }
 
-    if (!boundChannel)
-      return { ok: false, error: "no_channel_for_session", sessionId: sid };
+    if (!boundChannel) return { ok: false, error: "no_channel_for_session", sessionId: sid };
     const channelId = boundChannel;
 
     if (a === "post") {
@@ -218,20 +212,43 @@ export async function executeMessageToolAction(
             ok: false,
             error: "attachments not supported on this platform",
           };
-        if (!Array.isArray(attRaw))
-          return { ok: false, error: "attachments must be an array" };
+        if (!Array.isArray(attRaw)) return { ok: false, error: "attachments must be an array" };
         for (const row of attRaw) {
           if (row === null || typeof row !== "object" || Array.isArray(row))
             return { ok: false, error: "each attachment must be an object" };
           const o = row as Record<string, unknown>;
           const filename = str(o.filename, "attachments[].filename");
-          const b64 = o.content_base64;
-          if (typeof b64 !== "string" || !b64.trim())
+          const b64 = optStr(o.content_base64);
+          const path = optStr(o.content_path);
+
+          // Mutually exclusive: exactly one of content_base64 or content_path required
+          if (b64 && path) {
             return {
               ok: false,
-              error: "attachments[].content_base64 required",
+              error: "attachments[]: content_base64 and content_path are mutually exclusive",
             };
-          files.push(decodeBase64File(b64.trim(), filename));
+          }
+          if (!b64 && !path) {
+            return {
+              ok: false,
+              error: "attachments[]: either content_base64 or content_path is required",
+            };
+          }
+
+          if (path) {
+            // Read from workspace path
+            if (!deps.readWorkspaceFile) {
+              return {
+                ok: false,
+                error: "attachments[].content_path requires readWorkspaceFile handler",
+              };
+            }
+            const buf = await deps.readWorkspaceFile(sid, path);
+            files.push(decodePathFile(buf, filename));
+          } else {
+            // Use base64
+            files.push(decodeBase64File(b64!, filename));
+          }
         }
       }
       if (!content && files.length === 0)
@@ -250,8 +267,7 @@ export async function executeMessageToolAction(
     }
 
     if (a === "edit") {
-      if (!x.messageEdit)
-        return { ok: false, error: "edit not supported on this platform" };
+      if (!x.messageEdit) return { ok: false, error: "edit not supported on this platform" };
       const messageId = str(args.message_id, "message_id");
       const content = typeof args.content === "string" ? args.content : "";
       await t.editMessage(channelId, messageId, { content });
@@ -259,8 +275,7 @@ export async function executeMessageToolAction(
     }
 
     if (a === "delete") {
-      if (!x.messageDelete)
-        return { ok: false, error: "delete not supported on this platform" };
+      if (!x.messageDelete) return { ok: false, error: "delete not supported on this platform" };
       const messageId = str(args.message_id, "message_id");
       await t.deleteMessage(channelId, messageId);
       return { ok: true, message_id: messageId, channel_id: channelId };
@@ -280,17 +295,14 @@ export async function executeMessageToolAction(
         if (dur !== 60 && dur !== 1440 && dur !== 4320 && dur !== 10080) {
           return {
             ok: false,
-            error:
-              "auto_archive_duration_minutes must be one of 60, 1440, 4320, 10080",
+            error: "auto_archive_duration_minutes must be one of 60, 1440, 4320, 10080",
           };
         }
         auto_archive_duration = dur;
       }
       const { id } = await t.createThreadFromMessage(channelId, messageId, {
         name,
-        ...(auto_archive_duration !== undefined
-          ? { auto_archive_duration }
-          : {}),
+        ...(auto_archive_duration !== undefined ? { auto_archive_duration } : {}),
       });
       return {
         ok: true,
@@ -312,8 +324,7 @@ export async function executeMessageToolAction(
     }
 
     if (a === "react") {
-      if (!x.react)
-        return { ok: false, error: "react not supported on this platform" };
+      if (!x.react) return { ok: false, error: "react not supported on this platform" };
       const messageId = str(args.message_id, "message_id");
       const emoji = str(args.emoji, "emoji");
       const remove = args.remove === true;
@@ -329,8 +340,7 @@ export async function executeMessageToolAction(
     }
 
     if (a === "choice") {
-      if (!x.react)
-        return { ok: false, error: "choice not supported on this platform" };
+      if (!x.react) return { ok: false, error: "choice not supported on this platform" };
       const choicesRaw = args.choices;
       if (!Array.isArray(choicesRaw) || choicesRaw.length === 0) {
         return {
@@ -356,14 +366,11 @@ export async function executeMessageToolAction(
           };
         choices.push({ emoji, label });
       }
-      const preamble =
-        typeof args.content === "string" ? args.content.trim() : "";
+      const preamble = typeof args.content === "string" ? args.content.trim() : "";
       const legendLines = choices.map((c) => `${c.emoji} ${c.label}`);
-      const body = [
-        ...(preamble ? [preamble, ""] : []),
-        "React to choose:",
-        ...legendLines,
-      ].join("\n");
+      const body = [...(preamble ? [preamble, ""] : []), "React to choose:", ...legendLines].join(
+        "\n",
+      );
       const { id } = await t.createMessage(channelId, { content: body });
       for (const c of choices) {
         try {
@@ -381,16 +388,11 @@ export async function executeMessageToolAction(
     }
 
     if (a === "reactions") {
-      if (!x.reactions)
-        return { ok: false, error: "reactions not supported on this platform" };
+      if (!x.reactions) return { ok: false, error: "reactions not supported on this platform" };
       const messageId = str(args.message_id, "message_id");
       const emojiFilter = optStr(args.emoji);
       if (emojiFilter) {
-        const users = await t.getMessageReactions(
-          channelId,
-          messageId,
-          emojiFilter,
-        );
+        const users = await t.getMessageReactions(channelId, messageId, emojiFilter);
         const summarized = users.map((u) => ({
           id: typeof u.id === "string" ? u.id : undefined,
           username: typeof u.username === "string" ? u.username : undefined,
@@ -400,19 +402,15 @@ export async function executeMessageToolAction(
           ok: true,
           message_id: messageId,
           channel_id: channelId,
-          reactions: [
-            { emoji: emojiFilter, count: summarized.length, users: summarized },
-          ],
+          reactions: [{ emoji: emojiFilter, count: summarized.length, users: summarized }],
         };
       }
       const raw = await t.getMessage(channelId, messageId);
       const rawReactions = Array.isArray(raw.reactions) ? raw.reactions : [];
       const reactions = rawReactions.map((r: Record<string, unknown>) => {
         const emojiObj = r.emoji as Record<string, unknown> | undefined;
-        const name =
-          emojiObj && typeof emojiObj.name === "string" ? emojiObj.name : "?";
-        const emojiId =
-          emojiObj && typeof emojiObj.id === "string" ? emojiObj.id : undefined;
+        const name = emojiObj && typeof emojiObj.name === "string" ? emojiObj.name : "?";
+        const emojiId = emojiObj && typeof emojiObj.id === "string" ? emojiObj.id : undefined;
         return {
           emoji: emojiId ? `${name}:${emojiId}` : name,
           count: typeof r.count === "number" ? r.count : 0,
@@ -428,14 +426,12 @@ export async function executeMessageToolAction(
     }
 
     if (a === "search") {
-      if (!x.search)
-        return { ok: false, error: "search not supported on this platform" };
+      if (!x.search) return { ok: false, error: "search not supported on this platform" };
       const guildId = deps.sessionToGuild?.(sid);
       if (!guildId)
         return {
           ok: false,
-          error:
-            "search requires a guild context; not available for DM sessions",
+          error: "search requires a guild context; not available for DM sessions",
         };
 
       const query = optStr(args.query);
@@ -448,10 +444,7 @@ export async function executeMessageToolAction(
       const channelIdsRaw = args.channel_ids;
 
       let authorIds: string[] | undefined;
-      if (
-        authorId ||
-        (Array.isArray(authorIdsRaw) && authorIdsRaw.length > 0)
-      ) {
+      if (authorId || (Array.isArray(authorIdsRaw) && authorIdsRaw.length > 0)) {
         authorIds = [];
         if (authorId) authorIds.push(authorId);
         if (Array.isArray(authorIdsRaw)) {
@@ -463,8 +456,7 @@ export async function executeMessageToolAction(
       if (fromMe === true && !authorIds) {
         return {
           ok: false,
-          error:
-            "from_me requires the bot's own user id; pass it via author_id instead",
+          error: "from_me requires the bot's own user id; pass it via author_id instead",
         };
       }
 
@@ -479,8 +471,7 @@ export async function executeMessageToolAction(
 
       const searchResult = await t.searchMessages(guildId, {
         content: query,
-        author_id:
-          authorIds && authorIds.length === 1 ? authorIds[0] : authorIds,
+        author_id: authorIds && authorIds.length === 1 ? authorIds[0] : authorIds,
         channel_id: channelIds.length === 1 ? channelIds[0] : channelIds,
         min_id: after,
         max_id: before,
@@ -518,9 +509,7 @@ export async function executeMessageToolAction(
       const destPath = optStr(args.path);
 
       const raw = await t.getMessage(channelId, messageId);
-      const rawAttachments = Array.isArray(raw.attachments)
-        ? raw.attachments
-        : [];
+      const rawAttachments = Array.isArray(raw.attachments) ? raw.attachments : [];
       if (rawAttachments.length === 0)
         return {
           ok: false,
@@ -547,9 +536,7 @@ export async function executeMessageToolAction(
         }
       } else {
         const idx =
-          typeof indexRaw === "number" && Number.isFinite(indexRaw)
-            ? Math.trunc(indexRaw)
-            : 0;
+          typeof indexRaw === "number" && Number.isFinite(indexRaw) ? Math.trunc(indexRaw) : 0;
         if (idx < 0 || idx >= rawAttachments.length) {
           return {
             ok: false,
@@ -560,20 +547,14 @@ export async function executeMessageToolAction(
         attachment = rawAttachments[idx] as Record<string, unknown>;
       }
 
-      const url =
-        typeof attachment!.url === "string" ? attachment!.url : undefined;
+      const url = typeof attachment!.url === "string" ? attachment!.url : undefined;
       if (!url) return { ok: false, error: "attachment has no URL" };
 
       const filename =
-        typeof attachment!.filename === "string"
-          ? attachment!.filename
-          : "attachment";
+        typeof attachment!.filename === "string" ? attachment!.filename : "attachment";
       const contentType =
-        typeof attachment!.content_type === "string"
-          ? attachment!.content_type
-          : undefined;
-      const sizeBytes =
-        typeof attachment!.size === "number" ? attachment!.size : undefined;
+        typeof attachment!.content_type === "string" ? attachment!.content_type : undefined;
+      const sizeBytes = typeof attachment!.size === "number" ? attachment!.size : undefined;
 
       const maxSize = 25 * 1024 * 1024;
       if (sizeBytes !== undefined && sizeBytes > maxSize) {
@@ -589,8 +570,7 @@ export async function executeMessageToolAction(
       let finalPath = destPath ?? safeName;
       if (finalPath && !finalPath.startsWith("/")) {
         const workspace = deps.getSessionWorkspace?.(sid);
-        if (workspace)
-          finalPath = `${workspace.replace(/\/+$/, "")}/${finalPath}`;
+        if (workspace) finalPath = `${workspace.replace(/\/+$/, "")}/${finalPath}`;
       }
 
       const bytesWritten = await deps.downloadFile(url, finalPath);

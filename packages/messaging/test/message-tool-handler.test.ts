@@ -37,9 +37,7 @@ function allCaps(): MessagingAdapterCapabilities {
   };
 }
 
-function mockTransport(
-  overrides?: Partial<MessageToolTransport>,
-): MessageToolTransport {
+function mockTransport(overrides?: Partial<MessageToolTransport>): MessageToolTransport {
   return {
     async createMessage() {
       return { id: "x" };
@@ -128,6 +126,116 @@ describe("executeMessageToolAction", () => {
     assert.equal(multipart, true);
   });
 
+  it("post: content_path reads file from workspace", async () => {
+    let capturedPath: string | undefined;
+    const transport = mockTransport({
+      async createMessageWithFiles(_ch, _body, files) {
+        capturedPath = Buffer.from(files[0]?.data ?? new Uint8Array()).toString();
+        return { id: "m3" };
+      },
+    });
+    const r = await executeMessageToolAction(
+      {
+        capabilities: caps,
+        transport,
+        sessionToChannel: () => "chan-c",
+        readWorkspaceFile: async (_sid, path) => {
+          return Buffer.from(`file content from ${path}`);
+        },
+      },
+      "sess",
+      {
+        action: "post",
+        content: "with file",
+        attachments: [{ filename: "readme.txt", content_path: "docs/readme.txt" }],
+      },
+    );
+    assert.equal((r as { ok: boolean }).ok, true);
+    assert.equal(capturedPath, "file content from docs/readme.txt");
+  });
+
+  it("post: content_path enforces 24MB size limit", async () => {
+    const transport = mockTransport({
+      async createMessageWithFiles() {
+        throw new Error("should not be called");
+      },
+    });
+    const r = await executeMessageToolAction(
+      {
+        capabilities: caps,
+        transport,
+        sessionToChannel: () => "chan-c",
+        readWorkspaceFile: async () => {
+          // Create a buffer larger than 24MB
+          return Buffer.alloc(25 * 1024 * 1024);
+        },
+      },
+      "sess",
+      {
+        action: "post",
+        attachments: [{ filename: "big.bin", content_path: "big.bin" }],
+      },
+    );
+    assert.equal((r as { ok: boolean }).ok, false);
+    assert.ok((r as { error: string }).error.includes("exceeds size limit"));
+  });
+
+  it("post: error when both content_base64 and content_path provided", async () => {
+    const transport = mockTransport();
+    const r = await executeMessageToolAction(
+      {
+        capabilities: caps,
+        transport,
+        sessionToChannel: () => "chan-c",
+        readWorkspaceFile: async () => Buffer.from("x"),
+      },
+      "sess",
+      {
+        action: "post",
+        attachments: [{ filename: "f.txt", content_base64: "YWI=", content_path: "f.txt" }],
+      },
+    );
+    assert.equal((r as { ok: boolean }).ok, false);
+    assert.ok((r as { error: string }).error.includes("mutually exclusive"));
+  });
+
+  it("post: error when neither content_base64 nor content_path provided", async () => {
+    const transport = mockTransport();
+    const r = await executeMessageToolAction(
+      {
+        capabilities: caps,
+        transport,
+        sessionToChannel: () => "chan-c",
+      },
+      "sess",
+      {
+        action: "post",
+        attachments: [{ filename: "f.txt" }],
+      },
+    );
+    assert.equal((r as { ok: boolean }).ok, false);
+    assert.ok((r as { error: string }).error.includes("either content_base64 or content_path"));
+  });
+
+  it("post: error when content_path used but readWorkspaceFile not wired", async () => {
+    const transport = mockTransport();
+    const r = await executeMessageToolAction(
+      {
+        capabilities: caps,
+        transport,
+        sessionToChannel: () => "chan-c",
+        // readWorkspaceFile not provided
+      },
+      "sess",
+      {
+        action: "post",
+        attachments: [{ filename: "f.txt", content_path: "f.txt" }],
+      },
+    );
+    assert.equal((r as { ok: boolean }).ok, false);
+    assert.ok((r as { error: string }).error.includes("readWorkspaceFile handler"));
+  });
+
   it("rejects attachments when capability off", async () => {
     const transport = mockTransport();
     const noAtt = {
@@ -177,9 +285,7 @@ describe("executeMessageToolAction", () => {
       { action: "get", message_id: "snow1" },
     );
     assert.equal((r as { ok: boolean }).ok, true);
-    const msgs = (
-      r as { messages: { content: string; attachment_count: number }[] }
-    ).messages;
+    const msgs = (r as { messages: { content: string; attachment_count: number }[] }).messages;
     assert.equal(msgs.length, 1);
     assert.equal(msgs[0]!.content, "hello");
     assert.equal(msgs[0]!.attachment_count, 1);
@@ -355,9 +461,8 @@ describe("executeMessageToolAction", () => {
       { action: "reactions", message_id: "m1", emoji: "✅" },
     );
     assert.equal((r as { ok: boolean }).ok, true);
-    const reactions = (
-      r as { reactions: { emoji: string; count: number; users: unknown[] }[] }
-    ).reactions;
+    const reactions = (r as { reactions: { emoji: string; count: number; users: unknown[] }[] })
+      .reactions;
     assert.equal(reactions.length, 1);
     assert.equal(reactions[0]!.emoji, "✅");
     assert.equal(reactions[0]!.count, 2);
@@ -385,9 +490,8 @@ describe("executeMessageToolAction", () => {
       "sess",
       { action: "reactions", message_id: "m1" },
     );
-    const reactions = (
-      r as { reactions: { emoji: string; count: number; me: boolean }[] }
-    ).reactions;
+    const reactions = (r as { reactions: { emoji: string; count: number; me: boolean }[] })
+      .reactions;
     assert.equal(reactions.length, 2);
     assert.equal(reactions[0]!.emoji, "✅");
     assert.equal(reactions[1]!.emoji, "fire:12345");
@@ -507,10 +611,7 @@ describe("executeMessageToolAction", () => {
       "sess",
       { action: "search", query: "hello" },
     );
-    assert.equal(
-      (capturedQuery as { channel_id: string }).channel_id,
-      "bound-ch",
-    );
+    assert.equal((capturedQuery as { channel_id: string }).channel_id, "bound-ch");
   });
 
   // --- attachment-download ---
@@ -720,9 +821,7 @@ describe("executeMessageToolAction", () => {
           content: "",
           timestamp: "t",
           author: {},
-          attachments: [
-            { id: "a1", filename: "f.txt", url: "https://cdn/f.txt", size: 10 },
-          ],
+          attachments: [{ id: "a1", filename: "f.txt", url: "https://cdn/f.txt", size: 10 }],
         };
       },
     });

@@ -46,7 +46,7 @@ export function buildMessageToolDescriptor(
       type: "string",
       enum: actions,
       description:
-        "get: read message(s). post/edit/delete/create_thread/delete_thread: message CRUD. react: add/remove emoji reaction. choice: post a reaction-based choice prompt with seeded emoji. reactions: read reactions on a message. search: filtered message fetch by keyword/author/time. attachment-download: download a file attachment. Only actions supported by the current platform appear in action's enum.",
+        "get: read message(s). post/edit/delete/create_thread/delete_thread: message CRUD. react: add/remove emoji reaction. choice: post a reaction-based choice prompt with seeded emoji. reactions: read reactions on a message. search: filtered message fetch by keyword/author/time. attachment-download: download a file attachment. Only actions supported by the current platform appear in action's enum. Regular assistant replies are delivered by the platform and do not use this tool.",
     },
     content: {
       type: "string",
@@ -103,14 +103,19 @@ export function buildMessageToolDescriptor(
   if (slice.attachments) {
     properties.attachments = {
       type: "array",
-      description: "post only: optional files as base64.",
+      description: "post only: optional files as base64 or by workspace path.",
       items: {
         type: "object",
         properties: {
           filename: { type: "string" },
           content_base64: { type: "string" },
+          content_path: {
+            type: "string",
+            description:
+              "Workspace-relative path to file to attach. Mutually exclusive with content_base64.",
+          },
         },
-        required: ["filename", "content_base64"],
+        required: ["filename"],
       },
     };
   }
@@ -133,20 +138,17 @@ export function buildMessageToolDescriptor(
   if (slice.react) {
     properties.remove = {
       type: "boolean",
-      description:
-        "react only: if true, remove the reaction instead of adding it. Default false.",
+      description: "react only: if true, remove the reaction instead of adding it. Default false.",
     };
     properties.choices = {
       type: "array",
-      description:
-        "choice only: array of emoji + label pairs for the reaction choice prompt.",
+      description: "choice only: array of emoji + label pairs for the reaction choice prompt.",
       items: {
         type: "object",
         properties: {
           emoji: {
             type: "string",
-            description:
-              "Emoji for this choice (Unicode or platform shortcode).",
+            description: "Emoji for this choice (Unicode or platform shortcode).",
           },
           label: { type: "string", description: "Label text for this choice." },
         },
@@ -172,24 +174,20 @@ export function buildMessageToolDescriptor(
     };
     properties.before = {
       type: "string",
-      description:
-        "search: only messages before this message id or ISO timestamp.",
+      description: "search: only messages before this message id or ISO timestamp.",
     };
     properties.after = {
       type: "string",
-      description:
-        "search: only messages after this message id or ISO timestamp.",
+      description: "search: only messages after this message id or ISO timestamp.",
     };
     properties.from_me = {
       type: "boolean",
-      description:
-        "search: filter to messages sent by the bot/agent itself (requires author_id).",
+      description: "search: filter to messages sent by the bot/agent itself (requires author_id).",
     };
     properties.channel_ids = {
       type: "array",
       items: { type: "string" },
-      description:
-        "search: search across multiple channels. Defaults to the bound channel.",
+      description: "search: search across multiple channels. Defaults to the bound channel.",
     };
     // Extend limit description for search (max 25 for some platform search APIs)
     if (!properties.limit) {

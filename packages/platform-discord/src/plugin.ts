@@ -23,6 +23,7 @@ import {
 } from "@shoggoth/platform-discord";
 import { executeMessageToolAction } from "@shoggoth/messaging";
 import { resolvePlatformConfig } from "@shoggoth/shared";
+import { toolReadBinary } from "@shoggoth/os-exec";
 
 /** Reaction event shape (matches adapter's DiscordReactionAddEvent). */
 interface ReactionAddEvent {
@@ -335,6 +336,22 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
                   } catch {
                     return undefined;
                   }
+                },
+                readWorkspaceFile: async (sid, relativePath) => {
+                  const row = (db as any)
+                    .prepare(
+                      "SELECT workspace_path, runtime_uid, runtime_gid FROM sessions WHERE id = ?",
+                    )
+                    .get(sid) as
+                    | { workspace_path: string; runtime_uid: number; runtime_gid: number }
+                    | undefined;
+                  if (!row) {
+                    throw new Error(`session not found: ${sid}`);
+                  }
+                  return toolReadBinary(row.workspace_path, relativePath, {
+                    uid: row.runtime_uid,
+                    gid: row.runtime_gid,
+                  });
                 },
                 downloadFile: async (url, destPath) => {
                   const res = await fetch(url);
