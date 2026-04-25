@@ -186,6 +186,7 @@ export function sanitizeSchemaForGemini(schema: unknown): unknown {
 
   if (Array.isArray(s.enum)) {
     s.enum = s.enum.map((v: unknown) => String(v));
+    s.type = "string";
   }
 
   if (s.properties && typeof s.properties === "object") {

@@ -270,28 +270,31 @@ describe("sanitizeSchemaForGemini", () => {
     assert.equal("const" in result, false);
   });
 
-  it("converts numeric const to string enum", () => {
+  it("converts numeric const to string enum and sets type to string", () => {
     const result = sanitizeSchemaForGemini({
       type: "number",
       const: 42,
     }) as Record<string, unknown>;
     assert.deepStrictEqual(result.enum, ["42"]);
     assert.equal("const" in result, false);
+    assert.equal(result.type, "string");
   });
 
-  it("coerces numeric enum values to strings", () => {
+  it("coerces numeric enum values to strings and sets type to string", () => {
     const result = sanitizeSchemaForGemini({
       type: "integer",
       enum: [60, 1440, 4320, 10080],
     }) as Record<string, unknown>;
     assert.deepStrictEqual(result.enum, ["60", "1440", "4320", "10080"]);
+    assert.equal(result.type, "string");
   });
 
-  it("coerces mixed enum values to strings", () => {
+  it("coerces mixed enum values to strings and sets type to string", () => {
     const result = sanitizeSchemaForGemini({
       enum: ["a", 2, true],
     }) as Record<string, unknown>;
     assert.deepStrictEqual(result.enum, ["a", "2", "true"]);
+    assert.equal(result.type, "string");
   });
 
   it("recursively sanitizes nested properties", () => {
@@ -350,18 +353,19 @@ describe("sanitizeSchemaForGemini", () => {
     assert.strictEqual(sanitizeSchemaForGemini(arr), arr);
   });
 
-  it("leaves already-clean schemas untouched", () => {
+  it("leaves already-clean schemas untouched (enum forces type to string)", () => {
     const clean = {
       type: "object",
       properties: {
         name: { type: "string" },
-        count: { type: "integer", enum: ["1", "2", "3"] },
+        count: { type: "string", enum: ["1", "2", "3"] },
       },
     };
     const result = sanitizeSchemaForGemini(clean) as Record<string, unknown>;
     assert.equal(result.type, "object");
     const props = result.properties as Record<string, Record<string, unknown>>;
     assert.deepStrictEqual(props.count.enum, ["1", "2", "3"]);
+    assert.equal(props.count.type, "string");
   });
 });
 
@@ -615,6 +619,7 @@ describe("createGeminiProvider completeWithTools()", () => {
     assert.deepStrictEqual(props.mode.enum, ["auto"]);
     assert.equal("const" in props.mode, false);
     assert.deepStrictEqual(props.timeout.enum, ["60", "1440"]);
+    assert.equal(props.timeout.type, "string");
   });
 });
 
