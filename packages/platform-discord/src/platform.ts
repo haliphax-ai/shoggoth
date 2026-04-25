@@ -21,7 +21,6 @@ import {
   sessionSegmentStartupUserContent,
   resolveSessionBypassUpTo,
   executeSessionAgentTurn,
-  buildSessionSystemContext,
   createSessionMcpRuntime,
   defaultPlatformAssistantDeps,
   getTurnQueue,
@@ -413,33 +412,7 @@ export async function startDiscordPlatform(
                 toolRuns,
                 userContent,
                 userMetadata,
-                systemPrompt: buildSessionSystemContext({
-                  workspacePath: session.workspacePath,
-                  workingDirectory: session.workingDirectory,
-                  config: opts.config,
-                  env,
-                  sessionId: session.id,
-                  contextSegmentId: session.contextSegmentId,
-                  contextLevel: session.contextLevel,
-                  channel: parseAgentSessionUrn(session.id)?.platform,
-                  systemContextToken: session.systemContextToken!,
-                  messagingCapabilities: opts.discord.capabilities,
-                  toolNames: mcpCtx.toolsOpenAi.map((t) => t.function.name),
-                  sandbox: {
-                    runtimeUid: session.runtimeUid,
-                    runtimeGid: session.runtimeGid,
-                  },
-                  stateDb: opts.db,
-                  transcriptMessages: opts.db
-                    .prepare(
-                      `SELECT role, content FROM transcript_messages
-                 WHERE session_id = ? AND context_segment_id = ? ORDER BY seq`,
-                    )
-                    .all(session.id, session.contextSegmentId) as {
-                    role: string;
-                    content: string | null;
-                  }[],
-                }),
+
                 env,
                 config: opts.config,
                 policyEngine: engine,
@@ -562,33 +535,7 @@ export async function startDiscordPlatform(
           userContent: input.userContent,
           userMetadata,
           systemContext: input.systemContext,
-          systemPrompt: buildSessionSystemContext({
-            workspacePath: sessionRow.workspacePath,
-            workingDirectory: sessionRow.workingDirectory,
-            config: opts.config,
-            env,
-            sessionId: sessionRow.id,
-            contextSegmentId: sessionRow.contextSegmentId,
-            contextLevel: sessionRow.contextLevel,
-            channel: parseAgentSessionUrn(sessionRow.id)?.platform,
-            systemContextToken: sessionRow.systemContextToken!,
-            messagingCapabilities: opts.discord.capabilities,
-            toolNames: mcpCtx.toolsOpenAi.map((t) => t.function.name),
-            sandbox: {
-              runtimeUid: sessionRow.runtimeUid,
-              runtimeGid: sessionRow.runtimeGid,
-            },
-            stateDb: opts.db,
-            transcriptMessages: opts.db
-              .prepare(
-                `SELECT role, content FROM transcript_messages
-             WHERE session_id = ? AND context_segment_id = ? ORDER BY seq`,
-              )
-              .all(sessionRow.id, sessionRow.contextSegmentId) as {
-              role: string;
-              content: string | null;
-            }[],
-          }),
+
           env,
           config: opts.config,
           policyEngine: engine,

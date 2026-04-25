@@ -15,10 +15,7 @@ import { join, resolve as resolvePath } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { buildSessionSystemContext } from "@shoggoth/daemon/lib";
-import {
-  builtinShoggothToolsCatalog,
-  aggregateMcpCatalogs,
-} from "@shoggoth/mcp-integration";
+import { builtinShoggothToolsCatalog, aggregateMcpCatalogs } from "@shoggoth/mcp-integration";
 import {
   defaultConfig,
   type ShoggothConfig,
@@ -29,12 +26,7 @@ import {
 import type { MessagingAdapterCapabilities } from "@shoggoth/messaging";
 
 const __dirname = resolvePath(fileURLToPath(import.meta.url), "..");
-const TEMPLATES_DIR = resolvePath(
-  __dirname,
-  "..",
-  "templates",
-  "agent-workspace",
-);
+const TEMPLATES_DIR = resolvePath(__dirname, "..", "templates", "agent-workspace");
 
 // --- 1. In-memory SQLite with session_stats table + example data ---
 const db = new Database(":memory:");
@@ -92,9 +84,7 @@ const config: ShoggothConfig = {
         apiKeyEnv: "ANTHROPIC_API_KEY",
       },
     ],
-    failoverChain: [
-      { providerId: "anthropic", model: "claude-sonnet-4-20250514" },
-    ],
+    failoverChain: [{ providerId: "anthropic", model: "claude-sonnet-4-20250514" }],
   },
   memory: {
     paths: ["/var/lib/shoggoth/memory"],
@@ -138,10 +128,7 @@ const tools = aggregated.tools.map((t) => ({
   function: {
     name: t.namespacedName,
     description: t.description ?? `${t.sourceId}-${t.originalName}`,
-    parameters: (t.inputSchema ?? { type: "object", properties: {} }) as Record<
-      string,
-      unknown
-    >,
+    parameters: (t.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>,
   },
 }));
 
@@ -159,8 +146,7 @@ const exampleSystemContext: SystemContext = {
   },
 };
 
-const rawUserContent =
-  "Hello, can you help me with a coding question about TypeScript generics?";
+const rawUserContent = "Hello, can you help me with a coding question about TypeScript generics?";
 const wrappedUserContent = wrapWithSystemContext(
   rawUserContent,
   exampleSystemContext,
@@ -201,6 +187,7 @@ try {
     stateDb: db,
     transcriptMessages,
     systemContextToken,
+    modelLabel: "claude-sonnet-4-20250514 (provider: anthropic)",
   });
 
   const wireFormat = {

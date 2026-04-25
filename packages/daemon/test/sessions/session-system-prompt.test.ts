@@ -28,6 +28,7 @@ describe("buildSessionSystemContext", () => {
       env: { SHOGGOTH_MODEL: "test-model" },
       sessionId: "sid-1",
       channel: "discord",
+      modelLabel: "test-model (test-provider)",
       messagingCapabilities: discordCapabilityDescriptor(),
       toolNames: ["builtin-read", "builtin-exec"],
       systemContextToken: "test0001",
@@ -52,6 +53,8 @@ describe("buildSessionSystemContext", () => {
         config: {
           operatorDirectory: opDir,
         } as unknown as import("@shoggoth/shared").ShoggothConfig,
+        channel: "test-channel",
+        modelLabel: "test-model (test-provider)",
         systemContextToken: "test0001",
       });
       assert.match(s, /## Global instructions \(operator-managed\)/);
@@ -59,10 +62,7 @@ describe("buildSessionSystemContext", () => {
       assert.match(s, /agents-body/);
       const g = s.indexOf("operator-global-body");
       const a = s.indexOf("--- workspace: AGENTS.md ---");
-      assert.ok(
-        g >= 0 && a >= 0 && g < a,
-        "operator global precedes AGENTS block",
-      );
+      assert.ok(g >= 0 && a >= 0 && g < a, "operator global precedes AGENTS block");
     } finally {
       rmSync(opDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
@@ -79,6 +79,8 @@ describe("buildSessionSystemContext", () => {
         config: {
           operatorDirectory: opDir,
         } as unknown as import("@shoggoth/shared").ShoggothConfig,
+        channel: "test-channel",
+        modelLabel: "test-model (test-provider)",
         systemContextToken: "test0001",
       });
       assert.match(s, /from-env-path/);
@@ -97,6 +99,8 @@ describe("buildSessionSystemContext", () => {
         config: {
           operatorDirectory: opDir,
         } as unknown as import("@shoggoth/shared").ShoggothConfig,
+        channel: "test-channel",
+        modelLabel: "test-model (test-provider)",
         systemContextToken: "test0001",
       });
       assert.doesNotMatch(s, /## Global instructions \(operator-managed\)/);
@@ -112,6 +116,8 @@ describe("buildSessionSystemContext", () => {
       workspacePath: dir,
       sessionId: "s2",
       toolNames: [],
+      channel: "test-channel",
+      modelLabel: "test-model (test-provider)",
       systemContextToken: "test0001",
     });
     assert.doesNotMatch(s, /--- workspace: SOUL\.md ---/);
@@ -125,6 +131,8 @@ describe("buildSessionSystemContext", () => {
       workspacePath: undefined,
       workingDirectory: undefined,
       env: { SHOGGOTH_SESSION_SYSTEM_PROMPT: "extra operator note" },
+      channel: "test-channel",
+      modelLabel: "test-model (test-provider)",
       systemContextToken: "test0001",
     });
     assert.match(s, /--- session \(SHOGGOTH_SESSION_SYSTEM_PROMPT\) ---/);
@@ -137,6 +145,8 @@ describe("buildSessionSystemContext", () => {
       workingDirectory: undefined,
       env: { SHOGGOTH_MODEL: "test-model" },
       sessionId: "sid-tsc",
+      channel: "test-channel",
+      modelLabel: "test-model (test-provider)",
       systemContextToken: "test0001",
     });
     // Section header and divider pattern
@@ -151,6 +161,8 @@ describe("buildSessionSystemContext", () => {
       workspacePath: dir,
       sessionId: "sid-tsc-ws",
       toolNames: [],
+      channel: "test-channel",
+      modelLabel: "test-model (test-provider)",
       systemContextToken: "test0001",
     });
     assert.match(s, /# System Context/);
@@ -167,6 +179,8 @@ describe("buildSessionSystemContext", () => {
           embeddings: { enabled: false },
         },
       } as unknown as import("@shoggoth/shared").ShoggothConfig,
+      channel: "test-channel",
+      modelLabel: "test-model (test-provider)",
       systemContextToken: "test0001",
     });
     // memory.paths hint was removed in the system prompt cleanup
@@ -422,6 +436,8 @@ describe("buildSessionSystemContext — context levels", () => {
       } as unknown as import("@shoggoth/shared").ShoggothConfig,
       env: { SHOGGOTH_MODEL: "test-model" },
       sessionId: "sid-default",
+      channel: "test-channel",
+      modelLabel: "test-model (test-provider)",
       toolNames: [],
       systemContextToken: "test0001",
     });

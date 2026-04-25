@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
+import { parseAgentSessionUrn } from "@shoggoth/shared";
+import { buildSessionSystemContext } from "./session-system-prompt";
 import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import type { ChatMessage, ImageBlockCodec, OpenAIToolFunctionDefinition } from "@shoggoth/models";
 import {
@@ -74,7 +76,6 @@ export interface ExecuteSessionAgentTurnInput {
   readonly userContent: string;
   readonly userMetadata: Record<string, unknown> | undefined;
   readonly systemContext?: SystemContext;
-  readonly systemPrompt: string;
   readonly env: NodeJS.ProcessEnv;
   readonly config: ShoggothConfig;
   readonly policyEngine: PolicyEngine;
@@ -193,27 +194,6 @@ export async function executeSessionAgentTurn(
   const log = getLogger("session-agent-turn");
   log.debug("executeSessionAgentTurn entered", { sessionId: input.sessionId });
 
-  // Drain any buffered system context entries and append to the system prompt.
-  const buffered = drainSystemContext(input.sessionId);
-  // Prepend a human-readable timestamp to the system prompt so the model knows the current date/time.
-  const now = new Date();
-  const weekday = now.toLocaleDateString("en-US", {
-    weekday: "long",
-    timeZone: "UTC",
-  });
-  const datePart = now.toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    timeZone: "UTC",
-  });
-  const timePart = now.toISOString().slice(11, 19);
-  const systemTimestamp = `Current date and time: ${weekday}, ${datePart} - ${timePart}+00:00 (UTC)`;
-
-  const baseSystemPrompt =
-    buffered.length > 0 ? input.systemPrompt + "\n\n" + buffered.join("\n") : input.systemPrompt;
-  const effectiveSystemPrompt = `${systemTimestamp}\n\n${baseSystemPrompt}`;
-
   const loopImpl = input.loopImpl ?? runToolLoop;
   const ctxSeg = input.session.contextSegmentId.trim();
   if (!ctxSeg) {
@@ -273,10 +253,6 @@ export async function executeSessionAgentTurn(
   } else {
     effectiveHistory = history;
   }
-  const system: ChatMessage = {
-    role: "system",
-    content: effectiveSystemPrompt,
-  };
 
   log.debug("resolving mcp context", { sessionId: input.sessionId });
   let mcpCtx = await input.resolveMcpContext(input.sessionId);
@@ -314,6 +290,64 @@ export async function executeSessionAgentTurn(
     ? sessionModelRef.slice(0, sessionModelRef.indexOf("/"))
     : undefined;
   const imageBlockCodec = resolveImageBlockCodec(modelsForSession, sessionPrimaryProviderId);
+
+  const effectiveModel =
+    sessionModelRef ?? resolveModel(input.db, input.config, { sessionId: input.sessionId })?.ref;
+
+  // --- System Prompt Assembly ---
+  const buffered = drainSystemContext(input.sessionId);
+  const now = new Date();
+  const weekday = now.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+  const datePart = now.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+  const timePart = now.toISOString().slice(11, 19);
+  const systemTimestamp = `Current date and time: ${weekday}, ${datePart} - ${timePart}+00:00 (UTC)`;
+
+  const modelSlashIdx = effectiveModel?.indexOf("/");
+  const modelLabel =
+    effectiveModel && modelSlashIdx !== undefined && modelSlashIdx > 0
+      ? `${effectiveModel.slice(modelSlashIdx + 1)} (provider: ${effectiveModel.slice(0, modelSlashIdx)})`
+      : "gemini-flash-latest (provider: google)";
+
+  const assembledSystemPrompt = buildSessionSystemContext({
+    workspacePath: input.session.workspacePath,
+    workingDirectory: input.session.workingDirectory,
+    config: input.config,
+    env: input.env,
+    sessionId: input.sessionId,
+    contextSegmentId: ctxSeg,
+    contextLevel: input.session.contextLevel,
+    channel: parseAgentSessionUrn(input.sessionId)?.platform ?? "unknown",
+    systemContextToken: input.session.systemContextToken!,
+    // TODO: wire messagingCapabilities if available
+    toolNames: mcpCtx.toolsOpenAi.map((t) => t.function.name),
+    sandbox: {
+      runtimeUid: input.session.runtimeUid,
+      runtimeGid: input.session.runtimeGid,
+    },
+    stateDb: input.db,
+    modelLabel,
+    transcriptMessages: input.db
+      .prepare(
+        `SELECT role, content FROM transcript_messages WHERE session_id = ? AND context_segment_id = ? ORDER BY seq`,
+      )
+      .all(input.sessionId, ctxSeg) as { role: string; content: string | null }[],
+  });
+
+  const baseSystemPrompt =
+    buffered.length > 0
+      ? assembledSystemPrompt + "\n\n" + buffered.join("\n")
+      : assembledSystemPrompt;
+  const effectiveSystemPrompt = `${systemTimestamp}\n\n${baseSystemPrompt}`;
+
+  const system: ChatMessage = {
+    role: "system",
+    content: effectiveSystemPrompt,
+  };
 
   // Strip image blocks from transcript when the provider doesn't support image input.
   const initialMessages: ChatMessage[] = sanitizeTranscriptForProvider(
@@ -363,7 +397,7 @@ export async function executeSessionAgentTurn(
           compactionModel: modelsForSession?.compaction?.model,
           env: input.env,
           systemPromptChars: effectiveSystemPrompt.length,
-          toolSchemaChars: JSON.stringify(mcpCtx.toolsOpenAi).length,
+          toolSchemaChars: JSON.stringify(currentToolsOpenAi).length,
           turnAbortSignal,
           compactionAbortTimeoutMs:
             modelsForSession?.compaction?.compactionAbortTimeoutMs ?? 60_000,
@@ -433,13 +467,11 @@ export async function executeSessionAgentTurn(
     },
   });
 
-  const effectiveModel =
-    sessionModelRef ?? resolveModel(input.db, input.config, { sessionId: input.sessionId })?.ref;
   log.debug("model call started", {
     sessionId: input.sessionId,
     messageCount: initialMessages.length,
     toolCount: mcpCtx.toolsLoop.length,
-    systemPromptLen: input.systemPrompt.length,
+    systemPromptLen: effectiveSystemPrompt.length,
     totalContentLen: initialMessages.reduce((n, m) => n + (m.content?.length ?? 0), 0),
     model: effectiveModel ? `default (${effectiveModel})` : "default",
     isSubagent: isSubagentSessionUrn(input.sessionId),

@@ -5,17 +5,12 @@ import { type MessagingAdapterCapabilities } from "@shoggoth/messaging";
 import {
   LAYOUT,
   OPERATOR_GLOBAL_INSTRUCTIONS_BASENAME,
-  resolveEffectiveModelsConfig,
   type ContextLevel,
   type ShoggothConfig,
 } from "@shoggoth/shared";
 import type Database from "better-sqlite3";
 import { daemonPrompt } from "../prompts/load-prompts";
-import {
-  getSessionStats,
-  estimateTokens,
-  buildFormattedStats,
-} from "./session-stats-store";
+import { getSessionStats, estimateTokens, buildFormattedStats } from "./session-stats-store";
 import { getTurnQueue } from "./session-turn-queue-singleton";
 
 /** Max bytes read per workspace template file (UTF-8). */
@@ -25,7 +20,6 @@ const DEFAULT_MAX_BYTES_PER_FILE = 8192;
 const DEFAULT_MAX_TOTAL_TEMPLATE_BYTES = 24576;
 
 /** Baked into the container image (`Dockerfile`); same tree as the repo `docs/` directory. */
-
 
 /**
  * Workspace-relative basenames only (allowlist). Order follows OpenClaw bootstrap file order.
@@ -67,8 +61,10 @@ export interface BuildSessionSystemContextInput {
   readonly sessionId?: string;
   /** Internal context segment UUID (`sessions.context_segment_id`; `new` / `reset` commands). */
   readonly contextSegmentId?: string;
-  /** Delivery surface id from the session URN (`agent:…:<platform>:…`), when known. */
-  readonly channel?: string;
+  /** Delivery surface id from the session URN (`agent:…:<platform>:…`). */
+  readonly channel: string;
+  /** Primary model label (e.g. `gpt-4o (provider: openai)`). */
+  readonly modelLabel: string;
   /** When set, core prompt sections use transport {@link MessagingAdapterCapabilities.features}. */
   readonly messagingCapabilities?: MessagingAdapterCapabilities;
   /** MCP + built-in tool names exposed to the model for this turn (e.g. `builtin-read`). */
@@ -89,10 +85,7 @@ export interface BuildSessionSystemContextInput {
   readonly systemContextToken: string;
 }
 
-function isPathInsideResolvedRoot(
-  rootReal: string,
-  resolvedTarget: string,
-): boolean {
+function isPathInsideResolvedRoot(rootReal: string, resolvedTarget: string): boolean {
   const base = resolve(rootReal);
   const target = resolve(resolvedTarget);
   const prefix = base.endsWith(sep) ? base : base + sep;
@@ -173,9 +166,7 @@ function safeReadOperatorGlobalInstructions(
 ): string | undefined {
   if (maxBytes <= 0) return undefined;
 
-  const opRootRaw = (
-    input.config?.operatorDirectory?.trim() || LAYOUT.operatorDir
-  ).trim();
+  const opRootRaw = (input.config?.operatorDirectory?.trim() || LAYOUT.operatorDir).trim();
   let operatorRootReal: string;
   try {
     operatorRootReal = realpathSync(resolve(opRootRaw));
@@ -185,15 +176,9 @@ function safeReadOperatorGlobalInstructions(
 
   const envOverride = env.SHOGGOTH_GLOBAL_INSTRUCTIONS_PATH?.trim();
   const cfgPath = input.config?.globalInstructionsPath?.trim();
-  const defaultRel = join(
-    operatorRootReal,
-    OPERATOR_GLOBAL_INSTRUCTIONS_BASENAME,
-  );
+  const defaultRel = join(operatorRootReal, OPERATOR_GLOBAL_INSTRUCTIONS_BASENAME);
   const chosen = envOverride ?? cfgPath ?? defaultRel;
-  const candidate = resolveOperatorInstructionsCandidatePath(
-    operatorRootReal,
-    chosen,
-  );
+  const candidate = resolveOperatorInstructionsCandidatePath(operatorRootReal, chosen);
 
   if (!existsSync(candidate)) return undefined;
 
@@ -204,8 +189,7 @@ function safeReadOperatorGlobalInstructions(
     return undefined;
   }
 
-  if (!isPathInsideResolvedRoot(operatorRootReal, resolvedFile))
-    return undefined;
+  if (!isPathInsideResolvedRoot(operatorRootReal, resolvedFile)) return undefined;
 
   try {
     const buf = readFileSync(resolvedFile);
@@ -221,29 +205,8 @@ function safeReadOperatorGlobalInstructions(
   }
 }
 
-function formatPrimaryModelLabel(
-  models: ShoggothConfig["models"] | undefined,
-  env: NodeJS.ProcessEnv,
-): string {
-  const chain = models?.failoverChain;
-  if (chain?.length) {
-    const first = chain[0]!;
-    const [firstProviderId, ...modelParts] = first.split("/");
-    const firstModel = modelParts.join("/");
-    return `${firstModel} (provider: ${firstProviderId})`;
-  }
-  if (env.ANTHROPIC_BASE_URL?.trim()) {
-    const model = env.SHOGGOTH_MODEL?.trim() || "claude-3-5-sonnet-20241022";
-    return `${model} (anthropic-messages / env)`;
-  }
-  const model = env.SHOGGOTH_MODEL?.trim() || "gpt-4o-mini";
-  return `${model} (openai-compatible / env)`;
-}
-
 function buildTrustedSystemContextGuidance(token: string): string {
-  return (
-    "# System Context\n\n" + daemonPrompt("system-trusted-context", { token })
-  );
+  return "# System Context\n\n" + daemonPrompt("system-trusted-context", { token });
 }
 
 function buildWorkspaceSection(
@@ -298,13 +261,9 @@ function buildRuntimeSection(input: {
   ].join("; ");
   const parts = [
     `session=${input.sessionId ?? "unknown"}`,
-    input.contextSegmentId
-      ? `context_segment=${input.contextSegmentId}`
-      : undefined,
+    input.contextSegmentId ? `context_segment=${input.contextSegmentId}` : undefined,
     input.channel ? `channel=${input.channel}` : undefined,
-    input.resolvedWorkspace
-      ? `workspace=${input.resolvedWorkspace}`
-      : "workspace=(none)",
+    input.resolvedWorkspace ? `workspace=${input.resolvedWorkspace}` : "workspace=(none)",
     input.workingDirectory && input.workingDirectory !== input.resolvedWorkspace
       ? `workdir=${input.workingDirectory}`
       : undefined,
@@ -354,10 +313,7 @@ function buildSessionStatsSection(
   ].join("\n");
 }
 
-function appendEnvSystemPrompt(
-  base: string,
-  env: NodeJS.ProcessEnv | undefined,
-): string {
+function appendEnvSystemPrompt(base: string, env: NodeJS.ProcessEnv | undefined): string {
   const extra = env?.SHOGGOTH_SESSION_SYSTEM_PROMPT?.trim();
   if (!extra) return base;
   return `${base}\n\n${daemonPrompt("system-env-session-appendix", { extra })}`;
@@ -372,9 +328,7 @@ function joinSections(sections: (string | undefined)[]): string {
  * context (operator global instructions before workspace templates), heartbeats / silent-reply
  * notes, runtime metadata, and optional `SHOGGOTH_SESSION_SYSTEM_PROMPT`.
  */
-export function buildSessionSystemContext(
-  input: BuildSessionSystemContextInput,
-): string {
+export function buildSessionSystemContext(input: BuildSessionSystemContextInput): string {
   const level: ContextLevel = input.contextLevel ?? "full";
 
   // `none` — raw model, no Shoggoth framing at all.
@@ -393,8 +347,7 @@ export function buildSessionSystemContext(
   let operatorGlobal: string | undefined;
   let totalPayloadBytes = 0;
   if (atLeast("light")) {
-    const remainingForGlobal =
-      DEFAULT_MAX_TOTAL_TEMPLATE_BYTES - totalPayloadBytes;
+    const remainingForGlobal = DEFAULT_MAX_TOTAL_TEMPLATE_BYTES - totalPayloadBytes;
     const globalCap = Math.min(DEFAULT_MAX_BYTES_PER_FILE, remainingForGlobal);
     operatorGlobal = safeReadOperatorGlobalInstructions(input, env, globalCap);
     if (operatorGlobal) {
@@ -420,9 +373,7 @@ export function buildSessionSystemContext(
     }
   }
   if (level !== "full") {
-    allowedFiles = new Set(
-      [...allowedFiles].filter((f) => f !== "BOOTSTRAP.md"),
-    );
+    allowedFiles = new Set([...allowedFiles].filter((f) => f !== "BOOTSTRAP.md"));
   }
 
   if (root && allowedFiles.size > 0) {
@@ -456,9 +407,7 @@ export function buildSessionSystemContext(
     // Workspace root: light+
     workspaceBody,
     // Project context (operator global + template files): light+
-    atLeast("light")
-      ? buildProjectContextSection(operatorGlobal, fileBlocks)
-      : undefined,
+    atLeast("light") ? buildProjectContextSection(operatorGlobal, fileBlocks) : undefined,
     // Heartbeats: light+
     // Runtime: minimal+
     buildRuntimeSection({
@@ -467,13 +416,7 @@ export function buildSessionSystemContext(
       channel: input.channel,
       resolvedWorkspace: resolvedRoot,
       workingDirectory: input.workingDirectory,
-      modelLabel: formatPrimaryModelLabel(
-        input.sessionId && input.config
-          ? (resolveEffectiveModelsConfig(input.config, input.sessionId) ??
-              input.config.models)
-          : input.config?.models,
-        env,
-      ),
+      modelLabel: input.modelLabel,
       toolCount,
     }),
   ]);
@@ -489,9 +432,7 @@ export function buildSessionSystemContext(
         )
       : undefined;
 
-  const core = statsSection
-    ? `${coreSansStats}\n\n${statsSection}`
-    : coreSansStats;
+  const core = statsSection ? `${coreSansStats}\n\n${statsSection}` : coreSansStats;
 
   // Env appendix: light+
   return atLeast("light") ? appendEnvSystemPrompt(core, env) : core;

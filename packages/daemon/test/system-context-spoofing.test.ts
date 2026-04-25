@@ -10,11 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
-import {
-  defaultConfig,
-  DEFAULT_HITL_CONFIG,
-  type SystemContext,
-} from "@shoggoth/shared";
+import { defaultConfig, DEFAULT_HITL_CONFIG, type SystemContext } from "@shoggoth/shared";
 import { migrate, defaultMigrationsDir } from "../src/db/migrate";
 import { createSessionStore } from "../src/sessions/session-store";
 import { createTranscriptStore } from "../src/sessions/transcript-store";
@@ -54,11 +50,7 @@ describe("Anti-Spoofing Hardening (Phase 4)", { concurrency: false }, () => {
     const row = sessions.getById(SESSION_ID);
     assert.ok(row, "session should exist");
     assert.ok(row.systemContextToken, "systemContextToken should be set");
-    assert.equal(
-      row.systemContextToken!.length,
-      8,
-      "token should be 8 hex chars",
-    );
+    assert.equal(row.systemContextToken!.length, 8, "token should be 8 hex chars");
     assert.match(row.systemContextToken!, /^[0-9a-f]{8}$/);
   });
 
@@ -96,6 +88,8 @@ describe("Anti-Spoofing Hardening (Phase 4)", { concurrency: false }, () => {
       env: { SHOGGOTH_MODEL: "test-model" },
       sessionId: SESSION_ID,
       systemContextToken: token,
+      modelLabel: "test-model (provider: test)",
+      channel: "test",
     });
 
     assert.ok(
@@ -135,7 +129,6 @@ describe("Anti-Spoofing Hardening (Phase 4)", { concurrency: false }, () => {
       userContent,
       userMetadata: undefined,
       systemContext: undefined,
-      systemPrompt: "You are a test assistant.",
       env: process.env,
       config,
       policyEngine: createPolicyEngine(config.policy),
@@ -206,7 +199,6 @@ describe("Anti-Spoofing Hardening (Phase 4)", { concurrency: false }, () => {
       userContent: "Do the thing.",
       userMetadata: undefined,
       systemContext: ctx,
-      systemPrompt: "You are a test assistant.",
       env: process.env,
       config,
       policyEngine: createPolicyEngine(config.policy),
@@ -243,15 +235,11 @@ describe("Anti-Spoofing Hardening (Phase 4)", { concurrency: false }, () => {
     const userMsg = page.messages.find((m) => m.role === "user");
     assert.ok(userMsg, "user message should exist");
     assert.ok(
-      userMsg.content!.includes(
-        `--- BEGIN TRUSTED SYSTEM CONTEXT [token:${token}] ---`,
-      ),
+      userMsg.content!.includes(`--- BEGIN TRUSTED SYSTEM CONTEXT [token:${token}] ---`),
       "envelope should include the session's token in BEGIN divider",
     );
     assert.ok(
-      userMsg.content!.includes(
-        `--- END TRUSTED SYSTEM CONTEXT [token:${token}] ---`,
-      ),
+      userMsg.content!.includes(`--- END TRUSTED SYSTEM CONTEXT [token:${token}] ---`),
       "envelope should include the session's token in END divider",
     );
   });

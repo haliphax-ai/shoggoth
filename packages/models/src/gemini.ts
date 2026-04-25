@@ -620,7 +620,11 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
         if (content === null) {
           throw new ModelHttpError(502, "missing streamed assistant content", "");
         }
-        return { content: typeof content === "string" ? content : JSON.stringify(content), usage };
+        return {
+          content:
+            typeof content === "string" ? content : content === null ? "" : JSON.stringify(content),
+          usage,
+        };
       }
 
       const rawText = await res.text();
@@ -660,7 +664,8 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
         );
       }
       return {
-        content: typeof content === "string" ? content : JSON.stringify(content),
+        content:
+          typeof content === "string" ? content : content === null ? "" : JSON.stringify(content),
         usage: extractGeminiUsage(json),
       };
     },
@@ -710,7 +715,12 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
           throw new ModelHttpError(502, "missing assistant content and functionCall parts", "");
         }
         return {
-          content: typeof content === "string" ? content : JSON.stringify(content),
+          content:
+            typeof content === "string"
+              ? content
+              : content === null
+                ? null
+                : JSON.stringify(content),
           toolCalls,
           usage,
         };
@@ -746,7 +756,8 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
         );
       }
       return {
-        content: typeof content === "string" ? content : JSON.stringify(content),
+        content:
+          typeof content === "string" ? content : content === null ? null : JSON.stringify(content),
         toolCalls,
         usage: extractGeminiUsage(json),
       };

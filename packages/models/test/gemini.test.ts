@@ -748,6 +748,40 @@ describe("streaming completeWithTools()", () => {
     assert.equal(out.toolCalls[0]!.arguments, '{"path":"a"}');
     assert.equal(out.toolCalls[1]!.arguments, '{"path":"b"}');
   });
+
+  it("returns null content instead of 'null' string when no text is present (non-streaming)", async () => {
+    const fetchImpl = async () =>
+      new Response(
+        JSON.stringify(geminiToolCallResponse([{ name: "read_file", args: { path: "x" } }])),
+        {
+          status: 200,
+        },
+      );
+
+    const p = createGeminiProvider({ id: "g", fetchImpl });
+    const out = await p.completeWithTools({
+      model: "gemini-pro",
+      messages: [{ role: "user", content: "hi" }],
+      tools,
+    });
+    assert.strictEqual(out.content, null);
+  });
+
+  it("returns null content instead of 'null' string when no text is present (streaming)", async () => {
+    const fetchImpl = async () =>
+      sseResponse([
+        JSON.stringify(geminiToolCallResponse([{ name: "read_file", args: { path: "x" } }])),
+      ]);
+
+    const p = createGeminiProvider({ id: "g", fetchImpl });
+    const out = await p.completeWithTools({
+      model: "gemini-pro",
+      messages: [{ role: "user", content: "hi" }],
+      tools,
+      stream: true,
+    });
+    assert.strictEqual(out.content, null);
+  });
 });
 
 // ---------------------------------------------------------------------------
