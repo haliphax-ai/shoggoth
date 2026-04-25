@@ -122,13 +122,10 @@ export function mapChatMessagesToGeminiPayload(messages: readonly ChatMessage[])
             );
           }
           const fcPart: Record<string, unknown> = { functionCall: { name: tc.name, args } };
-          // Gemini 3.x thinking models return thought_signature on functionCall
-          // parts that must be echoed back verbatim. Only emit when we have a
-          // real captured value — the field is TYPE_BYTES (base64) so dummy
-          // strings cause decode errors.
-          if (tc.thoughtSignature) {
-            fcPart.thought_signature = tc.thoughtSignature;
-          }
+          // Gemini 3.x requires thought_signature on every functionCall part.
+          // Use the real signature when available; fall back to the documented
+          // bypass dummy for legacy transcript entries that predate capture.
+          fcPart.thought_signature = tc.thoughtSignature || "context_engineering_is_the_way_to_go";
           parts.push(fcPart);
         }
       }
