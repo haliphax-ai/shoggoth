@@ -153,7 +153,6 @@ describe("mapChatMessagesToGeminiPayload", () => {
     assert.equal(turn.role, "model");
     assert.deepStrictEqual(turn.parts[0], {
       functionCall: { name: "read", args: { path: "a.txt" } },
-      thought_signature: "context_engineering_is_the_way to_go",
     });
   });
 
