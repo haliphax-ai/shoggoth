@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { migrate, defaultMigrationsDir } from "../../src/db/migrate";
@@ -28,8 +29,7 @@ describe("provider-failure-store", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(TMP, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, TMP);
   });
 
   describe("getProviderFailure", () => {

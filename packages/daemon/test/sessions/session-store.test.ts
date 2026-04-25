@@ -1,15 +1,13 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
 import { openStateDb } from "../../src/db/open";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
-import {
-  createSessionStore,
-  type SessionStatus,
-} from "../../src/sessions/session-store";
+import { createSessionStore, type SessionStatus } from "../../src/sessions/session-store";
 
 function openMigratedDb(): { db: Database.Database; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "shoggoth-sess-"));
@@ -30,8 +28,7 @@ describe("SessionStore", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("creates and reads a session", () => {
@@ -122,9 +119,7 @@ describe("SessionStore", () => {
         workspacePath: `/w/${id}`,
         status: status as SessionStatus,
       });
-      db.prepare(
-        "UPDATE sessions SET created_at = @ca, updated_at = @ua WHERE id = @id",
-      ).run({
+      db.prepare("UPDATE sessions SET created_at = @ca, updated_at = @ua WHERE id = @id").run({
         id,
         ca: createdAt,
         ua: updatedAt,
@@ -133,27 +128,9 @@ describe("SessionStore", () => {
 
     it("sortBy=created, sortOrder=desc (default)", () => {
       const store = createSessionStore(db);
-      createWithTimestamps(
-        store,
-        "old",
-        "active",
-        "2026-01-01 00:00:00",
-        "2026-01-01 00:00:00",
-      );
-      createWithTimestamps(
-        store,
-        "mid",
-        "active",
-        "2026-02-01 00:00:00",
-        "2026-02-01 00:00:00",
-      );
-      createWithTimestamps(
-        store,
-        "new",
-        "active",
-        "2026-03-01 00:00:00",
-        "2026-03-01 00:00:00",
-      );
+      createWithTimestamps(store, "old", "active", "2026-01-01 00:00:00", "2026-01-01 00:00:00");
+      createWithTimestamps(store, "mid", "active", "2026-02-01 00:00:00", "2026-02-01 00:00:00");
+      createWithTimestamps(store, "new", "active", "2026-03-01 00:00:00", "2026-03-01 00:00:00");
 
       const rows = store.list();
       assert.deepEqual(
@@ -164,20 +141,8 @@ describe("SessionStore", () => {
 
     it("sortBy=created, sortOrder=asc", () => {
       const store = createSessionStore(db);
-      createWithTimestamps(
-        store,
-        "old",
-        "active",
-        "2026-01-01 00:00:00",
-        "2026-01-01 00:00:00",
-      );
-      createWithTimestamps(
-        store,
-        "new",
-        "active",
-        "2026-03-01 00:00:00",
-        "2026-03-01 00:00:00",
-      );
+      createWithTimestamps(store, "old", "active", "2026-01-01 00:00:00", "2026-01-01 00:00:00");
+      createWithTimestamps(store, "new", "active", "2026-03-01 00:00:00", "2026-03-01 00:00:00");
 
       const rows = store.list({ sortBy: "created", sortOrder: "asc" });
       assert.deepEqual(
@@ -189,20 +154,8 @@ describe("SessionStore", () => {
     it("sortBy=lastActivity sorts by updated_at", () => {
       const store = createSessionStore(db);
       // "old" was created first but updated most recently
-      createWithTimestamps(
-        store,
-        "old",
-        "active",
-        "2026-01-01 00:00:00",
-        "2026-03-31 12:00:00",
-      );
-      createWithTimestamps(
-        store,
-        "new",
-        "active",
-        "2026-03-01 00:00:00",
-        "2026-03-01 00:00:00",
-      );
+      createWithTimestamps(store, "old", "active", "2026-01-01 00:00:00", "2026-03-31 12:00:00");
+      createWithTimestamps(store, "new", "active", "2026-03-01 00:00:00", "2026-03-01 00:00:00");
 
       const rows = store.list({ sortBy: "lastActivity", sortOrder: "desc" });
       assert.equal(rows[0]!.id, "old", "most recently active should be first");
@@ -218,20 +171,8 @@ describe("SessionStore", () => {
         "2026-01-01 00:00:00",
         "2026-01-01 00:00:00",
       );
-      createWithTimestamps(
-        store,
-        "alpha",
-        "active",
-        "2026-02-01 00:00:00",
-        "2026-02-01 00:00:00",
-      );
-      createWithTimestamps(
-        store,
-        "bravo",
-        "active",
-        "2026-03-01 00:00:00",
-        "2026-03-01 00:00:00",
-      );
+      createWithTimestamps(store, "alpha", "active", "2026-02-01 00:00:00", "2026-02-01 00:00:00");
+      createWithTimestamps(store, "bravo", "active", "2026-03-01 00:00:00", "2026-03-01 00:00:00");
 
       const asc = store.list({ sortBy: "name", sortOrder: "asc" });
       assert.deepEqual(
@@ -248,27 +189,9 @@ describe("SessionStore", () => {
 
     it("limit restricts result count (applied after sort)", () => {
       const store = createSessionStore(db);
-      createWithTimestamps(
-        store,
-        "s1",
-        "active",
-        "2026-01-01 00:00:00",
-        "2026-01-01 00:00:00",
-      );
-      createWithTimestamps(
-        store,
-        "s2",
-        "active",
-        "2026-02-01 00:00:00",
-        "2026-02-01 00:00:00",
-      );
-      createWithTimestamps(
-        store,
-        "s3",
-        "active",
-        "2026-03-01 00:00:00",
-        "2026-03-01 00:00:00",
-      );
+      createWithTimestamps(store, "s1", "active", "2026-01-01 00:00:00", "2026-01-01 00:00:00");
+      createWithTimestamps(store, "s2", "active", "2026-02-01 00:00:00", "2026-02-01 00:00:00");
+      createWithTimestamps(store, "s3", "active", "2026-03-01 00:00:00", "2026-03-01 00:00:00");
 
       const rows = store.list({
         sortBy: "created",
@@ -281,27 +204,9 @@ describe("SessionStore", () => {
 
     it("activeSince filters by updated_at (inclusive lower bound)", () => {
       const store = createSessionStore(db);
-      createWithTimestamps(
-        store,
-        "stale",
-        "active",
-        "2026-01-01 00:00:00",
-        "2026-01-15 00:00:00",
-      );
-      createWithTimestamps(
-        store,
-        "recent",
-        "active",
-        "2026-02-01 00:00:00",
-        "2026-03-30 12:00:00",
-      );
-      createWithTimestamps(
-        store,
-        "fresh",
-        "active",
-        "2026-03-01 00:00:00",
-        "2026-03-31 06:00:00",
-      );
+      createWithTimestamps(store, "stale", "active", "2026-01-01 00:00:00", "2026-01-15 00:00:00");
+      createWithTimestamps(store, "recent", "active", "2026-02-01 00:00:00", "2026-03-30 12:00:00");
+      createWithTimestamps(store, "fresh", "active", "2026-03-01 00:00:00", "2026-03-31 06:00:00");
 
       const rows = store.list({
         activeSince: "2026-03-01 00:00:00",
@@ -315,13 +220,7 @@ describe("SessionStore", () => {
 
     it("activeSince is inclusive (exact match included)", () => {
       const store = createSessionStore(db);
-      createWithTimestamps(
-        store,
-        "exact",
-        "active",
-        "2026-01-01 00:00:00",
-        "2026-03-15 00:00:00",
-      );
+      createWithTimestamps(store, "exact", "active", "2026-01-01 00:00:00", "2026-03-15 00:00:00");
 
       const rows = store.list({ activeSince: "2026-03-15 00:00:00" });
       assert.equal(rows.length, 1);
@@ -330,34 +229,10 @@ describe("SessionStore", () => {
 
     it("activeSince + limit + sort compose correctly", () => {
       const store = createSessionStore(db);
-      createWithTimestamps(
-        store,
-        "a",
-        "active",
-        "2026-01-01 00:00:00",
-        "2026-03-01 00:00:00",
-      );
-      createWithTimestamps(
-        store,
-        "b",
-        "active",
-        "2026-02-01 00:00:00",
-        "2026-03-15 00:00:00",
-      );
-      createWithTimestamps(
-        store,
-        "c",
-        "active",
-        "2026-03-01 00:00:00",
-        "2026-03-31 00:00:00",
-      );
-      createWithTimestamps(
-        store,
-        "stale",
-        "active",
-        "2026-01-01 00:00:00",
-        "2026-01-01 00:00:00",
-      );
+      createWithTimestamps(store, "a", "active", "2026-01-01 00:00:00", "2026-03-01 00:00:00");
+      createWithTimestamps(store, "b", "active", "2026-02-01 00:00:00", "2026-03-15 00:00:00");
+      createWithTimestamps(store, "c", "active", "2026-03-01 00:00:00", "2026-03-31 00:00:00");
+      createWithTimestamps(store, "stale", "active", "2026-01-01 00:00:00", "2026-01-01 00:00:00");
 
       // Active since March, newest first, limit 1 → should be "c"
       const rows = store.list({
@@ -372,13 +247,7 @@ describe("SessionStore", () => {
 
     it("activeSince with no matches returns empty array", () => {
       const store = createSessionStore(db);
-      createWithTimestamps(
-        store,
-        "old",
-        "active",
-        "2026-01-01 00:00:00",
-        "2026-01-01 00:00:00",
-      );
+      createWithTimestamps(store, "old", "active", "2026-01-01 00:00:00", "2026-01-01 00:00:00");
 
       const rows = store.list({ activeSince: "2026-12-01 00:00:00" });
       assert.equal(rows.length, 0);
@@ -420,20 +289,8 @@ describe("SessionStore", () => {
 
     it("omitting all new params preserves default behavior (backward compat)", () => {
       const store = createSessionStore(db);
-      createWithTimestamps(
-        store,
-        "x",
-        "active",
-        "2026-01-01 00:00:00",
-        "2026-01-01 00:00:00",
-      );
-      createWithTimestamps(
-        store,
-        "y",
-        "active",
-        "2026-02-01 00:00:00",
-        "2026-02-01 00:00:00",
-      );
+      createWithTimestamps(store, "x", "active", "2026-01-01 00:00:00", "2026-01-01 00:00:00");
+      createWithTimestamps(store, "y", "active", "2026-02-01 00:00:00", "2026-02-01 00:00:00");
 
       // Default: sortBy=created, sortOrder=desc → newest first
       const rows = store.list();

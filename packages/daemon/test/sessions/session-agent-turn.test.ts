@@ -5,7 +5,8 @@
 import { describe, it, beforeEach, afterEach, vi } from "vitest";
 import assert from "node:assert";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -42,8 +43,7 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("runs builtin-only MCP context and returns assistant text", async () => {
@@ -369,8 +369,7 @@ describe(
     });
 
     afterEach(() => {
-      db.close();
-      rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      closeTestDb(db, tmp);
     });
 
     it("prepends session modelSelection.model to the failover chain (deduped)", async () => {

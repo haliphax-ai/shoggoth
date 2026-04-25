@@ -8,19 +8,13 @@
  * 4. After eviction, `resolveContext` triggers a fresh connect (reconnect-after-eviction).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  createSessionMcpRuntime,
-} from "../../src/sessions/session-mcp-runtime";
-import {
-  runInboundSessionTurn,
-} from "../../src/messaging/inbound-session-turn";
+import { createSessionMcpRuntime } from "../../src/sessions/session-mcp-runtime";
+import { runInboundSessionTurn } from "../../src/messaging/inbound-session-turn";
 import type { McpServerPool } from "../../src/mcp/mcp-server-pool";
 import type { ShoggothConfig, ShoggothMcpServerEntry } from "@shoggoth/shared";
-import {
-  defaultConfig,
-  SHOGGOTH_DEFAULT_PER_SESSION_MCP_IDLE_MS,
-} from "@shoggoth/shared";
-import { mkdtempSync, rmSync } from "node:fs";
+import { defaultConfig, SHOGGOTH_DEFAULT_PER_SESSION_MCP_IDLE_MS } from "@shoggoth/shared";
+import { mkdtempSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -41,10 +35,7 @@ function perSessionServer(id = "test-mcp"): ShoggothMcpServerEntry {
 }
 
 /** Build a config with one per-session MCP server and a short idle timeout. */
-function configWithPerSessionMcp(
-  workspacePath: string,
-  idleMs = 5000,
-): ShoggothConfig {
+function configWithPerSessionMcp(workspacePath: string, idleMs = 5000): ShoggothConfig {
   const cfg = defaultConfig(workspacePath);
   cfg.mcp = {
     ...cfg.mcp,
@@ -63,21 +54,19 @@ function createMockConnectMcp() {
   const connectCalls: string[][] = [];
   const closeFns: ReturnType<typeof vi.fn>[] = [];
 
-  const connectShoggothMcpServers = vi.fn(
-    async (servers: readonly ShoggothMcpServerEntry[]) => {
-      connectCalls.push(servers.map((s) => s.id));
-      const closeFn = vi.fn(async () => {});
-      closeFns.push(closeFn);
-      const pool: McpServerPool = {
-        externalSources: [],
-        close: closeFn,
-      };
-      return {
-        pool,
-        external: vi.fn(async () => ({ resultJson: "{}" })),
-      };
-    },
-  );
+  const connectShoggothMcpServers = vi.fn(async (servers: readonly ShoggothMcpServerEntry[]) => {
+    connectCalls.push(servers.map((s) => s.id));
+    const closeFn = vi.fn(async () => {});
+    closeFns.push(closeFn);
+    const pool: McpServerPool = {
+      externalSources: [],
+      close: closeFn,
+    };
+    return {
+      pool,
+      external: vi.fn(async () => ({ resultJson: "{}" })),
+    };
+  });
 
   return { connectShoggothMcpServers, connectCalls, closeFns };
 }
@@ -99,8 +88,7 @@ describe("per-session MCP idle timeout — turn lifecycle wiring", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("runInboundSessionTurn calls mcpLifecycle.onTurnBegin at start and onTurnEnd at end (success path)", async () => {
@@ -320,8 +308,7 @@ describe("per-session MCP idle timeout — timer and eviction", () => {
 
   afterEach(async () => {
     vi.useRealTimers();
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("notifyTurnEnd schedules an idle timer that evicts the per-session pool", async () => {

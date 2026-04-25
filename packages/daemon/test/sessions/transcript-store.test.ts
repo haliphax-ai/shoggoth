@@ -1,15 +1,13 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
 import { openStateDb } from "../../src/db/open";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
-import {
-  createSessionStore,
-  getSessionContextSegmentId,
-} from "../../src/sessions/session-store";
+import { createSessionStore, getSessionContextSegmentId } from "../../src/sessions/session-store";
 import { createTranscriptStore } from "../../src/sessions/transcript-store";
 
 function openMigratedDb(): { db: Database.Database; dir: string } {
@@ -32,8 +30,7 @@ describe("TranscriptStore", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("appends with monotonic seq", () => {
@@ -173,25 +170,14 @@ describe("TranscriptStore", () => {
     assert.equal(messages.length, 4); // assistant + 2 synthetic + user
     assert.equal(messages[0]!.role, "assistant");
     assert.equal(messages[1]!.role, "tool");
-    assert.equal(
-      messages[1]!.content,
-      "[Tool call aborted — no result available]",
-    );
-    assert.ok(
-      messages[1]!.toolCallId === "tc1" || messages[1]!.toolCallId === "tc2",
-    );
+    assert.equal(messages[1]!.content, "[Tool call aborted — no result available]");
+    assert.ok(messages[1]!.toolCallId === "tc1" || messages[1]!.toolCallId === "tc2");
     assert.equal(messages[2]!.role, "tool");
-    assert.equal(
-      messages[2]!.content,
-      "[Tool call aborted — no result available]",
-    );
+    assert.equal(messages[2]!.content, "[Tool call aborted — no result available]");
     assert.equal(messages[3]!.role, "user");
     assert.equal(messages[3]!.content, "hello");
     // Both tool call IDs are covered
-    const syntheticIds = new Set([
-      messages[1]!.toolCallId,
-      messages[2]!.toolCallId,
-    ]);
+    const syntheticIds = new Set([messages[1]!.toolCallId, messages[2]!.toolCallId]);
     assert.ok(syntheticIds.has("tc1"));
     assert.ok(syntheticIds.has("tc2"));
   });
@@ -240,10 +226,7 @@ describe("TranscriptStore", () => {
     assert.equal(messages.length, 5); // assistant + 2 real tools + 1 synthetic + user
     assert.equal(messages[3]!.role, "tool");
     assert.equal(messages[3]!.toolCallId, "tc2");
-    assert.equal(
-      messages[3]!.content,
-      "[Tool call aborted — no result available]",
-    );
+    assert.equal(messages[3]!.content, "[Tool call aborted — no result available]");
     assert.equal(messages[4]!.role, "user");
     assert.equal(messages[4]!.content, "go");
   });
@@ -277,10 +260,7 @@ describe("TranscriptStore", () => {
     assert.equal(messages.length, 3); // assistant + synthetic + user
     assert.equal(messages[1]!.role, "tool");
     assert.equal(messages[1]!.toolCallId, "tc1");
-    assert.equal(
-      messages[1]!.content,
-      "[Tool call aborted — no result available]",
-    );
+    assert.equal(messages[1]!.content, "[Tool call aborted — no result available]");
     assert.equal(messages[2]!.role, "user");
   });
 });

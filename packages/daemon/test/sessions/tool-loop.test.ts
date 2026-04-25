@@ -1,22 +1,16 @@
 import { describe, it, beforeEach, afterEach, vi } from "vitest";
 import assert from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
 import { openStateDb } from "../../src/db/open";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
-import {
-  createSessionStore,
-  getSessionContextSegmentId,
-} from "../../src/sessions/session-store";
+import { createSessionStore, getSessionContextSegmentId } from "../../src/sessions/session-store";
 import { createTranscriptStore } from "../../src/sessions/transcript-store";
 import { createToolRunStore } from "../../src/sessions/tool-run-store";
-import {
-  runToolLoop,
-  TurnAbortedError,
-  type ModelClient,
-} from "../../src/sessions/tool-loop";
+import { runToolLoop, TurnAbortedError, type ModelClient } from "../../src/sessions/tool-loop";
 import { createHitlPendingResolutionStack } from "../../src/hitl/hitl-pending-stack";
 import { createPendingActionsStore } from "../../src/hitl/pending-actions-store";
 import { DEFAULT_HITL_CONFIG } from "@shoggoth/shared";
@@ -42,8 +36,7 @@ describe("runToolLoop", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("invokes executor and audit when policy allows", async () => {
@@ -81,9 +74,9 @@ describe("runToolLoop", () => {
     });
     assert.equal(exec.mock.calls.length, 1);
     assert.ok(audit.mock.calls.length >= 2);
-    const row = db
-      .prepare(`SELECT status FROM tool_runs WHERE id = 'run-a'`)
-      .get() as { status: string };
+    const row = db.prepare(`SELECT status FROM tool_runs WHERE id = 'run-a'`).get() as {
+      status: string;
+    };
     assert.equal(row.status, "completed");
   });
 
@@ -127,9 +120,9 @@ describe("runToolLoop", () => {
     assert.equal(pushed.length, 1);
     assert.ok(pushed[0]!.content.includes("policy_denied"));
     // Run should complete (model recovered on second hop)
-    const row = db
-      .prepare(`SELECT status FROM tool_runs WHERE id = 'run-deny'`)
-      .get() as { status: string };
+    const row = db.prepare(`SELECT status FROM tool_runs WHERE id = 'run-deny'`).get() as {
+      status: string;
+    };
     assert.equal(row.status, "completed");
   });
 
@@ -146,9 +139,7 @@ describe("runToolLoop", () => {
         if (step === 1) {
           return {
             content: null,
-            toolCalls: [
-              { id: "h1", name: "builtin-exec", argsJson: '{"x":1}' },
-            ],
+            toolCalls: [{ id: "h1", name: "builtin-exec", argsJson: '{"x":1}' }],
           };
         }
         return { content: "ok after hitl", toolCalls: [] };
@@ -188,16 +179,10 @@ describe("runToolLoop", () => {
     assert.equal(row!.status, "denied");
     assert.equal(row!.toolName, "builtin-exec");
     const run = db
-      .prepare(
-        `SELECT status, failure_reason FROM tool_runs WHERE id = 'run-hitl'`,
-      )
+      .prepare(`SELECT status, failure_reason FROM tool_runs WHERE id = 'run-hitl'`)
       .get() as { status: string; failure_reason: string | null };
     assert.equal(run.status, "completed");
-    assert.ok(
-      audit.mock.calls.some((c) =>
-        String(JSON.stringify(c)).includes("hitl_queued"),
-      ),
-    );
+    assert.ok(audit.mock.calls.some((c) => String(JSON.stringify(c)).includes("hitl_queued")));
   });
 
   it("does not queue HITL when role bypass covers tool risk", async () => {
@@ -335,10 +320,7 @@ describe("runToolLoop", () => {
     });
     const toolMsgs = page.messages.filter((m) => m.role === "tool");
     assert.equal(toolMsgs.length, 1);
-    assert.ok(
-      String(toolMsgs[0]!.metadata).includes("read") ||
-        toolMsgs[0]!.toolCallId === "t1",
-    );
+    assert.ok(String(toolMsgs[0]!.metadata).includes("read") || toolMsgs[0]!.toolCallId === "t1");
   });
 
   it("throws TurnAbortedError when turnAbortSignal fires before the next model hop", async () => {
@@ -412,9 +394,7 @@ describe("runToolLoop", () => {
       tools: [{ name: "slow" }],
       executor: {
         execute: () =>
-          new Promise((resolve) =>
-            setTimeout(() => resolve({ resultJson: '"late"' }), 500),
-          ),
+          new Promise((resolve) => setTimeout(() => resolve({ resultJson: '"late"' }), 500)),
       },
       toolRuns,
       transcript: tr,
@@ -438,9 +418,9 @@ describe("runToolLoop", () => {
     assert.equal(toolMsgs.length, 1);
     assert.ok(toolMsgs[0]!.content!.includes("tool_call_timeout"));
     // Run should still complete (model recovered)
-    const row = db
-      .prepare(`SELECT status FROM tool_runs WHERE id = 'run-timeout'`)
-      .get() as { status: string };
+    const row = db.prepare(`SELECT status FROM tool_runs WHERE id = 'run-timeout'`).get() as {
+      status: string;
+    };
     assert.equal(row.status, "completed");
   });
 
@@ -473,9 +453,9 @@ describe("runToolLoop", () => {
       toolRuns,
     });
     assert.equal(exec.mock.calls.length, 1);
-    const row = db
-      .prepare(`SELECT status FROM tool_runs WHERE id = 'run-no-timeout'`)
-      .get() as { status: string };
+    const row = db.prepare(`SELECT status FROM tool_runs WHERE id = 'run-no-timeout'`).get() as {
+      status: string;
+    };
     assert.equal(row.status, "completed");
   });
 
@@ -493,9 +473,7 @@ describe("runToolLoop", () => {
         if (step === 1) {
           return {
             content: null,
-            toolCalls: [
-              { id: "img1", name: "read", argsJson: '{"path":"test.png"}' },
-            ],
+            toolCalls: [{ id: "img1", name: "read", argsJson: '{"path":"test.png"}' }],
           };
         }
         return { content: "I see the image", toolCalls: [] };
@@ -553,9 +531,9 @@ describe("runToolLoop", () => {
     assert.equal(storedContent[1].base64, "iVBORw0KGgo=");
 
     // Run should complete
-    const row = db
-      .prepare(`SELECT status FROM tool_runs WHERE id = 'run-img'`)
-      .get() as { status: string };
+    const row = db.prepare(`SELECT status FROM tool_runs WHERE id = 'run-img'`).get() as {
+      status: string;
+    };
     assert.equal(row.status, "completed");
   });
 
@@ -569,9 +547,7 @@ describe("runToolLoop", () => {
         if (step === 1) {
           return {
             content: null,
-            toolCalls: [
-              { id: "v1", name: "read", argsJson: '{"limit": "not-a-number"}' },
-            ],
+            toolCalls: [{ id: "v1", name: "read", argsJson: '{"limit": "not-a-number"}' }],
           };
         }
         return { content: "recovered", toolCalls: [] };

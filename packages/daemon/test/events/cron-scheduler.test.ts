@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -28,8 +29,7 @@ describe("cron scheduler", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("runCronTick enqueues a durable event and advances next_run_at", () => {
@@ -56,9 +56,7 @@ describe("cron scheduler", () => {
     assert.equal(body.cronJobId, "job1");
     assert.deepEqual(body.payload, { hello: true });
     const job = db
-      .prepare(
-        `SELECT last_status, last_error FROM cron_jobs WHERE id = 'job1'`,
-      )
+      .prepare(`SELECT last_status, last_error FROM cron_jobs WHERE id = 'job1'`)
       .get() as {
       last_status: string | null;
       last_error: string | null;

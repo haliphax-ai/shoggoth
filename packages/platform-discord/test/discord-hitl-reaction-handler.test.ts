@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import Database from "better-sqlite3";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { closeTestDb } from "../../daemon/test/helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -17,27 +18,14 @@ import {
   createHitlAutoApproveGate,
 } from "@shoggoth/daemon/lib";
 
-
 describe("classifyHitlDiscordReaction", () => {
   it("classifies unicode HITL emojis", () => {
     assert.equal(classifyHitlDiscordReaction({ id: null, name: "1️⃣" }), "once");
-    assert.equal(
-      classifyHitlDiscordReaction({ id: null, name: "✅" }),
-      "session",
-    );
-    assert.equal(
-      classifyHitlDiscordReaction({ id: null, name: "♾️" }),
-      "agent",
-    );
+    assert.equal(classifyHitlDiscordReaction({ id: null, name: "✅" }), "session");
+    assert.equal(classifyHitlDiscordReaction({ id: null, name: "♾️" }), "agent");
     assert.equal(classifyHitlDiscordReaction({ id: null, name: "♾" }), "agent");
-    assert.equal(
-      classifyHitlDiscordReaction({ id: null, name: "\u267E" }),
-      "agent",
-    );
-    assert.equal(
-      classifyHitlDiscordReaction({ id: null, name: "\u267E\uFE0F" }),
-      "agent",
-    );
+    assert.equal(classifyHitlDiscordReaction({ id: null, name: "\u267E" }), "agent");
+    assert.equal(classifyHitlDiscordReaction({ id: null, name: "\u267E\uFE0F" }), "agent");
     assert.equal(classifyHitlDiscordReaction({ id: null, name: "❌" }), "deny");
   });
 
@@ -57,8 +45,7 @@ describe("handleDiscordHitlReactionAdd", () => {
       const id = "pend-r1";
       pending.enqueue({
         id,
-        sessionId:
-          "agent:main:discord:channel:10000000-0000-4000-8000-000000000001",
+        sessionId: "agent:main:discord:channel:10000000-0000-4000-8000-000000000001",
         toolName: "builtin-write",
         payload: {},
         riskTier: "caution",
@@ -108,8 +95,7 @@ describe("handleDiscordHitlReactionAdd", () => {
       });
       assert.equal(pending.getById(id)!.status, "approved");
     } finally {
-      db.close();
-      rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      closeTestDb(db, tmp);
     }
   });
 });

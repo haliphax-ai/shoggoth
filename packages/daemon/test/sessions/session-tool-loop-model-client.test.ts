@@ -1,6 +1,7 @@
 import { describe, it, vi, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -194,8 +195,7 @@ describe("mid-turn compaction in complete()", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("triggers compaction when estimated tokens exceed budget", async () => {
@@ -348,9 +348,7 @@ describe("mid-turn compaction in complete()", () => {
   it("handles compaction failure gracefully (logs warning, proceeds)", async () => {
     const bigToolContent = "x".repeat(400);
 
-    vi.mocked(compactSessionTranscript).mockRejectedValue(
-      new Error("model unreachable"),
-    );
+    vi.mocked(compactSessionTranscript).mockRejectedValue(new Error("model unreachable"));
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let capturedMessages: any[] = [];
@@ -502,8 +500,7 @@ describe("dedicated compaction model", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("uses dedicated model when compactionModel is set", async () => {
@@ -558,10 +555,7 @@ describe("dedicated compaction model", () => {
     // createFailoverClientFromModelsConfig should have been called with a config
     // containing only the "local" provider and a single-entry failover chain
     const calls = vi.mocked(createFailoverClientFromModelsConfig).mock.calls;
-    assert.ok(
-      calls.length > 0,
-      "createFailoverClientFromModelsConfig should have been called",
-    );
+    assert.ok(calls.length > 0, "createFailoverClientFromModelsConfig should have been called");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const passedConfig = calls[0][0] as any;
     assert.equal(passedConfig.failoverChain.length, 1);
@@ -635,8 +629,7 @@ describe("abort during mid-turn compaction", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   function makeCompactionConfig(overrides?: {
@@ -700,10 +693,7 @@ describe("abort during mid-turn compaction", () => {
     );
 
     // Compaction must have completed before the error was thrown
-    assert.ok(
-      compactionResolved,
-      "compaction should have completed before TurnAbortedError",
-    );
+    assert.ok(compactionResolved, "compaction should have completed before TurnAbortedError");
   });
 
   it("proceeds normally when no abort signal fires during compaction", async () => {
@@ -759,10 +749,7 @@ describe("abort during mid-turn compaction", () => {
     const result = await model.complete();
     assert.equal(result.content, "done");
     // Transcript should NOT have been reloaded since we timed out
-    assert.equal(
-      vi.mocked(loadSessionTranscriptAsModelChat).mock.calls.length,
-      0,
-    );
+    assert.equal(vi.mocked(loadSessionTranscriptAsModelChat).mock.calls.length, 0);
   });
 
   it("throws TurnAbortedError after compaction timeout if abort signal was fired", async () => {

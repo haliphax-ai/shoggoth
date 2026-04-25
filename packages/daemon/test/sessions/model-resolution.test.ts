@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { migrate, defaultMigrationsDir } from "../../src/db/migrate";
@@ -68,11 +69,7 @@ function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
         },
         { id: "gemini", kind: "gemini", models: [{ name: "gemini-pro" }] },
       ],
-      failoverChain: [
-        "openai/gpt-4o",
-        "anthropic/claude-sonnet",
-        "gemini/gemini-pro",
-      ],
+      failoverChain: ["openai/gpt-4o", "anthropic/claude-sonnet", "gemini/gemini-pro"],
     },
     ...overrides,
   } as ShoggothConfig;
@@ -86,8 +83,7 @@ describe("model-resolution", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(TMP, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, TMP);
   });
 
   describe("resolveModel", () => {
@@ -237,9 +233,7 @@ describe("model-resolution", () => {
           list: {
             main: {
               models: {
-                failoverChain: [
-                  { providerId: "anthropic", model: "claude-sonnet" },
-                ],
+                failoverChain: [{ providerId: "anthropic", model: "claude-sonnet" }],
               },
             },
           },
@@ -311,10 +305,7 @@ describe("model-resolution", () => {
     });
 
     it("provider retry overrides global", () => {
-      const result = resolveRetryConfig(
-        { maxRetries: 5, retryDelayMs: 2000 },
-        { maxRetries: 3 },
-      );
+      const result = resolveRetryConfig({ maxRetries: 5, retryDelayMs: 2000 }, { maxRetries: 3 });
       assert.strictEqual(result.maxRetries, 3);
       assert.strictEqual(result.retryDelayMs, 2000);
       assert.strictEqual(result.retryBackoffMultiplier, 2);
@@ -347,18 +338,13 @@ describe("model-resolution", () => {
           list: {
             main: {
               models: {
-                failoverChain: [
-                  { providerId: "anthropic", model: "claude-sonnet" },
-                ],
+                failoverChain: [{ providerId: "anthropic", model: "claude-sonnet" }],
               },
             },
           },
         },
       });
-      const result = resolveBootstrapModelRef(
-        config,
-        "agent:main:discord:channel:123:abc",
-      );
+      const result = resolveBootstrapModelRef(config, "agent:main:discord:channel:123:abc");
       assert.strictEqual(result, "anthropic/claude-sonnet");
     });
 

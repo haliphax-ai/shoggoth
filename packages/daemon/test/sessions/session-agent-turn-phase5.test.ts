@@ -10,7 +10,8 @@
 import { describe, it, beforeEach, afterEach, vi } from "vitest";
 import assert from "node:assert";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -70,8 +71,7 @@ describe(
 
     afterEach(() => {
       vi.restoreAllMocks();
-      db.close();
-      rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      closeTestDb(db, tmp);
     });
 
     it("resolves ctxWindowTokens from metadata store (not resolveModel) when session has a valid model ref", async () => {

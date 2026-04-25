@@ -1,14 +1,13 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { closeTestDb } from "./helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
 import { openStateDb } from "../src/db/open";
 import { defaultMigrationsDir, migrate } from "../src/db/migrate";
-import {
-  createDaemonSpawnAdapter,
-} from "../src/workflow-adapters.js";
+import { createDaemonSpawnAdapter } from "../src/workflow-adapters.js";
 import { upsertCronJob, runCronTick } from "../src/events/cron-scheduler";
 import { createDefaultHeartbeatHandlers } from "../src/events/heartbeat-consumer";
 
@@ -150,8 +149,7 @@ describe("cron job context level", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("persists per-job contextLevel and includes it in event payload", () => {
@@ -163,9 +161,7 @@ describe("cron job context level", () => {
     });
 
     // Verify it's stored on the row
-    const row = db
-      .prepare("SELECT context_level FROM cron_jobs WHERE id = 'job-ctx'")
-      .get() as {
+    const row = db.prepare("SELECT context_level FROM cron_jobs WHERE id = 'job-ctx'").get() as {
       context_level: string | null;
     };
     assert.equal(row.context_level, "minimal");
@@ -199,9 +195,7 @@ describe("cron job context level", () => {
     });
 
     // Verify context_level is null
-    const row = db
-      .prepare("SELECT context_level FROM cron_jobs WHERE id = 'job-no-ctx'")
-      .get() as {
+    const row = db.prepare("SELECT context_level FROM cron_jobs WHERE id = 'job-no-ctx'").get() as {
       context_level: string | null;
     };
     assert.equal(row.context_level, null);
@@ -230,9 +224,7 @@ describe("cron job context level", () => {
       contextLevel: "minimal",
     });
 
-    let row = db
-      .prepare("SELECT context_level FROM cron_jobs WHERE id = 'job-update'")
-      .get() as {
+    let row = db.prepare("SELECT context_level FROM cron_jobs WHERE id = 'job-update'").get() as {
       context_level: string | null;
     };
     assert.equal(row.context_level, "minimal");
@@ -244,9 +236,7 @@ describe("cron job context level", () => {
       contextLevel: "full",
     });
 
-    row = db
-      .prepare("SELECT context_level FROM cron_jobs WHERE id = 'job-update'")
-      .get() as {
+    row = db.prepare("SELECT context_level FROM cron_jobs WHERE id = 'job-update'").get() as {
       context_level: string | null;
     };
     assert.equal(row.context_level, "full");

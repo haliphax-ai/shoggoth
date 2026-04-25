@@ -1,12 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import {
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-  mkdirSync,
-  unlinkSync,
-} from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -39,8 +34,7 @@ describe("memory — markdown ingest + FTS/BM25", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("ingestMemoryRoots indexes markdown under roots and searchMemoryFts finds terms", () => {
@@ -82,11 +76,7 @@ describe("memory — markdown ingest + FTS/BM25", () => {
   it("searchMemoryFts ranks more relevant doc higher (BM25)", () => {
     const memRoot = join(tmp, "rank");
     mkdirSync(memRoot, { recursive: true });
-    writeFileSync(
-      join(memRoot, "a.md"),
-      "# A\n\nThe word zeta appears once.\n",
-      "utf8",
-    );
+    writeFileSync(join(memRoot, "a.md"), "# A\n\nThe word zeta appears once.\n", "utf8");
     writeFileSync(
       join(memRoot, "b.md"),
       "# B\n\nZeta zeta zeta zeta zeta many zeta terms.\n",
@@ -115,8 +105,7 @@ describe("memory — optional embeddings", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("upsertMemoryEmbedding stores vector; search uses cosine when enabled", () => {
@@ -213,19 +202,14 @@ describe("memory — relevance scores", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("searchMemoryFts returns scores when includeScores is true", () => {
     const memRoot = join(tmp, "scores");
     mkdirSync(memRoot, { recursive: true });
     writeFileSync(join(memRoot, "a.md"), "# A\n\nzeta once\n", "utf8");
-    writeFileSync(
-      join(memRoot, "b.md"),
-      "# B\n\nzeta zeta zeta many\n",
-      "utf8",
-    );
+    writeFileSync(join(memRoot, "b.md"), "# B\n\nzeta zeta zeta many\n", "utf8");
     ingestMemoryRoots(db, [memRoot]);
 
     const hits = searchMemoryFts(db, "zeta", {
@@ -235,14 +219,8 @@ describe("memory — relevance scores", () => {
     assert.equal(hits.length, 2);
     assert.ok(typeof hits[0]!.score === "number", "score should be a number");
     assert.ok(typeof hits[1]!.score === "number", "score should be a number");
-    assert.ok(
-      hits[0]!.score! >= hits[1]!.score!,
-      "first hit should have higher or equal score",
-    );
-    assert.ok(
-      hits[0]!.score! > 0 && hits[0]!.score! <= 1,
-      "score should be in (0, 1]",
-    );
+    assert.ok(hits[0]!.score! >= hits[1]!.score!, "first hit should have higher or equal score");
+    assert.ok(hits[0]!.score! > 0 && hits[0]!.score! <= 1, "score should be in (0, 1]");
   });
 
   it("searchMemoryFts omits scores when includeScores is false", () => {
@@ -263,11 +241,7 @@ describe("memory — relevance scores", () => {
     const memRoot = join(tmp, "min-score");
     mkdirSync(memRoot, { recursive: true });
     writeFileSync(join(memRoot, "a.md"), "# A\n\nkappa once\n", "utf8");
-    writeFileSync(
-      join(memRoot, "b.md"),
-      "# B\n\nkappa kappa kappa kappa kappa many\n",
-      "utf8",
-    );
+    writeFileSync(join(memRoot, "b.md"), "# B\n\nkappa kappa kappa kappa kappa many\n", "utf8");
     ingestMemoryRoots(db, [memRoot]);
 
     const allHits = searchMemoryFts(db, "kappa", {
@@ -283,10 +257,7 @@ describe("memory — relevance scores", () => {
       includeScores: true,
       minScore: 0.99,
     });
-    assert.ok(
-      filtered.length <= 1,
-      "high minScore should filter out weaker matches",
-    );
+    assert.ok(filtered.length <= 1, "high minScore should filter out weaker matches");
   });
 
   it("searchMemoryWithOptionalEmbedding returns cosine scores when includeScores is true", () => {
@@ -316,10 +287,7 @@ describe("memory — relevance scores", () => {
     });
     assert.ok(hits.length >= 1);
     assert.ok(typeof hits[0]!.score === "number");
-    assert.ok(
-      hits[0]!.score! > 0,
-      "cosine score should be positive for similar vectors",
-    );
+    assert.ok(hits[0]!.score! > 0, "cosine score should be positive for similar vectors");
   });
 });
 
@@ -338,24 +306,15 @@ describe("memory — search filters", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("searchMemoryFts filters by path prefix", () => {
     const memRoot = join(tmp, "prefix");
     mkdirSync(join(memRoot, "projects", "alpha"), { recursive: true });
     mkdirSync(join(memRoot, "projects", "beta"), { recursive: true });
-    writeFileSync(
-      join(memRoot, "projects", "alpha", "a.md"),
-      "# A\n\nuniquefoo data\n",
-      "utf8",
-    );
-    writeFileSync(
-      join(memRoot, "projects", "beta", "b.md"),
-      "# B\n\nuniquefoo data\n",
-      "utf8",
-    );
+    writeFileSync(join(memRoot, "projects", "alpha", "a.md"), "# A\n\nuniquefoo data\n", "utf8");
+    writeFileSync(join(memRoot, "projects", "beta", "b.md"), "# B\n\nuniquefoo data\n", "utf8");
     ingestMemoryRoots(db, [memRoot]);
 
     const alphaPrefix = join(memRoot, "projects", "alpha");
@@ -370,16 +329,8 @@ describe("memory — search filters", () => {
   it("searchMemoryFts filters by path prefix with trailing slash", () => {
     const memRoot = join(tmp, "prefix-slash");
     mkdirSync(join(memRoot, "notes"), { recursive: true });
-    writeFileSync(
-      join(memRoot, "notes", "n.md"),
-      "# N\n\nuniquebarx content\n",
-      "utf8",
-    );
-    writeFileSync(
-      join(memRoot, "top.md"),
-      "# T\n\nuniquebarx content\n",
-      "utf8",
-    );
+    writeFileSync(join(memRoot, "notes", "n.md"), "# N\n\nuniquebarx content\n", "utf8");
+    writeFileSync(join(memRoot, "top.md"), "# T\n\nuniquebarx content\n", "utf8");
     ingestMemoryRoots(db, [memRoot]);
 
     const hits = searchMemoryFts(db, "uniquebarx", {
@@ -398,9 +349,9 @@ describe("memory — search filters", () => {
     ingestMemoryRoots(db, [memRoot]);
 
     // Get the actual mtime from the DB.
-    const row = db
-      .prepare("SELECT source_mtime_ms FROM memory_documents LIMIT 1")
-      .get() as { source_mtime_ms: number };
+    const row = db.prepare("SELECT source_mtime_ms FROM memory_documents LIMIT 1").get() as {
+      source_mtime_ms: number;
+    };
     const mtime = row.source_mtime_ms;
 
     // afterMs = mtime + 1 should exclude the document.
@@ -421,16 +372,12 @@ describe("memory — search filters", () => {
   it("searchMemoryFts filters by date range (beforeMs)", () => {
     const memRoot = join(tmp, "datebefore");
     mkdirSync(memRoot, { recursive: true });
-    writeFileSync(
-      join(memRoot, "old.md"),
-      "# O\n\nuniquebefore content\n",
-      "utf8",
-    );
+    writeFileSync(join(memRoot, "old.md"), "# O\n\nuniquebefore content\n", "utf8");
     ingestMemoryRoots(db, [memRoot]);
 
-    const row = db
-      .prepare("SELECT source_mtime_ms FROM memory_documents LIMIT 1")
-      .get() as { source_mtime_ms: number };
+    const row = db.prepare("SELECT source_mtime_ms FROM memory_documents LIMIT 1").get() as {
+      source_mtime_ms: number;
+    };
     const mtime = row.source_mtime_ms;
 
     // beforeMs = mtime should exclude (strict <).
@@ -452,16 +399,8 @@ describe("memory — search filters", () => {
     const memRoot = join(tmp, "emb-prefix");
     mkdirSync(join(memRoot, "proj"), { recursive: true });
     mkdirSync(join(memRoot, "other"), { recursive: true });
-    writeFileSync(
-      join(memRoot, "proj", "x.md"),
-      "# X\n\napple fruit\n",
-      "utf8",
-    );
-    writeFileSync(
-      join(memRoot, "other", "y.md"),
-      "# Y\n\nbanana boat\n",
-      "utf8",
-    );
+    writeFileSync(join(memRoot, "proj", "x.md"), "# X\n\napple fruit\n", "utf8");
+    writeFileSync(join(memRoot, "other", "y.md"), "# Y\n\nbanana boat\n", "utf8");
     ingestMemoryRoots(db, [memRoot]);
 
     const rowX = db
@@ -497,10 +436,7 @@ describe("memory — extractSnippet", () => {
       maxChars: 200,
       highlightTag: "**",
     });
-    assert.ok(
-      result.includes("**banana**"),
-      `expected highlighted term, got: ${result}`,
-    );
+    assert.ok(result.includes("**banana**"), `expected highlighted term, got: ${result}`);
     assert.ok(result.includes("apple"), "should include surrounding text");
   });
 
@@ -511,10 +447,7 @@ describe("memory — extractSnippet", () => {
       maxChars: 100,
       highlightTag: "**",
     });
-    assert.ok(
-      result.includes("**rollback**"),
-      `expected highlighted term, got: ${result}`,
-    );
+    assert.ok(result.includes("**rollback**"), `expected highlighted term, got: ${result}`);
     assert.ok(
       result.length <= 150,
       "snippet should be roughly within maxChars (with ellipsis/highlights)",
@@ -536,10 +469,7 @@ describe("memory — extractSnippet", () => {
       highlightTag: "**",
     });
     // Should return beginning of body.
-    assert.ok(
-      result.includes("apple"),
-      "should return start of body when no match",
-    );
+    assert.ok(result.includes("apple"), "should return start of body when no match");
   });
 
   it("handles empty body", () => {
@@ -559,14 +489,10 @@ describe("memory — extractSnippet", () => {
   });
 
   it("highlights multiple terms", () => {
-    const result = extractSnippet(
-      "apple banana cherry date elderberry",
-      "apple cherry",
-      {
-        maxChars: 200,
-        highlightTag: "**",
-      },
-    );
+    const result = extractSnippet("apple banana cherry date elderberry", "apple cherry", {
+      maxChars: 200,
+      highlightTag: "**",
+    });
     assert.ok(result.includes("**apple**"), "should highlight first term");
     assert.ok(result.includes("**cherry**"), "should highlight second term");
   });
@@ -576,10 +502,7 @@ describe("memory — extractSnippet", () => {
       maxChars: 200,
       highlightTag: "==",
     });
-    assert.ok(
-      result.includes("==banana=="),
-      `expected custom tag, got: ${result}`,
-    );
+    assert.ok(result.includes("==banana=="), `expected custom tag, got: ${result}`);
   });
 });
 
@@ -598,8 +521,7 @@ describe("memory — ingest file reporting", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("reports added files with status 'added'", () => {
@@ -649,11 +571,7 @@ describe("memory — ingest file reporting", () => {
   it("returns empty files array when nothing changed", () => {
     const memRoot = join(tmp, "report-noop");
     mkdirSync(memRoot, { recursive: true });
-    writeFileSync(
-      join(memRoot, "stable.md"),
-      "# Stable\n\nunchanged\n",
-      "utf8",
-    );
+    writeFileSync(join(memRoot, "stable.md"), "# Stable\n\nunchanged\n", "utf8");
 
     ingestMemoryRoots(db, [memRoot]);
     const result = ingestMemoryRoots(db, [memRoot]);
@@ -699,8 +617,7 @@ describe("memory — selective ingest (paths / exclude)", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("paths filter restricts ingest to matching files only", () => {
@@ -716,9 +633,9 @@ describe("memory — selective ingest (paths / exclude)", () => {
     assert.equal(result.files[0]!.status, "added");
 
     // docs/b.md should not be in the index.
-    const rows = db
-      .prepare("SELECT source_path FROM memory_documents")
-      .all() as { source_path: string }[];
+    const rows = db.prepare("SELECT source_path FROM memory_documents").all() as {
+      source_path: string;
+    }[];
     assert.equal(rows.length, 1);
     assert.match(rows[0]!.source_path, /src/);
   });
@@ -726,16 +643,8 @@ describe("memory — selective ingest (paths / exclude)", () => {
   it("exclude filter skips matching files", () => {
     const memRoot = join(tmp, "sel-excl");
     mkdirSync(join(memRoot, "src"), { recursive: true });
-    writeFileSync(
-      join(memRoot, "src", "code.md"),
-      "# Code\n\ncode file\n",
-      "utf8",
-    );
-    writeFileSync(
-      join(memRoot, "src", "code.test.md"),
-      "# Test\n\ntest file\n",
-      "utf8",
-    );
+    writeFileSync(join(memRoot, "src", "code.md"), "# Code\n\ncode file\n", "utf8");
+    writeFileSync(join(memRoot, "src", "code.test.md"), "# Test\n\ntest file\n", "utf8");
 
     const result = ingestMemoryRoots(db, [memRoot], {
       exclude: ["**/*.test.md"],
@@ -749,21 +658,9 @@ describe("memory — selective ingest (paths / exclude)", () => {
     mkdirSync(join(memRoot, "src", "utils"), { recursive: true });
     mkdirSync(join(memRoot, "docs"), { recursive: true });
     writeFileSync(join(memRoot, "src", "main.md"), "# Main\n\nmain\n", "utf8");
-    writeFileSync(
-      join(memRoot, "src", "utils", "helper.md"),
-      "# Helper\n\nhelper\n",
-      "utf8",
-    );
-    writeFileSync(
-      join(memRoot, "src", "utils", "helper.test.md"),
-      "# HTest\n\ntest\n",
-      "utf8",
-    );
-    writeFileSync(
-      join(memRoot, "docs", "readme.md"),
-      "# Readme\n\nreadme\n",
-      "utf8",
-    );
+    writeFileSync(join(memRoot, "src", "utils", "helper.md"), "# Helper\n\nhelper\n", "utf8");
+    writeFileSync(join(memRoot, "src", "utils", "helper.test.md"), "# HTest\n\ntest\n", "utf8");
+    writeFileSync(join(memRoot, "docs", "readme.md"), "# Readme\n\nreadme\n", "utf8");
 
     const result = ingestMemoryRoots(db, [memRoot], {
       paths: ["src/**"],
@@ -779,14 +676,8 @@ describe("memory — selective ingest (paths / exclude)", () => {
       paths.some((p) => p.includes("helper.md")),
       "should include helper.md",
     );
-    assert.ok(
-      !paths.some((p) => p.includes("test")),
-      "should not include test files",
-    );
-    assert.ok(
-      !paths.some((p) => p.includes("docs")),
-      "should not include docs",
-    );
+    assert.ok(!paths.some((p) => p.includes("test")), "should not include test files");
+    assert.ok(!paths.some((p) => p.includes("docs")), "should not include docs");
   });
 
   it("exclude without paths applies to full ingest", () => {
@@ -841,21 +732,13 @@ describe("memory — selective ingest (paths / exclude)", () => {
         c: number;
       }
     ).c;
-    assert.equal(
-      count,
-      2,
-      "scoped ingest should not remove out-of-scope entries",
-    );
+    assert.equal(count, 2, "scoped ingest should not remove out-of-scope entries");
   });
 
   it("scoped ingest detects removed files within scope", () => {
     const memRoot = join(tmp, "sel-rm-scope");
     mkdirSync(join(memRoot, "src"), { recursive: true });
-    writeFileSync(
-      join(memRoot, "src", "a.md"),
-      "# A\n\nwill be removed\n",
-      "utf8",
-    );
+    writeFileSync(join(memRoot, "src", "a.md"), "# A\n\nwill be removed\n", "utf8");
     writeFileSync(join(memRoot, "src", "b.md"), "# B\n\nstays\n", "utf8");
 
     ingestMemoryRoots(db, [memRoot]);

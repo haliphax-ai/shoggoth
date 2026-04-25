@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -60,8 +61,7 @@ describe("write handler AGENTS.md gate", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("gates write when AGENTS.md exists in cwd", async () => {
@@ -73,11 +73,7 @@ describe("write handler AGENTS.md gate", () => {
     registerFs(registry);
 
     const ctx = makeCtx(db, wsPath, sub);
-    const result = await registry.execute(
-      "write",
-      { path: "foo.txt", content: "hello" },
-      ctx,
-    );
+    const result = await registry.execute("write", { path: "foo.txt", content: "hello" }, ctx);
     const json = JSON.parse(result.resultJson);
     assert.strictEqual(json.gated, true);
   });
@@ -94,11 +90,7 @@ describe("write handler AGENTS.md gate", () => {
     // First call — gated
     await registry.execute("write", { path: "foo.txt", content: "hello" }, ctx);
     // Second call — should proceed
-    const result = await registry.execute(
-      "write",
-      { path: "foo.txt", content: "hello" },
-      ctx,
-    );
+    const result = await registry.execute("write", { path: "foo.txt", content: "hello" }, ctx);
     const json = JSON.parse(result.resultJson);
     assert.strictEqual(json.ok, true);
   });
@@ -118,8 +110,7 @@ describe("search-replace handler AGENTS.md gate", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("gates replace when AGENTS.md exists in cwd", async () => {

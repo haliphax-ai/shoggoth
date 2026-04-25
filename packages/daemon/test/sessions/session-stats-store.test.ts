@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { migrate, defaultMigrationsDir } from "../../src/lib";
@@ -33,8 +34,7 @@ describe("session-stats-store", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(TMP, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, TMP);
   });
 
   it("resetSegmentStats resets compaction_count to 0", () => {
@@ -49,16 +49,8 @@ describe("session-stats-store", () => {
     resetSegmentStats(db, "sess");
 
     const after = getSessionStats(db, "sess");
-    assert.equal(
-      after?.compactionCount,
-      0,
-      "compaction_count should be 0 after reset",
-    );
-    assert.equal(
-      after?.lastCompactedAt,
-      null,
-      "last_compacted_at should be null after reset",
-    );
+    assert.equal(after?.compactionCount, 0, "compaction_count should be 0 after reset");
+    assert.equal(after?.lastCompactedAt, null, "last_compacted_at should be null after reset");
   });
 
   it("resetSegmentStats resets turn_count and token counters", () => {

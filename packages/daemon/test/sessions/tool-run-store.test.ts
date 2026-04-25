@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -29,8 +30,7 @@ describe("ToolRunStore", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("markAllRunningFailed sets failure_reason", () => {
@@ -39,9 +39,7 @@ describe("ToolRunStore", () => {
     const n = tr.markAllRunningFailed("shutdown:sigterm");
     assert.equal(n, 1);
     const row = db
-      .prepare(
-        `SELECT status, failure_reason FROM tool_runs WHERE id = 'run-1'`,
-      )
+      .prepare(`SELECT status, failure_reason FROM tool_runs WHERE id = 'run-1'`)
       .get() as { status: string; failure_reason: string | null };
     assert.equal(row.status, "failed");
     assert.equal(row.failure_reason, "shutdown:sigterm");

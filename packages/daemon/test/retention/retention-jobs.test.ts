@@ -1,12 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import {
-  writeFileSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  existsSync,
-} from "node:fs";
+import { writeFileSync, mkdirSync, mkdtempSync, existsSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { utimes } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -14,14 +9,8 @@ import Database from "better-sqlite3";
 import { defaultConfig } from "@shoggoth/shared";
 import { openStateDb } from "../../src/db/open";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
-import {
-  runRetentionJobs,
-  retentionScheduleIntervalMs,
-} from "../../src/retention/retention-jobs";
-import {
-  createSessionStore,
-  getSessionContextSegmentId,
-} from "../../src/sessions/session-store";
+import { runRetentionJobs, retentionScheduleIntervalMs } from "../../src/retention/retention-jobs";
+import { createSessionStore, getSessionContextSegmentId } from "../../src/sessions/session-store";
 
 function openMigratedDb(): { db: Database.Database; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "shoggoth-ret-"));
@@ -42,8 +31,7 @@ describe("retention jobs", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("no-op when retention is unset", async () => {
@@ -168,9 +156,7 @@ describe("retention jobs", () => {
     assert.equal(s2.transcriptMessagesDeleted, 1);
 
     const n = db
-      .prepare(
-        `SELECT COUNT(*) AS c FROM transcript_messages WHERE session_id = 's1'`,
-      )
+      .prepare(`SELECT COUNT(*) AS c FROM transcript_messages WHERE session_id = 's1'`)
       .get() as {
       c: number;
     };

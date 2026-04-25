@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -64,8 +65,7 @@ describe("BuiltinToolContext workingDirectory integration", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("read resolves relative path from workingDirectory", async () => {
@@ -91,11 +91,7 @@ describe("BuiltinToolContext workingDirectory integration", () => {
     registerFsHandlers(registry);
 
     const ctx = makeCtx(db, "s1", wsPath, join(wsPath, "subdir"));
-    const result = await registry.execute(
-      "read",
-      { path: join(wsPath, "root.txt") },
-      ctx,
-    );
+    const result = await registry.execute("read", { path: join(wsPath, "root.txt") }, ctx);
     const json = JSON.parse(result.resultJson);
     assert.ok(!json.error, `unexpected error: ${json.error}`);
     assert.ok(json.content?.includes("root-content"));
@@ -109,11 +105,7 @@ describe("BuiltinToolContext workingDirectory integration", () => {
     registerFsHandlers(registry);
 
     const ctx = makeCtx(db, "s1", wsPath, join(wsPath, "subdir"));
-    const result = await registry.execute(
-      "write",
-      { path: "new.txt", content: "hello" },
-      ctx,
-    );
+    const result = await registry.execute("write", { path: "new.txt", content: "hello" }, ctx);
     const json = JSON.parse(result.resultJson);
     assert.ok(json.ok, `unexpected error: ${JSON.stringify(json)}`);
 
@@ -167,11 +159,7 @@ describe("BuiltinToolContext workingDirectory integration", () => {
     registerFs(registry);
 
     const ctx = makeCtx(db, "s1", wsPath, join(wsPath, "subdir"));
-    const result = await registry.execute(
-      "fs",
-      { action: "stat", path: "child.txt" },
-      ctx,
-    );
+    const result = await registry.execute("fs", { action: "stat", path: "child.txt" }, ctx);
     const json = JSON.parse(result.resultJson);
     assert.ok(json.ok, `unexpected error: ${JSON.stringify(json)}`);
     assert.equal(json.type, "file");

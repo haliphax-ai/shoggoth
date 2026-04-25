@@ -1,7 +1,8 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -54,8 +55,7 @@ function makeToolCallClient(toolArgs: Record<string, unknown>) {
 describe("session.query tool handler", { concurrency: false }, () => {
   let db: InstanceType<typeof Database>;
   let tmp: string;
-  const sessionId =
-    "agent:alice:discord:channel:00000000-0000-0000-0000-000000000001";
+  const sessionId = "agent:alice:discord:channel:00000000-0000-0000-0000-000000000001";
 
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "shoggoth-sq-"));
@@ -88,8 +88,7 @@ describe("session.query tool handler", { concurrency: false }, () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   async function runWithToolArgs(
@@ -145,14 +144,10 @@ describe("session.query tool handler", { concurrency: false }, () => {
       tool_call_id: string | null;
     }[];
 
-    const toolResultRow = allRows.find(
-      (r) => r.role === "tool" && r.tool_call_id === "tc1",
-    );
+    const toolResultRow = allRows.find((r) => r.role === "tool" && r.tool_call_id === "tc1");
     return {
       result,
-      toolResult: toolResultRow?.content
-        ? JSON.parse(toolResultRow.content)
-        : null,
+      toolResult: toolResultRow?.content ? JSON.parse(toolResultRow.content) : null,
     };
   }
 
@@ -174,11 +169,9 @@ describe("session.query tool handler", { concurrency: false }, () => {
   });
 
   it("allows querying another agent when configured globally", async () => {
-    const bobSessionId =
-      "agent:bob:discord:channel:00000000-0000-0000-0000-000000000002";
+    const bobSessionId = "agent:bob:discord:channel:00000000-0000-0000-0000-000000000002";
     createSessionStore(db).create({ id: bobSessionId, workspacePath: tmp });
-    const bobSeg =
-      createSessionStore(db).getById(bobSessionId)!.contextSegmentId;
+    const bobSeg = createSessionStore(db).getById(bobSessionId)!.contextSegmentId;
     createTranscriptStore(db).append({
       sessionId: bobSessionId,
       contextSegmentId: bobSeg,
@@ -192,11 +185,7 @@ describe("session.query tool handler", { concurrency: false }, () => {
     );
     assert.ok(toolResult);
     assert.ok(!toolResult.error, `unexpected error: ${toolResult?.error}`);
-    assert.ok(
-      toolResult.messages.some(
-        (m: { content: string }) => m.content === "bob message",
-      ),
-    );
+    assert.ok(toolResult.messages.some((m: { content: string }) => m.content === "bob message"));
   });
 
   it("respects limit parameter", async () => {
@@ -246,9 +235,7 @@ describe("session.query tool handler", { concurrency: false }, () => {
     const { toolResult } = await runWithToolArgs({ role: [] });
     assert.ok(toolResult);
     assert.ok(!toolResult.error, `unexpected error: ${toolResult?.error}`);
-    const roles = new Set(
-      toolResult.messages.map((m: { role: string }) => m.role),
-    );
+    const roles = new Set(toolResult.messages.map((m: { role: string }) => m.role));
     // Should have at least user and assistant from seeded data
     assert.ok(roles.has("user"));
     assert.ok(roles.has("assistant"));
@@ -261,10 +248,7 @@ describe("session.query tool handler", { concurrency: false }, () => {
     assert.ok(toolResult);
     assert.ok(!toolResult.error, `unexpected error: ${toolResult?.error}`);
     for (const m of toolResult.messages) {
-      assert.ok(
-        m.role === "user" || m.role === "assistant",
-        `unexpected role: ${m.role}`,
-      );
+      assert.ok(m.role === "user" || m.role === "assistant", `unexpected role: ${m.role}`);
     }
   });
 
@@ -310,11 +294,7 @@ describe("session.query tool handler", { concurrency: false }, () => {
     assert.ok(toolResult);
     assert.ok(!toolResult.error, `unexpected error: ${toolResult?.error}`);
     assert.ok(toolResult.messages.length >= 1);
-    assert.ok(
-      toolResult.messages.some(
-        (m: { content: string }) => m.content === "hello",
-      ),
-    );
+    assert.ok(toolResult.messages.some((m: { content: string }) => m.content === "hello"));
   });
 
   it("rejects both query and queryRegex together", async () => {
@@ -363,9 +343,7 @@ describe("session.query tool handler", { concurrency: false }, () => {
     assert.ok(!toolResult.error, `unexpected error: ${toolResult?.error}`);
     for (const m of toolResult.messages) {
       assert.ok(m._meta, "expected _meta on message");
-      assert.ok(
-        typeof m._meta.timestamp === "string" || m._meta.timestamp === null,
-      );
+      assert.ok(typeof m._meta.timestamp === "string" || m._meta.timestamp === null);
       assert.ok(typeof m._meta.tokenCount === "number");
       assert.ok(m._meta.tokenCount >= 0);
       assert.ok(typeof m._meta.index === "number" || m._meta.index === null);
@@ -390,10 +368,7 @@ describe("session.query tool handler", { concurrency: false }, () => {
     assert.ok(!toolResult.error, `unexpected error: ${toolResult?.error}`);
     for (const m of toolResult.messages) {
       // content should be omitted entirely
-      assert.ok(
-        !("content" in m),
-        "content should not be present in metadataOnly mode",
-      );
+      assert.ok(!("content" in m), "content should not be present in metadataOnly mode");
       // _meta should be present
       assert.ok(m._meta, "expected _meta on message");
       assert.ok(typeof m._meta.tokenCount === "number");

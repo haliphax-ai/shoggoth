@@ -1,7 +1,8 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync, readFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, mkdirSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -14,10 +15,7 @@ import {
   type IntegrationOpsContext,
 } from "../../src/control/integration-ops";
 
-function minimalConfig(
-  tmp: string,
-  dynamicConfigDirectory?: string,
-): ShoggothConfig {
+function minimalConfig(tmp: string, dynamicConfigDirectory?: string): ShoggothConfig {
   const configDir = join(tmp, "config.d");
   mkdirSync(configDir, { recursive: true });
   return {
@@ -43,10 +41,7 @@ function minimalConfig(
   } as ShoggothConfig;
 }
 
-function makeWireRequest(
-  op: string,
-  payload: Record<string, unknown>,
-): WireRequest {
+function makeWireRequest(op: string, payload: Record<string, unknown>): WireRequest {
   return {
     v: WIRE_VERSION,
     id: randomUUID(),
@@ -81,8 +76,7 @@ describe("config_request control op", { concurrency: false }, () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("succeeds with a valid fragment and writes the file", async () => {
@@ -102,11 +96,7 @@ describe("config_request control op", { concurrency: false }, () => {
       key: "logLevel",
       fragment: "debug",
     });
-    const result = (await handleIntegrationControlOp(
-      req,
-      agentPrincipal,
-      ctx,
-    )) as {
+    const result = (await handleIntegrationControlOp(req, agentPrincipal, ctx)) as {
       ok: boolean;
       path: string;
       key: string;
@@ -217,11 +207,7 @@ describe("config_request control op", { concurrency: false }, () => {
       key: "logLevel",
       fragment: "warn",
     });
-    const result = (await handleIntegrationControlOp(
-      req,
-      agentPrincipal,
-      ctx,
-    )) as {
+    const result = (await handleIntegrationControlOp(req, agentPrincipal, ctx)) as {
       ok: boolean;
       path: string;
     };

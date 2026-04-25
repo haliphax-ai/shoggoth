@@ -6,7 +6,8 @@ vi.mock("../../src/workspaces/agent-workspace-layout", () => ({
 }));
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -42,8 +43,7 @@ describe("context level spawn wiring", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(workspacesRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, workspacesRoot);
   });
 
   it("spawn with explicit contextLevel override persists it on the session row", async () => {
@@ -232,8 +232,7 @@ describe("context level session store persistence", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("persists contextLevel on create and returns it on read", () => {

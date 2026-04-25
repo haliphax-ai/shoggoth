@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -59,8 +60,7 @@ describe("cd handler AGENTS.md gate", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("gates cd when AGENTS.md exists in cwd", async () => {
@@ -92,11 +92,7 @@ describe("cd handler AGENTS.md gate", () => {
     // First call — gated
     await registry.execute("cd", { path: "." }, ctx);
     // Second call — should proceed
-    const result = await registry.execute(
-      "cd",
-      { path: join(wsPath, "sub") },
-      ctx,
-    );
+    const result = await registry.execute("cd", { path: join(wsPath, "sub") }, ctx);
     const json = JSON.parse(result.resultJson);
     assert.ok(!json.gated);
     assert.ok(json.workingDirectory);

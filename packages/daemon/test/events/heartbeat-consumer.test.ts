@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -31,8 +32,7 @@ describe("heartbeat consumer", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("dispatches registered handler and completes event", async () => {
@@ -64,9 +64,7 @@ describe("heartbeat consumer", () => {
     });
     assert.equal(n, 1);
     assert.equal(saw, 1);
-    const st = db
-      .prepare("SELECT status FROM events WHERE event_type = 'custom.tick'")
-      .get() as {
+    const st = db.prepare("SELECT status FROM events WHERE event_type = 'custom.tick'").get() as {
       status: string;
     };
     assert.equal(st.status, "completed");
@@ -105,9 +103,7 @@ describe("heartbeat consumer", () => {
       handlers: {},
     });
     let row = db
-      .prepare(
-        "SELECT status, attempts FROM events WHERE event_type = 'unknown.kind'",
-      )
+      .prepare("SELECT status, attempts FROM events WHERE event_type = 'unknown.kind'")
       .get() as {
       status: string;
       attempts: number;
@@ -123,9 +119,7 @@ describe("heartbeat consumer", () => {
       handlers: {},
     });
     row = db
-      .prepare(
-        "SELECT status, attempts, last_error FROM events WHERE event_type = 'unknown.kind'",
-      )
+      .prepare("SELECT status, attempts, last_error FROM events WHERE event_type = 'unknown.kind'")
       .get() as {
       status: string;
       attempts: number;
@@ -149,9 +143,9 @@ describe("heartbeat consumer", () => {
       handlers,
     });
     assert.equal(n, 1);
-    const st = db
-      .prepare("SELECT status FROM events WHERE event_type = 'cron.fire'")
-      .get() as { status: string };
+    const st = db.prepare("SELECT status FROM events WHERE event_type = 'cron.fire'").get() as {
+      status: string;
+    };
     assert.equal(st.status, "completed");
   });
 

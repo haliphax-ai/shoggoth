@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -60,8 +61,7 @@ describe("builtin-cd handler", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("registers as 'cd' in the registry", () => {
@@ -78,11 +78,7 @@ describe("builtin-cd handler", () => {
     registerCd(registry);
 
     const subdir = join(wsPath, "subdir");
-    const result = await registry.execute(
-      "cd",
-      { path: subdir },
-      makeCtx(db, "s1", wsPath),
-    );
+    const result = await registry.execute("cd", { path: subdir }, makeCtx(db, "s1", wsPath));
     const json = JSON.parse(result.resultJson);
     assert.equal(json.workingDirectory, subdir);
 
@@ -112,11 +108,7 @@ describe("builtin-cd handler", () => {
     const registry = new BuiltinToolRegistry();
     registerCd(registry);
 
-    const result = await registry.execute(
-      "cd",
-      { path: "/tmp" },
-      makeCtx(db, "s1", wsPath),
-    );
+    const result = await registry.execute("cd", { path: "/tmp" }, makeCtx(db, "s1", wsPath));
     const json = JSON.parse(result.resultJson);
     assert.ok(json.error);
   });
@@ -128,11 +120,7 @@ describe("builtin-cd handler", () => {
     const registry = new BuiltinToolRegistry();
     registerCd(registry);
 
-    const result = await registry.execute(
-      "cd",
-      { path: "../../.." },
-      makeCtx(db, "s1", wsPath),
-    );
+    const result = await registry.execute("cd", { path: "../../.." }, makeCtx(db, "s1", wsPath));
     const json = JSON.parse(result.resultJson);
     assert.ok(json.error);
   });
@@ -181,11 +169,7 @@ describe("builtin-cd handler", () => {
     const registry = new BuiltinToolRegistry();
     registerCd(registry);
 
-    const result = await registry.execute(
-      "cd",
-      { path: "nonexistent" },
-      makeCtx(db, "s1", wsPath),
-    );
+    const result = await registry.execute("cd", { path: "nonexistent" }, makeCtx(db, "s1", wsPath));
     const json = JSON.parse(result.resultJson);
     assert.ok(json.error);
   });

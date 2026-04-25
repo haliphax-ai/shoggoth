@@ -5,15 +5,13 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { closeTestDb } from "./helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
 import { DEFAULT_HITL_CONFIG, defaultConfig } from "@shoggoth/shared";
-import {
-  renderSystemContextEnvelope,
-  type SystemContext,
-} from "@shoggoth/shared";
+import { renderSystemContextEnvelope, type SystemContext } from "@shoggoth/shared";
 import { migrate, defaultMigrationsDir } from "../src/db/migrate";
 import { createHitlPendingResolutionStack } from "../src/hitl/hitl-pending-stack";
 import { createPolicyEngine } from "../src/policy/engine";
@@ -39,14 +37,10 @@ describe("SystemContext in session agent turns", { concurrency: false }, () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
-  function buildTurnInput(overrides: {
-    userContent: string;
-    systemContext?: SystemContext;
-  }) {
+  function buildTurnInput(overrides: { userContent: string; systemContext?: SystemContext }) {
     const config = defaultConfig(tmp);
     const sessions = createSessionStore(db);
     const session = sessions.getById(SESSION_ID)!;
@@ -109,8 +103,7 @@ describe("SystemContext in session agent turns", { concurrency: false }, () => {
     const transcript = createTranscriptStore(db);
     const page = transcript.listPage({
       sessionId: SESSION_ID,
-      contextSegmentId:
-        createSessionStore(db).getById(SESSION_ID)!.contextSegmentId,
+      contextSegmentId: createSessionStore(db).getById(SESSION_ID)!.contextSegmentId,
       afterSeq: 0,
       limit: 100,
     });
@@ -141,8 +134,7 @@ describe("SystemContext in session agent turns", { concurrency: false }, () => {
     const transcript = createTranscriptStore(db);
     const page = transcript.listPage({
       sessionId: SESSION_ID,
-      contextSegmentId:
-        createSessionStore(db).getById(SESSION_ID)!.contextSegmentId,
+      contextSegmentId: createSessionStore(db).getById(SESSION_ID)!.contextSegmentId,
       afterSeq: 0,
       limit: 100,
     });
@@ -191,8 +183,7 @@ describe("SystemContext in session agent turns", { concurrency: false }, () => {
     const transcript = createTranscriptStore(db);
     const page = transcript.listPage({
       sessionId: SESSION_ID,
-      contextSegmentId:
-        createSessionStore(db).getById(SESSION_ID)!.contextSegmentId,
+      contextSegmentId: createSessionStore(db).getById(SESSION_ID)!.contextSegmentId,
       afterSeq: 0,
       limit: 100,
     });

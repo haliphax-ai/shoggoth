@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -27,8 +28,7 @@ describe("PendingActionsStore", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("enqueue and getById round-trip", () => {
@@ -166,11 +166,7 @@ describe("PendingActionsStore", () => {
       expiresAtIso: "2020-01-01T00:00:00.000Z",
     });
     store.expireDue("2025-01-01T00:00:00.000Z");
-    assert.deepEqual(events, [
-      "h1:approved:",
-      "h2:denied:operator",
-      "h3:denied:timeout",
-    ]);
+    assert.deepEqual(events, ["h1:approved:", "h2:denied:operator", "h3:denied:timeout"]);
   });
 
   it("listPendingForSession returns only pending", () => {

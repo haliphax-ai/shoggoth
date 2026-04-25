@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -35,18 +36,14 @@ describe("boot reconciliation", () => {
   });
 
   afterEach(() => {
-    db.close();
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    closeTestDb(db, tmp);
   });
 
   it("requeues stale processing claims and fails orphaned tool runs", () => {
     emitEvent(db, { scope: EVENT_SCOPE_GLOBAL, eventType: "a", payload: {} });
     const [row] = claimPendingEvents(db, { limit: 1 }) as EventQueueRow[];
     const past = new Date(Date.now() - 300_000).toISOString();
-    db.prepare("UPDATE events SET claimed_at = ? WHERE id = ?").run(
-      past,
-      row!.id,
-    );
+    db.prepare("UPDATE events SET claimed_at = ? WHERE id = ?").run(past, row!.id);
 
     const sessions = createSessionStore(db);
     sessions.create({
@@ -65,9 +62,9 @@ describe("boot reconciliation", () => {
     assert.equal(r.staleEventsRequeued, 1);
     assert.equal(r.toolRunsMarkedFailed, 1);
 
-    const ev = db
-      .prepare("SELECT status FROM events WHERE id = ?")
-      .get(row!.id) as { status: string };
+    const ev = db.prepare("SELECT status FROM events WHERE id = ?").get(row!.id) as {
+      status: string;
+    };
     assert.equal(ev.status, "pending");
 
     const tr = db
