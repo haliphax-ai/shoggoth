@@ -122,9 +122,10 @@ export function mapChatMessagesToGeminiPayload(messages: readonly ChatMessage[])
             );
           }
           const fcPart: Record<string, unknown> = { functionCall: { name: tc.name, args } };
-          if (tc.thoughtSignature) {
-            fcPart.thought_signature = tc.thoughtSignature;
-          }
+          // Gemini 3.x requires thought_signature on every functionCall part.
+          // Use the real signature when available; fall back to the documented
+          // bypass dummy for legacy transcript entries that predate capture.
+          fcPart.thought_signature = tc.thoughtSignature || "context_engineering_is_the_way to_go";
           parts.push(fcPart);
         }
       }
