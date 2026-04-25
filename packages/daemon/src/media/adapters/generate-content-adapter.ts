@@ -92,7 +92,7 @@ export async function generateContentAdapter(
     }
 
     const { mimeType, data } = inlinePart.inlineData;
-    let decoded = Buffer.from(data, "base64");
+    let decoded: Buffer = Buffer.from(data, "base64") as Buffer;
     let effectiveMime: string = mimeType;
 
     // Raw PCM audio (e.g. audio/L16;codec=pcm;rate=24000) needs WAV headers

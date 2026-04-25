@@ -4,4 +4,4 @@ OpenAI-compatible chat completions, failover tool-calling clients, compaction he
 
 - **Source:** `src/`
 - **Tests:** `test/` (`npm run test`)
-- **Typecheck:** `npm run typecheck` → `tsc --noEmit`
+- **Typecheck:** `npm run typecheck` → `tsgo --noEmit`

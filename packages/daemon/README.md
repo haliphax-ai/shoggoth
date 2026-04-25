@@ -4,4 +4,4 @@ SQLite-backed daemon: control plane (Unix socket), Discord messaging bridge, too
 
 - **Source:** `src/`
 - **Tests:** `test/` (`npm run test`)
-- **Typecheck:** `npm run typecheck` → `tsc --noEmit`. Run: `npm run daemon` or `node --import tsx/esm packages/daemon/src/index.ts` (library: `src/index.ts`, `src/lib.ts`).
+- **Typecheck:** `npm run typecheck` → `tsgo --noEmit`. Run: `npm run daemon` or `node --import tsx/esm packages/daemon/src/index.ts` (library: `src/index.ts`, `src/lib.ts`).

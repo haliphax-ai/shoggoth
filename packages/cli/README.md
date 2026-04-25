@@ -4,4 +4,4 @@ Operator `shoggoth` CLI: control-socket client, skills listing, HITL, retention,
 
 - **Source:** `src/`
 - **Tests:** `test/` (`npm run test`)
-- **Typecheck:** `npm run typecheck` → `tsc --noEmit`. Bin `run-cli.mjs` spawns `node --import tsx/esm src/cli.ts`.
+- **Typecheck:** `npm run typecheck` → `tsgo --noEmit`. Bin `run-cli.mjs` spawns `node --import tsx/esm src/cli.ts`.

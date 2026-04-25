@@ -4,4 +4,4 @@ Subprocess execution with UID/GID drop, and `read` / `write` / `exec` tool helpe
 
 - **Source:** `src/`
 - **Tests:** `test/` (`npm run test`)
-- **Typecheck:** `npm run typecheck` → `tsc --noEmit`
+- **Typecheck:** `npm run typecheck` → `tsgo --noEmit`

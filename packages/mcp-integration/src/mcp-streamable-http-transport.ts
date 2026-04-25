@@ -65,7 +65,7 @@ function mergeHeaders(
   base: Readonly<Record<string, string>> | undefined,
   extra: Record<string, string>,
 ): Record<string, string> {
-  return { ...(base ?? {}), ...extra };
+  return { ...base, ...extra };
 }
 
 const SSE_EVENT_BOUNDARY = /\r\n\r\n|\n\n/;
@@ -106,7 +106,7 @@ export async function* iterateSseDataJson(
 ): AsyncGenerator<McpSseJsonEvent> {
   if (!body) return;
   const decoder = new TextDecoderStream();
-  const reader = body.pipeThrough(decoder).getReader();
+  const reader = (body as ReadableStream<any>).pipeThrough(decoder).getReader();
   let buf = "";
   for (;;) {
     const { value, done } = await reader.read();
@@ -162,15 +162,9 @@ function tryRejectPendingFromCancelledNotification(
   if (!p) return false;
   pending.delete(rid);
   const reason =
-    typeof params.reason === "string" && params.reason.length > 0
-      ? params.reason
-      : undefined;
+    typeof params.reason === "string" && params.reason.length > 0 ? params.reason : undefined;
   p.reject(
-    new Error(
-      reason !== undefined
-        ? `MCP request cancelled: ${reason}`
-        : "MCP request cancelled",
-    ),
+    new Error(reason !== undefined ? `MCP request cancelled: ${reason}` : "MCP request cancelled"),
   );
   return true;
 }
@@ -234,8 +228,7 @@ export function connectMcpStreamableHttpSession(
   const baseHeaders = opts.headers ?? {};
   const serverMessageHandler = opts.onServerMessage;
   let mcpSessionId: string | undefined;
-  let mcpProtocolVersionHeader =
-    opts.initialMcpProtocolVersionHeader ?? "2025-11-25";
+  let mcpProtocolVersionHeader = opts.initialMcpProtocolVersionHeader ?? "2025-11-25";
   let closed = false;
   const pending = new Map<number, Pending>();
   let nextId = 1;
@@ -264,8 +257,7 @@ export function connectMcpStreamableHttpSession(
   }
 
   function applySessionHeaders(res: Response): void {
-    const sid =
-      res.headers.get("mcp-session-id") ?? res.headers.get("MCP-Session-Id");
+    const sid = res.headers.get("mcp-session-id") ?? res.headers.get("MCP-Session-Id");
     if (sid) {
       const t = sid.trim();
       if (t !== mcpSessionId) {
@@ -283,11 +275,12 @@ export function connectMcpStreamableHttpSession(
     while (!closed && !standingGetDisabled) {
       const resumeHeader: string | undefined = lastSseEventId;
       try {
-        const getHeaders = mergeHeaders(buildRequestHeaders(), {
-          ...(resumeHeader !== undefined && resumeHeader !== ""
+        const getHeaders = mergeHeaders(
+          buildRequestHeaders(),
+          resumeHeader !== undefined && resumeHeader !== ""
             ? { "Last-Event-ID": resumeHeader }
-            : {}),
-        });
+            : {},
+        );
         const res = await fetch(endpoint, {
           method: "GET",
           headers: getHeaders,
@@ -350,9 +343,7 @@ export function connectMcpStreamableHttpSession(
               method: "POST",
               headers: mergeHeaders(buildRequestHeaders(), {
                 "Content-Type": "application/json",
-                ...(resumeLastEventId !== undefined
-                  ? { "Last-Event-ID": resumeLastEventId }
-                  : {}),
+                ...(resumeLastEventId !== undefined ? { "Last-Event-ID": resumeLastEventId } : {}),
               }),
               body: JSON.stringify(rpcBody),
               signal: abortGlobal.signal,
@@ -492,20 +483,14 @@ export function connectMcpStreamableHttpSession(
             } catch (e) {
               if (pending.has(rid)) {
                 pending.delete(rid);
-                reject(
-                  new Error(`MCP HTTP response is not JSON: ${String(e)}`),
-                );
+                reject(new Error(`MCP HTTP response is not JSON: ${String(e)}`));
               }
               return;
             }
             dispatchIncomingMessage(msg, pending, serverMessageHandler);
             if (pending.has(rid)) {
               pending.delete(rid);
-              reject(
-                new Error(
-                  "MCP HTTP JSON response missing matching JSON-RPC id",
-                ),
-              );
+              reject(new Error("MCP HTTP JSON response missing matching JSON-RPC id"));
             }
             return;
           }
@@ -515,11 +500,7 @@ export function connectMcpStreamableHttpSession(
           }
           if (pending.has(rid)) {
             pending.delete(rid);
-            reject(
-              new Error(
-                `Unsupported MCP HTTP Content-Type: ${ct || "(empty)"}`,
-              ),
-            );
+            reject(new Error(`Unsupported MCP HTTP Content-Type: ${ct || "(empty)"}`));
           }
         } catch (e) {
           if (pending.has(rid)) {

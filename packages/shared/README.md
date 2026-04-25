@@ -4,6 +4,6 @@ Layered configuration, Zod schemas, path layout defaults, and shared types for t
 
 - **Source:** `src/`
 - **Tests:** `test/` (documentation only — no test files; see `test/README.md`)
-- **Typecheck:** `npm run typecheck` → `tsc --noEmit` (no emit). Runtime: `tsx` loads `src/*.ts` (repo root `package.json`).
+- **Typecheck:** `npm run typecheck` → `tsgo --noEmit` (no emit). Runtime: `tsx` loads `src/*.ts` (repo root `package.json`).
 
 Behavior is covered indirectly through packages that depend on this library.

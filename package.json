@@ -24,13 +24,13 @@
   "devDependencies": {
     "@commitlint/config-conventional": "^20.5.0",
     "@types/node": "~22",
+    "@typescript/native-preview": "^7.0.0-dev.20260425.1",
     "commitlint": "^20.5.0",
     "globals": "^17.5.0",
     "husky": "^9.1.7",
     "nano-staged": "^1.0.2",
     "oxfmt": "^0.46.0",
     "oxlint": "^1.61.0",
-    "typescript": "~5.7.2",
     "vitest": "^4.1.2"
   },
   "nano-staged": {

@@ -17,21 +17,21 @@
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsgo --noEmit -p tsconfig.json",
     "test": "node --import tsx/esm --test --test-isolation=process --test-concurrency=true $(find test -name '*.test.ts' | sort)"
   },
   "dependencies": {
-    "@shoggoth/procman": "*",
-    "@shoggoth/workflow": "*",
+    "@shoggoth/authn": "*",
     "@shoggoth/mcp-integration": "*",
     "@shoggoth/messaging": "*",
-    "@shoggoth/platform-discord": "*",
-    "@shoggoth/os-exec": "*",
-    "@shoggoth/authn": "*",
     "@shoggoth/models": "*",
+    "@shoggoth/os-exec": "*",
+    "@shoggoth/platform-discord": "*",
+    "@shoggoth/plugins": "*",
+    "@shoggoth/procman": "*",
     "@shoggoth/shared": "*",
     "@shoggoth/skills": "*",
-    "@shoggoth/plugins": "*",
+    "@shoggoth/workflow": "*",
     "better-sqlite3": "^11.7.0",
     "tsx": "^4.19.3"
   },

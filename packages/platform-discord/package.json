@@ -12,12 +12,8 @@
     },
     "./package.json": "./package.json"
   },
-  "shoggothPlugin": {
-    "kind": "messaging-platform",
-    "entrypoint": "./src/plugin.ts"
-  },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsgo --noEmit -p tsconfig.json",
     "test": "node --import tsx/esm --test --test-isolation=process --test-concurrency=true $(find test -name '*.test.ts' | sort)"
   },
   "dependencies": {
@@ -32,5 +28,9 @@
     "@types/better-sqlite3": "^7.6.12",
     "better-sqlite3": "^11.7.0",
     "typescript": "~5.7.2"
+  },
+  "shoggothPlugin": {
+    "kind": "messaging-platform",
+    "entrypoint": "./src/plugin.ts"
   }
 }

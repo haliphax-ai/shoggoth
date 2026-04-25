@@ -1,12 +1,12 @@
 {
   "name": "@shoggoth/cli",
   "version": "0.1.0",
-  "type": "module",
   "bin": {
     "shoggoth": "./run-cli.mjs"
   },
+  "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsgo --noEmit -p tsconfig.json",
     "test": "node --import tsx/esm --test --test-isolation=process --test-concurrency=true $(find test -name '*.test.ts' | sort)"
   },
   "dependencies": {

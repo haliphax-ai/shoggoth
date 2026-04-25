@@ -4,4 +4,4 @@ Internal message model, agent-to-agent bus, outbound transport, Discord gateway/
 
 - **Source:** `src/`
 - **Tests:** `test/` (`npm run test`)
-- **Typecheck:** `npm run typecheck` → `tsc --noEmit`
+- **Typecheck:** `npm run typecheck` → `tsgo --noEmit`
