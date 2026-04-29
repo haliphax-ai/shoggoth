@@ -197,6 +197,7 @@ export class Orchestrator {
   private paused = false;
   private pollingTimer: ReturnType<typeof setTimeout> | null = null;
   private statusTimer: ReturnType<typeof setInterval> | null = null;
+  private dirty = false;
 
   constructor(
     spawner: SpawnAdapter,
@@ -374,7 +375,8 @@ export class Orchestrator {
   private startStatusTimer(): void {
     if (!this.statusManager || !this.workflow || !this.opts) return;
     this.statusTimer = setInterval(() => {
-      if (!this.workflow || !this.statusManager) return;
+      if (!this.workflow || !this.statusManager || !this.dirty) return;
+      this.dirty = false;
       this.statusManager.updateStatus(this.workflow).catch((err) => {
         log.error("status timer updateStatus failed", {
           workflowId: this.workflow?.id,
@@ -454,6 +456,7 @@ export class Orchestrator {
           task.status = "failed";
           task.error = `self-reported failure: ${result.output}`;
           task.completedAt = result.completedAt ?? Date.now();
+          this.dirty = true;
           log.debug("task self-reported failure via ERROR:TASK_FAILED marker", {
             workflowId: wf.id,
             taskId: task.taskDef.id,
@@ -462,6 +465,7 @@ export class Orchestrator {
           task.status = "done";
           task.output = result.output;
           task.completedAt = result.completedAt ?? Date.now();
+          this.dirty = true;
           log.debug("task completed", {
             workflowId: wf.id,
             taskId: task.taskDef.id,
@@ -474,6 +478,7 @@ export class Orchestrator {
         task.status = "failed";
         task.error = result.error;
         task.completedAt = result.completedAt ?? Date.now();
+        this.dirty = true;
         log.debug("task failed", {
           workflowId: wf.id,
           taskId: task.taskDef.id,
@@ -510,6 +515,7 @@ export class Orchestrator {
         task.status = "failed";
         task.error = `timeout: task exceeded runtime limit of ${limit}ms`;
         task.completedAt = now;
+        this.dirty = true;
         log.debug("task timed out", {
           workflowId: wf.id,
           taskId: task.taskDef.id,
@@ -612,6 +618,7 @@ export class Orchestrator {
       if (shouldSkip(task.taskDef.id, wf.graph, tm)) {
         task.status = "skipped";
         task.completedAt = Date.now();
+        this.dirty = true;
         continue;
       }
 
@@ -619,6 +626,7 @@ export class Orchestrator {
         task.status = "failed";
         task.error = "blocked: dependency failed";
         task.completedAt = Date.now();
+        this.dirty = true;
       }
     }
   }
@@ -662,6 +670,7 @@ export class Orchestrator {
             task.output = "pass";
             task.status = "done";
             task.completedAt = Date.now();
+            this.dirty = true;
             log.debug("gate task passed", {
               workflowId: wf.id,
               taskId: task.taskDef.id,
@@ -670,6 +679,7 @@ export class Orchestrator {
             task.output = "skip";
             task.status = "done";
             task.completedAt = Date.now();
+            this.dirty = true;
             log.debug("gate task skipped", {
               workflowId: wf.id,
               taskId: task.taskDef.id,
@@ -690,6 +700,7 @@ export class Orchestrator {
           task.status = "failed";
           task.error = errorMsg;
           task.completedAt = Date.now();
+          this.dirty = true;
         }
         continue;
       }
@@ -703,6 +714,7 @@ export class Orchestrator {
           task.output = resolved;
           task.status = "done";
           task.completedAt = Date.now();
+          this.dirty = true;
           log.debug("transform task completed", {
             workflowId: wf.id,
             taskId: task.taskDef.id,
@@ -712,6 +724,7 @@ export class Orchestrator {
           task.status = "failed";
           task.error = errorMsg;
           task.completedAt = Date.now();
+          this.dirty = true;
         }
         continue;
       }
@@ -724,6 +737,7 @@ export class Orchestrator {
           task.status = "failed";
           task.error = "message task requires a MessagePoster but none was provided";
           task.completedAt = Date.now();
+          this.dirty = true;
           continue;
         }
         try {
@@ -733,6 +747,7 @@ export class Orchestrator {
           task.output = resolvedMessage;
           task.status = "done";
           task.completedAt = Date.now();
+          this.dirty = true;
           log.debug("message task completed", {
             workflowId: wf.id,
             taskId: task.taskDef.id,
@@ -743,6 +758,7 @@ export class Orchestrator {
           task.status = "failed";
           task.error = errorMsg;
           task.completedAt = Date.now();
+          this.dirty = true;
         }
         continue;
       }
@@ -754,6 +770,7 @@ export class Orchestrator {
           task.status = "failed";
           task.error = "tool task requires a ToolExecutor but none was provided";
           task.completedAt = Date.now();
+          this.dirty = true;
           continue;
         }
         try {
@@ -785,6 +802,7 @@ export class Orchestrator {
             task.status = "done";
           }
           task.completedAt = Date.now();
+          this.dirty = true;
           log.debug("tool task completed", {
             workflowId: wf.id,
             taskId: task.taskDef.id,
@@ -795,6 +813,7 @@ export class Orchestrator {
           task.status = "failed";
           task.error = errorMsg;
           task.completedAt = Date.now();
+          this.dirty = true;
         }
         continue;
       }
@@ -817,6 +836,7 @@ export class Orchestrator {
         task.status = "in_progress";
         task.sessionKey = sessionKey;
         task.startedAt = Date.now();
+        this.dirty = true;
         log.debug("task started", {
           workflowId: wf.id,
           taskId: task.taskDef.id,
@@ -827,6 +847,7 @@ export class Orchestrator {
         task.status = "failed";
         task.error = errorMsg;
         task.completedAt = Date.now();
+        this.dirty = true;
 
         // Pause orchestrator on spawn error
         this.paused = true;
@@ -869,6 +890,7 @@ export class Orchestrator {
       // Update status message with final state before posting summary
       if (this.statusManager) {
         await this.statusManager.updateStatus(wf);
+        this.dirty = false;
         await this.statusManager.postSummary(wf);
       }
 
