@@ -1804,8 +1804,8 @@ export async function handleIntegrationControlOp(
         if (val != null && typeof val === "object" && !Array.isArray(val)) {
           const m = (val as Record<string, unknown>).model;
           if (typeof m === "string") {
-            const parts = m.split("/");
-            if (parts.length !== 2 || !parts[0] || !parts[1]) {
+            const slashIdx = m.indexOf("/");
+            if (slashIdx < 1 || slashIdx === m.length - 1) {
               throw new IntegrationOpError(
                 "ERR_INVALID_PAYLOAD",
                 "model_selection.model must be in providerId/model format",
