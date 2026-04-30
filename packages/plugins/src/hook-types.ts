@@ -64,7 +64,7 @@ export interface PlatformDeps {
   readonly logger: Logger;
   /** Default platform assistant dependencies (opaque to the plugin system). */
   readonly platformAssistantDeps: unknown;
-  readonly abortSession: (sessionId: string) => Promise<void>;
+  readonly abortSession: (sessionId: string) => Promise<boolean>;
   readonly invokeControlOp: (
     op: string,
     payload: unknown,

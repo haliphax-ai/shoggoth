@@ -556,7 +556,8 @@ export async function executeSessionAgentTurn(
       if (input.throwOnError) throw e;
       const failoverMeta = model.getSessionToolLoopFailoverState();
       const latestAssistantText =
-        extractLatestTranscriptAssistantText(input.db, input.sessionId, ctxSeg) ?? "_Aborted._";
+        (extractLatestTranscriptAssistantText(input.db, input.sessionId, ctxSeg) ?? "") +
+        "\n\n<Aborted>";
       return { failoverMeta, latestAssistantText };
     }
     // Catch-all: log the error and return whatever partial response exists

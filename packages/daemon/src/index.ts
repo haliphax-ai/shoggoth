@@ -344,7 +344,7 @@ void (async () => {
     logger: getLogger("messaging"),
     platformAssistantDeps: defaultPlatformAssistantDeps as unknown,
     abortSession: async (sessionId) => {
-      await requestSessionTurnAbort(sessionId ?? "");
+      return requestSessionTurnAbort(sessionId ?? "");
     },
     invokeControlOp: async (op, payload) => {
       if (!stateDb) return { ok: false, error: "state database unavailable" };
