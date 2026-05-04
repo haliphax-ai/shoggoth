@@ -26,6 +26,7 @@ interface TaskInput {
   response_schema?: {
     schema: Record<string, unknown>;
   };
+  model_options?: { model?: string };
 }
 
 export interface WorkflowToolArgs {
@@ -117,6 +118,7 @@ function toTaskDefs(inputs: TaskInput[]): TaskDef[] {
           kind: "agent" as const,
           prompt,
           ...(t.response_schema ? { responseSchema: t.response_schema } : {}),
+          ...(t.model_options ? { modelOptions: t.model_options } : {}),
         };
       }
       case "tool": {

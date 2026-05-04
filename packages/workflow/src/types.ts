@@ -38,6 +38,8 @@ export interface AgentTaskDef extends TaskDefBase {
   responseSchema?: {
     schema: Record<string, unknown>;
   };
+  /** Optional per-task model override. Highest priority in the model selection chain. */
+  modelOptions?: { model?: string };
 }
 
 /** Tool task — invokes an MCP tool directly (Phase 2). */

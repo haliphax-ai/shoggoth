@@ -113,6 +113,14 @@ const workflowToolArgs = {
             },
             required: ["schema"],
           },
+          model_options: {
+            type: "object",
+            description:
+              "Optional: per-task model override for agent tasks. Highest priority in the model selection chain.",
+            properties: {
+              model: { type: "string", description: "Model identifier to use for this task." },
+            },
+          },
         },
         required: ["id"],
       },
