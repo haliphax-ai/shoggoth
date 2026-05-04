@@ -90,6 +90,8 @@ export interface DaemonSpawnAdapterDeps {
   readonly completionMap?: CompletionMap;
   /** Context level for spawned workflow task sessions. Defaults to "minimal". */
   readonly contextLevel?: ContextLevel;
+  /** Resolved subagent model ref from config (agents.list.<id>.subagentModel or agents.subagentModel). */
+  readonly subagentModel?: string;
 }
 
 export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAdapter & {
@@ -111,12 +113,19 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
         contextLevel: deps.contextLevel ?? "minimal",
       });
 
+      // Build modelSelection merging subagentModel + responseSchema
+      const modelSelection: Record<string, unknown> = {};
+      if (deps.subagentModel) {
+        modelSelection.model = deps.subagentModel;
+      }
+      if (req.responseSchema) {
+        modelSelection.responseSchema = req.responseSchema;
+      }
+
       deps.sessions.update(childId, {
         parentSessionId,
         subagentMode: "one_shot",
-        ...(req.responseSchema
-          ? { modelSelection: { responseSchema: req.responseSchema } }
-          : {}),
+        ...(Object.keys(modelSelection).length > 0 ? { modelSelection } : {}),
       });
 
       // Fire off the model turn without awaiting — poll adapter tracks completion.
