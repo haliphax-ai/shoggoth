@@ -524,10 +524,18 @@ void (async () => {
       agentsConfig: config.agents,
     });
 
+    // Resolve configured subagentModel (per-agent override > global default).
+    const workflowAgentId = resolveShoggothAgentId(config);
+    const workflowPerAgentModel = workflowAgentId
+      ? config.agents?.list?.[workflowAgentId]?.subagentModel
+      : undefined;
+    const workflowSubagentModel = workflowPerAgentModel ?? config.agents?.subagentModel;
+
     const spawner = createDaemonSpawnAdapter({
       sessionManager: workflowSessionManager,
       sessions: workflowSessions,
       requestTurnAbort: (id) => requestSessionTurnAbort(id),
+      subagentModel: workflowSubagentModel,
       runSessionModelTurn: (input) => {
         const ext = subagentRuntimeExtensionRef.current;
         if (!ext) throw new Error("subagent runtime not available (platform not started)");
