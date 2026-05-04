@@ -129,6 +129,54 @@ export function buildMixedSessionMcpToolContext(
   };
 }
 
+/**
+ * Merges global + per-agent + per-session MCP tool catalogs (global first, then agent, then session).
+ * Routes external invoke calls to the correct pool based on source ID membership.
+ */
+export function buildThreeTierSessionMcpToolContext(
+  globalSources: readonly McpSourceCatalog[],
+  globalExternal: ExternalMcpInvoke | undefined,
+  agentSources: readonly McpSourceCatalog[],
+  agentExternal: ExternalMcpInvoke | undefined,
+  sessionSources: readonly McpSourceCatalog[],
+  sessionExternal: ExternalMcpInvoke | undefined,
+  globalSourceIds: ReadonlySet<string>,
+  perAgentSourceIds: ReadonlySet<string>,
+  perSessionSourceIds: ReadonlySet<string>,
+): SessionMcpToolContext {
+  const aggregated = buildAggregatedMcpCatalog([
+    ...globalSources,
+    ...agentSources,
+    ...sessionSources,
+  ]);
+  const externals = [globalExternal, agentExternal, sessionExternal].filter(
+    Boolean,
+  ) as ExternalMcpInvoke[];
+  let external: ExternalMcpInvoke | undefined;
+  if (externals.length > 1) {
+    external = async (input) => {
+      if (globalSourceIds.has(input.sourceId) && globalExternal) return globalExternal(input);
+      if (perAgentSourceIds.has(input.sourceId) && agentExternal) return agentExternal(input);
+      if (perSessionSourceIds.has(input.sourceId) && sessionExternal) return sessionExternal(input);
+      return {
+        resultJson: JSON.stringify({
+          error: "mcp_source_unknown",
+          sourceId: input.sourceId,
+          detail: "Tool source id is not mapped to a connected MCP pool",
+        }),
+      };
+    };
+  } else {
+    external = externals[0];
+  }
+  return {
+    aggregated,
+    toolsOpenAi: openAiToolsFromCatalog(aggregated),
+    toolsLoop: mcpToolsForToolLoop(aggregated),
+    external,
+  };
+}
+
 export function buildBuiltinOnlySessionMcpToolContext(): SessionMcpToolContext {
   const aggregated = buildAggregatedMcpCatalog();
   return {
