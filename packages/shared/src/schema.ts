@@ -506,10 +506,6 @@ export type ShoggothMcpServerEntry = z.infer<typeof shoggothMcpServerEntrySchema
 
 export type ShoggothMcpHttpServerEntry = z.infer<typeof shoggothMcpHttpServerSchema>;
 
-/** Default idle eviction for lazy per-session MCP pools when `perInstanceIdleTimeoutMs` is omitted. */
-/** @deprecated Use SHOGGOTH_DEFAULT_MCP_INSTANCE_IDLE_MS */
-export const SHOGGOTH_DEFAULT_PER_SESSION_MCP_IDLE_MS = 30 * 60 * 1000;
-
 /** Default idle eviction for MCP pool instances when `perInstanceIdleTimeoutMs` is omitted. */
 export const SHOGGOTH_DEFAULT_MCP_INSTANCE_IDLE_MS = 30 * 60 * 1000;
 

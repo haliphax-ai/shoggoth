@@ -96,7 +96,7 @@ function createMockConnectMcp() {
 }
 
 // ---------------------------------------------------------------------------
-// 1. trackInstanceIdle — replaces trackPerSessionIdle
+// 1. trackInstanceIdle — unified idle tracking flag
 // ---------------------------------------------------------------------------
 
 describe("unified MCP idle eviction — trackInstanceIdle", () => {
@@ -126,8 +126,7 @@ describe("unified MCP idle eviction — trackInstanceIdle", () => {
       deps: { connectShoggothMcpServers: mockMcp.connectShoggothMcpServers },
     });
 
-    // The new unified property should exist and be true.
-    // This FAILS because the runtime only exposes trackPerSessionIdle, not trackInstanceIdle.
+    // The unified property should exist and be true.
     expect((runtime as any).trackInstanceIdle).toBe(true);
 
     await runtime.shutdown();
@@ -145,7 +144,6 @@ describe("unified MCP idle eviction — trackInstanceIdle", () => {
     });
 
     // trackInstanceIdle should be true even for global-only servers.
-    // This FAILS because the current trackPerSessionIdle is false when there are no per-session servers.
     expect((runtime as any).trackInstanceIdle).toBe(true);
 
     await runtime.shutdown();
@@ -455,7 +453,6 @@ describe("unified MCP idle eviction — global pool", () => {
     vi.advanceTimersByTime(idleMs + 100);
 
     // The global pool should have been evicted (close called).
-    // This FAILS because the current runtime does not schedule idle eviction for global pools.
     expect(mockMcp.closeFns[0]).toHaveBeenCalled();
 
     // Resolving context again should trigger a fresh global connect
@@ -486,7 +483,6 @@ describe("unified MCP idle eviction — global pool", () => {
     vi.advanceTimersByTime(idleMs - 1000);
 
     // Begin a new turn → should cancel the global idle timer.
-    // This FAILS because notifyTurnBegin only cancels per-session timers currently.
     runtime.notifyTurnBegin("sess-global-cancel");
 
     // Advance well past the original timeout
@@ -520,7 +516,6 @@ describe("unified MCP idle eviction — global pool", () => {
     vi.advanceTimersByTime(idleMs - 1000);
 
     // sess-b starts a turn — should keep the global pool alive.
-    // This FAILS because the runtime doesn't track global idle across sessions.
     runtime.notifyTurnBegin("sess-b");
 
     // Advance past original timeout
@@ -603,7 +598,6 @@ describe("unified MCP idle eviction — turn begin cancels all scopes", () => {
     vi.advanceTimersByTime(idleMs - 1000);
 
     // Begin a new turn — should cancel ALL pending idle timers.
-    // This FAILS because notifyTurnBegin currently only cancels per-session timers.
     runtime.notifyTurnBegin(sessionId);
 
     // Advance well past the timeout
@@ -658,7 +652,6 @@ describe("unified MCP idle eviction — shutdown clears all timers", () => {
     runtime.notifyTurnEnd("sess-shutdown-global");
 
     // Shutdown before the timer fires — should clear the timer.
-    // This FAILS because shutdown() doesn't clear global idle timers (they don't exist yet).
     await runtime.shutdown();
 
     // Advance past the timeout — the eviction callback should NOT fire

@@ -67,8 +67,6 @@ export interface SessionMcpRuntime {
   /** Call when a turn finishes (schedules idle eviction when configured). */
   readonly notifyTurnEnd: (sessionId: string) => void;
   readonly shutdown: () => Promise<void>;
-  /** @deprecated Use {@link trackInstanceIdle} instead. */
-  readonly trackPerSessionIdle: boolean;
   /** True when perInstanceIdleTimeoutMs > 0 and at least one MCP server is configured. */
   readonly trackInstanceIdle: boolean;
 }
@@ -572,8 +570,6 @@ export async function createSessionMcpRuntime(
     notifyTurnBegin,
     notifyTurnEnd,
     trackInstanceIdle,
-    // Keep backward compat — trackPerSessionIdle mirrors the old semantics.
-    trackPerSessionIdle: trackInstanceIdle && perSessionServers.length > 0,
     shutdown: async () => {
       // Clear all idle timers.
       if (globalIdleTimer.ref !== undefined) {

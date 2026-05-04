@@ -57,9 +57,9 @@ Defines the entire Shoggoth configuration surface as Zod schemas. Every config k
 | `ShoggothToolRules`                | `{ allow: string[], deny: string[], review: string[] }` — deny wins; empty allow + no `"*"` = default-deny.                                                                                                                                                                                                     |
 | `ShoggothMemoryConfig`             | Workspace-relative memory paths (scanned for `*.md`) and embeddings sub-config. Absolute paths are rejected by schema.                                                                                                                                                                                          |
 | `ShoggothMemoryEmbeddingsConfig`   | `enabled`, optional `modelId`, `openaiBaseUrl`, `apiKey`/`apiKeyEnv`.                                                                                                                                                                                                                                           |
-| `ShoggothMcpConfig`                | MCP server definitions, pool scope (`"global"` / `"per_session"`), idle timeout, server rules. See [MCP Integration](mcp-integration.md).                                                                                                                                                                       |
+| `ShoggothMcpConfig`                | MCP server definitions, pool scope (`"global"` / `"per_agent"` / `"per_session"`), idle timeout, server rules. See [MCP Integration](mcp-integration.md).                                                                                                                                                       |
 | `ShoggothMcpServerEntry`           | Discriminated union on `transport`: `"stdio"`, `"tcp"`, or `"http"`. Each has an `id`, transport-specific fields, and optional `poolScope`.                                                                                                                                                                     |
-| `ShoggothMcpServerPoolScope`       | `"inherit"` \| `"global"` \| `"per_session"`                                                                                                                                                                                                                                                                    |
+| `ShoggothMcpServerPoolScope`       | `"inherit"` \| `"global"` \| `"per_agent"` \| `"per_session"`                                                                                                                                                                                                                                                   |
 | `McpServerRules`                   | `{ allow: string[], deny: string[] }` — deny wins.                                                                                                                                                                                                                                                              |
 | `ShoggothSkillsConfig`             | `scanRoots` (dirs scanned for `*.md` skill files) and `disabledIds`. See [Skills & Plugins](skills-plugins.md).                                                                                                                                                                                                 |
 | `ShoggothRetentionConfig`          | Data lifecycle: `inboundMediaMaxAgeDays`, `inboundMediaMaxTotalBytes`, `transcriptMessageMaxAgeDays`, `transcriptMaxMessagesPerSession`, `kvMaxEntries`. See [Daemon — Retention](daemon.md#retention).                                                                                                         |
@@ -80,15 +80,15 @@ Defines the entire Shoggoth configuration surface as Zod schemas. Every config k
 
 ### Important Constants
 
-| Constant                                   | Value                                                   | Description                                                               |
-| ------------------------------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `CONTEXT_LEVELS`                           | `["none", "minimal", "light", "full"]`                  | Valid context level values.                                               |
-| `DEFAULT_HITL_CONFIG`                      | See source                                              | Default HITL risk tiers for builtins; `bypassUpTo: "safe"`.               |
-| `DEFAULT_POLICY_CONFIG`                    | See source                                              | Operator gets `["*"]` for all; agent gets a curated controlOps allowlist. |
-| `DEFAULT_MEMORY_CONFIG`                    | `{ paths: ["memory"], embeddings: { enabled: false } }` | Default workspace-relative `memory/` root, embeddings off.                |
-| `DEFAULT_SKILLS_CONFIG`                    | `{ scanRoots: [], disabledIds: [] }`                    | No skill scan roots.                                                      |
-| `DEFAULT_TOOL_CALL_TIMEOUT_MS`             | `600_000` (10 min)                                      | Default tool call timeout.                                                |
-| `SHOGGOTH_DEFAULT_PER_SESSION_MCP_IDLE_MS` | `1_800_000` (30 min)                                    | Default idle eviction for per-session MCP pools.                          |
+| Constant                                | Value                                                   | Description                                                               |
+| --------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `CONTEXT_LEVELS`                        | `["none", "minimal", "light", "full"]`                  | Valid context level values.                                               |
+| `DEFAULT_HITL_CONFIG`                   | See source                                              | Default HITL risk tiers for builtins; `bypassUpTo: "safe"`.               |
+| `DEFAULT_POLICY_CONFIG`                 | See source                                              | Operator gets `["*"]` for all; agent gets a curated controlOps allowlist. |
+| `DEFAULT_MEMORY_CONFIG`                 | `{ paths: ["memory"], embeddings: { enabled: false } }` | Default workspace-relative `memory/` root, embeddings off.                |
+| `DEFAULT_SKILLS_CONFIG`                 | `{ scanRoots: [], disabledIds: [] }`                    | No skill scan roots.                                                      |
+| `DEFAULT_TOOL_CALL_TIMEOUT_MS`          | `600_000` (10 min)                                      | Default tool call timeout.                                                |
+| `SHOGGOTH_DEFAULT_MCP_INSTANCE_IDLE_MS` | `1_800_000` (30 min)                                    | Default idle eviction for MCP pool instances (all scopes).                |
 
 ### `defaultConfig(configDirectory)`
 
