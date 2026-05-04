@@ -96,34 +96,34 @@ export async function connectShoggothMcpServers(
   const agentCtx = options?.agentContext;
 
   for (const s of servers) {
-    // Build env: agent workspace as HOME, then server config env on top
-    const baseEnv = agentCtx ? { HOME: agentCtx.workspacePath, ...s.env } : s.env;
+    let session: McpJsonRpcSession;
 
-    // Resolve cwd: server config cwd takes precedence, then agent workspace, then undefined
-    const cwd = s.cwd ?? agentCtx?.workspacePath;
-
-    const session =
-      s.transport === "stdio"
-        ? await openMcpStdioClient({
-            command: s.command,
-            args: s.args,
-            cwd,
-            env: baseEnv,
-            uid: agentCtx?.uid,
-            gid: agentCtx?.gid,
-            processManager: getProcessManager(),
-          })
-        : s.transport === "tcp"
-          ? await openMcpTcpClient({ host: s.host, port: s.port })
-          : await openMcpStreamableHttpClient({
-              url: s.url,
-              headers: s.headers,
-              onServerMessage: onPoolMessage
-                ? (msg) => onPoolMessage({ sourceId: s.id, msg })
-                : undefined,
-            });
-    if (s.transport === "http") {
-      streamableBySourceId.set(s.id, session as McpStreamableHttpSession);
+    if (s.transport === "stdio") {
+      // Build env: agent workspace as HOME, then server config env on top
+      const baseEnv = agentCtx ? { HOME: agentCtx.workspacePath, ...s.env } : s.env;
+      // Resolve cwd: server config cwd takes precedence, then agent workspace, then undefined
+      const cwd = s.cwd ?? agentCtx?.workspacePath;
+      session = await openMcpStdioClient({
+        command: s.command,
+        args: s.args,
+        cwd,
+        env: baseEnv,
+        uid: agentCtx?.uid,
+        gid: agentCtx?.gid,
+        processManager: getProcessManager(),
+      });
+    } else if (s.transport === "tcp") {
+      session = await openMcpTcpClient({ host: s.host, port: s.port });
+    } else {
+      const httpSession = await openMcpStreamableHttpClient({
+        url: s.url,
+        headers: s.headers,
+        onServerMessage: onPoolMessage
+          ? (msg) => onPoolMessage({ sourceId: s.id, msg })
+          : undefined,
+      });
+      streamableBySourceId.set(s.id, httpSession);
+      session = httpSession;
     }
     const tools = await mcpFetchToolsList(session);
     externalSources.push(mcpToolsToSourceCatalog(s.id, tools));

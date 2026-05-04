@@ -1,6 +1,6 @@
 ---
 date: 2026-05-04
-completed: never
+completed: 2026-05-04
 ---
 
 # Per-Agent MCP Pool Scope
