@@ -25,18 +25,33 @@ The top-level default also accepts `per_agent`:
 poolScope: z.enum(["global", "per_agent", "per_session"]).default("global"),
 ```
 
-### Idle Timeout Config
+### Idle Timeout Config (renamed + unified)
 
-A new optional field on `shoggothMcpConfigSchema`:
+The existing `perSessionIdleTimeoutMs` is replaced by `perInstanceIdleTimeoutMs`. It applies to all pool scopes uniformly:
 
 ```ts
 /**
- * After the last turn completes for any session belonging to an agent,
- * close that agent's per-agent MCP pool if no further turn completes
- * within this many milliseconds. `0` disables. Default: disabled (no eviction).
+ * After the last turn completes for a pool instance (global, per-agent, or per-session),
+ * close that pool if no further turn completes within this many milliseconds.
+ * `0` disables idle eviction. Default: disabled.
+ *
+ * - global: timer resets on any session's turn end; evicts the shared pool.
+ * - per_agent: timer resets on any turn end from that agent's sessions; evicts that agent's pool.
+ * - per_session: timer resets on that session's turn end; evicts that session's pool.
  */
-perAgentIdleTimeoutMs: z.number().int().nonnegative().optional(),
+perInstanceIdleTimeoutMs: z.number().int().nonnegative().optional(),
 ```
+
+The `perSessionIdleTimeoutMs` field is removed from the schema.
+
+### Default Constant (renamed)
+
+```ts
+/** Default idle eviction for lazy MCP pools when `perInstanceIdleTimeoutMs` is omitted. */
+export const SHOGGOTH_DEFAULT_MCP_INSTANCE_IDLE_MS = 30 * 60 * 1000;
+```
+
+Replaces `SHOGGOTH_DEFAULT_PER_SESSION_MCP_IDLE_MS`.
 
 ## Interfaces
 
@@ -117,11 +132,12 @@ export interface SessionMcpRuntime {
   readonly notifyTurnBegin: (sessionId: string) => void;
   readonly notifyTurnEnd: (sessionId: string) => void;
   readonly shutdown: () => Promise<void>;
-  readonly trackPerSessionIdle: boolean;
-  /** True when at least one server uses per_agent scope and perAgentIdleTimeoutMs > 0. */
-  readonly trackPerAgentIdle: boolean;
+  /** True when perInstanceIdleTimeoutMs > 0 and at least one MCP server is configured. */
+  readonly trackInstanceIdle: boolean;
 }
 ```
+
+Replaces the previous `trackPerSessionIdle` and `trackPerAgentIdle` booleans with a single `trackInstanceIdle`.
 
 ### Cancel Handler Key Convention
 
@@ -182,9 +198,7 @@ export async function connectShoggothMcpServers(
     const agentCtx = options?.agentContext;
 
     // Build env: agent workspace as HOME, then server config env on top
-    const baseEnv = agentCtx
-      ? { HOME: agentCtx.workspacePath, ...s.env }
-      : s.env;
+    const baseEnv = agentCtx ? { HOME: agentCtx.workspacePath, ...s.env } : s.env;
 
     // Resolve cwd: server config cwd, or agent workspace, or undefined
     const cwd = s.cwd ?? agentCtx?.workspacePath;
@@ -216,7 +230,7 @@ async function resolveContext(sessionId: string): Promise<SessionMcpToolContext>
   // Resolve agent credentials for scoped pools
   const agentContext = agentId ? resolveAgentMcpContext(agentId, sessionId) : undefined;
 
-  // 1. Global sources (daemon identity, already connected at boot)
+  // 1. Global sources (daemon identity, lazy connect on first resolveContext)
   // 2. Per-agent sources (agent identity, lazy connect keyed by agentId)
   // 3. Per-session sources (agent identity, lazy connect keyed by sessionId)
   // 4. Merge all three tiers into a single context
@@ -239,6 +253,47 @@ function resolveAgentMcpContext(agentId: string, sessionId: string): AgentMcpCon
 }
 ```
 
+### Idle Eviction (unified)
+
+```ts
+// Unified idle timer maps — one per pool scope, same eviction logic
+const globalIdleTimer: { ref?: ReturnType<typeof setTimeout> } = {};
+const perAgentIdleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const perSessionIdleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleIdleEviction(key: string, scope: "global" | "per_agent" | "per_session"): void {
+  // Cancel existing timer for this key
+  cancelIdleEviction(key, scope);
+  const timer = setTimeout(() => {
+    evictPool(key, scope);
+  }, instanceIdleMs);
+  // Store in the appropriate map
+}
+
+function cancelIdleEviction(key: string, scope: "global" | "per_agent" | "per_session"): void {
+  // Clear timer from the appropriate map
+}
+
+// notifyTurnEnd schedules eviction for all applicable scopes:
+function notifyTurnEnd(sessionId: string): void {
+  if (!trackInstanceIdle) return;
+  const agentId = parseAgentSessionUrn(sessionId)?.agentId;
+  // Schedule for each scope that has active pools
+  if (globalPool) scheduleIdleEviction("__global__", "global");
+  if (agentId && perAgentPools.has(agentId)) scheduleIdleEviction(agentId, "per_agent");
+  if (perSessionPools.has(sessionId)) scheduleIdleEviction(sessionId, "per_session");
+}
+
+// notifyTurnBegin cancels pending eviction for all applicable scopes:
+function notifyTurnBegin(sessionId: string): void {
+  if (!trackInstanceIdle) return;
+  const agentId = parseAgentSessionUrn(sessionId)?.agentId;
+  cancelIdleEviction("__global__", "global");
+  if (agentId) cancelIdleEviction(agentId, "per_agent");
+  cancelIdleEviction(sessionId, "per_session");
+}
+```
+
 ## Data Structures
 
 ### Per-Agent Pool Cache (internal)
@@ -248,7 +303,6 @@ function resolveAgentMcpContext(agentId: string, sessionId: string): AgentMcpCon
 const perAgentMcpCtx = new Map<string, SessionMcpToolContext>();
 const perAgentMcpClose = new Map<string, () => Promise<void>>();
 const perAgentMcpConnect = new Map<string, Promise<SessionMcpToolContext>>();
-const perAgentMcpIdleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 ```
 
 ## Code Examples
@@ -258,7 +312,7 @@ const perAgentMcpIdleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 ```yaml
 mcp:
   poolScope: "per_agent" # default for servers that omit poolScope
-  perAgentIdleTimeoutMs: 1800000 # 30 min idle eviction (optional)
+  perInstanceIdleTimeoutMs: 1800000 # 30 min idle eviction for all pool instances
   servers:
     - id: "code-sandbox"
       transport: stdio
@@ -276,6 +330,7 @@ mcp:
 ```yaml
 mcp:
   poolScope: "global" # default
+  perInstanceIdleTimeoutMs: 0 # disable idle eviction
   servers:
     - id: "isolated-fs"
       transport: stdio

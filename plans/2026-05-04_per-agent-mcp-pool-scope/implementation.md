@@ -2,11 +2,12 @@
 
 ## Phase 1: Schema & Partition Logic
 
-Extend the pool scope enum and update the partition function to produce a three-way split. This phase is purely additive — existing behavior is unchanged.
+Extend the pool scope enum, rename the idle timeout field, and update the partition function to produce a three-way split.
 
 - Add `"per_agent"` to `shoggothMcpServerPoolScopeSchema` enum
 - Add `"per_agent"` to the top-level `mcp.poolScope` enum
-- Add optional `perAgentIdleTimeoutMs` field to `shoggothMcpConfigSchema`
+- Rename `perSessionIdleTimeoutMs` → `perInstanceIdleTimeoutMs` in `shoggothMcpConfigSchema`
+- Rename `SHOGGOTH_DEFAULT_PER_SESSION_MCP_IDLE_MS` → `SHOGGOTH_DEFAULT_MCP_INSTANCE_IDLE_MS`
 - Update `EffectiveMcpPoolScope` type in `mcp-server-pool.ts`
 - Update `partitionMcpServersByEffectiveScope` to return `{ globalServers, perAgentServers, perSessionServers }`
 - Update all call sites of `partitionMcpServersByEffectiveScope` to destructure the new field (even if unused initially)
@@ -17,6 +18,7 @@ Extend the pool scope enum and update the partition function to produce a three-
 **Files:**
 
 - `packages/shared/src/schema.ts`
+- `packages/shared/src/index.ts` (re-export renamed constant)
 - `packages/daemon/src/mcp/mcp-server-pool.ts`
 - `packages/daemon/src/mcp/mcp-http-cancel-registry.ts`
 - `packages/daemon/test/mcp/mcp-server-pool.test.ts`
@@ -71,7 +73,6 @@ Update the existing `per_session` pool path to also use agent identity. Currentl
 
 - In `resolveContext`, when connecting per-session servers, pass `agentContext` (resolved from the session's agent ID) to `connectShoggothMcpServers`
 - The `resolveAgentMcpContext` helper from Phase 3 is reused here
-- Existing per-session idle eviction logic is unchanged
 - Integration tests: verify per-session pool connect receives agent credentials
 
 **Files:**
@@ -79,31 +80,41 @@ Update the existing `per_session` pool path to also use agent identity. Currentl
 - `packages/daemon/src/sessions/session-mcp-runtime.ts`
 - `packages/daemon/test/sessions/session-mcp-idle-timeout.test.ts` (extend to verify agent context)
 
-## Phase 5: Per-Agent Idle Eviction
+## Phase 5: Unified Idle Eviction
 
-Add optional idle eviction for per-agent pools, following the same pattern as per-session idle eviction.
+Replace the per-session-only idle eviction with a unified mechanism that covers all three pool scopes using the renamed `perInstanceIdleTimeoutMs` config.
 
-- Read `perAgentIdleTimeoutMs` from config (default: disabled / 0)
-- Add `perAgentMcpIdleTimers` map
-- On `notifyTurnEnd`, if per-agent idle is enabled, schedule/reset a timer keyed by agent ID
-- On `notifyTurnBegin`, cancel any pending per-agent idle timer for that agent
-- On timer fire: close the per-agent pool, clear cached context, log eviction
-- Next `resolveContext` for that agent triggers a fresh connect
-- Expose `trackPerAgentIdle` on `SessionMcpRuntime` interface
-- Unit tests with fake timers: eviction fires, begin cancels timer, reconnect after eviction
+- Replace `perSessionMcpIdleTimers` with three timer stores: `globalIdleTimer`, `perAgentIdleTimers`, `perSessionIdleTimers`
+- Replace `trackPerSessionIdle` with `trackInstanceIdle` (true when `perInstanceIdleTimeoutMs > 0` and at least one MCP server is configured)
+- Refactor `notifyTurnEnd` to schedule idle eviction for all applicable scopes:
+  - Always schedule/reset the global pool timer (if global pool exists)
+  - Schedule/reset the per-agent timer keyed by agent ID (if per-agent pool exists for that agent)
+  - Schedule/reset the per-session timer keyed by session ID (if per-session pool exists for that session)
+- Refactor `notifyTurnBegin` to cancel pending eviction for all applicable scopes
+- Implement `evictPool(key, scope)` that closes the pool, clears cached context, unregisters cancel handler, and logs eviction
+- Global pool eviction: close and null out the global pool; next `resolveContext` reconnects
+- Update `shutdown()` to clear all three timer stores
+- Update existing per-session idle timeout tests to use `perInstanceIdleTimeoutMs`
+- Add tests for global pool idle eviction
+- Add tests for per-agent pool idle eviction
+- Test that a turn begin on any session cancels the global timer
 
 **Files:**
 
 - `packages/daemon/src/sessions/session-mcp-runtime.ts`
-- `packages/daemon/test/sessions/session-mcp-per-agent.test.ts` (extend)
+- `packages/daemon/test/sessions/session-mcp-idle-timeout.test.ts` (rework for unified eviction)
+- `packages/daemon/test/sessions/session-mcp-per-agent.test.ts` (extend with idle eviction tests)
 
 ## Phase 6: Test Fixture & Documentation Updates
 
-Update existing test fixtures that reference the MCP config shape, and add documentation.
+Update existing test fixtures that reference the MCP config shape or the old field name, and add documentation.
 
+- Rename all references to `perSessionIdleTimeoutMs` → `perInstanceIdleTimeoutMs` in test fixtures
+- Rename all references to `SHOGGOTH_DEFAULT_PER_SESSION_MCP_IDLE_MS` → `SHOGGOTH_DEFAULT_MCP_INSTANCE_IDLE_MS`
+- Replace `trackPerSessionIdle` with `trackInstanceIdle` in all test assertions
 - Update all test files that construct `mcp: { servers: [], poolScope: "global" }` to ensure they still compile with the widened type
-- Update `packages/platform-discord/test/discord-platform.test.ts` if it references the partition function
-- Add a section to project docs describing the three pool scopes and agent identity behavior
+- Update `packages/platform-discord/test/discord-platform.test.ts` if it references the partition function or old idle config
+- Add a section to project docs describing the three pool scopes, agent identity behavior, and unified idle eviction
 - Verify the full test suite passes (`vitest run`)
 
 **Files:**
