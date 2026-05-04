@@ -62,12 +62,15 @@ export interface CreateSessionMcpRuntimeOptions {
 
 export interface SessionMcpRuntime {
   readonly resolveContext: (sessionId: string) => Promise<SessionMcpToolContext>;
-  /** Call when an inbound user turn starts (clears per-session idle eviction timer). */
+  /** Call when an inbound user turn starts (clears idle eviction timers for all applicable scopes). */
   readonly notifyTurnBegin: (sessionId: string) => void;
   /** Call when a turn finishes (schedules idle eviction when configured). */
   readonly notifyTurnEnd: (sessionId: string) => void;
   readonly shutdown: () => Promise<void>;
+  /** @deprecated Use {@link trackInstanceIdle} instead. */
   readonly trackPerSessionIdle: boolean;
+  /** True when perInstanceIdleTimeoutMs > 0 and at least one MCP server is configured. */
+  readonly trackInstanceIdle: boolean;
 }
 
 function buildMcpPoolConnectOptions(
@@ -188,11 +191,15 @@ export async function createSessionMcpRuntime(
   const perAgentSourceIds = new Set(perAgentServers.map((s) => s.id));
   const perSessionSourceIds = new Set(perSessionServers.map((s) => s.id));
 
+  // ── Global pool state (mutable for idle eviction / reconnect) ──
   let globalExternalSources: readonly McpSourceCatalog[] = [];
   let globalExternalInvoke: ExternalMcpInvoke | undefined;
   let mcpShutdownGlobal: (() => Promise<void>) | undefined;
+  let globalPoolConnected = false;
 
-  if (globalServers.length > 0) {
+  /** Connect (or reconnect) the global MCP pool. */
+  async function connectGlobalPool(): Promise<void> {
+    if (globalServers.length === 0) return;
     try {
       const { pool, external } = await connectMcpPool(globalServers, mcpConnectOpts);
       const unregisterGlobal = registerMcpHttpCancelHandler(
@@ -205,29 +212,36 @@ export async function createSessionMcpRuntime(
       };
       globalExternalSources = pool.externalSources;
       globalExternalInvoke = external;
+      globalPoolConnected = true;
     } catch (e) {
       log.error("session.mcp_pool.connect_failed", { err: String(e) });
     }
   }
 
+  // Initial global pool connect.
+  await connectGlobalPool();
+
   // Pre-built context when only global servers exist (no per-agent, no per-session).
-  const globalOnlyMcpCtx =
-    perSessionServers.length === 0 && perAgentServers.length === 0
-      ? buildMixedSessionMcpToolContext(
-          globalExternalSources,
-          globalExternalInvoke,
-          [],
-          undefined,
-          globalSourceIds,
-          perSessionSourceIds,
-        )
-      : builtinMcpCtx;
+  function buildGlobalOnlyCtx(): SessionMcpToolContext {
+    if (perSessionServers.length === 0 && perAgentServers.length === 0) {
+      return buildMixedSessionMcpToolContext(
+        globalExternalSources,
+        globalExternalInvoke,
+        [],
+        undefined,
+        globalSourceIds,
+        perSessionSourceIds,
+      );
+    }
+    return builtinMcpCtx;
+  }
+
+  let globalOnlyMcpCtx = buildGlobalOnlyCtx();
 
   // ── Per-session pool state ───────────────────────────────────────
   const perSessionMcpClose = new Map<string, () => Promise<void>>();
   const perSessionMcpCtx = new Map<string, SessionMcpToolContext>();
   const perSessionMcpConnect = new Map<string, Promise<SessionMcpToolContext>>();
-  const perSessionMcpIdleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   // ── Per-agent pool state ─────────────────────────────────────────
   const perAgentMcpClose = new Map<string, () => Promise<void>>();
@@ -240,44 +254,95 @@ export async function createSessionMcpRuntime(
     Promise<{ sources: readonly McpSourceCatalog[]; external: ExternalMcpInvoke | undefined }>
   >();
 
-  function resolvePerSessionMcpIdleMs(): number {
-    if (perSessionServers.length === 0) return 0;
+  // ── Unified idle eviction ────────────────────────────────────────
+
+  function resolveInstanceIdleMs(): number {
     const v = opts.config.mcp?.perInstanceIdleTimeoutMs;
     if (v === 0) return 0;
     if (v === undefined) return SHOGGOTH_DEFAULT_MCP_INSTANCE_IDLE_MS;
     return v;
   }
 
-  const perSessionMcpIdleMs = resolvePerSessionMcpIdleMs();
-  const trackPerSessionIdle =
-    mcpServers.length > 0 && perSessionMcpIdleMs > 0 && perSessionServers.length > 0;
+  const instanceIdleMs = resolveInstanceIdleMs();
+  const trackInstanceIdle = mcpServers.length > 0 && instanceIdleMs > 0;
 
-  function cancelPerSessionMcpIdleTimer(sessionId: string): void {
-    const t = perSessionMcpIdleTimers.get(sessionId);
-    if (t !== undefined) {
-      clearTimeout(t);
-      perSessionMcpIdleTimers.delete(sessionId);
+  // Three timer stores — one per pool scope.
+  const globalIdleTimer: { ref?: ReturnType<typeof setTimeout> } = {};
+  const perAgentIdleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const perSessionIdleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  function cancelIdleEviction(key: string, scope: "global" | "per_agent" | "per_session"): void {
+    if (scope === "global") {
+      if (globalIdleTimer.ref !== undefined) {
+        clearTimeout(globalIdleTimer.ref);
+        globalIdleTimer.ref = undefined;
+      }
+    } else if (scope === "per_agent") {
+      const t = perAgentIdleTimers.get(key);
+      if (t !== undefined) {
+        clearTimeout(t);
+        perAgentIdleTimers.delete(key);
+      }
+    } else {
+      const t = perSessionIdleTimers.get(key);
+      if (t !== undefined) {
+        clearTimeout(t);
+        perSessionIdleTimers.delete(key);
+      }
     }
   }
 
-  function evictPerSessionMcpIdlePool(sessionId: string): void {
-    cancelPerSessionMcpIdleTimer(sessionId);
-    const close = perSessionMcpClose.get(sessionId);
-    if (close) {
-      void close().catch(() => {});
-      perSessionMcpClose.delete(sessionId);
+  function evictPool(key: string, scope: "global" | "per_agent" | "per_session"): void {
+    cancelIdleEviction(key, scope);
+    log.info("session.mcp_pool.idle_evicted", { key, scope });
+
+    if (scope === "global") {
+      // Close the global pool; next resolveContext will reconnect.
+      if (mcpShutdownGlobal) {
+        void mcpShutdownGlobal().catch(() => {});
+        mcpShutdownGlobal = undefined;
+      }
+      globalExternalSources = [];
+      globalExternalInvoke = undefined;
+      globalPoolConnected = false;
+      globalOnlyMcpCtx = buildGlobalOnlyCtx();
+    } else if (scope === "per_agent") {
+      const close = perAgentMcpClose.get(key);
+      if (close) {
+        void close().catch(() => {});
+        perAgentMcpClose.delete(key);
+      }
+      perAgentMcpCtx.delete(key);
+    } else {
+      const close = perSessionMcpClose.get(key);
+      if (close) {
+        void close().catch(() => {});
+        perSessionMcpClose.delete(key);
+      }
+      perSessionMcpCtx.delete(key);
     }
-    perSessionMcpCtx.delete(sessionId);
   }
 
-  function schedulePerSessionMcpIdleTimer(sessionId: string): void {
-    cancelPerSessionMcpIdleTimer(sessionId);
+  function scheduleIdleEviction(key: string, scope: "global" | "per_agent" | "per_session"): void {
+    cancelIdleEviction(key, scope);
     const t = setTimeout(() => {
-      perSessionMcpIdleTimers.delete(sessionId);
-      log.info("session.mcp_pool.idle_evicted", { sessionId });
-      evictPerSessionMcpIdlePool(sessionId);
-    }, perSessionMcpIdleMs);
-    perSessionMcpIdleTimers.set(sessionId, t);
+      if (scope === "global") {
+        globalIdleTimer.ref = undefined;
+      } else if (scope === "per_agent") {
+        perAgentIdleTimers.delete(key);
+      } else {
+        perSessionIdleTimers.delete(key);
+      }
+      evictPool(key, scope);
+    }, instanceIdleMs);
+
+    if (scope === "global") {
+      globalIdleTimer.ref = t;
+    } else if (scope === "per_agent") {
+      perAgentIdleTimers.set(key, t);
+    } else {
+      perSessionIdleTimers.set(key, t);
+    }
   }
 
   // ── Per-agent pool helpers ───────────────────────────────────────
@@ -337,6 +402,12 @@ export async function createSessionMcpRuntime(
   async function resolveContext(sessionId: string): Promise<SessionMcpToolContext> {
     if (mcpServers.length === 0) {
       return runContextFinalizers(builtinMcpCtx, sessionId);
+    }
+
+    // Reconnect global pool if it was evicted by idle timer.
+    if (globalServers.length > 0 && !globalPoolConnected) {
+      await connectGlobalPool();
+      globalOnlyMcpCtx = buildGlobalOnlyCtx();
     }
 
     // Fast path: only global servers, no per-agent or per-session.
@@ -468,20 +539,56 @@ export async function createSessionMcpRuntime(
     return runContextFinalizers(await inflight, sessionId);
   }
 
+  // ── notifyTurnBegin / notifyTurnEnd ──────────────────────────────
+
+  function notifyTurnBegin(sessionId: string): void {
+    if (!trackInstanceIdle) return;
+    const parsed = parseAgentSessionUrn(sessionId);
+    const agentId = parsed?.agentId ?? null;
+
+    cancelIdleEviction("__global__", "global");
+    if (agentId) cancelIdleEviction(agentId, "per_agent");
+    cancelIdleEviction(sessionId, "per_session");
+  }
+
+  function notifyTurnEnd(sessionId: string): void {
+    if (!trackInstanceIdle) return;
+    const parsed = parseAgentSessionUrn(sessionId);
+    const agentId = parsed?.agentId ?? null;
+
+    if (globalServers.length > 0 && globalPoolConnected) {
+      scheduleIdleEviction("__global__", "global");
+    }
+    if (agentId && perAgentMcpCtx.has(agentId)) {
+      scheduleIdleEviction(agentId, "per_agent");
+    }
+    if (perSessionMcpClose.has(sessionId)) {
+      scheduleIdleEviction(sessionId, "per_session");
+    }
+  }
+
   const _runtime: SessionMcpRuntime = {
     resolveContext,
-    notifyTurnBegin: cancelPerSessionMcpIdleTimer,
-    notifyTurnEnd: (sessionId: string) => {
-      if (trackPerSessionIdle) {
-        schedulePerSessionMcpIdleTimer(sessionId);
-      }
-    },
-    trackPerSessionIdle,
+    notifyTurnBegin,
+    notifyTurnEnd,
+    trackInstanceIdle,
+    // Keep backward compat — trackPerSessionIdle mirrors the old semantics.
+    trackPerSessionIdle: trackInstanceIdle && perSessionServers.length > 0,
     shutdown: async () => {
-      for (const t of perSessionMcpIdleTimers.values()) {
+      // Clear all idle timers.
+      if (globalIdleTimer.ref !== undefined) {
+        clearTimeout(globalIdleTimer.ref);
+        globalIdleTimer.ref = undefined;
+      }
+      for (const t of perAgentIdleTimers.values()) {
         clearTimeout(t);
       }
-      perSessionMcpIdleTimers.clear();
+      perAgentIdleTimers.clear();
+      for (const t of perSessionIdleTimers.values()) {
+        clearTimeout(t);
+      }
+      perSessionIdleTimers.clear();
+
       if (mcpShutdownGlobal) {
         await mcpShutdownGlobal();
       }
