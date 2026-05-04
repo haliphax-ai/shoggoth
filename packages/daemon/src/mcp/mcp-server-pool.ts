@@ -14,7 +14,7 @@ import { getProcessManager } from "../process-manager-singleton";
 import type { ShoggothMcpConfig, ShoggothMcpServerEntry } from "@shoggoth/shared";
 import type { ExternalMcpInvoke } from "./tool-loop-mcp";
 
-type EffectiveMcpPoolScope = "global" | "per_session";
+type EffectiveMcpPoolScope = "global" | "per_agent" | "per_session";
 
 /** Resolve `entry.poolScope ?? "inherit"` then map `inherit` → top-level `mcp.poolScope`. */
 function effectiveMcpPoolScope(
@@ -26,24 +26,29 @@ function effectiveMcpPoolScope(
   return p;
 }
 
-/** Split configured servers by effective pool scope (global vs per Shoggoth session). */
+/** Split configured servers by effective pool scope (global, per-agent, or per-session). */
 export function partitionMcpServersByEffectiveScope(
   servers: readonly ShoggothMcpServerEntry[],
   topLevelPoolScope: ShoggothMcpConfig["poolScope"],
 ): {
   globalServers: ShoggothMcpServerEntry[];
+  perAgentServers: ShoggothMcpServerEntry[];
   perSessionServers: ShoggothMcpServerEntry[];
 } {
   const globalServers: ShoggothMcpServerEntry[] = [];
+  const perAgentServers: ShoggothMcpServerEntry[] = [];
   const perSessionServers: ShoggothMcpServerEntry[] = [];
   for (const s of servers) {
-    if (effectiveMcpPoolScope(s, topLevelPoolScope) === "global") {
+    const scope = effectiveMcpPoolScope(s, topLevelPoolScope);
+    if (scope === "global") {
       globalServers.push(s);
+    } else if (scope === "per_agent") {
+      perAgentServers.push(s);
     } else {
       perSessionServers.push(s);
     }
   }
-  return { globalServers, perSessionServers };
+  return { globalServers, perAgentServers, perSessionServers };
 }
 
 export type McpServerPool = {
@@ -56,11 +61,23 @@ export type McpServerPool = {
   readonly close: () => Promise<void>;
 };
 
+/** Agent identity and workspace context for scoped MCP server processes. */
+export interface AgentMcpContext {
+  /** POSIX UID for the agent (from session row or bootstrap). */
+  readonly uid: number;
+  /** POSIX GID for the agent (from session row or bootstrap). */
+  readonly gid: number;
+  /** Absolute path to the agent's workspace directory. */
+  readonly workspacePath: string;
+}
+
 export type ConnectShoggothMcpPoolOptions = {
   readonly onMcpServerMessage?: (input: {
     sourceId: string;
     msg: McpStreamableHttpServerMessage;
   }) => void;
+  /** When provided, stdio MCP servers are spawned under this agent's identity. */
+  readonly agentContext?: AgentMcpContext;
 };
 
 /**
@@ -76,27 +93,37 @@ export async function connectShoggothMcpServers(
   const streamableBySourceId = new Map<string, McpStreamableHttpSession>();
   const onPoolMessage = options?.onMcpServerMessage;
 
+  const agentCtx = options?.agentContext;
+
   for (const s of servers) {
-    const session =
-      s.transport === "stdio"
-        ? await openMcpStdioClient({
-            command: s.command,
-            args: s.args,
-            cwd: s.cwd,
-            env: s.env,
-            processManager: getProcessManager(),
-          })
-        : s.transport === "tcp"
-          ? await openMcpTcpClient({ host: s.host, port: s.port })
-          : await openMcpStreamableHttpClient({
-              url: s.url,
-              headers: s.headers,
-              onServerMessage: onPoolMessage
-                ? (msg) => onPoolMessage({ sourceId: s.id, msg })
-                : undefined,
-            });
-    if (s.transport === "http") {
-      streamableBySourceId.set(s.id, session as McpStreamableHttpSession);
+    let session: McpJsonRpcSession;
+
+    if (s.transport === "stdio") {
+      // Build env: agent workspace as HOME, then server config env on top
+      const baseEnv = agentCtx ? { HOME: agentCtx.workspacePath, ...s.env } : s.env;
+      // Resolve cwd: server config cwd takes precedence, then agent workspace, then undefined
+      const cwd = s.cwd ?? agentCtx?.workspacePath;
+      session = await openMcpStdioClient({
+        command: s.command,
+        args: s.args,
+        cwd,
+        env: baseEnv,
+        uid: agentCtx?.uid,
+        gid: agentCtx?.gid,
+        processManager: getProcessManager(),
+      });
+    } else if (s.transport === "tcp") {
+      session = await openMcpTcpClient({ host: s.host, port: s.port });
+    } else {
+      const httpSession = await openMcpStreamableHttpClient({
+        url: s.url,
+        headers: s.headers,
+        onServerMessage: onPoolMessage
+          ? (msg) => onPoolMessage({ sourceId: s.id, msg })
+          : undefined,
+      });
+      streamableBySourceId.set(s.id, httpSession);
+      session = httpSession;
     }
     const tools = await mcpFetchToolsList(session);
     externalSources.push(mcpToolsToSourceCatalog(s.id, tools));

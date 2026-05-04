@@ -312,7 +312,7 @@ export async function startDiscordPlatform(
       .enqueue(msg.sessionId, "user", "user message", async () => {
         const hitlReplyInSession = env.SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION !== "0";
 
-        const mcpLifecycle = mcpRuntime.trackPerSessionIdle
+        const mcpLifecycle = mcpRuntime.trackInstanceIdle
           ? {
               onTurnBegin: () => {
                 mcpRuntime.notifyTurnBegin(msg.sessionId);

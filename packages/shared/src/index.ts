@@ -30,7 +30,7 @@ export {
   shoggothHitlConfigSchema,
   shoggothMemoryConfigSchema,
   shoggothMemoryEmbeddingsConfigSchema,
-  SHOGGOTH_DEFAULT_PER_SESSION_MCP_IDLE_MS,
+  SHOGGOTH_DEFAULT_MCP_INSTANCE_IDLE_MS,
   shoggothMcpConfigSchema,
   shoggothMcpHttpServerSchema,
   shoggothMcpServerEntrySchema,

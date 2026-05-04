@@ -454,7 +454,12 @@ const mcpSourceIdSchema = z
   });
 
 /** Per-server override for MCP connection pooling (omit or `inherit` → use top-level `mcp.poolScope`). */
-export const shoggothMcpServerPoolScopeSchema = z.enum(["inherit", "global", "per_session"]);
+export const shoggothMcpServerPoolScopeSchema = z.enum([
+  "inherit",
+  "global",
+  "per_agent",
+  "per_session",
+]);
 
 export type ShoggothMcpServerPoolScope = z.infer<typeof shoggothMcpServerPoolScopeSchema>;
 
@@ -501,8 +506,8 @@ export type ShoggothMcpServerEntry = z.infer<typeof shoggothMcpServerEntrySchema
 
 export type ShoggothMcpHttpServerEntry = z.infer<typeof shoggothMcpHttpServerSchema>;
 
-/** Default idle eviction for lazy per-session MCP pools when `perSessionIdleTimeoutMs` is omitted. */
-export const SHOGGOTH_DEFAULT_PER_SESSION_MCP_IDLE_MS = 30 * 60 * 1000;
+/** Default idle eviction for MCP pool instances when `perInstanceIdleTimeoutMs` is omitted. */
+export const SHOGGOTH_DEFAULT_MCP_INSTANCE_IDLE_MS = 30 * 60 * 1000;
 
 export const shoggothMcpConfigSchema = z
   .object({
@@ -512,13 +517,11 @@ export const shoggothMcpConfigSchema = z
      * `global`: one MCP connection set shared across all platform-bound sessions.
      * `per_session`: lazy pool per Shoggoth `sessionId` on first inbound turn; closed on orchestrator stop.
      */
-    poolScope: z.enum(["global", "per_session"]).default("global"),
+    poolScope: z.enum(["global", "per_agent", "per_session"]).default("global"),
     /**
-     * After an inbound platform turn completes, close that session's per-session MCP pool if no further
-     * turn completes within this many milliseconds. `0` disables. When omitted and any server uses an
-     * effective per-session pool, defaults to {@link SHOGGOTH_DEFAULT_PER_SESSION_MCP_IDLE_MS}.
+     * After an inbound platform turn completes, close that pool instance if no further\n     * turn completes within this many milliseconds. `0` disables. When omitted and any server uses an\n     * effective non-global pool, defaults to {@link SHOGGOTH_DEFAULT_MCP_INSTANCE_IDLE_MS}.
      */
-    perSessionIdleTimeoutMs: z.number().int().nonnegative().optional(),
+    perInstanceIdleTimeoutMs: z.number().int().nonnegative().optional(),
     serverRules: mcpServerRulesSchema.optional(),
   })
   .strict();

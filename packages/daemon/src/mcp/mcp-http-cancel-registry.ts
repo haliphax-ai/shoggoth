@@ -6,6 +6,11 @@
 /** Use this `session_id` with control / CLI when targeting the platform global MCP pool. */
 export const SHOGGOTH_GLOBAL_MCP_SESSION_KEY = "__global__";
 
+/** Returns the cancel-registry key for a per-agent MCP pool. */
+export function mcpAgentPoolKey(agentId: string): string {
+  return `__agent__:${agentId}`;
+}
+
 type CancelHandler = (sourceId: string, requestId: number) => boolean;
 
 const handlers = new Map<string, CancelHandler>();

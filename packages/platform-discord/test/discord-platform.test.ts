@@ -670,7 +670,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     await platform.stop();
   });
 
-  it("per-session MCP pool reconnects after perSessionIdleTimeoutMs", async () => {
+  it("per-session MCP pool reconnects after perInstanceIdleTimeoutMs", async () => {
     let connectCalls = 0;
     const stubConnect: ConnectShoggothMcpServersFn = async () => {
       connectCalls++;
@@ -708,7 +708,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     const cfg = defaultConfig(tmp);
     cfg.mcp = {
       poolScope: "per_session",
-      perSessionIdleTimeoutMs: 40,
+      perInstanceIdleTimeoutMs: 40,
       servers: [{ id: "s1", transport: "stdio", command: "true", args: [] }],
     };
 
@@ -756,7 +756,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     await platform.stop();
   });
 
-  it("perSessionIdleTimeoutMs 0 keeps a single per-session MCP pool across idle gaps", async () => {
+  it("perInstanceIdleTimeoutMs 0 keeps a single per-session MCP pool across idle gaps", async () => {
     let connectCalls = 0;
     const stubConnect: ConnectShoggothMcpServersFn = async () => {
       connectCalls++;
@@ -794,7 +794,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     const cfg = defaultConfig(tmp);
     cfg.mcp = {
       poolScope: "per_session",
-      perSessionIdleTimeoutMs: 0,
+      perInstanceIdleTimeoutMs: 0,
       servers: [{ id: "s1", transport: "stdio", command: "true", args: [] }],
     };
 

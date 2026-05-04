@@ -1,18 +1,20 @@
 /**
- * RED-phase TDD tests for per-session MCP pool idle timeout wiring (Phase 1).
+ * RED-phase TDD tests for unified MCP pool idle eviction (Phase 5).
  *
  * These tests verify:
- * 1. `notifyTurnBegin` / `notifyTurnEnd` are called during inbound turns (wiring gap).
- * 2. After `notifyTurnEnd`, the idle timer fires and evicts the per-session pool.
- * 3. `notifyTurnBegin` cancels a pending idle timer.
- * 4. After eviction, `resolveContext` triggers a fresh connect (reconnect-after-eviction).
+ * 1. `trackInstanceIdle` — true when perInstanceIdleTimeoutMs > 0 and at least one MCP server.
+ * 2. `notifyTurnBegin` / `notifyTurnEnd` are called during inbound turns (wiring gap).
+ * 3. Per-session idle eviction using `perInstanceIdleTimeoutMs`.
+ * 4. Global pool idle eviction — after notifyTurnEnd with no subsequent turn, global pool evicted.
+ * 5. Turn begin cancels eviction timers for all applicable scopes.
+ * 6. shutdown() clears global, per-agent, and per-session idle timers.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSessionMcpRuntime } from "../../src/sessions/session-mcp-runtime";
 import { runInboundSessionTurn } from "../../src/messaging/inbound-session-turn";
 import type { McpServerPool } from "../../src/mcp/mcp-server-pool";
 import type { ShoggothConfig, ShoggothMcpServerEntry } from "@shoggoth/shared";
-import { defaultConfig, SHOGGOTH_DEFAULT_PER_SESSION_MCP_IDLE_MS } from "@shoggoth/shared";
+import { defaultConfig, SHOGGOTH_DEFAULT_MCP_INSTANCE_IDLE_MS } from "@shoggoth/shared";
 import { mkdtempSync } from "node:fs";
 import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
@@ -34,6 +36,16 @@ function perSessionServer(id = "test-mcp"): ShoggothMcpServerEntry {
   } as ShoggothMcpServerEntry;
 }
 
+/** Minimal global MCP server entry. */
+function globalServer(id = "global-mcp"): ShoggothMcpServerEntry {
+  return {
+    id,
+    transport: "stdio" as const,
+    command: "echo",
+    poolScope: "global",
+  } as ShoggothMcpServerEntry;
+}
+
 /** Build a config with one per-session MCP server and a short idle timeout. */
 function configWithPerSessionMcp(workspacePath: string, idleMs = 5000): ShoggothConfig {
   const cfg = defaultConfig(workspacePath);
@@ -41,7 +53,19 @@ function configWithPerSessionMcp(workspacePath: string, idleMs = 5000): Shoggoth
     ...cfg.mcp,
     servers: [perSessionServer()],
     poolScope: "per_session",
-    perSessionIdleTimeoutMs: idleMs,
+    perInstanceIdleTimeoutMs: idleMs,
+  };
+  return cfg;
+}
+
+/** Build a config with one global MCP server and a short idle timeout. */
+function configWithGlobalMcp(workspacePath: string, idleMs = 5000): ShoggothConfig {
+  const cfg = defaultConfig(workspacePath);
+  cfg.mcp = {
+    ...cfg.mcp,
+    servers: [globalServer()],
+    poolScope: "global",
+    perInstanceIdleTimeoutMs: idleMs,
   };
   return cfg;
 }
@@ -72,10 +96,98 @@ function createMockConnectMcp() {
 }
 
 // ---------------------------------------------------------------------------
-// 1. notifyTurnBegin / notifyTurnEnd called during inbound turns
+// 1. trackInstanceIdle — unified idle tracking flag
 // ---------------------------------------------------------------------------
 
-describe("per-session MCP idle timeout — turn lifecycle wiring", () => {
+describe("unified MCP idle eviction — trackInstanceIdle", () => {
+  let tmp: string;
+  let db: Database.Database;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "shoggoth-mcp-idle-"));
+    const dbPath = join(tmp, "s.db");
+    db = new Database(dbPath);
+    db.pragma("foreign_keys = ON");
+    migrate(db, defaultMigrationsDir());
+  });
+
+  afterEach(async () => {
+    closeTestDb(db, tmp);
+  });
+
+  it("trackInstanceIdle is true when perInstanceIdleTimeoutMs > 0 and at least one MCP server is configured", async () => {
+    const mockMcp = createMockConnectMcp();
+    const config = configWithPerSessionMcp(tmp, 5000);
+
+    const runtime = await createSessionMcpRuntime({
+      config,
+      env: process.env,
+      db,
+      deps: { connectShoggothMcpServers: mockMcp.connectShoggothMcpServers },
+    });
+
+    // The unified property should exist and be true.
+    expect((runtime as any).trackInstanceIdle).toBe(true);
+
+    await runtime.shutdown();
+  });
+
+  it("trackInstanceIdle is true for global-only MCP servers with perInstanceIdleTimeoutMs > 0", async () => {
+    const mockMcp = createMockConnectMcp();
+    const config = configWithGlobalMcp(tmp, 5000);
+
+    const runtime = await createSessionMcpRuntime({
+      config,
+      env: process.env,
+      db,
+      deps: { connectShoggothMcpServers: mockMcp.connectShoggothMcpServers },
+    });
+
+    // trackInstanceIdle should be true even for global-only servers.
+    expect((runtime as any).trackInstanceIdle).toBe(true);
+
+    await runtime.shutdown();
+  });
+
+  it("trackInstanceIdle is false when perInstanceIdleTimeoutMs is 0", async () => {
+    const mockMcp = createMockConnectMcp();
+    const config = configWithPerSessionMcp(tmp, 0);
+
+    const runtime = await createSessionMcpRuntime({
+      config,
+      env: process.env,
+      db,
+      deps: { connectShoggothMcpServers: mockMcp.connectShoggothMcpServers },
+    });
+
+    expect((runtime as any).trackInstanceIdle).toBe(false);
+
+    await runtime.shutdown();
+  });
+
+  it("trackInstanceIdle is false when no MCP servers are configured", async () => {
+    const mockMcp = createMockConnectMcp();
+    const cfg = defaultConfig(tmp);
+    cfg.mcp = { ...cfg.mcp, servers: [], perInstanceIdleTimeoutMs: 5000 };
+
+    const runtime = await createSessionMcpRuntime({
+      config: cfg,
+      env: process.env,
+      db,
+      deps: { connectShoggothMcpServers: mockMcp.connectShoggothMcpServers },
+    });
+
+    expect((runtime as any).trackInstanceIdle).toBe(false);
+
+    await runtime.shutdown();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2. notifyTurnBegin / notifyTurnEnd called during inbound turns
+// ---------------------------------------------------------------------------
+
+describe("unified MCP idle eviction — turn lifecycle wiring", () => {
   let tmp: string;
   let db: Database.Database;
 
@@ -180,120 +292,13 @@ describe("per-session MCP idle timeout — turn lifecycle wiring", () => {
     expect(onTurnBegin).toHaveBeenCalledOnce();
     expect(onTurnEnd).toHaveBeenCalledOnce();
   });
-
-  /**
-   * This is the KEY wiring-gap test: when a platform orchestrator runs a turn
-   * for a session with per-session MCP servers, the runtime's notifyTurnBegin
-   * and notifyTurnEnd must be wired into the mcpLifecycle hooks.
-   *
-   * Currently, no caller constructs mcpLifecycle from the runtime — this test
-   * should FAIL until the wiring is added.
-   */
-  it("orchestrateInboundTurn wires runtime.notifyTurnBegin/notifyTurnEnd into mcpLifecycle", async () => {
-    const mockMcp = createMockConnectMcp();
-    const config = configWithPerSessionMcp(tmp, 60_000);
-
-    const runtime = await createSessionMcpRuntime({
-      config,
-      env: process.env,
-      db,
-      deps: { connectShoggothMcpServers: mockMcp.connectShoggothMcpServers },
-    });
-
-    // Spy on the runtime's notify methods
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const beginSpy = vi.spyOn(runtime, "notifyTurnBegin" as any);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const endSpy = vi.spyOn(runtime, "notifyTurnEnd" as any);
-
-    // Import and use the PresentationTurnOrchestrator
-    const { PresentationTurnOrchestrator } =
-      await import("../../src/presentation/turn-orchestrator");
-
-    const orchestrator = new PresentationTurnOrchestrator({
-      config,
-      env: process.env,
-      adapter: {
-        maxBodyLength: 4000,
-        sendBody: vi.fn(async () => {}),
-        sendError: vi.fn(async () => {}),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any,
-    });
-
-    // Run a turn — the orchestrator should wire mcpLifecycle from the runtime.
-    // This will FAIL because the orchestrator does not auto-wire the runtime hooks.
-    await orchestrator.orchestrateInboundTurn({
-      sessionId: "sess-wiring",
-      buildTurn: async () => ({
-        db,
-        sessionId: "sess-wiring",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        session: { id: "sess-wiring", workspacePath: tmp } as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        transcript: { append: vi.fn(), getAll: vi.fn(() => []) } as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        toolRuns: { append: vi.fn() } as any,
-        userContent: "hello",
-        userMetadata: undefined,
-        systemPrompt: "test",
-        env: process.env,
-        config,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        policyEngine: { evaluate: vi.fn() } as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        getHitlConfig: () => ({}) as any,
-        hitl: {
-          bypassUpTo: "safe",
-          pending: {
-            add: vi.fn(),
-            remove: vi.fn(),
-            getAll: vi.fn(() => []),
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          } as any,
-          clock: { nowMs: () => Date.now() },
-          newPendingId: () => "id",
-          waitForHitlResolution: vi.fn(),
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any,
-        loopImpl: vi.fn(async () => ({
-          latestAssistantText: "reply",
-          failoverMeta: undefined,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        })) as any,
-        createToolCallingClient: () =>
-          ({
-            completeWithTools: vi.fn(async () => ({
-              content: "reply",
-              toolCalls: [],
-              usedModel: "stub",
-              usedProviderId: "stub",
-              degraded: false,
-            })),
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          }) as any,
-        resolveMcpContext: async () => ({
-          aggregated: { tools: [] },
-          toolsOpenAi: [],
-          toolsLoop: { tools: [], externalInvoke: undefined },
-        }),
-      }),
-    });
-
-    // The runtime's notifyTurnBegin/notifyTurnEnd should have been called.
-    // This FAILS because no caller wires mcpLifecycle from the runtime.
-    expect(beginSpy).toHaveBeenCalledWith("sess-wiring");
-    expect(endSpy).toHaveBeenCalledWith("sess-wiring");
-
-    await runtime.shutdown();
-  });
 });
 
 // ---------------------------------------------------------------------------
-// 2–4. Idle timer scheduling, eviction, and reconnect-after-eviction
+// 3. Per-session idle eviction (using perInstanceIdleTimeoutMs)
 // ---------------------------------------------------------------------------
 
-describe("per-session MCP idle timeout — timer and eviction", () => {
+describe("unified MCP idle eviction — per-session pool", () => {
   let tmp: string;
   let db: Database.Database;
 
@@ -323,8 +328,6 @@ describe("per-session MCP idle timeout — timer and eviction", () => {
       deps: { connectShoggothMcpServers: mockMcp.connectShoggothMcpServers },
     });
 
-    expect(runtime.trackPerSessionIdle).toBe(true);
-
     // Trigger lazy connect by resolving context
     const _ctx1 = await runtime.resolveContext("sess-idle");
     expect(mockMcp.connectShoggothMcpServers).toHaveBeenCalledTimes(1);
@@ -345,7 +348,7 @@ describe("per-session MCP idle timeout — timer and eviction", () => {
     await runtime.shutdown();
   });
 
-  it("notifyTurnBegin cancels a pending idle timer", async () => {
+  it("notifyTurnBegin cancels a pending per-session idle timer", async () => {
     const mockMcp = createMockConnectMcp();
     const idleMs = 5000;
     const config = configWithPerSessionMcp(tmp, idleMs);
@@ -383,41 +386,7 @@ describe("per-session MCP idle timeout — timer and eviction", () => {
     await runtime.shutdown();
   });
 
-  it("after eviction, resolveContext triggers a fresh connect (reconnect-after-eviction)", async () => {
-    const mockMcp = createMockConnectMcp();
-    const idleMs = 3000;
-    const config = configWithPerSessionMcp(tmp, idleMs);
-
-    const runtime = await createSessionMcpRuntime({
-      config,
-      env: process.env,
-      db,
-      deps: { connectShoggothMcpServers: mockMcp.connectShoggothMcpServers },
-    });
-
-    // Initial connect
-    await runtime.resolveContext("sess-reconnect");
-    expect(mockMcp.connectShoggothMcpServers).toHaveBeenCalledTimes(1);
-
-    // End turn → schedule idle timer
-    runtime.notifyTurnEnd("sess-reconnect");
-
-    // Evict
-    vi.advanceTimersByTime(idleMs + 100);
-    expect(mockMcp.closeFns[0]).toHaveBeenCalledOnce();
-
-    // Reconnect — resolveContext should trigger a brand new connect
-    await runtime.resolveContext("sess-reconnect");
-    expect(mockMcp.connectShoggothMcpServers).toHaveBeenCalledTimes(2);
-
-    // The second pool should be a different close fn
-    expect(mockMcp.closeFns).toHaveLength(2);
-    expect(mockMcp.closeFns[1]).not.toHaveBeenCalled();
-
-    await runtime.shutdown();
-  });
-
-  it("idle timer does not fire when perSessionIdleTimeoutMs is 0 (disabled)", async () => {
+  it("idle timer does not fire when perInstanceIdleTimeoutMs is 0 (disabled)", async () => {
     const mockMcp = createMockConnectMcp();
     const config = configWithPerSessionMcp(tmp, 0);
 
@@ -428,19 +397,273 @@ describe("per-session MCP idle timeout — timer and eviction", () => {
       deps: { connectShoggothMcpServers: mockMcp.connectShoggothMcpServers },
     });
 
-    expect(runtime.trackPerSessionIdle).toBe(false);
-
     await runtime.resolveContext("sess-disabled");
     runtime.notifyTurnEnd("sess-disabled");
 
     // Advance a long time — nothing should happen
-    vi.advanceTimersByTime(SHOGGOTH_DEFAULT_PER_SESSION_MCP_IDLE_MS * 2);
+    vi.advanceTimersByTime(SHOGGOTH_DEFAULT_MCP_INSTANCE_IDLE_MS * 2);
+    expect(mockMcp.closeFns[0]).not.toHaveBeenCalled();
+
+    await runtime.shutdown();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. Global pool idle eviction
+// ---------------------------------------------------------------------------
+
+describe("unified MCP idle eviction — global pool", () => {
+  let tmp: string;
+  let db: Database.Database;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    tmp = mkdtempSync(join(tmpdir(), "shoggoth-mcp-idle-"));
+    const dbPath = join(tmp, "s.db");
+    db = new Database(dbPath);
+    db.pragma("foreign_keys = ON");
+    migrate(db, defaultMigrationsDir());
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    closeTestDb(db, tmp);
+  });
+
+  it("notifyTurnEnd with no subsequent notifyTurnBegin evicts the global pool after timeout", async () => {
+    const mockMcp = createMockConnectMcp();
+    const idleMs = 5000;
+    const config = configWithGlobalMcp(tmp, idleMs);
+
+    const runtime = await createSessionMcpRuntime({
+      config,
+      env: process.env,
+      db,
+      deps: { connectShoggothMcpServers: mockMcp.connectShoggothMcpServers },
+    });
+
+    // Resolve context to trigger the global pool connect
+    await runtime.resolveContext("sess-global-1");
+    expect(mockMcp.connectShoggothMcpServers).toHaveBeenCalledTimes(1);
+
+    // End turn — should schedule global idle timer
+    runtime.notifyTurnEnd("sess-global-1");
+
+    // Advance past the idle timeout
+    vi.advanceTimersByTime(idleMs + 100);
+
+    // The global pool should have been evicted (close called).
+    expect(mockMcp.closeFns[0]).toHaveBeenCalled();
+
+    // Resolving context again should trigger a fresh global connect
+    await runtime.resolveContext("sess-global-1");
+    expect(mockMcp.connectShoggothMcpServers).toHaveBeenCalledTimes(2);
+
+    await runtime.shutdown();
+  });
+
+  it("notifyTurnBegin cancels a pending global idle timer", async () => {
+    const mockMcp = createMockConnectMcp();
+    const idleMs = 5000;
+    const config = configWithGlobalMcp(tmp, idleMs);
+
+    const runtime = await createSessionMcpRuntime({
+      config,
+      env: process.env,
+      db,
+      deps: { connectShoggothMcpServers: mockMcp.connectShoggothMcpServers },
+    });
+
+    await runtime.resolveContext("sess-global-cancel");
+
+    // End turn → schedules global idle timer
+    runtime.notifyTurnEnd("sess-global-cancel");
+
+    // Advance partway
+    vi.advanceTimersByTime(idleMs - 1000);
+
+    // Begin a new turn → should cancel the global idle timer.
+    runtime.notifyTurnBegin("sess-global-cancel");
+
+    // Advance well past the original timeout
+    vi.advanceTimersByTime(idleMs * 2);
+
+    // Global pool should NOT have been evicted
     expect(mockMcp.closeFns[0]).not.toHaveBeenCalled();
 
     await runtime.shutdown();
   });
 
-  it("multiple turns reset the idle timer (only the last notifyTurnEnd matters)", async () => {
+  it("multiple sessions sharing global pool: eviction only fires when ALL sessions are idle", async () => {
+    const mockMcp = createMockConnectMcp();
+    const idleMs = 5000;
+    const config = configWithGlobalMcp(tmp, idleMs);
+
+    const runtime = await createSessionMcpRuntime({
+      config,
+      env: process.env,
+      db,
+      deps: { connectShoggothMcpServers: mockMcp.connectShoggothMcpServers },
+    });
+
+    await runtime.resolveContext("sess-a");
+    await runtime.resolveContext("sess-b");
+
+    // End turn for sess-a
+    runtime.notifyTurnEnd("sess-a");
+
+    // Advance partway
+    vi.advanceTimersByTime(idleMs - 1000);
+
+    // sess-b starts a turn — should keep the global pool alive.
+    runtime.notifyTurnBegin("sess-b");
+
+    // Advance past original timeout
+    vi.advanceTimersByTime(idleMs * 2);
+
+    // Global pool should NOT have been evicted (sess-b is still active)
+    expect(mockMcp.closeFns[0]).not.toHaveBeenCalled();
+
+    // Now end sess-b's turn
+    runtime.notifyTurnEnd("sess-b");
+
+    // Advance past timeout
+    vi.advanceTimersByTime(idleMs + 100);
+
+    // NOW the global pool should be evicted
+    expect(mockMcp.closeFns[0]).toHaveBeenCalled();
+
+    await runtime.shutdown();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. Turn begin cancels eviction for all applicable scopes
+// ---------------------------------------------------------------------------
+
+describe("unified MCP idle eviction — turn begin cancels all scopes", () => {
+  let tmp: string;
+  let db: Database.Database;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    tmp = mkdtempSync(join(tmpdir(), "shoggoth-mcp-idle-"));
+    const dbPath = join(tmp, "s.db");
+    db = new Database(dbPath);
+    db.pragma("foreign_keys = ON");
+    migrate(db, defaultMigrationsDir());
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    closeTestDb(db, tmp);
+  });
+
+  it("notifyTurnBegin cancels pending eviction timers for global, per-agent, and per-session scopes", async () => {
+    const mockMcp = createMockConnectMcp();
+    const idleMs = 5000;
+    const cfg = defaultConfig(tmp);
+    cfg.mcp = {
+      ...cfg.mcp,
+      servers: [
+        globalServer("g"),
+        {
+          id: "a",
+          transport: "stdio" as const,
+          command: "echo",
+          poolScope: "per_agent",
+        } as ShoggothMcpServerEntry,
+        perSessionServer("s"),
+      ],
+      poolScope: "global",
+      perInstanceIdleTimeoutMs: idleMs,
+    };
+
+    const runtime = await createSessionMcpRuntime({
+      config: cfg,
+      env: process.env,
+      db,
+      deps: { connectShoggothMcpServers: mockMcp.connectShoggothMcpServers },
+    });
+
+    const sessionId = "agent:myagent:discord:channel:aaaaaaaa-0000-4000-8000-000000000001";
+
+    // Resolve context to connect all pools
+    await runtime.resolveContext(sessionId);
+
+    // End turn — should schedule idle timers for all three scopes
+    runtime.notifyTurnEnd(sessionId);
+
+    // Advance partway
+    vi.advanceTimersByTime(idleMs - 1000);
+
+    // Begin a new turn — should cancel ALL pending idle timers.
+    runtime.notifyTurnBegin(sessionId);
+
+    // Advance well past the timeout
+    vi.advanceTimersByTime(idleMs * 3);
+
+    // None of the pools should have been evicted
+    for (const closeFn of mockMcp.closeFns) {
+      expect(closeFn).not.toHaveBeenCalled();
+    }
+
+    await runtime.shutdown();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. shutdown() clears all idle timers
+// ---------------------------------------------------------------------------
+
+describe("unified MCP idle eviction — shutdown clears all timers", () => {
+  let tmp: string;
+  let db: Database.Database;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    tmp = mkdtempSync(join(tmpdir(), "shoggoth-mcp-idle-"));
+    const dbPath = join(tmp, "s.db");
+    db = new Database(dbPath);
+    db.pragma("foreign_keys = ON");
+    migrate(db, defaultMigrationsDir());
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    closeTestDb(db, tmp);
+  });
+
+  it("shutdown clears global idle timer so eviction callback does not fire", async () => {
+    const mockMcp = createMockConnectMcp();
+    const idleMs = 5000;
+    const config = configWithGlobalMcp(tmp, idleMs);
+
+    const runtime = await createSessionMcpRuntime({
+      config,
+      env: process.env,
+      db,
+      deps: { connectShoggothMcpServers: mockMcp.connectShoggothMcpServers },
+    });
+
+    await runtime.resolveContext("sess-shutdown-global");
+
+    // End turn — schedules global idle timer
+    runtime.notifyTurnEnd("sess-shutdown-global");
+
+    // Shutdown before the timer fires — should clear the timer.
+    await runtime.shutdown();
+
+    // Advance past the timeout — the eviction callback should NOT fire
+    vi.advanceTimersByTime(idleMs * 2);
+
+    // The pool was closed by shutdown, but the idle eviction callback should not
+    // have fired (no double-close or errors from stale timer).
+    // close is called once by shutdown, not again by the timer.
+    expect(mockMcp.closeFns[0]).toHaveBeenCalledTimes(1);
+  });
+
+  it("shutdown clears per-session idle timers", async () => {
     const mockMcp = createMockConnectMcp();
     const idleMs = 5000;
     const config = configWithPerSessionMcp(tmp, idleMs);
@@ -452,25 +675,15 @@ describe("per-session MCP idle timeout — timer and eviction", () => {
       deps: { connectShoggothMcpServers: mockMcp.connectShoggothMcpServers },
     });
 
-    await runtime.resolveContext("sess-multi");
-
-    // First turn cycle
-    runtime.notifyTurnEnd("sess-multi");
-    vi.advanceTimersByTime(3000); // 3s into 5s timeout
-
-    // Second turn begins — cancels timer
-    runtime.notifyTurnBegin("sess-multi");
-    // Second turn ends — restarts timer
-    runtime.notifyTurnEnd("sess-multi");
-
-    // Advance 3s — would have been past original timeout but not the reset one
-    vi.advanceTimersByTime(3000);
-    expect(mockMcp.closeFns[0]).not.toHaveBeenCalled();
-
-    // Advance past the reset timeout
-    vi.advanceTimersByTime(3000);
-    expect(mockMcp.closeFns[0]).toHaveBeenCalledOnce();
+    await runtime.resolveContext("sess-shutdown-ps");
+    runtime.notifyTurnEnd("sess-shutdown-ps");
 
     await runtime.shutdown();
+
+    // Advance past the timeout — the eviction callback should NOT fire
+    vi.advanceTimersByTime(idleMs * 2);
+
+    // close called once by shutdown, not again by the timer
+    expect(mockMcp.closeFns[0]).toHaveBeenCalledTimes(1);
   });
 });

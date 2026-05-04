@@ -292,6 +292,10 @@ export interface McpStdioConnectOptions {
   readonly env?: NodeJS.ProcessEnv;
   /** When provided, the MCP server process is spawned and managed via procman. */
   readonly processManager?: ProcessManager;
+  /** When set, the MCP server process is spawned with this POSIX UID (agent identity). */
+  readonly uid?: number;
+  /** When set, the MCP server process is spawned with this POSIX GID (agent identity). */
+  readonly gid?: number;
 }
 
 export interface McpTcpConnectOptions {
@@ -313,10 +317,14 @@ export async function connectMcpStdioSession(
 async function connectMcpStdioSessionDirect(
   opts: McpStdioConnectOptions,
 ): Promise<McpJsonRpcSession> {
+  const hasIdentity = opts.uid !== undefined || opts.gid !== undefined;
   const proc = spawn(opts.command, opts.args ? [...opts.args] : [], {
     cwd: opts.cwd,
+    uid: opts.uid,
+    gid: opts.gid,
     env: opts.env ? { ...process.env, ...opts.env } : undefined,
     stdio: ["pipe", "pipe", "ignore"],
+    ...(hasIdentity ? { detached: true } : {}),
   });
   const out = proc.stdout;
   const inp = proc.stdin;
@@ -360,6 +368,8 @@ async function connectMcpStdioSessionViaProcman(
     args: opts.args ? [...opts.args] : undefined,
     cwd: opts.cwd,
     env: opts.env ? ({ ...opts.env } as Record<string, string>) : undefined,
+    uid: opts.uid,
+    gid: opts.gid,
     restart: { mode: "on-failure", maxRetries: 5 },
     stdio: { capture: "pipe", stdin: true },
     shutdown: { signal: "SIGTERM", graceMs: 5000 },
