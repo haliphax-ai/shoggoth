@@ -113,10 +113,14 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
         contextLevel: deps.contextLevel ?? "minimal",
       });
 
-      // Build modelSelection merging subagentModel + responseSchema
+      // Build modelSelection: per-task model_options > subagentModel from config
       const modelSelection: Record<string, unknown> = {};
       if (deps.subagentModel) {
         modelSelection.model = deps.subagentModel;
+      }
+      // Per-task model override takes highest priority
+      if (req.modelOptions?.model) {
+        modelSelection.model = req.modelOptions.model;
       }
       if (req.responseSchema) {
         modelSelection.responseSchema = req.responseSchema;
