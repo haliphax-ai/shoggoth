@@ -1,59 +1,230 @@
-// RED Phase 2: This is a stub that will make tests fail
-// The real implementation will be added in the next phase
+// -----------------------------------------------------------------------------
+// builtin-search — search for patterns in files
+// -----------------------------------------------------------------------------
 
-import { ToolDefinition } from "../types";
+import { readFileSync, statSync, existsSync, readdirSync } from "node:fs";
+import { join, resolve, relative } from "node:path";
+import { formatRegexError } from "../lib/error-utils";
 
-interface BuiltinToolContext {
+export interface BuiltinSearchParams {
+  path: string;
+  pattern: string;
+  caseSensitive?: boolean;
+  contextLines?: number;
+  maxResults?: number;
+}
+
+export interface BuiltinToolContext {
   workspacePath: string;
 }
 
-interface SearchMatch {
+export interface SearchMatch {
   filePath: string;
   lineNumber: number;
   context: string;
   matchedText: string;
 }
 
-interface SearchResult {
+export interface SearchResult {
   matches: SearchMatch[];
   totalMatches: number;
 }
 
-// Stub implementation - returns empty results to make tests fail
 export async function builtinSearch(
-  _params: {
-    path: string;
-    pattern: string;
-    caseSensitive?: boolean;
-    contextLines?: number;
-    maxResults?: number;
-  },
-  _ctx: BuiltinToolContext,
+  args: BuiltinSearchParams,
+  ctx: BuiltinToolContext,
 ): Promise<{ resultJson: string }> {
-  // RED PHASE: Return empty results so all assertions fail
-  const emptyResult: SearchResult = {
-    matches: [],
-    totalMatches: 0,
-  };
+  try {
+    const path = args.path;
+    const pattern = args.pattern;
+    const caseSensitive = args.caseSensitive ?? false;
+    const contextLines = args.contextLines ?? 2;
+    const maxResults = args.maxResults ?? 100;
 
-  return {
-    resultJson: JSON.stringify(emptyResult),
-  };
+    if (!pattern) {
+      return {
+        resultJson: JSON.stringify({
+          matches: [],
+          totalMatches: 0,
+        }),
+      };
+    }
+
+    // Resolve the full path
+    const fullPath = resolve(ctx.workspacePath, path);
+
+    // Check if path exists
+    if (!existsSync(fullPath)) {
+      return {
+        resultJson: JSON.stringify({
+          error: `Path not found: ${path}`,
+          matches: [],
+          totalMatches: 0,
+        }),
+      };
+    }
+
+    // Check if it's a directory or file
+    const stats = statSync(fullPath);
+    if (stats.isDirectory()) {
+      return await searchDirectory(
+        fullPath,
+        pattern,
+        caseSensitive,
+        contextLines,
+        maxResults,
+        ctx.workspacePath,
+      );
+    } else {
+      return await searchFile(
+        fullPath,
+        pattern,
+        caseSensitive,
+        contextLines,
+        maxResults,
+        ctx.workspacePath,
+        path,
+      );
+    }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return {
+      resultJson: JSON.stringify({
+        error: `Search failed: ${errorMessage}`,
+        matches: [],
+        totalMatches: 0,
+      }),
+    };
+  }
 }
 
-// Export as a tool definition for registration
-export const builtinSearchTool: ToolDefinition = {
-  name: "builtin-search",
-  description: "Search for patterns in files",
-  parameters: {
-    type: "object",
-    properties: {
-      path: { type: "string", description: "File or directory path to search" },
-      pattern: { type: "string", description: "Regex pattern to search for" },
-      caseSensitive: { type: "boolean", description: "Case-sensitive search (default: false)" },
-      contextLines: { type: "number", description: "Number of context lines around matches" },
-      maxResults: { type: "number", description: "Maximum number of results to return" },
-    },
-    required: ["path", "pattern"],
-  },
-};
+async function searchFile(
+  filePath: string,
+  pattern: string,
+  caseSensitive: boolean,
+  contextLines: number,
+  maxResults: number,
+  workspacePath: string,
+): Promise<{ resultJson: string }> {
+  const matches: SearchMatch[] = [];
+  let totalMatches = 0;
+
+  try {
+    // Create regex from pattern
+    const flags = caseSensitive ? "g" : "gi";
+    let regex: RegExp;
+    try {
+      regex = new RegExp(pattern, flags);
+    } catch (error) {
+      const errorData = formatRegexError(error, pattern, flags);
+      return {
+        resultJson: JSON.stringify(errorData),
+      };
+    }
+
+    const content = readFileSync(filePath, "utf-8");
+    const lines = content.split("\n");
+
+    // Search through lines
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const lineMatches = [...line.matchAll(regex)];
+
+      for (const match of lineMatches) {
+        totalMatches++;
+
+        if (matches.length < maxResults) {
+          // Calculate context
+          const startLine = Math.max(0, i - contextLines);
+          const endLine = Math.min(lines.length - 1, i + contextLines);
+          const contextLinesArray = lines.slice(startLine, endLine + 1);
+          const context = contextLinesArray.join("\n");
+
+          // Get relative path for display
+          const relativePath = relative(workspacePath, filePath);
+
+          matches.push({
+            filePath: relativePath,
+            lineNumber: i + 1,
+            context,
+            matchedText: match[0],
+          });
+        }
+      }
+    }
+
+    return {
+      resultJson: JSON.stringify({
+        matches,
+        totalMatches,
+      }),
+    };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return {
+      resultJson: JSON.stringify({
+        error: `Failed to search file: ${errorMessage}`,
+        matches: [],
+        totalMatches: 0,
+      }),
+    };
+  }
+}
+
+async function searchDirectory(
+  dirPath: string,
+  pattern: string,
+  caseSensitive: boolean,
+  contextLines: number,
+  maxResults: number,
+  workspacePath: string,
+): Promise<{ resultJson: string }> {
+  const matches: SearchMatch[] = [];
+  let totalMatches = 0;
+
+  try {
+    // Read directory contents
+    const items = readdirSync(dirPath, { withFileTypes: true });
+
+    // Process files in the directory (non-recursive for now)
+    for (const item of items) {
+      if (matches.length >= maxResults) break;
+
+      if (item.isFile()) {
+        const filePath = join(dirPath, item.name);
+        const fileResult = await searchFile(
+          filePath,
+          pattern,
+          caseSensitive,
+          0, // No context for directory search to save memory
+          maxResults - matches.length,
+          workspacePath,
+        );
+
+        const parsed = JSON.parse(fileResult.resultJson);
+        if (parsed.error) {
+          continue; // Skip files with errors
+        }
+
+        matches.push(...parsed.matches);
+        totalMatches += parsed.totalMatches;
+      }
+    }
+
+    return {
+      resultJson: JSON.stringify({
+        matches,
+        totalMatches,
+      }),
+    };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return {
+      resultJson: JSON.stringify({
+        error: `Failed to search directory: ${errorMessage}`,
+        matches: [],
+        totalMatches: 0,
+      }),
+    };
+  }
+}
