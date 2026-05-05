@@ -4,24 +4,102 @@ Run shell commands and poll background processes.
 
 ## exec
 
-Execute a command via `/bin/sh -c`. Returns combined or split stdout/stderr.
+Execute a command via the system shell. Returns combined or split stdout/stderr.
 
 ### Parameters
 
 | Param          | Type     | Required | Notes                                                                    |
 | -------------- | -------- | -------- | ------------------------------------------------------------------------ |
 | `argv`         | string[] | yes      | Command + arguments                                                      |
-| `timeout`      | number   | no       | Max seconds before SIGTERM → SIGKILL                                     |
+| `timeout`      | number   | no       | Max milliseconds before SIGTERM → SIGKILL (default: 30000)               |
 | `stdin`        | string   | no       | Written to stdin, then closed                                            |
 | `workdir`      | string   | no       | Working directory (absolute or workspace-relative)                       |
 | `env`          | object   | no       | Key-value pairs merged into process env                                  |
 | `splitStreams` | boolean  | no       | Return `stdout`/`stderr` separately (default: false → combined `output`) |
 | `maxOutput`    | number   | no       | Max characters per stream. System cap: ~1 MB, default: ~200 KB           |
 | `truncation`   | string   | no       | `"head"`, `"tail"` (default), or `"both"` — which end to keep            |
-| `background`   | boolean  | no       | Start in background immediately, return a handle                         |
-| `yieldMs`      | number   | no       | Wait up to N ms; if still running, background it and return a handle     |
 
-When none of the extended params are present, `argv` is executed directly and the response always contains split `stdout`/`stderr` fields.
+### Newline Preservation in argv Strings
+
+When passing multiline scripts in `argv` strings (especially with `bash -c` or `sh -c`), newlines are preserved through proper JSON escaping:
+
+- In JSON, `\n` represents an actual newline character
+- When passed to the shell, these newlines are preserved in the command string
+- Proper quoting ensures literal characters are maintained
+
+**Example: multiline script with bash**
+
+```json
+{
+  "argv": ["bash", "-c", "echo 'line 1'\necho 'line 2'\necho 'line 3'"]
+}
+```
+
+This executes as:
+
+```bash
+bash -c "echo 'line 1'
+echo 'line 2'
+echo 'line 3'"
+```
+
+**Example: complex multiline script**
+
+```json
+{
+  "argv": ["bash", "-c", "for i in 1 2 3; do\n  echo \"Number: $i\"\ndone"]
+}
+```
+
+### Shell Escaping Expectations
+
+The tool expects arguments to be properly formatted for shell execution:
+
+1. **Command and arguments as separate array elements**
+   - `argv[0]` is the command to execute
+   - `argv[1..]` are the arguments passed to the command
+
+2. **For bash -c or sh -c, the script should be a single argument**
+   - Wrong: `["bash", "-c", "echo", "hello"]` (echo and hello are separate args)
+   - Right: `["bash", "-c", "echo hello"]` (entire script is one argument)
+
+3. **JSON string escaping**
+   - `\n` in JSON becomes actual newline in the string
+   - `\\n` in JSON becomes literal `\n` in the string
+   - Use proper escaping for quotes and special characters
+
+### Return Value Structure
+
+**Default (combined output):**
+
+```json
+{
+  "stdout": "command output here",
+  "stderr": "",
+  "exitCode": 0
+}
+```
+
+**Split streams:**
+
+```json
+{
+  "stdout": "standard output",
+  "stderr": "error output",
+  "exitCode": 0
+}
+```
+
+**Error case:**
+
+```json
+{
+  "error": "Failed to execute command: ...",
+  "stdout": "",
+  "stderr": "",
+  "exitCode": -1
+}
+```
 
 ### Examples
 
@@ -31,31 +109,36 @@ When none of the extended params are present, `argv` is executed directly and th
 { "argv": ["ls", "-la"] }
 ```
 
-**With timeout and stdin:**
+**Command with timeout:**
+
+```json
+{
+  "argv": ["sleep", "10"],
+  "timeout": 5000
+}
+```
+
+**Command with stdin:**
 
 ```json
 {
   "argv": ["grep", "error"],
   "stdin": "line1\nerror here\nline3\n",
-  "timeout": 5
+  "timeout": 5000
 }
 ```
 
-**Background a long-running process:**
+**Multiline bash script:**
 
 ```json
-{ "argv": ["make", "-j4"], "background": true }
+{
+  "argv": [
+    "bash",
+    "-c",
+    "echo 'Starting process...'\nfor i in 1 2 3; do\n  echo \"Processing item $i\"\ndone\necho 'Done!'"
+  ]
+}
 ```
-
-→ `{ "status": "running", "sessionId": "...", "pid": 1234 }`
-
-**Yield — wait briefly, background if slow:**
-
-```json
-{ "argv": ["npm", "test"], "yieldMs": 10000 }
-```
-
-→ Returns full result if done within 10 s, otherwise backgrounds and returns `{ "sessionId": "...", "pid": ..., "yielded": true, "partialOutput": "..." }`.
 
 **Split streams with truncation:**
 
@@ -67,54 +150,48 @@ When none of the extended params are present, `argv` is executed directly and th
 }
 ```
 
----
-
-## poll
-
-Check status and read output of a backgrounded `exec` process.
-
-### Parameters
-
-| Param     | Type    | Required | Notes                                                                   |
-| --------- | ------- | -------- | ----------------------------------------------------------------------- |
-| `pid`     | number  | yes      | PID from the background exec result                                     |
-| `timeout` | number  | no       | Max ms to wait for exit before returning current status (0 = immediate) |
-| `streams` | boolean | no       | Split `stdout`/`stderr` (default: false → combined `output`)            |
-| `tail`    | number  | no       | Return only the last N lines                                            |
-| `since`   | number  | no       | Return output after this byte offset (incremental reads)                |
-
-### Examples
-
-**Check immediately:**
+**Command with custom working directory:**
 
 ```json
-{ "pid": 1234 }
+{
+  "argv": ["git", "status"],
+  "workdir": "src"
+}
 ```
 
-→ `{ "pid": 1234, "status": "running", "output": "...", "outputBytes": 512, "runtimeMs": 3200 }`
-
-**Wait up to 5 s for completion:**
+**Command with custom environment:**
 
 ```json
-{ "pid": 1234, "timeout": 5000 }
+{
+  "argv": ["echo", "$MY_VAR"],
+  "env": { "MY_VAR": "hello world" }
+}
 ```
 
-**Incremental output (read only new bytes):**
+**Complex multiline script with quotes:**
 
 ```json
-{ "pid": 1234, "since": 512 }
+{
+  "argv": ["bash", "-c", "echo \"nested 'quotes' in \\\"multiline\\\" lines\""]
+}
 ```
 
-**Tail last 20 lines, split streams:**
+## Output Truncation
 
-```json
-{ "pid": 1234, "tail": 20, "streams": true }
-```
+When output exceeds `maxOutput` (default 200KB):
+
+- `truncation: "head"` - keeps beginning, truncates end
+- `truncation: "tail"` - keeps end, truncates beginning (default)
+- `truncation: "both"` - keeps beginning and end, truncates middle
+
+Truncated output includes a marker: `[... truncated X chars ...]`
 
 ## Tips
 
-- Use `yieldMs` for commands that _usually_ finish fast but _might_ be slow — avoids unnecessary backgrounding.
-- `background: true` and `yieldMs: 0` are equivalent (immediate background).
-- Poll with `since` to stream incremental output without re-reading everything.
-- `tail` is useful for watching build/test progress without pulling full logs.
-- When a backgrounded process finishes, `poll` returns `"status": "exited"` with `exitCode`.
+- Use `splitStreams: true` when you need to separate stdout and stderr
+- Set `timeout` to prevent long-running commands from hanging
+- For multiline scripts, use bash -c with properly escaped newlines
+- Use `env` to pass environment variables without modifying the parent process
+- The `workdir` parameter supports both absolute paths and workspace-relative paths
+- Exit code 0 typically indicates success, non-zero indicates failure
+- When a command times out, it receives SIGTERM, then SIGKILL after 5 seconds
