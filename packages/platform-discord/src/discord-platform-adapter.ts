@@ -23,6 +23,7 @@ import type { DiscordMessagingRuntime } from "./bridge";
 import type { DiscordRestTransport } from "./transport";
 import { DISCORD_PLATFORM_MAX_MESSAGE_BODY_CHARS, sliceDiscordPlatformMessageBody } from "./errors";
 import { splitDiscordMessage } from "./split-message";
+import { mdTableToAscii } from "./table-formatter.js";
 import type { HitlDiscordNoticeRegistry } from "./hitl/notice-registry";
 import { registerDiscordHitlNoticeAndAddReactions } from "./hitl/reaction-wiring";
 import type { Logger, PendingActionRow } from "./daemon-types";
@@ -64,7 +65,7 @@ export class DiscordPlatformAdapter implements PlatformAdapter {
       data: a.data,
     }));
 
-    const chunks = splitDiscordMessage(body);
+    const chunks = splitDiscordMessage(mdTableToAscii(body));
     for (let i = 0; i < chunks.length; i++) {
       // Attach files only to the first chunk.
       const chunkFiles = i === 0 ? attachmentFiles : undefined;

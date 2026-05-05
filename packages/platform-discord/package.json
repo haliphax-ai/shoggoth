@@ -14,7 +14,7 @@
   },
   "scripts": {
     "typecheck": "tsgo --noEmit -p tsconfig.json",
-    "test": "node --import tsx/esm --test --test-isolation=process --test-concurrency=true $(find test -name '*.test.ts' | sort)"
+    "test": "vitest run"
   },
   "dependencies": {
     "@shoggoth/daemon": "*",
@@ -22,6 +22,11 @@
     "@shoggoth/models": "*",
     "@shoggoth/plugins": "*",
     "@shoggoth/shared": "*",
+    "remark-gfm": "^4.0.0",
+    "remark-parse": "^11.0.0",
+    "remark-stringify": "^11.0.0",
+    "unified": "^11.0.0",
+    "unist-util-visit": "^5.1.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {

@@ -1,6 +1,7 @@
 import type { MessagingAdapterCapabilities } from "@shoggoth/messaging";
 import type { DiscordRestTransport } from "./transport";
 import { splitDiscordMessage } from "./split-message";
+import { mdTableToAscii } from "./table-formatter.js";
 import { formatMessageWithThinking, type ThinkingDisplayMode } from "./thinking-formatter";
 
 const DEFAULT_DISCORD_MAX_CONTENT = 2000;
@@ -51,11 +52,11 @@ export function createDiscordStreamingOutbound(
       return {
         messageId,
         async setFullContent(text: string): Promise<void> {
-          // Apply thinking display formatting if configured
           let formattedText = text;
           if (thinkingDisplay) {
             formattedText = formatMessageWithThinking(text, thinkingDisplay);
           }
+          formattedText = mdTableToAscii(formattedText);
 
           const chunks = splitDiscordMessage(formattedText, maxContentLength);
           // Edit the original streaming message with the first chunk.
