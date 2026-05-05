@@ -17,6 +17,7 @@ function nodeText(node?: MdNode): string {
   if (!node) return "";
   if (node.type === "text") return node.value || "";
   if (node.type === "inlineCode") return node.value || "";
+  if (node.type === "html") return node.value || "";
   if (node.children) return node.children.map(nodeText).join("");
   return "";
 }
