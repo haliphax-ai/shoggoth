@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 // Import the actual implementation - but we'll call it in a way that will fail
-import { builtinRead } from "../builtin-read.js";
+import { builtinRead } from "../builtin-read";
 
 interface BuiltinToolContext {
   workspacePath: string;
