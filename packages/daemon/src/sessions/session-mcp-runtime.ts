@@ -297,27 +297,56 @@ export async function createSessionMcpRuntime(
     if (scope === "global") {
       // Close the global pool; next resolveContext will reconnect.
       if (mcpShutdownGlobal) {
-        void mcpShutdownGlobal().catch(() => {});
+        const shutdownFn = mcpShutdownGlobal;
+        // Optimistically clear state so resolveContext triggers a reconnect.
         mcpShutdownGlobal = undefined;
+        globalExternalSources = [];
+        globalExternalInvoke = undefined;
+        globalPoolConnected = false;
+        globalOnlyMcpCtx = buildGlobalOnlyCtx();
+        void shutdownFn().catch((err) => {
+          log.error("session.mcp_pool.eviction_close_failed", {
+            key,
+            scope,
+            error: String(err),
+          });
+          // Close failed (EPERM) — restore state so we don't spawn a duplicate.
+          mcpShutdownGlobal = shutdownFn;
+          globalPoolConnected = true;
+        });
       }
-      globalExternalSources = [];
-      globalExternalInvoke = undefined;
-      globalPoolConnected = false;
-      globalOnlyMcpCtx = buildGlobalOnlyCtx();
     } else if (scope === "per_agent") {
       const close = perAgentMcpClose.get(key);
       if (close) {
-        void close().catch(() => {});
+        // Optimistically clear state.
         perAgentMcpClose.delete(key);
+        perAgentMcpCtx.delete(key);
+        void close().catch((err) => {
+          log.error("session.mcp_pool.eviction_close_failed", {
+            key,
+            scope,
+            error: String(err),
+          });
+          // Close failed — restore state so we don't spawn a duplicate.
+          perAgentMcpClose.set(key, close);
+        });
       }
-      perAgentMcpCtx.delete(key);
     } else {
       const close = perSessionMcpClose.get(key);
       if (close) {
-        void close().catch(() => {});
+        // Optimistically clear state.
         perSessionMcpClose.delete(key);
+        perSessionMcpCtx.delete(key);
+        void close().catch((err) => {
+          log.error("session.mcp_pool.eviction_close_failed", {
+            key,
+            scope,
+            error: String(err),
+          });
+          // Close failed — restore state so we don't spawn a duplicate.
+          perSessionMcpClose.set(key, close);
+        });
       }
-      perSessionMcpCtx.delete(key);
     }
   }
 

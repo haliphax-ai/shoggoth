@@ -2,7 +2,7 @@
 // Managed Process — wraps a ChildProcess with state machine & lifecycle
 // ---------------------------------------------------------------------------
 
-import { spawn, execFile, type ChildProcess } from "node:child_process";
+import { spawn, execFile, execFileSync, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import * as net from "node:net";
 import * as http from "node:http";
@@ -15,15 +15,51 @@ function log(level: string, msg: string, fields: Record<string, unknown> = {}): 
   );
 }
 
-/** Kill a process group (negative PID). Falls back to direct kill. */
-function killPg(child: ChildProcess, signal: NodeJS.Signals): void {
+/**
+ * Kill a process group (negative PID). When the target process runs under a
+ * different UID than the daemon, uses `execFileSync("kill", ...)` with the
+ * matching UID so the signal is permitted by the kernel.
+ *
+ * Returns true if the signal was sent successfully, false on EPERM or other
+ * failure.
+ */
+function killPg(child: ChildProcess, signal: NodeJS.Signals, uid?: number): boolean {
+  const pid = child.pid!;
+  const sigName = signal.replace("SIG", "");
+  const needsCrossUid = uid != null && uid !== (process.getuid?.() ?? -1);
+
+  if (needsCrossUid) {
+    // Spawn `kill` as the target UID to satisfy POSIX signal permission rules
+    try {
+      execFileSync("kill", [`-${sigName}`, "--", `-${pid}`], { uid, timeout: 5000 });
+      return true;
+    } catch (err: unknown) {
+      // Try direct kill on the process group leader as fallback
+      try {
+        execFileSync("kill", [`-${sigName}`, "--", `${pid}`], { uid, timeout: 5000 });
+        return true;
+      } catch {
+        log("error", "cross-uid kill failed", {
+          pid,
+          signal,
+          uid,
+          error: String(err),
+        });
+        return false;
+      }
+    }
+  }
+
+  // Same-UID path: use process.kill directly
   try {
-    process.kill(-child.pid!, signal);
+    process.kill(-pid, signal);
+    return true;
   } catch {
     try {
       child.kill(signal);
+      return true;
     } catch {
-      /* already dead */
+      return false;
     }
   }
 }
@@ -41,6 +77,7 @@ export class ManagedProcess extends EventEmitter {
   private _lastSignal: NodeJS.Signals | null = null;
   private _startedAt: number | null = null;
   private _consecutiveFailures = 0;
+  private _killFailed = false;
 
   private _stdoutBuf: RingBuffer;
   private _stderrBuf: RingBuffer;
@@ -85,6 +122,11 @@ export class ManagedProcess extends EventEmitter {
     return Date.now() - this._startedAt;
   }
 
+  /** True if the last stop attempt failed to kill the process. */
+  get killFailed(): boolean {
+    return this._killFailed;
+  }
+
   // -- Output access --------------------------------------------------------
 
   readOutput(stream: "stdout" | "stderr"): string {
@@ -103,6 +145,7 @@ export class ManagedProcess extends EventEmitter {
   /** Spawn the child process and begin lifecycle management. */
   async start(): Promise<void> {
     this._setState("starting");
+    this._killFailed = false;
     this._spawn();
 
     // If there's no health check, transition to running immediately
@@ -148,7 +191,22 @@ export class ManagedProcess extends EventEmitter {
       }
     }
 
-    killPg(this._child, signal);
+    const killed = killPg(this._child, signal, this.spec.uid);
+
+    if (!killed) {
+      // Signal delivery failed (EPERM or similar) — cannot stop this process.
+      // Do NOT wait for a close event that will never come.
+      log("error", "failed to signal process, cannot stop", {
+        processId: this.spec.id,
+        pid: this._pid,
+        signal,
+        uid: this.spec.uid,
+      });
+      this._killFailed = true;
+      this._setState("failed");
+      this._resolveStop();
+      return this._stopPromise;
+    }
 
     // Grace period → SIGKILL
     const graceTimer = setTimeout(() => {
@@ -156,15 +214,40 @@ export class ManagedProcess extends EventEmitter {
         log("warn", "grace period expired, sending SIGKILL", {
           processId: this.spec.id,
         });
-        killPg(this._child!, "SIGKILL");
+        const sigkilled = killPg(this._child!, "SIGKILL", this.spec.uid);
+        if (!sigkilled) {
+          log("error", "SIGKILL failed, process may be orphaned", {
+            processId: this.spec.id,
+            pid: this._pid,
+            uid: this.spec.uid,
+          });
+          this._killFailed = true;
+          this._setState("failed");
+          this._resolveStop();
+        }
       }
     }, graceMs);
 
-    // Wait for exit
+    // Wait for exit (with a safety timeout to avoid hanging forever)
     if (this._child.exitCode === null) {
+      const safetyTimeout = graceMs + 5000;
       await new Promise<void>((resolve) => {
+        const safety = setTimeout(() => {
+          // If we get here, the process didn't exit despite our signals.
+          // This shouldn't happen if killPg succeeded, but guard against it.
+          if (!this._killFailed) {
+            log("error", "process did not exit within safety timeout", {
+              processId: this.spec.id,
+              pid: this._pid,
+            });
+            this._killFailed = true;
+          }
+          resolve();
+        }, safetyTimeout);
+
         this._child!.once("close", () => {
           clearTimeout(graceTimer);
+          clearTimeout(safety);
           resolve();
         });
       });
@@ -172,20 +255,35 @@ export class ManagedProcess extends EventEmitter {
       clearTimeout(graceTimer);
     }
 
-    this._finalize();
+    if (this._killFailed) {
+      // Already transitioned to failed in the grace timer callback
+      if (this._state !== "failed") {
+        this._setState("failed");
+      }
+      this._resolveStop();
+    } else {
+      this._finalize();
+    }
     return this._stopPromise;
   }
 
   /** Force kill (SIGKILL). */
   kill(): void {
     if (this._child && this._child.exitCode === null) {
-      killPg(this._child, "SIGKILL");
+      killPg(this._child, "SIGKILL", this.spec.uid);
     }
   }
 
   /** Stop then start again. */
   async restart(): Promise<void> {
     await this.stop();
+
+    if (this._killFailed) {
+      throw new Error(
+        `Cannot restart process ${this.spec.id}: previous instance could not be killed (pid ${this._pid})`,
+      );
+    }
+
     this._stopPromise = null;
     this._stopResolve = null;
     this._state = "starting"; // reset without emitting yet

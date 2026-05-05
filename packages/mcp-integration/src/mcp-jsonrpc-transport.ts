@@ -407,11 +407,7 @@ async function connectMcpStdioSessionViaProcman(
       await baseClose().catch(() => {});
       stdoutStream.destroy();
       stdinStream.destroy();
-      try {
-        await pm.stop(specId);
-      } catch {
-        // already stopped or removed
-      }
+      await pm.stop(specId);
     },
   };
 }

@@ -50,13 +50,25 @@ export class ProcessManager extends EventEmitter {
     return mp;
   }
 
-  /** Stop a managed process by spec ID. */
+  /**
+   * Stop a managed process by spec ID.
+   * Throws if the process could not be killed (EPERM, etc.) — the process
+   * remains registered so no replacement is spawned while it's still alive.
+   */
   async stop(id: string): Promise<void> {
     const mp = this.processes.get(id);
     if (!mp) {
       throw new Error(`No process with id "${id}"`);
     }
     await mp.stop();
+
+    if (mp.killFailed) {
+      throw new Error(
+        `Failed to kill process "${id}" (pid ${mp.pid ?? "unknown"}): signal delivery failed (EPERM). ` +
+          `Process may still be running; not deregistering to prevent orphaned replacement.`,
+      );
+    }
+
     this.processes.delete(id);
   }
 
@@ -114,7 +126,14 @@ export class ProcessManager extends EventEmitter {
       matches.map(async (mp) => {
         try {
           await mp.stop();
-          this.processes.delete(mp.spec.id);
+          if (!mp.killFailed) {
+            this.processes.delete(mp.spec.id);
+          } else {
+            log("error", "process kill failed, not deregistering", {
+              processId: mp.spec.id,
+              pid: mp.pid,
+            });
+          }
         } catch (err) {
           log("error", "error stopping process by owner", {
             processId: mp.spec.id,
