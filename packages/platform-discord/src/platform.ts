@@ -308,8 +308,15 @@ export async function startDiscordPlatform(
     attachments?: readonly import("@shoggoth/messaging").MessageAttachment[],
   ): Promise<void> {
     // Fire-and-forget: push to the turn queue (synchronous) and return immediately.
+    // Create a label with truncated message content for display in queue
+    const maxLabelLength = 100;
+    const userMessageLabel =
+      userContent.length > maxLabelLength
+        ? userContent.slice(0, maxLabelLength) + "..."
+        : userContent;
+
     void turnQueue
-      .enqueue(msg.sessionId, "user", "user message", async () => {
+      .enqueue(msg.sessionId, "user", userMessageLabel, async () => {
         const hitlReplyInSession = env.SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION !== "0";
 
         const mcpLifecycle = mcpRuntime.trackInstanceIdle
