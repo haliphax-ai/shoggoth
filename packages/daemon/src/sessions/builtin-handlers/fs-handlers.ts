@@ -21,6 +21,8 @@ async function readHandler(
   ctx: BuiltinToolContext,
 ): Promise<{ resultJson: string; contentParts?: ChatContentPart[] }> {
   const path = String(args.path ?? "");
+  const lines = args.lines === true;
+  const lineNumbers = args.lineNumbers === true;
   const resolvedPath = resolveUserPath(ctx, path);
   const ext = extname(path).toLowerCase();
   const imageMime = IMAGE_EXTENSION_TO_MIME[ext];
@@ -53,8 +55,37 @@ async function readHandler(
   }
 
   const body = await toolRead(ctx.workspacePath, resolvedPath, ctx.creds);
+
+  // Apply line processing if requested
+  let content: string | string[];
+  if (lines || lineNumbers) {
+    // Split by newlines (handle \r\n, \n, and \r)
+    const rawLines = body.split(/\r\n|\n|\r/);
+
+    // Apply line numbers if requested
+    if (lineNumbers) {
+      content = rawLines.map((line, index) => `${index + 1}: ${line}`);
+    } else {
+      content = rawLines;
+    }
+
+    // Handle truncation for large files (>1000 lines)
+    if (lines && rawLines.length > 1000) {
+      const truncatedContent = rawLines.slice(0, 1000);
+      if (lineNumbers) {
+        content = truncatedContent.map((line, index) => `${index + 1}: ${line}`);
+      } else {
+        content = truncatedContent;
+      }
+      content.push(`[... truncated — file has ${rawLines.length} lines, showing first 1000 ...]`);
+    }
+  } else {
+    // Default behavior: return raw content as string
+    content = truncateToolOutput(body);
+  }
+
   return {
-    resultJson: JSON.stringify({ path, content: truncateToolOutput(body) }),
+    resultJson: JSON.stringify({ path, content }),
   };
 }
 
