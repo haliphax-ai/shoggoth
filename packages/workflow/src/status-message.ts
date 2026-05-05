@@ -44,7 +44,7 @@ export function formatStatusMessage(wf: TaskList, now?: number): string {
   lines.push("");
   for (const task of wf.tasks) {
     const deps = wf.graph.get(task.taskDef.id) ?? new Set<number>();
-    lines.push(formatTaskLine(task, deps, now));
+    lines.push(`- ${formatTaskLine(task, deps, now)}`);
   }
   return lines.join("\n");
 }
