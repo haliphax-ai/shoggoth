@@ -1,13 +1,10 @@
-// RED Phase 1: Write failing tests for builtin-read formatted output
-// This file contains tests that will FAIL until the implementation is complete
-
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-// Import the actual implementation - but we'll call it in a way that will fail
+// Import the actual implementation
 import { builtinRead } from "../builtin-read";
 
 interface BuiltinToolContext {
@@ -20,7 +17,7 @@ function stubCtx(workspacePath: string): BuiltinToolContext {
   };
 }
 
-describe("builtin-read formatted output (RED PHASE)", () => {
+describe("builtin-read formatted output", () => {
   let workspace: string;
 
   beforeEach(() => {
@@ -37,18 +34,11 @@ describe("builtin-read formatted output (RED PHASE)", () => {
       const testFile = join(workspace, "test.txt");
       writeFileSync(testFile, "line1\nline2\nline3\n");
 
-      // This test will FAIL because we're not calling the function correctly for RED phase
-      // In RED phase, we want tests to fail, so we'll use an incorrect assertion
       const result = await builtinRead({ path: "test.txt", lines: true }, ctx);
       const parsed = JSON.parse(result.resultJson);
 
-      // RED PHASE: This assertion will fail because we're checking for wrong behavior
       assert.ok(Array.isArray(parsed.content), "Content should be an array when lines: true");
-      assert.strictEqual(
-        parsed.content.length,
-        4,
-        "RED PHASE: This should fail - expecting 4 instead of 3",
-      );
+      assert.strictEqual(parsed.content.length, 3, "Should have 3 lines (trailing empty stripped)");
       assert.strictEqual(parsed.content[0], "line1", "First line should be 'line1'");
       assert.strictEqual(parsed.content[1], "line2", "Second line should be 'line2'");
       assert.strictEqual(parsed.content[2], "line3", "Third line should be 'line3'");
@@ -62,13 +52,8 @@ describe("builtin-read formatted output (RED PHASE)", () => {
       const result = await builtinRead({ path: "empty.txt", lines: true }, ctx);
       const parsed = JSON.parse(result.resultJson);
 
-      // RED PHASE: This will fail because we're asserting wrong behavior
       assert.ok(Array.isArray(parsed.content), "Content should be an array when lines: true");
-      assert.strictEqual(
-        parsed.content.length,
-        999,
-        "RED PHASE: This should fail - expecting 999 instead of 0",
-      );
+      assert.strictEqual(parsed.content.length, 0, "Empty file should have 0 lines");
     });
 
     it("should handle CRLF line endings with lines: true", async () => {
@@ -79,13 +64,8 @@ describe("builtin-read formatted output (RED PHASE)", () => {
       const result = await builtinRead({ path: "crlf.txt", lines: true }, ctx);
       const parsed = JSON.parse(result.resultJson);
 
-      // RED PHASE: This will fail because we're asserting wrong behavior
       assert.ok(Array.isArray(parsed.content), "Content should be an array when lines: true");
-      assert.strictEqual(
-        parsed.content.length,
-        999,
-        "RED PHASE: This should fail - expecting 999 instead of 3",
-      );
+      assert.strictEqual(parsed.content.length, 3, "Should have 3 lines with CRLF endings");
     });
 
     it("should handle large file (>1000 lines) with lines: true", async () => {
@@ -102,12 +82,11 @@ describe("builtin-read formatted output (RED PHASE)", () => {
       const result = await builtinRead({ path: "large.txt", lines: true }, ctx);
       const parsed = JSON.parse(result.resultJson);
 
-      // RED PHASE: This will fail because we're asserting wrong behavior
       assert.ok(Array.isArray(parsed.content), "Content should be an array when lines: true");
       assert.strictEqual(
         parsed.content.length,
-        999,
-        "RED PHASE: This should fail - expecting 999 instead of 1001",
+        1001,
+        "Should have 1000 lines + 1 truncation message",
       );
     });
   });
@@ -121,14 +100,13 @@ describe("builtin-read formatted output (RED PHASE)", () => {
       const result = await builtinRead({ path: "numbered.txt", lineNumbers: true }, ctx);
       const parsed = JSON.parse(result.resultJson);
 
-      // RED PHASE: This will fail because we're asserting wrong behavior
       assert.ok(
-        parsed.content.includes("0: first"),
-        "RED PHASE: This should fail - expecting 0-indexed",
+        parsed.content.includes("1: first"),
+        "Should include 1-indexed line number for first line",
       );
       assert.ok(
         parsed.content.includes("2: second"),
-        "RED PHASE: This should fail - expecting wrong index",
+        "Should include 1-indexed line number for second line",
       );
     });
 
@@ -140,11 +118,7 @@ describe("builtin-read formatted output (RED PHASE)", () => {
       const result = await builtinRead({ path: "single.txt", lineNumbers: true }, ctx);
       const parsed = JSON.parse(result.resultJson);
 
-      // RED PHASE: This will fail because we're asserting wrong behavior
-      assert.ok(
-        parsed.content.includes("0: only line"),
-        "RED PHASE: This should fail - expecting 0-indexed",
-      );
+      assert.ok(parsed.content.includes("1: only line"), "Should use 1-indexed line numbers");
     });
   });
 
@@ -157,17 +131,12 @@ describe("builtin-read formatted output (RED PHASE)", () => {
       const result = await builtinRead({ path: "both.txt", lines: true, lineNumbers: true }, ctx);
       const parsed = JSON.parse(result.resultJson);
 
-      // RED PHASE: This will fail because we're asserting wrong behavior
       assert.ok(Array.isArray(parsed.content), "Content should be an array when lines: true");
-      assert.strictEqual(
-        parsed.content.length,
-        999,
-        "RED PHASE: This should fail - expecting wrong length",
-      );
+      assert.strictEqual(parsed.content.length, 3, "Should have 3 lines");
       assert.strictEqual(
         parsed.content[0],
-        "0: first line",
-        "RED PHASE: This should fail - expecting 0-indexed",
+        "1: first line",
+        "First element should be '1: first line'",
       );
     });
   });
@@ -184,12 +153,11 @@ describe("builtin-read formatted output (RED PHASE)", () => {
       );
       const parsed = JSON.parse(result.resultJson);
 
-      // RED PHASE: This will fail because we're asserting wrong behavior
       assert.ok(Array.isArray(parsed.content), "Should return an array");
       assert.strictEqual(
         parsed.content.length,
-        999,
-        "RED PHASE: This should fail - expecting wrong number of lines",
+        4,
+        "Should have 4 lines (including trailing empty strings)",
       );
     });
 
@@ -201,13 +169,8 @@ describe("builtin-read formatted output (RED PHASE)", () => {
       const result = await builtinRead({ path: "empty.txt", lines: true, lineNumbers: true }, ctx);
       const parsed = JSON.parse(result.resultJson);
 
-      // RED PHASE: This will fail because we're asserting wrong behavior
       assert.ok(Array.isArray(parsed.content), "Should return an array");
-      assert.strictEqual(
-        parsed.content.length,
-        999,
-        "RED PHASE: This should fail - expecting wrong length",
-      );
+      assert.strictEqual(parsed.content.length, 0, "Empty file should have 0 lines");
     });
   });
 
@@ -220,12 +183,10 @@ describe("builtin-read formatted output (RED PHASE)", () => {
       const result = await builtinRead({ path: "default.txt" }, ctx);
       const parsed = JSON.parse(result.resultJson);
 
-      // RED PHASE: This will fail because we're asserting wrong behavior
       assert.ok(
-        typeof parsed.content === "number",
-        "RED PHASE: This should fail - expecting number instead of string",
+        typeof parsed.content === "string",
+        "Content should be a string when no flags are specified",
       );
-      assert.strictEqual(parsed.content, 42, "RED PHASE: This should fail - expecting wrong value");
     });
   });
 });
