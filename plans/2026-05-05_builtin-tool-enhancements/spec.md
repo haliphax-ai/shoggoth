@@ -20,7 +20,7 @@ builtin-read(path: string): string
 
 ```typescript
 interface BuiltinReadParams {
-  path: string;
+  path: string; // File path to read
   lines?: boolean; // Split output by newline characters
   lineNumbers?: boolean; // Prefix each line with number
 }
@@ -36,7 +36,7 @@ line2
 line3
 ```
 
-**With `--lines` (split):**
+**With `lines: true` (split):**
 
 ```
 line1
@@ -44,9 +44,9 @@ line2
 line3
 ```
 
-(As separate lines, not escaped newlines)
+(Split by newline, joined back with newlines)
 
-**With `--lines --line-numbers`:**
+**With `lineNumbers: true`:**
 
 ```
 1: line1
@@ -54,9 +54,17 @@ line3
 3: line3
 ```
 
-**Large file handling:**
+**With both flags:**
 
-- For files > 1000 lines, add truncation warning
+```
+1: line1
+2: line2
+3: line3
+```
+
+### Large File Handling
+
+- Files > 1000 lines: Add truncation warning
 - Provide option to show only first/last N lines
 
 ### Edge Cases
@@ -95,22 +103,39 @@ interface SearchResults {
 }
 ```
 
-### Modified `builtin-replace` Tool
+### Modified `builtin-replace` Tool (renamed from `builtin-search-replace`)
 
 ```typescript
 interface BuiltinReplaceParams {
-  file: string; // File path
+  path: string; // File path (renamed from `file`)
   pattern: string; // Regex pattern to match
   replacement: string; // Replacement text
   caseSensitive?: boolean; // Default: false
   maxOccurrences?: number; // Limit replacements (default: Infinity)
-  dryRun?: boolean; // Preview without modifying
+  dryRun?: boolean; // NEW: Preview without modifying
+  deleteLines?: number[]; // NEW: Array of line numbers to delete (1-indexed)
+  deleteRange?: {
+    // NEW: Alternative: range deletion
+    start: number;
+    end: number;
+  };
+  replaceRange?: {
+    // NEW: Replace a range of lines
+    start: number;
+    end: number;
+    replacement: string | string[];
+  };
+}
+
+// Deprecated parameter (support for migration):
+interface DeprecatedParams {
+  file?: string; // Use 'path' instead (deprecated, will be removed in next major version)
 }
 ```
 
 ### API Consistency
 
-- Rename `file` parameter to `path` in `builtin-replace` for consistency
+- Rename `file` parameter to `path` across both tools for consistency
 - Deprecate old `file` parameter with warning, support both temporarily
 
 ---
@@ -147,7 +172,9 @@ try {
 } catch (e: any) {
   if (e instanceof SyntaxError) {
     throw new ToolError(
-      `Invalid regex pattern at position ${e.index}:\n  Pattern: /${userPattern}/\n  Error: ${e.message}`,
+      `Invalid regex pattern at position ${e.index}:
+  Pattern: /${userPattern}/
+  Error: ${e.message}`,
     );
   }
   throw e;
@@ -167,35 +194,29 @@ builtin-exec argv: ["git", "commit", "-m", "line1\nline2\nline3"]
 
 ### New Approaches
 
-**Option A: JSON Array with String Arrays**
+**Option A: JSON Array with String Arrays (Recommended)**
+
+Support proper JSON escaping in strings passed through tool APIs:
 
 ```typescript
-builtin-exec(argv: string[][]): Result
-// argv[0] can be array of lines joined by newlines
+// When argv contains:
+builtin-exec(argv: ["bash", "-c", "echo 'line1\\nline2'"])
+
+// The string "line1\nline2" preserves newlines
+// Bash interprets \n appropriately based on command
 ```
 
-**Option B: Dedicated Multiline Flag**
+**Implementation Guideline:**
 
-```typescript
-interface BuiltinExecParams {
-  argv: string[];
-  multiline?: boolean; // If true, join argv[1] with newlines
-  multilineMode?: "join" | "block"; // How to handle multiline content
-}
-```
+- Accept standard JSON escaping in strings
+- Properly escape arguments for shell execution
+- Document escaping expectations clearly
 
-**Option C: JSON String with Escaping (Recommended)**
+### Documentation Requirements
 
-```typescript
-// Support standard JSON escaping in strings
-builtin-exec(argv: ["git", "commit", "-m", "This is line 1\nThis is line 2"])
-// Or use heredoc-style:
-builtin-exec(argv: ["git", "commit", "-m"], multiline: "This is line 1\nThis is line 2")
-```
-
-### Recommended Implementation
-
-Implement JSON-aware string parsing where `\n` sequences are preserved as newlines when passed through tool APIs, and provide documentation on proper escaping.
+- Examples with commit messages
+- Examples with script content
+- Shell escaping guidelines
 
 ---
 
@@ -256,7 +277,7 @@ File: example.ts
 ```typescript
 interface BuiltinReplaceParams {
   path: string;
-  deleteLines: number[]; // Array of line numbers to delete (1-indexed)
+  deleteLines?: number[]; // Array of line numbers to delete (1-indexed)
   deleteRange?: {
     // Alternative: range deletion
     start: number;
@@ -288,11 +309,11 @@ Delete lines 5, 15, 25:
 ```typescript
 interface BuiltinReplaceParams {
   path: string;
-  replaceRange: {
+  replaceRange?: {
     // Replace a range of lines
     start: number;
     end: number;
-    replacement: string; // Single string or array of strings
+    replacement: string | string[]; // Single string or array of strings
   };
 }
 ```
@@ -334,6 +355,82 @@ Replace lines 5-10 with new content:
 
 ---
 
+## Phase 7: Documentation Specifications
+
+### Documentation Structure
+
+Each tool documentation should follow this structure:
+
+1. **Overview**: Brief description of the tool's purpose
+2. **Parameters**: Table with name, type, required, default, description
+3. **Examples**: Copy-paste ready usage examples
+4. **Error Handling**: Common errors and how to resolve them
+5. **Edge Cases**: Special scenarios and how they're handled
+6. **Performance Notes**: Any relevant performance considerations
+
+### Per-Tool Documentation Requirements
+
+#### `builtin-read.md`
+
+- Document `lines` and `lineNumbers` parameters
+- Show output examples for all flag combinations
+- Explain large file handling and truncation limits
+
+#### `builtin-search.md` (new)
+
+- Complete new tool documentation
+- Document structured return value (matches array)
+- Provide search pattern examples (simple, regex, escaped)
+- Explain `contextLines` and `maxResults` usage
+
+#### `builtin-replace.md` (new)
+
+- Document from Phase 2b rename of `builtin-search-replace`
+- Explain dry-run mode thoroughly
+- Document line-level operations (`deleteLines`, `replaceRange`)
+- Provide migration guide for `file` → `path` parameter
+
+#### `builtin-search-replace.md` (deprecated)
+
+- Clearly mark as deprecated with `file` → `path` migration instructions
+- Link to `builtin-replace.md` for current documentation
+- Explain deprecation timeline
+
+#### `builtin-exec.md`
+
+- Document multiline string handling patterns
+- Provide examples with commit messages and scripts
+- Explain shell escaping guidelines
+
+### Migration Guide (`docs/migrations.md`)
+
+Required sections:
+
+- Summary of what changed
+- Parameter renames (`file` → `path`)
+- New features summary
+- Breaking changes (if any)
+- Code examples: before/after
+- Deprecation timeline
+- Rollback instructions (if needed)
+
+### Testing Documentation
+
+- Verify all code examples in docs work correctly
+- Ensure API reference matches implementation
+- Check migration guide clarity with test scenarios
+- Validate error message documentation
+
+---
+
+## API Versioning
+
+- All changes are additive or non-breaking
+- Deprecated parameters will be supported for one major version
+- Release notes will document all changes
+
+---
+
 ## Testing Strategy
 
 ### Unit Tests
@@ -363,11 +460,85 @@ Replace lines 5-10 with new content:
 2. Migration guide for renamed parameters
 3. Examples for each new feature
 4. Error message reference
+5. API documentation updates
 
 ---
 
-## API Versioning
+## Examples
 
-- All changes are additive or non-breaking
-- Deprecated parameters will be supported for one major version
-- Release notes will document all changes
+### Example 1: Read with Line Numbers
+
+```typescript
+builtin-read(
+  path: "src/utils.ts",
+  lines: true,
+  lineNumbers: true
+)
+// Output:
+// 1: import React from 'react'
+// 2:
+// 3: export const Utils = { ... }
+```
+
+### Example 2: Search with Context
+
+```typescript
+builtin-search(
+  path: "src/",
+  pattern: "TODO:.*",
+  contextLines: 3
+)
+// Output:
+// {
+//   matches: [{
+//     filePath: "src/utils.ts",
+//     lineNumber: 15,
+//     context: "export function format(data) {",
+//     matchedText: "TODO: Improve error handling"
+//   }],
+//   totalMatches: 1
+// }
+```
+
+### Example 3: Replace with Dry Run
+
+```typescript
+builtin-replace(
+  path: "config.json",
+  pattern: "\"debug\": true",
+  replacement: "\"debug\": false",
+  dryRun: true
+)
+// Output:
+// Dry-run mode: No files will be modified.
+// File: config.json
+//   Line 5: Change
+//     Before: "debug": true
+//     After:  "debug": false
+//
+// 1 replacement would be made.
+```
+
+### Example 4: Range Replacement
+
+```typescript
+builtin-replace(
+  path: "Dockerfile",
+  replaceRange: {
+    start: 1,
+    end: 3,
+    replacement: "FROM node:18-alpine"
+  }
+)
+// Output:
+// { replacedLines: 3, modified: true }
+```
+
+---
+
+## Success Criteria
+
+- All specifications are clear and actionable
+- Examples demonstrate real-world usage
+- Error handling is comprehensive
+- Documentation is complete and accurate

@@ -28,6 +28,7 @@ Current builtin tools have several pain points identified through developer feed
 4. Support multiline content more naturally
 5. Enable safe preview of replacements before execution
 6. Simplify targeted edits with line-level operations
+7. Ensure comprehensive documentation for all new and modified tools
 
 ## Non-Goals
 
@@ -37,7 +38,7 @@ Current builtin tools have several pain points identified through developer feed
 
 ## Implementation Phases
 
-This plan is broken into 6 independent phases, each addressing one enhancement. Each phase can be developed, tested, and deployed independently.
+This plan is broken into 7 independent phases, each addressing one enhancement. Each phase can be developed, tested, and deployed independently.
 
 ### Phase 1: Formatted Output for `builtin-read`
 
@@ -166,12 +167,50 @@ This plan is broken into 6 independent phases, each addressing one enhancement. 
 - Test range replacements at boundaries
 - Verify error handling for out-of-range operations
 
+### Phase 7: Documentation Updates
+
+**Focus:** Comprehensive documentation for all new and modified tools
+
+**Tasks:**
+
+- Update `docs/tools/builtin-read.md` with new flags, output formats, and edge cases
+- Create `docs/tools/builtin-search.md` with full feature documentation and examples
+- Update `docs/tools/builtin-search-replace.md` with deprecation notices for old `file` parameter
+- Create `docs/tools/builtin-replace.md` documenting the renamed tool
+- Update `docs/tools/builtin-exec.md` with multiline string usage examples
+- Add documentation for dry-run mode behavior and safety features
+- Document line-level operation syntax, constraints, and examples
+- Create migration guide (`docs/migrations.md`) for parameter renames (`file` → `path`)
+- Update API reference with all new parameters and default values
+- Add usage examples for each new feature
+- Document all error message formats with examples
+- Include troubleshooting section for common issues
+
+**Files to Modify/Create:**
+
+- `docs/tools/builtin-read.md` (update)
+- `docs/tools/builtin-search.md` (new)
+- `docs/tools/builtin-search-replace.md` (update with deprecation notices)
+- `docs/tools/builtin-replace.md` (new)
+- `docs/tools/builtin-exec.md` (update)
+- `docs/migrations.md` (new)
+- `docs/tools/README.md` (update tool listing)
+
+**Testing:**
+
+- Verify all documentation builds correctly
+- Check code examples work as documented
+- Update API reference to reflect new parameters
+- Validate migration guide clarity with real scenarios
+- Ensure all tool signatures match actual implementation
+
 ## Success Criteria
 
 - Each phase completes with all tests passing
 - All enhancement goals are met
 - Backwards compatibility preserved (no breaking changes)
-- Documentation updated for each new feature
+- Comprehensive documentation (Phase 7) completed
+- Migration guide clear and actionable
 - Negative testing confirms robust error handling
 
 ## Risk Assessment
@@ -182,6 +221,7 @@ This plan is broken into 6 independent phases, each addressing one enhancement. 
 | Complex line-number handling bugs       | Medium     | Medium | Extensive unit tests, edge case coverage                             |
 | Performance regression with large files | Low        | Medium | Add streaming or chunked processing if needed                        |
 | Multiline string escaping issues        | Medium     | Low    | Thorough testing with various delimiters                             |
+| Documentation gaps or confusion         | Medium     | Low    | Peer review of docs, testing migration guide with first users        |
 
 ## Dependencies
 
@@ -191,10 +231,11 @@ This plan is broken into 6 independent phases, each addressing one enhancement. 
 
 ## Timeline
 
-Target completion: 2 weeks (1 week per major feature area)
+Target completion: 2.5 weeks (documentation adds half week)
 
 - Week 1: Phases 1-3 (output formatting, API consistency, error handling)
 - Week 2: Phases 4-6 (multiline support, dry-run, line operations)
+- Week 2.5: Phase 7 (comprehensive documentation)
 
 ## Related Issues
 
@@ -205,10 +246,12 @@ Target completion: 2 weeks (1 week per major feature area)
 1. Should line-splitting be the default for `builtin-read`, or remain opt-in?
 2. Should line deletion be a separate tool or an option of `builtin-search-replace`?
 3. What's the best API for specifying line ranges (inclusive/exclusive, 0-indexed vs 1-indexed)?
+4. What's the deprecation timeline for the `file` parameter?
 
 ## Next Steps
 
 1. Begin implementation of Phase 1
 2. Add tests for each feature before implementation
 3. Create PRs for each phase or group related phases together
-4. Gather feedback on intermediate deliverables
+4. Start Phase 7 documentation work after Phase 2a (search tool created)
+5. Gather feedback on intermediate deliverables
