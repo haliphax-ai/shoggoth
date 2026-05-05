@@ -120,15 +120,14 @@ export const builtinSearch: ToolDefinition = {
 ```typescript
 // packages/shoggoth/src/tools/builtin-search-replace.ts
 // Use 'path' consistently across both tools
+// BREAKING: Remove 'file' parameter support
 inputSchema: {
   properties: {
-    path: { type: "string" }, // Use 'path' instead of 'file'
+    path: { type: "string" }, // Use 'path' (breaking: remove 'file')
     pattern: { type: "string" },
     replacement: { type: "string" },
     // ... other params
-  },
-  // Support both 'path' and 'file' for backwards compatibility
-  // Update documentation to prefer 'path'
+  }
 }
 ```
 
@@ -153,8 +152,8 @@ export const builtinTools = [
 - [ ] Test search respects context lines
 - [ ] Test search respects max results
 - [ ] Test replace maintains old behavior
-- [ ] Test both 'path' and 'file' parameters work
-- [ ] Verify documentation prefers 'path' parameter name
+- [ ] **Verify `file` parameter no longer works** (breaking change)
+- [ ] Verify only `path` parameter is supported
 
 ---
 
@@ -445,8 +444,8 @@ Comprehensive documentation for all new and modified tools to ensure users can e
 
 - Update `docs/tools/builtin-read.md` with new flags, output formats, and edge cases
 - Create `docs/tools/builtin-search.md` with full feature documentation and examples
-- Update `docs/tools/builtin-search-replace.md` with new documentation including both `path` and `file` parameter support
-- Create `docs/tools/builtin-replace.md` documenting the standalone replace functionality
+- Update `docs/tools/builtin-search-replace.md` with new parameter names and features
+- Create `docs/tools/builtin-replace.md` documenting the renamed functionality
 - Update `docs/tools/builtin-exec.md` with multiline string usage examples
 - Add documentation for dry-run mode behavior and safety features
 - Document line-level operation syntax, constraints, and examples
@@ -477,6 +476,7 @@ Comprehensive documentation for all new and modified tools to ensure users can e
 - Each tool doc should have: description, parameters table, examples, error handling, and edge cases
 - API reference should be machine-readable (OpenAPI-like) where applicable
 - Examples should be copy-paste ready and demonstrate real use cases
+- Clearly document breaking changes (`file` → `path`)
 
 ---
 
@@ -487,7 +487,7 @@ Recommended order for maximum efficiency:
 1. **Phase 3** - Easy, foundational improvement (better errors)
 2. **Phase 1** - Straightforward enhancement (read formatting)
 3. **Phase 2a** - Create new search tool
-4. **Phase 2b** - Modify replace tool (parameter naming consistency)
+4. **Phase 2b** - Modify replace tool (parameter naming consistency, breaking change)
 5. **Phase 5** - Build on replace tool (dry-run)
 6. **Phase 6** - Build on replace tool (line operations)
 7. **Phase 4** - Can be done anytime (standalone)
@@ -498,18 +498,18 @@ Recommended order for maximum efficiency:
 ## Release Strategy
 
 - Release all phases together as a single version bump
-- Document all changes in release notes
-- Maintain backwards compatibility for both `path` and `file` parameter names
-- No deprecation strategy needed
+- Document all breaking changes clearly in release notes
+- Provide migration guide for `file` → `path` parameter change
+- Update all examples and documentation
 
 ---
 
 ## Rollback Plan
 
 - All changes are additive (new parameters)
-- Old parameters remain functional
 - Can revert individual phases if issues arise
 - No database or config migrations required
+- Breaking change (`file` → `path`) requires coordination
 
 ---
 
@@ -582,7 +582,7 @@ Expected: "newKey: newVal\nkey3: val3\n"
   - [ ] Error handling examples
 
 - [ ] **`builtin-search-replace` / `builtin-replace`:**
-  - [ ] Document both `path` and `file` parameter support
+  - [ ] Document breaking change: `file` parameter removed
   - [ ] New `path` parameter documentation
   - [ ] Dry-run mode examples
   - [ ] Line-level operations examples
@@ -596,11 +596,18 @@ Expected: "newKey: newVal\nkey3: val3\n"
 
 ### Cross-Cutting Documentation
 
+- [ ] **Migration guide:**
+  - [ ] Document breaking change (`file` → `path`)
+  - [ ] Show before/after code examples
+  - [ ] Explain impact on existing usage
+  - [ ] Provide clear migration instructions
+
 - [ ] **API reference:**
   - [ ] All new parameters listed
   - [ ] Default values documented
   - [ ] Type information
   - [ ] Constraints and limits
+  - [ ] Breaking changes clearly marked
 
 - [ ] **Examples repository:**
   - [ ] Real-world scenarios for each feature

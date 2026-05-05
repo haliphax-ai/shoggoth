@@ -36,6 +36,7 @@ Current builtin tools have several pain points identified through developer feed
 - Replacing existing tools with entirely new abstractions
 - Adding completely unrelated features not mentioned in the issue
 - Deprecation strategy (not used in this project)
+- Backwards compatibility for inconsistent parameter naming (`file` → `path`)
 
 ## Implementation Phases
 
@@ -69,6 +70,7 @@ This plan is broken into 7 independent phases, each addressing one enhancement. 
 - Create new `builtin-search` tool for search-only functionality
 - Modify `builtin-search-replace` to keep only replace functionality
 - Rename `file` parameter to `path` across both tools for consistency
+- **Breaking change:** Remove `file` parameter support, use `path` only
 - Update documentation to reflect new structure
 
 **Files to Touch:**
@@ -83,6 +85,8 @@ This plan is broken into 7 independent phases, each addressing one enhancement. 
 - Verify search functionality in new tool
 - Verify replace functionality retained in modified tool
 - Ensure API consistency between both tools
+- Verify `path` parameter works correctly
+- **Note:** `file` parameter will no longer be supported
 
 ### Phase 3: Improved Regex Error Messages
 
@@ -212,20 +216,20 @@ This plan is broken into 7 independent phases, each addressing one enhancement. 
 
 - Each phase completes with all tests passing
 - All enhancement goals are met
-- Backwards compatibility preserved (no breaking changes)
 - Comprehensive documentation (Phase 7) completed
 - Negative testing confirms robust error handling
 - All examples are copy-paste ready and work as documented
+- **Breaking changes accepted:** `file` parameter removed in favor of `path`
 
 ## Risk Assessment
 
-| Risk                                    | Likelihood | Impact | Mitigation                                                  |
-| --------------------------------------- | ---------- | ------ | ----------------------------------------------------------- |
-| Breaking existing usage patterns        | Low        | Medium | Maintain backwards compatibility, keep both parameter names |
-| Complex line-number handling bugs       | Medium     | Medium | Extensive unit tests, edge case coverage                    |
-| Performance regression with large files | Low        | Medium | Add streaming or chunked processing if needed               |
-| Multiline string escaping issues        | Medium     | Low    | Thorough testing with various delimiters                    |
-| Documentation gaps or confusion         | Medium     | Low    | Peer review of docs, testing examples with first users      |
+| Risk                                    | Likelihood | Impact | Mitigation                                                 |
+| --------------------------------------- | ---------- | ------ | ---------------------------------------------------------- |
+| Breaking existing usage patterns        | Medium     | Medium | Document breaking changes clearly, provide migration guide |
+| Complex line-number handling bugs       | Medium     | Medium | Extensive unit tests, edge case coverage                   |
+| Performance regression with large files | Low        | Medium | Add streaming or chunked processing if needed              |
+| Multiline string escaping issues        | Medium     | Low    | Thorough testing with various delimiters                   |
+| Documentation gaps or confusion         | Medium     | Low    | Peer review of docs, testing examples with first users     |
 
 ## Dependencies
 
@@ -250,7 +254,6 @@ Target completion: 2.5 weeks (documentation adds half week)
 1. Should line-splitting be the default for `builtin-read`, or remain opt-in?
 2. Should line deletion be a separate tool or an option of `builtin-search-replace`?
 3. What's the best API for specifying line ranges (inclusive/exclusive, 0-indexed vs 1-indexed)?
-4. Should the `file` parameter still be supported alongside `path`, or should we commit to `path` only?
 
 ## Next Steps
 

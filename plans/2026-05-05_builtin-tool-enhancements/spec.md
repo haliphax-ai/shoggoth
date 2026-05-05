@@ -103,11 +103,11 @@ interface SearchResults {
 }
 ```
 
-### Modified `builtin-search-replace` Tool (rename to `builtin-replace`)
+### Modified `builtin-search-replace` Tool
 
 ```typescript
 interface BuiltinReplaceParams {
-  path: string; // File path (preferred naming)
+  path: string; // File path (breaking change: rename from `file`)
   pattern: string; // Regex pattern to match
   replacement: string; // Replacement text
   caseSensitive?: boolean; // Default: false
@@ -128,11 +128,11 @@ interface BuiltinReplaceParams {
 }
 ```
 
-### Parameter Naming
+### Breaking Change: Parameter Renaming
 
-- Support both `path` and `file` for backwards compatibility
-- Update documentation to prefer `path` parameter name
-- No deprecation warnings needed (both formats work)
+- **Remove** `file` parameter support entirely
+- **Use** `path` parameter consistently across both tools
+- Update all examples and documentation to use `path` only
 
 ---
 
@@ -384,13 +384,13 @@ Each tool documentation should follow this structure:
 - Document standalone replace functionality
 - Explain dry-run mode thoroughly
 - Document line-level operations (`deleteLines`, `replaceRange`)
-- Document both `path` and `file` parameter support
+- Clearly document breaking change: `file` → `path` parameter removal
 
 #### `builtin-search-replace.md` (update)
 
-- Document as predecessor to `builtin-replace`
+- Update documentation reflecting new parameter naming
+- Document breaking change: `file` parameter removed
 - Clarify relationship between tools
-- Document both parameter naming options
 
 #### `builtin-exec.md`
 
@@ -403,14 +403,15 @@ Each tool documentation should follow this structure:
 - Verify all code examples in docs work correctly
 - Ensure API reference matches implementation
 - Validate error message documentation
+- Clearly document all breaking changes
 
 ---
 
 ## API Versioning
 
-- All changes are additive or non-breaking
-- Support both `path` and `file` parameters for backwards compatibility
-- Release notes will document all changes
+- All changes are additive or non-breaking (except parameter rename)
+- Breaking change: `file` → `path` parameter rename
+- Release notes will document all changes clearly
 
 ---
 
@@ -432,8 +433,9 @@ Each tool documentation should follow this structure:
 
 ### Regression Tests
 
-- Existing usage patterns must continue to work
-- Backwards compatibility assertions
+- Existing usage patterns will break for `file` parameter
+- Verify `path` parameter works correctly
+- Test that invalid parameter names are rejected
 
 ---
 
@@ -443,6 +445,7 @@ Each tool documentation should follow this structure:
 2. Examples for each new feature
 3. Error message reference
 4. API documentation updates
+5. Migration guide for breaking change
 
 ---
 
@@ -486,7 +489,7 @@ builtin-search(
 
 ```typescript
 builtin-search-replace(
-  path: "config.json", // or 'file': 'config.json'
+  path: "config.json", // BREAKING: 'file' no longer supported
   pattern: "\"debug\": true",
   replacement: "\"debug\": false",
   dryRun: true
@@ -516,18 +519,19 @@ builtin-search-replace(
 // { replacedLines: 3, modified: true }
 ```
 
-### Example 5: Backwards Compatibility
+### Example 5: Breaking Change Example
 
 ```typescript
-// Both forms work:
+// BEFORE (no longer works):
 builtin-search-replace(
-  path: "test.txt",
+  file: "config.json", // ❌ This will fail
   pattern: "old",
   replacement: "new"
 )
 
+// AFTER (correct usage):
 builtin-search-replace(
-  file: "test.txt", // Still supported
+  path: "config.json", // ✅ Use 'path' instead
   pattern: "old",
   replacement: "new"
 )
@@ -541,4 +545,5 @@ builtin-search-replace(
 - Examples demonstrate real-world usage
 - Error handling is comprehensive
 - Documentation is complete and accurate
-- Backwards compatibility maintained
+- Breaking changes clearly documented
+- API reference is consistent with implementation
