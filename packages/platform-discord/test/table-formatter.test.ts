@@ -58,7 +58,7 @@ test("inline code in table cells is not stripped", () => {
   expect(result).toContain("Push to remote");
 });
 
-test("inline HTML in table cells is not stripped", () => {
+test("inline HTML tags are stripped from table cells", () => {
   const md2 = [
     "| Element | Tag |",
     "|---|---|",
@@ -68,9 +68,13 @@ test("inline HTML in table cells is not stripped", () => {
     "",
   ].join("\n");
   const result = mdTableToAscii(md2);
-  expect(result).toContain("<b>b</b>");
-  expect(result).toContain("<i>i</i>");
-  expect(result).toContain("<ins>text</ins>");
+  // HTML tags should be stripped, keeping only text content
+  expect(result).toContain("b"); // plain "b" after stripping <b> tags
+  expect(result).toContain("i"); // plain "i" after stripping <i> tags
+  expect(result).toContain("text"); // plain "text" after stripping <ins> tags
+  expect(result).not.toContain("<b>");
+  expect(result).not.toContain("</b>");
+  expect(result).not.toContain("<i>");
 });
 
 test("no table -> pass-through unchanged", () => {

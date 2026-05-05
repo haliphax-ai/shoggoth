@@ -4,7 +4,6 @@ import {
   validateResponseSchema,
   resolveStructuredOutputMode,
   StructuredOutputValidationError,
-  type ValidationResult,
 } from "../src/response-validation";
 
 // ---------------------------------------------------------------------------

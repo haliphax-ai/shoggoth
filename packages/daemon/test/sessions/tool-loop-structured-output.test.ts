@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { mkdtempSync } from "node:fs";
 import { closeTestDb } from "../helpers/close-test-db";

@@ -24,6 +24,7 @@ import {
 import { executeMessageToolAction } from "@shoggoth/messaging";
 import { resolvePlatformConfig } from "@shoggoth/shared";
 import { toolReadBinary } from "@shoggoth/os-exec";
+import { mdTableToAscii } from "./table-formatter.js";
 
 /** Reaction event shape (matches adapter's DiscordReactionAddEvent). */
 interface ReactionAddEvent {
@@ -323,7 +324,26 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
             executeMessageToolAction(
               {
                 capabilities: discordMessaging.capabilities,
-                transport: discordMessaging.discordRestTransport,
+                transport: {
+                  // Wrapped transport that applies Markdown table formatting
+                  ...discordMessaging.discordRestTransport,
+                  createMessage: async (channelId, body) =>
+                    discordMessaging.discordRestTransport.createMessage(channelId, {
+                      ...body,
+                      content: mdTableToAscii(body.content),
+                    }),
+                  createMessageWithFiles: async (channelId, body, files) =>
+                    discordMessaging.discordRestTransport.createMessageWithFiles(
+                      channelId,
+                      { ...body, content: mdTableToAscii(body.content) },
+                      files,
+                    ),
+                  editMessage: async (channelId, messageId, body) =>
+                    discordMessaging.discordRestTransport.editMessage(channelId, messageId, {
+                      ...body,
+                      content: mdTableToAscii(body.content),
+                    }),
+                },
                 sessionToChannel: (sid) =>
                   discordMessaging.resolveOutboundChannelIdForSession?.(sid),
                 sessionToGuild: (sid) => discordMessaging.resolveGuildIdForSession?.(sid),

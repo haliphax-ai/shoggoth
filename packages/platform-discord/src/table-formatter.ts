@@ -17,7 +17,11 @@ function nodeText(node?: MdNode): string {
   if (!node) return "";
   if (node.type === "text") return node.value || "";
   if (node.type === "inlineCode") return node.value || "";
-  if (node.type === "html") return node.value || "";
+  if (node.type === "html") {
+    // Strip HTML tags and return only text content
+    const value = node.value || "";
+    return value.replace(/<[^>]+>/g, "");
+  }
   if (node.children) return node.children.map(nodeText).join("");
   return "";
 }
