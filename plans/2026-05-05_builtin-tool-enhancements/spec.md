@@ -75,7 +75,7 @@ line3
 
 ---
 
-## Phase 2: Split `builtin-search-replace`
+## Phase 2: Split `builtin-search-replace` into Two Tools
 
 ### New `builtin-search` Tool
 
@@ -103,24 +103,24 @@ interface SearchResults {
 }
 ```
 
-### Modified `builtin-search-replace` Tool
+### New `builtin-replace` Tool (replaces `builtin-search-replace`)
 
 ```typescript
 interface BuiltinReplaceParams {
-  path: string; // File path (use 'path' instead of 'file')
+  path: string; // File path to modify
   pattern: string; // Regex pattern to match
   replacement: string; // Replacement text
   caseSensitive?: boolean; // Default: false
   maxOccurrences?: number; // Limit replacements (default: Infinity)
-  dryRun?: boolean; // NEW: Preview without modifying
-  deleteLines?: number[]; // NEW: Array of line numbers to delete (1-indexed)
+  dryRun?: boolean; // Preview without modifying
+  deleteLines?: number[]; // Array of line numbers to delete (1-indexed)
   deleteRange?: {
-    // NEW: Alternative: range deletion
+    // Alternative: range deletion
     start: number;
     end: number;
   };
   replaceRange?: {
-    // NEW: Replace a range of lines
+    // Replace a range of lines
     start: number;
     end: number;
     replacement: string | string[];
@@ -128,11 +128,12 @@ interface BuiltinReplaceParams {
 }
 ```
 
-### Parameter Naming
+### Tool Replacement Strategy
 
-- Use `path` consistently across both tools
-- Remove `file` parameter entirely
-- No backwards compatibility concerns needed
+- **Drop** `builtin-search-replace` entirely
+- **Create** `builtin-search` for search-only functionality
+- **Create** `builtin-replace` for replace-only functionality
+- Use `path` parameter consistently across both new tools
 
 ---
 
@@ -386,10 +387,10 @@ Each tool documentation should follow this structure:
 - Document line-level operations (`deleteLines`, `replaceRange`)
 - Document `path` parameter usage
 
-#### `builtin-search-replace.md` (update)
+#### `builtin-search-replace.md` (to be deleted)
 
-- Update to reflect new parameter naming
-- Clarify relationship between tools
+- **Delete this file entirely** - no longer needed
+- Remove all references to it from documentation
 
 #### `builtin-exec.md`
 
@@ -402,12 +403,14 @@ Each tool documentation should follow this structure:
 - Verify all code examples in docs work correctly
 - Ensure API reference matches implementation
 - Validate error message documentation
+- Verify old search-replace documentation has been deleted
 
 ---
 
 ## API Versioning
 
 - All changes are additive or non-breaking
+- `builtin-search-replace` replaced with two new tools
 - Use `path` parameter consistently (remove `file`)
 - Release notes will document all changes
 
@@ -431,9 +434,10 @@ Each tool documentation should follow this structure:
 
 ### Regression Tests
 
-- Existing usage patterns will need updates
+- Verify existing usage patterns work with new tools
 - Verify `path` parameter works correctly
-- Test that invalid parameter names are rejected
+- Verify `builtin-search-replace` has been removed
+- Test that old tool is no longer accessible
 
 ---
 
@@ -443,6 +447,7 @@ Each tool documentation should follow this structure:
 2. Examples for each new feature
 3. Error message reference
 4. API documentation updates
+5. **Delete old search-replace documentation**
 
 ---
 
@@ -462,7 +467,7 @@ builtin-read(
 // 3: export const Utils = { ... }
 ```
 
-### Example 2: Search with Context
+### Example 2: Search (New Tool)
 
 ```typescript
 builtin-search(
@@ -482,10 +487,10 @@ builtin-search(
 // }
 ```
 
-### Example 3: Replace with Dry Run
+### Example 3: Replace (New Tool)
 
 ```typescript
-builtin-search-replace(
+builtin-replace(
   path: "config.json",
   pattern: "\"debug\": true",
   replacement: "\"debug\": false",
@@ -504,7 +509,7 @@ builtin-search-replace(
 ### Example 4: Range Replacement
 
 ```typescript
-builtin-search-replace(
+builtin-replace(
   path: "Dockerfile",
   replaceRange: {
     start: 1,
@@ -516,19 +521,26 @@ builtin-search-replace(
 // { replacedLines: 3, modified: true }
 ```
 
-### Example 5: Correct Parameter Usage
+### Example 5: Old Tool No Longer Exists
 
 ```typescript
-// Use 'path' parameter:
+// OLD (no longer exists):
 builtin-search-replace(
-  path: "config.json", // ✅ Correct
+  file: "config.json", // ❌ Tool doesn't exist anymore
   pattern: "old",
   replacement: "new"
 )
 
-// 'file' parameter no longer supported:
-builtin-search-replace(
-  file: "config.json", // ❌ Will fail
+// NEW (use separate tools):
+// For search:
+builtin-search(
+  path: "src/",
+  pattern: "TODO:.*"
+)
+
+// For replace:
+builtin-replace(
+  path: "config.json",
   pattern: "old",
   replacement: "new"
 )
@@ -542,4 +554,5 @@ builtin-search-replace(
 - Examples demonstrate real-world usage
 - Error handling is comprehensive
 - Documentation is complete and accurate
-- API reference is consistent with implementation
+- Old `builtin-search-replace` tool removed from codebase
+- New tools (`builtin-search`, `builtin-replace`) fully functional

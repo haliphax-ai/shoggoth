@@ -62,29 +62,32 @@ This plan is broken into 7 independent phases, each addressing one enhancement. 
 - Test with various file sizes and content types
 - Verify line-splitting handles edge cases (empty lines, special characters)
 
-### Phase 2: Split `builtin-search-replace`
+### Phase 2: Split `builtin-search-replace` into Two Tools
 
-**Focus:** Separate concerns and normalize APIs
+**Focus:** Replace combined tool with two separate tools and clean up APIs
 
 **Approach:**
 
 - Create new `builtin-search` tool for search-only functionality
-- Modify `builtin-search-replace` to keep only replace functionality
-- Rename `file` parameter to `path` across both tools for consistency
+- Create new `builtin-replace` tool for replace-only functionality
+- **Drop** `builtin-search-replace` entirely (no longer needed)
+- Rename `file` parameter to `path` across both new tools for consistency
 
 **Files to Touch:**
 
 - `packages/shoggoth/src/tools/builtin-search.ts` (new)
-- `packages/shoggoth/src/tools/builtin-search-replace.ts` (modify to keep replace only)
-- `packages/shoggoth/src/tools/index.ts` (update registration)
+- `packages/shoggoth/src/tools/builtin-replace.ts` (new)
+- `packages/shoggoth/src/tools/builtin-search-replace.ts` (delete)
+- `packages/shoggoth/src/tools/index.ts` (update registration - add `builtin-replace`, remove `builtin-search-replace`)
 - Documentation files
 
 **Testing:**
 
 - Verify search functionality in new tool
-- Verify replace functionality retained in modified tool
+- Verify replace functionality in new tool
 - Ensure API consistency between both tools
 - Verify `path` parameter works correctly
+- Verify old `builtin-search-replace` has been removed
 
 ### Phase 3: Improved Regex Error Messages
 
@@ -100,7 +103,7 @@ This plan is broken into 7 independent phases, each addressing one enhancement. 
 **Files to Touch:**
 
 - `packages/shoggoth/src/tools/builtin-search.ts`
-- `packages/shoggoth/src/tools/builtin-search-replace.ts`
+- `packages/shoggoth/src/tools/builtin-replace.ts`
 
 **Testing:**
 
@@ -134,7 +137,7 @@ This plan is broken into 7 independent phases, each addressing one enhancement. 
 
 **Tasks:**
 
-- Add `--dry-run` or `--preview` flag to `builtin-search-replace`
+- Add `--dry-run` or `--preview` flag to `builtin-replace`
 - Output proposed changes without modifying files
 - Include line numbers and context around replacements
 - Distinguish between "would match" and "would replace"
@@ -142,7 +145,7 @@ This plan is broken into 7 independent phases, each addressing one enhancement. 
 
 **Files to Touch:**
 
-- `packages/shoggoth/src/tools/builtin-search-replace.ts`
+- `packages/shoggoth/src/tools/builtin-replace.ts`
 
 **Testing:**
 
@@ -157,7 +160,7 @@ This plan is broken into 7 independent phases, each addressing one enhancement. 
 
 **Tasks:**
 
-- Add line deletion functionality to `builtin-search-replace` (e.g., `deleteLines` array or `deleteRange`)
+- Add line deletion functionality to `builtin-replace` (e.g., `deleteLines` array or `deleteRange`)
 - Add range-based replacement option (`replaceRange`)
 - Consider adding line range support to `builtin-write`
 - Ensure line numbers are 1-indexed and clearly documented
@@ -165,7 +168,7 @@ This plan is broken into 7 independent phases, each addressing one enhancement. 
 
 **Files to Touch:**
 
-- `packages/shoggoth/src/tools/builtin-search-replace.ts` (new options)
+- `packages/shoggoth/src/tools/builtin-replace.ts` (new options)
 - `packages/shoggoth/src/tools/builtin-write.ts` (optional range support)
 - Documentation
 
@@ -184,8 +187,8 @@ This plan is broken into 7 independent phases, each addressing one enhancement. 
 
 - Update `docs/tools/builtin-read.md` with new flags, output formats, and edge cases
 - Create `docs/tools/builtin-search.md` with full feature documentation and examples
-- Update `docs/tools/builtin-search-replace.md` with new parameter names and features
-- Create `docs/tools/builtin-replace.md` documenting the renamed functionality
+- Create `docs/tools/builtin-replace.md` with full feature documentation and examples
+- Delete `docs/tools/builtin-search-replace.md` (no longer needed)
 - Update `docs/tools/builtin-exec.md` with multiline string usage examples
 - Add documentation for dry-run mode behavior and safety features
 - Document line-level operation syntax, constraints, and examples
@@ -194,12 +197,12 @@ This plan is broken into 7 independent phases, each addressing one enhancement. 
 - Document all error message formats with examples
 - Include troubleshooting section for common issues
 
-**Files to Modify/Create:**
+**Files to Modify/Create/Delete:**
 
 - `docs/tools/builtin-read.md` (update)
 - `docs/tools/builtin-search.md` (new)
-- `docs/tools/builtin-search-replace.md` (update)
 - `docs/tools/builtin-replace.md` (new)
+- `docs/tools/builtin-search-replace.md` (delete)
 - `docs/tools/builtin-exec.md` (update)
 - `docs/tools/README.md` (update tool listing)
 
@@ -215,6 +218,7 @@ This plan is broken into 7 independent phases, each addressing one enhancement. 
 - Each phase completes with all tests passing
 - All enhancement goals are met
 - Comprehensive documentation (Phase 7) completed
+- `builtin-search-replace` removed from codebase and documentation
 - Negative testing confirms robust error handling
 - All examples are copy-paste ready and work as documented
 
@@ -248,7 +252,7 @@ Target completion: 2.5 weeks (documentation adds half week)
 ## Open Questions
 
 1. Should line-splitting be the default for `builtin-read`, or remain opt-in?
-2. Should line deletion be a separate tool or an option of `builtin-search-replace`?
+2. Should line deletion be a separate tool or an option of `builtin-replace`?
 3. What's the best API for specifying line ranges (inclusive/exclusive, 0-indexed vs 1-indexed)?
 
 ## Next Steps
@@ -256,5 +260,5 @@ Target completion: 2.5 weeks (documentation adds half week)
 1. Begin implementation of Phase 1
 2. Add tests for each feature before implementation
 3. Create PRs for each phase or group related phases together
-4. Start Phase 7 documentation work after Phase 2a (search tool created)
+4. Start Phase 7 documentation work after Phase 2 (search/replace tools created)
 5. Gather feedback on intermediate deliverables

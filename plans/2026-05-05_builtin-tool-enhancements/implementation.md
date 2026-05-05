@@ -78,15 +78,17 @@ This document outlines the implementation phases for the builtin tool enhancemen
 
 ---
 
-## Phase 2: Split `builtin-search-replace`
+## Phase 2: Split `builtin-search-replace` into Two Tools
 
-### Files to Create/Modify
+### Files to Create/Delete
 
 - `packages/shoggoth/src/tools/builtin-search.ts` (new)
-- `packages/shoggoth/src/tools/builtin-search-replace.ts` (modify)
+- `packages/shoggoth/src/tools/builtin-replace.ts` (new)
+- `packages/shoggoth/src/tools/builtin-search-replace.ts` (delete)
 - `packages/shoggoth/src/tools/index.ts` (update registration)
 - `docs/tools/builtin-search.md` (new)
-- `docs/tools/builtin-search-replace.md` (update)
+- `docs/tools/builtin-replace.md` (new)
+- `docs/tools/builtin-search-replace.md` (delete)
 
 ### Implementation Steps
 
@@ -115,32 +117,67 @@ export const builtinSearch: ToolDefinition = {
 };
 ```
 
-#### Step 2b: Modify `builtin-search-replace`
+#### Step 2b: Create `builtin-replace`
 
 ```typescript
-// packages/shoggoth/src/tools/builtin-search-replace.ts
-// Use 'path' consistently across both tools
-inputSchema: {
-  properties: {
-    path: { type: "string" }, // Use 'path' instead of 'file'
-    pattern: { type: "string" },
-    replacement: { type: "string" },
-    // ... other params
+// packages/shoggoth/src/tools/builtin-replace.ts
+export const builtinReplace: ToolDefinition = {
+  name: "builtin-replace",
+  description: "Replace patterns in files",
+  inputSchema: {
+    type: "object",
+    properties: {
+      path: { type: "string" },
+      pattern: { type: "string" },
+      replacement: { type: "string" },
+      caseSensitive: { type: "boolean", default: false },
+      maxOccurrences: { type: "number", default: Infinity },
+      dryRun: { type: "boolean", default: false },
+      deleteLines: { type: "array", items: { type: "number" }, default: [] },
+      deleteRange: {
+        type: "object",
+        properties: {
+          start: { type: "number" },
+          end: { type: "number" }
+        }
+      },
+      replaceRange: {
+        type: "object",
+        properties: {
+          start: { type: "number" },
+          end: { type: "number" },
+          replacement: { type: ["string", "array", "items": { type: "string" }] }
+        }
+      }
+    },
+    required: ["path", "pattern", "replacement"]
+  },
+  execute: async (params) => {
+    // Implementation combining replace, dry-run, and line operations
   }
-}
+};
 ```
 
-#### Step 2c: Update Tool Registration
+#### Step 2c: Delete Old File
+
+```bash
+# Delete the old combined tool
+rm packages/shoggoth/src/tools/builtin-search-replace.ts
+rm docs/tools/builtin-search-replace.md
+```
+
+#### Step 2d: Update Tool Registration
 
 ```typescript
 // packages/shoggoth/src/tools/index.ts
 import { builtinSearch } from "./builtin-search";
-import { builtinSearchReplace } from "./builtin-search-replace";
+import { builtinReplace } from "./builtin-replace";
 
 export const builtinTools = [
   // ... other tools
   builtinSearch,
-  builtinSearchReplace,
+  builtinReplace,
+  // Note: builtin-search-replace removed
 ];
 ```
 
@@ -150,9 +187,10 @@ export const builtinTools = [
 - [ ] Test search respects case sensitivity
 - [ ] Test search respects context lines
 - [ ] Test search respects max results
-- [ ] Test replace maintains old behavior
+- [ ] Test replace maintains expected functionality
 - [ ] Verify `path` parameter works correctly
-- [ ] Ensure no `file` parameter support
+- [ ] Verify old `builtin-search-replace` has been removed
+- [ ] Verify both new tools work independently
 
 ---
 
@@ -161,7 +199,7 @@ export const builtinTools = [
 ### Files to Modify
 
 - `packages/shoggoth/src/tools/builtin-search.ts`
-- `packages/shoggoth/src/tools/builtin-search-replace.ts`
+- `packages/shoggoth/src/tools/builtin-replace.ts`
 
 ### Implementation Steps
 
@@ -265,7 +303,7 @@ interface BuiltinExecParams {
 
 ### Files to Modify
 
-- `packages/shoggoth/src/tools/builtin-search-replace.ts`
+- `packages/shoggoth/src/tools/builtin-replace.ts`
 
 ### Implementation Steps
 
@@ -348,7 +386,7 @@ ${changes.length} replacements would be made.`;
 
 ### Files to Modify
 
-- `packages/shoggoth/src/tools/builtin-search-replace.ts` (add `deleteLines` and `replaceRange` parameters)
+- `packages/shoggoth/src/tools/builtin-replace.ts` (already created in Phase 2)
 - Optionally: `packages/shoggoth/src/tools/builtin-write.ts` (add range support)
 
 ### Implementation Steps
@@ -437,14 +475,14 @@ execute: async (params) => {
 
 ### Focus
 
-Comprehensive documentation for all new and modified tools to ensure developers can effectively use the new features.
+Comprehensive documentation for all new and modified tools, including deletion of old documentation.
 
 ### Tasks
 
 - Update `docs/tools/builtin-read.md` with new flags, output formats, and edge cases
 - Create `docs/tools/builtin-search.md` with full feature documentation and examples
-- Update `docs/tools/builtin-search-replace.md` with new parameter names and features
-- Create `docs/tools/builtin-replace.md` documenting the renamed functionality
+- Create `docs/tools/builtin-replace.md` with full feature documentation and examples
+- **Delete** `docs/tools/builtin-search-replace.md` (no longer needed)
 - Update `docs/tools/builtin-exec.md` with multiline string usage examples
 - Add documentation for dry-run mode behavior and safety features
 - Document line-level operation syntax, constraints, and examples
@@ -453,12 +491,12 @@ Comprehensive documentation for all new and modified tools to ensure developers 
 - Document all error message formats with examples
 - Include troubleshooting section for common issues
 
-### Files to Modify/Create
+### Files to Modify/Create/Delete
 
 - `docs/tools/builtin-read.md` (update)
 - `docs/tools/builtin-search.md` (new)
-- `docs/tools/builtin-search-replace.md` (update)
 - `docs/tools/builtin-replace.md` (new)
+- `docs/tools/builtin-search-replace.md` (delete)
 - `docs/tools/builtin-exec.md` (update)
 - `docs/tools/README.md` (update tool listing)
 
@@ -467,6 +505,7 @@ Comprehensive documentation for all new and modified tools to ensure developers 
 - [ ] Verify all documentation builds correctly
 - [ ] Check code examples work as documented
 - [ ] Ensure all tool signatures match actual implementation
+- [ ] Verify old search-replace docs have been deleted
 - [ ] Proofread for consistency in terminology and examples
 
 ### Documentation Standards
@@ -484,19 +523,21 @@ Recommended order for maximum efficiency:
 1. **Phase 3** - Easy, foundational improvement (better errors)
 2. **Phase 1** - Straightforward enhancement (read formatting)
 3. **Phase 2a** - Create new search tool
-4. **Phase 2b** - Modify replace tool (parameter naming consistency)
-5. **Phase 5** - Build on replace tool (dry-run)
-6. **Phase 6** - Build on replace tool (line operations)
-7. **Phase 4** - Can be done anytime (standalone)
-8. **Phase 7** - Documentation (can start after Phase 2a, complete after all implementation)
+4. **Phase 2b** - Create new replace tool
+5. **Phase 2c** - Delete old search-replace tool
+6. **Phase 5** - Build on replace tool (dry-run)
+7. **Phase 6** - Build on replace tool (line operations)
+8. **Phase 4** - Can be done anytime (standalone)
+9. **Phase 7** - Documentation (can start after Phase 2, complete after all implementation)
 
 ---
 
 ## Release Strategy
 
 - Release all phases together as a single version bump
-- Document all changes in release notes (no migration guide needed)
+- Document all changes in release notes
 - Update all examples and documentation
+- Note: `builtin-search-replace` removed, replaced with `builtin-search` and `builtin-replace`
 
 ---
 
@@ -504,7 +545,7 @@ Recommended order for maximum efficiency:
 
 - All changes are additive (new parameters)
 - Can revert individual phases if issues arise
-- No database or config migrations required
+- If rollback needed, restore old `builtin-search-replace.ts` file
 
 ---
 
@@ -574,11 +615,12 @@ Expected: "newKey: newVal\nkey3: val3\n"
   - [ ] Performance considerations
   - [ ] Error handling examples
 
-- [ ] **`builtin-search-replace` / `builtin-replace`:**
-  - [ ] New `path` parameter documentation
+- [ ] **`builtin-replace` (new):**
+  - [ ] Complete parameter documentation
   - [ ] Dry-run mode examples
   - [ ] Line-level operations examples
   - [ ] Regex error message examples
+  - [ ] Usage examples
 
 - [ ] **`builtin-exec`:**
   - [ ] Multiline string handling documentation
@@ -603,3 +645,10 @@ Expected: "newKey: newVal\nkey3: val3\n"
   - [ ] Common error messages and fixes
   - [ ] Performance tips
   - [ ] Edge case handling
+
+### File Cleanup
+
+- [ ] Verify `builtin-search-replace.ts` has been deleted from source
+- [ ] Verify `builtin-search-replace.md` has been deleted from docs
+- [ ] Verify tool registration updated to remove old tool
+- [ ] Verify all references to old tool removed from documentation
