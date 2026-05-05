@@ -124,6 +124,7 @@ export class DiscordPlatformAdapter implements PlatformAdapter {
     const handle = await streamingOutbound.start();
     return {
       setFullContent: (text: string) => handle.setFullContent(text),
+      pushUpdate: (text: string) => handle.pushUpdate(text),
     };
   }
 

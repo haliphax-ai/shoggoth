@@ -56,6 +56,7 @@ export interface InboundSessionTurnStreaming {
   readonly minIntervalMs: number;
   readonly start: () => Promise<{
     setFullContent: (body: string) => Promise<void>;
+    pushUpdate: (body: string) => Promise<void>;
   }>;
   readonly onStartFailed?: (message: string) => void;
 }
@@ -106,14 +107,19 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
 
   options.mcpLifecycle?.onTurnBegin?.();
 
-  let streamSink: { setFullContent: (body: string) => Promise<void> } | undefined;
+  let streamSink:
+    | {
+        setFullContent: (body: string) => Promise<void>;
+        pushUpdate: (body: string) => Promise<void>;
+      }
+    | undefined;
   let streamPusher: ReturnType<typeof createCoalescingStreamPusher> | undefined;
 
   if (streaming) {
     try {
       streamSink = await streaming.start();
       streamPusher = createCoalescingStreamPusher(
-        (s) => streamSink!.setFullContent(s),
+        (s) => streamSink!.pushUpdate(s),
         streaming.minIntervalMs,
       );
     } catch (e) {
@@ -132,13 +138,9 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
         ? {
             streamModel: true,
             onModelTextDelta: (() => {
-              let lastSliced = "";
               return (t: string) => {
                 const vis = t.trim() ? t : "…";
-                const sliced = sliceDisplayText(vis);
-                if (sliced === lastSliced) return;
-                lastSliced = sliced;
-                streamPusher!.push(sliced);
+                streamPusher!.push(vis);
               };
             })(),
           }

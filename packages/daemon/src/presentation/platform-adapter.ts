@@ -24,6 +24,9 @@ export interface OutboundAttachment {
 export interface StreamHandle {
   /** Replace the current message content with the full text. */
   setFullContent(text: string): Promise<void>;
+
+  /** Update the current message content incrementally. */
+  pushUpdate(text: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

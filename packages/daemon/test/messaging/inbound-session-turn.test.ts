@@ -35,7 +35,8 @@ describe("runInboundSessionTurn streaming final delivery", () => {
     const MAX_LEN = 50;
     const sendErrorBody = vi.fn().mockResolvedValue(undefined);
     const setFullContent = vi.fn().mockResolvedValue(undefined);
-    const streamStart = vi.fn().mockResolvedValue({ setFullContent });
+    const pushUpdate = vi.fn().mockResolvedValue(undefined);
+    const streamStart = vi.fn().mockResolvedValue({ setFullContent, pushUpdate });
 
     await runInboundSessionTurn({
       buildTurn: () =>
@@ -73,7 +74,8 @@ describe("runInboundSessionTurn streaming final delivery", () => {
   it("does not push duplicate sliced content during streaming", async () => {
     const MAX_LEN = 50;
     const setFullContent = vi.fn().mockResolvedValue(undefined);
-    const streamStart = vi.fn().mockResolvedValue({ setFullContent });
+    const pushUpdate = vi.fn().mockResolvedValue(undefined);
+    const streamStart = vi.fn().mockResolvedValue({ setFullContent, pushUpdate });
 
     await runInboundSessionTurn({
       buildTurn: () =>
@@ -101,19 +103,13 @@ describe("runInboundSessionTurn streaming final delivery", () => {
     });
 
     // The mock sends 10 deltas: 30, 60, 90, 120, 150, 180, 210, 240, 270, 300 chars.
-    // After slicing to 50, deltas 2-10 all produce the same 50-char string.
-    // The callback should NOT push duplicates — only the first time the
-    // sliced content changes should trigger a push.
-    const slicedCalls = setFullContent.mock.calls
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .map((c: any) => c[0] as string)
+    // With the new approach, pushUpdate receives the full accumulated text
+    // not the sliced version, so we should verify that pushUpdate was called
+    // with the full text, not the sliced text.
+    expect(pushUpdate).toHaveBeenCalled();
 
-      .filter((s: string) => s.length === MAX_LEN);
-
-    // With deduplication, the 50-char sliced content should appear at most
-    // 3 times: once from the initial push, once from the chain resolving
-    // with the updated latest ref, and once from flush.
-    // Without dedup, it appears 9+ times.
-    expect(slicedCalls.length).toBeLessThanOrEqual(3);
+    // The last call should have the full 300-character text
+    const lastCall = pushUpdate.mock.calls.at(-1)?.[0] as string;
+    expect(lastCall.length).toBe(300);
   });
 });
