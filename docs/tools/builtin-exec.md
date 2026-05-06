@@ -8,16 +8,19 @@ Execute a command via the system shell. Returns combined or split stdout/stderr.
 
 ### Parameters
 
-| Param          | Type     | Required | Notes                                                                    |
-| -------------- | -------- | -------- | ------------------------------------------------------------------------ |
-| `argv`         | string[] | yes      | Command + arguments                                                      |
-| `timeout`      | number   | no       | Max milliseconds before SIGTERM → SIGKILL (default: 30000)               |
-| `stdin`        | string   | no       | Written to stdin, then closed                                            |
-| `workdir`      | string   | no       | Working directory (absolute or workspace-relative)                       |
-| `env`          | object   | no       | Key-value pairs merged into process env                                  |
-| `splitStreams` | boolean  | no       | Return `stdout`/`stderr` separately (default: false → combined `output`) |
-| `maxOutput`    | number   | no       | Max characters per stream. System cap: ~1 MB, default: ~200 KB           |
-| `truncation`   | string   | no       | `"head"`, `"tail"` (default), or `"both"` — which end to keep            |
+| Param          | Type     | Required | Notes                                                                              |
+| -------------- | -------- | -------- | ---------------------------------------------------------------------------------- |
+| `argv`         | string[] | yes      | Command + arguments                                                                |
+| `timeout`      | number   | no       | Max milliseconds before SIGTERM → SIGKILL (default: 30000)                         |
+| `stdin`        | string   | no       | Written to stdin, then closed                                                      |
+| `workdir`      | string   | no       | Working directory (absolute or workspace-relative)                                 |
+| `env`          | object   | no       | Key-value pairs merged into process env                                            |
+| `splitStreams` | boolean  | no       | Return `stdout`/`stderr` separately (default: false → combined `output`)           |
+| `maxOutput`    | number   | no       | Max characters per stream. System cap: ~1 MB, default: ~200 KB                     |
+| `truncation`   | string   | no       | `"head"`, `"tail"` (default), or `"both"` — which end to keep                      |
+| `stdoutFile`   | string   | no       | Write stdout to this workspace-relative file instead of returning inline           |
+| `stderrFile`   | string   | no       | Write stderr to this workspace-relative file instead of returning inline           |
+| `outputFile`   | string   | no       | Write combined output to this file (mutually exclusive with stdoutFile/stderrFile) |
 
 ### Newline Preservation in argv Strings
 
@@ -185,6 +188,55 @@ When output exceeds `maxOutput` (default 200KB):
 - `truncation: "both"` - keeps beginning and end, truncates middle
 
 Truncated output includes a marker: `[... truncated X chars ...]`
+
+## File Output
+
+Instead of returning output inline, you can write it to workspace files for later processing with `builtin-read`.
+
+**Rules:**
+
+- `outputFile` writes combined stdout+stderr to a single file. Mutually exclusive with `stdoutFile`/`stderrFile`.
+- `stdoutFile` and `stderrFile` can be used together or separately. Non-redirected streams are returned inline.
+- File output is foreground-only — cannot be combined with `background` or `yieldMs`.
+- Files are created even if output is empty (zero-byte file).
+- Files are written even on non-zero exit codes.
+- Paths are validated to stay within the workspace boundary.
+
+**Examples:**
+
+Combined output to file:
+
+```json
+{
+  "argv": ["find", ".", "-name", "*.ts"],
+  "outputFile": "tmp/ts-files.txt"
+}
+```
+
+Separate stdout and stderr:
+
+```json
+{
+  "argv": ["npm", "run", "build"],
+  "stdoutFile": "tmp/build.log",
+  "stderrFile": "tmp/build-errors.log"
+}
+```
+
+Only capture stderr (stdout returned inline):
+
+```json
+{
+  "argv": ["node", "script.js"],
+  "stderrFile": "tmp/errors.log"
+}
+```
+
+Reading the output file afterward:
+
+```json
+{ "tool": "builtin-read", "args": { "path": "tmp/ts-files.txt" } }
+```
 
 ## Tips
 
