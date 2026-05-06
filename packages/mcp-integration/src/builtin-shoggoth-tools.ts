@@ -6,15 +6,6 @@ import { buildWorkflowToolDescriptor } from "@shoggoth/workflow";
  * Example built-in tools as MCP descriptors for aggregation with external servers (plan: expose read/write/exec as MCP).
  */
 
-const pathArg = {
-  type: "object",
-  description: "Workspace-relative path",
-  properties: {
-    path: { type: "string", description: "Path relative to session workspace" },
-  },
-  required: ["path"],
-} as const;
-
 const writeArgs = {
   type: "object",
   properties: {
@@ -635,8 +626,22 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
     tools: [
       {
         name: "read",
-        description: "Read a file under the session workspace",
-        inputSchema: pathArg,
+        description: "Read file content (text or image) from the workspace. Supports line ranges, multi-file globs, and stat-only mode.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Single file path (workspace-relative)" },
+            paths: { type: "array", items: { type: "string" }, description: "Multiple paths or glob patterns" },
+            maxFiles: { type: "integer", description: "Cap on files returned for paths (default: 20)" },
+            fromLine: { type: "integer", description: "First line to include, 1-indexed" },
+            toLine: { type: "integer", description: "Last line to include, 1-indexed inclusive" },
+            offset: { type: "integer", description: "Starting line, 1-indexed" },
+            limit: { type: "integer", description: "Max lines to read" },
+            stat: { type: "boolean", description: "Return metadata only (size, mtime, type, permissions, line count) — no content" },
+            lines: { type: "boolean", description: "Split content by newlines and return as array" },
+            lineNumbers: { type: "boolean", description: "Prefix each line with its line number (1-indexed)" },
+          },
+        },
       },
       {
         name: "write",
@@ -777,82 +782,38 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
         },
       },
       {
-        name: "search-replace",
-        description:
-          "Search files using ripgrep or replace text in a file. Actions: search (regex/literal pattern match across files), replace (regex replacement with capture group support).",
+        name: "search",
+        description: "Search for patterns in files using ripgrep. Returns structured results with file path, line number, context, and matched text.",
         inputSchema: {
           type: "object",
           properties: {
-            action: {
-              type: "string",
-              enum: ["search", "replace"],
-              description:
-                "search: find text in files using ripgrep. replace: regex replace in a single file.",
-            },
-            pattern: {
-              type: "string",
-              description: "search: regex pattern to search for.",
-            },
-            path: {
-              type: "string",
-              description: 'search: file or directory to search (workspace-relative). Default: "."',
-            },
-            fileType: {
-              type: "string",
-              description: 'search: ripgrep type filter (e.g. "ts", "json").',
-            },
-            glob: {
-              type: "string",
-              description: 'search: glob pattern for file filtering (e.g. "*.ts", "!*.test.ts").',
-            },
-            caseSensitive: {
-              type: "boolean",
-              description: "search: case-sensitive search. Default: true.",
-            },
-            fixedStrings: {
-              type: "boolean",
-              description:
-                "search/replace: treat pattern as literal string, not regex. Default: false.",
-            },
-            contextLines: {
-              type: "integer",
-              description: "search: lines of context around matches.",
-            },
-            maxCount: {
-              type: "integer",
-              description: "search: max matches per file.",
-            },
-            maxResults: {
-              type: "integer",
-              description: "search: total max result lines. Default: 200.",
-            },
-            includeHidden: {
-              type: "boolean",
-              description: "search: include hidden files/dirs. Default: false.",
-            },
-            multiline: {
-              type: "boolean",
-              description:
-                "search/replace: enable multiline matching (required when pattern spans multiple lines). Default: false.",
-            },
-            file: {
-              type: "string",
-              description: "replace: path to file (workspace-relative).",
-            },
-            match: {
-              type: "string",
-              description: "replace: regex pattern to find.",
-            },
-            replacement: {
-              type: "string",
-              description: "replace: replacement string (supports $1, $2 capture groups).",
-            },
-            count: {
-              type: "integer",
-              description: "replace: max occurrences to replace. Omit to replace all.",
-            },
+            path: { type: "string", description: "File or directory path to search (workspace-relative)" },
+            pattern: { type: "string", description: "Regex pattern to search for" },
+            caseSensitive: { type: "boolean", description: "Case-sensitive search. Default: false (case-insensitive)" },
+            contextLines: { type: "integer", description: "Lines of context around each match (default: 2)" },
+            maxResults: { type: "integer", description: "Maximum number of matches to return (default: 100)" },
           },
-          required: ["action"],
+          required: ["path", "pattern"],
+        },
+      },
+      {
+        name: "replace",
+        description: "Replace patterns in files with support for regex replacements, line-level operations, and dry-run mode.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Workspace-relative path to the file to modify" },
+            pattern: { type: "string", description: "Regex pattern to match" },
+            replacement: { type: "string", description: "Replacement text" },
+            caseSensitive: { type: "boolean", description: "Case-sensitive matching. Default: false" },
+            maxOccurrences: { type: "integer", description: "Maximum number of replacements to make (default: unlimited)" },
+            dryRun: { type: "boolean", description: "Preview changes without modifying file (default: false)" },
+            deleteLines: { type: "array", items: { type: "integer" }, description: "Array of line numbers to delete (1-indexed)" },
+            deleteLine: { type: "integer", description: "Single line number to delete" },
+            deleteRange: { type: "object", properties: { start: { type: "integer" }, end: { type: "integer" } }, description: "Delete lines from start to end (inclusive)" },
+            replaceRange: { type: "object", properties: { start: { type: "integer" }, end: { type: "integer" } }, description: "Replace lines from start to end (inclusive)" },
+          },
+          required: ["path"],
         },
       },
       {

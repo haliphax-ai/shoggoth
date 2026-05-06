@@ -12,7 +12,7 @@ import {
   type BuiltinToolContext,
 } from "../../src/sessions/builtin-tool-registry";
 import { register as registerFs } from "../../src/sessions/builtin-handlers/fs-handlers";
-import { register as registerSearchReplace } from "../../src/sessions/builtin-handlers/search-replace-handler";
+import { register as registerReplace } from "../../src/sessions/builtin-handlers/replace-handler";
 
 function openMigratedDb(): { db: Database.Database; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "shoggoth-write-gate-"));
@@ -96,7 +96,7 @@ describe("write handler AGENTS.md gate", () => {
   });
 });
 
-describe("search-replace handler AGENTS.md gate", () => {
+describe("replace handler AGENTS.md gate", () => {
   let db: Database.Database;
   let tmp: string;
   let wsPath: string;
@@ -120,43 +120,19 @@ describe("search-replace handler AGENTS.md gate", () => {
     writeFileSync(join(sub, "target.txt"), "old content");
 
     const registry = new BuiltinToolRegistry();
-    registerSearchReplace(registry);
+    registerReplace(registry);
 
     const ctx = makeCtx(db, wsPath, sub);
     const result = await registry.execute(
-      "search-replace",
+      "replace",
       {
-        action: "replace",
-        file: "target.txt",
-        match: "old",
+        path: "target.txt",
+        pattern: "old",
         replacement: "new",
       },
       ctx,
     );
     const json = JSON.parse(result.resultJson);
     assert.strictEqual(json.gated, true);
-  });
-
-  it("does NOT gate search action", async () => {
-    const sub = join(wsPath, "sub");
-    mkdirSync(sub, { recursive: true });
-    writeFileSync(join(sub, "AGENTS.md"), "# Search rules");
-    writeFileSync(join(sub, "target.txt"), "some content");
-
-    const registry = new BuiltinToolRegistry();
-    registerSearchReplace(registry);
-
-    const ctx = makeCtx(db, wsPath, sub);
-    const result = await registry.execute(
-      "search-replace",
-      {
-        action: "search",
-        pattern: "some",
-      },
-      ctx,
-    );
-    const json = JSON.parse(result.resultJson);
-    // Should not be gated — search is read-only
-    assert.ok(!json.gated);
   });
 });

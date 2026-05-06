@@ -3,7 +3,13 @@
 // ---------------------------------------------------------------------------
 
 import { extname } from "node:path";
-import { toolRead, toolReadBinary, toolWrite } from "@shoggoth/os-exec";
+import {
+  toolRead,
+  toolReadBinary,
+  toolReadExtended,
+  toolWrite,
+  type ReadExtendedOptions,
+} from "@shoggoth/os-exec";
 import { IMAGE_EXTENSION_TO_MIME, MAX_IMAGE_BLOCK_BYTES } from "@shoggoth/shared";
 import type { ChatContentPart } from "@shoggoth/models";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
@@ -21,13 +27,22 @@ async function readHandler(
   ctx: BuiltinToolContext,
 ): Promise<{ resultJson: string; contentParts?: ChatContentPart[] }> {
   const path = String(args.path ?? "");
+  const paths = args.paths as string[] | undefined;
   const lines = args.lines === true;
   const lineNumbers = args.lineNumbers === true;
+  const fromLine = typeof args.fromLine === "number" ? args.fromLine : undefined;
+  const toLine = typeof args.toLine === "number" ? args.toLine : undefined;
+  const offset = typeof args.offset === "number" ? args.offset : undefined;
+  const limit = typeof args.limit === "number" ? args.limit : undefined;
+  const stat = args.stat === true;
+  const maxFiles = typeof args.maxFiles === "number" ? args.maxFiles : undefined;
+
   const resolvedPath = resolveUserPath(ctx, path);
   const ext = extname(path).toLowerCase();
   const imageMime = IMAGE_EXTENSION_TO_MIME[ext];
 
-  if (imageMime) {
+  // Image handling (single path only)
+  if (path && imageMime) {
     if (!ctx.imageBlockCodec) {
       return {
         resultJson: JSON.stringify({
@@ -54,22 +69,87 @@ async function readHandler(
     return { resultJson: JSON.stringify({ path }), contentParts };
   }
 
+  // Check if any extended params are used (multi-path, line range, stat)
+  const hasExtended =
+    (paths && paths.length > 0) ||
+    fromLine !== undefined ||
+    toLine !== undefined ||
+    offset !== undefined ||
+    limit !== undefined ||
+    stat === true;
+
+  if (hasExtended) {
+    const opts: ReadExtendedOptions = {
+      path: path || undefined,
+      paths,
+      fromLine,
+      toLine,
+      offset,
+      limit,
+      stat,
+      maxFiles,
+    };
+
+    const result = await toolReadExtended(ctx.workspacePath, opts, ctx.creds);
+
+    // Handle stat results
+    if (result.kind === "stat-single") {
+      return { resultJson: JSON.stringify({ path, stat: result.stat }) };
+    }
+    if (result.kind === "stat-multi") {
+      return { resultJson: JSON.stringify({ stats: result.stats }) };
+    }
+
+    // Handle multi-file results
+    if (result.kind === "multi") {
+      const output: Record<string, unknown> = { files: result.files };
+      if (result.notices) output.notices = result.notices;
+      return { resultJson: JSON.stringify(output) };
+    }
+
+    // Single file result — apply lines/lineNumbers formatting
+    const body = result.content;
+    let content: string | string[];
+    if (lines || lineNumbers) {
+      const rawLines = body.split(/\r\n|\n|\r/);
+      if (lineNumbers) {
+        content = rawLines.map((line, index) => `${index + 1}: ${line}`);
+      } else {
+        content = rawLines;
+      }
+      if (lines && rawLines.length > 1000) {
+        const truncatedContent = rawLines.slice(0, 1000);
+        if (lineNumbers) {
+          content = truncatedContent.map((line, index) => `${index + 1}: ${line}`);
+        } else {
+          content = truncatedContent;
+        }
+        content.push(
+          `[... truncated — file has ${rawLines.length} lines, showing first 1000 ...]`,
+        );
+      }
+    } else {
+      content = truncateToolOutput(body);
+    }
+
+    return {
+      resultJson: JSON.stringify({ path, content }),
+    };
+  }
+
+  // Simple single-file read (no extended params)
   const body = await toolRead(ctx.workspacePath, resolvedPath, ctx.creds);
 
   // Apply line processing if requested
   let content: string | string[];
   if (lines || lineNumbers) {
-    // Split by newlines (handle \r\n, \n, and \r)
     const rawLines = body.split(/\r\n|\n|\r/);
 
-    // Apply line numbers if requested
     if (lineNumbers) {
       content = rawLines.map((line, index) => `${index + 1}: ${line}`);
     } else {
       content = rawLines;
     }
-
-    // Handle truncation for large files (>1000 lines)
     if (lines && rawLines.length > 1000) {
       const truncatedContent = rawLines.slice(0, 1000);
       if (lineNumbers) {
@@ -80,7 +160,6 @@ async function readHandler(
       content.push(`[... truncated — file has ${rawLines.length} lines, showing first 1000 ...]`);
     }
   } else {
-    // Default behavior: return raw content as string
     content = truncateToolOutput(body);
   }
 

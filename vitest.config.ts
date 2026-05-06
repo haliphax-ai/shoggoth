@@ -18,9 +18,9 @@ export default defineConfig({
       const rel = relative(rootDir, process.cwd());
       if (rel.startsWith("packages/")) {
         const pkg = rel.split("/")[1];
-        return [`packages/${pkg}/test/**/*.test.ts`, `packages/${pkg}/src/tools/test/**/*.test.ts`];
+        return [`packages/${pkg}/test/**/*.test.ts`];
       }
-      return ["packages/*/test/**/*.test.ts", "packages/*/src/tools/test/**/*.test.ts"];
+      return ["packages/*/test/**/*.test.ts"];
     })(),
     onConsoleLog: () => false,
     pool: "forks",

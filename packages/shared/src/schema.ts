@@ -732,7 +732,8 @@ const shoggothToolDiscoveryConfigSchema = z
         "builtin-fetch",
         "builtin-kv",
         "builtin-timer",
-        "builtin-search-replace",
+        "builtin-search",
+        "builtin-replace",
         "builtin-cd",
       ]),
     /** Trigger phrases: when a user message contains the match string (case-insensitive), the listed tool IDs are auto-enabled for that turn. */

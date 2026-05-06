@@ -58,7 +58,7 @@ async function execHandlerInner(
       ctx.workspacePath,
       {
         command,
-        timeout: typeof args.timeout === "number" ? args.timeout : undefined,
+        timeout: typeof args.timeout === "number" ? Math.ceil(args.timeout / 1000) : undefined,
         stdin: typeof args.stdin === "string" ? args.stdin : undefined,
         workdir: typeof args.workdir === "string" ? args.workdir : execCwd(ctx),
         env:
@@ -130,7 +130,7 @@ async function pollHandler(
   }
   const r = await toolPoll({
     pid,
-    timeout: typeof args.timeout === "number" ? args.timeout : undefined,
+    timeout: typeof args.timeout === "number" ? Math.ceil(args.timeout / 1000) : undefined,
     streams: typeof args.streams === "boolean" ? args.streams : undefined,
     tail: typeof args.tail === "number" ? args.tail : undefined,
     since: typeof args.since === "number" ? args.since : undefined,
