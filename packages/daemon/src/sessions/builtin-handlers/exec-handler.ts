@@ -48,7 +48,10 @@ async function execHandlerInner(
     args.maxOutput !== undefined ||
     args.truncation !== undefined ||
     args.background !== undefined ||
-    args.yieldMs !== undefined;
+    args.yieldMs !== undefined ||
+    args.stdoutFile !== undefined ||
+    args.stderrFile !== undefined ||
+    args.outputFile !== undefined;
   if (hasExtended) {
     // Convert argv to a shell command string for toolExecExtended
     const command = (argv as string[])
@@ -73,6 +76,9 @@ async function execHandlerInner(
             : undefined,
         background: typeof args.background === "boolean" ? args.background : undefined,
         yieldMs: typeof args.yieldMs === "number" ? args.yieldMs : undefined,
+        stdoutFile: typeof args.stdoutFile === "string" ? args.stdoutFile : undefined,
+        stderrFile: typeof args.stderrFile === "string" ? args.stderrFile : undefined,
+        outputFile: typeof args.outputFile === "string" ? args.outputFile : undefined,
       },
       ctx.creds,
     );
@@ -86,6 +92,25 @@ async function execHandlerInner(
           partialOutput: r.partialOutput,
         }),
       };
+    }
+    // File output — return paths, not content
+    if (r.outputFile) {
+      return {
+        resultJson: JSON.stringify({
+          exitCode: r.exitCode,
+          outputFile: r.outputFile,
+        }),
+      };
+    }
+    if (r.stdoutFile || r.stderrFile) {
+      const result: Record<string, unknown> = { exitCode: r.exitCode };
+      if (r.stdoutFile) result.stdoutFile = r.stdoutFile;
+      else if (r.stdout !== undefined) result.stdout = truncateToolOutput(r.stdout);
+      if (r.stderrFile) result.stderrFile = r.stderrFile;
+      else if (r.stderr !== undefined) result.stderr = truncateToolOutput(r.stderr);
+      if (r.stdoutTruncated) result.stdoutTruncated = true;
+      if (r.stderrTruncated) result.stderrTruncated = true;
+      return { resultJson: JSON.stringify(result) };
     }
     // Normal foreground completion — check if split streams were used
     if (r.stdout !== undefined || r.stderr !== undefined) {
