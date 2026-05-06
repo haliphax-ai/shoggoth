@@ -750,7 +750,7 @@ describe("toolExecExtended", () => {
             },
             creds,
           ),
-        /outputFile.*mutually exclusive/i,
+        /outputFile.*cannot be used together/i,
       );
     });
 
@@ -768,7 +768,7 @@ describe("toolExecExtended", () => {
             },
             creds,
           ),
-        /outputFile.*mutually exclusive/i,
+        /outputFile.*cannot be used together/i,
       );
     });
 
@@ -786,7 +786,7 @@ describe("toolExecExtended", () => {
             },
             creds,
           ),
-        /file output.*incompatible.*background/i,
+        /File output cannot be used with.*background/i,
       );
     });
 
@@ -804,7 +804,7 @@ describe("toolExecExtended", () => {
             },
             creds,
           ),
-        /file output.*incompatible.*yieldMs/i,
+        /File output cannot be used with.*yieldMs/i,
       );
     });
 
@@ -881,9 +881,9 @@ describe("toolExecExtended", () => {
       const fg = r as ExecForegroundResult;
       // @ts-expect-error - new fields not yet added to interface
       assert.equal(fg.stderrFile, "stderr.txt");
-      assert.equal(fg.stdout, undefined);
+      assert.ok(fg.stdout?.includes("out"), "stdout should be returned inline");
       assert.equal(fg.output, undefined);
-      // stderr should be returned inline since stderrFile was set
+      // stderr should NOT be returned inline since stderrFile was set
       // @ts-expect-error - new fields not yet added to interface
       assert.equal(fg.stderr, undefined);
 
@@ -906,9 +906,9 @@ describe("toolExecExtended", () => {
       const fg = r as ExecForegroundResult;
       // @ts-expect-error - new fields not yet added to interface
       assert.equal(fg.stdoutFile, "stdout.txt");
-      assert.equal(fg.stderr, undefined);
+      assert.ok(fg.stderr?.includes("err"), "stderr should be returned inline");
       assert.equal(fg.output, undefined);
-      // stdout should be returned inline since stdoutFile was set
+      // stdout should NOT be returned inline since stdoutFile was set
       // @ts-expect-error - new fields not yet added to interface
       assert.equal(fg.stdout, undefined);
 
@@ -977,7 +977,7 @@ describe("toolExecExtended", () => {
             },
             creds,
           ),
-        /path.*traversal/i,
+        /path escapes workspace/i,
       );
     });
   });
