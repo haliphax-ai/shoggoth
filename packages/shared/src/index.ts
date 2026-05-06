@@ -129,6 +129,7 @@ export {
   SHOGGOTH_AGENT_DEFAULT_EMOJI,
 } from "./effective-agent-for-session";
 export { redactToolArgsJson, redactJsonValue, redactDeep } from "./redact-json";
+export { sanitizeJsonEscapes } from "./sanitize-json-escapes";
 export { VERSION } from "./version";
 export {
   assertValidAgentId,

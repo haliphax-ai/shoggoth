@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { ShoggothHitlConfig, HitlRiskTier } from "@shoggoth/shared";
+import { sanitizeJsonEscapes, type ShoggothHitlConfig, type HitlRiskTier } from "@shoggoth/shared";
 import type { ChatContentPart } from "@shoggoth/models";
 import { StructuredOutputValidationError } from "@shoggoth/models";
 import { classifyToolRisk } from "../hitl/risk-classify";
@@ -306,9 +306,11 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
       // execution but still store valid JSON in the transcript.
       const badArgIds = new Set<string>();
       const sanitizedToolCalls = turn.toolCalls.map((tc) => {
+        // Fix invalid JSON escape sequences (e.g. \{ \( \. from regex patterns)
+        const fixedArgs = sanitizeJsonEscapes(tc.argsJson);
         try {
-          JSON.parse(tc.argsJson);
-          return tc;
+          JSON.parse(fixedArgs);
+          return fixedArgs !== tc.argsJson ? { ...tc, argsJson: fixedArgs } : tc;
         } catch {
           log.warn("tool call args sanitized", {
             toolName: tc.name,
