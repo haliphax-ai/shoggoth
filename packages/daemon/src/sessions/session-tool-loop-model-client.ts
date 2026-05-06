@@ -269,6 +269,7 @@ export function createSessionToolLoopModelClient(input: {
             role: "assistant",
             content: out.content,
             toolCalls: out.toolCalls,
+            ...(out.reasoningContent ? { reasoningContent: out.reasoningContent } : {}),
           },
         ];
         return {
@@ -279,6 +280,7 @@ export function createSessionToolLoopModelClient(input: {
             argsJson: tc.arguments,
             ...(tc.thoughtSignature ? { thoughtSignature: tc.thoughtSignature } : {}),
           })),
+          reasoningContent: out.reasoningContent,
         };
       }
 
@@ -287,9 +289,10 @@ export function createSessionToolLoopModelClient(input: {
         {
           role: "assistant",
           content: out.content ?? "",
+          ...(out.reasoningContent ? { reasoningContent: out.reasoningContent } : {}),
         },
       ];
-      return { content: out.content, toolCalls: [] };
+      return { content: out.content, toolCalls: [], reasoningContent: out.reasoningContent };
     },
 
     pushToolMessage({ toolCallId, content }) {
