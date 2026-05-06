@@ -353,7 +353,7 @@ function contentBlocksToModelOutput(
   content: unknown,
   anthropicToOpenAiToolName?: ReadonlyMap<string, string>,
   thinkingFormat?: "native" | "xml-tags" | "none",
-): { text: string | null; toolCalls: ChatToolCall[] } {
+): { text: string | null; toolCalls: ChatToolCall[]; reasoningContent?: string } {
   if (!Array.isArray(content)) {
     throw new ModelHttpError(
       502,
@@ -364,12 +364,19 @@ function contentBlocksToModelOutput(
 
   const textParts: string[] = [];
   const toolCalls: ChatToolCall[] = [];
+  const thinkingParts: string[] = [];
 
   for (const block of content) {
     if (!block || typeof block !== "object") continue;
     const b = block as Record<string, unknown>;
     const type = b.type;
-    if (type === "text" && typeof b.text === "string") {
+    if (type === "thinking" && typeof b.thinking === "string") {
+      if (thinkingFormat === "native") {
+        thinkingParts.push(b.thinking);
+      }
+    } else if (type === "redacted_thinking") {
+      // Skip redacted thinking blocks entirely
+    } else if (type === "text" && typeof b.text === "string") {
       textParts.push(thinkingFormat === "xml-tags" ? stripXmlThinkingTags(b.text) : b.text);
     } else if (type === "tool_use") {
       const id = typeof b.id === "string" ? b.id : "";
@@ -391,11 +398,13 @@ function contentBlocksToModelOutput(
 
   const joined = textParts.join("");
   const text = joined.length > 0 ? joined : null;
-  return { text, toolCalls };
+  const reasoningContent = thinkingParts.length > 0 ? thinkingParts.join("\n\n") : undefined;
+  return { text, toolCalls, reasoningContent };
 }
 
 type AnthropicBlockState =
   | { kind: "text"; text: string }
+  | { kind: "thinking"; text: string }
   | {
       kind: "tool_use";
       id: string;
@@ -403,7 +412,6 @@ type AnthropicBlockState =
       inputJson: string;
       finalized: boolean;
     };
-
 export interface ConsumeAnthropicMessagesStreamOptions {
   readonly accumulateTools: boolean;
   readonly thinkingFormat?: "native" | "xml-tags" | "none";
@@ -425,6 +433,7 @@ export async function consumeAnthropicMessagesStream(
   content: string | null;
   toolCalls: ChatToolCall[];
   usage?: ModelUsage;
+  reasoningContent?: string;
 }> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -526,6 +535,10 @@ export async function consumeAnthropicMessagesStream(
       const blockType = cb?.type;
       if (blockType === "text") {
         blocks.set(index, { kind: "text", text: "" });
+      } else if (blockType === "thinking") {
+        if (options.thinkingFormat === "native") {
+          blocks.set(index, { kind: "thinking", text: "" });
+        }
       } else if (blockType === "tool_use") {
         if (!options.accumulateTools) {
           forbiddenToolUse = true;
@@ -549,6 +562,18 @@ export async function consumeAnthropicMessagesStream(
       const delta = o.delta as Record<string, unknown> | undefined;
       if (!delta) return;
       const dt = delta.type;
+
+      if (
+        dt === "thinking_delta" &&
+        typeof delta.thinking === "string" &&
+        delta.thinking.length > 0
+      ) {
+        const st = blocks.get(index);
+        if (st?.kind === "thinking") {
+          st.text += delta.thinking;
+        }
+        return;
+      }
 
       if (dt === "text_delta" && typeof delta.text === "string" && delta.text.length > 0) {
         const raw = delta.text;
@@ -699,10 +724,13 @@ export async function consumeAnthropicMessagesStream(
 
   const sortedIndices = [...blocks.keys()].sort((a, b) => a - b);
   const textParts: string[] = [];
+  const thinkingParts: string[] = [];
   for (const idx of sortedIndices) {
     const st = blocks.get(idx);
     if (st?.kind === "text" && st.text.length > 0) {
       textParts.push(st.text);
+    } else if (st?.kind === "thinking" && st.text.length > 0) {
+      thinkingParts.push(st.text);
     }
   }
   const joinedText = textParts.join("");
@@ -716,7 +744,8 @@ export async function consumeAnthropicMessagesStream(
       ? { inputTokens: usageInputTokens, outputTokens: usageOutputTokens }
       : undefined;
 
-  return { content, toolCalls, usage };
+  const reasoningContent = thinkingParts.length > 0 ? thinkingParts.join("\n\n") : undefined;
+  return { content, toolCalls, usage, reasoningContent };
 }
 
 function headersToRecord(h: Headers): Record<string, string | undefined> {
@@ -806,6 +835,7 @@ export function createAnthropicMessagesProvider(
           content: streamed,
           toolCalls,
           usage,
+          reasoningContent: streamedReasoning,
         } = await consumeAnthropicMessagesStream(res.body, {
           accumulateTools: false,
           thinkingFormat: input.thinkingFormat,
@@ -821,7 +851,7 @@ export function createAnthropicMessagesProvider(
         if (streamed === null) {
           throw new ModelHttpError(502, "missing streamed assistant content", "");
         }
-        return { content: streamed, usage };
+        return { content: streamed, usage, reasoningContent: streamedReasoning };
       }
 
       const text = await res.text();
@@ -845,11 +875,11 @@ export function createAnthropicMessagesProvider(
       }
 
       const content = (json as { content?: unknown }).content;
-      const { text: outText, toolCalls } = contentBlocksToModelOutput(
-        content,
-        undefined,
-        input.thinkingFormat,
-      );
+      const {
+        text: outText,
+        toolCalls,
+        reasoningContent,
+      } = contentBlocksToModelOutput(content, undefined, input.thinkingFormat);
       if (toolCalls.length > 0) {
         throw new ModelHttpError(
           502,
@@ -864,7 +894,7 @@ export function createAnthropicMessagesProvider(
           text.slice(0, 200),
         );
       }
-      return { content: outText, usage: extractAnthropicUsage(json) };
+      return { content: outText, usage: extractAnthropicUsage(json), reasoningContent };
     },
 
     async completeWithTools(input: ModelToolCompleteInput): Promise<ModelToolCompleteOutput> {
@@ -926,6 +956,7 @@ export function createAnthropicMessagesProvider(
           content: outText,
           toolCalls,
           usage,
+          reasoningContent: streamedReasoning,
         } = await consumeAnthropicMessagesStream(res.body, {
           accumulateTools: true,
           thinkingFormat: input.thinkingFormat,
@@ -955,10 +986,20 @@ export function createAnthropicMessagesProvider(
                 );
               }
             }
-            return { content: structuredContent, toolCalls: [], usage };
+            return {
+              content: structuredContent,
+              toolCalls: [],
+              usage,
+              reasoningContent: streamedReasoning,
+            };
           } else if (syntheticCall && realToolCalls.length > 0) {
             // Mixed: strip synthetic, return only real tool calls
-            return { content: outText, toolCalls: realToolCalls, usage };
+            return {
+              content: outText,
+              toolCalls: realToolCalls,
+              usage,
+              reasoningContent: streamedReasoning,
+            };
           } else if (!syntheticCall && toolCalls.length === 0) {
             // Text-only response with schema → force follow-up (non-streaming)
             const followUpTools: unknown[] = mapOpenAIToolsToAnthropic(
@@ -1052,7 +1093,7 @@ export function createAnthropicMessagesProvider(
           }
         }
 
-        return { content: outText, toolCalls, usage };
+        return { content: outText, toolCalls, usage, reasoningContent: streamedReasoning };
       }
 
       const rawText = await res.text();
@@ -1077,11 +1118,11 @@ export function createAnthropicMessagesProvider(
       }
 
       const content = (json as { content?: unknown }).content;
-      const { text: outText, toolCalls } = contentBlocksToModelOutput(
-        content,
-        anthropicToOpenAi,
-        input.thinkingFormat,
-      );
+      const {
+        text: outText,
+        toolCalls,
+        reasoningContent,
+      } = contentBlocksToModelOutput(content, anthropicToOpenAi, input.thinkingFormat);
 
       if (toolCalls.length === 0 && (outText === null || outText === "")) {
         throw new ModelHttpError(
@@ -1110,10 +1151,20 @@ export function createAnthropicMessagesProvider(
               );
             }
           }
-          return { content: structuredContent, toolCalls: [], usage: extractAnthropicUsage(json) };
+          return {
+            content: structuredContent,
+            toolCalls: [],
+            usage: extractAnthropicUsage(json),
+            reasoningContent,
+          };
         } else if (syntheticCall && realToolCalls.length > 0) {
           // Mixed: strip synthetic, return only real tool calls
-          return { content: outText, toolCalls: realToolCalls, usage: extractAnthropicUsage(json) };
+          return {
+            content: outText,
+            toolCalls: realToolCalls,
+            usage: extractAnthropicUsage(json),
+            reasoningContent,
+          };
         } else if (!syntheticCall && toolCalls.length === 0) {
           // No synthetic call and no real tools (text response) → force follow-up
           // Build a follow-up request with tool_choice targeting the synthetic tool
@@ -1201,6 +1252,7 @@ export function createAnthropicMessagesProvider(
               content: structuredContent,
               toolCalls: [],
               usage: extractAnthropicUsage(followUpJson),
+              reasoningContent,
             };
           }
         }
@@ -1211,6 +1263,7 @@ export function createAnthropicMessagesProvider(
         content: outText,
         toolCalls,
         usage: extractAnthropicUsage(json),
+        reasoningContent,
       };
     },
   };
