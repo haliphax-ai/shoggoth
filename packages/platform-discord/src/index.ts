@@ -24,6 +24,7 @@ export * from "./hitl/reaction-handler";
 export * from "./hitl/reaction-wiring";
 export * from "./hitl/notice-registry";
 export * from "./interaction";
+export * from "./model-select";
 export * from "./slash-commands";
 
 // Step 5: Discord config resolution
