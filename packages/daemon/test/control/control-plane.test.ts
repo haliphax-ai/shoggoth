@@ -1411,6 +1411,366 @@ describe("control plane (unix socket + JSONL)", () => {
     db.close();
   });
 
+  it("subagent_spawn one_shot background returns immediately", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-sub-bg-"));
+    const sock = join(dir, "c.sock");
+    const dbPath = join(dir, "state.db");
+    const db = new Database(dbPath);
+    migrate(db, defaultMigrationsDir());
+    const parentId = formatAgentSessionUrn(
+      "par",
+      "discord",
+      "channel",
+      SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID,
+    );
+    createSessionStore(db).create({
+      id: parentId,
+      workspacePath: "/tmp/w",
+      status: "active",
+      modelSelection: { model: "gpt-parent", temperature: 0.1 },
+    });
+
+    let turnResolved = false;
+    let resolveModelTurn: (() => void) | undefined;
+    const modelTurnPromise = new Promise<void>((r) => {
+      resolveModelTurn = r;
+    });
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: async () => {
+        // Wait until we explicitly resolve, proving the spawn returned first.
+        await modelTurnPromise;
+        turnResolved = true;
+        return {
+          latestAssistantText: "BG_REPLY",
+          failoverMeta: undefined,
+        };
+      },
+      subscribeSubagentSession: () => () => {},
+      registerPlatformThreadBinding: () => () => {},
+    });
+    try {
+      await withControlPlaneSession(
+        {
+          stateDb: db,
+          config: minimalConfig(sock),
+        },
+        async (send) => {
+          const opAuth = {
+            kind: "operator_token",
+            token: "test-op-token",
+          } as const;
+          const line = await send({
+            v: WIRE_VERSION,
+            id: "bg1",
+            op: "subagent_spawn",
+            auth: opAuth,
+            payload: {
+              parent_session_id: parentId,
+              prompt: "background task",
+              mode: "one_shot",
+              background: true,
+            },
+          });
+          const res = parseResponseLine(line);
+          assert.equal(res.ok, true);
+          const r = res.result as {
+            session_id: string;
+            mode: string;
+            background: boolean;
+            reply?: string;
+          };
+          assert.equal(r.mode, "one_shot");
+          assert.equal(r.background, true);
+          // No reply yet — model turn hasn't completed.
+          assert.equal(r.reply, undefined);
+          assert.equal(turnResolved, false);
+          assert.match(r.session_id, /^agent:par:discord:channel:/);
+
+          // Now let the model turn complete.
+          resolveModelTurn!();
+          // Give the async turn a tick to settle.
+          await new Promise((r) => setTimeout(r, 50));
+          assert.equal(turnResolved, true);
+
+          // Session should be terminated after the background turn completes.
+          const child = createSessionStore(db).getById(r.session_id);
+          assert.equal(child?.status, "terminated");
+        },
+      );
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
+    db.close();
+  });
+
+  it("subagent_spawn one_shot background delivers result to respond_to session", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-sub-bg-deliver-"));
+    const sock = join(dir, "c.sock");
+    const dbPath = join(dir, "state.db");
+    const db = new Database(dbPath);
+    migrate(db, defaultMigrationsDir());
+    const parentId = formatAgentSessionUrn(
+      "par",
+      "discord",
+      "channel",
+      SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID,
+    );
+    createSessionStore(db).create({
+      id: parentId,
+      workspacePath: "/tmp/w",
+      status: "active",
+      modelSelection: { model: "gpt-parent", temperature: 0.1 },
+    });
+
+    const deliveryCalls: Array<{
+      sessionId: string;
+      userContent: string;
+      userMetadata: Record<string, unknown>;
+    }> = [];
+    let childTurnCount = 0;
+
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: async (input) => {
+        if (input.userMetadata?.subagent_result) {
+          // This is the delivery call to the respond_to session.
+          deliveryCalls.push({
+            sessionId: input.sessionId,
+            userContent: input.userContent,
+            userMetadata: input.userMetadata as Record<string, unknown>,
+          });
+          return { latestAssistantText: "ACK", failoverMeta: undefined };
+        }
+        // This is the child's model turn.
+        childTurnCount++;
+        return {
+          latestAssistantText: "BG_RESULT_TEXT",
+          failoverMeta: undefined,
+        };
+      },
+      subscribeSubagentSession: () => () => {},
+      registerPlatformThreadBinding: () => () => {},
+    });
+    try {
+      await withControlPlaneSession(
+        {
+          stateDb: db,
+          config: minimalConfig(sock),
+        },
+        async (send) => {
+          const opAuth = {
+            kind: "operator_token",
+            token: "test-op-token",
+          } as const;
+          const line = await send({
+            v: WIRE_VERSION,
+            id: "bg-del1",
+            op: "subagent_spawn",
+            auth: opAuth,
+            payload: {
+              parent_session_id: parentId,
+              prompt: "background deliver task",
+              mode: "one_shot",
+              background: true,
+            },
+          });
+          const res = parseResponseLine(line);
+          assert.equal(res.ok, true);
+          const r = res.result as { session_id: string };
+
+          // Give the async turn + delivery a tick to settle.
+          await new Promise((resolve) => setTimeout(resolve, 100));
+
+          assert.equal(childTurnCount, 1);
+          assert.equal(deliveryCalls.length, 1);
+          // Delivery should target the parent (respond_to defaults to parent).
+          assert.equal(deliveryCalls[0].sessionId, parentId);
+          // Content should include the child session id and the assistant text.
+          assert.ok(deliveryCalls[0].userContent.includes(r.session_id));
+          assert.ok(deliveryCalls[0].userContent.includes("BG_RESULT_TEXT"));
+          assert.ok(deliveryCalls[0].userContent.includes("[Subagent completed]"));
+          // Metadata should identify it as a subagent result.
+          assert.equal(deliveryCalls[0].userMetadata.subagent_result, true);
+          assert.equal(deliveryCalls[0].userMetadata.child_session_id, r.session_id);
+          assert.equal(deliveryCalls[0].userMetadata.mode, "one_shot");
+        },
+      );
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
+    db.close();
+  });
+
+  it("subagent_spawn persistent non-thread-bound delivers result to respond_to session", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-sub-persist-deliver-"));
+    const sock = join(dir, "c.sock");
+    const dbPath = join(dir, "state.db");
+    const db = new Database(dbPath);
+    migrate(db, defaultMigrationsDir());
+    const parentId = formatAgentSessionUrn(
+      "par",
+      "discord",
+      "channel",
+      SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID,
+    );
+    createSessionStore(db).create({
+      id: parentId,
+      workspacePath: "/tmp/w",
+      status: "active",
+      modelSelection: { model: "gpt-parent", temperature: 0.1 },
+    });
+
+    const deliveryCalls: Array<{
+      sessionId: string;
+      userContent: string;
+      userMetadata: Record<string, unknown>;
+    }> = [];
+
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: async (input) => {
+        if (input.userMetadata?.subagent_result) {
+          deliveryCalls.push({
+            sessionId: input.sessionId,
+            userContent: input.userContent,
+            userMetadata: input.userMetadata as Record<string, unknown>,
+          });
+          return { latestAssistantText: "ACK", failoverMeta: undefined };
+        }
+        return {
+          latestAssistantText: "PERSISTENT_RESULT",
+          failoverMeta: undefined,
+        };
+      },
+      subscribeSubagentSession: () => () => {},
+      registerPlatformThreadBinding: () => () => {},
+    });
+    try {
+      await withControlPlaneSession(
+        {
+          stateDb: db,
+          config: minimalConfig(sock),
+        },
+        async (send) => {
+          const opAuth = {
+            kind: "operator_token",
+            token: "test-op-token",
+          } as const;
+          // Spawn persistent WITHOUT platform_thread_id (non-thread-bound).
+          const line = await send({
+            v: WIRE_VERSION,
+            id: "persist-del1",
+            op: "subagent_spawn",
+            auth: opAuth,
+            payload: {
+              parent_session_id: parentId,
+              prompt: "persistent deliver task",
+              mode: "persistent",
+            },
+          });
+          const res = parseResponseLine(line);
+          assert.equal(res.ok, true);
+          const r = res.result as { session_id: string };
+
+          // Give the async turn + delivery a tick to settle.
+          await new Promise((resolve) => setTimeout(resolve, 100));
+
+          assert.equal(deliveryCalls.length, 1);
+          assert.equal(deliveryCalls[0].sessionId, parentId);
+          assert.ok(deliveryCalls[0].userContent.includes(r.session_id));
+          assert.ok(deliveryCalls[0].userContent.includes("PERSISTENT_RESULT"));
+          assert.equal(deliveryCalls[0].userMetadata.subagent_result, true);
+          assert.equal(deliveryCalls[0].userMetadata.mode, "persistent");
+        },
+      );
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
+    db.close();
+  });
+
+  it("subagent_spawn persistent thread-bound does NOT deliver result to respond_to", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-sub-persist-thread-"));
+    const sock = join(dir, "c.sock");
+    const dbPath = join(dir, "state.db");
+    const db = new Database(dbPath);
+    migrate(db, defaultMigrationsDir());
+    const parentId = formatAgentSessionUrn(
+      "par",
+      "discord",
+      "channel",
+      SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID,
+    );
+    createSessionStore(db).create({
+      id: parentId,
+      workspacePath: "/tmp/w",
+      status: "active",
+      modelSelection: { model: "gpt-parent", temperature: 0.1 },
+    });
+
+    const deliveryCalls: Array<Record<string, unknown>> = [];
+
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: async (input) => {
+        if (input.userMetadata?.subagent_result) {
+          deliveryCalls.push(input.userMetadata as Record<string, unknown>);
+          return { latestAssistantText: "ACK", failoverMeta: undefined };
+        }
+        return {
+          latestAssistantText: "THREAD_RESULT",
+          failoverMeta: undefined,
+        };
+      },
+      subscribeSubagentSession: () => () => {},
+      registerPlatformThreadBinding: () => () => {},
+    });
+    try {
+      await withControlPlaneSession(
+        {
+          stateDb: db,
+          config: minimalConfig(sock),
+        },
+        async (send) => {
+          const opAuth = {
+            kind: "operator_token",
+            token: "test-op-token",
+          } as const;
+          // Spawn persistent WITH platform_thread_id (thread-bound).
+          const line = await send({
+            v: WIRE_VERSION,
+            id: "persist-thread1",
+            op: "subagent_spawn",
+            auth: opAuth,
+            payload: {
+              parent_session_id: parentId,
+              prompt: "thread-bound task",
+              mode: "persistent",
+              platform_thread_id: "thread-123",
+              platform_user_id: "user-456",
+            },
+          });
+          const res = parseResponseLine(line);
+          assert.equal(res.ok, true);
+
+          // Give the async turn a tick to settle.
+          await new Promise((resolve) => setTimeout(resolve, 100));
+
+          // Thread-bound persistent subagents should NOT deliver to respond_to.
+          assert.equal(deliveryCalls.length, 0);
+        },
+      );
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
+    db.close();
+  });
+
   it("subagent_spawn denied for agent when spawnSubagents false", async () => {
     if (process.platform !== "linux") return;
 

@@ -281,6 +281,7 @@ async function subagentHandler(
       payload.respond_to = respondTo.trim();
     }
     if (args.internal === false) payload.internal = false;
+    if (args.background === true) payload.background = true;
   } else if (action === "spawn_persistent") {
     const prompt = String(args.prompt ?? "").trim();
     const threadId = String(args.thread_id ?? "").trim();

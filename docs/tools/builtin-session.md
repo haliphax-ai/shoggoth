@@ -65,16 +65,29 @@ Spawn and manage subagent sessions. Only available to top-level (non-subagent) s
 
 #### spawn_one_shot / spawn_persistent
 
-| Param                 | Type    | Required | Notes                                  |
-| --------------------- | ------- | -------- | -------------------------------------- |
-| `prompt`              | string  | yes      | Task prompt for the subagent           |
-| `respond_to`          | string  | no       | Where to deliver the result            |
-| `internal`            | boolean | no       | Set `false` to make externally visible |
-| `model_options`       | object  | no       | Override model settings                |
-| `thread_id`           | string  | no       | Platform thread (persistent only)      |
-| `platform_user_id`    | string  | no       | Persistent only                        |
-| `reply_to_message_id` | string  | no       | Persistent only                        |
-| `lifetime_ms`         | number  | no       | Auto-kill timeout (persistent only)    |
+| Param                 | Type    | Required | Notes                                                 |
+| --------------------- | ------- | -------- | ----------------------------------------------------- |
+| `prompt`              | string  | yes      | Task prompt for the subagent                          |
+| `respond_to`          | string  | no       | Session to deliver the result to (default: parent)    |
+| `internal`            | boolean | no       | Set `false` to surface delivery to messaging platform |
+| `background`          | boolean | no       | Return immediately without waiting (one_shot only)    |
+| `model_options`       | object  | no       | Override model settings                               |
+| `thread_id`           | string  | no       | Platform thread (persistent only)                     |
+| `platform_user_id`    | string  | no       | Persistent only                                       |
+| `reply_to_message_id` | string  | no       | Persistent only                                       |
+| `lifetime_ms`         | number  | no       | Auto-kill timeout (persistent only)                   |
+
+##### Automatic Result Delivery
+
+When a background one-shot or non-thread-bound persistent subagent completes its model turn, the result is automatically delivered as a user message to the `respond_to` session (defaults to the spawning parent). The delivered message includes:
+
+- **Content**: `[Subagent completed] session_id: <child_id>\n\n<assistant text>`
+- **Metadata**: `{ subagent_result: true, child_session_id: "<id>", mode: "one_shot" | "persistent" }`
+
+This does **not** apply to:
+
+- Synchronous one-shot spawns (the reply is returned inline in the tool result)
+- Thread-bound persistent subagents (they deliver via their bound messaging surface)
 
 #### steer
 
@@ -119,6 +132,12 @@ No additional parameters. Returns info about the current session.
 
 ```json
 { "action": "spawn_one_shot", "prompt": "Summarize the last 5 PRs" }
+```
+
+**Background one-shot (returns immediately):**
+
+```json
+{ "action": "spawn_one_shot", "prompt": "Run the full test suite", "background": true }
 ```
 
 **Persistent subagent in a thread:**
