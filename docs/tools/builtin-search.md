@@ -112,6 +112,16 @@ When searching a specific file:
 - Case-insensitive mode uses the `gi` flags
 - Empty patterns return no matches
 
+### Automatic Escape Sanitization
+
+The tool loop automatically sanitizes invalid JSON escape sequences in tool call arguments before they reach the tool. When an LLM produces a regex pattern like `\d{3}` or `\(foo\)`, the raw JSON contains invalid escapes (`\d`, `\{`, `\(`) that would normally break JSON parsing. The sanitizer detects these and doubles the backslash (`\\d`, `\\{`, `\\(`), preserving the intended regex pattern.
+
+This means:
+
+- LLMs do **not** need to double-escape regex metacharacters in practice — the sanitizer handles it
+- Already-valid escapes (`\n`, `\t`, `\\`, `\"`, `\uXXXX`) are left untouched
+- The fix is applied transparently before the tool executes
+
 ## Error Handling
 
 The tool returns error information in the following cases:
