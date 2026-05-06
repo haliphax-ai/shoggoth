@@ -381,6 +381,213 @@ describe("createDiscordInteractionHandler", () => {
     ];
     assert.ok(body.data.content.includes("Failed to get model"));
   });
+
+  // PHASE 3 RED: Failing tests for dropdown flow
+  it("handles /model command with provider select menu (dropdown flow)", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransport(calls);
+    const handler = createDiscordInteractionHandler({
+      transport,
+      applicationId: "app-123",
+      logger: stubLogger(),
+      abortSession: async () => false,
+      getModelsConfig: async () => ({
+        providers: [
+          { id: "anthropic", name: "Anthropic" },
+          { id: "openai", name: "OpenAI" },
+        ],
+      }),
+      resolveSessionForChannel: (channelId) => {
+        if (channelId === "ch-1") return "agent:main:discord:channel:abc";
+        return undefined;
+      },
+    });
+
+    const ev: DiscordInteractionEvent = {
+      kind: "interaction_create",
+      id: "int-10",
+      token: "tok-10",
+      type: 2,
+      channelId: "ch-1",
+      userId: "u-1",
+      data: { name: "model" },
+    };
+
+    handler(ev);
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.strictEqual(calls.length, 1);
+    const [, , body] = calls[0]!.args as [
+      string,
+      string,
+      { type: number; data: Record<string, unknown> },
+    ];
+
+    // Should respond with CHANNEL_MESSAGE_WITH_SOURCE
+    assert.strictEqual(body.type, 4, "Expected response type 4 (CHANNEL_MESSAGE_WITH_SOURCE)");
+
+    // Should be ephemeral
+    assert.strictEqual(body.data.flags, 64, "Expected ephemeral flag (64)");
+
+    // Should have components array with action row containing StringSelect
+    assert.ok(Array.isArray(body.data.components), "Expected components array");
+    assert.ok(body.data.components.length > 0, "Expected at least one component");
+
+    const actionRow = body.data.components[0];
+    assert.ok(actionRow, "Expected action row component");
+    assert.strictEqual(actionRow.type, 1, "Expected action row type 1");
+
+    const selectComponent = actionRow.components[0];
+    assert.ok(selectComponent, "Expected select component in action row");
+    assert.strictEqual(selectComponent.type, 3, "Expected StringSelect type 3");
+    assert.ok(
+      selectComponent.custom_id?.startsWith("model_select"),
+      `Expected custom_id to start with 'model_select', got: ${selectComponent.custom_id}`,
+    );
+  });
+
+  it("calls getModelsConfig to build provider options", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const getModelsConfigCalls: number[] = [];
+    const transport = stubTransport(calls);
+    const handler = createDiscordInteractionHandler({
+      transport,
+      applicationId: "app-123",
+      logger: stubLogger(),
+      abortSession: async () => false,
+      getModelsConfig: async () => {
+        getModelsConfigCalls.push(Date.now());
+        return {
+          providers: [
+            { id: "anthropic", name: "Anthropic" },
+            { id: "openai", name: "OpenAI" },
+          ],
+        };
+      },
+      resolveSessionForChannel: (channelId) => {
+        if (channelId === "ch-1") return "agent:main:discord:channel:abc";
+        return undefined;
+      },
+    });
+
+    const ev: DiscordInteractionEvent = {
+      kind: "interaction_create",
+      id: "int-11",
+      token: "tok-11",
+      type: 2,
+      channelId: "ch-1",
+      userId: "u-1",
+      data: { name: "model" },
+    };
+
+    handler(ev);
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.strictEqual(getModelsConfigCalls.length, 1, "getModelsConfig should be called once");
+
+    const [, , body] = calls[0]!.args as [
+      string,
+      string,
+      { type: number; data: Record<string, unknown> },
+    ];
+
+    const actionRow = body.data.components![0] as {
+      components: Array<{ options?: Array<{ value: string }> }>;
+    };
+    const selectComponent = actionRow.components[0];
+    assert.ok(selectComponent.options, "Expected options array in select component");
+    assert.strictEqual(selectComponent.options.length, 2, "Expected 2 provider options");
+    assert.ok(
+      selectComponent.options.some((opt) => opt.value === "anthropic"),
+      "Expected anthropic option",
+    );
+    assert.ok(
+      selectComponent.options.some((opt) => opt.value === "openai"),
+      "Expected openai option",
+    );
+  });
+
+  it("responds with modal when getModelsConfig returns null providers", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransport(calls);
+    const handler = createDiscordInteractionHandler({
+      transport,
+      applicationId: "app-123",
+      logger: stubLogger(),
+      abortSession: async () => false,
+      getModelsConfig: async () => ({
+        providers: null,
+      }),
+      resolveSessionForChannel: (channelId) => {
+        if (channelId === "ch-1") return "agent:main:discord:channel:abc";
+        return undefined;
+      },
+    });
+
+    const ev: DiscordInteractionEvent = {
+      kind: "interaction_create",
+      id: "int-12",
+      token: "tok-12",
+      type: 2,
+      channelId: "ch-1",
+      userId: "u-1",
+      data: { name: "model" },
+    };
+
+    handler(ev);
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.strictEqual(calls.length, 1);
+    const [, , body] = calls[0]!.args as [
+      string,
+      string,
+      { type: number; data: Record<string, unknown> },
+    ];
+
+    // Should respond with modal (type 9)
+    assert.strictEqual(body.type, 9, "Expected response type 9 (MODAL)");
+  });
+
+  it("responds with modal when getModelsConfig returns empty providers array", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransport(calls);
+    const handler = createDiscordInteractionHandler({
+      transport,
+      applicationId: "app-123",
+      logger: stubLogger(),
+      abortSession: async () => false,
+      getModelsConfig: async () => ({
+        providers: [],
+      }),
+      resolveSessionForChannel: (channelId) => {
+        if (channelId === "ch-1") return "agent:main:discord:channel:abc";
+        return undefined;
+      },
+    });
+
+    const ev: DiscordInteractionEvent = {
+      kind: "interaction_create",
+      id: "int-13",
+      token: "tok-13",
+      type: 2,
+      channelId: "ch-1",
+      userId: "u-1",
+      data: { name: "model" },
+    };
+
+    handler(ev);
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.strictEqual(calls.length, 1);
+    const [, , body] = calls[0]!.args as [
+      string,
+      string,
+      { type: number; data: Record<string, unknown> },
+    ];
+
+    // Should respond with modal (type 9)
+    assert.strictEqual(body.type, 9, "Expected response type 9 (MODAL)");
+  });
 });
 
 describe("registerDiscordSlashCommands", () => {
@@ -407,7 +614,7 @@ describe("registerDiscordSlashCommands", () => {
     assert.ok(commands.some((c) => c.name === "queue"));
   });
 
-  it("registers model command with correct options", async () => {
+  it("registers model command without model_selection option (dropdown flow)", async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
     const transport = stubTransport(calls);
 
@@ -418,10 +625,24 @@ describe("registerDiscordSlashCommands", () => {
 
     const [, commands] = calls[0]!.args as [string, Array<Record<string, unknown>>];
     const modelCmd = commands.find((c) => c.name === "model");
-    assert.ok(modelCmd);
-    const options = modelCmd!.options as Array<Record<string, unknown>>;
-    assert.ok(options.some((o) => o.name === "session_id"));
-    assert.ok(options.some((o) => o.name === "agent_id"));
-    assert.ok(options.some((o) => o.name === "model_selection"));
+    assert.ok(modelCmd, "Model command should be registered");
+    const options = modelCmd!.options as Array<Record<string, unknown>> | undefined;
+    assert.ok(options, "Model command should have options");
+
+    // Should have session_id and agent_id options
+    assert.ok(
+      options.some((o) => o.name === "session_id"),
+      "Should have session_id option",
+    );
+    assert.ok(
+      options.some((o) => o.name === "agent_id"),
+      "Should have agent_id option",
+    );
+
+    // Should NOT have model_selection option (dropdown flow)
+    assert.ok(
+      !options.some((o) => o.name === "model_selection"),
+      "Should NOT have model_selection option (dropdown flow)",
+    );
   });
 });
