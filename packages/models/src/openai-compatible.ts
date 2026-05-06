@@ -90,6 +90,9 @@ function serializeChatMessage(m: ChatMessage): Record<string, unknown> {
   } else {
     o.content = "";
   }
+  if (m.reasoningContent) {
+    o.reasoning_content = m.reasoningContent;
+  }
   return o;
 }
 
@@ -146,12 +149,14 @@ async function consumeOpenAIChatCompletionStream(
   content: string | null;
   toolCalls: ChatToolCall[];
   usage?: ModelUsage;
+  reasoningContent?: string;
 }> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let lineBuf = "";
   let sawValidChoice = false;
   let content: string | null = null;
+  let reasoningBuf = "";
   let usage: ModelUsage | undefined;
   const toolPartials = new Map<number, ToolCallPartial>();
   const thinkNorm =
@@ -182,7 +187,7 @@ async function consumeOpenAIChatCompletionStream(
     sawValidChoice = true;
     const delta = (ch0 as { delta?: unknown }).delta;
     if (!delta || typeof delta !== "object" || delta === null) return;
-    const d = delta as { content?: unknown; tool_calls?: unknown };
+    const d = delta as { content?: unknown; tool_calls?: unknown; reasoning_content?: unknown };
 
     if (typeof d.content === "string" && d.content.length > 0) {
       if (thinkNorm) {
@@ -198,6 +203,14 @@ async function consumeOpenAIChatCompletionStream(
         const next = prev + d.content;
         content = next;
         options.onTextDelta?.(d.content, next);
+      }
+    }
+
+    if (typeof d.reasoning_content === "string" && d.reasoning_content.length > 0) {
+      reasoningBuf += d.reasoning_content;
+      // Cap at 200KB to prevent memory issues
+      if (reasoningBuf.length > 200 * 1024) {
+        reasoningBuf = reasoningBuf.slice(0, 200 * 1024);
       }
     }
 
@@ -247,6 +260,7 @@ async function consumeOpenAIChatCompletionStream(
       ? finalizeToolCalls(toolPartials, options.thinkingFormat)
       : [],
     usage,
+    reasoningContent: reasoningBuf || undefined,
   };
 }
 
@@ -352,6 +366,7 @@ export function createOpenAICompatibleProvider(
           content: streamed,
           toolCalls,
           usage,
+          reasoningContent,
         } = await consumeOpenAIChatCompletionStream(res.body, {
           accumulateTools: false,
           onTextDelta: input.onTextDelta,
@@ -369,7 +384,7 @@ export function createOpenAICompatibleProvider(
         const thinkingFormat = input.thinkingFormat ?? "none";
         const normalized = normalizeThinkingBlocks(streamed, thinkingFormat);
         const content = typeof normalized === "string" ? normalized : JSON.stringify(normalized);
-        return { content, usage };
+        return { content, usage, reasoningContent };
       }
 
       const rawText = await res.text();
@@ -393,7 +408,7 @@ export function createOpenAICompatibleProvider(
       const first = Array.isArray(choices) ? choices[0] : undefined;
       const message =
         first && typeof first === "object" && first !== null && "message" in first
-          ? (first as { message?: { content?: unknown } }).message
+          ? (first as { message?: { content?: unknown; reasoning_content?: unknown } }).message
           : undefined;
       const content =
         message && typeof message.content === "string"
@@ -409,6 +424,16 @@ export function createOpenAICompatibleProvider(
       const normalized = normalizeThinkingBlocks(content, thinkingFormat);
       const finalContent = typeof normalized === "string" ? normalized : JSON.stringify(normalized);
 
+      // Extract reasoning_content
+      let reasoningContent: string | undefined;
+      if (
+        message &&
+        typeof message.reasoning_content === "string" &&
+        message.reasoning_content.length > 0
+      ) {
+        reasoningContent = message.reasoning_content;
+      }
+
       // Structured output: post-validate when mode is "best-effort"
       if (input.responseSchema && mode !== "strict" && mode !== "none") {
         const result = validateResponseSchema(finalContent, input.responseSchema.schema);
@@ -421,7 +446,7 @@ export function createOpenAICompatibleProvider(
         }
       }
 
-      return { content: finalContent, usage: extractOpenAIUsage(json) };
+      return { content: finalContent, usage: extractOpenAIUsage(json), reasoningContent };
     },
 
     async completeWithTools(input: ModelToolCompleteInput): Promise<ModelToolCompleteOutput> {
@@ -482,6 +507,7 @@ export function createOpenAICompatibleProvider(
           content: rawContent,
           toolCalls,
           usage,
+          reasoningContent,
         } = await consumeOpenAIChatCompletionStream(res.body, {
           accumulateTools: true,
           thinkingFormat,
@@ -500,7 +526,7 @@ export function createOpenAICompatibleProvider(
             : typeof normalized === "string"
               ? normalized
               : JSON.stringify(normalized);
-        return { content: finalContent, toolCalls, usage };
+        return { content: finalContent, toolCalls, usage, reasoningContent };
       }
 
       const rawText = await res.text();
@@ -557,6 +583,16 @@ export function createOpenAICompatibleProvider(
         }
       }
 
+      // Extract reasoning_content
+      let reasoningContent: string | undefined;
+      if (
+        message &&
+        typeof message.reasoning_content === "string" &&
+        message.reasoning_content.length > 0
+      ) {
+        reasoningContent = message.reasoning_content;
+      }
+
       if (toolCalls.length === 0 && (content === null || content === "")) {
         throw new ModelHttpError(
           502,
@@ -595,6 +631,7 @@ export function createOpenAICompatibleProvider(
         content: finalContent,
         toolCalls,
         usage: extractOpenAIUsage(json),
+        reasoningContent,
       };
     },
   };

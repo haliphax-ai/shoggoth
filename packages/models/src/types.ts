@@ -55,6 +55,8 @@ export interface ChatMessage {
   readonly name?: string;
   readonly toolCallId?: string;
   readonly toolCalls?: readonly ChatToolCall[];
+  /** Native reasoning content from providers like DeepSeek. */
+  readonly reasoningContent?: string;
 }
 
 /** OpenAI `tools` array entry (`type: function`). */
@@ -144,6 +146,8 @@ export interface ModelToolCompleteOutput {
   readonly content: string | null;
   readonly toolCalls: readonly ChatToolCall[];
   readonly usage?: ModelUsage;
+  /** Native reasoning content from providers like DeepSeek. */
+  readonly reasoningContent?: string;
 }
 
 export interface ModelCompleteInput extends ModelInvocationParams {
@@ -156,6 +160,8 @@ export interface ModelCompleteInput extends ModelInvocationParams {
 export interface ModelCompleteOutput {
   readonly content: string;
   readonly usage?: ModelUsage;
+  /** Native reasoning content from providers like DeepSeek. */
+  readonly reasoningContent?: string;
 }
 
 export interface ModelProvider {

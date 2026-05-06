@@ -297,6 +297,132 @@ describe("createOpenAICompatibleProvider", () => {
     assert.equal(out.content, "xy");
     assert.equal(nCalls.n, 2);
   });
+
+  it("complete parses reasoning_content (non-stream)", async () => {
+    const fetchImpl = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                role: "assistant",
+                content: "The final answer is 42.",
+                reasoning_content: "I need to think about this.",
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+    const p = createOpenAICompatibleProvider({
+      id: "p1",
+      baseUrl: "https://api.example/v1",
+      fetchImpl,
+    });
+
+    const out = await p.complete({
+      model: "gpt-test",
+      messages: [{ role: "user", content: "What is 6 * 7?" }],
+    });
+
+    assert.equal(out.content, "The final answer is 42.");
+    assert.equal(out.reasoningContent, "I need to think about this.");
+  });
+
+  it("completeWithTools parses reasoning_content (non-stream)", async () => {
+    const fetchImpl = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                role: "assistant",
+                content: "The final answer is 42.",
+                reasoning_content: "I need to think about this.",
+                tool_calls: [],
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+    const p = createOpenAICompatibleProvider({
+      id: "p1",
+      baseUrl: "https://api.example/v1",
+      fetchImpl,
+    });
+
+    const out = await p.completeWithTools({
+      model: "gpt-test",
+      messages: [{ role: "user", content: "What is 6 * 7?" }],
+      tools: [],
+      stream: false,
+    });
+
+    assert.equal(out.content, "The final answer is 42.");
+    assert.equal(out.reasoningContent, "I need to think about this.");
+  });
+
+  it("complete streams reasoning_content", async () => {
+    const fetchImpl = async () =>
+      sseResponse([
+        'data: {"choices":[{"delta":{"content":"The answer "}}]}',
+        'data: {"choices":[{"delta":{"reasoning_content":"Let me calculate..."}}]}',
+        'data: {"choices":[{"delta":{"content":"is 42."}}]}',
+        "data: [DONE]",
+      ]);
+
+    const p = createOpenAICompatibleProvider({
+      id: "p1",
+      baseUrl: "https://api.example/v1",
+      fetchImpl,
+    });
+
+    const out = await p.complete({
+      model: "m",
+      messages: [{ role: "user", content: "p" }],
+      stream: true,
+    });
+
+    assert.equal(out.content, "The answer is 42.");
+    assert.equal(out.reasoningContent, "Let me calculate...");
+  });
+
+  it("completeWithTools streams reasoning_content", async () => {
+    const fetchImpl = async () =>
+      sseResponse([
+        'data: {"choices":[{"delta":{"content":"The answer "}}]}',
+        'data: {"choices":[{"delta":{"reasoning_content":"Let me calculate..."}}]}',
+        'data: {"choices":[{"delta":{"content":"is 42."}}]}',
+        "data: [DONE]",
+      ]);
+
+    const p = createOpenAICompatibleProvider({
+      id: "p1",
+      baseUrl: "https://api.example/v1",
+      fetchImpl,
+    });
+
+    const out = await p.completeWithTools({
+      model: "m",
+      messages: [{ role: "user", content: "p" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "noop",
+            parameters: { type: "object", properties: {} },
+          },
+        },
+      ],
+      stream: true,
+    });
+
+    assert.equal(out.content, "The answer is 42.");
+    assert.equal(out.reasoningContent, "Let me calculate...");
+  });
 });
 
 describe("serializeChatMessage with ChatContentPart[]", () => {
@@ -405,5 +531,62 @@ describe("serializeChatMessage with ChatContentPart[]", () => {
       messages: Array<{ content: unknown }>;
     };
     assert.equal(body.messages[0]!.content, "hello");
+  });
+
+  it("serializes reasoning_content when present", async () => {
+    let capturedBody: string | undefined;
+    const fetchImpl = async (_url: string | URL, init?: RequestInit) => {
+      capturedBody = init?.body as string;
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+        status: 200,
+      });
+    };
+    const p = createOpenAICompatibleProvider({
+      id: "oai",
+      baseUrl: "https://api.openai.com/v1",
+      fetchImpl,
+    });
+
+    const messages: ChatMessage[] = [
+      {
+        role: "assistant",
+        content: "The final answer is 42.",
+        reasoningContent: "I calculated 6 * 7 = 42.",
+      },
+    ];
+
+    await p.complete({ model: "gpt-4o", messages });
+    const body = JSON.parse(capturedBody ?? "{}") as {
+      messages: Array<{ content: unknown; reasoning_content?: string }>;
+    };
+    assert.equal(body.messages[0]!.reasoning_content, "I calculated 6 * 7 = 42.");
+  });
+
+  it("does not serialize reasoning_content when absent", async () => {
+    let capturedBody: string | undefined;
+    const fetchImpl = async (_url: string | URL, init?: RequestInit) => {
+      capturedBody = init?.body as string;
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+        status: 200,
+      });
+    };
+    const p = createOpenAICompatibleProvider({
+      id: "oai",
+      baseUrl: "https://api.openai.com/v1",
+      fetchImpl,
+    });
+
+    const messages: ChatMessage[] = [
+      {
+        role: "assistant",
+        content: "The final answer is 42.",
+      },
+    ];
+
+    await p.complete({ model: "gpt-4o", messages });
+    const body = JSON.parse(capturedBody ?? "{}") as {
+      messages: Array<{ content: unknown; reasoning_content?: string }>;
+    };
+    assert.equal(body.messages[0]!.reasoning_content, undefined);
   });
 });

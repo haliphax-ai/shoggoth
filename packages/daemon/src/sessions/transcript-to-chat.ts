@@ -56,6 +56,11 @@ export function transcriptRowsToModelChatMessages(
       continue;
     }
     if (m.role === "assistant") {
+      const baseMsg: ChatMessage = {
+        role: "assistant",
+        content: "",
+      };
+
       if (m.toolCalls?.length) {
         const toolCalls: ChatToolCall[] = m.toolCalls.map((tc) => ({
           id: tc.id,
@@ -65,16 +70,23 @@ export function transcriptRowsToModelChatMessages(
         }));
         let content = m.content ? parseTranscriptContent(m.content) : m.content;
         content = content != null ? stripThinkingBlocks(content) : content;
-        out.push({
-          role: "assistant",
-          content,
-          toolCalls,
-        });
+        baseMsg.content = content;
+        baseMsg.toolCalls = toolCalls;
       } else {
         let content = m.content ? parseTranscriptContent(m.content) : "";
         content = stripThinkingBlocks(content);
-        out.push({ role: "assistant", content });
+        baseMsg.content = content;
       }
+
+      // Extract reasoningContent from metadata
+      if (m.metadata && typeof m.metadata === "object") {
+        const meta = m.metadata as { reasoningContent?: string };
+        if (meta.reasoningContent) {
+          baseMsg.reasoningContent = meta.reasoningContent;
+        }
+      }
+
+      out.push(baseMsg);
       continue;
     }
     if (m.role === "tool" && m.toolCallId) {

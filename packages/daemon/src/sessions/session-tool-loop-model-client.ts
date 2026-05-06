@@ -263,14 +263,15 @@ export function createSessionToolLoopModelClient(input: {
         if (piece) {
           priorRoundsStreamText += priorRoundsStreamText ? `\n\n${piece}` : piece;
         }
-        messages = [
-          ...messages,
-          {
-            role: "assistant",
-            content: out.content,
-            toolCalls: out.toolCalls,
-          },
-        ];
+        const assistantMsg: ChatMessage = {
+          role: "assistant",
+          content: out.content,
+          toolCalls: out.toolCalls,
+        };
+        if (out.reasoningContent) {
+          assistantMsg.reasoningContent = out.reasoningContent;
+        }
+        messages = [...messages, assistantMsg];
         return {
           content: out.content,
           toolCalls: out.toolCalls.map((tc) => ({
@@ -279,17 +280,19 @@ export function createSessionToolLoopModelClient(input: {
             argsJson: tc.arguments,
             ...(tc.thoughtSignature ? { thoughtSignature: tc.thoughtSignature } : {}),
           })),
+          reasoningContent: out.reasoningContent,
         };
       }
 
-      messages = [
-        ...messages,
-        {
-          role: "assistant",
-          content: out.content ?? "",
-        },
-      ];
-      return { content: out.content, toolCalls: [] };
+      const assistantMsg: ChatMessage = {
+        role: "assistant",
+        content: out.content ?? "",
+      };
+      if (out.reasoningContent) {
+        assistantMsg.reasoningContent = out.reasoningContent;
+      }
+      messages = [...messages, assistantMsg];
+      return { content: out.content, toolCalls: [], reasoningContent: out.reasoningContent };
     },
 
     pushToolMessage({ toolCallId, content }) {

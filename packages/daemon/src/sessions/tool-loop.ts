@@ -41,6 +41,7 @@ export interface ModelClient {
   complete(): Promise<{
     content: string | null;
     toolCalls: readonly ToolCall[];
+    reasoningContent?: string;
   }>;
   /** When set, tool results are fed back so the next `complete()` sees OpenAI-style tool messages. */
   pushToolMessage?(input: { toolCallId: string; content: string }): void;
@@ -226,7 +227,11 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
     for (;;) {
       assertNotAborted(options.turnAbortSignal);
 
-      let turn: { content: string | null; toolCalls: readonly ToolCall[] };
+      let turn: {
+        content: string | null;
+        toolCalls: readonly ToolCall[];
+        reasoningContent?: string;
+      };
       try {
         turn = await Promise.race([
           options.model.complete(),
@@ -283,6 +288,9 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
           appendTx({
             role: "assistant",
             content: turn.content,
+            metadata: turn.reasoningContent
+              ? { reasoningContent: turn.reasoningContent }
+              : undefined,
           });
           emitStats?.({ transcriptMessageCount: getTranscriptCount() });
         }
@@ -322,6 +330,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
             argsJson: tc.argsJson,
             ...(tc.thoughtSignature ? { thoughtSignature: tc.thoughtSignature } : {}),
           })),
+          metadata: turn.reasoningContent ? { reasoningContent: turn.reasoningContent } : undefined,
         });
         emitStats?.({ transcriptMessageCount: getTranscriptCount() });
       }
