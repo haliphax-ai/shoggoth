@@ -336,7 +336,10 @@ async function handleInteraction(
           name: p.name,
           models: p.models?.map((m) => ({ id: m.name, name: m.name })) || [],
         })),
-        failoverChain: modelsConfig.failoverChain || [],
+        failoverChain: (modelsConfig.failoverChain || []).map((e) => ({
+          providerId: e.providerId,
+          modelId: e.model,
+        })),
       });
 
       await deps.transport.interactionCallback(ev.id, ev.token, {

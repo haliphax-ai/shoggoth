@@ -100,14 +100,10 @@ export function buildProviderSelectOptions({
   const providersToAdd = providers.slice(0, maxProviders);
 
   for (const provider of providersToAdd) {
-    const option: SelectMenuOption = {
-      label: provider.name,
-      value: provider.id,
-    };
-
-    if (provider.id === currentProviderId) {
-      option.default = true;
-    }
+    const option: SelectMenuOption =
+      provider.id === currentProviderId
+        ? { label: provider.name, value: provider.id, default: true }
+        : { label: provider.name, value: provider.id };
 
     options.push(option);
   }
@@ -127,8 +123,8 @@ export function buildModelSelectOptions({
   currentModel,
 }: {
   providerId: string;
-  providers: ProviderConfig[];
-  failoverChain: FailoverChainEntry[];
+  providers: readonly ProviderConfig[];
+  failoverChain: readonly FailoverChainEntry[];
   currentModel?: string;
 }): SelectMenuOption[] {
   // Find the provider
@@ -156,18 +152,13 @@ export function buildModelSelectOptions({
   // Build options array
   const options: SelectMenuOption[] = [];
   for (const [modelId, modelName] of modelsById) {
-    const option: SelectMenuOption = {
-      label: modelName,
-      value: modelId,
-    };
-
-    if (modelId === currentModel) {
-      option.default = true;
-    }
+    const option: SelectMenuOption =
+      modelId === currentModel
+        ? { label: modelName, value: modelId, default: true }
+        : { label: modelName, value: modelId };
 
     options.push(option);
   }
-
   // Cap at 25 options
   return options.slice(0, 25);
 }

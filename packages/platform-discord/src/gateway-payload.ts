@@ -161,12 +161,13 @@ export function discordInteractionCreateToEvent(d: unknown): DiscordInteractionE
 
   // Extract message from the root level of the payload (for MESSAGE_COMPONENT interactions)
   const message = asRecord(o.message);
-  const extractedMessage = message
-    ? {
-        id: typeof message.id === "string" ? message.id : undefined,
-        content: typeof message.content === "string" ? message.content : undefined,
-      }
-    : undefined;
+  const extractedMessage =
+    message && typeof message.id === "string"
+      ? {
+          id: message.id,
+          content: typeof message.content === "string" ? message.content : undefined,
+        }
+      : undefined;
 
   const data: DiscordInteractionEvent["data"] = {
     name: typeof rawData?.name === "string" ? rawData.name : undefined,
