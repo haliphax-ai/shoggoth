@@ -555,7 +555,7 @@ describe("serializeChatMessage with ChatContentPart[]", () => {
       },
     ];
 
-    await p.complete({ model: "gpt-4o", messages });
+    await p.complete({ model: "gpt-4o", messages, thinkingFormat: "native" });
     const body = JSON.parse(capturedBody ?? "{}") as {
       messages: Array<{ content: unknown; reasoning_content?: string }>;
     };

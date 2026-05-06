@@ -68,7 +68,10 @@ function serializeContentParts(parts: ChatContentPart[]): unknown[] {
   });
 }
 
-function serializeChatMessage(m: ChatMessage): Record<string, unknown> {
+function serializeChatMessage(
+  m: ChatMessage,
+  thinkingFormat?: "native" | "xml-tags" | "none",
+): Record<string, unknown> {
   const o: Record<string, unknown> = { role: m.role };
   if (m.name) o.name = m.name;
   if (m.toolCallId) o.tool_call_id = m.toolCallId;
@@ -90,7 +93,7 @@ function serializeChatMessage(m: ChatMessage): Record<string, unknown> {
   } else {
     o.content = "";
   }
-  if (m.reasoningContent) {
+  if (m.reasoningContent && thinkingFormat === "native") {
     o.reasoning_content = m.reasoningContent;
   }
   return o;
@@ -321,7 +324,7 @@ export function createOpenAICompatibleProvider(
 
       const body: Record<string, unknown> = {
         model: input.model,
-        messages: input.messages.map((m) => serializeChatMessage(m)),
+        messages: input.messages.map((m) => serializeChatMessage(m, input.thinkingFormat)),
         max_tokens: input.maxOutputTokens,
         temperature: input.temperature,
       };
@@ -458,7 +461,7 @@ export function createOpenAICompatibleProvider(
 
       const body: Record<string, unknown> = {
         model: input.model,
-        messages: input.messages.map((m) => serializeChatMessage(m)),
+        messages: input.messages.map((m) => serializeChatMessage(m, input.thinkingFormat)),
         tools: input.tools,
         tool_choice: "auto" as const,
         max_tokens: input.maxOutputTokens,
