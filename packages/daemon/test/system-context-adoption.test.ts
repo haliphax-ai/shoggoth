@@ -267,7 +267,8 @@ describe("systemContext adoption: subagent_spawn persistent", () => {
           });
           const res = parseResponseLine(line);
           assert.equal(res.ok, true);
-          assert.equal(calls.length, 1);
+          // First call is the child's model turn; a second delivery call may follow asynchronously.
+          assert.ok(calls.length >= 1);
 
           const sc = calls[0].systemContext;
           assert.ok(sc, "systemContext must be present");

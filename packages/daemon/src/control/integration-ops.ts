@@ -307,6 +307,58 @@ function assertAgentSpawnSubagentsAllowed(
   }
 }
 
+/**
+ * Deliver a subagent's completed result to the respond_to session.
+ * Used by background one-shot and non-thread-bound persistent subagents.
+ */
+async function deliverSubagentResult(
+  ext: NonNullable<typeof subagentRuntimeExtensionRef.current>,
+  opts: {
+    childSessionId: string;
+    respondTo: string;
+    internalDelivery: boolean;
+    mode: "one_shot" | "persistent";
+    assistantText: string;
+    subLog: ReturnType<typeof getLogger>;
+  },
+): Promise<void> {
+  const { childSessionId, respondTo, internalDelivery, mode, assistantText, subLog } = opts;
+  const content = `[Subagent completed] session_id: ${childSessionId}\n\n${assistantText}`;
+  try {
+    await ext.runSessionModelTurn({
+      sessionId: respondTo,
+      userContent: content,
+      userMetadata: {
+        subagent_result: true,
+        child_session_id: childSessionId,
+        mode,
+      },
+      systemContext: {
+        kind: "subagent.result",
+        summary: `Result delivered from subagent ${childSessionId}.`,
+        data: {
+          child_session_id: childSessionId,
+          mode,
+        },
+      },
+      delivery: { kind: "internal" },
+    });
+    subLog.info("subagent result delivered to respond_to session", {
+      childSessionId,
+      respondTo,
+      mode,
+      internal: internalDelivery,
+    });
+  } catch (err) {
+    subLog.warn("failed to deliver subagent result to respond_to session", {
+      childSessionId,
+      respondTo,
+      mode,
+      error: String(err),
+    });
+  }
+}
+
 function requireAcpxRuntime(ctx: IntegrationOpsContext): {
   acpxStore: AcpxBindingStore;
   sessions: SessionStore;
@@ -990,6 +1042,14 @@ export async function handleIntegrationControlOp(
                 childId,
                 replyLen: turn.latestAssistantText?.length ?? 0,
               });
+              return deliverSubagentResult(ext, {
+                childSessionId: childId,
+                respondTo,
+                internalDelivery,
+                mode: "one_shot",
+                assistantText: turn.latestAssistantText,
+                subLog,
+              });
             })
             .catch((err) => {
               subLog.warn("subagent one_shot (background) model turn failed", {
@@ -1146,6 +1206,19 @@ export async function handleIntegrationControlOp(
             },
           },
           delivery,
+        })
+        .then((turn) => {
+          // Deliver result to respond_to session for non-thread-bound persistent subagents.
+          if (!platformThreadId) {
+            return deliverSubagentResult(ext, {
+              childSessionId: childId,
+              respondTo,
+              internalDelivery,
+              mode: "persistent",
+              assistantText: turn.latestAssistantText,
+              subLog,
+            });
+          }
         })
         .catch((err) => {
           subLog.warn("persistent subagent first turn failed", {
