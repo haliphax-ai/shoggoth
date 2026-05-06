@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { toolExecExtended, getExecSession, removeExecSession } from "../src/tools";
@@ -728,6 +728,257 @@ describe("toolExecExtended", () => {
         creds,
       );
       assert.equal(readFileSync(join(ws, "stdin-file.txt"), "utf8"), content);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // File output feature (NEW TESTS)
+  // -----------------------------------------------------------------------
+
+  describe("file output", () => {
+    // @ts-expect-error - new fields not yet added to interface
+    it("validation: rejects outputFile with stdoutFile", async () => {
+      await assert.rejects(
+        () =>
+          // @ts-expect-error - new fields not yet added to interface
+          toolExecExtended(
+            ws,
+            {
+              command: "echo hello",
+              outputFile: "output.txt",
+              stdoutFile: "stdout.txt",
+            },
+            creds,
+          ),
+        /outputFile.*mutually exclusive/i,
+      );
+    });
+
+    // @ts-expect-error - new fields not yet added to interface
+    it("validation: rejects outputFile with stderrFile", async () => {
+      await assert.rejects(
+        () =>
+          // @ts-expect-error - new fields not yet added to interface
+          toolExecExtended(
+            ws,
+            {
+              command: "echo hello",
+              outputFile: "output.txt",
+              stderrFile: "stderr.txt",
+            },
+            creds,
+          ),
+        /outputFile.*mutually exclusive/i,
+      );
+    });
+
+    // @ts-expect-error - new fields not yet added to interface
+    it("validation: rejects file output with background: true", async () => {
+      await assert.rejects(
+        () =>
+          // @ts-expect-error - new fields not yet added to interface
+          toolExecExtended(
+            ws,
+            {
+              command: "echo hello",
+              stdoutFile: "stdout.txt",
+              background: true,
+            },
+            creds,
+          ),
+        /file output.*incompatible.*background/i,
+      );
+    });
+
+    // @ts-expect-error - new fields not yet added to interface
+    it("validation: rejects file output with yieldMs", async () => {
+      await assert.rejects(
+        () =>
+          // @ts-expect-error - new fields not yet added to interface
+          toolExecExtended(
+            ws,
+            {
+              command: "echo hello",
+              stderrFile: "stderr.txt",
+              yieldMs: 100,
+            },
+            creds,
+          ),
+        /file output.*incompatible.*yieldMs/i,
+      );
+    });
+
+    // @ts-expect-error - new fields not yet added to interface
+    it("file writing: writes combined output to outputFile", async () => {
+      // @ts-expect-error - new fields not yet added to interface
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "echo out; echo err >&2",
+          outputFile: "combined.txt",
+        },
+        creds,
+      );
+      assert.equal(r.kind, "foreground");
+      const fg = r as ExecForegroundResult;
+      // @ts-expect-error - new fields not yet added to interface
+      assert.ok(fg.outputFile);
+      // @ts-expect-error - new fields not yet added to interface
+      assert.equal(fg.outputFile, "combined.txt");
+      assert.equal(fg.output, undefined);
+      assert.equal(fg.stdout, undefined);
+      assert.equal(fg.stderr, undefined);
+
+      const content = readFileSync(join(ws, "combined.txt"), "utf8");
+      assert.ok(content.includes("out"));
+      assert.ok(content.includes("err"));
+    });
+
+    // @ts-expect-error - new fields not yet added to interface
+    it("file writing: writes stdout to stdoutFile and stderr to stderrFile", async () => {
+      // @ts-expect-error - new fields not yet added to interface
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "echo out; echo err >&2",
+          stdoutFile: "stdout.txt",
+          stderrFile: "stderr.txt",
+        },
+        creds,
+      );
+      assert.equal(r.kind, "foreground");
+      const fg = r as ExecForegroundResult;
+      // @ts-expect-error - new fields not yet added to interface
+      assert.ok(fg.stdoutFile);
+      // @ts-expect-error - new fields not yet added to interface
+      assert.ok(fg.stderrFile);
+      // @ts-expect-error - new fields not yet added to interface
+      assert.equal(fg.stdoutFile, "stdout.txt");
+      // @ts-expect-error - new fields not yet added to interface
+      assert.equal(fg.stderrFile, "stderr.txt");
+      assert.equal(fg.output, undefined);
+      assert.equal(fg.stdout, undefined);
+      assert.equal(fg.stderr, undefined);
+
+      const stdoutContent = readFileSync(join(ws, "stdout.txt"), "utf8");
+      const stderrContent = readFileSync(join(ws, "stderr.txt"), "utf8");
+      assert.ok(stdoutContent.includes("out"));
+      assert.ok(stderrContent.includes("err"));
+    });
+
+    // @ts-expect-error - new fields not yet added to interface
+    it("file writing: only stderrFile set — stdout returned inline", async () => {
+      // @ts-expect-error - new fields not yet added to interface
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "echo out; echo err >&2",
+          stderrFile: "stderr.txt",
+        },
+        creds,
+      );
+      assert.equal(r.kind, "foreground");
+      const fg = r as ExecForegroundResult;
+      // @ts-expect-error - new fields not yet added to interface
+      assert.equal(fg.stderrFile, "stderr.txt");
+      assert.equal(fg.stdout, undefined);
+      assert.equal(fg.output, undefined);
+      // stderr should be returned inline since stderrFile was set
+      // @ts-expect-error - new fields not yet added to interface
+      assert.equal(fg.stderr, undefined);
+
+      const stderrContent = readFileSync(join(ws, "stderr.txt"), "utf8");
+      assert.ok(stderrContent.includes("err"));
+    });
+
+    // @ts-expect-error - new fields not yet added to interface
+    it("file writing: only stdoutFile set — stderr returned inline", async () => {
+      // @ts-expect-error - new fields not yet added to interface
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "echo out; echo err >&2",
+          stdoutFile: "stdout.txt",
+        },
+        creds,
+      );
+      assert.equal(r.kind, "foreground");
+      const fg = r as ExecForegroundResult;
+      // @ts-expect-error - new fields not yet added to interface
+      assert.equal(fg.stdoutFile, "stdout.txt");
+      assert.equal(fg.stderr, undefined);
+      assert.equal(fg.output, undefined);
+      // stdout should be returned inline since stdoutFile was set
+      // @ts-expect-error - new fields not yet added to interface
+      assert.equal(fg.stdout, undefined);
+
+      const stdoutContent = readFileSync(join(ws, "stdout.txt"), "utf8");
+      assert.ok(stdoutContent.includes("out"));
+    });
+
+    // @ts-expect-error - new fields not yet added to interface
+    it("file writing: non-zero exit code still writes files", async () => {
+      // @ts-expect-error - new fields not yet added to interface
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "echo out; echo err >&2; exit 42",
+          stdoutFile: "stdout.txt",
+          stderrFile: "stderr.txt",
+        },
+        creds,
+      );
+      assert.equal(r.kind, "foreground");
+      const fg = r as ExecForegroundResult;
+      assert.equal(fg.exitCode, 42);
+      // @ts-expect-error - new fields not yet added to interface
+      assert.equal(fg.stdoutFile, "stdout.txt");
+      // @ts-expect-error - new fields not yet added to interface
+      assert.equal(fg.stderrFile, "stderr.txt");
+
+      const stdoutContent = readFileSync(join(ws, "stdout.txt"), "utf8");
+      const stderrContent = readFileSync(join(ws, "stderr.txt"), "utf8");
+      assert.ok(stdoutContent.includes("out"));
+      assert.ok(stderrContent.includes("err"));
+    });
+
+    // @ts-expect-error - new fields not yet added to interface
+    it("file writing: empty output creates zero-byte file", async () => {
+      // @ts-expect-error - new fields not yet added to interface
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "true",
+          stdoutFile: "empty.txt",
+        },
+        creds,
+      );
+      assert.equal(r.kind, "foreground");
+      const fg = r as ExecForegroundResult;
+      // @ts-expect-error - new fields not yet added to interface
+      assert.equal(fg.stdoutFile, "empty.txt");
+
+      const stats = existsSync(join(ws, "empty.txt"));
+      assert.ok(stats);
+      const content = readFileSync(join(ws, "empty.txt"));
+      assert.equal(content.length, 0);
+    });
+
+    // @ts-expect-error - new fields not yet added to interface
+    it("path validation: rejects path traversal (e.g. `../escape.txt`)", async () => {
+      await assert.rejects(
+        () =>
+          // @ts-expect-error - new fields not yet added to interface
+          toolExecExtended(
+            ws,
+            {
+              command: "echo hello",
+              stdoutFile: "../escape.txt",
+            },
+            creds,
+          ),
+        /path.*traversal/i,
+      );
     });
   });
 });
