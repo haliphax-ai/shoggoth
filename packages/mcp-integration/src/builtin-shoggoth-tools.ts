@@ -71,6 +71,21 @@ const execArgs = {
         "Wait up to this many milliseconds for the process to finish. If still running, background it and return a handle. Mutually exclusive with background (background wins). 0 is equivalent to background: true.",
       minimum: 0,
     },
+    stdoutFile: {
+      type: "string",
+      description:
+        "Write stdout to this workspace-relative file instead of returning inline. Incompatible with background/yieldMs.",
+    },
+    stderrFile: {
+      type: "string",
+      description:
+        "Write stderr to this workspace-relative file instead of returning inline. Incompatible with background/yieldMs.",
+    },
+    outputFile: {
+      type: "string",
+      description:
+        "Write combined stdout+stderr to this workspace-relative file instead of returning inline. Mutually exclusive with stdoutFile/stderrFile. Incompatible with background/yieldMs.",
+    },
   },
   required: ["argv"],
 } as const;
