@@ -191,6 +191,44 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
             logger,
             abortSession: abortSession as any,
             invokeControlOp,
+            getModelsConfig: async () => {
+              const cfg = configRef.current;
+              const models = cfg?.models;
+              if (!models?.providers || models.providers.length === 0) return null;
+              const chain = models.failoverChain ?? [];
+              // Parse failoverChain strings ("providerId/model") into structured entries
+              const parsedChain = chain.map((entry: string) => {
+                const slashIdx = entry.indexOf("/");
+                if (slashIdx < 0) return { providerId: entry, model: entry };
+                return { providerId: entry.slice(0, slashIdx), model: entry.slice(slashIdx + 1) };
+              });
+              return {
+                providers: models.providers.map(
+                  (p: { id: string; kind: string; models?: Array<{ name: string }> }) => {
+                    // Collect models from provider's own models array
+                    const seen = new Set<string>();
+                    const modelList: Array<{ name: string }> = [];
+                    if (p.models && Array.isArray(p.models)) {
+                      for (const m of p.models) {
+                        if (m.name && !seen.has(m.name)) {
+                          seen.add(m.name);
+                          modelList.push({ name: m.name });
+                        }
+                      }
+                    }
+                    // Also add any from failoverChain that aren't already listed
+                    for (const e of parsedChain) {
+                      if (e.providerId === p.id && !seen.has(e.model)) {
+                        seen.add(e.model);
+                        modelList.push({ name: e.model });
+                      }
+                    }
+                    return { id: p.id, name: p.id, models: modelList };
+                  },
+                ),
+                failoverChain: parsedChain,
+              };
+            },
             resolveSessionForChannel: (channelId, guildId) =>
               resolveSessionForChannel(configRef.current, channelId, guildId),
           }),

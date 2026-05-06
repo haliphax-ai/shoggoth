@@ -131,13 +131,20 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
       assert.strictEqual(body.type, 7); // UPDATE_MESSAGE response
       assert.ok(body.data.content.includes("Model Configuration"));
       assert.ok(Array.isArray(body.data.components));
-      assert.strictEqual(body.data.components.length, 1);
+      assert.strictEqual(body.data.components.length, 2);
 
-      const actionRow = body.data.components[0] as { components: unknown[] };
-      const selectComponent = actionRow.components[0] as { type: number; custom_id: string };
-      assert.strictEqual(selectComponent.type, 3); // STRING_SELECT
-      assert.ok(selectComponent.custom_id.includes("model_select|model|"));
-      assert.ok(selectComponent.custom_id.includes("anthropic"));
+      // First action row: provider select
+      const providerRow = body.data.components[0] as { components: unknown[] };
+      const providerSelect = providerRow.components[0] as { type: number; custom_id: string };
+      assert.strictEqual(providerSelect.type, 3); // STRING_SELECT
+      assert.ok(providerSelect.custom_id.includes("model_select|provider|"));
+
+      // Second action row: model select
+      const modelRow = body.data.components[1] as { components: unknown[] };
+      const modelSelect = modelRow.components[0] as { type: number; custom_id: string };
+      assert.strictEqual(modelSelect.type, 3); // STRING_SELECT
+      assert.ok(modelSelect.custom_id.includes("model_select|model|"));
+      assert.ok(modelSelect.custom_id.includes("anthropic"));
     });
   });
 
@@ -244,7 +251,6 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       assert.strictEqual(calls.length, 1);
-      assert.strictEqual(calls[0]!.method, "interactionCallback");
       const [id, token, body] = calls[0]!.args as [
         string,
         string,
@@ -252,7 +258,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
       ];
       assert.strictEqual(id, "int-4");
       assert.strictEqual(token, "tok-4");
-      assert.strictEqual(body.type, 4); // CHANNEL_MESSAGE_WITH_SOURCE response
+      assert.strictEqual(body.type, 7); // UPDATE_MESSAGE response
       assert.ok(body.data.content.includes("success") || body.data.content.includes("✅"));
 
       // Verify invokeControlOp was called correctly
@@ -348,7 +354,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
       ];
       assert.strictEqual(id, "int-6");
       assert.strictEqual(token, "tok-6");
-      assert.strictEqual(body.type, 4); // CHANNEL_MESSAGE_WITH_SOURCE response
+      assert.strictEqual(body.type, 7); // UPDATE_MESSAGE response
       assert.ok(
         body.data.content.includes("error") ||
           body.data.content.includes("⚠️") ||

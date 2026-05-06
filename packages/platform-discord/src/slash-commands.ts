@@ -342,11 +342,32 @@ async function handleInteraction(
         })),
       });
 
+      // Rebuild provider options with the newly selected provider highlighted
+      const providerOptions = buildProviderSelectOptions({
+        providers: modelsConfig.providers.map((p) => ({
+          id: p.id,
+          name: p.name,
+          models: p.models?.map((m) => ({ id: m.name, name: m.name })) || [],
+        })),
+        currentProviderId: value,
+      });
+
       await deps.transport.interactionCallback(ev.id, ev.token, {
         type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
         data: {
           content: `🎯 **Model Configuration**\nSession: \`${sessionId}\`\nProvider: ${provider.name}`,
           components: [
+            {
+              type: ACTION_ROW,
+              components: [
+                {
+                  type: STRING_SELECT,
+                  custom_id: encodeModelSelectCustomId("provider", sessionId),
+                  placeholder: "Select a provider",
+                  options: providerOptions,
+                },
+              ],
+            },
             {
               type: ACTION_ROW,
               components: [
@@ -453,10 +474,10 @@ async function handleInteraction(
     // Validate it contains '/'
     if (!value.includes("/")) {
       await deps.transport.interactionCallback(ev.id, ev.token, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
         data: {
           content: `⚠️ Invalid model format. Expected \`provider/model\`, got \`${value}\``,
-          flags: 64, // Ephemeral
+          components: [],
         },
       });
       return;
@@ -473,18 +494,18 @@ async function handleInteraction(
         : `⚠️ Failed to set model: ${res.error ?? "unknown error"}`;
 
       await deps.transport.interactionCallback(ev.id, ev.token, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
         data: {
           content,
-          flags: 64, // Ephemeral
+          components: [],
         },
       });
     } catch (err) {
       await deps.transport.interactionCallback(ev.id, ev.token, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
         data: {
           content: `⚠️ Failed to set model: ${String(err)}`,
-          flags: 64, // Ephemeral
+          components: [],
         },
       });
     }
@@ -645,10 +666,30 @@ async function handleInteraction(
 
       if (currentModelRes.ok && currentModelRes.result) {
         const r = currentModelRes.result as Record<string, unknown>;
-        const effectiveModels = r.effective_models as Record<string, unknown> | null;
-        if (effectiveModels) {
-          currentProviderId = effectiveModels.providerId as string | undefined;
-          currentModel = effectiveModels.model as string | undefined;
+        // Check explicit model_selection override first
+        const modelSel = r.model_selection as Record<string, unknown> | null | undefined;
+        if (modelSel && typeof modelSel.model === "string") {
+          const m = modelSel.model as string;
+          const slashIdx = m.indexOf("/");
+          if (slashIdx > 0) {
+            currentProviderId = m.slice(0, slashIdx);
+            currentModel = m.slice(slashIdx + 1);
+          }
+        }
+        // Fall back to first failoverChain entry from effective config
+        if (!currentProviderId || !currentModel) {
+          const effectiveModels = r.effective_models as Record<string, unknown> | null;
+          if (effectiveModels) {
+            const chain = effectiveModels.failoverChain as string[] | undefined;
+            if (chain && chain.length > 0) {
+              const first = chain[0];
+              const slashIdx = first.indexOf("/");
+              if (slashIdx > 0) {
+                currentProviderId = first.slice(0, slashIdx);
+                currentModel = first.slice(slashIdx + 1);
+              }
+            }
+          }
         }
       }
 
@@ -696,25 +737,62 @@ async function handleInteraction(
       const currentModelDisplay =
         currentProviderId && currentModel ? `\`${currentProviderId}/${currentModel}\`` : "Not set";
 
-      // Respond with provider select menu
+      // Respond with both provider and model select menus
+      // Determine which provider to show models for (current or first available)
+      const activeProviderId = currentProviderId || modelsConfig.providers[0]?.id;
+      const modelOptions = activeProviderId
+        ? buildModelSelectOptions({
+            providerId: activeProviderId,
+            providers: modelsConfig.providers.map((p) => ({
+              id: p.id,
+              name: p.name,
+              models: p.models?.map((m) => ({ id: m.name, name: m.name })) || [],
+            })),
+            failoverChain: (modelsConfig.failoverChain || []).map((e) => ({
+              providerId: e.providerId,
+              modelId: e.model,
+            })),
+          })
+        : [];
+
+      const components: Record<string, unknown>[] = [
+        {
+          type: 1,
+          components: [
+            {
+              type: 3, // STRING_SELECT
+              custom_id: encodeModelSelectCustomId("provider", payload.session_id as string),
+              placeholder: "Select a provider",
+              options: providerOptions,
+            },
+          ],
+        },
+      ];
+
+      if (modelOptions.length > 0) {
+        components.push({
+          type: 1,
+          components: [
+            {
+              type: 3, // STRING_SELECT
+              custom_id: encodeModelSelectCustomId(
+                "model",
+                payload.session_id as string,
+                activeProviderId,
+              ),
+              placeholder: "Select a model",
+              options: modelOptions,
+            },
+          ],
+        });
+      }
+
       await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
         type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
         data: {
           content: `🎯 **Model Configuration**\nSession: \`${payload.session_id}\`\nCurrent: ${currentModelDisplay}`,
           flags: 64, // Ephemeral
-          components: [
-            {
-              type: 1,
-              components: [
-                {
-                  type: 3, // STRING_SELECT
-                  custom_id: encodeModelSelectCustomId("provider", payload.session_id as string),
-                  placeholder: "Select a provider",
-                  options: providerOptions,
-                },
-              ],
-            },
-          ],
+          components,
         },
       });
     } catch (err) {
