@@ -1,4 +1,5 @@
 import { existsSync, realpathSync, globSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { join, resolve, relative } from "node:path";
 import {
   runAsUser,
@@ -922,6 +923,12 @@ export interface ExecExtendedOptions {
    * Mutually exclusive with `background: true` (background wins).
    */
   yieldMs?: number;
+  /** File path to write stdout to (workspace-relative). */
+  stdoutFile?: string;
+  /** File path to write stderr to (workspace-relative). */
+  stderrFile?: string;
+  /** File path to write combined stdout+stderr to (workspace-relative). Mutually exclusive with stdoutFile/stderrFile. */
+  outputFile?: string;
 }
 
 /** Result when the process ran to completion (foreground). */
@@ -943,6 +950,12 @@ export interface ExecForegroundResult {
   stdoutTruncated?: boolean;
   /** True when stderr was truncated (splitStreams mode). */
   stderrTruncated?: boolean;
+  /** Path where stdout was written (when stdoutFile was specified). */
+  stdoutFile?: string;
+  /** Path where stderr was written (when stderrFile was specified). */
+  stderrFile?: string;
+  /** Path where combined output was written (when outputFile was specified). */
+  outputFile?: string;
 }
 
 /** Result when the process was sent to the background. */
@@ -1100,6 +1113,17 @@ function validateExecOptions(opts: ExecExtendedOptions): void {
   }
   if (opts.yieldMs !== undefined && (typeof opts.yieldMs !== "number" || opts.yieldMs < 0)) {
     throw new Error("`yieldMs` must be a non-negative number.");
+  }
+  // File output validation
+  const hasFileOutput = opts.outputFile !== undefined || opts.stdoutFile !== undefined || opts.stderrFile !== undefined;
+  if (opts.outputFile && (opts.stdoutFile || opts.stderrFile)) {
+    throw new Error("`outputFile` cannot be used together with `stdoutFile` or `stderrFile`.");
+  }
+  if (hasFileOutput && opts.background) {
+    throw new Error("File output cannot be used with `background`.");
+  }
+  if (hasFileOutput && opts.yieldMs !== undefined) {
+    throw new Error("File output cannot be used with `yieldMs`.");
   }
 }
 
@@ -1298,6 +1322,47 @@ export async function toolExecExtended(
 
   // --- Foreground (default) ---
   const result = await runAsUser(spawnOpts);
+
+  // Handle file output if specified
+  const hasFileOutput = opts.outputFile || opts.stdoutFile || opts.stderrFile;
+  if (hasFileOutput) {
+    const fgResult: ExecForegroundResult = {
+      kind: "foreground",
+      exitCode: result.exitCode,
+      signal: result.signal,
+      timedOut: result.timedOut || undefined,
+    };
+
+    if (opts.outputFile) {
+      const absPath = resolvePathForWrite(workspaceRoot, opts.outputFile);
+      await writeFile(absPath, result.stdout + result.stderr);
+      fgResult.outputFile = opts.outputFile;
+    } else {
+      if (opts.stdoutFile) {
+        const absPath = resolvePathForWrite(workspaceRoot, opts.stdoutFile);
+        await writeFile(absPath, result.stdout);
+        fgResult.stdoutFile = opts.stdoutFile;
+      } else {
+        // stdout not redirected — return inline with truncation
+        const t = truncateOutput(result.stdout, maxOutput, truncationMode);
+        fgResult.stdout = t.text;
+        fgResult.stdoutTruncated = t.truncated || undefined;
+      }
+      if (opts.stderrFile) {
+        const absPath = resolvePathForWrite(workspaceRoot, opts.stderrFile);
+        await writeFile(absPath, result.stderr);
+        fgResult.stderrFile = opts.stderrFile;
+      } else {
+        // stderr not redirected — return inline with truncation
+        const t = truncateOutput(result.stderr, maxOutput, truncationMode);
+        fgResult.stderr = t.text;
+        fgResult.stderrTruncated = t.truncated || undefined;
+      }
+    }
+
+    return fgResult;
+  }
+
   return buildForegroundResultFromRaw(result, splitStreams, maxOutput, truncationMode);
 }
 
