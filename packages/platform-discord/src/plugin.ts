@@ -426,7 +426,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
       "health.register"(ctx) {
         ctx.registerProbe(
           createDiscordProbe({
-            getToken: state.getToken,
+            getToken: () => state.getToken(),
           }) as any,
         );
       },
