@@ -68,6 +68,15 @@ export function discordMessageCreateToInboundEvent(
     if (attachments.length === 0) attachments = undefined;
   }
 
+  // Thread detection: extract thread ID from `thread` object or `message_reference.channel_id`
+  const threadObj = asRecord(o.thread);
+  const threadId =
+    typeof threadObj?.id === "string"
+      ? threadObj.id
+      : typeof ref?.channel_id === "string" && ref.channel_id !== channelId
+        ? (ref.channel_id as string)
+        : undefined;
+
   return {
     kind: "message_create",
     messageId,
@@ -79,6 +88,7 @@ export function discordMessageCreateToInboundEvent(
     timestampIso,
     attachments,
     referencedMessageId,
+    threadId,
   };
 }
 

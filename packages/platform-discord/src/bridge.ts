@@ -6,10 +6,12 @@ import { createOutboundSender, type OutboundSender } from "./outbound";
 import { createDiscordStreamingOutbound } from "./streaming";
 import {
   createDiscordAdapter,
+  UnboundThreadError,
   type DiscordInboundEvent,
   type DiscordReactionAddEvent,
   type DiscordSessionRoute,
 } from "./adapter";
+
 export type { DiscordReactionAddEvent, DiscordSessionRoute } from "./adapter";
 import type { DiscordInteractionEvent } from "./interaction";
 import { connectDiscordGateway, type DiscordGatewaySession } from "./gateway-client";
@@ -279,6 +281,13 @@ export async function startDiscordMessagingIfConfigured(
         messageId: enriched.id,
       });
     } catch (err) {
+      if (err instanceof UnboundThreadError) {
+        opts.logger.warn("discord.inbound.unbound_thread", {
+          threadId: err.threadChannelId,
+          messageId: ev.messageId,
+        });
+        return;
+      }
       opts.logger.debug("discord.inbound.unrouted", { err: String(err) });
     }
   };
