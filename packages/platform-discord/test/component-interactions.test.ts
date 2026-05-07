@@ -12,6 +12,7 @@ function stubTransport(calls: Array<{ method: string; args: unknown[] }>): Disco
     editMessage: async () => {},
     deleteMessage: async () => {},
     createThreadFromMessage: async () => ({ id: "t1" }),
+    createThread: async () => ({ id: "t1" }),
     deleteChannel: async () => {},
     getMessage: async () => ({ id: "m1" }),
     getChannelMessages: async () => [],

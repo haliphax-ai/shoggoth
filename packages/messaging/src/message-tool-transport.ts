@@ -51,6 +51,15 @@ export interface MessageToolTransport {
       readonly auto_archive_duration?: 60 | 1440 | 4320 | 10080;
     },
   ): Promise<{ readonly id: string }>;
+  /** POST standalone thread (not anchored to a message). Discord type 11 = public, 12 = private. */
+  createThread(
+    channelId: string,
+    body: {
+      readonly name: string;
+      readonly type?: 11 | 12;
+      readonly auto_archive_duration?: 60 | 1440 | 4320 | 10080;
+    },
+  ): Promise<{ readonly id: string }>;
   deleteChannel(channelId: string): Promise<void>;
   createMessageReaction(channelId: string, messageId: string, emoji: string): Promise<void>;
   deleteMessageReaction(channelId: string, messageId: string, emoji: string): Promise<void>;

@@ -78,6 +78,9 @@ const stubDiscordRestTransport: DiscordMessagingRuntime["discordRestTransport"] 
   async createThreadFromMessage() {
     return { id: "thread-stub" };
   },
+  async createThread() {
+    return { id: "thread-stub" };
+  },
   async deleteChannel() {},
   async createMessageReaction() {},
   async triggerTypingIndicator() {},

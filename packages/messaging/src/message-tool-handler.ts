@@ -287,7 +287,6 @@ export async function executeMessageToolAction(
           ok: false,
           error: "create_thread not supported on this platform",
         };
-      const messageId = str(args.message_id, "message_id");
       const name = str(args.name, "name");
       const dur = args.auto_archive_duration_minutes;
       let auto_archive_duration: 60 | 1440 | 4320 | 10080 | undefined;
@@ -300,15 +299,32 @@ export async function executeMessageToolAction(
         }
         auto_archive_duration = dur;
       }
-      const { id } = await t.createThreadFromMessage(channelId, messageId, {
+      const messageId =
+        typeof args.message_id === "string" && args.message_id.trim()
+          ? args.message_id.trim()
+          : undefined;
+      if (messageId) {
+        const { id } = await t.createThreadFromMessage(channelId, messageId, {
+          name,
+          ...(auto_archive_duration !== undefined ? { auto_archive_duration } : {}),
+        });
+        return {
+          ok: true,
+          thread_id: id,
+          parent_channel_id: channelId,
+          message_id: messageId,
+        };
+      }
+      // Standalone thread (no anchor message)
+      const { id } = await t.createThread(channelId, {
         name,
+        type: 11,
         ...(auto_archive_duration !== undefined ? { auto_archive_duration } : {}),
       });
       return {
         ok: true,
         thread_id: id,
         parent_channel_id: channelId,
-        message_id: messageId,
       };
     }
 

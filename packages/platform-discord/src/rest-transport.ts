@@ -49,6 +49,7 @@ type DiscordRestOperation =
   | "getMessage"
   | "getChannelMessages"
   | "createThreadFromMessage"
+  | "createThread"
   | "deleteChannel"
   | "openDmChannel"
   | "createMessageReaction"
@@ -210,6 +211,20 @@ export function createDiscordRestTransport(
       const j = (await res.json()) as { id?: string };
       if (!j.id) throw new Error("Discord REST createThreadFromMessage: missing id in response");
       return { id: j.id };
+    },
+
+    async createThread(channelId, threadBody) {
+      const res = await discordFetchWithRateLimitRetry(
+        () =>
+          discordFetch(`/channels/${encodeURIComponent(channelId)}/threads`, {
+            method: "POST",
+            body: JSON.stringify(threadBody),
+          }),
+        "createThread",
+      );
+      const j2 = (await res.json()) as { id?: string };
+      if (!j2.id) throw new Error("Discord REST createThread: missing id in response");
+      return { id: j2.id };
     },
 
     async deleteChannel(channelId) {
