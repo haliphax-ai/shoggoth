@@ -109,8 +109,8 @@ export interface SessionAgentTurnResult {
 }
 
 function sessionCreds(uid?: number, gid?: number): AgentCredentials {
-  const u = uid ?? process.getuid?.() ?? 0;
-  const g = gid ?? process.getgid?.() ?? 0;
+  const u = uid ?? 900;
+  const g = gid ?? 900;
   return { uid: u, gid: g };
 }
 
