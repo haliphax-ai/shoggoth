@@ -592,7 +592,6 @@ async function handleInteraction(
             `📋 **Session Status**`,
             `ID: \`${session.id}\``,
             `Status: ${session.status}`,
-            model?.providerId ? `Provider: ${model.providerId}` : null,
             model?.model ? `Model: ${model.model}` : null,
             `Context segment: \`${session.contextSegmentId}\``,
           ];
