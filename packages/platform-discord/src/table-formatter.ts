@@ -110,14 +110,109 @@ function borderRow(widths: number[], left: string, mid: string, right: string): 
   );
 }
 
+/** Maximum total table width before responsive reflow kicks in. */
+const MAX_TABLE_WIDTH = 80;
+/** Maximum column content width when reflowing. */
+const MAX_COL_WIDTH = 20;
+
+/**
+ * Wrap a string into lines that fit within `maxWidth` visual columns.
+ * Prefers breaking at spaces; falls back to hard-breaking mid-word.
+ */
+function wrapText(text: string, maxWidth: number): string[] {
+  if (visualWidth(text) <= maxWidth) return [text];
+
+  const words = text.split(/( +)/); // keep spaces as separate tokens
+  const lines: string[] = [];
+  let cur = "";
+  let curW = 0;
+
+  for (const word of words) {
+    const ww = visualWidth(word);
+    if (curW + ww <= maxWidth) {
+      cur += word;
+      curW += ww;
+    } else if (curW === 0) {
+      // Single token wider than maxWidth — hard-break character by character
+      for (const ch of word) {
+        const cw = classifyCp(ch.codePointAt(0)!);
+        if (curW + cw > maxWidth && cur.length > 0) {
+          lines.push(cur);
+          cur = "";
+          curW = 0;
+        }
+        cur += ch;
+        curW += cw;
+      }
+    } else {
+      // Push current line (trim trailing spaces) and start fresh
+      lines.push(cur.trimEnd());
+      cur = word.trimStart();
+      curW = visualWidth(cur);
+    }
+  }
+  if (cur.length > 0) lines.push(cur.trimEnd());
+  return lines.length > 0 ? lines : [""];
+}
+
 function boxTable(cells: string[][], aligns: Array<"left" | "right" | "center">): string {
   if (cells.length === 0) return "";
   const colCount = Math.max(...cells.map((r: string[]) => r.length));
   if (colCount === 0) return "";
 
-  const widths: number[] = Array.from({ length: colCount }, (_, c: number) =>
+  // Compute natural (uncapped) column widths
+  const naturalWidths: number[] = Array.from({ length: colCount }, (_, c: number) =>
     Math.max(...cells.map((r: string[]) => visualWidth(r[c] ?? "")), 1),
   );
+
+  // Total table width = sum(widths) + 3*colCount + 1
+  // (each col has +2 padding, +1 separator except last, +2 outer borders)
+  const totalWidth = naturalWidths.reduce((a, b) => a + b, 0) + 3 * colCount + 1;
+
+  // If table exceeds max width, redistribute column widths to fit.
+  // Columns that naturally fit within the fair-share cap keep their width;
+  // remaining budget is distributed among the wider columns.
+  let widths: number[];
+  if (totalWidth > MAX_TABLE_WIDTH) {
+    const availableContent = MAX_TABLE_WIDTH - (3 * colCount + 1);
+    widths = [...naturalWidths];
+
+    // Iteratively assign fair-share caps: narrow columns lock in, freeing
+    // budget for the wider ones, until stable.
+    let remaining = availableContent;
+    const locked = Array.from<boolean>({ length: colCount }).fill(false);
+    let unlocked = colCount;
+
+    for (;;) {
+      const cap = Math.max(Math.floor(remaining / unlocked), MAX_COL_WIDTH);
+      let changed = false;
+      for (let c = 0; c < colCount; c++) {
+        if (locked[c]) continue;
+        if (naturalWidths[c] <= cap) {
+          // This column fits naturally — lock it in at its natural width
+          widths[c] = naturalWidths[c];
+          remaining -= naturalWidths[c];
+          locked[c] = true;
+          unlocked--;
+          changed = true;
+        }
+      }
+      if (!changed) break;
+    }
+
+    // Cap all remaining (wide) columns to the final fair-share value
+    if (unlocked > 0) {
+      const finalCap = Math.max(Math.floor(remaining / unlocked), MAX_COL_WIDTH);
+      for (let c = 0; c < colCount; c++) {
+        if (!locked[c]) {
+          widths[c] = finalCap;
+        }
+      }
+    }
+  } else {
+    widths = naturalWidths;
+  }
+
   const normAlign: Array<"left" | "right" | "center"> = Array.from(
     { length: colCount },
     (_, c: number) => aligns[c] ?? "left",
@@ -128,27 +223,49 @@ function boxTable(cells: string[][], aligns: Array<"left" | "right" | "center">)
   const sep = borderRow(innerW, BOX.lm, BOX.mm, BOX.rm);
   const bot = borderRow(innerW, BOX.bl, BOX.bm, BOX.br);
 
+  const needsWrap = totalWidth > MAX_TABLE_WIDTH;
+
   const lines: string[] = [top];
 
-  const header = cells[0];
-  lines.push(
-    BOX.v +
-      header
-        .map((cell: string, c: number) => " " + padVisual(cell, widths[c], normAlign[c]) + " ")
-        .join(BOX.v) +
-      BOX.v,
-  );
+  /**
+   * Render a logical row (which may span multiple visual lines when wrapping).
+   */
+  function renderRow(row: string[]): void {
+    if (!needsWrap) {
+      // Simple single-line row
+      lines.push(
+        BOX.v +
+          row
+            .map((cell: string, c: number) => " " + padVisual(cell, widths[c], normAlign[c]) + " ")
+            .join(BOX.v) +
+          BOX.v,
+      );
+      return;
+    }
+
+    // Wrap each cell into multiple visual lines
+    const wrapped: string[][] = row.map((cell: string, c: number) => wrapText(cell, widths[c]));
+    const maxLines = Math.max(...wrapped.map((w) => w.length), 1);
+
+    for (let ln = 0; ln < maxLines; ln++) {
+      lines.push(
+        BOX.v +
+          wrapped
+            .map((cellLines: string[], c: number) => {
+              const content = cellLines[ln] ?? "";
+              return " " + padVisual(content, widths[c], normAlign[c]) + " ";
+            })
+            .join(BOX.v) +
+          BOX.v,
+      );
+    }
+  }
+
+  renderRow(cells[0]);
   lines.push(sep);
 
   for (let i = 1; i < cells.length; i++) {
-    const row = cells[i];
-    lines.push(
-      BOX.v +
-        row
-          .map((cell: string, c: number) => " " + padVisual(cell, widths[c], normAlign[c]) + " ")
-          .join(BOX.v) +
-        BOX.v,
-    );
+    renderRow(cells[i]);
   }
 
   lines.push(bot);
