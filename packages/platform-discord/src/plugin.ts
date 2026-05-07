@@ -229,8 +229,12 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
                 failoverChain: parsedChain,
               };
             },
-            resolveSessionForChannel: (channelId, guildId) =>
-              resolveSessionForChannel(configRef.current, channelId, guildId),
+            resolveSessionForChannel: (channelId, guildId) => {
+              // Check dynamic thread bindings first, then static routes
+              const dynamic = discordMessaging?.resolveSessionId(channelId, guildId);
+              if (dynamic) return dynamic;
+              return resolveSessionForChannel(configRef.current, channelId, guildId);
+            },
           }),
           onMessageReactionAdd:
             hitlStack && hitlDiscordNoticeRegistry && hitlAutoApproveGate

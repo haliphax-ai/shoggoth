@@ -1169,15 +1169,11 @@ export async function handleIntegrationControlOp(
       });
       const delivery = platformThreadId
         ? (() => {
-            if (!platformUserId) {
-              throw new IntegrationOpError(
-                "ERR_MISSING_PLATFORM_USER_ID",
-                "platform_user_id is required for messaging_surface delivery",
-              );
-            }
+            // Thread-bound subagent: platform resolves channel from thread binding,
+            // so platform_user_id is optional.
             return {
               kind: "messaging_surface",
-              userId: platformUserId,
+              userId: platformUserId ?? "system",
               replyToMessageId,
             } as const;
           })()
@@ -1709,7 +1705,7 @@ export async function handleIntegrationControlOp(
       const delivery = silent
         ? ({ kind: "internal" } as const)
         : (() => {
-            if (!platformUserId) {
+            if (!platformUserId && !row.subagentPlatformThreadId?.trim()) {
               throw new IntegrationOpError(
                 "ERR_MISSING_PLATFORM_USER_ID",
                 "platform_user_id is required for messaging_surface delivery",
@@ -1717,7 +1713,7 @@ export async function handleIntegrationControlOp(
             }
             return {
               kind: "messaging_surface",
-              userId: platformUserId,
+              userId: platformUserId ?? "system",
               replyToMessageId,
             } as const;
           })();
@@ -1804,7 +1800,7 @@ export async function handleIntegrationControlOp(
         pl.delivery === "internal" || (!hasThreadBinding && pl.delivery !== "messaging_surface")
           ? ({ kind: "internal" } as const)
           : (() => {
-              if (!platformUserId) {
+              if (!platformUserId && !hasThreadBinding) {
                 throw new IntegrationOpError(
                   "ERR_MISSING_PLATFORM_USER_ID",
                   "platform_user_id is required for messaging_surface delivery",
@@ -1812,7 +1808,7 @@ export async function handleIntegrationControlOp(
               }
               return {
                 kind: "messaging_surface",
-                userId: platformUserId,
+                userId: platformUserId ?? "system",
                 replyToMessageId,
               } as const;
             })();

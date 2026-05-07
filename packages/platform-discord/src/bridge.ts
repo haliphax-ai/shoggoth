@@ -160,6 +160,11 @@ export interface DiscordMessagingRuntime {
   readonly resolveOutboundChannelIdForSession?: (sessionId: string) => string | undefined;
   /** Resolve the guild snowflake for a session (routes + thread bindings). */
   readonly resolveGuildIdForSession?: (sessionId: string) => string | undefined;
+  /**
+   * Resolve session ID for a channel or thread (dynamic thread bindings + static routes).
+   * Used by slash commands when channel_id points to a thread.
+   */
+  readonly resolveSessionId: (channelId: string, guildId?: string) => string | undefined;
 }
 
 /**
@@ -348,6 +353,19 @@ export async function startDiscordMessagingIfConfigured(
     },
     resolveGuildIdForSession(sessionId: string) {
       return sessionToGuild(sessionId.trim());
+    },
+    resolveSessionId(channelId: string, guildId?: string) {
+      // First check dynamic thread bindings (runtime registrations from subagent threads)
+      const dynamicSession = discordDynamicSessionByChannel.get(channelId.trim());
+      if (dynamicSession) return dynamicSession;
+      // Then check static routes from config
+      for (const r of routes) {
+        if (r.channelId !== channelId) continue;
+        if (r.guildId !== undefined && r.guildId !== guildId) continue;
+        if (r.guildId === undefined && guildId !== undefined) continue;
+        return r.sessionId;
+      }
+      return undefined;
     },
   };
 }
