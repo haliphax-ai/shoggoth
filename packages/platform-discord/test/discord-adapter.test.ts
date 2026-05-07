@@ -2,6 +2,7 @@ import { describe, it, beforeEach } from "vitest";
 import assert from "node:assert";
 import {
   createDiscordAdapter,
+  UnboundThreadError,
   type DiscordInboundEvent,
   type DiscordSessionRoute,
 } from "../src/adapter";
@@ -69,5 +70,28 @@ describe("Discord adapter", () => {
       timestampIso: "2026-03-27T21:05:00.000Z",
     };
     assert.throws(() => adapter.inboundToInternal(ev), /no session route/i);
+  });
+
+  it("throws UnboundThreadError when threadId is present but not bound", () => {
+    const adapter = createDiscordAdapter({
+      routes,
+      resolveThreadSessionId: () => undefined,
+    });
+    const ev: DiscordInboundEvent = {
+      kind: "message_create",
+      messageId: "m2",
+      channelId: "c1",
+      guildId: "g1",
+      authorId: "user-1",
+      authorIsBot: false,
+      content: "hello thread",
+      timestampIso: "2026-03-27T21:05:00.000Z",
+      threadId: "thread-unbound",
+    };
+    assert.throws(
+      () => adapter.inboundToInternal(ev),
+      (err: unknown) =>
+        err instanceof UnboundThreadError && err.threadChannelId === "thread-unbound",
+    );
   });
 });

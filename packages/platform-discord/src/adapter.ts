@@ -52,6 +52,15 @@ export interface DiscordAdapter {
   inboundToInternal(ev: DiscordInboundEvent): ReturnType<typeof createInboundMessage>;
 }
 
+/** Thrown when a message arrives in a thread with no bound subagent session. */
+export class UnboundThreadError extends Error {
+  readonly threadChannelId: string;
+  constructor(threadChannelId: string) {
+    super(`Discord adapter: unbound thread ${threadChannelId}`);
+    this.threadChannelId = threadChannelId;
+  }
+}
+
 function resolveSessionId(
   routes: readonly DiscordSessionRoute[],
   guildId: string | undefined,
@@ -67,6 +76,10 @@ function resolveSessionId(
       seen.add(key);
       const sid = resolveThread(key);
       if (sid) return sid;
+    }
+    // threadId present but no binding found — do not fall through to static routes
+    if (threadId?.trim()) {
+      throw new UnboundThreadError(threadId.trim());
     }
   }
   for (const r of routes) {
