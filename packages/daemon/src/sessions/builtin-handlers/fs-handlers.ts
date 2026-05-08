@@ -2,7 +2,7 @@
 // read & write handlers
 // ---------------------------------------------------------------------------
 
-import { extname } from "node:path";
+import { extname, isAbsolute, relative } from "node:path";
 import {
   toolRead,
   toolReadBinary,
@@ -20,6 +20,22 @@ import { checkAgentsMdGate } from "../agents-md-gate";
 export function register(registry: BuiltinToolRegistry): void {
   registry.register("read", readHandler);
   registry.register("write", writeHandler);
+}
+
+/**
+ * Convert a resolved absolute path back to workspace-relative.
+ * toolReadExtended expects workspace-relative paths because it internally
+ * joins them with the workspace root. If the path is already relative or
+ * escapes the workspace (e.g. /app docs), return it as-is for the security
+ * layer in os-exec to handle.
+ */
+function toWorkspaceRelative(ctx: BuiltinToolContext, absolutePath: string): string {
+  if (!isAbsolute(absolutePath)) return absolutePath;
+  const rel = relative(ctx.workspacePath, absolutePath);
+  // If relative() produces a path starting with "..", the path is outside
+  // the workspace — return the absolute path and let os-exec reject it.
+  if (rel.startsWith("..")) return absolutePath;
+  return rel;
 }
 
 async function readHandler(
@@ -79,9 +95,13 @@ async function readHandler(
     stat === true;
 
   if (hasExtended) {
+    // Resolve paths against workingDirectory, then convert to workspace-relative
+    // because toolReadExtended internally joins paths with the workspace root.
+    const resolvedPaths = paths?.map((p) => toWorkspaceRelative(ctx, resolveUserPath(ctx, p)));
+
     const opts: ReadExtendedOptions = {
-      path: path || undefined,
-      paths,
+      path: paths ? undefined : toWorkspaceRelative(ctx, resolvedPath),
+      paths: resolvedPaths,
       fromLine,
       toLine,
       offset,
@@ -124,9 +144,7 @@ async function readHandler(
         } else {
           content = truncatedContent;
         }
-        content.push(
-          `[... truncated — file has ${rawLines.length} lines, showing first 1000 ...]`,
-        );
+        content.push(`[... truncated — file has ${rawLines.length} lines, showing first 1000 ...]`);
       }
     } else {
       content = truncateToolOutput(body);
