@@ -108,7 +108,7 @@ export async function connectShoggothMcpServers(
       // Build env: agent workspace as HOME, then server config env on top
       let baseEnv = agentCtx ? { HOME: agentCtx.workspacePath, ...s.env } : s.env;
       // Resolve $vault: references in env vars if vault is available
-      if (baseEnv && options?.vault && options?.agentId) {
+      if (baseEnv && options?.vault) {
         baseEnv = await resolveVaultEnv(baseEnv, options.vault, options.agentId);
       }
       const cwd = s.cwd ?? agentCtx?.workspacePath;

@@ -54,7 +54,7 @@ export function extractVaultName(value: string): string | null {
 export async function resolveVaultEnv(
   env: Record<string, string>,
   vault: VaultService,
-  agentId: string,
+  agentId?: string,
 ): Promise<Record<string, string>> {
   const result: Record<string, string> = {};
 
@@ -66,12 +66,16 @@ export async function resolveVaultEnv(
         continue;
       }
 
-      const resolved = await vault.resolve(agentId, name);
+      // If agentId is available, resolve with agent scope precedence; otherwise global only
+      const resolved = agentId
+        ? await vault.resolve(agentId, name)
+        : await vault.get("global", name);
       if (resolved !== null) {
         result[key] = resolved;
       } else {
+        const scope = agentId ? `agent "${agentId}"` : "global";
         console.warn(
-          `[vault] Credential "${name}" not found for agent "${agentId}", omitting env var "${key}"`,
+          `[vault] Credential "${name}" not found for ${scope}, omitting env var "${key}"`,
         );
       }
     } else {
