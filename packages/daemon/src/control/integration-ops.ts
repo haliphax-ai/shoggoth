@@ -71,6 +71,7 @@ import { pushSystemContext } from "../sessions/system-context-buffer";
 import { pushSteer } from "../sessions/steer-channel";
 import { getTurnQueue } from "../sessions/session-turn-queue-singleton";
 import { MediaGenerationService } from "../media/media-generation-service";
+import { handleVaultSet, handleVaultGet, handleVaultDelete, handleVaultList, handleVaultImport, handleVaultRotateKey } from "./vault-ops.js";
 
 export class IntegrationOpError extends Error {
   constructor(
@@ -2359,7 +2360,22 @@ export async function handleIntegrationControlOp(
       });
     }
 
+    case "vault.set":
+      return handleVaultSet(req, principal, ctx);
+    case "vault.get":
+      return handleVaultGet(req, principal, ctx);
+    case "vault.delete":
+      return handleVaultDelete(req, principal, ctx);
+    case "vault.list":
+      return handleVaultList(req, principal, ctx);
+    case "vault.import":
+      return handleVaultImport(req, principal, ctx);
+    case "vault.rotate-key":
+      return handleVaultRotateKey(req, principal, ctx);
+
     default:
       return undefined;
+  }
+}
   }
 }

@@ -5,7 +5,9 @@
 import type { WireRequest } from "@shoggoth/authn";
 import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import type { IntegrationOpsContext } from "./integration-ops";
-import type { VaultService } from "../vault/vault-service";
+import type { VaultService, VaultEntryMetadata } from "../vault/vault-service";
+import { parseEnvFile } from "../vault/env-parser";
+import { ageLoadIdentity } from "../vault/age-crypto";
 
 /**
  * Extract the vault service from the integration context.
@@ -19,15 +21,47 @@ function requireVaultService(ctx: IntegrationOpsContext): VaultService {
 }
 
 /**
+ * Helper to get payload object from request.
+ */
+function getPayload(req: WireRequest): Record<string, unknown> {
+  const p = req.payload;
+  if (!p || typeof p !== "object" || Array.isArray(p)) {
+    throw new Error("payload must be a JSON object");
+  }
+  return p as Record<string, unknown>;
+}
+
+/**
+ * Helper to require a string from payload.
+ */
+function requireString(obj: Record<string, unknown>, key: string): string {
+  const v = obj[key];
+  if (typeof v !== "string" || !v.trim()) {
+    throw new Error(`payload.${key} must be a non-empty string`);
+  }
+  return v.trim();
+}
+
+/**
  * Handle vault.set control operation.
  * Stores a credential in the specified scope.
  */
 export async function handleVaultSet(
   req: WireRequest,
-  principal: AuthenticatedPrincipal,
+  _principal: AuthenticatedPrincipal,
   ctx: IntegrationOpsContext,
 ): Promise<unknown> {
-  throw new Error("not implemented");
+  const vault = requireVaultService(ctx);
+  const payload = getPayload(req);
+  
+  const scope = requireString(payload, "scope");
+  const name = requireString(payload, "name");
+  const value = requireString(payload, "value");
+  const metadata = payload.metadata as VaultEntryMetadata | undefined;
+  
+  await vault.put(scope, name, value, metadata);
+  
+  return { ok: true, scope, name, written: true };
 }
 
 /**
@@ -36,10 +70,18 @@ export async function handleVaultSet(
  */
 export async function handleVaultGet(
   req: WireRequest,
-  principal: AuthenticatedPrincipal,
+  _principal: AuthenticatedPrincipal,
   ctx: IntegrationOpsContext,
 ): Promise<unknown> {
-  throw new Error("not implemented");
+  const vault = requireVaultService(ctx);
+  const payload = getPayload(req);
+  
+  const scope = requireString(payload, "scope");
+  const name = requireString(payload, "name");
+  
+  const value = await vault.get(scope, name);
+  
+  return { ok: true, scope, name, value };
 }
 
 /**
@@ -48,10 +90,18 @@ export async function handleVaultGet(
  */
 export async function handleVaultDelete(
   req: WireRequest,
-  principal: AuthenticatedPrincipal,
+  _principal: AuthenticatedPrincipal,
   ctx: IntegrationOpsContext,
 ): Promise<unknown> {
-  throw new Error("not implemented");
+  const vault = requireVaultService(ctx);
+  const payload = getPayload(req);
+  
+  const scope = requireString(payload, "scope");
+  const name = requireString(payload, "name");
+  
+  const deleted = await vault.delete(scope, name);
+  
+  return { ok: true, deleted };
 }
 
 /**
@@ -60,10 +110,35 @@ export async function handleVaultDelete(
  */
 export async function handleVaultList(
   req: WireRequest,
-  principal: AuthenticatedPrincipal,
+  _principal: AuthenticatedPrincipal,
   ctx: IntegrationOpsContext,
 ): Promise<unknown> {
-  throw new Error("not implemented");
+  const vault = requireVaultService(ctx);
+  const payload = getPayload(req);
+  
+  const scope = payload.scope as string | undefined;
+  
+  let entries: Array<{
+    name: string;
+    scope: string;
+    metadata: VaultEntryMetadata | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  
+  if (scope) {
+    entries = vault.list(scope);
+  } else {
+    // No scope provided - list all scopes
+    const scopes = vault.listScopes();
+    entries = [];
+    for (const s of scopes) {
+      const scopeEntries = vault.list(s);
+      entries.push(...scopeEntries);
+    }
+  }
+  
+  return { ok: true, entries };
 }
 
 /**
@@ -72,10 +147,25 @@ export async function handleVaultList(
  */
 export async function handleVaultImport(
   req: WireRequest,
-  principal: AuthenticatedPrincipal,
+  _principal: AuthenticatedPrincipal,
   ctx: IntegrationOpsContext,
 ): Promise<unknown> {
-  throw new Error("not implemented");
+  const vault = requireVaultService(ctx);
+  const payload = getPayload(req);
+  
+  const scope = requireString(payload, "scope");
+  const envFileContent = requireString(payload, "envFileContent");
+  
+  const entries = parseEnvFile(envFileContent);
+  
+  // Filter out entries with empty values (they can't be encrypted)
+  const nonEmptyEntries = entries.filter((entry) => entry.value !== "");
+  
+  for (const entry of nonEmptyEntries) {
+    await vault.put(scope, entry.key, entry.value);
+  }
+  
+  return { ok: true, imported: nonEmptyEntries.length };
 }
 
 /**
@@ -84,8 +174,17 @@ export async function handleVaultImport(
  */
 export async function handleVaultRotateKey(
   req: WireRequest,
-  principal: AuthenticatedPrincipal,
+  _principal: AuthenticatedPrincipal,
   ctx: IntegrationOpsContext,
 ): Promise<unknown> {
-  throw new Error("not implemented");
+  const vault = requireVaultService(ctx);
+  const payload = getPayload(req);
+  
+  const newIdentityPath = requireString(payload, "newIdentityPath");
+  
+  const newIdentity = await ageLoadIdentity(newIdentityPath);
+  
+  await vault.rotateKey(newIdentity);
+  
+  return { ok: true };
 }
