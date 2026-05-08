@@ -202,6 +202,23 @@ void (async () => {
     });
 
     hitlStack = createHitlPendingResolutionStack(db);
+
+    // Initialize vault service
+    try {
+      const { createVaultService } = await import("./vault/vault-service-impl.js");
+      const { vaultServiceRef } = await import("./vault/vault-ref.js");
+      const vault = await createVaultService(
+        db,
+        "/var/lib/shoggoth/daemon/vault.key",
+        "/run/secrets",
+      );
+      vaultServiceRef.current = vault;
+      getLogger("daemon").info("vault service initialized", {
+        publicKey: vault.publicKey.substring(0, 20) + "...",
+      });
+    } catch (e) {
+      getLogger("daemon").warn("vault service unavailable", { err: String(e) });
+    }
   } catch (e) {
     getLogger("daemon").warn(
       "state database unavailable; control plane uses ephemeral agent tokens",

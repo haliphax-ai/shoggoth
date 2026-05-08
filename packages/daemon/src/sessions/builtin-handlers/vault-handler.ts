@@ -5,31 +5,7 @@
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
 import { parseAgentSessionUrn } from "@shoggoth/shared";
 import { createSecretFifo } from "../../vault/fifo-proxy.js";
-
-/**
- * Extended context with vault service and agentId.
- * The vault and agentId are injected by session-agent-turn.ts.
- */
-interface VaultToolContext extends BuiltinToolContext {
-  vault: {
-    put: (scope: string, name: string, plaintext: string, metadata?: unknown) => Promise<void>;
-    get: (scope: string, name: string) => Promise<string | null>;
-    resolve: (agentId: string, name: string) => Promise<string | null>;
-    delete: (scope: string, name: string) => Promise<boolean>;
-    list: (scope: string) => Array<{
-      name: string;
-      scope: string;
-      metadata: unknown | null;
-      createdAt: string;
-      updatedAt: string;
-    }>;
-    listScopes: () => string[];
-    rotateKey: (newIdentity: unknown) => Promise<void>;
-    readonly publicKey: string;
-  };
-  agentId: string;
-  creds: { uid: number; gid: number };
-}
+import type { VaultService } from "../../vault/vault-service.js";
 
 export function register(registry: BuiltinToolRegistry): void {
   registry.register("builtin-vault", vaultHandler);
@@ -39,13 +15,13 @@ async function vaultHandler(
   args: Record<string, unknown>,
   ctx: BuiltinToolContext,
 ): Promise<{ resultJson: string }> {
-  // Extend context with vault and agentId from the base context
-  const vaultCtx = ctx as VaultToolContext;
-  const vault = vaultCtx.vault;
-  const agentId = vaultCtx.agentId;
+  const vault = ctx.vault;
+  if (!vault) {
+    return { resultJson: JSON.stringify({ error: "vault service not available" }) };
+  }
 
-  // Resolve agentId from session if not provided in context
-  const resolvedAgentId = agentId || parseAgentSessionUrn(ctx.sessionId)?.agentId;
+  // Resolve agentId from session
+  const resolvedAgentId = parseAgentSessionUrn(ctx.sessionId)?.agentId;
   if (!resolvedAgentId) {
     return {
       resultJson: JSON.stringify({ error: "unable to resolve agent ID from session" }),
@@ -63,7 +39,7 @@ async function vaultHandler(
     case "list":
       return vaultList(args, vault, resolvedAgentId);
     case "inject":
-      return vaultInject(args, vault, resolvedAgentId, vaultCtx);
+      return vaultInject(args, vault, resolvedAgentId, ctx);
     default:
       return {
         resultJson: JSON.stringify({ error: `unknown action: ${action}` }),
@@ -73,7 +49,7 @@ async function vaultHandler(
 
 async function vaultGet(
   args: Record<string, unknown>,
-  vault: VaultToolContext["vault"],
+  vault: VaultService,
   agentId: string,
 ): Promise<{ resultJson: string }> {
   const name = String(args.name ?? "");
@@ -81,7 +57,7 @@ async function vaultGet(
     return { resultJson: JSON.stringify({ error: "name is required" }) };
   }
 
-  // Use resolve for scope precedence (agent scope first, then global)
+  // Try agent scope first via resolve
   let value = await vault.resolve(agentId, name);
   let scope = `agent:${agentId}`;
 
@@ -104,7 +80,7 @@ async function vaultGet(
 
 async function vaultSet(
   args: Record<string, unknown>,
-  vault: VaultToolContext["vault"],
+  vault: VaultService,
   agentId: string,
 ): Promise<{ resultJson: string }> {
   const name = String(args.name ?? "");
@@ -129,7 +105,7 @@ async function vaultSet(
 
 async function vaultDelete(
   args: Record<string, unknown>,
-  vault: VaultToolContext["vault"],
+  vault: VaultService,
   agentId: string,
 ): Promise<{ resultJson: string }> {
   const name = String(args.name ?? "");
@@ -146,17 +122,15 @@ async function vaultDelete(
 }
 
 function vaultList(
-  args: Record<string, unknown>,
-  vault: VaultToolContext["vault"],
+  _args: Record<string, unknown>,
+  vault: VaultService,
   agentId: string,
 ): { resultJson: string } {
   const agentScope = `agent:${agentId}`;
 
-  // Get entries from agent scope and global scope
   const agentEntries = vault.list(agentScope);
   const globalEntries = vault.list("global");
 
-  // Combine entries, agent scope first
   const entries = [...agentEntries, ...globalEntries];
 
   return {
@@ -166,16 +140,16 @@ function vaultList(
 
 async function vaultInject(
   args: Record<string, unknown>,
-  vault: VaultToolContext["vault"],
+  vault: VaultService,
   agentId: string,
-  ctx: VaultToolContext,
+  ctx: BuiltinToolContext,
 ): Promise<{ resultJson: string }> {
   const name = String(args.name ?? "");
   if (!name) {
     return { resultJson: JSON.stringify({ error: "name is required" }) };
   }
 
-  // Resolve credential using scope precedence
+  // Resolve credential using scope precedence (agent first, then global)
   let value = await vault.resolve(agentId, name);
   if (value === null) {
     value = await vault.get("global", name);
@@ -187,9 +161,8 @@ async function vaultInject(
     };
   }
 
-  const timeoutMs = args.timeoutMs != null ? Number(args.timeoutMs) : undefined;
   const { uid, gid } = ctx.creds;
-
+  const timeoutMs = args.timeoutMs != null ? Number(args.timeoutMs) : undefined;
   const path = await createSecretFifo(value, uid, gid, timeoutMs);
 
   return {
@@ -201,5 +174,3 @@ async function vaultInject(
     }),
   };
 }
-
-

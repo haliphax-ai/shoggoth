@@ -58,6 +58,9 @@ export interface BuiltinToolContext {
 
   /** Image block codec for the active model provider, or undefined when unsupported. */
   readonly imageBlockCodec?: ImageBlockCodec;
+
+  /** Vault service instance, if initialized. */
+  readonly vault?: import("../vault/vault-service.js").VaultService;
 }
 
 /** Result returned by a builtin tool handler. */
