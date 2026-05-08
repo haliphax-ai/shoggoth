@@ -63,6 +63,9 @@ function mockTransport(overrides?: Partial<MessageToolTransport>): MessageToolTr
     async createThreadFromMessage() {
       return { id: "t" };
     },
+    async createThread() {
+      return { id: "t" };
+    },
     async deleteChannel() {},
     async createMessageReaction() {},
     async deleteMessageReaction() {},
@@ -894,5 +897,75 @@ describe("executeMessageToolAction", () => {
     assert.equal(s.bot, true);
     assert.equal(s.attachment_count, 2);
     assert.deepEqual(s.attachment_filenames, ["f.png", "g.txt"]);
+  });
+
+  // --- create_thread ---
+  it("create_thread: with message_id calls createThreadFromMessage", async () => {
+    const calls: string[] = [];
+    const transport = mockTransport({
+      async createThreadFromMessage(ch, msgId, body) {
+        calls.push(`fromMsg:${ch}:${msgId}:${body.name}`);
+        return { id: "thread-1" };
+      },
+    });
+    const r = await executeMessageToolAction(
+      { capabilities: caps, transport, sessionToChannel: () => "chan-a" },
+      "agent:x:discord:channel:00000000-0000-4000-8000-000000000001",
+      { action: "create_thread", message_id: "m99", name: "my thread" },
+    );
+    assert.deepEqual(r, {
+      ok: true,
+      thread_id: "thread-1",
+      parent_channel_id: "chan-a",
+      message_id: "m99",
+    });
+    assert.equal(calls[0], "fromMsg:chan-a:m99:my thread");
+  });
+
+  it("create_thread: without message_id calls createThread (standalone)", async () => {
+    const calls: Array<{ ch: string; body: unknown }> = [];
+    const transport = mockTransport({
+      async createThread(ch, body) {
+        calls.push({ ch, body });
+        return { id: "thread-2" };
+      },
+    });
+    const r = await executeMessageToolAction(
+      { capabilities: caps, transport, sessionToChannel: () => "chan-a" },
+      "agent:x:discord:channel:00000000-0000-4000-8000-000000000001",
+      { action: "create_thread", name: "standalone thread" },
+    );
+    assert.deepEqual(r, {
+      ok: true,
+      thread_id: "thread-2",
+      parent_channel_id: "chan-a",
+    });
+    assert.equal(calls[0]!.ch, "chan-a");
+    assert.deepEqual(calls[0]!.body, { name: "standalone thread", type: 11 });
+  });
+
+  it("create_thread: standalone with auto_archive_duration_minutes", async () => {
+    const calls: Array<{ ch: string; body: unknown }> = [];
+    const transport = mockTransport({
+      async createThread(ch, body) {
+        calls.push({ ch, body });
+        return { id: "thread-3" };
+      },
+    });
+    const r = await executeMessageToolAction(
+      { capabilities: caps, transport, sessionToChannel: () => "chan-a" },
+      "agent:x:discord:channel:00000000-0000-4000-8000-000000000001",
+      { action: "create_thread", name: "archived thread", auto_archive_duration_minutes: 1440 },
+    );
+    assert.deepEqual(r, {
+      ok: true,
+      thread_id: "thread-3",
+      parent_channel_id: "chan-a",
+    });
+    assert.deepEqual(calls[0]!.body, {
+      name: "archived thread",
+      type: 11,
+      auto_archive_duration: 1440,
+    });
   });
 });

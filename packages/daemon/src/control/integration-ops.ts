@@ -1125,10 +1125,36 @@ export async function handleIntegrationControlOp(
         };
       }
       const platformThreadIdRaw = pl.platform_thread_id;
-      const platformThreadId =
+      let platformThreadId: string | undefined;
+      const rawTrimmed =
         typeof platformThreadIdRaw === "string" && platformThreadIdRaw.trim()
           ? platformThreadIdRaw.trim()
           : undefined;
+      if (rawTrimmed === "0") {
+        // Sentinel: auto-create a standalone thread in the parent session's channel.
+        const parentChannelId = ext.resolveOutboundChannelIdForSession?.(parentSessionId);
+        if (!parentChannelId) {
+          throw new IntegrationOpError(
+            "ERR_INVALID_PAYLOAD",
+            "cannot create thread: parent session has no bound channel",
+          );
+        }
+        const threadNameRaw = pl.thread_name;
+        const threadName =
+          typeof threadNameRaw === "string" && threadNameRaw.trim()
+            ? threadNameRaw.trim()
+            : prompt.slice(0, 100);
+        if (!ext.createThread) {
+          throw new IntegrationOpError(
+            "ERR_SUBAGENT_RUNTIME_UNAVAILABLE",
+            "createThread not available on subagent runtime extension",
+          );
+        }
+        const created = await ext.createThread(parentChannelId, { name: threadName, type: 11 });
+        platformThreadId = created.id;
+      } else {
+        platformThreadId = rawTrimmed;
+      }
       const lifetimeMs =
         optionalFinitePositiveInt(pl, "lifetime_ms") ?? SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS;
       const platformUserIdRaw = pl.platform_user_id;

@@ -30,6 +30,13 @@ export type SubagentRuntimeExtension = {
     readonly sessionId: string;
     readonly reason: PersistentSubagentSessionEndReason;
   }) => void;
+  /** Create a standalone thread in a channel. Used when thread_id sentinel "0" is passed. */
+  readonly createThread?: (
+    channelId: string,
+    body: { readonly name: string; readonly type?: 11 | 12 },
+  ) => Promise<{ readonly id: string }>;
+  /** Resolve the outbound channel ID for a session (routes + thread bindings). */
+  readonly resolveOutboundChannelIdForSession?: (sessionId: string) => string | undefined;
 };
 
 export const subagentRuntimeExtensionRef: {

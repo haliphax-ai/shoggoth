@@ -138,7 +138,12 @@ const subagentToolArgs = {
     thread_id: {
       type: "string",
       description:
-        "spawn_persistent: optional platform thread / channel identifier (omit for A2A-only)",
+        'spawn_persistent: optional platform thread / channel identifier (omit for A2A-only). Pass "0" to auto-create a new standalone thread in the parent session\'s channel.',
+    },
+    thread_name: {
+      type: "string",
+      description:
+        'spawn_persistent: name for the auto-created thread when thread_id is "0". Defaults to first 100 chars of prompt.',
     },
     model_options: {
       type: "object",

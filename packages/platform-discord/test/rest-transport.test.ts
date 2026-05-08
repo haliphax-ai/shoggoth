@@ -206,6 +206,33 @@ describe("Discord REST transport", () => {
     assert.equal(body.auto_archive_duration, 60);
   });
 
+  it("createThread POSTs standalone thread and returns thread id", async () => {
+    const fetchFn: typeof fetch = async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ id: "thread-standalone" }), { status: 201 });
+    };
+    const t = createDiscordRestTransport({
+      botToken: "tok",
+      fetchFn,
+      apiBase: "https://example.com/v10",
+    });
+    const ref = await t.createThread("ch1", {
+      name: "standalone",
+      type: 11,
+      auto_archive_duration: 1440,
+    });
+    assert.equal(ref.id, "thread-standalone");
+    assert.match(calls[0]!.url, /\/channels\/ch1\/threads$/);
+    const body = JSON.parse(String(calls[0]!.init.body)) as {
+      name: string;
+      type: number;
+      auto_archive_duration: number;
+    };
+    assert.equal(body.name, "standalone");
+    assert.equal(body.type, 11);
+    assert.equal(body.auto_archive_duration, 1440);
+  });
+
   it("deleteChannel DELETEs channel", async () => {
     const fetchFn: typeof fetch = async (url, init) => {
       calls.push({ url: String(url), init: init ?? {} });

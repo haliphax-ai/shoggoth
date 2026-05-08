@@ -47,6 +47,18 @@ export interface DiscordRestTransport {
       readonly auto_archive_duration?: 60 | 1440 | 4320 | 10080;
     },
   ): Promise<{ readonly id: string }>;
+  /**
+   * POST `/channels/{channel.id}/threads` — create a standalone thread (not anchored to a message).
+   * Discord thread type 11 = public, 12 = private.
+   */
+  createThread(
+    channelId: string,
+    body: {
+      readonly name: string;
+      readonly type?: 11 | 12;
+      readonly auto_archive_duration?: 60 | 1440 | 4320 | 10080;
+    },
+  ): Promise<{ readonly id: string }>;
   /** DELETE `/channels/{channel.id}` — also deletes thread channels. */
   deleteChannel(channelId: string): Promise<void>;
   /** GET `/channels/{channel.id}/messages/{message.id}` — returns raw API message object. */

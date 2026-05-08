@@ -23,7 +23,7 @@ export interface ExtensionFlags {
   readonly messageEdit: boolean;
   /** Agent `message` tool: delete messages. */
   readonly messageDelete: boolean;
-  /** Agent `message` tool: start a thread from an existing message. */
+  /** Agent `message` tool: create a thread (from a message or standalone). */
   readonly threadCreate: boolean;
   /** Agent `message` tool: delete a thread channel. */
   readonly threadDelete: boolean;

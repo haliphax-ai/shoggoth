@@ -56,7 +56,7 @@ export function buildMessageToolDescriptor(
     message_id: {
       type: "string",
       description:
-        "get: fetch this message only (single-message mode). edit/delete: target message. create_thread: message to branch from. react/reactions: target message. attachment-download: message containing the attachment.",
+        "get: fetch this message only (single-message mode). edit/delete: target message. create_thread: optional message to branch from (omit for standalone thread). react/reactions: target message. attachment-download: message containing the attachment.",
     },
     name: {
       type: "string",

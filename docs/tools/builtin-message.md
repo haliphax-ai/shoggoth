@@ -8,7 +8,7 @@ Messaging surface control for the session's bound channel. Pure passthrough — 
 | ------------------------------- | ------- | -------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `action`                        | string  | yes      | all                                                                     | One of: `post`, `get`, `edit`, `delete`, `create_thread`, `delete_thread`, `react`, `choice`, `reactions`, `search`, `attachment-download`. Platform determines which are available. |
 | `content`                       | string  | no       | post, choice, edit                                                      | Message body. For `choice`, preamble text before the choice legend. For `edit`, replacement text.                                                                                    |
-| `message_id`                    | string  | no       | get, edit, delete, create_thread, react, reactions, attachment-download | Target message identifier. For `get`, fetches a single message.                                                                                                                      |
+| `message_id`                    | string  | no       | get, edit, delete, create_thread, react, reactions, attachment-download | Target message identifier. For `get`, fetches a single message. For `create_thread`, optional anchor message (omit for standalone thread).                                           |
 | `name`                          | string  | no       | create_thread                                                           | Thread name.                                                                                                                                                                         |
 | `thread_id`                     | string  | no       | delete_thread                                                           | Thread/channel identifier.                                                                                                                                                           |
 | `channel_id`                    | string  | no       | get                                                                     | Channel or thread id; defaults to session's bound channel.                                                                                                                           |
@@ -68,6 +68,18 @@ Messaging surface control for the session's bound channel. Pure passthrough — 
 
 ```json
 { "action": "delete", "message_id": "123456" }
+```
+
+**Create a thread from a message:**
+
+```json
+{ "action": "create_thread", "message_id": "123456", "name": "Discussion" }
+```
+
+**Create a standalone thread (no anchor message):**
+
+```json
+{ "action": "create_thread", "name": "New topic" }
 ```
 
 **Add a reaction:**

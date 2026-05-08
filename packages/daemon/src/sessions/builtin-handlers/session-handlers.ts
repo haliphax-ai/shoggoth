@@ -310,6 +310,8 @@ async function subagentHandler(
       payload.respond_to = respondTo.trim();
     }
     if (args.internal === false) payload.internal = false;
+    const tn = args.thread_name;
+    if (typeof tn === "string" && tn.trim()) payload.thread_name = tn.trim();
   } else if (action === "inspect") {
     op = "session_inspect";
     payload = { session_id: ctx.sessionId };

@@ -356,6 +356,12 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           registerPlatformThreadBinding: discordMessaging.registerPlatformThreadBinding,
           announcePersistentSubagentSessionEnded:
             discordPlatform.announcePersistentSubagentSessionEnded,
+          createThread: (
+            channelId: string,
+            body: { readonly name: string; readonly type?: 11 | 12 },
+          ) => discordMessaging.discordRestTransport.createThread(channelId, body),
+          resolveOutboundChannelIdForSession: (sessionId: string) =>
+            discordMessaging.resolveOutboundChannelIdForSession?.(sessionId),
         };
         setSubagentRuntimeExtension(subagentExt as any);
 
