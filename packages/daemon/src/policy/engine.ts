@@ -56,6 +56,12 @@ export const DEFINED_CONTROL_OPS = [
   "procman_list",
   "procman_restart",
   "procman_stop",
+  "vault.set",
+  "vault.get",
+  "vault.delete",
+  "vault.list",
+  "vault.import",
+  "vault.rotate-key",
 ] as const;
 type DefinedControlOp = (typeof DEFINED_CONTROL_OPS)[number];
 

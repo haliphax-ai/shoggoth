@@ -121,7 +121,7 @@ export type IntegrationOpsContext = {
    * Override in tests.
    */
   /** The vault service for credential management. */
-  readonly vault?: import("../vault/vault-service.js").VaultService;
+  readonly vault?: import("../vault/vault-service").VaultService;
   readonly cancelMcpHttpRequest?: (input: {
     readonly sessionId: string;
     readonly sourceId: string;
