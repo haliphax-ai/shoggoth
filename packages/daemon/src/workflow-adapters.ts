@@ -221,8 +221,15 @@ export function createDaemonPollAdapter(deps: DaemonPollAdapterDeps): PollAdapte
       }
 
       // Fall back to session status.
+      // Fall back to session status.
       if (row.status === "terminated") {
-        return { status: "done" };
+        // If the session is terminated but has no completion map entry, it was
+        // killed externally (normal completion always populates the map first).
+        // Treat this as a failure so the orchestrator doesn't silently advance.
+        return {
+          status: "failed",
+          error: "session was killed externally",
+        };
       }
 
       return { status: "running" };
