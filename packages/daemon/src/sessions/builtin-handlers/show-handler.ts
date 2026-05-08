@@ -8,6 +8,7 @@ import type {
   BuiltinToolContext,
   BuiltinToolResult,
 } from "../builtin-tool-registry.js";
+import { resolveUserPath } from "../builtin-tool-registry.js";
 import { getBlockResolver, type ShowToolParams } from "../../presentation/show-blocks.js";
 import { getLogger } from "../../logging.js";
 
@@ -54,8 +55,16 @@ async function showHandler(
       // extraction step (extractShowBlocks) will read the file at
       // delivery time.
       if (input.path) {
+        // Resolve path against workingDirectory, then make workspace-relative
+        // so toolReadBinary (which joins with workspacePath) finds the file.
+        const resolvedPath = resolveUserPath(ctx, input.path);
+        const wsRelativePath = resolvedPath.startsWith(ctx.workspacePath)
+          ? resolvedPath.slice(ctx.workspacePath.length).replace(/^\//, "")
+          : resolvedPath;
+        const resolvedInput: ShowToolParams = { ...input, path: wsRelativePath };
+
         // Still resolve to validate the file exists and is a supported image
-        const resolved = await resolver(input, {
+        const resolved = await resolver(resolvedInput, {
           workspacePath: ctx.workspacePath,
           creds: ctx.creds,
         });
@@ -65,9 +74,9 @@ async function showHandler(
               totalBytes += Math.floor(part.base64.length * 0.75);
             }
           }
-          // Store path reference + display label instead of base64
+          // Store workspace-relative path reference + display label instead of base64
           allParts.push(
-            { type: "text", text: `[show-file: ${input.path}]` },
+            { type: "text", text: `[show-file: ${wsRelativePath}]` },
             {
               type: "text",
               text: `[show: ${input.filename ?? input.path.split("/").pop() ?? "image"}]`,
