@@ -76,7 +76,9 @@ describe("builtin-vault get", () => {
 
     const mockVault = createMockVaultService();
     // Agent scope has the credential
-    mockVault.resolve.mockReturnValue("secret-value-from-agent-scope");
+    mockVault.get.mockImplementation((scope: string) =>
+      scope === "agent:developer" ? "secret-value-from-agent-scope" : null,
+    );
 
     const ctx = stubCtx({
       sessionId: "agent:developer:discord:channel:123",
@@ -91,10 +93,9 @@ describe("builtin-vault get", () => {
     assert.strictEqual(parsed.name, "API_KEY");
     assert.strictEqual(parsed.value, "secret-value-from-agent-scope");
     assert.strictEqual(parsed.scope, "agent:developer");
-    // Verify resolve was called with agentId and name
-    assert.strictEqual(mockVault.resolve.mock.calls.length, 1);
-    assert.strictEqual(mockVault.resolve.mock.calls[0][0], "developer");
-    assert.strictEqual(mockVault.resolve.mock.calls[0][1], "API_KEY");
+    // Verify get was called with agent scope first
+    assert.strictEqual(mockVault.get.mock.calls[0][0], "agent:developer");
+    assert.strictEqual(mockVault.get.mock.calls[0][1], "API_KEY");
   });
 
   it("falls back to global scope when agent scope credential not found", async () => {
@@ -102,9 +103,10 @@ describe("builtin-vault get", () => {
     register(reg);
 
     const mockVault = createMockVaultService();
-    // Agent scope returns null, so it should fallback to get with global
-    mockVault.resolve.mockReturnValue(null);
-    mockVault.get.mockReturnValue("secret-value-from-global");
+    // Agent scope returns null, global has the value
+    mockVault.get.mockImplementation((scope: string) =>
+      scope === "global" ? "secret-value-from-global" : null,
+    );
 
     const ctx = stubCtx({
       sessionId: "agent:developer:discord:channel:123",
@@ -125,7 +127,6 @@ describe("builtin-vault get", () => {
     register(reg);
 
     const mockVault = createMockVaultService();
-    mockVault.resolve.mockReturnValue(null);
     mockVault.get.mockReturnValue(null);
 
     const ctx = stubCtx({
@@ -364,7 +365,9 @@ describe("builtin-vault subagent resolution", () => {
     register(reg);
 
     const mockVault = createMockVaultService();
-    mockVault.resolve.mockReturnValue("subagent-secret");
+    mockVault.get.mockImplementation((scope: string) =>
+      scope === "agent:developer" ? "subagent-secret" : null,
+    );
 
     // Subagent session: agent:developer:discord:channel:123:subagent:456
     const ctx = stubCtx({
@@ -378,7 +381,7 @@ describe("builtin-vault subagent resolution", () => {
 
     assert.strictEqual(parsed.ok, true);
     // Subagent should use parent's agentId for scope
-    assert.strictEqual(mockVault.resolve.mock.calls[0][0], "developer");
+    assert.strictEqual(mockVault.get.mock.calls[0][0], "agent:developer");
   });
 });
 
@@ -392,7 +395,9 @@ describe("builtin-vault audit redaction", () => {
     register(reg);
 
     const mockVault = createMockVaultService();
-    mockVault.resolve.mockReturnValue("actual-secret-value");
+    mockVault.get.mockImplementation((scope: string) =>
+      scope === "agent:developer" ? "actual-secret-value" : null,
+    );
 
     const ctx = stubCtx({
       sessionId: "agent:developer:discord:channel:123",

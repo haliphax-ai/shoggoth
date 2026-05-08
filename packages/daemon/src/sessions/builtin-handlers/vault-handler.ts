@@ -57,11 +57,10 @@ async function vaultGet(
     return { resultJson: JSON.stringify({ error: "name is required" }) };
   }
 
-  // Try agent scope first via resolve
-  let value = await vault.resolve(agentId, name);
+  // Check agent scope explicitly first, then global
+  let value = await vault.get(`agent:${agentId}`, name);
   let scope = `agent:${agentId}`;
 
-  // Fall back to global scope if not found in agent scope
   if (value === null) {
     value = await vault.get("global", name);
     scope = "global";
