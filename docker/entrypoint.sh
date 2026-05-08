@@ -27,6 +27,11 @@ if [ -d /etc/shoggoth/config.d/dynamic ]; then
   fix_dir /etc/shoggoth/config.d/dynamic 0700 shoggoth shoggoth
 fi
 fix_dir /var/lib/shoggoth/daemon 0700 shoggoth shoggoth
+# Vault key: restrict to daemon user only
+if [ -f /var/lib/shoggoth/daemon/vault.key ]; then
+  chown shoggoth:shoggoth /var/lib/shoggoth/daemon/vault.key
+  chmod 0600 /var/lib/shoggoth/daemon/vault.key
+fi
 fix_dir /var/lib/shoggoth/state 0700 shoggoth shoggoth
 # Workspaces root: setgid (2…) so new session dirs inherit group `agent`; agent UID matches group perms.
 fix_dir /var/lib/shoggoth/workspaces 0770 agent agent
