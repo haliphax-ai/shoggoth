@@ -57,8 +57,6 @@ export interface VaultService {
 ```ts
 /** Optional metadata stored alongside a vault entry (JSON in the metadata column). */
 export interface VaultEntryMetadata {
-  /** Human-readable description of what this credential is for. */
-  description?: string;
   /** ISO 8601 timestamp — informational, not enforced in this plan. */
   expiresAt?: string;
 }
@@ -297,10 +295,6 @@ CREATE INDEX IF NOT EXISTS idx_vault_secrets_scope ON vault_secrets(scope);
         "description": "Credential value. Required for set.",
         "type": "string",
       },
-      "description": {
-        "description": "Optional human-readable description (set only).",
-        "type": "string",
-      },
     },
     "required": ["action"],
   },
@@ -344,10 +338,10 @@ shoggoth vault set GITHUB_TOKEN --scope agent:developer --value "ghp_dev456"
 
 # List all credentials (names only)
 shoggoth vault list
-# scope          name            description       updated
-# global         GITHUB_TOKEN    GitHub PAT        2026-05-08T05:00:00Z
-# global         DATABASE_URL    Production DB     2026-05-08T05:00:00Z
-# agent:developer GITHUB_TOKEN   Dev-specific PAT  2026-05-08T05:01:00Z
+# scope             name            updated
+# global            GITHUB_TOKEN    2026-05-08T05:00:00Z
+# global            DATABASE_URL    2026-05-08T05:00:00Z
+# agent:developer   GITHUB_TOKEN    2026-05-08T05:01:00Z
 
 # Retrieve a credential value
 shoggoth vault get GITHUB_TOKEN --scope global
@@ -372,7 +366,7 @@ shoggoth vault rotate-key --new-key /path/to/new-identity.key
 // → { ok: true, name: "GITHUB_TOKEN", value: "ghp_dev456", scope: "agent:developer" }
 
 // Agent stores a credential (always in their own agent scope)
-{ action: "set", name: "OAUTH_TOKEN", value: "bearer_xyz", description: "OAuth refresh token" }
+{ action: "set", name: "OAUTH_TOKEN", value: "bearer_xyz" }
 // → { ok: true, name: "OAUTH_TOKEN", scope: "agent:developer", written: true }
 
 // Agent lists accessible credentials (own scope + global, names only)
