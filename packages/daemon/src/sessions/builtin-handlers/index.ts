@@ -24,6 +24,7 @@ import { register as registerReplace } from "./replace-handler";
 import { register as registerCd } from "./cd-handler";
 import { register as registerElevate } from "./elevate-handler";
 import { register as registerMediaGenerate } from "./media-generate-handler";
+import { register as registerVault } from "./vault-handler";
 
 /**
  * Register all builtin tool handlers on the given registry.
@@ -51,4 +52,5 @@ export function registerAllBuiltinHandlers(registry: BuiltinToolRegistry): void 
   registerCd(registry);
   registerElevate(registry);
   registerMediaGenerate(registry);
+  registerVault(registry);
 }

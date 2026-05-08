@@ -17,6 +17,7 @@ import {
   type ShoggothConfig,
 } from "@shoggoth/shared";
 import { messageToolContextRef } from "../messaging/message-tool-context-ref";
+import { vaultServiceRef } from "../vault/vault-ref";
 import {
   buildAggregatedMcpCatalog,
   mcpToolsForToolLoop,
@@ -504,6 +505,7 @@ export function createWebSearchToolFinalizer(
   const enabled = Boolean(config.searxng?.baseUrl);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   return (ctx, _sessionId) => {
+    if (!vaultServiceRef.current) return ctx;
     if (!enabled) return ctx;
     // Avoid duplicate if already present
     if (ctx.aggregated.tools.some((t) => t.namespacedName === "builtin-web-search")) return ctx;
@@ -532,6 +534,65 @@ export function createMediaGenerateToolFinalizer(
     if (ctx.aggregated.tools.some((t) => t.namespacedName === "builtin-media-generate")) return ctx;
     const aggregated: AggregateMcpCatalogResult = {
       tools: [...ctx.aggregated.tools, MEDIA_GENERATE_TOOL_DESCRIPTOR],
+    };
+    return {
+      aggregated,
+      toolsOpenAi: openAiToolsFromCatalog(aggregated),
+      toolsLoop: mcpToolsForToolLoop(aggregated),
+      external: ctx.external,
+    };
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Vault tool — conditionally injected when vault service is initialized
+// ---------------------------------------------------------------------------
+
+const VAULT_TOOL_DESCRIPTOR: AggregatedTool = {
+  namespacedName: "builtin-vault",
+  sourceId: "builtin",
+  originalName: "vault",
+  name: "vault",
+  description:
+    "Secure credential storage. Store, retrieve, delete, list, or inject secrets. Secrets are encrypted at rest and scoped per-agent.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["get", "set", "delete", "list", "inject"],
+        description: "Operation to perform.",
+      },
+      name: {
+        type: "string",
+        description: "Credential name. Required for get, set, delete, inject.",
+      },
+      value: {
+        type: "string",
+        description: "Credential value. Required for set.",
+      },
+      timeoutMs: {
+        type: "number",
+        description: "inject: FIFO read timeout in ms (default 30000).",
+      },
+    },
+    required: ["action"],
+  },
+};
+
+/**
+ * Creates a context finalizer that appends `builtin-vault` when the vault service is initialized.
+ */
+export function createVaultToolFinalizer(): (
+  ctx: SessionMcpToolContext,
+  sessionId: string,
+) => SessionMcpToolContext {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  return (ctx, _sessionId) => {
+    if (!vaultServiceRef.current) return ctx;
+    if (ctx.aggregated.tools.some((t) => t.namespacedName === "builtin-vault")) return ctx;
+    const aggregated: AggregateMcpCatalogResult = {
+      tools: [...ctx.aggregated.tools, VAULT_TOOL_DESCRIPTOR],
     };
     return {
       aggregated,

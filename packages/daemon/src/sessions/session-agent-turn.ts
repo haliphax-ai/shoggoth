@@ -26,6 +26,7 @@ import { mergeOrchestratorEnv, resolveToolCallTimeoutMs } from "../config/effect
 import { getAgentIntegrationInvoker } from "../control/agent-integration-invoke-ref";
 import { getProcessManager } from "../process-manager-singleton";
 import { BuiltinToolRegistry, type BuiltinToolContext } from "./builtin-tool-registry";
+import { vaultServiceRef } from "../vault/vault-ref";
 import { registerAllBuiltinHandlers } from "./builtin-handlers/index";
 import { createMcpRoutingToolExecutor } from "../mcp/tool-loop-mcp";
 import { createToolLoopPolicyAndAudit } from "../policy/tool-loop-bridge";
@@ -466,6 +467,7 @@ export async function executeSessionAgentTurn(
           runtimeOpenaiBaseUrl: input.config.runtime?.openaiBaseUrl,
           isSubagentSession: isSubagentSessionUrn(input.sessionId),
           imageBlockCodec,
+          vault: vaultServiceRef.current,
         };
         if (builtinRegistry.has(originalName)) {
           return builtinRegistry.execute(originalName, args, toolCtx);

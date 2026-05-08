@@ -15,6 +15,15 @@ export type ToolLoopBridgeOptions = {
 };
 
 /**
+ * Get effective redaction paths for a tool, merging global paths with tool-specific paths.
+ */
+function getEffectivePaths(engine: PolicyEngine, toolName: string): string[] {
+  const globalPaths = engine.config.auditRedaction.jsonPaths;
+  const toolPaths = engine.config.auditRedaction.toolPaths?.[toolName] ?? [];
+  return [...globalPaths, ...toolPaths];
+}
+
+/**
  * Binds the central policy engine to the session tool loop and appends authz/tool audit rows.
  */
 export function createToolLoopPolicyAndAudit(options: ToolLoopBridgeOptions): {
@@ -24,7 +33,6 @@ export function createToolLoopPolicyAndAudit(options: ToolLoopBridgeOptions): {
   const { engine, principal, db, correlationId } = options;
   const source = auditSourceForPrincipal(principal);
   const pf = principalAuditFields(principal);
-  const paths = engine.config.auditRedaction.jsonPaths;
 
   const policy: ToolLoopPolicy = {
     check(ctx) {
@@ -43,8 +51,10 @@ export function createToolLoopPolicyAndAudit(options: ToolLoopBridgeOptions): {
       if (!entry || typeof entry !== "object") return;
       const e = entry as Record<string, unknown>;
       const phase = e.phase;
+      const tool = String(e.tool ?? "");
+      const paths = getEffectivePaths(engine, tool);
+
       if (phase === "policy") {
-        const tool = String(e.tool ?? "");
         const decision = e.decision as { allow?: boolean; reason?: string } | undefined;
         const argsJson = typeof e.argsJson === "string" ? e.argsJson : undefined;
         const allow = Boolean(decision?.allow);
@@ -68,7 +78,7 @@ export function createToolLoopPolicyAndAudit(options: ToolLoopBridgeOptions): {
           ...pf,
           correlationId,
           action: "hitl.queued",
-          resource: String(e.tool ?? ""),
+          resource: tool,
           outcome: "pending",
           argsRedactedJson: redactJsonValue(
             {
@@ -87,7 +97,7 @@ export function createToolLoopPolicyAndAudit(options: ToolLoopBridgeOptions): {
           ...pf,
           correlationId,
           action: "hitl.denied",
-          resource: String(e.tool ?? ""),
+          resource: tool,
           outcome: "denied",
           argsRedactedJson: redactJsonValue(
             {
@@ -107,7 +117,7 @@ export function createToolLoopPolicyAndAudit(options: ToolLoopBridgeOptions): {
           ...pf,
           correlationId,
           action: "tool.invoke",
-          resource: String(e.tool ?? ""),
+          resource: tool,
           outcome: "started",
           argsRedactedJson:
             argsJson !== undefined ? redactToolArgsJson(argsJson, paths) : undefined,
@@ -124,7 +134,7 @@ export function createToolLoopPolicyAndAudit(options: ToolLoopBridgeOptions): {
           ...pf,
           correlationId,
           action: "tool.result",
-          resource: String(e.tool ?? ""),
+          resource: tool,
           outcome: "success",
           argsRedactedJson:
             resultJson.length > 4096

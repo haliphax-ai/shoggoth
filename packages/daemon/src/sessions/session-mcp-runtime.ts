@@ -22,6 +22,7 @@ import {
   createContextLevelToolFinalizer,
   createMcpServerRulesFinalizer,
   createMediaGenerateToolFinalizer,
+  createVaultToolFinalizer,
   createWebSearchToolFinalizer,
   type SessionMcpToolContext,
 } from "./session-mcp-tool-context";
@@ -132,6 +133,8 @@ export async function createSessionMcpRuntime(
   registerContextFinalizer(createWebSearchToolFinalizer(opts.config));
   // Register media-generate tool finalizer (adds builtin-media-generate when a gemini provider exists).
   registerContextFinalizer(createMediaGenerateToolFinalizer(opts.config));
+  // Register vault tool finalizer (adds builtin-vault when vault service is initialized).
+  registerContextFinalizer(createVaultToolFinalizer());
   // Register elevation tool finalizer (conditionally injects builtin-elevate when grant is active).
   registerContextFinalizer(createElevationToolFinalizer(opts.db));
   // Register skills enum finalizer (enriches builtin-skills id field with available skill IDs).

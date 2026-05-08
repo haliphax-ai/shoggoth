@@ -332,6 +332,11 @@ export const shoggothPolicyConfigSchema = z
       .object({
         /** Dot paths into JSON objects (e.g. `env.API_KEY`, `headers.authorization`). */
         jsonPaths: z.array(z.string()),
+        /**
+         * Per-tool additional redaction paths. Keyed by tool name.
+         * These are merged with jsonPaths when redacting that tool's audit entries.
+         */
+        toolPaths: z.record(z.string(), z.array(z.string())).optional(),
       })
       .strict(),
   })
@@ -359,6 +364,7 @@ export const shoggothPolicyFragmentSchema = z
     auditRedaction: z
       .object({
         jsonPaths: z.array(z.string()).optional(),
+        toolPaths: z.record(z.string(), z.array(z.string())).optional(),
       })
       .strict()
       .optional(),
@@ -406,6 +412,9 @@ export const DEFAULT_POLICY_CONFIG: ShoggothPolicyConfig = {
   },
   auditRedaction: {
     jsonPaths: ["password", "token", "apiKey", "api_key", "authorization", "secret"],
+    toolPaths: {
+      "builtin-vault": ["value"],
+    },
   },
 };
 
@@ -1114,6 +1123,7 @@ export const DEFAULT_HITL_CONFIG: ShoggothHitlConfig = {
     "builtin-message": "caution",
     "builtin-config-request": "never",
     "builtin-media-generate": "caution",
+    "builtin-vault": "caution",
   },
   /**
    * Default bypass tier for all agents. Per-agent overrides in agents.list.<id>.hitl.bypassUpTo.

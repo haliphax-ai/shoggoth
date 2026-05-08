@@ -13,6 +13,8 @@ import {
 import { getProcessManager } from "../process-manager-singleton";
 import type { ShoggothMcpConfig, ShoggothMcpServerEntry } from "@shoggoth/shared";
 import type { ExternalMcpInvoke } from "./tool-loop-mcp";
+import { resolveVaultEnv } from "./vault-env-resolve";
+import type { VaultService } from "../vault/vault-service";
 
 type EffectiveMcpPoolScope = "global" | "per_agent" | "per_session";
 
@@ -78,6 +80,10 @@ export type ConnectShoggothMcpPoolOptions = {
   }) => void;
   /** When provided, stdio MCP servers are spawned under this agent's identity. */
   readonly agentContext?: AgentMcpContext;
+  /** Vault service for resolving $vault: references in env vars. */
+  readonly vault?: VaultService;
+  /** Agent ID for vault scope resolution. Required if vault is provided. */
+  readonly agentId?: string;
 };
 
 /**
@@ -100,8 +106,11 @@ export async function connectShoggothMcpServers(
 
     if (s.transport === "stdio") {
       // Build env: agent workspace as HOME, then server config env on top
-      const baseEnv = agentCtx ? { HOME: agentCtx.workspacePath, ...s.env } : s.env;
-      // Resolve cwd: server config cwd takes precedence, then agent workspace, then undefined
+      let baseEnv = agentCtx ? { HOME: agentCtx.workspacePath, ...s.env } : s.env;
+      // Resolve $vault: references in env vars if vault is available
+      if (baseEnv && options?.vault) {
+        baseEnv = await resolveVaultEnv(baseEnv, options.vault, options.agentId);
+      }
       const cwd = s.cwd ?? agentCtx?.workspacePath;
       session = await openMcpStdioClient({
         command: s.command,

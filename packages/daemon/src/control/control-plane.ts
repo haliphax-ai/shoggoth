@@ -37,6 +37,7 @@ import {
 } from "./integration-ops";
 import { createInProcessAgentIntegrationInvoker } from "./integration-invoke";
 import { dispatchMcpHttpCancelRequest } from "../mcp/mcp-http-cancel-registry";
+import { vaultServiceRef } from "../vault/vault-ref";
 
 type ControlPlaneOptions = {
   config: ShoggothConfig;
@@ -143,6 +144,7 @@ async function handleOneLine(
       | "hitlPending"
       | "hitlClear"
       | "cancelMcpHttpRequest"
+      | "vault"
     >;
   },
 ): Promise<WireResponse> {
@@ -255,6 +257,7 @@ async function handleOneLine(
       hitlPending: deps.integration.hitlPending,
       hitlClear: deps.integration.hitlClear,
       cancelMcpHttpRequest: deps.integration.cancelMcpHttpRequest,
+      vault: vaultServiceRef.current,
       recordIntegrationAudit: (extras) =>
         recordControlPlaneAudit(deps.stateDb, {
           ...auditBaseFields(),
@@ -358,6 +361,7 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
     | "hitlPending"
     | "hitlClear"
     | "cancelMcpHttpRequest"
+    | "vault"
   > = {
     config,
     stateDb,
@@ -368,6 +372,7 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
     hitlPending: hitlPendingOpt,
     hitlClear: hitlClearOpt,
     cancelMcpHttpRequest: cancelMcpHttpRequestOpt ?? dispatchMcpHttpCancelRequest,
+    vault: vaultServiceRef.current,
   };
 
   await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 });

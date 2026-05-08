@@ -71,6 +71,14 @@ import { pushSystemContext } from "../sessions/system-context-buffer";
 import { pushSteer } from "../sessions/steer-channel";
 import { getTurnQueue } from "../sessions/session-turn-queue-singleton";
 import { MediaGenerationService } from "../media/media-generation-service";
+import {
+  handleVaultSet,
+  handleVaultGet,
+  handleVaultDelete,
+  handleVaultList,
+  handleVaultImport,
+  handleVaultRotateKey,
+} from "./vault-ops";
 
 export class IntegrationOpError extends Error {
   constructor(
@@ -112,6 +120,8 @@ export type IntegrationOpsContext = {
    * MCP streamable HTTP cancel routing (default: process registry filled by the active platform).
    * Override in tests.
    */
+  /** The vault service for credential management. */
+  readonly vault?: import("../vault/vault-service").VaultService;
   readonly cancelMcpHttpRequest?: (input: {
     readonly sessionId: string;
     readonly sourceId: string;
@@ -2356,6 +2366,19 @@ export async function handleIntegrationControlOp(
         timeout_ms: typeof mgPl.timeout_ms === "number" ? mgPl.timeout_ms : undefined,
       });
     }
+
+    case "vault.set":
+      return handleVaultSet(req, principal, ctx);
+    case "vault.get":
+      return handleVaultGet(req, principal, ctx);
+    case "vault.delete":
+      return handleVaultDelete(req, principal, ctx);
+    case "vault.list":
+      return handleVaultList(req, principal, ctx);
+    case "vault.import":
+      return handleVaultImport(req, principal, ctx);
+    case "vault.rotate-key":
+      return handleVaultRotateKey(req, principal, ctx);
 
     default:
       return undefined;
