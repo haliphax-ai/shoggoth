@@ -4,6 +4,7 @@
 
 import { toolExec, toolExecExtended, toolPoll } from "@shoggoth/os-exec";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
+import { resolveUserPath } from "../builtin-tool-registry";
 import { truncateToolOutput } from "./truncate-output";
 
 export function register(registry: BuiltinToolRegistry): void {
@@ -63,7 +64,8 @@ async function execHandlerInner(
         command,
         timeout: typeof args.timeout === "number" ? Math.ceil(args.timeout / 1000) : undefined,
         stdin: typeof args.stdin === "string" ? args.stdin : undefined,
-        workdir: typeof args.workdir === "string" ? args.workdir : execCwd(ctx),
+        workdir:
+          typeof args.workdir === "string" ? resolveUserPath(ctx, args.workdir) : execCwd(ctx),
         env:
           args.env && typeof args.env === "object"
             ? (args.env as Record<string, string>)

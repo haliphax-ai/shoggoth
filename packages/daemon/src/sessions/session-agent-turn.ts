@@ -449,7 +449,14 @@ export async function executeSessionAgentTurn(
           config: input.config,
           env: input.env,
           workspacePath: input.session.workspacePath,
-          workingDirectory: input.session.workingDirectory ?? undefined,
+          workingDirectory: (() => {
+            // Read workingDirectory fresh from DB on each tool call so that
+            // `cd` updates within the same turn are visible to subsequent tools.
+            const wd = input.db
+              .prepare(`SELECT working_directory FROM sessions WHERE id = ?`)
+              .get(input.sessionId) as { working_directory: string | null } | undefined;
+            return wd?.working_directory?.trim() || undefined;
+          })(),
           creds,
           orchestratorEnv,
           getAgentIntegrationInvoker,
