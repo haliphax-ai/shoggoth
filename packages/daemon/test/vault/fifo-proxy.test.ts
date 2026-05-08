@@ -32,7 +32,7 @@ describe("createSecretFifo", () => {
     const secret = "test-secret";
     const path = await createSecretFifo(secret, 1000, 1000);
 
-    expect(path).toMatch(/^\/tmp\.vault\/[a-zA-Z0-9-]+$/);
+    expect(path).toMatch(/^\/tmp\/\.vault\/[a-f0-9]+$/);
     expect(existsSync(path)).toBe(true);
   });
 

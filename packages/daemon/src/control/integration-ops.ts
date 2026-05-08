@@ -112,6 +112,8 @@ export type IntegrationOpsContext = {
    * MCP streamable HTTP cancel routing (default: process registry filled by the active platform).
    * Override in tests.
    */
+  /** The vault service for credential management. */
+  readonly vault?: import("../vault/vault-service.js").VaultService;
   readonly cancelMcpHttpRequest?: (input: {
     readonly sessionId: string;
     readonly sourceId: string;

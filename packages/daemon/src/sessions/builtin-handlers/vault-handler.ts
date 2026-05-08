@@ -4,6 +4,7 @@
 
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
 import { parseAgentSessionUrn } from "@shoggoth/shared";
+import { createSecretFifo } from "../../vault/fifo-proxy.js";
 
 /**
  * Extended context with vault service and agentId.
@@ -27,6 +28,7 @@ interface VaultToolContext extends BuiltinToolContext {
     readonly publicKey: string;
   };
   agentId: string;
+  creds: { uid: number; gid: number };
 }
 
 export function register(registry: BuiltinToolRegistry): void {
@@ -60,6 +62,8 @@ async function vaultHandler(
       return vaultDelete(args, vault, resolvedAgentId);
     case "list":
       return vaultList(args, vault, resolvedAgentId);
+    case "inject":
+      return vaultInject(args, vault, resolvedAgentId, vaultCtx);
     default:
       return {
         resultJson: JSON.stringify({ error: `unknown action: ${action}` }),
@@ -159,3 +163,43 @@ function vaultList(
     resultJson: JSON.stringify({ ok: true, entries }),
   };
 }
+
+async function vaultInject(
+  args: Record<string, unknown>,
+  vault: VaultToolContext["vault"],
+  agentId: string,
+  ctx: VaultToolContext,
+): Promise<{ resultJson: string }> {
+  const name = String(args.name ?? "");
+  if (!name) {
+    return { resultJson: JSON.stringify({ error: "name is required" }) };
+  }
+
+  // Resolve credential using scope precedence
+  let value = await vault.resolve(agentId, name);
+  if (value === null) {
+    value = await vault.get("global", name);
+  }
+
+  if (value === null) {
+    return {
+      resultJson: JSON.stringify({ ok: true, name, exists: false }),
+    };
+  }
+
+  const timeoutMs = args.timeoutMs != null ? Number(args.timeoutMs) : undefined;
+  const { uid, gid } = ctx.creds;
+
+  const path = await createSecretFifo(value, uid, gid, timeoutMs);
+
+  return {
+    resultJson: JSON.stringify({
+      ok: true,
+      name,
+      path,
+      hint: "Use this path in your command. The file will be consumed on first read.",
+    }),
+  };
+}
+
+
