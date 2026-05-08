@@ -1,6 +1,7 @@
 import { loadLayeredConfig, LAYOUT, VERSION } from "@shoggoth/shared";
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 function controlAuth(): { kind: "operator_token"; token: string } {
   const token = process.env.SHOGGOTH_OPERATOR_TOKEN?.trim();
@@ -119,10 +120,12 @@ export async function runVaultCli(argv: string[]): Promise<void> {
       return;
     }
     let envFileContent: string;
+    const resolvedPath = resolve(filePath);
     try {
-      envFileContent = readFileSync(filePath, "utf8");
-    } catch {
-      console.error(`Failed to read file: ${filePath}`);
+      envFileContent = readFileSync(resolvedPath, "utf8");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Failed to read file: ${resolvedPath}\n  ${msg}`);
       process.exitCode = 1;
       return;
     }
@@ -136,7 +139,6 @@ export async function runVaultCli(argv: string[]): Promise<void> {
     if (!res.ok) process.exitCode = 1;
     return;
   }
-
   if (sub === "rotate-key") {
     const identityFile = argv[1]?.trim();
     if (!identityFile) {
