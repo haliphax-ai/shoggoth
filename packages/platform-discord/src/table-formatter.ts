@@ -127,6 +127,23 @@ function wrapText(text: string, maxWidth: number): string[] {
   let cur = "";
   let curW = 0;
 
+  /**
+   * Hard-break a token that is wider than maxWidth, character by character,
+   * appending resulting lines to `lines` and leaving the remainder in cur/curW.
+   */
+  function hardBreak(token: string): void {
+    for (const ch of token) {
+      const cw = classifyCp(ch.codePointAt(0)!);
+      if (curW + cw > maxWidth && cur.length > 0) {
+        lines.push(cur);
+        cur = "";
+        curW = 0;
+      }
+      cur += ch;
+      curW += cw;
+    }
+  }
+
   for (const word of words) {
     const ww = visualWidth(word);
     if (curW + ww <= maxWidth) {
@@ -134,21 +151,20 @@ function wrapText(text: string, maxWidth: number): string[] {
       curW += ww;
     } else if (curW === 0) {
       // Single token wider than maxWidth — hard-break character by character
-      for (const ch of word) {
-        const cw = classifyCp(ch.codePointAt(0)!);
-        if (curW + cw > maxWidth && cur.length > 0) {
-          lines.push(cur);
-          cur = "";
-          curW = 0;
-        }
-        cur += ch;
-        curW += cw;
-      }
+      hardBreak(word);
     } else {
       // Push current line (trim trailing spaces) and start fresh
       lines.push(cur.trimEnd());
-      cur = word.trimStart();
-      curW = visualWidth(cur);
+      cur = "";
+      curW = 0;
+      // If the new word itself exceeds maxWidth, hard-break it too
+      const trimmed = word.trimStart();
+      if (visualWidth(trimmed) > maxWidth) {
+        hardBreak(trimmed);
+      } else {
+        cur = trimmed;
+        curW = visualWidth(cur);
+      }
     }
   }
   if (cur.length > 0) lines.push(cur.trimEnd());

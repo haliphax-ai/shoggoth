@@ -193,3 +193,38 @@ test("narrow columns keep natural width, wide columns get remaining budget", () 
   // So the table should be much wider than a naive 3*20 + 10 = 70 layout.
   expect(lineWidth).toBeGreaterThan(70);
 });
+
+test("words wider than their column are hard-broken when column is narrower than 20 chars", () => {
+  // Simulate the real-world bug: a path like "projects/shoggoth/package.json" (30 chars)
+  // in a table with 3 columns where the dynamic cap is well below 20.
+  const mdPaths = [
+    "| Test | Expected | Actual |",
+    "|---|---|---|",
+    "| 1. stat projects/shoggoth/package.json from workspace root | success | success |",
+    "| 2. stat package.json from workdir | success | ENOENT |",
+    "",
+  ].join("\n");
+  const result = mdTableToAscii(mdPaths);
+  const codeMatch = result.match(/```text\n([\s\S]*?)```/);
+  expect(codeMatch).toBeTruthy();
+  const box = codeMatch![1].trim();
+  const lines = box.split("\n");
+
+  // All lines must be the same width (no overflow past the box border)
+  const firstLineWidth = lines[0].length;
+  for (const line of lines) {
+    expect(line.length).toBe(firstLineWidth);
+  }
+
+  // Table must fit within 80 chars
+  expect(firstLineWidth).toBeLessThanOrEqual(80);
+
+  // The long path should be broken across lines (not left as one oversized cell)
+  // Count data lines for the first data row — should be > 1 due to wrapping
+  const sepIndex = lines.findIndex((l) => l.startsWith("├"));
+  const dataLinesAfterSep = lines
+    .slice(sepIndex + 1)
+    .filter((l) => l.startsWith("│") && !l.includes("├") && !l.includes("└"));
+  // 2 logical rows, but the first has a long path that must wrap → more visual lines
+  expect(dataLinesAfterSep.length).toBeGreaterThan(2);
+});
