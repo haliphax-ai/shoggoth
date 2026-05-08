@@ -1,7 +1,14 @@
 import { loadLayeredConfig, LAYOUT, VERSION } from "@shoggoth/shared";
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, isAbsolute } from "node:path";
+
+/** Resolve a file path relative to the caller's cwd (not the process cwd). */
+function resolveCallerPath(filePath: string): string {
+  if (isAbsolute(filePath)) return filePath;
+  const callerCwd = process.env.SHOGGOTH_CALLER_CWD || process.cwd();
+  return resolve(callerCwd, filePath);
+}
 
 function controlAuth(): { kind: "operator_token"; token: string } {
   const token = process.env.SHOGGOTH_OPERATOR_TOKEN?.trim();
@@ -120,7 +127,7 @@ export async function runVaultCli(argv: string[]): Promise<void> {
       return;
     }
     let envFileContent: string;
-    const resolvedPath = resolve(filePath);
+    const resolvedPath = resolveCallerPath(filePath);
     try {
       envFileContent = readFileSync(resolvedPath, "utf8");
     } catch (err) {
@@ -143,7 +150,7 @@ export async function runVaultCli(argv: string[]): Promise<void> {
     const identityFile = argv[1]?.trim() || undefined;
     const payload: Record<string, string> = {};
     if (identityFile) {
-      payload.newIdentityPath = resolve(identityFile);
+      payload.newIdentityPath = resolveCallerPath(identityFile);
     }
     const res = await invokeControlRequest({
       socketPath,
