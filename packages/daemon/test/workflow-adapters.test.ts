@@ -258,7 +258,7 @@ describe("createDaemonPollAdapter", () => {
     assert.equal(result.output, "result text");
   });
 
-  it("returns done for a terminated session without completion map entry", async () => {
+  it("returns failed for a terminated session without completion map entry (killed externally)", async () => {
     const rows = new Map([["sess-1", { status: "terminated" }]]);
     const adapter = createDaemonPollAdapter({
       sessions: fakeSessionStore(rows),
@@ -266,7 +266,8 @@ describe("createDaemonPollAdapter", () => {
     });
 
     const result = await adapter.poll("sess-1");
-    assert.equal(result.status, "done");
+    assert.equal(result.status, "failed");
+    assert.match(result.error!, /killed externally/i);
   });
 
   it("returns failed when completion map has an error", async () => {
