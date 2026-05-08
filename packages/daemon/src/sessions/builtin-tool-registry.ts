@@ -60,7 +60,7 @@ export interface BuiltinToolContext {
   readonly imageBlockCodec?: ImageBlockCodec;
 
   /** Vault service instance, if initialized. */
-  readonly vault?: import("../vault/vault-service.js").VaultService;
+  readonly vault?: import("../vault/vault-service").VaultService;
 }
 
 /** Result returned by a builtin tool handler. */

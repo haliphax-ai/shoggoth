@@ -5,7 +5,7 @@
  * using the connecting agent's scope precedence.
  */
 
-import type { VaultService } from "../vault/vault-service.js";
+import type { VaultService } from "../vault/vault-service";
 
 const VAULT_PREFIX = "$vault:";
 const VAULT_PREFIX_LEN = VAULT_PREFIX.length;

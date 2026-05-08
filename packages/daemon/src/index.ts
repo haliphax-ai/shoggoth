@@ -205,8 +205,8 @@ void (async () => {
 
     // Initialize vault service
     try {
-      const { createVaultService } = await import("./vault/vault-service-impl.js");
-      const { vaultServiceRef } = await import("./vault/vault-ref.js");
+      const { createVaultService } = await import("./vault/vault-service-impl");
+      const { vaultServiceRef } = await import("./vault/vault-ref");
       const vault = await createVaultService(
         db,
         "/var/lib/shoggoth/daemon/vault.key",

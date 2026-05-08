@@ -2,7 +2,7 @@
  * Vault module exports.
  */
 
-export * from "./age-crypto.js";
-export * from "./vault-service.js";
-export * from "./fifo-proxy.js";
-export * from "./env-parser.js";
+export * from "./age-crypto";
+export * from "./vault-service";
+export * from "./fifo-proxy";
+export * from "./env-parser";

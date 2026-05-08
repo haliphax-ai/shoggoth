@@ -13,8 +13,8 @@ import {
 import { getProcessManager } from "../process-manager-singleton";
 import type { ShoggothMcpConfig, ShoggothMcpServerEntry } from "@shoggoth/shared";
 import type { ExternalMcpInvoke } from "./tool-loop-mcp";
-import { resolveVaultEnv } from "./vault-env-resolve.js";
-import type { VaultService } from "../vault/vault-service.js";
+import { resolveVaultEnv } from "./vault-env-resolve";
+import type { VaultService } from "../vault/vault-service";
 
 type EffectiveMcpPoolScope = "global" | "per_agent" | "per_session";
 

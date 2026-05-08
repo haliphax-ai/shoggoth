@@ -1,4 +1,4 @@
-import type { VaultService } from "./vault-service.js";
+import type { VaultService } from "./vault-service";
 
 /**
  * Module-level ref for the vault service instance.

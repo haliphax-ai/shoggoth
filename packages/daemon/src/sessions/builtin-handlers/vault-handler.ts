@@ -4,8 +4,8 @@
 
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
 import { parseAgentSessionUrn } from "@shoggoth/shared";
-import { createSecretFifo } from "../../vault/fifo-proxy.js";
-import type { VaultService } from "../../vault/vault-service.js";
+import { createSecretFifo } from "../../vault/fifo-proxy";
+import type { VaultService } from "../../vault/vault-service";
 
 export function register(registry: BuiltinToolRegistry): void {
   registry.register("builtin-vault", vaultHandler);

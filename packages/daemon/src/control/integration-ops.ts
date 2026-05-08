@@ -78,7 +78,7 @@ import {
   handleVaultList,
   handleVaultImport,
   handleVaultRotateKey,
-} from "./vault-ops.js";
+} from "./vault-ops";
 
 export class IntegrationOpError extends Error {
   constructor(

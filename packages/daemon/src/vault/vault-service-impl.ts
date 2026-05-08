@@ -6,8 +6,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import type { AgeIdentity } from "./age-crypto";
-import { ageGenerateIdentity, ageLoadIdentity, ageEncrypt, ageDecrypt } from "./age-crypto.js";
-import type { VaultService, VaultListEntry, VaultEntryMetadata } from "./vault-service.js";
+import { ageGenerateIdentity, ageLoadIdentity, ageEncrypt, ageDecrypt } from "./age-crypto";
+import type { VaultService, VaultListEntry, VaultEntryMetadata } from "./vault-service";
 
 const SCOPE_VALIDATOR = /^(global|agent:[a-zA-Z0-9_-]+)$/;
 
