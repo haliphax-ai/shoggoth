@@ -10,6 +10,7 @@ import type {
   BuiltinToolContext,
   BuiltinToolResult,
 } from "../builtin-tool-registry";
+import { resolveUserPath } from "../builtin-tool-registry";
 import type { ChatContentPart } from "@shoggoth/models";
 import { getBlockResolver, type ShowToolParams } from "../../presentation/show-blocks.js";
 import { getLogger } from "../../logging.js";
@@ -79,7 +80,7 @@ async function mediaGenerateHandler(
 
   const outputPath =
     typeof args.output_path === "string" && args.output_path
-      ? join(ctx.workspacePath, args.output_path)
+      ? resolveUserPath(ctx, args.output_path)
       : join(
           ctx.config.mediaGeneration?.outputDirectory ?? join(ctx.workspacePath, "tmp", "media"),
           `${randomUUID()}${extensionForKind(params.kind as string)}`,
