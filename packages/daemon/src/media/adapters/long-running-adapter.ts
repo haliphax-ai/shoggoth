@@ -156,8 +156,8 @@ export async function longRunningAdapter(req: LongRunningRequest): Promise<Media
       lastFrameBase64 = lastFrameBytes.toString("base64");
     }
 
-    const apiVersion = "v1beta";
-    const initiateUrl = `${req.baseUrl}/${apiVersion}/models/${req.model}:predictLongRunning?key=${req.apiKey}`;
+    const apiVersion = req.provider.apiVersion ?? "v1beta";
+    const initiateUrl = `${req.provider.baseUrl}/${apiVersion}/models/${req.model}:predictLongRunning?key=${req.provider.apiKey}`;
     const body = buildRequestBody(req, inputImageBase64, lastFrameBase64);
 
     const response = await fetch(initiateUrl, {
@@ -179,7 +179,7 @@ export async function longRunningAdapter(req: LongRunningRequest): Promise<Media
 
     // If already done on first response
     if (json.done === true) {
-      return parseCompletedResponse(json, req.outputPath, req.apiKey);
+      return parseCompletedResponse(json, req.outputPath, req.provider.apiKey);
     }
 
     // Poll loop
@@ -189,7 +189,7 @@ export async function longRunningAdapter(req: LongRunningRequest): Promise<Media
     while (Date.now() - startTime < timeoutMs) {
       await sleep(DEFAULT_POLL_INTERVAL_MS);
 
-      const pollUrl = `${req.baseUrl}/${apiVersion}/${operationName}?key=${req.apiKey}`;
+      const pollUrl = `${req.provider.baseUrl}/${apiVersion}/${operationName}?key=${req.provider.apiKey}`;
       const pollResponse = await fetch(pollUrl);
 
       if (!pollResponse.ok) {
@@ -203,7 +203,7 @@ export async function longRunningAdapter(req: LongRunningRequest): Promise<Media
       const pollJson = (await pollResponse.json()) as Record<string, unknown>;
 
       if (pollJson.done === true) {
-        return parseCompletedResponse(pollJson, req.outputPath, req.apiKey);
+        return parseCompletedResponse(pollJson, req.outputPath, req.provider.apiKey);
       }
     }
 

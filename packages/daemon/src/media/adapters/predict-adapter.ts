@@ -35,7 +35,6 @@ export async function predictAdapter(req: MediaAdapterRequest): Promise<MediaAda
       inputImageBase64 = imageBytes.toString("base64");
     }
 
-    const url = `${req.baseUrl}/v1beta/models/${req.model}:predict?key=${req.apiKey}`;
     const body = buildRequestBody(req, inputImageBase64);
 
     const response = await fetch(url, {
@@ -81,3 +80,4 @@ export async function predictAdapter(req: MediaAdapterRequest): Promise<MediaAda
     };
   }
 }
+

@@ -37,18 +37,6 @@ export function register(registry: BuiltinToolRegistry): void {
   registry.register("media-generate", mediaGenerateHandler);
 }
 
-/**
- * Resolve the provider_id to use for media generation.
- * Priority: mediaGeneration.defaultProviderId → first gemini provider.
- */
-function resolveProviderId(ctx: BuiltinToolContext): string | undefined {
-  const explicit = ctx.config.mediaGeneration?.defaultProviderId;
-  if (explicit) return explicit;
-  const providers = ctx.config.models?.providers ?? [];
-  const gemini = providers.find((p) => p.kind === "gemini");
-  return gemini?.id;
-}
-
 async function mediaGenerateHandler(
   args: Record<string, unknown>,
   ctx: BuiltinToolContext,
@@ -63,12 +51,13 @@ async function mediaGenerateHandler(
     return { resultJson: JSON.stringify({ error: "params with kind is required" }) };
   }
 
-  const providerId = resolveProviderId(ctx);
-  if (!providerId) {
+  // Check that media generation is configured
+  const hasMediaConfig = (ctx.config.mediaGeneration?.providers?.length ?? 0) > 0 && 
+                         (ctx.config.mediaGeneration?.models?.length ?? 0) > 0;
+  if (!hasMediaConfig) {
     return {
       resultJson: JSON.stringify({
-        error:
-          "No gemini provider configured. Add a gemini provider to models.providers or set mediaGeneration.defaultProviderId.",
+        error: "Media generation not configured. Add providers and models to mediaGeneration config.",
       }),
     };
   }
@@ -92,7 +81,6 @@ async function mediaGenerateHandler(
     result = (await invoker(ctx.sessionId, "media_generate", {
       model,
       prompt,
-      provider_id: providerId,
       params,
       output_path: outputPath,
       ...(timeoutMs != null ? { timeout_ms: timeoutMs } : {}),

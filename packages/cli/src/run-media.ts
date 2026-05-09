@@ -81,7 +81,6 @@ export function parseMediaGenerateArgs(args: string[]):
     }
   }
 
-  if (!model) return { ok: false, error: "--model is required" };
   if (!prompt) return { ok: false, error: "--prompt is required" };
   if (!provider_id) return { ok: false, error: "--provider is required" };
 
@@ -254,3 +253,4 @@ export async function runMediaCli(argv: string[]): Promise<void> {
   printMediaHelp();
   process.exitCode = 1;
 }
+

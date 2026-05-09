@@ -522,7 +522,6 @@ export function createWebSearchToolFinalizer(
 }
 
 /**
- * Creates a context finalizer that appends `builtin-media-generate` when a gemini provider is configured.
  */
 export function createMediaGenerateToolFinalizer(
   config: ShoggothConfig,
@@ -602,3 +601,4 @@ export function createVaultToolFinalizer(): (
     };
   };
 }
+

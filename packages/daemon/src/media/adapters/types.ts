@@ -1,3 +1,5 @@
+import type { ResolvedMediaProvider } from "../resolve-model.js";
+
 export interface ImageGenerateParams {
   kind: "image";
   aspectRatio?: string;
@@ -41,8 +43,7 @@ export interface MediaGeneratePayload {
 export interface MediaAdapterRequest {
   model: string;
   prompt: string;
-  apiKey: string;
-  baseUrl: string;
+  provider: ResolvedMediaProvider;
   outputPath: string;
   params: MediaGenerateParams;
 }

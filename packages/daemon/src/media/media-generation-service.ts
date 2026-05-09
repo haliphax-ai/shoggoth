@@ -11,6 +11,8 @@ import type {
   MediaAdapterResult,
   MediaGenerateParams,
 } from "./adapters/types";
+import { resolveModel, type ResolvedMediaProvider, type MediaGenerationModelEntry } from "./resolve-model.js";
+import type { ShoggothMediaGenerationConfig } from "@shoggoth/shared";
 
 export interface PollRequest {
   provider_id: string;
@@ -18,119 +20,95 @@ export interface PollRequest {
   output_path?: string;
 }
 
-const BUILTIN_MODEL_ADAPTER_MAP: Record<string, "generateContent" | "predict" | "longRunning"> = {
-  // Nano Banana image generation models (generateContent with responseModalities: ["IMAGE"])
-  "gemini-2.5-flash-image": "generateContent",
-  "gemini-3-pro-image-preview": "generateContent",
-  "gemini-3.1-flash-image-preview": "generateContent",
-  // TTS models (generateContent with responseModalities: ["AUDIO"])
-  "gemini-2.5-flash-preview-tts": "generateContent",
-  "gemini-2.5-pro-preview-tts": "generateContent",
-  "gemini-3.1-flash-tts-preview": "generateContent",
-  // Lyria music models (prefix matches lyria-3-pro-preview, lyria-3-clip-preview)
-  "lyria-3": "generateContent",
-  // Imagen (prefix matches imagen-*)
-  imagen: "predict",
-  // Veo video models (prefix matches veo-3.1-generate-preview, veo-2.0-generate-001, etc.)
-  veo: "longRunning",
-};
-
-interface ProviderConfig {
-  id: string;
-  kind: string;
-  apiKey?: string;
-  baseUrl?: string;
-  models?: Array<{ name: string }>;
-}
-
-interface ServiceConfig {
-  providers: ProviderConfig[];
-  modelAdapterMap?: Record<string, "generateContent" | "predict" | "longRunning">;
-}
-
 interface GenerateRequest {
   model: string;
   prompt: string;
-  provider_id: string;
   params: MediaGenerateParams;
   output_path: string;
   timeout_ms?: number;
 }
 
-function resolveAdapter(
-  model: string,
-  mergedMap: Record<string, "generateContent" | "predict" | "longRunning">,
-): "generateContent" | "predict" | "longRunning" | undefined {
-  // Exact match first
-  if (mergedMap[model]) {
-    return mergedMap[model];
-  }
-  // Prefix match: find the longest key that is a prefix of the model name
-  let bestKey: string | undefined;
-  for (const key of Object.keys(mergedMap)) {
-    if (model.startsWith(key)) {
-      if (!bestKey || key.length > bestKey.length) {
-        bestKey = key;
-      }
-    }
-  }
-  return bestKey ? mergedMap[bestKey] : undefined;
-}
-
 export class MediaGenerationService {
-  private readonly config: ServiceConfig;
-  private readonly mergedMap: Record<string, "generateContent" | "predict" | "longRunning">;
+  private readonly providers: ResolvedMediaProvider[];
+  private readonly models: MediaGenerationModelEntry[];
+  private readonly adapterDefaults?: Record<string, unknown>;
 
-  constructor(config: ServiceConfig) {
-    this.config = config;
-    this.mergedMap = { ...BUILTIN_MODEL_ADAPTER_MAP, ...config.modelAdapterMap };
+  constructor(config: {
+    providers: ResolvedMediaProvider[];
+    models: MediaGenerationModelEntry[];
+    adapterDefaults?: Record<string, unknown>;
+  }) {
+    this.providers = config.providers;
+    this.models = config.models;
+    this.adapterDefaults = config.adapterDefaults;
+  }
+
+  static fromConfig(config: ShoggothMediaGenerationConfig): MediaGenerationService {
+    // Resolve providers from config
+    const resolvedProviders: ResolvedMediaProvider[] = (config.providers ?? []).map(p => ({
+      id: p.id,
+      kind: p.kind as "openai-compatible" | "gemini",
+      baseUrl: p.baseUrl,
+      apiKey: p.apiKey ?? (p.apiKeyEnv ? process.env[p.apiKeyEnv] ?? "" : ""),
+      apiVersion: p.apiVersion,
+    }));
+
+    // Use models from config
+    const modelEntries: MediaGenerationModelEntry[] = (config.models ?? []).map(m => ({
+      pattern: m.pattern,
+      provider: m.provider,
+      adapter: m.adapter,
+    }));
+
+    return new MediaGenerationService({
+      providers: resolvedProviders,
+      models: modelEntries,
+      adapterDefaults: config.adapterDefaults,
+    });
   }
 
   async generate(req: GenerateRequest): Promise<MediaAdapterResult> {
-    const adapterType = resolveAdapter(req.model, this.mergedMap);
-    if (!adapterType) {
+    const resolved = resolveModel(req.model, this.models, this.providers);
+    if (!resolved) {
       return {
         status: "error",
-        error: `No adapter found for model: ${req.model}`,
+        error: `No provider/adapter found for model: ${req.model}`,
       };
     }
 
-    const provider = this.config.providers.find((p) => p.id === req.provider_id);
-    if (!provider) {
-      return {
-        status: "error",
-        error: `Provider not found: ${req.provider_id}`,
-      };
-    }
-
-    if (provider.kind !== "gemini") {
-      return {
-        status: "error",
-        error: `Provider ${req.provider_id} is kind '${provider.kind}', but media generation requires kind 'gemini'`,
-      };
-    }
-
+    const adapterName = resolved.adapter;
     const adapterReq: MediaAdapterRequest = {
       model: req.model,
       prompt: req.prompt,
-      apiKey: provider.apiKey ?? "",
-      baseUrl: provider.baseUrl ?? "https://generativelanguage.googleapis.com",
+      provider: resolved.provider,
       outputPath: req.output_path,
       params: req.params,
     };
 
-    switch (adapterType) {
-      case "generateContent":
+    switch (adapterName) {
+      case "gemini-generate-content":
         return generateContentAdapter(adapterReq);
-      case "predict":
+      case "gemini-predict":
         return predictAdapter(adapterReq);
-      case "longRunning":
-        return longRunningAdapter(adapterReq);
+      case "gemini-long-running":
+        return longRunningAdapter(adapterReq as MediaAdapterRequest & { timeout_ms?: number });
+      case "openai-images":
+      case "openai-chat-image":
+      case "openai-video-async":
+        return {
+          status: "error",
+          error: `Adapter ${adapterName} not yet implemented`,
+        };
+      default:
+        return {
+          status: "error",
+          error: `Unknown adapter: ${adapterName}`,
+        };
     }
   }
 
   async poll(req: PollRequest): Promise<MediaAdapterResult> {
-    const provider = this.config.providers.find((p) => p.id === req.provider_id);
+    const provider = this.providers.find((p) => p.id === req.provider_id);
     if (!provider) {
       return {
         status: "error",
@@ -145,9 +123,9 @@ export class MediaGenerationService {
       };
     }
 
-    const baseUrl = provider.baseUrl ?? "https://generativelanguage.googleapis.com";
-    const apiKey = provider.apiKey ?? "";
-    const apiVersion = "v1beta";
+    const baseUrl = provider.baseUrl;
+    const apiKey = provider.apiKey;
+    const apiVersion = provider.apiVersion ?? "v1beta";
     const pollUrl = `${baseUrl}/${apiVersion}/${req.operation_id}?key=${apiKey}`;
 
     try {

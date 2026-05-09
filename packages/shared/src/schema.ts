@@ -910,38 +910,16 @@ export const processDeclarationSchema = z
     restartMode: z.enum(["never", "on-failure", "always"]).optional(),
     /** Max restart retries. Default 5. */
     maxRetries: z.number().int().nonnegative().optional(),
-    /** Health check (optional). */
     health: processDeclarationHealthSchema.optional(),
   })
   .strict();
 
 export type ProcessDeclaration = z.infer<typeof processDeclarationSchema>;
 
-// ---------------------------------------------------------------------------
 // SearXNG web search
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Media Generation
-// ---------------------------------------------------------------------------
-
-export const shoggothMediaGenerationConfigSchema = z
-  .object({
-    /** Default provider ID for media generation (must be kind: "gemini"). Resolved from first gemini provider if omitted. */
-    defaultProviderId: z.string().min(1).optional(),
-    /** Directory for generated media files. Default: "{workspacesRoot}/{agentId}/tmp/media" */
-    outputDirectory: z.string().min(1).optional(),
-    /** Max poll time for async models (Veo). Default 300000 (5 min). */
-    defaultTimeoutMs: z.number().int().positive().optional(),
-    /** Operator-defined model-to-adapter mappings, merged on top of built-in defaults. Values must be one of "generateContent", "predict", or "longRunning". */
-    modelAdapterMap: z
-      .record(z.string(), z.enum(["generateContent", "predict", "longRunning"]))
-      .optional(),
-  })
-  .strict();
-
-export type ShoggothMediaGenerationConfig = z.infer<typeof shoggothMediaGenerationConfigSchema>;
-
 // ---------------------------------------------------------------------------
 // SearXNG web search
 // ---------------------------------------------------------------------------
@@ -1151,3 +1129,6 @@ export function defaultConfig(configDirectory: string): ShoggothConfig {
     platforms: { discord: { enabled: true } },
   };
 }
+
+
+

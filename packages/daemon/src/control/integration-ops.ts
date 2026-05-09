@@ -2278,94 +2278,6 @@ export async function handleIntegrationControlOp(
       return { ok: true, revokedCount: revokeCount };
     }
 
-    case "media_generate_poll": {
-      if (principal.kind !== "agent") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "media_generate_poll requires agent principal",
-        );
-      }
-      const mpPl = payloadObject(req);
-      const mpProvId = requireString(mpPl, "provider_id");
-      const mpOpId = requireString(mpPl, "operation_id");
-      const mpOutputPath = typeof mpPl.output_path === "string" ? mpPl.output_path : undefined;
-
-      // Validate provider exists and is gemini
-      const mpProviders = ctx.config.models?.providers ?? [];
-      const mpProvider = mpProviders.find((p) => p.id === mpProvId);
-      if (!mpProvider) {
-        return { status: "error", error: `Provider not found: ${mpProvId}` };
-      }
-      if (mpProvider.kind !== "gemini") {
-        return {
-          status: "error",
-          error: `Provider ${mpProvId} is kind '${mpProvider.kind}', but media generation requires kind 'gemini'`,
-        };
-      }
-
-      const mpService = new MediaGenerationService({
-        providers: mpProviders as Array<{
-          id: string;
-          kind: string;
-          apiKey?: string;
-          baseUrl?: string;
-        }>,
-        modelAdapterMap: ctx.config.mediaGeneration?.modelAdapterMap,
-      });
-      return mpService.poll({
-        provider_id: mpProvId,
-        operation_id: mpOpId,
-        output_path: mpOutputPath,
-      });
-    }
-
-    case "media_generate": {
-      if (principal.kind !== "agent") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "media_generate requires agent principal");
-      }
-      const mgPl = payloadObject(req);
-      const mgModel = requireString(mgPl, "model");
-      const mgPrompt = requireString(mgPl, "prompt");
-      const mgProvId = requireString(mgPl, "provider_id");
-      const mgParams = mgPl.params;
-      if (!mgParams || typeof mgParams !== "object" || Array.isArray(mgParams)) {
-        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "payload.params must be an object");
-      }
-      if (!(mgParams as Record<string, unknown>).kind) {
-        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "payload.params.kind is required");
-      }
-
-      // Validate provider exists and is gemini
-      const mgProviders = ctx.config.models?.providers ?? [];
-      const mgProvider = mgProviders.find((p) => p.id === mgProvId);
-      if (!mgProvider) {
-        return { status: "error", error: `Provider not found: ${mgProvId}` };
-      }
-      if (mgProvider.kind !== "gemini") {
-        return {
-          status: "error",
-          error: `Provider ${mgProvId} is kind '${mgProvider.kind}', but media generation requires kind 'gemini'`,
-        };
-      }
-
-      const mgService = new MediaGenerationService({
-        providers: mgProviders as Array<{
-          id: string;
-          kind: string;
-          apiKey?: string;
-          baseUrl?: string;
-        }>,
-        modelAdapterMap: ctx.config.mediaGeneration?.modelAdapterMap,
-      });
-      return mgService.generate({
-        model: mgModel,
-        prompt: mgPrompt,
-        provider_id: mgProvId,
-        params: mgParams as any,
-        output_path: typeof mgPl.output_path === "string" ? mgPl.output_path : "",
-        timeout_ms: typeof mgPl.timeout_ms === "number" ? mgPl.timeout_ms : undefined,
-      });
-    }
 
     case "vault.set":
       return handleVaultSet(req, principal, ctx);
@@ -2384,3 +2296,4 @@ export async function handleIntegrationControlOp(
       return undefined;
   }
 }
+
