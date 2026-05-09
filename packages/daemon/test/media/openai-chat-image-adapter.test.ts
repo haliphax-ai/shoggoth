@@ -167,6 +167,7 @@ describe("openAIChatImageAdapter", () => {
       makeRequest({
         model: "gpt-4o-mini",
         prompt: "Generate a beautiful sunset",
+        modalities: ["text", "image"],
       }),
     );
 

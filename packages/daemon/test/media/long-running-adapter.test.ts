@@ -395,10 +395,15 @@ describe("longRunningAdapter", () => {
 // Mock MediaGenerationService for poll op tests
 const mockPoll = vi.fn();
 
+const MockMediaGenerationService = vi.fn().mockImplementation(function () {
+  return { generate: vi.fn(), poll: mockPoll };
+});
+MockMediaGenerationService.fromConfig = vi.fn().mockImplementation(() => {
+  return { generate: vi.fn(), poll: mockPoll };
+});
+
 vi.mock("../../src/media/media-generation-service", () => ({
-  MediaGenerationService: vi.fn().mockImplementation(function () {
-    return { generate: vi.fn(), poll: mockPoll };
-  }),
+  MediaGenerationService: MockMediaGenerationService,
 }));
 
 // Lazy-import integration-ops after mocks are set up
@@ -443,10 +448,20 @@ function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
         },
       ],
     },
+    mediaGeneration: {
+      providers: [
+        {
+          id: "gemini-default",
+          kind: "gemini",
+          apiKey: "test-api-key",
+          baseUrl: "https://generativelanguage.googleapis.com",
+          models: [{ name: "veo-3.1-generate-preview", mediaType: "video" }],
+        },
+      ],
+    },
     ...overrides,
   } as ShoggothConfig;
 }
-
 function makeCtx(configOverrides?: Partial<ShoggothConfig>): IntegrationOpsContext {
   return {
     config: makeConfig(configOverrides),
@@ -597,8 +612,12 @@ describe("media_generate_poll control op", () => {
     const callArg = mockPoll.mock.calls[0][0];
     assert.strictEqual(callArg.output_path, "/tmp/media/custom-output.mp4");
   });
-
   it("rejects unknown provider_id", async () => {
+    mockPoll.mockResolvedValueOnce({
+      status: "error",
+      error: "Provider not found: nonexistent-provider",
+    });
+
     const req = makePollReq({
       provider_id: "nonexistent-provider",
       operation_id: "operations/veo-abc123",

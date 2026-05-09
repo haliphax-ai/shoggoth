@@ -586,6 +586,26 @@ export type AttachmentHandlingConfig = z.infer<typeof attachmentHandlingSchema>;
 // Media Generation
 // ---------------------------------------------------------------------------
 
+const mediaGenerationAdapterType = z.enum([
+  "openai-images",
+  "openai-chat-image",
+  "openai-video-async",
+  "gemini-generate-content",
+  "gemini-predict",
+  "gemini-long-running",
+]);
+
+const mediaGenerationModelSchema = z.object({
+  /** Exact model name. */
+  name: z.string().min(1),
+  /** Type of media this model generates. */
+  mediaType: z.enum(["image", "video", "audio"]),
+  /** Optional adapter override. If omitted, derived from provider.kind + mediaType. */
+  adapter: mediaGenerationAdapterType.optional(),
+  /** Optional modalities to send with the request (e.g. ["image"] or ["text", "image"]). */
+  modalities: z.array(z.string()).optional(),
+});
+
 const mediaGenerationProviderSchema = z.object({
   /** Unique identifier for this media provider. */
   id: z.string().min(1),
@@ -599,24 +619,8 @@ const mediaGenerationProviderSchema = z.object({
   apiKeyEnv: z.string().optional(),
   /** Gemini-specific: API version path segment. Default "v1beta". */
   apiVersion: z.string().optional(),
-});
-
-const mediaGenerationAdapterType = z.enum([
-  "openai-images",
-  "openai-chat-image",
-  "openai-video-async",
-  "gemini-generate-content",
-  "gemini-predict",
-  "gemini-long-running",
-]);
-
-const mediaGenerationModelEntry = z.object({
-  /** Glob pattern matched against the model name. First match wins. */
-  pattern: z.string().min(1),
-  /** ID of the provider from mediaGeneration.providers. */
-  provider: z.string().min(1),
-  /** Which adapter protocol to use. */
-  adapter: mediaGenerationAdapterType,
+  /** Models available from this provider. */
+  models: z.array(mediaGenerationModelSchema).optional().default([]),
 });
 
 const mediaGenerationAdapterDefaults = z.object({
@@ -628,10 +632,8 @@ const mediaGenerationAdapterDefaults = z.object({
 
 export const shoggothMediaGenerationConfigSchema = z
   .object({
-    /** Media generation providers (independent from LLM providers). */
+    /** Media generation providers with their models. */
     providers: z.array(mediaGenerationProviderSchema).optional().default([]),
-    /** Model routing rules. Evaluated in order; first pattern match wins. */
-    models: z.array(mediaGenerationModelEntry).optional().default([]),
     /** Per-adapter-type default settings. */
     adapterDefaults: z
       .record(mediaGenerationAdapterType, mediaGenerationAdapterDefaults)

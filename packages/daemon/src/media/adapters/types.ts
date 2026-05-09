@@ -41,6 +41,7 @@ export interface MediaGeneratePayload {
 }
 
 export interface MediaAdapterRequest {
+  modalities?: string[];
   model: string;
   prompt: string;
   provider: ResolvedMediaProvider;

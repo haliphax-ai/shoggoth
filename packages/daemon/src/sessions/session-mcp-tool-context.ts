@@ -528,8 +528,9 @@ export function createMediaGenerateToolFinalizer(
 ): (ctx: SessionMcpToolContext, sessionId: string) => SessionMcpToolContext {
   const hasMediaConfig =
     (config.models?.providers ?? []).length > 0 ||
-    ((config as any).mediaGeneration?.providers ?? []).length > 0 ||
-    ((config as any).mediaGeneration?.models ?? []).length > 0;
+    ((config as any).mediaGeneration?.providers ?? []).some(
+      (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
+    );
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   return (ctx, _sessionId) => {
     if (!hasMediaConfig) return ctx;

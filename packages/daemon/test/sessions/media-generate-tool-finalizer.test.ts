@@ -3,7 +3,9 @@ import { describe, it, vi, beforeEach, expect } from "vitest";
 // Mock the media generation service to avoid circular deps
 vi.mock("../../src/media/media-generation-service", () => ({
   MediaGenerationService: vi.fn().mockImplementation(() => ({
-    generate: vi.fn().mockResolvedValue({ status: "complete", path: "/tmp/out.png", mime_type: "image/png" }),
+    generate: vi
+      .fn()
+      .mockResolvedValue({ status: "complete", path: "/tmp/out.png", mime_type: "image/png" }),
   })),
 }));
 
@@ -18,7 +20,9 @@ import { createMediaGenerateToolFinalizer } from "../../src/sessions/session-mcp
 import { buildBuiltinOnlySessionMcpToolContext } from "../../src/sessions/session-mcp-tool-context";
 import type { ShoggothConfig } from "@shoggoth/shared";
 
-function makeConfig(overrides?: Partial<{ mediaGeneration: ShoggothConfig["mediaGeneration"] }>): ShoggothConfig {
+function makeConfig(
+  overrides?: Partial<{ mediaGeneration: ShoggothConfig["mediaGeneration"] }>,
+): ShoggothConfig {
   return {
     logLevel: "info",
     stateDbPath: "/tmp/state.db",
@@ -28,18 +32,28 @@ function makeConfig(overrides?: Partial<{ mediaGeneration: ShoggothConfig["media
     inboundMediaRoot: "/tmp/media",
     operatorDirectory: "/tmp/operator",
     configDirectory: "/tmp/config",
-    hitl: { defaultApprovalTimeoutMs: 300000, toolRisk: { read: "safe", write: "caution" }, bypassUpTo: "safe" },
+    hitl: {
+      defaultApprovalTimeoutMs: 300000,
+      toolRisk: { read: "safe", write: "caution" },
+      bypassUpTo: "safe",
+    },
     memory: { paths: ["memory"], embeddings: { enabled: false } },
     skills: { scanRoots: ["skills"], disabledIds: [] },
     plugins: [],
     mcp: { servers: [], poolScope: "global" },
     policy: {
-      operator: { controlOps: { allow: ["*"], deny: [], review: [] }, tools: { allow: ["*"], deny: [], review: [] } },
-      agent: { controlOps: { allow: ["*"], deny: [], review: [] }, tools: { allow: ["*"], deny: [], review: [] } },
+      operator: {
+        controlOps: { allow: ["*"], deny: [], review: [] },
+        tools: { allow: ["*"], deny: [], review: [] },
+      },
+      agent: {
+        controlOps: { allow: ["*"], deny: [], review: [] },
+        tools: { allow: ["*"], deny: [], review: [] },
+      },
       auditRedaction: { jsonPaths: [] },
     },
     models: { providers: [] },
-    mediaGeneration: { providers: [], models: [] },
+    mediaGeneration: { providers: [] },
     ...overrides,
   } as ShoggothConfig;
 }
@@ -53,19 +67,18 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
     vi.clearAllMocks();
   });
 
-  describe("1. Tool injected when mediaGeneration.providers has entries", () => {
-    it("injects builtin-media-generate when mediaGeneration.providers array has items", () => {
+  describe("1. Tool injected when providers have models", () => {
+    it("injects builtin-media-generate when a provider has models", () => {
       const config = makeConfig({
         mediaGeneration: {
           providers: [
             {
-              id: "openai",
+              id: "openrouter",
               kind: "openai-compatible",
-              apiKey: "sk-test",
-              baseUrl: "https://api.openai.com/v1",
+              baseUrl: "https://openrouter.ai/api",
+              models: [{ name: "black-forest-labs/flux.2-klein-4b", mediaType: "image" }],
             },
           ],
-          models: [],
         },
       });
 
@@ -73,25 +86,26 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
       const ctx = buildBuiltinOnlySessionMcpToolContext();
       const result = finalizer(ctx, "agent:test:discord:channel:123");
 
-      // Tool should be injected
       const hasMediaGenerate = result.aggregated.tools.some(
         (t) => t.namespacedName === "builtin-media-generate",
       );
       expect(hasMediaGenerate).toBe(true);
     });
 
-    it("injects tool when mediaGeneration.providers has gemini provider", () => {
+    it("injects tool when gemini provider has models", () => {
       const config = makeConfig({
         mediaGeneration: {
           providers: [
             {
               id: "google",
               kind: "gemini",
-              apiKey: "google-key",
               baseUrl: "https://generativelanguage.googleapis.com",
+              models: [
+                { name: "gemini-2.5-flash-image", mediaType: "image" },
+                { name: "veo-3.1", mediaType: "video" },
+              ],
             },
           ],
-          models: [],
         },
       });
 
@@ -106,52 +120,7 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
     });
   });
 
-  describe("2. Tool injected when mediaGeneration.models has entries", () => {
-    it("injects builtin-media-generate when mediaGeneration.models array has items", () => {
-      const config = makeConfig({
-        mediaGeneration: {
-          providers: [],
-          models: [
-            { pattern: "dall-e-*", provider: "openai", adapter: "openai-images" },
-          ],
-        },
-      });
-
-      const finalizer = createMediaGenerateToolFinalizer(config);
-      const ctx = buildBuiltinOnlySessionMcpToolContext();
-      const result = finalizer(ctx, "agent:test:discord:channel:123");
-
-      // Tool should be injected when models has entries (even if providers is empty)
-      const hasMediaGenerate = result.aggregated.tools.some(
-        (t) => t.namespacedName === "builtin-media-generate",
-      );
-      expect(hasMediaGenerate).toBe(true);
-    });
-
-    it("injects tool with multiple model patterns", () => {
-      const config = makeConfig({
-        mediaGeneration: {
-          providers: [],
-          models: [
-            { pattern: "dall-e-*", provider: "openai", adapter: "openai-images" },
-            { pattern: "gemini-*-image", provider: "google", adapter: "gemini-generate-content" },
-            { pattern: "veo-*", provider: "google", adapter: "gemini-long-running" },
-          ],
-        },
-      });
-
-      const finalizer = createMediaGenerateToolFinalizer(config);
-      const ctx = buildBuiltinOnlySessionMcpToolContext();
-      const result = finalizer(ctx, "agent:test:discord:channel:123");
-
-      const hasMediaGenerate = result.aggregated.tools.some(
-        (t) => t.namespacedName === "builtin-media-generate",
-      );
-      expect(hasMediaGenerate).toBe(true);
-    });
-  });
-
-  describe("3. Tool NOT injected when config absent or arrays empty", () => {
+  describe("2. Tool NOT injected when config absent or no models", () => {
     it("does not inject tool when mediaGeneration is undefined", () => {
       const config = makeConfig({
         mediaGeneration: undefined as unknown as ShoggothConfig["mediaGeneration"],
@@ -167,11 +136,10 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
       expect(hasMediaGenerate).toBe(false);
     });
 
-    it("does not inject tool when mediaGeneration.providers is empty", () => {
+    it("does not inject tool when providers array is empty", () => {
       const config = makeConfig({
         mediaGeneration: {
           providers: [],
-          models: [],
         },
       });
 
@@ -185,11 +153,17 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
       expect(hasMediaGenerate).toBe(false);
     });
 
-    it("does not inject tool when mediaGeneration.models is empty (providers also empty)", () => {
+    it("does not inject tool when providers exist but have no models", () => {
       const config = makeConfig({
         mediaGeneration: {
-          providers: [],
-          models: [],
+          providers: [
+            {
+              id: "openrouter",
+              kind: "openai-compatible",
+              baseUrl: "https://openrouter.ai/api",
+              models: [],
+            },
+          ],
         },
       });
 
@@ -219,19 +193,18 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
     });
   });
 
-  describe("4. Tool already present - idempotency", () => {
+  describe("3. Tool already present - idempotency", () => {
     it("does not duplicate tool if already present", () => {
       const config = makeConfig({
         mediaGeneration: {
           providers: [
             {
-              id: "openai",
+              id: "openrouter",
               kind: "openai-compatible",
-              apiKey: "sk-test",
-              baseUrl: "https://api.openai.com/v1",
+              baseUrl: "https://openrouter.ai/api",
+              models: [{ name: "test-model", mediaType: "image" }],
             },
           ],
-          models: [],
         },
       });
 
@@ -251,9 +224,8 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
     });
   });
 
-  describe("5. Works with both old and new config shapes", () => {
+  describe("4. Backward compatibility with models.providers gemini fallback", () => {
     it("injects tool when old config shape has gemini provider in models.providers", () => {
-      // Old shape: mediaGeneration not defined, but models.providers has gemini
       const config = makeConfig({
         mediaGeneration: undefined as unknown as ShoggothConfig["mediaGeneration"],
         models: {
@@ -266,7 +238,7 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
             },
           ],
         },
-      });
+      } as any);
 
       const finalizer = createMediaGenerateToolFinalizer(config);
       const ctx = buildBuiltinOnlySessionMcpToolContext();
@@ -280,19 +252,24 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
     });
   });
 
-  describe("6. Different provider kinds", () => {
-    it("injects tool for openai-compatible providers", () => {
+  describe("5. Multiple providers", () => {
+    it("injects tool when multiple providers have models", () => {
       const config = makeConfig({
         mediaGeneration: {
           providers: [
             {
-              id: "local-ollama",
+              id: "openrouter",
               kind: "openai-compatible",
-              apiKey: "",
-              baseUrl: "http://localhost:11434/v1",
+              baseUrl: "https://openrouter.ai/api",
+              models: [{ name: "black-forest-labs/flux.2-klein-4b", mediaType: "image" }],
+            },
+            {
+              id: "google",
+              kind: "gemini",
+              baseUrl: "https://generativelanguage.googleapis.com",
+              models: [{ name: "gemini-2.5-flash-image", mediaType: "image" }],
             },
           ],
-          models: [],
         },
       });
 
@@ -306,24 +283,23 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
       expect(hasMediaGenerate).toBe(true);
     });
 
-    it("injects tool for multiple providers of different kinds", () => {
+    it("injects tool when only one of multiple providers has models", () => {
       const config = makeConfig({
         mediaGeneration: {
           providers: [
             {
-              id: "openai",
+              id: "empty-provider",
               kind: "openai-compatible",
-              apiKey: "sk-test",
-              baseUrl: "https://api.openai.com/v1",
+              baseUrl: "https://example.com",
+              models: [],
             },
             {
               id: "google",
               kind: "gemini",
-              apiKey: "google-key",
               baseUrl: "https://generativelanguage.googleapis.com",
+              models: [{ name: "gemini-2.5-flash-image", mediaType: "image" }],
             },
           ],
-          models: [],
         },
       });
 

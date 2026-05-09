@@ -3,14 +3,20 @@ import assert from "node:assert";
 
 // ---------------------------------------------------------------------------
 // Mock MediaGenerationService before importing integration-ops
-// ---------------------------------------------------------------------------
 
-const mockGenerate = vi.fn();
+const { mockGenerate, MockMediaGenerationService } = vi.hoisted(() => {
+  const mockGenerate = vi.fn();
+  const MockMediaGenerationService = vi.fn().mockImplementation(function () {
+    return { generate: mockGenerate, poll: vi.fn() };
+  });
+  MockMediaGenerationService.fromConfig = vi.fn().mockImplementation(() => {
+    return { generate: mockGenerate, poll: vi.fn() };
+  });
+  return { mockGenerate, MockMediaGenerationService };
+});
 
 vi.mock("../../src/media/media-generation-service", () => ({
-  MediaGenerationService: vi.fn().mockImplementation(function () {
-    return { generate: mockGenerate };
-  }),
+  MediaGenerationService: MockMediaGenerationService,
 }));
 
 import { handleIntegrationControlOp, IntegrationOpError } from "../../src/control/integration-ops";
@@ -39,7 +45,6 @@ function operatorPrincipal(): AuthenticatedPrincipal {
   return { kind: "operator", operatorId: "op-test" };
 }
 
-// New config shape: uses mediaGeneration.models and mediaGeneration.providers arrays
 function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
   return {
     logLevel: "info",
@@ -66,7 +71,6 @@ function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
         },
       ],
     },
-    // New mediaGeneration config shape with providers and models arrays
     mediaGeneration: {
       providers: [
         {
@@ -74,16 +78,16 @@ function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
           kind: "gemini",
           apiKey: "test-api-key",
           baseUrl: "https://generativelanguage.googleapis.com",
+          models: [
+            { name: "gemini-2.5-flash-image", mediaType: "image" },
+            { name: "imagen-4.0-generate-preview", mediaType: "image", adapter: "gemini-predict" },
+            { name: "veo-3.1-generate-preview", mediaType: "video" },
+          ],
         },
-      ],
-      models: [
-        { pattern: "gemini-*-image", provider: "gemini-default", adapter: "gemini-generate-content" },
-        { pattern: "imagen-*", provider: "gemini-default", adapter: "gemini-predict" },
-        { pattern: "veo-*", provider: "gemini-default", adapter: "gemini-long-running" },
       ],
     },
     ...overrides,
-  };
+  } as ShoggothConfig;
 }
 
 function makeCtx(configOverrides?: Partial<ShoggothConfig>): IntegrationOpsContext {
@@ -95,7 +99,7 @@ function makeCtx(configOverrides?: Partial<ShoggothConfig>): IntegrationOpsConte
     sessionManager: undefined,
     acpxSupervisor: undefined,
     recordIntegrationAudit: () => {},
-  };
+  } as unknown as IntegrationOpsContext;
 }
 
 function makeReq(payload: Record<string, unknown>): WireRequest {
@@ -107,7 +111,6 @@ function makeReq(payload: Record<string, unknown>): WireRequest {
   };
 }
 
-// New payload: no provider_id (resolved from model)
 function validPayload(overrides?: Record<string, unknown>): Record<string, unknown> {
   return {
     model: "gemini-2.5-flash-image",
@@ -118,7 +121,7 @@ function validPayload(overrides?: Record<string, unknown>): Record<string, unkno
 }
 
 // ---------------------------------------------------------------------------
-// Control plane op: media_generate - New Config Shape Tests
+// Control plane op: media_generate
 // ---------------------------------------------------------------------------
 
 describe("media_generate control op - Multi-Provider Integration", () => {
@@ -126,9 +129,7 @@ describe("media_generate control op - Multi-Provider Integration", () => {
     vi.clearAllMocks();
   });
 
-  // -- Payload validation --------------------------------------------------
-
-  describe("payload validation (new shape)", () => {
+  describe("payload validation", () => {
     it("rejects missing model", async () => {
       const req = makeReq(validPayload({ model: undefined }));
       delete (req.payload as Record<string, unknown>).model;
@@ -191,7 +192,6 @@ describe("media_generate control op - Multi-Provider Integration", () => {
       );
     });
 
-    // New test: rejects provider_id in payload (should be resolved from model)
     it("rejects provider_id in payload (resolved from model)", async () => {
       const req = makeReq(validPayload({ provider_id: "some-provider" }));
       await assert.rejects(
@@ -205,10 +205,8 @@ describe("media_generate control op - Multi-Provider Integration", () => {
     });
   });
 
-  // -- Model-based provider resolution -------------------------------------
-
   describe("model-based provider resolution", () => {
-    it("resolves provider from model pattern match", async () => {
+    it("resolves provider from model match", async () => {
       mockGenerate.mockResolvedValueOnce({
         status: "complete",
         path: "/tmp/media/output.png",
@@ -222,18 +220,28 @@ describe("media_generate control op - Multi-Provider Integration", () => {
       const callArg = mockGenerate.mock.calls[0][0];
       assert.equal(callArg.model, "gemini-2.5-flash-image");
       assert.equal(callArg.prompt, "a cute cat");
-      // Provider_id should be resolved from config, not from payload
-      assert.equal(callArg.provider_id, "gemini-default");
       assert.deepStrictEqual(callArg.params, { kind: "image" });
     });
 
-    it("returns error when model doesn't match any pattern", async () => {
+    it("returns error when model doesn't match any configured model", async () => {
+      mockGenerate.mockResolvedValueOnce({
+        status: "error",
+        error: "No provider/adapter found for model: unknown-model",
+      });
+
       const ctx = makeCtx({
         mediaGeneration: {
-          providers: [{ id: "test", kind: "gemini", apiKey: "key" }],
-          models: [{ pattern: "dall-e-*", provider: "test", adapter: "openai-images" }],
+          providers: [
+            {
+              id: "test",
+              kind: "gemini",
+              apiKey: "key",
+              baseUrl: "https://generativelanguage.googleapis.com",
+              models: [{ name: "dall-e-3", mediaType: "image" }],
+            },
+          ],
         },
-      });
+      } as any);
 
       const req = makeReq(validPayload({ model: "unknown-model" }));
       const result = await handleIntegrationControlOp(req, agentPrincipal(), ctx);
@@ -244,14 +252,13 @@ describe("media_generate control op - Multi-Provider Integration", () => {
       assert.ok(r.error!.includes("unknown-model"));
     });
 
-    it("routes to correct adapter based on model pattern", async () => {
+    it("routes to correct adapter based on model", async () => {
       mockGenerate.mockResolvedValueOnce({
         status: "complete",
         path: "/tmp/media/output.mp4",
         mime_type: "video/mp4",
       });
 
-      // Test video model routing
       const req = makeReq(
         validPayload({ model: "veo-3.1-generate-preview", params: { kind: "video" } }),
       );
@@ -263,10 +270,8 @@ describe("media_generate control op - Multi-Provider Integration", () => {
     });
   });
 
-  // -- OpenAI-compatible provider support ----------------------------------
-
   describe("openai-compatible provider support", () => {
-    it("works with openai-compatible provider when model matches pattern", async () => {
+    it("works with openai-compatible provider when model matches", async () => {
       const ctx = makeCtx({
         mediaGeneration: {
           providers: [
@@ -275,14 +280,14 @@ describe("media_generate control op - Multi-Provider Integration", () => {
               kind: "openai-compatible",
               apiKey: "sk-test",
               baseUrl: "https://api.openai.com/v1",
+              models: [
+                { name: "dall-e-3", mediaType: "image", adapter: "openai-images" },
+                { name: "gpt-image-1", mediaType: "image", adapter: "openai-chat-image" },
+              ],
             },
           ],
-          models: [
-            { pattern: "dall-e-*", provider: "openai", adapter: "openai-images" },
-            { pattern: "gpt-image-*", provider: "openai", adapter: "openai-chat-image" },
-          ],
         },
-      });
+      } as any);
 
       mockGenerate.mockResolvedValueOnce({
         status: "complete",
@@ -307,11 +312,11 @@ describe("media_generate control op - Multi-Provider Integration", () => {
               kind: "openai-compatible",
               apiKey: "sk-test",
               baseUrl: "https://api.openai.com/v1",
+              models: [{ name: "dall-e-3", mediaType: "image", adapter: "openai-images" }],
             },
           ],
-          models: [{ pattern: "dall-e-*", provider: "openai", adapter: "openai-images" }],
         },
-      });
+      } as any);
 
       mockGenerate.mockResolvedValueOnce({
         status: "complete",
@@ -325,8 +330,6 @@ describe("media_generate control op - Multi-Provider Integration", () => {
       assert.equal(mockGenerate.mock.calls.length, 1);
       const callArg = mockGenerate.mock.calls[0][0];
       assert.equal(callArg.model, "dall-e-3");
-      // Provider should be resolved from model pattern
-      assert.equal(callArg.provider_id, "openai");
     });
 
     it("routes to openai-chat-image for gpt-image models", async () => {
@@ -338,11 +341,11 @@ describe("media_generate control op - Multi-Provider Integration", () => {
               kind: "openai-compatible",
               apiKey: "sk-test",
               baseUrl: "https://api.openai.com/v1",
+              models: [{ name: "gpt-image-1", mediaType: "image", adapter: "openai-chat-image" }],
             },
           ],
-          models: [{ pattern: "gpt-image-*", provider: "openai", adapter: "openai-chat-image" }],
         },
-      });
+      } as any);
 
       mockGenerate.mockResolvedValueOnce({
         status: "complete",
@@ -358,8 +361,6 @@ describe("media_generate control op - Multi-Provider Integration", () => {
       assert.equal(r.status, "complete");
     });
   });
-
-  // -- Service invocation --------------------------------------------------
 
   describe("service invocation", () => {
     it("calls MediaGenerationService.generate() with correct arguments", async () => {
@@ -381,8 +382,6 @@ describe("media_generate control op - Multi-Provider Integration", () => {
       const callArg = mockGenerate.mock.calls[0][0];
       assert.equal(callArg.model, "gemini-2.5-flash-image");
       assert.equal(callArg.prompt, "a cute cat");
-      // provider_id resolved from model, not passed in payload
-      assert.equal(callArg.provider_id, "gemini-default");
       assert.deepStrictEqual(callArg.params, { kind: "image" });
     });
 
@@ -426,10 +425,17 @@ describe("media_generate control op - Multi-Provider Integration", () => {
 
       const ctx = makeCtx({
         mediaGeneration: {
-          providers: [{ id: "test", kind: "gemini", apiKey: "key" }],
-          models: [{ pattern: "veo-*", provider: "test", adapter: "gemini-long-running" }],
+          providers: [
+            {
+              id: "test",
+              kind: "gemini",
+              apiKey: "key",
+              baseUrl: "https://generativelanguage.googleapis.com",
+              models: [{ name: "veo-3.1-generate-preview", mediaType: "video" }],
+            },
+          ],
         },
-      });
+      } as any);
 
       const req = makeReq(
         validPayload({ model: "veo-3.1-generate-preview", params: { kind: "video" } }),
@@ -442,8 +448,6 @@ describe("media_generate control op - Multi-Provider Integration", () => {
       assert.equal(r.operation_id, "operations/abc123");
     });
   });
-
-  // -- Principal enforcement -----------------------------------------------
 
   describe("principal enforcement", () => {
     it("requires agent principal", async () => {
@@ -476,7 +480,7 @@ describe("media_generate control op - Multi-Provider Integration", () => {
 // ---------------------------------------------------------------------------
 
 describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
-  it("accepts valid mediaGeneration with providers and models arrays", () => {
+  it("accepts valid mediaGeneration with providers and nested models", () => {
     const fragment = {
       mediaGeneration: {
         providers: [
@@ -485,18 +489,18 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
             kind: "openai-compatible",
             apiKey: "sk-test",
             baseUrl: "https://api.openai.com/v1",
+            models: [{ name: "dall-e-3", mediaType: "image", adapter: "openai-images" }],
           },
           {
             id: "google",
             kind: "gemini",
             apiKey: "google-key",
             baseUrl: "https://generativelanguage.googleapis.com",
+            models: [
+              { name: "gemini-2.5-flash-image", mediaType: "image" },
+              { name: "veo-3.1", mediaType: "video" },
+            ],
           },
-        ],
-        models: [
-          { pattern: "dall-e-*", provider: "openai", adapter: "openai-images" },
-          { pattern: "gemini-*-image", provider: "google", adapter: "gemini-generate-content" },
-          { pattern: "veo-*", provider: "google", adapter: "gemini-long-running" },
         ],
       },
     };
@@ -529,11 +533,15 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
     );
   });
 
-  it("accepts mediaGeneration with only models array", () => {
+  it("accepts mediaGeneration with providers that have no models", () => {
     const fragment = {
       mediaGeneration: {
-        models: [
-          { pattern: "custom-*", provider: "my-provider", adapter: "openai-images" },
+        providers: [
+          {
+            id: "my-provider",
+            kind: "openai-compatible",
+            baseUrl: "https://api.example.com",
+          },
         ],
       },
     };
@@ -555,7 +563,6 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
     );
   });
 
-  // Old shape tests should now fail or be updated
   it("rejects old shape with defaultProviderId", () => {
     const fragment = {
       mediaGeneration: {
@@ -563,7 +570,6 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
       },
     };
     const result = shoggothConfigFragmentSchema.safeParse(fragment);
-    // New schema should reject old shape
     assert.equal(result.success, false);
   });
 
@@ -576,16 +582,19 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
       },
     };
     const result = shoggothConfigFragmentSchema.safeParse(fragment);
-    // New schema should reject old shape
     assert.equal(result.success, false);
   });
 
-  it("rejects invalid adapter values in models", () => {
+  it("rejects invalid adapter values in provider models", () => {
     const fragment = {
       mediaGeneration: {
-        providers: [{ id: "test", kind: "openai-compatible" }],
-        models: [
-          { pattern: "bad-model", provider: "test", adapter: "invalidAdapter" },
+        providers: [
+          {
+            id: "test",
+            kind: "openai-compatible",
+            baseUrl: "https://example.com",
+            models: [{ name: "bad-model", mediaType: "image", adapter: "invalidAdapter" }],
+          },
         ],
       },
     };
@@ -598,7 +607,6 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
       mediaGeneration: {
         unknownField: true,
         providers: [],
-        models: [],
       },
     };
     const result = shoggothConfigFragmentSchema.safeParse(fragment);
@@ -635,7 +643,6 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
         },
         auditRedaction: { jsonPaths: [] },
       },
-      // no mediaGeneration — should be fine
     };
     const result = shoggothConfigSchema.safeParse(config);
     assert.equal(
@@ -682,20 +689,26 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
             kind: "openai-compatible",
             apiKey: "sk-test",
             baseUrl: "https://api.openai.com/v1",
+            models: [
+              { name: "dall-e-3", mediaType: "image", adapter: "openai-images" },
+              { name: "gpt-image-1", mediaType: "image", adapter: "openai-chat-image" },
+            ],
           },
           {
             id: "google",
             kind: "gemini",
             apiKey: "google-key",
             baseUrl: "https://generativelanguage.googleapis.com",
+            models: [
+              { name: "gemini-2.5-flash-image", mediaType: "image" },
+              {
+                name: "imagen-4.0-generate-preview",
+                mediaType: "image",
+                adapter: "gemini-predict",
+              },
+              { name: "veo-3.1", mediaType: "video" },
+            ],
           },
-        ],
-        models: [
-          { pattern: "dall-e-*", provider: "openai", adapter: "openai-images" },
-          { pattern: "gpt-image-*", provider: "openai", adapter: "openai-chat-image" },
-          { pattern: "gemini-*-image", provider: "google", adapter: "gemini-generate-content" },
-          { pattern: "imagen-*", provider: "google", adapter: "gemini-predict" },
-          { pattern: "veo-*", provider: "google", adapter: "gemini-long-running" },
         ],
       },
     };

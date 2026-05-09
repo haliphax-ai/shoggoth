@@ -14,11 +14,7 @@ import type {
   MediaAdapterResult,
   MediaGenerateParams,
 } from "./adapters/types";
-import {
-  resolveModel,
-  type ResolvedMediaProvider,
-  type MediaGenerationModelEntry,
-} from "./resolve-model.js";
+import { resolveModel, type MediaProviderConfig } from "./resolve-model.js";
 import type { ShoggothMediaGenerationConfig } from "@shoggoth/shared";
 
 export interface PollRequest {
@@ -37,61 +33,41 @@ interface GenerateRequest {
 }
 
 export class MediaGenerationService {
-  private readonly providers: ResolvedMediaProvider[];
-  private readonly models: MediaGenerationModelEntry[];
+  private readonly providers: MediaProviderConfig[];
   private readonly adapterDefaults?: Record<string, unknown>;
 
   constructor(config: {
-    providers: ResolvedMediaProvider[];
-    models: MediaGenerationModelEntry[];
+    providers: MediaProviderConfig[];
     adapterDefaults?: Record<string, unknown>;
   }) {
     this.providers = config.providers;
-    this.models = config.models;
     this.adapterDefaults = config.adapterDefaults;
   }
 
   static fromConfig(config: ShoggothMediaGenerationConfig): MediaGenerationService {
-    // Resolve providers from config
-    const resolvedProviders: ResolvedMediaProvider[] = (config.providers ?? []).map((p) => ({
+    // Resolve providers from config, nesting models inside
+    const resolvedProviders: MediaProviderConfig[] = (config.providers ?? []).map((p) => ({
       id: p.id,
       kind: p.kind as "openai-compatible" | "gemini",
       baseUrl: p.baseUrl,
       apiKey: p.apiKey ?? (p.apiKeyEnv ? (process.env[p.apiKeyEnv] ?? "") : ""),
       apiVersion: p.apiVersion,
-    }));
-
-    // Use models from config
-    const modelEntries: MediaGenerationModelEntry[] = (config.models ?? []).map((m) => ({
-      pattern: m.pattern,
-      provider: m.provider,
-      adapter: m.adapter,
+      models: (p.models ?? []).map((m) => ({
+        name: m.name,
+        mediaType: m.mediaType as "image" | "video" | "audio",
+        adapter: m.adapter,
+      })),
     }));
 
     return new MediaGenerationService({
       providers: resolvedProviders,
-      models: modelEntries,
       adapterDefaults: config.adapterDefaults,
     });
   }
 
   async generate(req: GenerateRequest): Promise<MediaAdapterResult> {
-    const resolved = resolveModel(req.model, this.models, this.providers);
+    const resolved = resolveModel(req.model, this.providers);
     if (!resolved) {
-      // Check if a model pattern matched but provider was missing
-      for (const entry of this.models) {
-        const regexPattern = entry.pattern.split("*").join(".*");
-        const regex = new RegExp("^" + regexPattern + "$");
-        if (regex.test(req.model)) {
-          const providerExists = this.providers.some((p) => p.id === entry.provider);
-          if (!providerExists) {
-            return {
-              status: "error",
-              error: `Provider not found: ${entry.provider}`,
-            };
-          }
-        }
-      }
       return {
         status: "error",
         error: `No provider/adapter found for model: ${req.model}`,
@@ -105,6 +81,7 @@ export class MediaGenerationService {
       provider: resolved.provider,
       outputPath: req.output_path,
       params: req.params,
+      ...(resolved.modalities ? { modalities: resolved.modalities } : {}),
     };
 
     switch (adapterName) {

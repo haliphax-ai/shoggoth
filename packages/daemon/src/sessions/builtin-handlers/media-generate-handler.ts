@@ -52,12 +52,14 @@ async function mediaGenerateHandler(
   }
 
   // Check that media generation is configured
-  const hasMediaConfig = (ctx.config.mediaGeneration?.providers?.length ?? 0) > 0 && 
-                         (ctx.config.mediaGeneration?.models?.length ?? 0) > 0;
+  const hasMediaConfig = (ctx.config.mediaGeneration?.providers ?? []).some(
+    (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
+  );
   if (!hasMediaConfig) {
     return {
       resultJson: JSON.stringify({
-        error: "Media generation not configured. Add providers and models to mediaGeneration config.",
+        error:
+          "Media generation not configured. Add providers and models to mediaGeneration config.",
       }),
     };
   }
