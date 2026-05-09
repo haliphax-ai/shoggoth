@@ -6,6 +6,8 @@ import { toolExec, toolExecExtended, toolPoll } from "@shoggoth/os-exec";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
 import { resolveUserPath } from "../builtin-tool-registry";
 import { truncateToolOutput } from "./truncate-output";
+import { resolveVaultEnv } from "../../mcp/vault-env-resolve";
+import { parseAgentSessionUrn } from "@shoggoth/shared";
 
 export function register(registry: BuiltinToolRegistry): void {
   registry.register("exec", execHandler);
@@ -15,6 +17,18 @@ export function register(registry: BuiltinToolRegistry): void {
 /** Effective root for exec: workingDirectory if set, else workspacePath. */
 function execCwd(ctx: BuiltinToolContext): string | undefined {
   return ctx.workingDirectory ?? undefined;
+}
+
+/** Resolve $vault: references in exec env vars, if vault is available. */
+async function resolveExecEnv(
+  env: unknown,
+  ctx: BuiltinToolContext,
+): Promise<Record<string, string> | undefined> {
+  if (!env || typeof env !== "object") return undefined;
+  const raw = env as Record<string, string>;
+  if (!ctx.vault) return raw;
+  const agentId = parseAgentSessionUrn(ctx.sessionId)?.agentId;
+  return resolveVaultEnv(raw, ctx.vault, agentId);
 }
 
 async function execHandler(
@@ -66,10 +80,7 @@ async function execHandlerInner(
         stdin: typeof args.stdin === "string" ? args.stdin : undefined,
         workdir:
           typeof args.workdir === "string" ? resolveUserPath(ctx, args.workdir) : execCwd(ctx),
-        env:
-          args.env && typeof args.env === "object"
-            ? (args.env as Record<string, string>)
-            : undefined,
+        env: await resolveExecEnv(args.env, ctx),
         splitStreams: typeof args.splitStreams === "boolean" ? args.splitStreams : undefined,
         maxOutput: typeof args.maxOutput === "number" ? args.maxOutput : undefined,
         truncation:
