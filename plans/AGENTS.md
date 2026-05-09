@@ -35,6 +35,8 @@ completed: never # Date completed (YYYY-MM-DD), or "never"
 - Keep the primary plan document (`README.md`) focused on architecture and a high level overview. Include the feature/change motivation, design, testing strategy, considerations, migration steps (if any), and references to other plan documents/assets.
 - Break implementations (`implementation.md`) into chunked phases so they are easier to delegate to subagents.
 - Each implementation phase should be independently shippable and testable.
+- Structure phases so additive work (new modules, new files) comes before integration work (modifying existing code). This prevents cascading breakage across phases.
+- If a phase introduces a breaking change (e.g. replacing a schema), that phase owns fixing ALL tests broken by the change — not a later phase.
 - List the files each phase will touch.
 - Include type signatures and interfaces, code examples, etc. in a separate `spec.md` document.
 - Binary assets (images, etc.) should be kept small to avoid bloating the git repo. Skip including any if they do not provide useful context.
