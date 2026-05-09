@@ -17,7 +17,7 @@ function socketPathFromEnv(configPath: string): string {
 function printMediaHelp(): void {
   console.log(`shoggoth ${VERSION}
 Usage:
-  shoggoth media generate --model <model> --prompt <prompt> --provider <id> [--output <path>] [--param key=value...]
+  shoggoth media generate --model <model> --prompt <prompt> [--output <path>] [--param key=value...]
   shoggoth media poll --provider <id> --operation <id> [--output <path>]
   shoggoth media models    List configured media generation models`);
 }
@@ -33,14 +33,12 @@ export function parseMediaGenerateArgs(args: string[]):
   | ParseOk<{
       model: string;
       prompt: string;
-      provider_id: string;
       output_path?: string;
       params?: Record<string, string>;
     }>
   | ParseErr {
   let model: string | undefined;
   let prompt: string | undefined;
-  let provider_id: string | undefined;
   let output_path: string | undefined;
   const params: Record<string, string> = {};
   let hasParams = false;
@@ -51,8 +49,6 @@ export function parseMediaGenerateArgs(args: string[]):
       model = args[++i];
     } else if (a === "--prompt") {
       prompt = args[++i];
-    } else if (a === "--provider") {
-      provider_id = args[++i];
     } else if (a === "--output") {
       output_path = args[++i];
     } else if (a === "--param") {
@@ -71,15 +67,13 @@ export function parseMediaGenerateArgs(args: string[]):
 
   if (!prompt) return { ok: false, error: "--prompt is required" };
   if (!model) return { ok: false, error: "--model is required" };
-  if (!provider_id) return { ok: false, error: "--provider is required" };
 
   const payload: {
     model: string;
     prompt: string;
-    provider_id: string;
     output_path?: string;
     params?: Record<string, string>;
-  } = { model, prompt, provider_id };
+  } = { model, prompt };
   if (output_path) payload.output_path = output_path;
   if (hasParams) payload.params = params;
   return { ok: true, payload };
@@ -162,7 +156,7 @@ export async function runMediaCli(argv: string[]): Promise<void> {
     if (!parsed.ok) {
       console.error(parsed.error);
       console.error(
-        "usage: shoggoth media generate --model <model> --prompt <prompt> --provider <id> [--output <path>] [--param key=value...]",
+        "usage: shoggoth media generate --model <model> --prompt <prompt> [--output <path>] [--param key=value...]",
       );
       process.exitCode = 1;
       return;

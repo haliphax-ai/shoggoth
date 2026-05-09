@@ -2311,12 +2311,6 @@ export async function handleIntegrationControlOp(
       if (!(params as any).kind) {
         throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "media_generate params requires kind");
       }
-      if (pl.provider_id !== undefined) {
-        throw new IntegrationOpError(
-          "ERR_INVALID_PAYLOAD",
-          "media_generate does not accept provider_id; provider is resolved from model",
-        );
-      }
       const mediaGenConfig = (ctx.config as any).mediaGeneration;
       if (!mediaGenConfig) {
         return { status: "error", error: `No mediaGeneration config found` };

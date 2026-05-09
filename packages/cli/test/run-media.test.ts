@@ -44,21 +44,18 @@ afterEach(() => {
 // parseMediaGenerateArgs
 // ---------------------------------------------------------------------------
 describe("parseMediaGenerateArgs", () => {
-  it("parses --model, --prompt, --provider, --output flags", () => {
+  it("parses --model, --prompt, --output flags", () => {
     const result = parseMediaGenerateArgs([
       "--model",
       "gemini-2.5-flash-image",
       "--prompt",
       "a cat",
-      "--provider",
-      "gemini-1",
       "--output",
       "/tmp/out.png",
     ]);
     assert.ok(result.ok);
     assert.strictEqual(result.payload.model, "gemini-2.5-flash-image");
     assert.strictEqual(result.payload.prompt, "a cat");
-    assert.strictEqual(result.payload.provider_id, "gemini-1");
     assert.strictEqual(result.payload.output_path, "/tmp/out.png");
   });
 
@@ -68,8 +65,6 @@ describe("parseMediaGenerateArgs", () => {
       "gemini-2.5-flash-image",
       "--prompt",
       "a dog",
-      "--provider",
-      "g1",
       "--param",
       "kind=image",
       "--param",
@@ -86,31 +81,17 @@ describe("parseMediaGenerateArgs", () => {
   });
 
   it("requires --model", () => {
-    const result = parseMediaGenerateArgs(["--prompt", "hello", "--provider", "g"]);
+    const result = parseMediaGenerateArgs(["--prompt", "hello"]);
     assert.strictEqual(result.ok, false);
   });
 
   it("requires --prompt", () => {
-    const result = parseMediaGenerateArgs(["--model", "m", "--provider", "g"]);
-    assert.strictEqual(result.ok, false);
-  });
-
-  it("requires --provider", () => {
-    const result = parseMediaGenerateArgs(["--model", "m", "--prompt", "p"]);
+    const result = parseMediaGenerateArgs(["--model", "m"]);
     assert.strictEqual(result.ok, false);
   });
 
   it("handles --param with missing value gracefully", () => {
-    const result = parseMediaGenerateArgs([
-      "--model",
-      "m",
-      "--prompt",
-      "p",
-      "--provider",
-      "g",
-      "--param",
-      "noequals",
-    ]);
+    const result = parseMediaGenerateArgs(["--model", "m", "--prompt", "p", "--param", "noequals"]);
     // A param without '=' should either be rejected or treated as key with empty value
     // The implementation should handle this; either way it should not crash
     assert.ok(typeof result.ok === "boolean");
@@ -169,8 +150,6 @@ describe("runMediaCli generate", () => {
       "gemini-2.5-flash-image",
       "--prompt",
       "a cat on a roof",
-      "--provider",
-      "gemini-1",
       "--output",
       "/tmp/out.png",
       "--param",
@@ -182,7 +161,6 @@ describe("runMediaCli generate", () => {
     assert.strictEqual(call.op, "media_generate");
     assert.strictEqual(call.payload.model, "gemini-2.5-flash-image");
     assert.strictEqual(call.payload.prompt, "a cat on a roof");
-    assert.strictEqual(call.payload.provider_id, "gemini-1");
     assert.strictEqual(call.payload.output_path, "/tmp/out.png");
     assert.deepStrictEqual(call.payload.params, { kind: "image" });
   });
@@ -193,15 +171,7 @@ describe("runMediaCli generate", () => {
       result: { status: "complete", path: "/workspace/img.png", mime_type: "image/png" },
     });
 
-    await runMediaCli([
-      "generate",
-      "--model",
-      "gemini-2.5-flash-image",
-      "--prompt",
-      "test",
-      "--provider",
-      "g1",
-    ]);
+    await runMediaCli(["generate", "--model", "gemini-2.5-flash-image", "--prompt", "test"]);
 
     const output = logged.join("\n");
     assert.ok(output.includes("/workspace/img.png"), `Expected path in output: ${output}`);
@@ -213,15 +183,7 @@ describe("runMediaCli generate", () => {
       result: { status: "error", error: "Rate limit exceeded" },
     });
 
-    await runMediaCli([
-      "generate",
-      "--model",
-      "gemini-2.5-flash-image",
-      "--prompt",
-      "test",
-      "--provider",
-      "g1",
-    ]);
+    await runMediaCli(["generate", "--model", "gemini-2.5-flash-image", "--prompt", "test"]);
 
     const allOutput = [...logged, ...errored].join("\n");
     assert.ok(allOutput.includes("Rate limit exceeded"), `Expected error in output: ${allOutput}`);
@@ -233,7 +195,7 @@ describe("runMediaCli generate", () => {
       error: { message: "socket unreachable" },
     });
 
-    await runMediaCli(["generate", "--model", "m", "--prompt", "p", "--provider", "g"]);
+    await runMediaCli(["generate", "--model", "m", "--prompt", "p"]);
 
     assert.ok(process.exitCode === 1);
   });
@@ -254,7 +216,6 @@ describe("runMediaCli poll", () => {
       ok: true,
       result: { status: "complete", path: "/tmp/video.mp4", mime_type: "video/mp4" },
     });
-
     await runMediaCli([
       "poll",
       "--provider",

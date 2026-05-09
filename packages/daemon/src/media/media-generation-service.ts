@@ -26,7 +26,6 @@ export interface PollRequest {
 interface GenerateRequest {
   model: string;
   prompt: string;
-  provider_id?: string;
   params: MediaGenerateParams;
   output_path: string;
   timeout_ms?: number;

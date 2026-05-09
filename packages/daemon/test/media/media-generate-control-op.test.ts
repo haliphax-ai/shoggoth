@@ -191,18 +191,6 @@ describe("media_generate control op - Multi-Provider Integration", () => {
         },
       );
     });
-
-    it("rejects provider_id in payload (resolved from model)", async () => {
-      const req = makeReq(validPayload({ provider_id: "some-provider" }));
-      await assert.rejects(
-        () => handleIntegrationControlOp(req, agentPrincipal(), makeCtx()),
-        (err: IntegrationOpError) => {
-          assert.equal(err.code, "ERR_INVALID_PAYLOAD");
-          assert.ok(err.message.toLowerCase().includes("provider_id"));
-          return true;
-        },
-      );
-    });
   });
 
   describe("model-based provider resolution", () => {
