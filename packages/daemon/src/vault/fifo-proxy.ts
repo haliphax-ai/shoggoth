@@ -52,13 +52,16 @@ export async function createSecretFifo(
   });
 
   // Set ownership (best-effort — requires root in production)
+  let chownSucceeded = false;
   try {
     await chown(fifoPath, uid, gid);
+    chownSucceeded = true;
   } catch (e: unknown) {
     if ((e as NodeJS.ErrnoException).code !== "EPERM") throw e;
   }
-  // Set permissions
-  await chmod(fifoPath, 0o600);
+  // If chown succeeded, lock to owner only; otherwise allow group/other read
+  // so the agent (different UID) can still consume the FIFO.
+  await chmod(fifoPath, chownSucceeded ? 0o600 : 0o644);
 
   // Set up timeout to unlink if no reader connects
   const timeoutId = setTimeout(async () => {
