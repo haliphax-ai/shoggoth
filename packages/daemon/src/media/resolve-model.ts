@@ -34,7 +34,23 @@ export function resolveModel(
   models: MediaGenerationModelEntry[],
   providers: ResolvedMediaProvider[],
 ): ResolvedModel | undefined {
-  // Stub implementation - returns undefined always
+  for (const entry of models) {
+    // Convert glob * to regex .*
+    const regexPattern = entry.pattern.split("*").join(".*");
+    const regex = new RegExp("^" + regexPattern + "$");
+
+    if (regex.test(model)) {
+      // Find the provider by id
+      const provider = providers.find((p) => p.id === entry.provider);
+      if (provider) {
+        return {
+          provider,
+          adapter: entry.adapter,
+        };
+      }
+    }
+  }
+
   return undefined;
 }
 
@@ -43,9 +59,12 @@ export function resolveModel(
  * @param config - Configuration with either direct apiKey or apiKeyEnv reference
  * @returns The resolved API key string
  */
-export function resolveMediaProvider(
-  config: { apiKey?: string; apiKeyEnv?: string },
-): string {
-  // Stub implementation - returns empty string always
+export function resolveMediaProvider(config: { apiKey?: string; apiKeyEnv?: string }): string {
+  if (config.apiKey) {
+    return config.apiKey;
+  }
+  if (config.apiKeyEnv) {
+    return process.env[config.apiKeyEnv] || "";
+  }
   return "";
 }
