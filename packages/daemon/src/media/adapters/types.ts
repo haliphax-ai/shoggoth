@@ -3,6 +3,7 @@ import type { ResolvedMediaProvider } from "../resolve-model.js";
 export interface ImageGenerateParams {
   kind: "image";
   aspectRatio?: string;
+  size?: string;
   numberOfImages?: number;
   input_image?: string;
 }

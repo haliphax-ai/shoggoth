@@ -425,7 +425,13 @@ const MEDIA_GENERATE_TOOL_DESCRIPTOR: AggregatedTool = {
           },
           aspectRatio: {
             type: "string",
-            description: "Aspect ratio (image/video, e.g. '16:9', '1:1')",
+            description:
+              "Aspect ratio (image/video, e.g. '16:9', '1:1'). For OpenAI-compatible image APIs, supported values: 1:1, 16:9, 9:16, 4:3, 3:4",
+          },
+          size: {
+            type: "string",
+            description:
+              "Raw size string (e.g. '1024x1024', '512x512'). Alternative to aspectRatio for OpenAI-compatible image APIs. Ignored if aspectRatio is set.",
           },
           numberOfImages: {
             type: "number",

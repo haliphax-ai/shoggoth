@@ -76,9 +76,7 @@ describe("openAIImagesAdapter", () => {
     const base64 = Buffer.from(rawBytes).toString("base64");
     mockFetch.mockResolvedValue(makeB64JsonResponse(base64));
 
-    const result = await openAIImagesAdapter(
-      makeRequest({ outputPath: "/tmp/media/result.png" }),
-    );
+    const result = await openAIImagesAdapter(makeRequest({ outputPath: "/tmp/media/result.png" }));
 
     expect(vi.mocked(mkdir).mock.calls.length).toBe(1);
     expect(vi.mocked(writeFile).mock.calls.length).toBe(1);
@@ -96,8 +94,7 @@ describe("openAIImagesAdapter", () => {
 
   it("successful generation with url response — downloads and writes file", async () => {
     const imageData = "downloaded-image-bytes";
-    const base64Data = Buffer.from(imageData).toString("base64");
-    
+
     // Mock the image download fetch
     mockFetch
       .mockResolvedValueOnce(makeUrlResponse("https://example.com/image.png"))
@@ -107,13 +104,11 @@ describe("openAIImagesAdapter", () => {
         arrayBuffer: vi.fn().mockResolvedValue(Buffer.from(imageData)),
       });
 
-    const result = await openAIImagesAdapter(
-      makeRequest({ outputPath: "/tmp/media/result.png" }),
-    );
+    const result = await openAIImagesAdapter(makeRequest({ outputPath: "/tmp/media/result.png" }));
 
     // Should have made two fetch calls: one for generation, one for download
     expect(mockFetch.mock.calls.length).toBe(2);
-    
+
     // Second call should be the image download
     const [, downloadOpts] = mockFetch.mock.calls[1];
     expect(downloadOpts.method).toBe("GET");
@@ -134,9 +129,7 @@ describe("openAIImagesAdapter", () => {
     const base64 = Buffer.from("test").toString("base64");
     mockFetch.mockResolvedValue(makeB64JsonResponse(base64));
 
-    await openAIImagesAdapter(
-      makeRequest({ params: { kind: "image", aspectRatio: "1:1" } }),
-    );
+    await openAIImagesAdapter(makeRequest({ params: { kind: "image", aspectRatio: "1:1" } }));
 
     const [, opts] = mockFetch.mock.calls[0];
     const body = JSON.parse(opts.body as string);
@@ -147,9 +140,7 @@ describe("openAIImagesAdapter", () => {
     const base64 = Buffer.from("test").toString("base64");
     mockFetch.mockResolvedValue(makeB64JsonResponse(base64));
 
-    await openAIImagesAdapter(
-      makeRequest({ params: { kind: "image", aspectRatio: "16:9" } }),
-    );
+    await openAIImagesAdapter(makeRequest({ params: { kind: "image", aspectRatio: "16:9" } }));
 
     const [, opts] = mockFetch.mock.calls[0];
     const body = JSON.parse(opts.body as string);
@@ -160,9 +151,7 @@ describe("openAIImagesAdapter", () => {
     const base64 = Buffer.from("test").toString("base64");
     mockFetch.mockResolvedValue(makeB64JsonResponse(base64));
 
-    await openAIImagesAdapter(
-      makeRequest({ params: { kind: "image", aspectRatio: "9:16" } }),
-    );
+    await openAIImagesAdapter(makeRequest({ params: { kind: "image", aspectRatio: "9:16" } }));
 
     const [, opts] = mockFetch.mock.calls[0];
     const body = JSON.parse(opts.body as string);
@@ -173,9 +162,7 @@ describe("openAIImagesAdapter", () => {
     const base64 = Buffer.from("test").toString("base64");
     mockFetch.mockResolvedValue(makeB64JsonResponse(base64));
 
-    await openAIImagesAdapter(
-      makeRequest({ params: { kind: "image", aspectRatio: "4:3" } }),
-    );
+    await openAIImagesAdapter(makeRequest({ params: { kind: "image", aspectRatio: "4:3" } }));
 
     const [, opts] = mockFetch.mock.calls[0];
     const body = JSON.parse(opts.body as string);
@@ -186,26 +173,57 @@ describe("openAIImagesAdapter", () => {
     const base64 = Buffer.from("test").toString("base64");
     mockFetch.mockResolvedValue(makeB64JsonResponse(base64));
 
-    await openAIImagesAdapter(
-      makeRequest({ params: { kind: "image", aspectRatio: "3:4" } }),
-    );
+    await openAIImagesAdapter(makeRequest({ params: { kind: "image", aspectRatio: "3:4" } }));
 
     const [, opts] = mockFetch.mock.calls[0];
     const body = JSON.parse(opts.body as string);
     expect(body.size).toBe("1024x1536");
   });
-
-  it("aspect ratio default: 1024x1024", async () => {
+  it("no aspectRatio or size defaults to 1024x1024", async () => {
     const base64 = Buffer.from("test").toString("base64");
     mockFetch.mockResolvedValue(makeB64JsonResponse(base64));
 
-    await openAIImagesAdapter(
-      makeRequest({ params: { kind: "image" } }),
-    );
+    await openAIImagesAdapter(makeRequest({ params: { kind: "image" } }));
 
     const [, opts] = mockFetch.mock.calls[0];
     const body = JSON.parse(opts.body as string);
     expect(body.size).toBe("1024x1024");
+  });
+
+  it("raw size string is used when no aspectRatio is provided", async () => {
+    const base64 = Buffer.from("test").toString("base64");
+    mockFetch.mockResolvedValue(makeB64JsonResponse(base64));
+
+    await openAIImagesAdapter(makeRequest({ params: { kind: "image", size: "512x512" } }));
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body as string);
+    expect(body.size).toBe("512x512");
+  });
+
+  it("aspectRatio takes precedence over size when both provided", async () => {
+    const base64 = Buffer.from("test").toString("base64");
+    mockFetch.mockResolvedValue(makeB64JsonResponse(base64));
+
+    await openAIImagesAdapter(
+      makeRequest({ params: { kind: "image", aspectRatio: "16:9", size: "512x512" } }),
+    );
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body as string);
+    expect(body.size).toBe("1792x1024");
+  });
+
+  it("unsupported aspectRatio returns error", async () => {
+    const result = await openAIImagesAdapter(
+      makeRequest({ params: { kind: "image", aspectRatio: "3:2" } }),
+    );
+
+    expect(result.status).toBe("error");
+    const error = result as MediaAdapterResult & { status: "error" };
+    expect(error.error).toContain("Unsupported aspectRatio");
+    expect(error.error).toContain("3:2");
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("error response (non-200) returns error status", async () => {
@@ -228,9 +246,7 @@ describe("openAIImagesAdapter", () => {
     const base64 = Buffer.from("test").toString("base64");
     mockFetch.mockResolvedValue(makeB64JsonResponse(base64));
 
-    await openAIImagesAdapter(
-      makeRequest({ provider: makeProvider({ apiKey: "my-secret-key" }) }),
-    );
+    await openAIImagesAdapter(makeRequest({ provider: makeProvider({ apiKey: "my-secret-key" }) }));
 
     const [, opts] = mockFetch.mock.calls[0];
     expect(opts.headers).toHaveProperty("Authorization", "Bearer my-secret-key");
@@ -249,7 +265,7 @@ describe("openAIImagesAdapter", () => {
 
     const [, opts] = mockFetch.mock.calls[0];
     const body = JSON.parse(opts.body as string);
-    
+
     expect(body.model).toBe("dall-e-4");
     expect(body.prompt).toBe("a cat wearing a hat");
     expect(body.n).toBe(1);
