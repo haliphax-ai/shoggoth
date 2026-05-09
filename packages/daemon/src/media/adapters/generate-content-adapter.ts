@@ -58,6 +58,9 @@ export async function generateContentAdapter(
   try {
     const parts = await buildParts(req);
 
+    const apiVersion = req.provider.apiVersion ?? "v1beta";
+    const url = `${req.provider.baseUrl}/${apiVersion}/models/${req.model}:generateContent?key=${req.provider.apiKey}`;
+
     const body = {
       contents: [{ role: "user", parts }],
       generationConfig: buildGenerationConfig(req),
@@ -116,4 +119,3 @@ export async function generateContentAdapter(
     };
   }
 }
-

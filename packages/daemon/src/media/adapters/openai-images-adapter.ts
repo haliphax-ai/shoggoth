@@ -1,17 +1,6 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { MediaAdapterRequest, MediaAdapterResult } from "./types";
-
-interface ResolvedMediaProvider {
-  id: string;
-  kind: string;
-  baseUrl: string;
-  apiKey: string;
-}
-
-interface ImageRequest extends Omit<MediaAdapterRequest, "apiKey" | "baseUrl"> {
-  provider: ResolvedMediaProvider;
-}
+import type { MediaAdapterRequest, MediaAdapterResult, ImageGenerateParams } from "./types";
 
 function mapAspectRatio(aspectRatio?: string): string {
   switch (aspectRatio) {
@@ -30,10 +19,11 @@ function mapAspectRatio(aspectRatio?: string): string {
   }
 }
 
-export async function openAIImagesAdapter(req: ImageRequest): Promise<MediaAdapterResult> {
+export async function openAIImagesAdapter(req: MediaAdapterRequest): Promise<MediaAdapterResult> {
   try {
     const { baseUrl, apiKey } = req.provider;
-    const size = mapAspectRatio(req.params.aspectRatio);
+    const imageParams = req.params as ImageGenerateParams;
+    const size = mapAspectRatio(imageParams.aspectRatio);
 
     const response = await fetch(`${baseUrl}/images/generations`, {
       method: "POST",

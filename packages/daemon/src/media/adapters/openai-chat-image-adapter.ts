@@ -2,17 +2,6 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { MediaAdapterRequest, MediaAdapterResult } from "./types";
 
-interface ResolvedMediaProvider {
-  id: string;
-  kind: string;
-  baseUrl: string;
-  apiKey: string;
-}
-
-interface ImageRequest extends Omit<MediaAdapterRequest, "apiKey" | "baseUrl"> {
-  provider: ResolvedMediaProvider;
-}
-
 /**
  * Parse a data URI and extract mime type and base64 content.
  * Expected format: data:<mime>;base64,<data>
@@ -29,7 +18,9 @@ function parseDataUri(dataUri: string): { mime: string; data: Buffer } | null {
   };
 }
 
-export async function openAIChatImageAdapter(req: ImageRequest): Promise<MediaAdapterResult> {
+export async function openAIChatImageAdapter(
+  req: MediaAdapterRequest,
+): Promise<MediaAdapterResult> {
   try {
     const { baseUrl, apiKey } = req.provider;
 

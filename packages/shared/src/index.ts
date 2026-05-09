@@ -96,6 +96,8 @@ export {
   attachmentHandlingModes,
   type AttachmentHandlingMode,
   type AttachmentHandlingConfig,
+  shoggothMediaGenerationConfigSchema,
+  type ShoggothMediaGenerationConfig,
 } from "./schema";
 export {
   resolvePlatformConfig,

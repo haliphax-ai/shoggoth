@@ -582,6 +582,63 @@ export type AttachmentHandlingMode = (typeof attachmentHandlingModes)[number];
 
 export type AttachmentHandlingConfig = z.infer<typeof attachmentHandlingSchema>;
 
+// ---------------------------------------------------------------------------
+// Media Generation
+// ---------------------------------------------------------------------------
+
+const mediaGenerationProviderSchema = z.object({
+  /** Unique identifier for this media provider. */
+  id: z.string().min(1),
+  /** Determines auth headers and URL construction. */
+  kind: z.enum(["openai-compatible", "gemini"]),
+  /** Base URL for API requests. */
+  baseUrl: z.string().min(1),
+  /** API key (plaintext or env var reference). */
+  apiKey: z.string().optional(),
+  /** Environment variable name containing the API key. */
+  apiKeyEnv: z.string().optional(),
+  /** Gemini-specific: API version path segment. Default "v1beta". */
+  apiVersion: z.string().optional(),
+});
+
+const mediaGenerationAdapterType = z.enum([
+  "openai-images",
+  "openai-chat-image",
+  "openai-video-async",
+  "gemini-generate-content",
+  "gemini-predict",
+  "gemini-long-running",
+]);
+
+const mediaGenerationModelEntry = z.object({
+  /** Glob pattern matched against the model name. First match wins. */
+  pattern: z.string().min(1),
+  /** ID of the provider from mediaGeneration.providers. */
+  provider: z.string().min(1),
+  /** Which adapter protocol to use. */
+  adapter: mediaGenerationAdapterType,
+});
+
+const mediaGenerationAdapterDefaults = z.object({
+  /** Polling interval for async adapters. */
+  pollIntervalMs: z.number().int().positive().optional(),
+  /** Max time to poll before returning in_progress. */
+  timeoutMs: z.number().int().positive().optional(),
+});
+
+export const shoggothMediaGenerationConfigSchema = z.object({
+  /** Media generation providers (independent from LLM providers). */
+  providers: z.array(mediaGenerationProviderSchema).min(1),
+  /** Model routing rules. Evaluated in order; first pattern match wins. */
+  models: z.array(mediaGenerationModelEntry).min(1),
+  /** Per-adapter-type default settings. */
+  adapterDefaults: z.record(mediaGenerationAdapterType, mediaGenerationAdapterDefaults).optional(),
+  /** Directory for generated media files. Default: "{workspacePath}/tmp/media". */
+  outputDirectory: z.string().min(1).optional(),
+});
+
+export type ShoggothMediaGenerationConfig = z.infer<typeof shoggothMediaGenerationConfigSchema>;
+
 /** Daemon timers, probes, and feature flags also available via `SHOGGOTH_*` env (env wins when set). */
 export const shoggothRuntimeConfigSchema = z
   .object({
@@ -1129,6 +1186,3 @@ export function defaultConfig(configDirectory: string): ShoggothConfig {
     platforms: { discord: { enabled: true } },
   };
 }
-
-
-

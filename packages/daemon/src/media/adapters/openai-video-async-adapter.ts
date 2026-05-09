@@ -17,9 +17,7 @@ export async function openaiVideoAsyncAdapter(req: VideoRequest): Promise<MediaA
   const pollIntervalMs = req.adapterDefaults?.pollIntervalMs ?? 5000;
   const timeoutMs = req.adapterDefaults?.timeoutMs ?? 300000;
 
-  // Support both provider object and direct apiKey/baseUrl
-  const apiKey = (req as { provider?: { apiKey: string } }).provider?.apiKey ?? req.apiKey;
-  const baseUrl = (req as { provider?: { baseUrl: string } }).provider?.baseUrl ?? req.baseUrl;
+  const { apiKey, baseUrl } = req.provider;
 
   if (!apiKey || !baseUrl) {
     return {

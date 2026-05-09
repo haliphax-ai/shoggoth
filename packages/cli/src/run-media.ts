@@ -82,6 +82,7 @@ export function parseMediaGenerateArgs(args: string[]):
   }
 
   if (!prompt) return { ok: false, error: "--prompt is required" };
+  if (!model) return { ok: false, error: "--model is required" };
   if (!provider_id) return { ok: false, error: "--provider is required" };
 
   const payload: {
@@ -147,8 +148,13 @@ export async function runMediaCli(argv: string[]): Promise<void> {
   // --- models (no control socket needed) ---
   if (sub === "models") {
     const config = loadLayeredConfig(configDir);
-    const operatorMap = config.mediaGeneration?.modelAdapterMap;
-    const merged = operatorMap ? { ...BUILTIN_MEDIA_MODELS, ...operatorMap } : BUILTIN_MEDIA_MODELS;
+    const configModels = config.mediaGeneration?.models ?? [];
+    // Convert config models array to object mapping pattern -> adapter
+    const configModelMap: Record<string, string> = {};
+    for (const entry of configModels) {
+      configModelMap[entry.pattern] = entry.adapter;
+    }
+    const merged = { ...BUILTIN_MEDIA_MODELS, ...configModelMap };
     const lines: string[] = [];
     for (const [model, adapter] of Object.entries(merged)) {
       const source = BUILTIN_MEDIA_MODELS[model] ? "" : "  (config)";
@@ -253,4 +259,3 @@ export async function runMediaCli(argv: string[]): Promise<void> {
   printMediaHelp();
   process.exitCode = 1;
 }
-
