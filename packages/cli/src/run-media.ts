@@ -1,18 +1,6 @@
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
 import { loadLayeredConfig, LAYOUT, VERSION } from "@shoggoth/shared";
 
-export const BUILTIN_MEDIA_MODELS: Record<string, "generateContent" | "predict" | "longRunning"> = {
-  "gemini-2.5-flash-image": "generateContent",
-  "gemini-3-pro-image-preview": "generateContent",
-  "gemini-3.1-flash-image-preview": "generateContent",
-  "gemini-2.5-flash-preview-tts": "generateContent",
-  "gemini-2.5-pro-preview-tts": "generateContent",
-  "gemini-3.1-flash-tts-preview": "generateContent",
-  "lyria-3": "generateContent",
-  imagen: "predict",
-  veo: "longRunning",
-};
-
 function controlAuth(): { kind: "operator_token"; token: string } {
   const token = process.env.SHOGGOTH_OPERATOR_TOKEN?.trim();
   if (!token) throw new Error("SHOGGOTH_OPERATOR_TOKEN is required");
@@ -31,7 +19,7 @@ function printMediaHelp(): void {
 Usage:
   shoggoth media generate --model <model> --prompt <prompt> --provider <id> [--output <path>] [--param key=value...]
   shoggoth media poll --provider <id> --operation <id> [--output <path>]
-  shoggoth media models    List built-in media generation model-to-adapter mappings`);
+  shoggoth media models    List configured media generation models`);
 }
 
 // ---------------------------------------------------------------------------
@@ -145,20 +133,24 @@ export async function runMediaCli(argv: string[]): Promise<void> {
 
   const sub = argv[0];
 
-  // --- models (no control socket needed) ---
   if (sub === "models") {
     const config = loadLayeredConfig(configDir);
-    const configModels = config.mediaGeneration?.models ?? [];
-    // Convert config models array to object mapping pattern -> adapter
-    const configModelMap: Record<string, string> = {};
-    for (const entry of configModels) {
-      configModelMap[entry.pattern] = entry.adapter;
+    const providers = config.mediaGeneration?.providers ?? [];
+    if (!providers.length) {
+      console.log("No media generation providers configured.");
+      return;
     }
-    const merged = { ...BUILTIN_MEDIA_MODELS, ...configModelMap };
     const lines: string[] = [];
-    for (const [model, adapter] of Object.entries(merged)) {
-      const source = BUILTIN_MEDIA_MODELS[model] ? "" : "  (config)";
-      lines.push(`${model}  →  ${adapter}${source}`);
+    for (const provider of providers) {
+      const p = provider as {
+        id: string;
+        kind: string;
+        models?: { name: string; mediaType: string; adapter?: string }[];
+      };
+      for (const model of p.models ?? []) {
+        const adapter = model.adapter ?? `${p.kind}/${model.mediaType}`;
+        lines.push(`${model.name}  →  ${adapter}  [${p.id}]`);
+      }
     }
     console.log(lines.join("\n"));
     return;
