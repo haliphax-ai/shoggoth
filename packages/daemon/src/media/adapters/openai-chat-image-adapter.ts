@@ -1,6 +1,7 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { MediaAdapterRequest, MediaAdapterResult } from "./types";
+import { normalizeBaseUrl } from "./utils";
 
 /**
  * Parse a data URI and extract mime type and base64 content.
@@ -23,8 +24,9 @@ export async function openAIChatImageAdapter(
 ): Promise<MediaAdapterResult> {
   try {
     const { baseUrl, apiKey } = req.provider;
+    const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
 
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const response = await fetch(`${normalizedBaseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,

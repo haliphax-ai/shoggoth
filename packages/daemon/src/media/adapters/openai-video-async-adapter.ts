@@ -1,6 +1,7 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { MediaAdapterRequest, MediaAdapterResult } from "./types";
+import { normalizeBaseUrl } from "./utils";
 
 interface VideoRequest extends MediaAdapterRequest {
   adapterDefaults?: {
@@ -18,6 +19,7 @@ export async function openaiVideoAsyncAdapter(req: VideoRequest): Promise<MediaA
   const timeoutMs = req.adapterDefaults?.timeoutMs ?? 300000;
 
   const { apiKey, baseUrl } = req.provider;
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
 
   if (!apiKey || !baseUrl) {
     return {
@@ -28,7 +30,7 @@ export async function openaiVideoAsyncAdapter(req: VideoRequest): Promise<MediaA
 
   try {
     // Submit generation request
-    const submitResponse = await fetch(`${baseUrl}/chat/completions`, {
+    const submitResponse = await fetch(`${normalizedBaseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -83,7 +85,7 @@ export async function openaiVideoAsyncAdapter(req: VideoRequest): Promise<MediaA
         await sleep(pollIntervalMs);
       }
 
-      const pollResponse = await fetch(`${baseUrl}/generation?id=${generationId}`, {
+      const pollResponse = await fetch(`${normalizedBaseUrl}/generation?id=${generationId}`, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${apiKey}`,

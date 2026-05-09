@@ -1,6 +1,7 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { MediaAdapterRequest, MediaAdapterResult, ImageGenerateParams } from "./types";
+import { normalizeBaseUrl } from "./utils";
 
 function mapAspectRatio(aspectRatio?: string): string {
   switch (aspectRatio) {
@@ -22,10 +23,11 @@ function mapAspectRatio(aspectRatio?: string): string {
 export async function openAIImagesAdapter(req: MediaAdapterRequest): Promise<MediaAdapterResult> {
   try {
     const { baseUrl, apiKey } = req.provider;
+    const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
     const imageParams = req.params as ImageGenerateParams;
     const size = mapAspectRatio(imageParams.aspectRatio);
 
-    const response = await fetch(`${baseUrl}/images/generations`, {
+    const response = await fetch(`${normalizedBaseUrl}/images/generations`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
