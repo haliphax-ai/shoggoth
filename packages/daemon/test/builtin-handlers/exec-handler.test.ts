@@ -262,4 +262,79 @@ describe("exec-handler", () => {
       // so we can't easily verify the resultJson content
     });
   });
+
+  describe("$vault: env resolution", () => {
+    it("resolves $vault: references in env vars before passing to toolExecExtended", async () => {
+      const config = makeConfig();
+      const ctx = makeCtx(config);
+
+      // Add a mock vault service to the context
+      const mockVault = {
+        get: vi.fn().mockImplementation((scope: string, name: string) => {
+          if (scope === "agent:test" && name === "MY_SECRET") return "resolved-secret";
+          if (scope === "global" && name === "GLOBAL_KEY") return "global-value";
+          return null;
+        }),
+        resolve: vi.fn().mockImplementation((_agentId: string, name: string) => {
+          if (name === "MY_SECRET") return "resolved-secret";
+          return null;
+        }),
+        put: vi.fn(),
+        delete: vi.fn(),
+        list: vi.fn(),
+        listScopes: vi.fn(),
+        rotateKey: vi.fn(),
+        publicKey: "age1test",
+      };
+      (ctx as any).vault = mockVault;
+
+      vi.mocked(toolExecExtended).mockResolvedValueOnce({
+        kind: "foreground",
+        exitCode: 0,
+        signal: null,
+        output: "done",
+      } as any);
+
+      await registry.execute(
+        "exec",
+        {
+          argv: ["my-cmd"],
+          env: { SECRET: "$vault:MY_SECRET", PLAIN: "hello" },
+        },
+        ctx,
+      );
+
+      expect(toolExecExtended).toHaveBeenCalledOnce();
+      const callArgs = vi.mocked(toolExecExtended).mock.calls[0];
+      // The env should have the vault reference resolved
+      expect(callArgs[1].env).toEqual({ SECRET: "resolved-secret", PLAIN: "hello" });
+    });
+
+    it("passes env through unchanged when vault is not available", async () => {
+      const config = makeConfig();
+      const ctx = makeCtx(config);
+      // No vault on ctx
+
+      vi.mocked(toolExecExtended).mockResolvedValueOnce({
+        kind: "foreground",
+        exitCode: 0,
+        signal: null,
+        output: "done",
+      } as any);
+
+      await registry.execute(
+        "exec",
+        {
+          argv: ["my-cmd"],
+          env: { SECRET: "$vault:MY_SECRET", PLAIN: "hello" },
+        },
+        ctx,
+      );
+
+      expect(toolExecExtended).toHaveBeenCalledOnce();
+      const callArgs = vi.mocked(toolExecExtended).mock.calls[0];
+      // Without vault, env passes through as-is
+      expect(callArgs[1].env).toEqual({ SECRET: "$vault:MY_SECRET", PLAIN: "hello" });
+    });
+  });
 });
