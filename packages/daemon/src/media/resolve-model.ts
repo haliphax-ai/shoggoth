@@ -43,6 +43,7 @@ const ADAPTER_DEFAULTS: Record<string, Record<string, string>> = {
   gemini: {
     image: "gemini-generate-content",
     video: "gemini-long-running",
+    audio: "gemini-generate-content",
   },
 };
 

@@ -28,6 +28,7 @@ describe("resolveModel", () => {
       models: [
         { name: "gemini-2.5-flash-image", mediaType: "image" },
         { name: "veo-3.1", mediaType: "video" },
+        { name: "lyria-3-pro-preview", mediaType: "audio" },
       ],
     },
   ];
@@ -58,6 +59,13 @@ describe("resolveModel", () => {
     expect(result).toBeDefined();
     expect(result?.provider.id).toBe("google");
     expect(result?.adapter).toBe("gemini-long-running");
+  });
+
+  it("resolves gemini audio model to gemini-generate-content adapter", () => {
+    const result = resolveModel("lyria-3-pro-preview", mockProviders);
+    expect(result).toBeDefined();
+    expect(result?.provider.id).toBe("google");
+    expect(result?.adapter).toBe("gemini-generate-content");
   });
 
   it("uses explicit adapter override when specified on model", () => {
