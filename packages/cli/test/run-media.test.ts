@@ -346,9 +346,10 @@ describe("runMediaCli models", () => {
     mockLoadLayeredConfig.mockReturnValue({
       socketPath: "/tmp/test.sock",
       mediaGeneration: {
-        modelAdapterMap: {
-          "my-custom-model": "generateContent",
-        },
+        providers: [{ id: "custom", kind: "gemini", apiKey: "key" }],
+        models: [
+          { pattern: "my-custom-model", provider: "custom", adapter: "gemini-generate-content" },
+        ],
       },
     });
 

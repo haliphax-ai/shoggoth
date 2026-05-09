@@ -20,8 +20,12 @@ function makeRequest(overrides?: Partial<MediaAdapterRequest>): MediaAdapterRequ
   return {
     model: "imagen-4.0-generate-preview-06-2025",
     prompt: "a cat wearing a hat",
-    apiKey: "test-api-key",
-    baseUrl: "https://generativelanguage.googleapis.com",
+    provider: {
+      id: "gemini-test",
+      kind: "gemini",
+      baseUrl: "https://generativelanguage.googleapis.com",
+      apiKey: "test-api-key",
+    },
     outputPath: "/tmp/media/output.png",
     params: { kind: "image" },
     ...overrides,

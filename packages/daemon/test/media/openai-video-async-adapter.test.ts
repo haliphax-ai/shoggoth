@@ -19,13 +19,19 @@ import type { MediaAdapterRequest, MediaAdapterResult } from "../../src/media/ad
 // ---------------------------------------------------------------------------
 
 function makeRequest(
-  overrides?: Partial<MediaAdapterRequest> & { adapterDefaults?: { pollIntervalMs?: number; timeoutMs?: number } },
+  overrides?: Partial<MediaAdapterRequest> & {
+    adapterDefaults?: { pollIntervalMs?: number; timeoutMs?: number };
+  },
 ): MediaAdapterRequest & { adapterDefaults?: { pollIntervalMs?: number; timeoutMs?: number } } {
   return {
     model: "gpt-video-1",
     prompt: "A cat playing in the snow",
-    apiKey: "test-api-key",
-    baseUrl: "https://api.openai.com/v1",
+    provider: {
+      id: "openai-test",
+      kind: "openai-compatible",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "test-api-key",
+    },
     outputPath: "/tmp/media/output.mp4",
     params: { kind: "video" as const },
     ...overrides,
@@ -179,8 +185,8 @@ describe("openaiVideoAsyncAdapter", () => {
       expect(result.status).toBe("complete");
 
       // Verify 3 poll calls were made (excluding submit and download)
-      const pollCalls = mockFetch.mock.calls.filter(
-        ([url]: [string]) => url.includes("/generation?"),
+      const pollCalls = mockFetch.mock.calls.filter(([url]: [string]) =>
+        url.includes("/generation?"),
       );
       expect(pollCalls.length).toBe(3);
     });
@@ -221,9 +227,7 @@ describe("openaiVideoAsyncAdapter", () => {
       await openaiVideoAsyncAdapter(makeRequest());
 
       // The poll should use the generation_id from body
-      const pollCall = mockFetch.mock.calls.find(
-        ([url]: [string]) => url.includes("/generation?"),
-      );
+      const pollCall = mockFetch.mock.calls.find(([url]: [string]) => url.includes("/generation?"));
       expect(pollCall).toBeDefined();
       const pollUrl = pollCall![0] as string;
       expect(pollUrl).toContain(`id=${generationId}`);
@@ -239,9 +243,7 @@ describe("openaiVideoAsyncAdapter", () => {
       await openaiVideoAsyncAdapter(makeRequest());
 
       // The poll should use the generation_id from header
-      const pollCall = mockFetch.mock.calls.find(
-        ([url]: [string]) => url.includes("/generation?"),
-      );
+      const pollCall = mockFetch.mock.calls.find(([url]: [string]) => url.includes("/generation?"));
       expect(pollCall).toBeDefined();
       const pollUrl = pollCall![0] as string;
       expect(pollUrl).toContain(`id=${generationId}`);
@@ -279,10 +281,7 @@ describe("openaiVideoAsyncAdapter", () => {
 
       // Verify mkdir and writeFile were called
       expect(mkdir).toHaveBeenCalled();
-      expect(writeFile).toHaveBeenCalledWith(
-        "/tmp/media/final-output.mp4",
-        expect.any(Buffer),
-      );
+      expect(writeFile).toHaveBeenCalledWith("/tmp/media/final-output.mp4", expect.any(Buffer));
     });
   });
 });

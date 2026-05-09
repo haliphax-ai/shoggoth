@@ -626,16 +626,20 @@ const mediaGenerationAdapterDefaults = z.object({
   timeoutMs: z.number().int().positive().optional(),
 });
 
-export const shoggothMediaGenerationConfigSchema = z.object({
-  /** Media generation providers (independent from LLM providers). */
-  providers: z.array(mediaGenerationProviderSchema).min(1),
-  /** Model routing rules. Evaluated in order; first pattern match wins. */
-  models: z.array(mediaGenerationModelEntry).min(1),
-  /** Per-adapter-type default settings. */
-  adapterDefaults: z.record(mediaGenerationAdapterType, mediaGenerationAdapterDefaults).optional(),
-  /** Directory for generated media files. Default: "{workspacePath}/tmp/media". */
-  outputDirectory: z.string().min(1).optional(),
-});
+export const shoggothMediaGenerationConfigSchema = z
+  .object({
+    /** Media generation providers (independent from LLM providers). */
+    providers: z.array(mediaGenerationProviderSchema).optional().default([]),
+    /** Model routing rules. Evaluated in order; first pattern match wins. */
+    models: z.array(mediaGenerationModelEntry).optional().default([]),
+    /** Per-adapter-type default settings. */
+    adapterDefaults: z
+      .record(mediaGenerationAdapterType, mediaGenerationAdapterDefaults)
+      .optional(),
+    /** Directory for generated media files. Default: "{workspacePath}/tmp/media". */
+    outputDirectory: z.string().min(1).optional(),
+  })
+  .strict();
 
 export type ShoggothMediaGenerationConfig = z.infer<typeof shoggothMediaGenerationConfigSchema>;
 

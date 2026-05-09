@@ -26,8 +26,12 @@ function makeRequest(
   return {
     model: "veo-3.1-generate-preview",
     prompt: "a sunset timelapse over the ocean",
-    apiKey: "test-api-key",
-    baseUrl: "https://generativelanguage.googleapis.com",
+    provider: {
+      id: "gemini-test",
+      kind: "gemini",
+      baseUrl: "https://generativelanguage.googleapis.com",
+      apiKey: "test-api-key",
+    },
     outputPath: "/tmp/media/output.mp4",
     params: { kind: "video" as const },
     ...overrides,
@@ -367,7 +371,12 @@ describe("longRunningAdapter", () => {
 
     await longRunningAdapter(
       makeRequest({
-        baseUrl: "https://custom-gemini.example.com",
+        provider: {
+          id: "custom-gemini",
+          kind: "gemini",
+          baseUrl: "https://custom-gemini.example.com",
+          apiKey: "test-key",
+        },
       }),
     );
 

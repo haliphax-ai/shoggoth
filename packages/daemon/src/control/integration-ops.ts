@@ -2278,7 +2278,6 @@ export async function handleIntegrationControlOp(
       return { ok: true, revokedCount: revokeCount };
     }
 
-
     case "vault.set":
       return handleVaultSet(req, principal, ctx);
     case "vault.get":
@@ -2292,8 +2291,116 @@ export async function handleIntegrationControlOp(
     case "vault.rotate-key":
       return handleVaultRotateKey(req, principal, ctx);
 
+    case "media_generate": {
+      if (principal.kind !== "agent") {
+        throw new IntegrationOpError("ERR_FORBIDDEN", "media_generate requires agent principal");
+      }
+      const pl = payloadObject(req);
+      const model = pl.model;
+      if (typeof model !== "string" || !model) {
+        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "media_generate requires model");
+      }
+      const prompt = pl.prompt;
+      if (typeof prompt !== "string" || prompt === undefined) {
+        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "media_generate requires prompt");
+      }
+      const params = pl.params;
+      if (!params || typeof params !== "object") {
+        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "media_generate requires params");
+      }
+      if (!(params as any).kind) {
+        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "media_generate params requires kind");
+      }
+      if (pl.provider_id !== undefined) {
+        throw new IntegrationOpError(
+          "ERR_INVALID_PAYLOAD",
+          "media_generate does not accept provider_id; provider is resolved from model",
+        );
+      }
+      const mediaGenConfig = (ctx.config as any).mediaGeneration;
+      if (!mediaGenConfig) {
+        return { status: "error", error: `No mediaGeneration config found` };
+      }
+      // Resolve provider_id from model pattern
+      const modelEntries: Array<{ pattern: string; provider: string; adapter: string }> =
+        mediaGenConfig.models ?? [];
+      let resolvedProviderId: string | undefined;
+      for (const entry of modelEntries) {
+        const regexPattern = entry.pattern.split("*").join(".*");
+        const regex = new RegExp("^" + regexPattern + "$");
+        if (regex.test(model)) {
+          resolvedProviderId = entry.provider;
+          break;
+        }
+      }
+      if (!resolvedProviderId) {
+        return { status: "error", error: `No provider/adapter found for model: ${model}` };
+      }
+      const svc = new MediaGenerationService({
+        providers: (mediaGenConfig.providers ?? []).map((p: any) => ({
+          id: p.id,
+          kind: p.kind as "openai-compatible" | "gemini",
+          baseUrl: p.baseUrl ?? "",
+          apiKey: p.apiKey ?? "",
+          apiVersion: p.apiVersion,
+        })),
+        models: (mediaGenConfig.models ?? []).map((m: any) => ({
+          pattern: m.pattern,
+          provider: m.provider,
+          adapter: m.adapter,
+        })),
+      });
+      return svc.generate({
+        model: model,
+        prompt: prompt,
+        provider_id: resolvedProviderId,
+        params: params as any,
+        output_path:
+          typeof pl.output_path === "string" ? pl.output_path : `/tmp/media/${Date.now()}.bin`,
+        timeout_ms: typeof pl.timeout_ms === "number" ? pl.timeout_ms : undefined,
+      });
+    }
+    case "media_generate_poll": {
+      const pl = payloadObject(req);
+      const providerId = pl.provider_id;
+      const operationId = pl.operation_id;
+      if (typeof providerId !== "string" || !providerId) {
+        throw new IntegrationOpError(
+          "ERR_INVALID_PAYLOAD",
+          "media_generate_poll requires provider_id",
+        );
+      }
+      if (typeof operationId !== "string" || !operationId) {
+        throw new IntegrationOpError(
+          "ERR_INVALID_PAYLOAD",
+          "media_generate_poll requires operation_id",
+        );
+      }
+      const providers = ctx.config.models?.providers ?? [];
+      const provider = providers.find((p: any) => p.id === providerId);
+      if (!provider) {
+        return { status: "error", error: `Provider not found: ${providerId}` };
+      }
+      const svc = new MediaGenerationService({
+        providers: [
+          {
+            id: provider.id,
+            kind: provider.kind as "openai-compatible" | "gemini",
+            baseUrl: provider.baseUrl ?? "",
+            apiKey: provider.apiKey ?? "",
+            apiVersion: (provider as any).apiVersion,
+          },
+        ],
+        models: [],
+      });
+      return svc.poll({
+        provider_id: providerId,
+        operation_id: operationId,
+        output_path: typeof pl.output_path === "string" ? pl.output_path : undefined,
+      });
+    }
+
     default:
       return undefined;
   }
 }
-

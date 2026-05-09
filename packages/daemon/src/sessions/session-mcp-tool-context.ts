@@ -526,10 +526,13 @@ export function createWebSearchToolFinalizer(
 export function createMediaGenerateToolFinalizer(
   config: ShoggothConfig,
 ): (ctx: SessionMcpToolContext, sessionId: string) => SessionMcpToolContext {
-  const hasGemini = (config.models?.providers ?? []).some((p) => p.kind === "gemini");
+  const hasMediaConfig =
+    (config.models?.providers ?? []).length > 0 ||
+    ((config as any).mediaGeneration?.providers ?? []).length > 0 ||
+    ((config as any).mediaGeneration?.models ?? []).length > 0;
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   return (ctx, _sessionId) => {
-    if (!hasGemini) return ctx;
+    if (!hasMediaConfig) return ctx;
     if (ctx.aggregated.tools.some((t) => t.namespacedName === "builtin-media-generate")) return ctx;
     const aggregated: AggregateMcpCatalogResult = {
       tools: [...ctx.aggregated.tools, MEDIA_GENERATE_TOOL_DESCRIPTOR],
@@ -601,4 +604,3 @@ export function createVaultToolFinalizer(): (
     };
   };
 }
-

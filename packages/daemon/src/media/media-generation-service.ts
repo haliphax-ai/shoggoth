@@ -6,12 +6,19 @@ const log = getLogger("media-generation-service");
 import { generateContentAdapter } from "./adapters/generate-content-adapter";
 import { predictAdapter } from "./adapters/predict-adapter";
 import { longRunningAdapter } from "./adapters/long-running-adapter";
+import { openAIImagesAdapter } from "./adapters/openai-images-adapter";
+import { openAIChatImageAdapter } from "./adapters/openai-chat-image-adapter";
+import { openaiVideoAsyncAdapter } from "./adapters/openai-video-async-adapter";
 import type {
   MediaAdapterRequest,
   MediaAdapterResult,
   MediaGenerateParams,
 } from "./adapters/types";
-import { resolveModel, type ResolvedMediaProvider, type MediaGenerationModelEntry } from "./resolve-model.js";
+import {
+  resolveModel,
+  type ResolvedMediaProvider,
+  type MediaGenerationModelEntry,
+} from "./resolve-model.js";
 import type { ShoggothMediaGenerationConfig } from "@shoggoth/shared";
 
 export interface PollRequest {
@@ -23,6 +30,7 @@ export interface PollRequest {
 interface GenerateRequest {
   model: string;
   prompt: string;
+  provider_id?: string;
   params: MediaGenerateParams;
   output_path: string;
   timeout_ms?: number;
@@ -45,16 +53,16 @@ export class MediaGenerationService {
 
   static fromConfig(config: ShoggothMediaGenerationConfig): MediaGenerationService {
     // Resolve providers from config
-    const resolvedProviders: ResolvedMediaProvider[] = (config.providers ?? []).map(p => ({
+    const resolvedProviders: ResolvedMediaProvider[] = (config.providers ?? []).map((p) => ({
       id: p.id,
       kind: p.kind as "openai-compatible" | "gemini",
       baseUrl: p.baseUrl,
-      apiKey: p.apiKey ?? (p.apiKeyEnv ? process.env[p.apiKeyEnv] ?? "" : ""),
+      apiKey: p.apiKey ?? (p.apiKeyEnv ? (process.env[p.apiKeyEnv] ?? "") : ""),
       apiVersion: p.apiVersion,
     }));
 
     // Use models from config
-    const modelEntries: MediaGenerationModelEntry[] = (config.models ?? []).map(m => ({
+    const modelEntries: MediaGenerationModelEntry[] = (config.models ?? []).map((m) => ({
       pattern: m.pattern,
       provider: m.provider,
       adapter: m.adapter,
@@ -70,6 +78,20 @@ export class MediaGenerationService {
   async generate(req: GenerateRequest): Promise<MediaAdapterResult> {
     const resolved = resolveModel(req.model, this.models, this.providers);
     if (!resolved) {
+      // Check if a model pattern matched but provider was missing
+      for (const entry of this.models) {
+        const regexPattern = entry.pattern.split("*").join(".*");
+        const regex = new RegExp("^" + regexPattern + "$");
+        if (regex.test(req.model)) {
+          const providerExists = this.providers.some((p) => p.id === entry.provider);
+          if (!providerExists) {
+            return {
+              status: "error",
+              error: `Provider not found: ${entry.provider}`,
+            };
+          }
+        }
+      }
       return {
         status: "error",
         error: `No provider/adapter found for model: ${req.model}`,
@@ -93,12 +115,11 @@ export class MediaGenerationService {
       case "gemini-long-running":
         return longRunningAdapter(adapterReq as MediaAdapterRequest & { timeout_ms?: number });
       case "openai-images":
+        return openAIImagesAdapter(adapterReq);
       case "openai-chat-image":
+        return openAIChatImageAdapter(adapterReq);
       case "openai-video-async":
-        return {
-          status: "error",
-          error: `Adapter ${adapterName} not yet implemented`,
-        };
+        return openaiVideoAsyncAdapter(adapterReq);
       default:
         return {
           status: "error",
