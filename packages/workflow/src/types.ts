@@ -105,6 +105,8 @@ export interface TaskState {
   error?: string;
   startedAt?: number;
   completedAt?: number;
+  /** Computed duration in ms (present in status responses). */
+  duration?: number;
   /** Set after failure behavior has been processed to prevent re-handling on subsequent ticks. */
   failureHandled?: boolean;
 }

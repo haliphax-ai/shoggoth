@@ -64,6 +64,21 @@ Orchestrate multi-task workflows with dependency graphs. Supports agent, tool, g
 { "action": "status", "workflow_id": "wf-123" }
 ```
 
+**Status response** includes a `tasks` array. Each task object contains:
+
+| Field           | Type    | Notes                                                                                              |
+| --------------- | ------- | -------------------------------------------------------------------------------------------------- |
+| `taskDef`       | object  | Task definition (id, kind, prompt, etc.)                                                          |
+| `status`        | string  | One of: `pending`, `in_progress`, `done`, `failed`, `paused`, `skipped`                          |
+| `startedAt`     | number? | Unix timestamp (ms) when task started — omitted for pending tasks                                 |
+| `completedAt`   | number? | Unix timestamp (ms) when task completed — omitted for non-terminal tasks                         |
+| `duration`      | number? | Elapsed time in ms — present on tasks that have started. Computed as `completedAt - startedAt` for completed tasks, `Date.now() - startedAt` for in-progress tasks. Omitted for pending tasks. |
+| `output`        | string? | Task output (if completed successfully)                                                           |
+| `error`         | string? | Error message (if failed)                                                                         |
+| `sessionKey`    | string? | Session key for agent tasks                                                                       |
+
+The response also includes workflow-level fields: `id`, `name`, `createdAt`, `pollingIntervalMs`, `concurrency`, and `graph` (serialized dependency map).
+
 **Pause / resume / abort:**
 
 ```json

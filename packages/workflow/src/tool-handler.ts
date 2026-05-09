@@ -218,7 +218,23 @@ export async function handleWorkflowToolCall(
       case "status": {
         const wfId = requireField(args.workflow_id, "workflow_id");
         const wf = await deps.controlPlane.status(wfId);
-        return { ok: true, data: { ...wf, graph: serializeGraph(wf.graph) } };
+
+        // Add duration field to each task
+        const now = Date.now();
+        const tasksWithDuration = wf.tasks.map((task) => {
+          if (task.startedAt == null) {
+            return task;
+          }
+          const duration = task.completedAt != null
+            ? task.completedAt - task.startedAt
+            : now - task.startedAt;
+          return { ...task, duration };
+        });
+
+        return {
+          ok: true,
+          data: { ...wf, tasks: tasksWithDuration, graph: serializeGraph(wf.graph) },
+        };
       }
 
       case "list": {
