@@ -3,12 +3,12 @@
  */
 
 import { mkdir, chmod, open, unlink } from "node:fs/promises";
-import { existsSync } from "node:fs";
+
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 
-const VAULT_DIR = "/tmp/.vault";
+export const DEFAULT_VAULT_DIR = "/tmp/.vault";
 const DEFAULT_TIMEOUT_MS = 30000;
 
 /**
@@ -16,9 +16,10 @@ const DEFAULT_TIMEOUT_MS = 30000;
  * task that writes the secret on first reader open, then unlinks.
  *
  * @param secret - The plaintext to write.
- * @param uid - Owner UID for the FIFO.
- * @param gid - Owner GID for the FIFO.
+ * @param uid - Owner UID for the FIFO (unused, kept for API compat).
+ * @param gid - Owner GID for the FIFO (unused, kept for API compat).
  * @param timeoutMs - Auto-cleanup timeout (default 30000).
+ * @param dir - Directory for the FIFO (default /tmp/.vault).
  * @returns Absolute path to the FIFO.
  */
 export async function createSecretFifo(
@@ -26,17 +27,18 @@ export async function createSecretFifo(
   uid: number,
   gid: number,
   timeoutMs?: number,
+  dir?: string,
 ): Promise<string> {
   const timeout = timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const vaultDir = dir ?? DEFAULT_VAULT_DIR;
 
-  // Ensure vault directory exists
-  if (!existsSync(VAULT_DIR)) {
-    await mkdir(VAULT_DIR, { mode: 0o711, recursive: true });
-  }
+  // Ensure vault directory exists with correct permissions
+  await mkdir(vaultDir, { mode: 0o711, recursive: true });
+  await chmod(vaultDir, 0o711);
 
   // Generate random hex filename
   const filename = randomBytes(16).toString("hex");
-  const fifoPath = join(VAULT_DIR, filename);
+  const fifoPath = join(vaultDir, filename);
 
   // Create FIFO using mkfifo
   await new Promise<void>((resolve, reject) => {
