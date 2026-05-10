@@ -1165,13 +1165,32 @@ export async function handleIntegrationControlOp(
             parent_session_id: parentSessionId,
           }),
         });
+        if (deliveryMode === "inline") {
+          return {
+            session_id: childId,
+            mode: "one_shot",
+            reply: turn.latestAssistantText,
+            respond_to: respondTo,
+            internal: internalDelivery,
+            failover: turn.failoverMeta ?? null,
+          };
+        }
+        // queue or drop: route through deliverSubagentResult, suppress reply in response
+        await deliverSubagentResult(ext, {
+          deliveryMode,
+          childSessionId: childId,
+          respondTo,
+          internalDelivery,
+          mode: "one_shot",
+          assistantText: turn.latestAssistantText,
+          subLog,
+        });
         return {
           session_id: childId,
           mode: "one_shot",
-          reply: turn.latestAssistantText,
           respond_to: respondTo,
           internal: internalDelivery,
-          failover: turn.failoverMeta ?? null,
+          delivery_mode: deliveryMode,
         };
       }
       const platformThreadIdRaw = pl.platform_thread_id;
