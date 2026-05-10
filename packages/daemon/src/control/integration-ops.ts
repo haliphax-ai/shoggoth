@@ -1222,6 +1222,8 @@ export async function handleIntegrationControlOp(
         subagentMode: "persistent",
         subagentPlatformThreadId: platformThreadId ?? null,
         subagentExpiresAtMs: expiresAt,
+        subagentDeliveryMode: deliveryMode,
+        subagentRespondTo: respondTo,
       });
       const unregisterThread = platformThreadId
         ? ext.registerPlatformThreadBinding(platformThreadId, childId)
