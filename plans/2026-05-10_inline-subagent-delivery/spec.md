@@ -12,11 +12,11 @@ type SubagentDeliveryMode = "inline" | "queue" | "drop";
 ### Modified: Session Store Row
 
 ```ts
-// session-store.ts — add delivery_mode to the subagent metadata
+// session-store.ts — add delivery_mode and respond_to to the subagent metadata
 interface SessionRow {
   // ... existing fields ...
   subagentDeliveryMode: SubagentDeliveryMode | null;
-  subagentRespondTo: string | null; // already tracked implicitly; make explicit for all-turn delivery
+  subagentRespondTo: string | null; // persisted for all-turn delivery lookup
 }
 ```
 
@@ -54,6 +54,40 @@ async function deliverSubagentResult(
 ): Promise<void>;
 ```
 
+### Modified: Foreground One-Shot Return Shape
+
+When `delivery_mode` is `queue` or `drop`, the foreground one-shot spawn still blocks until the child completes but returns only session metadata (no `reply` field):
+
+```ts
+// delivery_mode = "inline" (default) — current behavior
+return {
+  session_id: childId,
+  mode: "one_shot",
+  reply: turn.latestAssistantText, // included
+  respond_to: respondTo,
+  internal: internalDelivery,
+  failover: turn.failoverMeta ?? null,
+};
+
+// delivery_mode = "queue" — block, deliver as queued turn, return metadata
+return {
+  session_id: childId,
+  mode: "one_shot",
+  delivery_mode: "queue",
+  respond_to: respondTo,
+  internal: internalDelivery,
+};
+
+// delivery_mode = "drop" — block, discard result, return metadata
+return {
+  session_id: childId,
+  mode: "one_shot",
+  delivery_mode: "drop",
+  respond_to: respondTo,
+  internal: internalDelivery,
+};
+```
+
 ### Modified: Tool Descriptor (builtin-shoggoth-tools.ts)
 
 ```ts
@@ -63,7 +97,8 @@ delivery_mode: {
   enum: ["inline", "queue", "drop"],
   description:
     "spawn_one_shot, spawn_persistent: how the subagent's completed result is delivered to the parent. " +
-    "'inline' (default) injects into the parent's active tool loop; falls back to 'queue' if no active loop. " +
+    "'inline' (default) injects into the parent's active tool loop (foreground one-shot returns as tool result); " +
+    "falls back to 'queue' if no active loop. " +
     "'queue' always delivers as a new turn. " +
     "'drop' does not deliver; use 'result' action to retrieve manually.",
 },
@@ -93,6 +128,15 @@ if (deliveryMode === "inline" || deliveryMode === "queue" || deliveryMode === "d
 const deliveryModeRaw = pl.delivery_mode;
 const deliveryMode: SubagentDeliveryMode =
   deliveryModeRaw === "queue" || deliveryModeRaw === "drop" ? deliveryModeRaw : "inline";
+
+// Store on session row for persistent all-turn delivery:
+sessions.update(childId, {
+  parentSessionId,
+  subagentMode: mode,
+  subagentDeliveryMode: deliveryMode,
+  subagentRespondTo: respondTo,
+  // ... other fields
+});
 ```
 
 ## Data Structures / Schemas
@@ -100,7 +144,7 @@ const deliveryMode: SubagentDeliveryMode =
 ### Session Store Schema Change
 
 ```sql
--- Add column to sessions table (or equivalent in-memory store)
+-- Add columns to sessions table (or equivalent in-memory store)
 ALTER TABLE sessions ADD COLUMN subagent_delivery_mode TEXT DEFAULT NULL;
 ALTER TABLE sessions ADD COLUMN subagent_respond_to TEXT DEFAULT NULL;
 ```
@@ -217,11 +261,52 @@ async function deliverSubagentResult(
 }
 ```
 
+### Foreground One-Shot with delivery_mode
+
+```ts
+// In the foreground one-shot path:
+if (modeRaw === "one_shot" && !backgroundSpawn) {
+  const turn = await ext.runSessionModelTurn({
+    /* ... */
+  });
+
+  if (deliveryMode === "inline") {
+    // Current behavior: return reply in tool call result
+    return {
+      session_id: childId,
+      mode: "one_shot",
+      reply: turn.latestAssistantText,
+      respond_to: respondTo,
+      internal: internalDelivery,
+      failover: turn.failoverMeta ?? null,
+    };
+  }
+
+  // queue or drop: deliver via deliverSubagentResult, return metadata only
+  await deliverSubagentResult(ext, {
+    childSessionId: childId,
+    respondTo,
+    internalDelivery,
+    mode: "one_shot",
+    deliveryMode,
+    assistantText: turn.latestAssistantText,
+    subLog,
+  });
+
+  return {
+    session_id: childId,
+    mode: "one_shot",
+    delivery_mode: deliveryMode,
+    respond_to: respondTo,
+    internal: internalDelivery,
+  };
+}
+```
+
 ### All-Turn Delivery Hook for Persistent Subagents
 
 ```ts
-// After each persistent subagent turn completes (in the platform message handler
-// or wherever subsequent turns are processed):
+// After each persistent subagent turn completes:
 const row = sessions.getById(childSessionId);
 if (
   row?.subagentMode === "persistent" &&

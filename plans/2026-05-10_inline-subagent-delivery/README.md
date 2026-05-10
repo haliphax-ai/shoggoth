@@ -7,7 +7,7 @@ completed: null
 
 ## Summary
 
-Add a `delivery_mode` parameter to subagent spawns that controls how completed turn results are delivered back to the parent session: inline into the active tool loop (`inline`), queued as a new turn (`queue`), or not delivered at all (`drop`). Default is `inline`. Also deliver all persistent subagent turn responses (not just the first).
+Add a `delivery_mode` parameter to subagent spawns that controls how completed turn results are delivered back to the parent session: inline into the active tool loop (`inline`), queued as a new turn (`queue`), or not delivered at all (`drop`). Default is `inline`. Applies to all spawn types except thread-bound persistent subagents. Also deliver all persistent subagent turn responses (not just the first).
 
 ## Motivation
 
@@ -19,7 +19,7 @@ Background subagent results currently arrive as new messages in the parent's tur
 
 Additionally, persistent (non-thread-bound) subagents only deliver their first turn's result to the parent. Subsequent turns are silently dropped, leaving the parent unaware of ongoing work.
 
-Inline delivery keeps results in the same conversational turn where the subagent was spawned, giving the model immediate access. The `delivery_mode` parameter gives agents explicit control over this behavior.
+Inline delivery keeps results in the same conversational turn where the subagent was spawned, giving the model immediate access. The `delivery_mode` parameter gives agents explicit control over this behavior for all spawn types.
 
 ## Design
 
@@ -30,23 +30,38 @@ A new `delivery_mode` field on spawn actions (`spawn_one_shot`, `spawn_persisten
 | Value              | Behavior                                                                                                 |
 | ------------------ | -------------------------------------------------------------------------------------------------------- |
 | `inline` (default) | Inject result into parent's active tool loop via steer channel. Falls back to `queue` if no active loop. |
-| `queue`            | Always deliver as a new turn in the parent's turn queue (current behavior).                              |
+| `queue`            | Always deliver as a new turn in the parent's turn queue.                                                 |
 | `drop`             | Don't deliver. Parent must use `wait` or `result` actions to retrieve output.                            |
+
+Applies to **all** subagent spawns except thread-bound persistent subagents (which communicate via their platform thread).
+
+### Interaction with `background` Flag (one-shot)
+
+The `background` flag and `delivery_mode` are orthogonal:
+
+- `background=false` + `delivery_mode=inline`: Block and return result as tool call response (current foreground behavior).
+- `background=false` + `delivery_mode=queue`: Block until complete, then deliver as queued turn. Tool call returns session metadata only.
+- `background=false` + `delivery_mode=drop`: Block until complete, discard result. Tool call returns session metadata only.
+- `background=true` + `delivery_mode=inline`: Return immediately, inject result into active loop when subagent completes.
+- `background=true` + `delivery_mode=queue`: Return immediately, queue new turn when subagent completes.
+- `background=true` + `delivery_mode=drop`: Fire-and-forget. Return immediately, no delivery.
 
 ### Delivery Matrix
 
-| Spawn Type                               | `delivery_mode` | Parent Turn Active? | Behavior                                     |
-| ---------------------------------------- | --------------- | ------------------- | -------------------------------------------- |
-| Foreground one-shot (`background=false`) | any             | Yes (blocked)       | Tool call result returned inline (unchanged) |
-| Background one-shot (`background=true`)  | `inline`        | Yes                 | Inject via steer channel                     |
-| Background one-shot (`background=true`)  | `inline`        | No                  | Fall back to `queue`                         |
-| Background one-shot (`background=true`)  | `queue`         | any                 | New turn in parent queue                     |
-| Background one-shot (`background=true`)  | `drop`          | any                 | No delivery                                  |
-| Persistent (non-thread-bound)            | `inline`        | Yes                 | Inject via steer channel (all turns)         |
-| Persistent (non-thread-bound)            | `inline`        | No                  | Fall back to `queue`                         |
-| Persistent (non-thread-bound)            | `queue`         | any                 | New turn in parent queue (all turns)         |
-| Persistent (non-thread-bound)            | `drop`          | any                 | No delivery                                  |
-| Persistent (thread-bound)                | any             | N/A                 | Communicates via platform thread (unchanged) |
+| Spawn Type                | `delivery_mode` | Parent Turn Active? | Behavior                                                  |
+| ------------------------- | --------------- | ------------------- | --------------------------------------------------------- |
+| One-shot (fg)             | `inline`        | Yes (blocked)       | Tool call result returned inline (current behavior)       |
+| One-shot (fg)             | `queue`         | Yes (blocked)       | Block, then deliver as queued turn; tool returns metadata |
+| One-shot (fg)             | `drop`          | Yes (blocked)       | Block, then discard; tool returns metadata                |
+| One-shot (bg)             | `inline`        | Yes                 | Inject via steer channel                                  |
+| One-shot (bg)             | `inline`        | No                  | Fall back to `queue`                                      |
+| One-shot (bg)             | `queue`         | any                 | New turn in parent queue                                  |
+| One-shot (bg)             | `drop`          | any                 | No delivery                                               |
+| Persistent (non-thread)   | `inline`        | Yes                 | Inject via steer channel (all turns)                      |
+| Persistent (non-thread)   | `inline`        | No                  | Fall back to `queue`                                      |
+| Persistent (non-thread)   | `queue`         | any                 | New turn in parent queue (all turns)                      |
+| Persistent (non-thread)   | `drop`          | any                 | No delivery                                               |
+| Persistent (thread-bound) | any             | N/A                 | Communicates via platform thread (unchanged)              |
 
 ### All-Turn Delivery for Persistent Subagents
 
@@ -99,16 +114,19 @@ The `delivery_mode` parameter must be exposed in:
 - **Unit test:** `delivery_mode=queue` → always calls `runSessionModelTurn` regardless of loop state.
 - **Unit test:** `delivery_mode=drop` → neither steer nor `runSessionModelTurn` called.
 - **Unit test:** result text exceeding 8000 chars is truncated.
+- **Unit test:** foreground one-shot with `delivery_mode=queue` → blocks but returns metadata, delivers as queued turn.
+- **Unit test:** foreground one-shot with `delivery_mode=drop` → blocks but returns metadata, no delivery.
 - **Integration test:** persistent subagent multiple turns → all results delivered to parent.
-- **Integration test:** foreground one-shot ignores `delivery_mode` (result is always the tool call response).
+- **Integration test:** background one-shot with `delivery_mode=drop` → fire-and-forget, parent verifies via filesystem.
 
 ## Considerations
 
 - Reusing the steer channel means subagent results appear as user-role messages, same as operator steers. The system context framing differentiates them for the model.
 - Multiple subagents completing between iterations are drained FIFO in completion order.
 - For persistent subagents, delivering all turns means the parent could receive many messages. The `drop` mode gives agents an escape hatch.
-- Foreground one-shot spawns ignore `delivery_mode` entirely — the result is always returned as the tool call response since the parent is blocked.
 - The `wait` and `result` tool actions remain useful for `drop` mode and for retrieving results after the fact.
+- Foreground one-shot with `delivery_mode=drop` still blocks — useful when the parent wants to ensure the work is done but doesn't need the text output (e.g., the subagent wrote files the parent can check).
+- Thread-bound persistent subagents ignore `delivery_mode` entirely — they communicate via their platform thread.
 
 ## Migration
 
