@@ -9,6 +9,7 @@ import { longRunningAdapter } from "./adapters/long-running-adapter";
 import { openAIImagesAdapter } from "./adapters/openai-images-adapter";
 import { openAIChatImageAdapter } from "./adapters/openai-chat-image-adapter";
 import { openaiVideoAsyncAdapter } from "./adapters/openai-video-async-adapter";
+import { openrouterVideoAdapter } from "./adapters/openrouter-video-adapter";
 import type {
   MediaAdapterRequest,
   MediaAdapterResult,
@@ -96,6 +97,8 @@ export class MediaGenerationService {
         return openAIChatImageAdapter(adapterReq);
       case "openai-video-async":
         return openaiVideoAsyncAdapter(adapterReq);
+      case "openrouter-video":
+        return openrouterVideoAdapter(adapterReq);
       default:
         return {
           status: "error",

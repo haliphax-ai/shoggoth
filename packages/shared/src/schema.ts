@@ -587,6 +587,7 @@ export type AttachmentHandlingConfig = z.infer<typeof attachmentHandlingSchema>;
 // ---------------------------------------------------------------------------
 
 const mediaGenerationAdapterType = z.enum([
+  "openrouter-video",
   "openai-images",
   "openai-chat-image",
   "openai-video-async",
