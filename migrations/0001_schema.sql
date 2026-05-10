@@ -19,8 +19,6 @@ CREATE TABLE sessions (
   subagent_mode TEXT,
   subagent_platform_thread_id TEXT,
   subagent_expires_at_ms INTEGER,
-  subagent_delivery_mode TEXT,
-  subagent_respond_to TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -288,3 +286,5 @@ CREATE TABLE session_stats (
   transcript_message_count INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+
