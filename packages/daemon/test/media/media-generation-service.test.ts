@@ -202,7 +202,7 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
             apiKey: "google-key",
             models: [
               {
-                name: "imagen-4.0-generate-preview",
+                name: "imagen-4.0-fast-generate-001",
                 mediaType: "image",
                 adapter: "gemini-predict",
               },
@@ -212,7 +212,7 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
       });
 
       const result = await service.generate({
-        model: "imagen-4.0-generate-preview",
+        model: "imagen-4.0-fast-generate-001",
         prompt: "a landscape",
         params: { kind: "image" },
         output_path: "/tmp/out.png",

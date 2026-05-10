@@ -18,7 +18,7 @@ import type { MediaAdapterRequest, MediaAdapterResult } from "../../src/media/ad
 
 function makeRequest(overrides?: Partial<MediaAdapterRequest>): MediaAdapterRequest {
   return {
-    model: "imagen-4.0-generate-preview-06-2025",
+    model: "imagen-4.0-fast-generate-001",
     prompt: "a cat wearing a hat",
     provider: {
       id: "gemini-test",
@@ -58,7 +58,7 @@ describe("predictAdapter", () => {
     assert.strictEqual(mockFetch.mock.calls.length, 1);
     const [url, opts] = mockFetch.mock.calls[0];
     assert.ok(
-      url.includes("/v1beta/models/imagen-4.0-generate-preview-06-2025:predict"),
+      url.includes("/v1beta/models/imagen-4.0-fast-generate-001:predict"),
       `URL should contain predict endpoint, got: ${url}`,
     );
     assert.ok(url.includes("key=test-api-key"), `URL should contain API key, got: ${url}`);

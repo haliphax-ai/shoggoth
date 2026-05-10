@@ -80,7 +80,7 @@ function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
           baseUrl: "https://generativelanguage.googleapis.com",
           models: [
             { name: "gemini-2.5-flash-image", mediaType: "image" },
-            { name: "imagen-4.0-generate-preview", mediaType: "image", adapter: "gemini-predict" },
+            { name: "imagen-4.0-fast-generate-001", mediaType: "image", adapter: "gemini-predict" },
             { name: "veo-3.1-generate-preview", mediaType: "video" },
           ],
         },
@@ -690,7 +690,7 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
             models: [
               { name: "gemini-2.5-flash-image", mediaType: "image" },
               {
-                name: "imagen-4.0-generate-preview",
+                name: "imagen-4.0-fast-generate-001",
                 mediaType: "image",
                 adapter: "gemini-predict",
               },

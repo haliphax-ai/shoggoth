@@ -339,7 +339,7 @@ describe("runMediaCli models", () => {
             baseUrl: "https://generativelanguage.googleapis.com",
             models: [
               {
-                name: "imagen-4.0-generate-preview",
+                name: "imagen-4.0-fast-generate-001",
                 mediaType: "image",
                 adapter: "gemini-predict",
               },
@@ -352,7 +352,7 @@ describe("runMediaCli models", () => {
     await runMediaCli(["models"]);
 
     const output = logged.join("\n");
-    assert.ok(output.includes("imagen-4.0-generate-preview"), `Expected imagen model: ${output}`);
+    assert.ok(output.includes("imagen-4.0-fast-generate-001"), `Expected imagen model: ${output}`);
     assert.ok(output.includes("gemini-predict"), `Expected adapter override: ${output}`);
   });
 });
