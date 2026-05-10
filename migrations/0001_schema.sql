@@ -286,5 +286,3 @@ CREATE TABLE session_stats (
   transcript_message_count INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-
-
