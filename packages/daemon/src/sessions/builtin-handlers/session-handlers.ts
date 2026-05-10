@@ -282,6 +282,8 @@ async function subagentHandler(
     }
     if (args.internal === false) payload.internal = false;
     if (args.background === true) payload.background = true;
+    const dm = args.delivery_mode;
+    if (dm === "inline" || dm === "queue" || dm === "drop") payload.delivery_mode = dm;
   } else if (action === "spawn_persistent") {
     const prompt = String(args.prompt ?? "").trim();
     const threadId = String(args.thread_id ?? "").trim();
@@ -312,6 +314,8 @@ async function subagentHandler(
     if (args.internal === false) payload.internal = false;
     const tn = args.thread_name;
     if (typeof tn === "string" && tn.trim()) payload.thread_name = tn.trim();
+    const dm2 = args.delivery_mode;
+    if (dm2 === "inline" || dm2 === "queue" || dm2 === "drop") payload.delivery_mode = dm2;
   } else if (action === "inspect") {
     op = "session_inspect";
     payload = { session_id: ctx.sessionId };

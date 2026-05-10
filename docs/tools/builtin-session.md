@@ -71,11 +71,25 @@ Spawn and manage subagent sessions. Only available to top-level (non-subagent) s
 | `respond_to`          | string  | no       | Session to deliver the result to (default: parent)    |
 | `internal`            | boolean | no       | Set `false` to surface delivery to messaging platform |
 | `background`          | boolean | no       | Return immediately without waiting (one_shot only)    |
+| `delivery_mode`       | string  | no       | `inline` (default), `queue`, or `drop`                |
 | `model_options`       | object  | no       | Override model settings                               |
 | `thread_id`           | string  | no       | Platform thread (persistent only)                     |
 | `platform_user_id`    | string  | no       | Persistent only                                       |
 | `reply_to_message_id` | string  | no       | Persistent only                                       |
 | `lifetime_ms`         | number  | no       | Auto-kill timeout (persistent only)                   |
+
+##### delivery_mode
+
+Controls how subagent results are delivered to the parent session:
+
+- **`inline`** (default): Inject the result into the parent's active tool loop via the steer channel. If no tool loop is active, falls back to `queue`.
+- **`queue`**: Queue a new user turn in the `respond_to` session with the result.
+- **`drop`**: Discard the result entirely. The parent can still retrieve it later via the `result` action using the returned `session_id`.
+
+For foreground (blocking) one-shot spawns:
+
+- `inline`: The reply is returned directly in the tool call result (existing behavior).
+- `queue` / `drop`: The reply is suppressed from the synchronous response. Only `session_id` and metadata are returned.
 
 ##### Automatic Result Delivery
 

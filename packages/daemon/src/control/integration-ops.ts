@@ -321,19 +321,55 @@ function assertAgentSpawnSubagentsAllowed(
  * Deliver a subagent's completed result to the respond_to session.
  * Used by background one-shot and non-thread-bound persistent subagents.
  */
-async function deliverSubagentResult(
+export async function deliverSubagentResult(
   ext: NonNullable<typeof subagentRuntimeExtensionRef.current>,
   opts: {
     childSessionId: string;
     respondTo: string;
     internalDelivery: boolean;
     mode: "one_shot" | "persistent";
+    deliveryMode: "inline" | "queue" | "drop";
+    maxChars?: number;
     assistantText: string;
     subLog: ReturnType<typeof getLogger>;
   },
 ): Promise<void> {
-  const { childSessionId, respondTo, internalDelivery, mode, assistantText, subLog } = opts;
-  const content = `[Subagent completed] session_id: ${childSessionId}\n\n${assistantText}`;
+  const {
+    childSessionId,
+    respondTo,
+    internalDelivery,
+    mode,
+    deliveryMode,
+    assistantText,
+    subLog,
+    maxChars = 8000,
+  } = opts;
+
+  // drop mode: do nothing
+  if (deliveryMode === "drop") {
+    subLog.info("subagent result delivery skipped (drop mode)", {
+      childSessionId,
+      respondTo,
+      mode,
+    });
+    return;
+  }
+
+  // Truncate to maxChars
+  const truncatedText =
+    assistantText.length > maxChars ? assistantText.slice(0, maxChars) : assistantText;
+  const content = `[Subagent completed] session_id: ${childSessionId}\n\n${truncatedText}`;
+
+  // inline mode: attempt steer injection first
+  if (deliveryMode === "inline" && pushSteer(respondTo, content)) {
+    subLog.info("subagent result injected inline via steer channel", {
+      childSessionId,
+      respondTo,
+      mode,
+      internal: internalDelivery,
+    });
+    return;
+  }
   try {
     await ext.runSessionModelTurn({
       sessionId: respondTo,
@@ -994,6 +1030,9 @@ export async function handleIntegrationControlOp(
           ? respondToRaw.trim()
           : parentSessionId;
       const internalDelivery = pl.internal !== false; // default true
+      const deliveryModeRaw = pl.delivery_mode;
+      const deliveryMode: "inline" | "queue" | "drop" =
+        deliveryModeRaw === "queue" || deliveryModeRaw === "drop" ? deliveryModeRaw : "inline";
 
       let childId: string;
       try {
@@ -1053,6 +1092,7 @@ export async function handleIntegrationControlOp(
                 replyLen: turn.latestAssistantText?.length ?? 0,
               });
               return deliverSubagentResult(ext, {
+                deliveryMode,
                 childSessionId: childId,
                 respondTo,
                 internalDelivery,
@@ -1125,13 +1165,32 @@ export async function handleIntegrationControlOp(
             parent_session_id: parentSessionId,
           }),
         });
+        if (deliveryMode === "inline") {
+          return {
+            session_id: childId,
+            mode: "one_shot",
+            reply: turn.latestAssistantText,
+            respond_to: respondTo,
+            internal: internalDelivery,
+            failover: turn.failoverMeta ?? null,
+          };
+        }
+        // queue or drop: route through deliverSubagentResult, suppress reply in response
+        await deliverSubagentResult(ext, {
+          deliveryMode,
+          childSessionId: childId,
+          respondTo,
+          internalDelivery,
+          mode: "one_shot",
+          assistantText: turn.latestAssistantText,
+          subLog,
+        });
         return {
           session_id: childId,
           mode: "one_shot",
-          reply: turn.latestAssistantText,
           respond_to: respondTo,
           internal: internalDelivery,
-          failover: turn.failoverMeta ?? null,
+          delivery_mode: deliveryMode,
         };
       }
       const platformThreadIdRaw = pl.platform_thread_id;
@@ -1182,6 +1241,8 @@ export async function handleIntegrationControlOp(
         subagentMode: "persistent",
         subagentPlatformThreadId: platformThreadId ?? null,
         subagentExpiresAtMs: expiresAt,
+        subagentDeliveryMode: deliveryMode,
+        subagentRespondTo: respondTo,
       });
       const unregisterThread = platformThreadId
         ? ext.registerPlatformThreadBinding(platformThreadId, childId)
@@ -1243,6 +1304,7 @@ export async function handleIntegrationControlOp(
           // Deliver result to respond_to session for non-thread-bound persistent subagents.
           if (!platformThreadId) {
             return deliverSubagentResult(ext, {
+              deliveryMode,
               childSessionId: childId,
               respondTo,
               internalDelivery,

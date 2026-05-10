@@ -12,6 +12,12 @@ export type SessionStatus = "starting" | "active" | "terminated" | string;
 /** Subagent spawn mode (see control op `subagent_spawn`). */
 export type SubagentMode = "one_shot" | "persistent";
 
+/**
+ * Controls how subagent turn results are delivered to the parent session.
+ * See control op `subagent_spawn` and deliverSubagentResult in integration-ops.ts.
+ */
+export type SubagentDeliveryMode = "inline" | "queue" | "drop";
+
 export interface SessionRow {
   readonly id: string;
   readonly agentProfileId: string | undefined;
@@ -28,6 +34,10 @@ export interface SessionRow {
   readonly subagentMode: SubagentMode | undefined;
   readonly subagentPlatformThreadId: string | undefined;
   readonly subagentExpiresAtMs: number | undefined;
+  /** Delivery mode for subagent results (inline/queue/drop). */
+  readonly subagentDeliveryMode: SubagentDeliveryMode | undefined;
+  /** Parent session to deliver subagent results to. */
+  readonly subagentRespondTo: string | undefined;
   /** ISO 8601 datetime string from the DB `created_at` column. */
   readonly createdAt: string;
   /** ISO 8601 datetime string from the DB `updated_at` column (tracks last activity). */
@@ -66,6 +76,8 @@ export interface UpdateSessionInput {
   readonly subagentMode?: SubagentMode | null;
   readonly subagentPlatformThreadId?: string | null;
   readonly subagentExpiresAtMs?: number | null;
+  readonly subagentDeliveryMode?: SubagentDeliveryMode | null;
+  readonly subagentRespondTo?: string | null;
   readonly systemContextToken?: string;
   readonly contextLevel?: ContextLevel | null;
   readonly workingDirectory?: string | null;
@@ -86,6 +98,8 @@ function rowToSession(r: {
   subagent_mode?: string | null;
   subagent_platform_thread_id?: string | null;
   subagent_expires_at_ms?: number | null;
+  subagent_delivery_mode?: string | null;
+  subagent_respond_to?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   system_context_token?: string | null;
@@ -114,6 +128,11 @@ function rowToSession(r: {
   const modeRaw = r.subagent_mode?.trim();
   const subagentMode: SubagentMode | undefined =
     modeRaw === "one_shot" || modeRaw === "persistent" ? (modeRaw as SubagentMode) : undefined;
+  const deliveryRaw = r.subagent_delivery_mode?.trim();
+  const subagentDeliveryMode: SubagentDeliveryMode | undefined =
+    deliveryRaw === "inline" || deliveryRaw === "queue" || deliveryRaw === "drop"
+      ? (deliveryRaw as SubagentDeliveryMode)
+      : undefined;
   const exp = r.subagent_expires_at_ms;
   return {
     id: r.id,
@@ -131,6 +150,8 @@ function rowToSession(r: {
     subagentPlatformThreadId: r.subagent_platform_thread_id?.trim() || undefined,
     subagentExpiresAtMs:
       typeof exp === "number" && Number.isFinite(exp) ? Math.trunc(exp) : undefined,
+    subagentDeliveryMode,
+    subagentRespondTo: r.subagent_respond_to?.trim() || undefined,
     createdAt: r.created_at ?? "",
     updatedAt: r.updated_at ?? "",
     systemContextToken: r.system_context_token?.trim() || undefined,
@@ -183,12 +204,14 @@ export function createSessionStore(db: Database.Database): SessionStore {
       model_selection_json, light_context, prompt_stack_json,
       runtime_uid, runtime_gid,
       parent_session_id, subagent_mode, subagent_platform_thread_id, subagent_expires_at_ms,
+      subagent_delivery_mode, subagent_respond_to,
       system_context_token, context_level
     ) VALUES (
       @id, @agent_profile_id, @workspace_path, @status, @context_segment_id,
       @model_selection_json, @light_context, @prompt_stack_json,
       @runtime_uid, @runtime_gid,
       @parent_session_id, @subagent_mode, @subagent_platform_thread_id, @subagent_expires_at_ms,
+      @subagent_delivery_mode, @subagent_respond_to,
       @system_context_token, @context_level
     )
   `);
@@ -197,6 +220,7 @@ export function createSessionStore(db: Database.Database): SessionStore {
     SELECT id, agent_profile_id, workspace_path, status, context_segment_id, model_selection_json,
            light_context, prompt_stack_json, runtime_uid, runtime_gid,
            parent_session_id, subagent_mode, subagent_platform_thread_id, subagent_expires_at_ms,
+           subagent_delivery_mode, subagent_respond_to,
            created_at, updated_at, system_context_token, context_level, working_directory
     FROM sessions WHERE id = @id
   `);
@@ -222,6 +246,8 @@ export function createSessionStore(db: Database.Database): SessionStore {
         subagent_mode: null,
         subagent_platform_thread_id: null,
         subagent_expires_at_ms: null,
+        subagent_delivery_mode: null,
+        subagent_respond_to: null,
         system_context_token: generateSystemContextToken(),
         context_level: input.contextLevel ?? null,
       });
@@ -244,6 +270,8 @@ export function createSessionStore(db: Database.Database): SessionStore {
             subagent_mode: string | null;
             subagent_platform_thread_id: string | null;
             subagent_expires_at_ms: number | null;
+            subagent_delivery_mode: string | null;
+            subagent_respond_to: string | null;
             system_context_token: string | null;
             context_level: string | null;
             working_directory: string | null;
@@ -267,6 +295,14 @@ export function createSessionStore(db: Database.Database): SessionStore {
         patch.subagentExpiresAtMs === undefined
           ? (cur.subagentExpiresAtMs ?? null)
           : patch.subagentExpiresAtMs;
+      const nextDeliveryMode =
+        patch.subagentDeliveryMode === undefined
+          ? (cur.subagentDeliveryMode ?? null)
+          : patch.subagentDeliveryMode;
+      const nextRespondTo =
+        patch.subagentRespondTo === undefined
+          ? (cur.subagentRespondTo ?? null)
+          : patch.subagentRespondTo;
       const nextToken = patch.systemContextToken ?? cur.systemContextToken ?? null;
       const nextContextLevel =
         patch.contextLevel === undefined ? (cur.contextLevel ?? null) : patch.contextLevel;
@@ -303,6 +339,8 @@ export function createSessionStore(db: Database.Database): SessionStore {
         subagent_mode: nextSubMode,
         subagent_platform_thread_id: nextThread,
         subagent_expires_at_ms: nextExp,
+        subagent_delivery_mode: nextDeliveryMode,
+        subagent_respond_to: nextRespondTo,
         system_context_token: nextToken,
         context_level: nextContextLevel,
         working_directory: nextWorkingDirectory,
@@ -323,6 +361,8 @@ export function createSessionStore(db: Database.Database): SessionStore {
           subagent_mode = @subagent_mode,
           subagent_platform_thread_id = @subagent_platform_thread_id,
           subagent_expires_at_ms = @subagent_expires_at_ms,
+          subagent_delivery_mode = @subagent_delivery_mode,
+          subagent_respond_to = @subagent_respond_to,
           system_context_token = @system_context_token,
           context_level = @context_level,
           working_directory = @working_directory,
@@ -341,6 +381,7 @@ export function createSessionStore(db: Database.Database): SessionStore {
       const cols = `id, agent_profile_id, workspace_path, status, context_segment_id, model_selection_json,
                  light_context, prompt_stack_json, runtime_uid, runtime_gid,
                  parent_session_id, subagent_mode, subagent_platform_thread_id, subagent_expires_at_ms,
+                 subagent_delivery_mode, subagent_respond_to,
                  created_at, updated_at, system_context_token, context_level, working_directory`;
 
       // --- Map sortBy to DB column ---

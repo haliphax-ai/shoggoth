@@ -1,4 +1,7 @@
 import type { SessionToolLoopFailoverState } from "../sessions/session-tool-loop-model-client";
+import { createSessionStore } from "../sessions/session-store";
+import { deliverSubagentResult } from "../control/integration-ops";
+import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
 import {
   executeSessionAgentTurn,
   type ExecuteSessionAgentTurnInput,
@@ -146,6 +149,35 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
           }
         : undefined,
     });
+
+    // All-turn delivery for persistent subagents
+    try {
+      const row = createSessionStore(turn.db).getById(turn.sessionId);
+      if (
+        row?.subagentMode === "persistent" &&
+        !row.subagentPlatformThreadId &&
+        row.subagentDeliveryMode !== "drop" &&
+        row.subagentRespondTo
+      ) {
+        const ext = subagentRuntimeExtensionRef.current;
+        if (ext) {
+          await deliverSubagentResult(ext, {
+            childSessionId: turn.sessionId,
+            respondTo: row.subagentRespondTo,
+            internalDelivery: true,
+            mode: "persistent",
+            deliveryMode: row.subagentDeliveryMode ?? "inline",
+            assistantText: turnResult.latestAssistantText,
+            subLog: log,
+          });
+        }
+      }
+    } catch (e) {
+      log.warn("persistent_subagent_delivery.failed", {
+        sessionId: turn.sessionId,
+        err: String(e),
+      });
+    }
 
     const rawBody = formatAssistantReply(turnResult.latestAssistantText, turnResult.failoverMeta);
 

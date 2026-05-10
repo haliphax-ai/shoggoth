@@ -29,14 +29,16 @@ function resolveSessionTargetOrExit(configDir: string, raw: string): string | nu
   }
 }
 
-/** Args after `spawn` — pulls `--model-options` / `--model-options=<json>`, returns positional remainder. */
+/** Args after `spawn` — pulls `--model-options` / `--model-options=<json>` and `--delivery-mode`, returns positional remainder. */
 function parseSubagentSpawnArgv(args: string[]): {
   positional: string[];
   modelOptions?: Record<string, unknown>;
+  deliveryMode?: string;
   error?: string;
 } {
   const positional: string[] = [];
   let modelOptions: Record<string, unknown> | undefined;
+  let deliveryMode: string | undefined;
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
     if (a === "--model-options") {
@@ -73,9 +75,27 @@ function parseSubagentSpawnArgv(args: string[]): {
       }
       continue;
     }
+    if (a === "--delivery-mode") {
+      const raw = args[++i]?.trim();
+      if (!raw) return { positional: [], error: "missing value for --delivery-mode" };
+      if (raw !== "inline" && raw !== "queue" && raw !== "drop") {
+        return { positional: [], error: "--delivery-mode must be one of: inline, queue, drop" };
+      }
+      deliveryMode = raw;
+      continue;
+    }
+    if (a.startsWith("--delivery-mode=")) {
+      const raw = a.slice("--delivery-mode=".length).trim();
+      if (!raw) return { positional: [], error: "empty value for --delivery-mode=" };
+      if (raw !== "inline" && raw !== "queue" && raw !== "drop") {
+        return { positional: [], error: "--delivery-mode must be one of: inline, queue, drop" };
+      }
+      deliveryMode = raw;
+      continue;
+    }
     positional.push(a);
   }
-  return { positional, modelOptions };
+  return { positional, modelOptions, deliveryMode };
 }
 
 function printSubagentHelp(): void {
@@ -112,7 +132,7 @@ export async function runSubagentCli(argv: string[]): Promise<void> {
 
   const sub = argv[0];
   if (sub === "spawn") {
-    const { positional, modelOptions, error } = parseSubagentSpawnArgv(argv.slice(1));
+    const { positional, modelOptions, deliveryMode, error } = parseSubagentSpawnArgv(argv.slice(1));
     if (error) {
       console.error(error);
       process.exitCode = 1;
@@ -179,6 +199,9 @@ export async function runSubagentCli(argv: string[]): Promise<void> {
     }
     if (modelOptions !== undefined) {
       payload.model_options = modelOptions;
+    }
+    if (deliveryMode !== undefined) {
+      payload.delivery_mode = deliveryMode;
     }
     const res = await invokeControlRequest({
       socketPath,

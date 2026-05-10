@@ -213,6 +213,12 @@ const subagentToolArgs = {
       description:
         "steer: delivery mode. Defaults to internal for persistent subagents with no platform thread binding. For thread-bound persistent subagents, defaults to messaging_surface. Explicit internal skips messaging surface; other values deliver via the session's bound messaging platform",
     },
+    delivery_mode: {
+      type: "string",
+      enum: ["inline", "queue", "drop"],
+      description:
+        "spawn_one_shot, spawn_persistent: how to deliver subagent results to the parent. inline (default): inject via steer channel. queue: queue a new turn. drop: discard results.",
+    },
   },
   required: ["action"],
 } as const;
