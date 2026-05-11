@@ -59,6 +59,8 @@ const providerRetryFields = {
 const shoggothOpenAiCompatibleProviderSchema = z
   .object({
     id: z.string().min(1),
+    /** Human-readable label. */
+    label: z.string().optional(),
     kind: z.literal("openai-compatible"),
     baseUrl: z.string().min(1),
     apiKey: z.string().min(1).optional(),
@@ -72,6 +74,8 @@ const shoggothOpenAiCompatibleProviderSchema = z
 const shoggothAnthropicMessagesProviderSchema = z
   .object({
     id: z.string().min(1),
+    /** Human-readable label. */
+    label: z.string().optional(),
     kind: z.literal("anthropic-messages"),
     /** API origin (or URL whose origin is used); POST `{origin}/v1/messages`. */
     baseUrl: z.string().min(1),
@@ -89,6 +93,8 @@ const shoggothAnthropicMessagesProviderSchema = z
 const shoggothGeminiProviderSchema = z
   .object({
     id: z.string().min(1),
+    /** Human-readable label. */
+    label: z.string().optional(),
     kind: z.literal("gemini"),
     /** API origin, e.g. "https://generativelanguage.googleapis.com". Defaults in provider factory when omitted. */
     baseUrl: z.string().min(1).optional(),
@@ -610,6 +616,8 @@ const mediaGenerationModelSchema = z.object({
 const mediaGenerationProviderSchema = z.object({
   /** Unique identifier for this media provider. */
   id: z.string().min(1),
+  /** Human-readable label. */
+  label: z.string().optional(),
   /** Determines auth headers and URL construction. */
   kind: z.enum(["openai-compatible", "gemini"]),
   /** Base URL for API requests. */
@@ -1047,6 +1055,8 @@ export const processDeclarationSchema = z
   .object({
     /** Unique ID for this process (used as ProcessSpec.id). */
     id: z.string().min(1),
+    /** Human-readable label. */
+    label: z.string().optional(),
     /** Service declaration for this process (web services plugin). */
     service: serviceDeclarationSchema.optional(),
     startPolicy: z.enum(["boot", "on-demand"]),
