@@ -2,10 +2,10 @@
 
 ## Interfaces
 
-### Service Declaration (config extension)
+### Service Declaration (config extension for managed services)
 
 ```ts
-/** Extension to ProcessDeclaration for web service processes. */
+/** Extension to ProcessDeclaration for managed web service processes. */
 interface ServiceDeclaration {
   /** Port the service listens on. */
   port: number;
@@ -22,6 +22,40 @@ interface ServiceDeclaration {
   /** Bind address override (default "127.0.0.1"). */
   host?: string;
 }
+```
+
+### External Service Declaration (top-level `services[]`)
+
+```ts
+/** Declaration for an external service not managed by procman. */
+interface ExternalServiceDeclaration {
+  /** Unique ID for this service. */
+  id: string;
+  /** Human-readable label. */
+  label?: string;
+  /** Host where the service is running. */
+  host: string;
+  /** Port the service listens on. */
+  port: number;
+  /** Protocol spoken by the service. */
+  protocol: "http" | "ws" | "http+ws";
+  /** Base path prefix for routing (default "/"). */
+  basePath?: string;
+  /** Named capabilities this service provides (for discovery). */
+  capabilities?: string[];
+  /** How the service is exposed externally. */
+  expose?: "gateway" | "direct" | "both";
+  /** Manifest endpoint path (default "/manifest"). Required for tool registration. */
+  manifestPath?: string;
+  /** Health check configuration. */
+  health: ExternalServiceHealthCheck;
+  /** Health check polling interval (ms). Default 30000. */
+  healthIntervalMs?: number;
+}
+
+type ExternalServiceHealthCheck =
+  | { kind: "tcp"; port?: number; timeoutMs?: number }
+  | { kind: "http"; url: string; expectedStatus?: number; timeoutMs?: number };
 ```
 
 ### Service Manifest (served by the service at its manifest endpoint)
@@ -201,7 +235,7 @@ interface GatewayConfig {
 
 ## Data Structures / Schemas
 
-### Config Schema (Zod extension to ProcessDeclaration)
+### Config Schema (Zod — managed service extension to ProcessDeclaration)
 
 ```ts
 const serviceDeclarationSchema = z
@@ -218,6 +252,43 @@ const serviceDeclarationSchema = z
 
 // Added as optional field on processDeclarationSchema:
 // service: serviceDeclarationSchema.optional()
+```
+
+### Config Schema (Zod — external services, top-level `services[]`)
+
+```ts
+const externalServiceHealthSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("tcp"),
+    port: z.number().int().min(1).max(65535).optional(),
+    timeoutMs: z.number().int().positive().optional(),
+  }),
+  z.object({
+    kind: z.literal("http"),
+    url: z.string().url(),
+    expectedStatus: z.number().int().optional(),
+    timeoutMs: z.number().int().positive().optional(),
+  }),
+]);
+
+const externalServiceDeclarationSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1).optional(),
+    host: z.string().min(1),
+    port: z.number().int().min(1).max(65535),
+    protocol: z.enum(["http", "ws", "http+ws"]),
+    basePath: z.string().optional().default("/"),
+    capabilities: z.array(z.string().min(1)).optional(),
+    expose: z.enum(["gateway", "direct", "both"]).optional().default("direct"),
+    manifestPath: z.string().optional().default("/manifest"),
+    health: externalServiceHealthSchema,
+    healthIntervalMs: z.number().int().positive().optional().default(30000),
+  })
+  .strict();
+
+// Top-level config key: "services"
+// services: z.array(externalServiceDeclarationSchema).optional()
 ```
 
 ### Gateway Config Schema

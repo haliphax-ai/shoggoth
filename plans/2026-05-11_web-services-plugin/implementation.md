@@ -2,20 +2,23 @@
 
 ## Phase 1: Service Declaration & Registry
 
-Extend the config schema to support service declarations and build the runtime registry that tracks healthy services. No external-facing changes yet — this is the foundation.
+Extend the config schema to support both managed and external service declarations, and build the runtime registry that tracks healthy services. No external-facing changes yet — this is the foundation.
 
 - Add `serviceDeclarationSchema` to `@shoggoth/shared` as an optional field on `processDeclarationSchema`
+- Add `externalServiceDeclarationSchema` and top-level `services[]` config key
 - Create `ServiceRegistry` class in the daemon (`src/service-registry.ts`)
-- Wire registry to procman events: `process-started` → register, `process-stopped` / `process-failed` → deregister
+- Wire registry to procman events for managed services: `process-started` → register, `process-stopped` / `process-failed` → deregister
+- For external services, implement a health check polling loop (configurable interval) that registers/deregisters based on reachability
 - Populate `ServiceEntry.url` from declaration's host + port + basePath
-- Add config validation: detect port conflicts across service declarations at load time
+- Add config validation: detect port/ID conflicts across both managed and external service declarations at load time
+- Both managed and external services produce the same `ServiceEntry` in the registry — downstream consumers (tools, gateway) don't need to know the difference
 
 **Files:**
 
-- `packages/shared/src/schema.ts` — add `serviceDeclarationSchema`, extend `processDeclarationSchema`
-- `packages/daemon/src/service-registry.ts` — new `ServiceRegistry` class
+- `packages/shared/src/schema.ts` — add `serviceDeclarationSchema`, `externalServiceDeclarationSchema`, extend `processDeclarationSchema`
+- `packages/daemon/src/service-registry.ts` — new `ServiceRegistry` class with health polling for external services
 - `packages/daemon/src/service-registry.test.ts` — unit tests
-- `packages/daemon/src/index.ts` — instantiate registry, subscribe to procman events
+- `packages/daemon/src/index.ts` — instantiate registry, subscribe to procman events, start external health polling
 
 ## Phase 2: Auth — Per-Service Key Pairs with Operator Approval
 

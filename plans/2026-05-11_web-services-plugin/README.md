@@ -55,7 +55,14 @@ Without this, each web integration becomes a bespoke wiring job. A plugin spec g
 
 **1. Service Declaration (config-driven)**
 
-Extends the existing `processes[]` config with an optional `service` block. When present, the process is treated as a web service with additional lifecycle semantics.
+Services come in two flavors:
+
+- **Managed services** — declared in `processes[]` with a `service` block. Procman handles the full lifecycle (start, stop, restart, health monitoring).
+- **External services** — declared in a top-level `services[]` block. Shoggoth does not launch or stop these processes, but still performs health checks, auth, tool registration, and gateway routing. Useful for services running in separate containers, on remote hosts, or managed by systemd/Docker/k8s.
+
+Both types go through the same registration, approval, health check, and tool lifecycle. The only difference is who owns the process.
+
+Managed service example:
 
 ```jsonc
 {
@@ -72,8 +79,7 @@ Extends the existing `processes[]` config with an optional `service` block. When
       "health": { "kind": "http", "target": "http://localhost:3100/health" },
       "service": {
         "port": 3100,
-        "protocol": "http",
-        "basePath": "/",
+        "protocol": "http+ws",
         "capabilities": ["canvas", "a2ui"],
         "expose": "gateway",
       },
@@ -82,9 +88,29 @@ Extends the existing `processes[]` config with an optional `service` block. When
 }
 ```
 
+External service example:
+
+```jsonc
+{
+  "services": [
+    {
+      "id": "analytics-dashboard",
+      "label": "Analytics Dashboard",
+      "host": "10.0.1.50",
+      "port": 8080,
+      "protocol": "http",
+      "basePath": "/",
+      "capabilities": ["analytics"],
+      "expose": "gateway",
+      "health": { "kind": "http", "target": "http://10.0.1.50:8080/health" },
+    },
+  ],
+}
+```
+
 **2. Service Registry (runtime)**
 
-A singleton that tracks healthy services and their metadata. Populated by procman lifecycle events (process started + health check passed → registered; process stopped → deregistered). Provides lookup by ID and by capability.
+A singleton that tracks healthy services and their metadata. For managed services, it's populated by procman lifecycle events (process started + health check passed → registered; process stopped → deregistered). For external services, the registry runs its own health check loop and registers/deregisters based on reachability. Provides lookup by ID and by capability.
 
 **3. HTTP Gateway (optional, daemon-managed)**
 
