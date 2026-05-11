@@ -25,31 +25,7 @@ Without this, each web integration becomes a bespoke wiring job. A plugin spec g
 
 ### Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────┐
-│ Shoggoth Daemon                                         │
-│                                                         │
-│  ┌──────────┐    ┌──────────────────┐    ┌──────────┐  │
-│  │ procman  │◄───│ Service Registry │───►│ Gateway  │  │
-│  │          │    │                  │    │ (HTTP)   │  │
-│  │ start/   │    │ - endpoints      │    │          │  │
-│  │ stop/    │    │ - health state   │    │ /svc/:id │  │
-│  │ restart  │    │ - capabilities   │    │ → proxy  │  │
-│  └──────────┘    └──────────────────┘    └──────────┘  │
-│       │                   ▲                     ▲       │
-│       ▼                   │                     │       │
-│  ┌──────────┐    ┌──────────────────┐           │       │
-│  │ Service  │───►│ Plugin Tools     │           │       │
-│  │ Process  │    │ (service-provided│           │       │
-│  │ (Canvas) │    │  e.g. canvas.*)  │           │       │
-│  │          │◄───│                  │           │       │
-│  └──────────┘    └──────────────────┘           │       │
-│                                                 │       │
-└─────────────────────────────────────────────────│───────┘
-                                                  │
-                                            External clients
-                                            (browsers, etc.)
-```
+![Architecture Overview](architecture.svg)
 
 ### Key Components
 
