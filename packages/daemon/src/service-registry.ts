@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import type { ServiceManifest } from "@shoggoth/shared";
 
 /**
  * Service entry representing a registered external service.
@@ -19,7 +20,7 @@ export interface ServiceEntry {
   /** How this service is exposed. */
   expose: "gateway" | "direct" | "both";
   /** Service manifest data (loaded on demand). */
-  manifest: null;
+  manifest: ServiceManifest | null;
   /** List of tools registered from this service. */
   registeredTools: string[];
 }
