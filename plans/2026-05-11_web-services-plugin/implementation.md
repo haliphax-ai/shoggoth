@@ -79,35 +79,43 @@ A reverse proxy that provides a single external entry point for all gateway-expo
 - `packages/daemon/src/gateway.test.ts` — integration tests with mock services
 - `packages/daemon/src/index.ts` — conditional gateway startup, shutdown drain registration
 
-## Phase 5: Service→Agent Callbacks
+## Phase 5: Scoped Control Plane Access for Services
 
-Enable services to push events back to agents (e.g., "user clicked a button in the Canvas UI").
+Enable services to interact with Shoggoth beyond responding to tool calls. Services connect to the existing control plane and are authorized based on their operator-approved scope.
 
-- Service POSTs to a daemon-internal callback endpoint with a signed request
-- Daemon validates the callback signature and injects a message into the target agent's turn queue
-- Callback auth: service signs callback requests with its private key (the daemon already has the corresponding public key in the key store)
-- Rate limiting on callbacks to prevent runaway services from flooding agent turns
-- Callback endpoint is internal-only (not exposed through the gateway)
+- Add service authentication to the control plane — services connect and prove identity with their key pair
+- Implement scope enforcement — each control plane operation is checked against the service's approved `ops` list
+- Service manifest declares requested operations in an `ops[]` field
+- `shoggoth service register` and `shoggoth service approve` display and gate the requested scope
+- Scope stored alongside the key pair in the credential store
+- Rate limiting per-service to prevent abuse (configurable per operation or globally)
+- Connection lifecycle: service connects at startup, daemon drops connection on service deregistration or revocation
 
 **Files:**
 
-- `packages/daemon/src/service-callbacks.ts` — callback receiver and turn injection
-- `packages/daemon/src/service-callbacks.test.ts` — tests
-- `packages/daemon/src/gateway.ts` — add internal `/callbacks` route (bound to localhost only)
+- `packages/daemon/src/control-plane/service-auth.ts` — authenticate service connections, enforce scope
+- `packages/daemon/src/control-plane/service-auth.test.ts` — tests for auth + scope enforcement
+- `packages/daemon/src/service-key-store.ts` — extend to store approved ops alongside key pair
+- `packages/cli/src/commands/service.ts` — update register/approve to handle scope display and confirmation
 
 ## Phase 6: Canvas Web Port (First Consumer)
 
-Adapt Canvas Web to run as a Shoggoth-managed service. This validates the entire plugin spec end-to-end.
+Adapt Canvas Web to run as a Shoggoth-managed service. This validates the entire plugin spec end-to-end, including tool registration and control plane access.
 
 - Strip OpenClaw-specific auth (Ed25519 keypair, node registration) from Canvas Web
 - Add Shoggoth token validation middleware using the public key provided during `shoggoth service register canvas-web`
 - Expose `/health` and `/manifest` endpoints per service contract
 - Manifest declares Canvas-specific tools: `canvas.push`, `canvas.show`, `canvas.reset`, etc.
+- Manifest declares requested control plane ops: `turn.invoke`, `session.query` (for UI-driven agent interaction)
+- Connect to daemon control plane at startup for invoking agent turns on user interaction
 - Configure as a `processes[]` entry with `service` block
-- Verify end-to-end: agent calls `canvas.push` → daemon dispatches to Canvas → Canvas renders → browser displays
+- Verify end-to-end:
+  - Agent calls `canvas.push` → daemon dispatches to Canvas → Canvas renders → browser displays
+  - User clicks button in Canvas → Canvas invokes agent turn via control plane → agent responds
 
 **Files:**
 
 - Canvas Web repo (adapted fork or new package under `packages/canvas-web/`)
 - Shoggoth config example in documentation
 - Integration test: mock agent session → tool call → Canvas response
+- Integration test: Canvas control plane connection → turn invocation → agent turn fires

@@ -69,6 +69,8 @@ interface ServiceManifest {
   version: string;
   /** Tools this service provides to agents. */
   tools?: ServiceToolDeclaration[];
+  /** Control plane operations this service requests access to. */
+  ops?: string[];
   /** WebSocket endpoints (informational). */
   wsEndpoints?: ManifestWsEndpoint[];
 }
@@ -147,7 +149,7 @@ class ServiceRegistry extends EventEmitter {
 }
 ```
 
-### Auth: Per-Service Key Pairs
+### Auth & Control Plane Access
 
 ```ts
 interface ServiceTokenPayload {
@@ -163,6 +165,17 @@ interface ServiceTokenPayload {
   session?: string;
 }
 
+interface ServiceRegistration {
+  /** Service ID. */
+  id: string;
+  /** Ed25519 public key (provided to the service). */
+  publicKey: Ed25519PublicKey;
+  /** Approved control plane operations. */
+  approvedOps: string[];
+  /** Whether the service has been approved by the operator. */
+  approved: boolean;
+}
+
 interface ServiceKeyStore {
   /** Get the private key for signing tokens destined for a service. */
   getPrivateKey(serviceId: string): Ed25519PrivateKey | null;
@@ -175,11 +188,18 @@ interface ServiceKeyStore {
 
   /** Check if a service has been approved (has a key pair). */
   isApproved(serviceId: string): boolean;
+
+  /** Get the approved control plane operations for a service. */
+  getApprovedOps(serviceId: string): string[];
+
+  /** Set the approved operations (called during operator approval). */
+  setApprovedOps(serviceId: string, ops: string[]): void;
 }
 
 interface TokenMinter {
   /** Mint a short-lived Ed25519-signed token for agent→service communication. */
   mint(agentId: string, serviceId: string, sessionUrn?: string): string;
+}
 }
 
 interface TokenValidator {
@@ -338,6 +358,7 @@ const serviceManifestSchema = z.object({
   name: z.string().min(1),
   version: z.string().min(1),
   tools: z.array(serviceToolDeclarationSchema).optional(),
+  ops: z.array(z.string().min(1)).optional(),
   wsEndpoints: z
     .array(
       z.object({

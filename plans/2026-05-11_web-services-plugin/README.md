@@ -133,24 +133,26 @@ Services provide their own tools rather than going through a generic invoke laye
 
 This means Canvas provides `canvas.show`, `canvas.push`, `canvas.eval` etc. as first-class agent tools — not generic HTTP calls wrapped in a `service.invoke` envelope.
 
-**5. Auth: Per-Service Key Pairs with Operator Approval**
+**5. Auth & Control Plane Access with Operator Approval**
 
-New services must be registered and approved by the operator via the CLI before they can communicate with the daemon. During registration, a unique key pair is generated for that service.
+New services must be registered and approved by the operator via the CLI before they can communicate with the daemon. During registration, a unique key pair is generated and the operator approves the service's requested control plane scope.
 
 Registration flow:
 
 1. Operator runs `shoggoth service register <id>` (or the service is declared in config with `approved: false`)
-2. CLI prompts for approval — operator confirms the service identity
-3. Daemon generates an Ed25519 key pair for the service and stores the private key in the daemon's credential store
-4. The service's public key is provided to the service **once** at registration time (displayed by CLI, or written to a file the service can read)
-5. The daemon signs tokens with the service's private key; the service validates tokens using its public key
+2. Service declares its requested control plane operations in its manifest (e.g., `ops: ["turn.invoke", "session.send", "session.query"]`)
+3. CLI displays the requested scope and prompts operator for approval
+4. On approval, daemon generates an Ed25519 key pair for the service and stores the private key in the daemon's credential store
+5. The service's public key is provided to the service **once** at registration time (displayed by CLI, or written to a file the service can read)
+6. The daemon signs tokens with the service's private key; the service validates tokens using its public key
 
 This means:
 
 - No shared secrets in environment variables
 - Each service has its own key pair — compromise of one service doesn't affect others
-- Operator must explicitly approve each service before it can receive authenticated requests
+- Operator must explicitly approve each service and its requested scope before it can interact with the daemon
 - Key rotation is per-service via `shoggoth service rotate-key <id>`
+- Scope changes require re-approval via `shoggoth service approve <id>`
 
 Token claims (signed with the service's private key):
 
@@ -160,6 +162,17 @@ Token claims (signed with the service's private key):
 - `session`: originating session URN (optional, for audit)
 
 When a plugin tool proxies a request to its service, the daemon signs a short-lived token with that service's private key. The service validates it using the public key it received at registration.
+
+**6. Control Plane Access for Services**
+
+Services that need to interact with Shoggoth beyond responding to tool calls (e.g., Canvas invoking agent turns when a user clicks a button) get scoped access to the existing control plane.
+
+- On startup, an approved service connects to the daemon's control plane (Unix socket or localhost endpoint) and authenticates with its key pair
+- The daemon enforces the approved operation scope — requests for unapproved operations are rejected
+- Services use the same control plane protocol and operations that already exist (turn invocation, session messaging, queries, etc.)
+- No new API surface needed — the control plane is the API; registration just gates access to it
+
+This avoids building a parallel service-specific API. The control plane already supports the operations services need; the plugin system just adds authentication and scoped authorization on top.
 
 ### Data Flow: Agent Uses a Service Tool
 
@@ -171,13 +184,25 @@ When a plugin tool proxies a request to its service, the daemon signs a short-li
 6. Canvas Web validates the token using its public key, processes the push, returns response
 7. Tool handler returns the result to the agent
 
+### Data Flow: Service Invokes an Agent Turn
+
+1. User clicks a button in the Canvas UI
+2. Canvas Web connects to the daemon control plane (already authenticated at startup)
+3. Canvas sends `turn.invoke { sessionUrn: "agent:dev:...", message: "User clicked Submit on form X" }`
+4. Daemon checks that "turn.invoke" is in Canvas's approved scope
+5. Daemon injects the message and triggers an agent turn
+6. Agent processes the event, potentially calling `canvas.push` back to update the UI
+
 ### Integration with Existing Systems
 
 - **procman** — No changes to procman's core. The service registry listens to procman's `process-started` / `process-stopped` / `process-failed` events and maintains its own state.
-- **Config schema** — `ProcessDeclaration` gains an optional `service` field. Backward compatible.
+- **Config schema** — `ProcessDeclaration` gains an optional `service` field. Backward compatible. New top-level `services[]` for external services.
 - **Tool registry** — Service tools are dynamically registered/deregistered based on service health. They coexist with builtin tools.
+- **Control plane** — Existing operations are reused. New auth/scope layer gates access for service clients.
 - **Shutdown** — Gateway drains connections before procman stops service processes. Registered as a separate drain phase.
-- **CLI** — New `shoggoth service` subcommands for registration, approval, key rotation, and status.
+- **CLI** — New `shoggoth service` subcommands for registration, approval, scope review, key rotation, and status.
+
+### Service Contract (what services must implement)
 
 ### Service Contract (what services must implement)
 
@@ -206,7 +231,7 @@ The manifest endpoint is required for services that provide agent tools. It enab
 - **Multi-tenant isolation** — In a multi-agent deployment, services may need to scope data by agent. The auth token provides identity; the service is responsible for isolation. This plan does not prescribe how services partition data internally.
 - **WebSocket lifecycle** — Long-lived WebSocket connections between agents and services need cleanup when sessions end. The `service.stream` tool should tie connection lifetime to the session or provide explicit close semantics.
 - **Gateway vs. direct access** — For development, direct port access is simpler. The gateway adds latency but provides auth and a single entry point. Both modes should be supported; `expose: "gateway" | "direct" | "both"` in config.
-- **Future: service-to-agent callbacks** — A service may want to push events to an agent (e.g., "user clicked button"). This plan covers agent→service. Service→agent (callbacks/webhooks) is deferred but the registry and auth infrastructure support it.
+- **Control plane scope evolution** — As new control plane operations are added to Shoggoth, services can request access to them by updating their manifest's `ops[]` field. The operator must re-approve the expanded scope via `shoggoth service approve <id>`.
 - **Static file serving** — Canvas Web serves a Vue SPA. The gateway could serve static assets directly (bypassing the service process) for performance, but this adds complexity. Deferred to a future optimization pass.
 
 ## Migration
