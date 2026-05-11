@@ -96,7 +96,6 @@ A lightweight reverse proxy that routes external requests to managed services. R
 
 The gateway is optional — services can also bind directly to host ports for development or single-service deployments.
 
-**4. Agent ↔ Service Communication**
 **4. Plugin Tool Registration**
 
 Services provide their own tools rather than going through a generic invoke layer. The service plugin spec defines a hook for services to register tools with the daemon at startup:
