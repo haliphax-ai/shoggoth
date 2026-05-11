@@ -98,24 +98,6 @@ Enable services to interact with Shoggoth beyond responding to tool calls. Servi
 - `packages/daemon/src/service-key-store.ts` — extend to store approved ops alongside key pair
 - `packages/cli/src/commands/service.ts` — update register/approve to handle scope display and confirmation
 
-## Phase 6: Canvas Web Port (First Consumer)
+## Future: Canvas Web Port (First Consumer)
 
-Adapt Canvas Web to run as a Shoggoth-managed service. This validates the entire plugin spec end-to-end, including tool registration and control plane access.
-
-- Strip OpenClaw-specific auth (Ed25519 keypair, node registration) from Canvas Web
-- Add Shoggoth token validation middleware using the public key provided during `shoggoth service register canvas-web`
-- Expose `/health` and `/manifest` endpoints per service contract
-- Manifest declares Canvas-specific tools: `canvas.push`, `canvas.show`, `canvas.reset`, etc.
-- Manifest declares requested control plane ops: `turn.invoke`, `session.query` (for UI-driven agent interaction)
-- Connect to daemon control plane at startup for invoking agent turns on user interaction
-- Configure as a `processes[]` entry with `service` block
-- Verify end-to-end:
-  - Agent calls `canvas.push` → daemon dispatches to Canvas → Canvas renders → browser displays
-  - User clicks button in Canvas → Canvas invokes agent turn via control plane → agent responds
-
-**Files:**
-
-- Canvas Web repo (adapted fork or new package under `packages/canvas-web/`)
-- Shoggoth config example in documentation
-- Integration test: mock agent session → tool call → Canvas response
-- Integration test: Canvas control plane connection → turn invocation → agent turn fires
+The Canvas Web port will be done as a separate project. It serves as the first real consumer of this plugin system and will validate the spec end-to-end (tool registration, control plane access, gateway routing). See the OpenClaw Canvas Web repo for context on what needs to be adapted.
