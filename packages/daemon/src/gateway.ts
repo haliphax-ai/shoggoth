@@ -1,4 +1,5 @@
 import http from "node:http";
+import net from "node:net";
 import { ServiceRegistry } from "./service-registry";
 import { ServiceKeyStore } from "./service-key-store";
 import { TokenValidator } from "./service-auth";
@@ -40,6 +41,7 @@ export interface GatewayOptions {
  * HTTP gateway for proxying requests to registered services.
  *
  * Routes requests like GET /{prefix}/{serviceId}/path → service backend
+ * Also handles WebSocket upgrade requests for ws-capable services.
  */
 export class ServiceGateway {
   private server: http.Server | null = null;
@@ -83,6 +85,11 @@ export class ServiceGateway {
       });
     });
 
+    // Handle WebSocket upgrade requests
+    this.server.on("upgrade", (req, socket, head) => {
+      this.handleUpgrade(req, socket as net.Socket, head);
+    });
+
     // Allow server to drain connections on close
     this.server.on("connection", (socket) => {
       socket.unref();
@@ -110,6 +117,136 @@ export class ServiceGateway {
         resolve();
       });
     });
+  }
+
+  /**
+   * Handle WebSocket upgrade requests by proxying to the backend service.
+   */
+  private handleUpgrade(req: http.IncomingMessage, socket: net.Socket, head: Buffer): void {
+    const url = req.url ?? "/";
+    const parsedUrl = new URL(url, `http://${this.options.host}:${this.options.port}`);
+    const pathname = parsedUrl.pathname;
+
+    // Parse /{prefix}/{serviceId}/{...rest}
+    const prefix = this.options.prefix;
+    if (!pathname.startsWith(prefix + "/")) {
+      this.destroySocketWithResponse(socket, 404, "Not Found");
+      return;
+    }
+
+    const pathParts = pathname.slice(prefix.length + 1).split("/");
+    if (pathParts.length < 1 || !pathParts[0]) {
+      this.destroySocketWithResponse(socket, 404, "Not Found");
+      return;
+    }
+
+    const serviceId = pathParts[0];
+
+    // Look up service in registry
+    const service = this.registry.get(serviceId);
+    if (!service) {
+      this.destroySocketWithResponse(socket, 404, "Service Not Found");
+      return;
+    }
+
+    // Check service health
+    if (!service.healthy) {
+      this.destroySocketWithResponse(socket, 503, "Service Unavailable");
+      return;
+    }
+
+    // Check if service supports WebSocket (has wsUrl)
+    if (!service.wsUrl) {
+      this.destroySocketWithResponse(socket, 426, "WebSocket Not Supported");
+      return;
+    }
+
+    // Parse the backend target from wsUrl
+    const wsUrlParsed = new URL(service.wsUrl.replace(/^ws:/, "http:"));
+    const targetHost = wsUrlParsed.hostname;
+    const targetPort = parseInt(wsUrlParsed.port, 10) || 80;
+
+    // Build the path for the backend (strip prefix and serviceId)
+    const restPath = "/" + pathParts.slice(1).join("/");
+    const targetPath = restPath + (parsedUrl.search || "");
+
+    // Create TCP connection to the backend
+    const backendSocket = net.createConnection({ host: targetHost, port: targetPort }, () => {
+      // Build the raw HTTP upgrade request to forward
+      const headers = this.buildUpgradeHeaders(req.headers);
+      let rawRequest = `${req.method} ${targetPath} HTTP/1.1\r\n`;
+      rawRequest += `Host: ${targetHost}:${targetPort}\r\n`;
+      for (const [key, value] of Object.entries(headers)) {
+        if (Array.isArray(value)) {
+          for (const v of value) {
+            rawRequest += `${key}: ${v}\r\n`;
+          }
+        } else if (value !== undefined) {
+          rawRequest += `${key}: ${value}\r\n`;
+        }
+      }
+      rawRequest += "\r\n";
+
+      // Send the upgrade request and any buffered head data
+      backendSocket.write(rawRequest);
+      if (head.length > 0) {
+        backendSocket.write(head);
+      }
+
+      // Pipe sockets together bidirectionally
+      backendSocket.pipe(socket);
+      socket.pipe(backendSocket);
+    });
+
+    // Handle errors on the backend socket
+    backendSocket.on("error", (err) => {
+      console.error("WebSocket proxy backend error:", err);
+      socket.destroy();
+    });
+
+    // Handle errors on the client socket
+    socket.on("error", (err) => {
+      console.error("WebSocket proxy client error:", err);
+      backendSocket.destroy();
+    });
+
+    // Cleanup when either side closes
+    backendSocket.on("close", () => {
+      socket.destroy();
+    });
+
+    socket.on("close", () => {
+      backendSocket.destroy();
+    });
+  }
+
+  /**
+   * Destroy a socket with an HTTP error response.
+   */
+  private destroySocketWithResponse(socket: net.Socket, statusCode: number, message: string): void {
+    const response =
+      `HTTP/1.1 ${statusCode} ${message}\r\n` +
+      `Content-Type: text/plain\r\n` +
+      `Connection: close\r\n` +
+      `\r\n` +
+      message;
+    socket.write(response);
+    socket.destroy();
+  }
+
+  /**
+   * Build headers for the upgrade proxy request (excluding host).
+   */
+  private buildUpgradeHeaders(
+    headers: http.IncomingHttpHeaders,
+  ): Record<string, string | string[] | undefined> {
+    const result: Record<string, string | string[] | undefined> = {};
+    for (const [key, value] of Object.entries(headers)) {
+      if (key.toLowerCase() !== "host" && value) {
+        result[key] = value;
+      }
+    }
+    return result;
   }
 
   /**
