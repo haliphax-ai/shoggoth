@@ -168,8 +168,8 @@ interface ServiceTokenPayload {
 interface ServiceRegistration {
   /** Service ID. */
   id: string;
-  /** Ed25519 public key (provided to the service). */
-  publicKey: Ed25519PublicKey;
+  /** Age recipient / public key (provided to the service). */
+  publicKey: AgeRecipient;
   /** Approved control plane operations. */
   approvedOps: string[];
   /** Whether the service has been approved by the operator. */
@@ -178,13 +178,13 @@ interface ServiceRegistration {
 
 interface ServiceKeyStore {
   /** Get the private key for signing tokens destined for a service. */
-  getPrivateKey(serviceId: string): Ed25519PrivateKey | null;
+  getPrivateKey(serviceId: string): AgeIdentity | null;
 
   /** Generate and store a new key pair for a service. Returns the public key. */
-  generateKeyPair(serviceId: string): Ed25519PublicKey;
+  generateKeyPair(serviceId: string): AgeRecipient;
 
   /** Rotate a service's key pair. Returns the new public key. */
-  rotateKey(serviceId: string): Ed25519PublicKey;
+  rotateKey(serviceId: string): AgeRecipient;
 
   /** Check if a service has been approved (has a key pair). */
   isApproved(serviceId: string): boolean;
@@ -197,14 +197,15 @@ interface ServiceKeyStore {
 }
 
 interface TokenMinter {
-  /** Mint a short-lived Ed25519-signed token for agent→service communication. */
-  mint(agentId: string, serviceId: string, sessionUrn?: string): string;
-}
+  /** Mint a short-lived age-encrypted token for agent→service communication.
+   *  Encrypts the payload to the service's recipient (public key). Only the service can decrypt it. */
+  mint(agentId: string, serviceId: string, sessionUrn?: string): Promise<string>;
 }
 
 interface TokenValidator {
-  /** Validate and decode a service token using the service's public key. Returns null if invalid/expired. */
-  validate(token: string, publicKey: Ed25519PublicKey): ServiceTokenPayload | null;
+  /** Validate and decode a service token by decrypting with the service's identity (private key).
+   *  Returns null if decryption fails or token is expired. */
+  validate(token: string, identity: string): Promise<ServiceTokenPayload | null>;
 }
 ```
 
@@ -481,21 +482,26 @@ canvas.reset { surface: "main" }
 ### Service validating a Shoggoth token (service-side code)
 
 ```ts
-import { createPublicKey, verify } from "node:crypto";
+import * as age from "age-encryption";
 import { readFileSync } from "node:fs";
 
-// Public key provided once during operator-approved registration
-const PUBLIC_KEY = createPublicKey(readFileSync("./shoggoth-service.pub"));
+// Age identity (private key) provided once during operator-approved registration
+const IDENTITY = readFileSync("./shoggoth-service.key", "utf8").trim();
 
-function validateToken(authHeader: string): ServiceTokenPayload | null {
+async function validateToken(authHeader: string): Promise<ServiceTokenPayload | null> {
   const token = authHeader.replace("Bearer ", "");
-  const [payloadB64, signatureB64] = token.split(".");
-  const signature = Buffer.from(signatureB64, "base64url");
-  const valid = verify(null, Buffer.from(payloadB64), PUBLIC_KEY, signature);
-  if (!valid) return null;
-  const payload: ServiceTokenPayload = JSON.parse(Buffer.from(payloadB64, "base64url").toString());
-  if (payload.exp < Math.floor(Date.now() / 1000)) return null;
-  return payload;
+  // Token is an age-encrypted payload — only this service can decrypt it
+  const encrypted = Buffer.from(token, "base64url");
+  const decrypter = new age.Decrypter();
+  decrypter.addIdentity(IDENTITY);
+  try {
+    const decrypted = await decrypter.decrypt(encrypted);
+    const payload: ServiceTokenPayload = JSON.parse(new TextDecoder().decode(decrypted));
+    if (payload.exp < Math.floor(Date.now() / 1000)) return null;
+    return payload;
+  } catch {
+    return null; // decryption failed — invalid or forged token
+  }
 }
 ```
 

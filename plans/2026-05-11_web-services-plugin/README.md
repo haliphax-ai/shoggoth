@@ -118,32 +118,32 @@ Registration flow:
 1. Operator runs `shoggoth service register <id>` (or the service is declared in config with `approved: false`)
 2. Service declares its requested control plane operations in its manifest (e.g., `ops: ["turn.invoke", "session.send", "session.query"]`)
 3. CLI displays the requested scope and prompts operator for approval
-4. On approval, daemon generates an Ed25519 key pair for the service and stores the private key in the daemon's credential store
-5. The service's public key is provided to the service **once** at registration time (displayed by CLI, or written to a file the service can read)
-6. The daemon signs tokens with the service's private key; the service validates tokens using its public key
+4. On approval, daemon generates an age X25519 identity for the service and stores the recipient (public key, `age1...`) in the daemon's credential store
+5. The service's identity (private key, `AGE-SECRET-KEY-1...`) is provided to the service **once** at registration time (displayed by CLI, or written to a file the service can read)
+6. The daemon encrypts tokens to the service's recipient; only the service can decrypt them using its identity
 
 This means:
 
 - No shared secrets in environment variables
-- Each service has its own key pair — compromise of one service doesn't affect others
+- Each service has its own age identity — compromise of one service doesn't affect others
 - Operator must explicitly approve each service and its requested scope before it can interact with the daemon
 - Key rotation is per-service via `shoggoth service rotate-key <id>`
 - Scope changes require re-approval via `shoggoth service approve <id>`
 
-Token claims (signed with the service's private key):
+Token claims (encrypted to the service's recipient):
 
 - `sub`: agent ID
 - `scope`: service ID
 - `iat` / `exp`: issued/expiry timestamps
 - `session`: originating session URN (optional, for audit)
 
-When a plugin tool proxies a request to its service, the daemon signs a short-lived token with that service's private key. The service validates it using the public key it received at registration.
+When a plugin tool proxies a request to its service, the daemon encrypts a short-lived token to the service's recipient. The service decrypts it using its identity to verify authenticity and extract claims.
 
 **6. Control Plane Access for Services**
 
 Services that need to interact with Shoggoth beyond responding to tool calls (e.g., Canvas invoking agent turns when a user clicks a button) get scoped access to the existing control plane.
 
-- On startup, an approved service connects to the daemon's control plane (Unix socket or localhost endpoint) and authenticates with its key pair
+- On startup, an approved service connects to the daemon's control plane (Unix socket or localhost endpoint) and authenticates with its age identity
 - The daemon enforces the approved operation scope — requests for unapproved operations are rejected
 - Services use the same control plane protocol and operations that already exist (turn invocation, session messaging, queries, etc.)
 - No new API surface needed — the control plane is the API; registration just gates access to it
@@ -155,9 +155,9 @@ This avoids building a parallel service-specific API. The control plane already 
 1. Agent calls `canvas.push { surface: "main", nodes: [...] }` (a tool registered by the Canvas service)
 2. Tool handler (registered dynamically from manifest) resolves the Canvas service URL from the registry
 3. Registry returns `{ url: "http://127.0.0.1:3100", healthy: true }`
-4. Tool handler mints a short-lived token signed with Canvas's private key
+4. Tool handler mints a short-lived token encrypted to Canvas's recipient
 5. Tool handler dispatches the request to the service with `Authorization: Bearer <token>`
-6. Canvas Web validates the token using its public key, processes the push, returns response
+6. Canvas Web decrypts the token using its identity, processes the push, returns response
 7. Tool handler returns the result to the agent
 
 ### Data Flow: Service Invokes an Agent Turn
@@ -180,13 +180,11 @@ This avoids building a parallel service-specific API. The control plane already 
 
 ### Service Contract (what services must implement)
 
-### Service Contract (what services must implement)
-
 A Shoggoth-managed web service must:
 
 1. Listen on the port declared in the `service.port` config field (how the service determines its port is its own concern — env var, config file, hardcoded default, etc.)
 2. Expose a health endpoint (path configurable in `health` config)
-3. Validate `Authorization: Bearer <token>` headers using the public key provided during operator-approved registration
+3. Decrypt `Authorization: Bearer <token>` headers using the age identity provided during operator-approved registration
 4. Expose a `GET /manifest` endpoint (path configurable via `service.manifestPath`) if it provides agent tools
 
 The manifest endpoint is required for services that provide agent tools. It enables the daemon to dynamically register and describe tools without hardcoding knowledge of each service.

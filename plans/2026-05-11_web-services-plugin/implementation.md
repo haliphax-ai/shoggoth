@@ -20,22 +20,23 @@ Extend the config schema to support both managed and external service declaratio
 - `packages/daemon/src/service-registry.test.ts` — unit tests
 - `packages/daemon/src/index.ts` — instantiate registry, subscribe to procman events, start external health polling
 
-## Phase 2: Auth — Per-Service Key Pairs with Operator Approval
+## Phase 2: Auth — Per-Service Age Identities with Operator Approval
 
-Implement the service registration and approval flow via the operator CLI. Each approved service gets a unique Ed25519 key pair. The daemon signs tokens with the private key; the service validates with its public key.
+Implement the service registration and approval flow via the operator CLI. Each approved service gets a unique age X25519 identity. The daemon stores the recipient (public key) and encrypts tokens to it; the service holds the identity (private key) and decrypts tokens.
 
-- Add `shoggoth service register <id>` CLI command — prompts operator for approval, generates Ed25519 key pair on confirmation
-- Add `shoggoth service rotate-key <id>` CLI command — generates new key pair, displays new public key
+- Add `shoggoth service register <id>` CLI command — prompts operator for approval, generates age identity on confirmation
+- Add `shoggoth service rotate-key <id>` CLI command — generates new identity, displays new private key for the service
 - Add `shoggoth service list` and `shoggoth service revoke <id>` CLI commands
-- Implement `ServiceKeyStore` — stores private keys in the daemon's credential store, keyed by service ID
-- Implement `TokenMinter` — Ed25519-signed base64url payloads with agent ID, scope, expiry
-- Implement `TokenValidator` — verify Ed25519 signature, check expiry, decode payload (for use in `@shoggoth/service-auth` helper package)
-- Service receives its public key once at registration time (displayed by CLI or written to a path)
-- Services declared in config with no approved key pair are started by procman but cannot receive authenticated tool requests until approved
+- Implement `ServiceKeyStore` — stores recipients (public keys) in the daemon's credential store, keyed by service ID
+- Implement `TokenMinter` — age-encrypted base64url payloads with agent ID, scope, expiry (encrypted to the service's recipient)
+- Implement `TokenValidator` — decrypt with age identity, check expiry, decode payload (for use in `@shoggoth/service-auth` helper package)
+- Service receives its identity (private key) once at registration time (displayed by CLI or written to a path)
+- Services declared in config with no approved identity are started by procman but cannot receive authenticated tool requests until approved
+- Reuses the existing `age-encryption` library already used by the vault system
 
 **Files:**
 
-- `packages/daemon/src/service-key-store.ts` — key pair generation, storage, retrieval
+- `packages/daemon/src/service-key-store.ts` — identity generation, recipient storage, retrieval
 - `packages/daemon/src/service-auth.ts` — `TokenMinter` implementation
 - `packages/daemon/src/service-auth.test.ts` — unit tests for key generation, mint/validate round-trip
 - `packages/cli/src/commands/service.ts` — CLI commands for register, rotate-key, list, revoke
