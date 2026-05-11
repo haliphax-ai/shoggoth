@@ -1,5 +1,7 @@
 import http from "node:http";
 import { ServiceRegistry } from "./service-registry";
+import { ServiceKeyStore } from "./service-key-store";
+import { TokenValidator } from "./service-auth";
 
 /**
  * Gateway options for configuring the HTTP gateway.
@@ -24,6 +26,13 @@ export interface GatewayOptions {
     windowMs: number;
     /** Maximum requests per window. */
     maxRequests: number;
+  };
+  /** Auth configuration. */
+  auth?: {
+    /** Key store for looking up service identities. */
+    keyStore: ServiceKeyStore;
+    /** Whether auth is required for all requests. */
+    required: boolean;
   };
 }
 
@@ -65,15 +74,13 @@ export class ServiceGateway {
    */
   async start(): Promise<void> {
     this.server = http.createServer((req, res) => {
-      try {
-        this.handleRequest(req, res);
-      } catch (err) {
+      this.handleRequest(req, res).catch((err) => {
         console.error("Gateway request error:", err);
         if (!res.headersSent) {
           res.writeHead(500, { "Content-Type": "text/plain" });
           res.end("Internal Server Error");
         }
-      }
+      });
     });
 
     // Allow server to drain connections on close
@@ -108,7 +115,7 @@ export class ServiceGateway {
   /**
    * Handle incoming HTTP requests and proxy to registered services.
    */
-  private handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
+  private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = req.url ?? "/";
     const parsedUrl = new URL(url, `http://${this.options.host}:${this.options.port}`);
     const pathname = parsedUrl.pathname;
@@ -151,6 +158,32 @@ export class ServiceGateway {
       res.writeHead(503, { "Content-Type": "text/plain" });
       res.end("Service Unavailable");
       return;
+    }
+
+    // Auth middleware: validate token if auth is configured and required
+    if (this.options.auth?.required) {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Authorization token required" }));
+        return;
+      }
+
+      const token = authHeader.slice(7); // Strip "Bearer "
+
+      const identityString = await this.options.auth.keyStore.getIdentity(serviceId);
+      if (!identityString) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Service identity not found" }));
+        return;
+      }
+
+      const payload = await TokenValidator.validate(token, identityString);
+      if (!payload) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid or expired token" }));
+        return;
+      }
     }
 
     // Build target URL

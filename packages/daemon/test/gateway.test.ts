@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import http from "node:http";
 import { ServiceGateway, GatewayOptions } from "../src/gateway";
 import { ServiceRegistry, ServiceEntry } from "../src/service-registry";
+import { ServiceKeyStore } from "../src/service-key-store";
+import { TokenMinter } from "../src/service-auth";
 
 /**
  * Helper function to create a mock ServiceEntry for testing.
@@ -242,6 +244,149 @@ describe("ServiceGateway", () => {
       expect(response.headers["access-control-allow-credentials"]).toBe("true");
 
       await corsGateway.stop();
+    });
+  });
+
+  describe("auth middleware", () => {
+    const authPort = 18450;
+    let keyStore: ServiceKeyStore;
+    let minter: TokenMinter;
+    let authGateway: ServiceGateway;
+    let mockServer: http.Server;
+
+    beforeEach(async () => {
+      keyStore = new ServiceKeyStore("/tmp/test-secrets");
+      minter = new TokenMinter(keyStore);
+
+      // Generate a key pair for the test service
+      await keyStore.generateKeyPair("auth-service");
+
+      // Create a mock backend service
+      mockServer = http.createServer((req, res) => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ proxied: true, path: req.url }));
+      });
+
+      await new Promise<void>((resolve) => {
+        mockServer.listen(13010, "127.0.0.1", () => resolve());
+      });
+
+      // Register the service
+      const entry = createMockEntry({
+        id: "auth-service",
+        url: "http://127.0.0.1:13010",
+        healthy: true,
+        expose: "gateway",
+      });
+      registry.register(entry);
+    });
+
+    afterEach(async () => {
+      try {
+        await authGateway?.stop();
+      } catch {
+        // Ignore
+      }
+      mockServer?.close();
+      await new Promise((r) => setTimeout(r, 100));
+    });
+
+    it("should return 401 when auth required and no token provided", async () => {
+      authGateway = new ServiceGateway(registry, {
+        port: authPort,
+        host: "127.0.0.1",
+        prefix: "/svc",
+        auth: { keyStore, required: true },
+      });
+      await authGateway.start();
+      await new Promise((r) => setTimeout(r, 50));
+
+      const response = await httpRequest({
+        hostname: "127.0.0.1",
+        port: authPort,
+        path: "/svc/auth-service/api/data",
+        method: "GET",
+      });
+
+      expect(response.statusCode).toBe(401);
+      const body = JSON.parse(response.body);
+      expect(body.error).toBe("Authorization token required");
+    });
+
+    it("should return 401 when auth required and invalid token provided", async () => {
+      authGateway = new ServiceGateway(registry, {
+        port: authPort,
+        host: "127.0.0.1",
+        prefix: "/svc",
+        auth: { keyStore, required: true },
+      });
+      await authGateway.start();
+      await new Promise((r) => setTimeout(r, 50));
+
+      const response = await httpRequest({
+        hostname: "127.0.0.1",
+        port: authPort,
+        path: "/svc/auth-service/api/data",
+        method: "GET",
+        headers: {
+          Authorization: "Bearer invalid-token-value",
+        },
+      });
+
+      expect(response.statusCode).toBe(401);
+      const body = JSON.parse(response.body);
+      expect(body.error).toBe("Invalid or expired token");
+    });
+
+    it("should proxy successfully when auth required and valid token provided", async () => {
+      authGateway = new ServiceGateway(registry, {
+        port: authPort,
+        host: "127.0.0.1",
+        prefix: "/svc",
+        auth: { keyStore, required: true },
+      });
+      await authGateway.start();
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Mint a valid token for the service
+      const token = await minter.mint("test-agent", "auth-service", "urn:session:test");
+
+      const response = await httpRequest({
+        hostname: "127.0.0.1",
+        port: authPort,
+        path: "/svc/auth-service/api/data",
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.body);
+      expect(body.proxied).toBe(true);
+      expect(body.path).toBe("/api/data");
+    });
+
+    it("should proxy without auth when auth not configured", async () => {
+      // Use the default gateway (no auth config)
+      authGateway = new ServiceGateway(registry, {
+        port: authPort,
+        host: "127.0.0.1",
+        prefix: "/svc",
+      });
+      await authGateway.start();
+      await new Promise((r) => setTimeout(r, 50));
+
+      const response = await httpRequest({
+        hostname: "127.0.0.1",
+        port: authPort,
+        path: "/svc/auth-service/api/data",
+        method: "GET",
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.body);
+      expect(body.proxied).toBe(true);
     });
   });
 });
