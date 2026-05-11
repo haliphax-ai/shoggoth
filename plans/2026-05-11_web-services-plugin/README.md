@@ -141,11 +141,12 @@ When a plugin tool proxies a request to its service, the daemon automatically at
 
 A Shoggoth-managed web service must:
 
-1. Read its port from an environment variable (configurable, default `PORT`)
+1. Listen on the port declared in the `service.port` config field (how the service determines its port is its own concern — env var, config file, hardcoded default, etc.)
 2. Expose a health endpoint (path configurable in `health` config)
 3. Accept `Authorization: Bearer <token>` headers and validate them using the shared secret provided in `SHOGGOTH_SERVICE_SECRET` env var
-4. Optionally expose a `GET /manifest` endpoint describing its capabilities, routes, and WebSocket endpoints
+4. Expose a `GET /manifest` endpoint (path configurable via `service.manifestPath`) if it provides agent tools
 
+The manifest endpoint is required for services that provide agent tools. It enables the daemon to dynamically register and describe tools without hardcoding knowledge of each service.
 The manifest endpoint is required for services that provide agent tools. It enables the daemon to dynamically register and describe tools without hardcoding knowledge of each service.
 
 ## Testing Strategy
