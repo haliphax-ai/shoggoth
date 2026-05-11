@@ -17,22 +17,26 @@ Extend the config schema to support service declarations and build the runtime r
 - `packages/daemon/src/service-registry.test.ts` — unit tests
 - `packages/daemon/src/index.ts` — instantiate registry, subscribe to procman events
 
-## Phase 2: Auth Token Infrastructure
+## Phase 2: Auth — Per-Service Key Pairs with Operator Approval
 
-Implement token minting (daemon-side) and provide a validation helper that services can use. The shared secret is generated at daemon startup and injected into service processes via environment variable.
+Implement the service registration and approval flow via the operator CLI. Each approved service gets a unique Ed25519 key pair. The daemon signs tokens with the private key; the service validates with its public key.
 
-- Generate a random `SHOGGOTH_SERVICE_SECRET` at daemon boot (or read from config/vault if persisted)
-- Implement `TokenMinter` — HMAC-SHA256 signed base64url payloads with agent ID, scope, expiry
-- Implement `TokenValidator` — verify signature, check expiry, decode payload
-- Inject `SHOGGOTH_SERVICE_SECRET` into service process env automatically (merged with declared env)
-- Publish `@shoggoth/service-auth` as a lightweight npm package services can import for validation (optional — services can also validate manually per the spec example)
+- Add `shoggoth service register <id>` CLI command — prompts operator for approval, generates Ed25519 key pair on confirmation
+- Add `shoggoth service rotate-key <id>` CLI command — generates new key pair, displays new public key
+- Add `shoggoth service list` and `shoggoth service revoke <id>` CLI commands
+- Implement `ServiceKeyStore` — stores private keys in the daemon's credential store, keyed by service ID
+- Implement `TokenMinter` — Ed25519-signed base64url payloads with agent ID, scope, expiry
+- Implement `TokenValidator` — verify Ed25519 signature, check expiry, decode payload (for use in `@shoggoth/service-auth` helper package)
+- Service receives its public key once at registration time (displayed by CLI or written to a path)
+- Services declared in config with no approved key pair are started by procman but cannot receive authenticated tool requests until approved
 
 **Files:**
 
+- `packages/daemon/src/service-key-store.ts` — key pair generation, storage, retrieval
 - `packages/daemon/src/service-auth.ts` — `TokenMinter` implementation
-- `packages/daemon/src/service-auth.test.ts` — unit tests for mint/validate round-trip
+- `packages/daemon/src/service-auth.test.ts` — unit tests for key generation, mint/validate round-trip
+- `packages/cli/src/commands/service.ts` — CLI commands for register, rotate-key, list, revoke
 - `packages/service-auth/` — optional standalone validation package for service authors
-- `packages/daemon/src/index.ts` — secret generation, env injection into service process specs
 
 ## Phase 3: Manifest Fetching & Plugin Tool Registration
 
@@ -78,7 +82,7 @@ Enable services to push events back to agents (e.g., "user clicked a button in t
 
 - Service POSTs to a daemon-internal callback endpoint with a signed request
 - Daemon validates the callback signature and injects a message into the target agent's turn queue
-- Callback auth: service uses `SHOGGOTH_SERVICE_SECRET` to sign callback requests
+- Callback auth: service signs callback requests with its private key (the daemon already has the corresponding public key in the key store)
 - Rate limiting on callbacks to prevent runaway services from flooding agent turns
 - Callback endpoint is internal-only (not exposed through the gateway)
 
@@ -93,7 +97,7 @@ Enable services to push events back to agents (e.g., "user clicked a button in t
 Adapt Canvas Web to run as a Shoggoth-managed service. This validates the entire plugin spec end-to-end.
 
 - Strip OpenClaw-specific auth (Ed25519 keypair, node registration) from Canvas Web
-- Add Shoggoth token validation middleware using `SHOGGOTH_SERVICE_SECRET`
+- Add Shoggoth token validation middleware using the public key provided during `shoggoth service register canvas-web`
 - Expose `/health` and `/manifest` endpoints per service contract
 - Manifest declares Canvas-specific tools: `canvas.push`, `canvas.show`, `canvas.reset`, etc.
 - Configure as a `processes[]` entry with `service` block

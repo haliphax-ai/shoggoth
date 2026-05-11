@@ -113,13 +113,13 @@ class ServiceRegistry extends EventEmitter {
 }
 ```
 
-### Auth Token
+### Auth: Per-Service Key Pairs
 
 ```ts
 interface ServiceTokenPayload {
   /** Agent ID (subject). */
   sub: string;
-  /** Target service ID or "*" for any. */
+  /** Target service ID. */
   scope: string;
   /** Issued-at (unix seconds). */
   iat: number;
@@ -129,14 +129,28 @@ interface ServiceTokenPayload {
   session?: string;
 }
 
+interface ServiceKeyStore {
+  /** Get the private key for signing tokens destined for a service. */
+  getPrivateKey(serviceId: string): Ed25519PrivateKey | null;
+
+  /** Generate and store a new key pair for a service. Returns the public key. */
+  generateKeyPair(serviceId: string): Ed25519PublicKey;
+
+  /** Rotate a service's key pair. Returns the new public key. */
+  rotateKey(serviceId: string): Ed25519PublicKey;
+
+  /** Check if a service has been approved (has a key pair). */
+  isApproved(serviceId: string): boolean;
+}
+
 interface TokenMinter {
-  /** Mint a short-lived token for agent→service communication. */
+  /** Mint a short-lived Ed25519-signed token for agent→service communication. */
   mint(agentId: string, serviceId: string, sessionUrn?: string): string;
 }
 
 interface TokenValidator {
-  /** Validate and decode a service token. Returns null if invalid/expired. */
-  validate(token: string): ServiceTokenPayload | null;
+  /** Validate and decode a service token using the service's public key. Returns null if invalid/expired. */
+  validate(token: string, publicKey: Ed25519PublicKey): ServiceTokenPayload | null;
 }
 ```
 
@@ -375,15 +389,18 @@ canvas.reset { surface: "main" }
 ### Service validating a Shoggoth token (service-side code)
 
 ```ts
-import { createHmac } from "node:crypto";
+import { createPublicKey, verify } from "node:crypto";
+import { readFileSync } from "node:fs";
 
-const SECRET = process.env.SHOGGOTH_SERVICE_SECRET!;
+// Public key provided once during operator-approved registration
+const PUBLIC_KEY = createPublicKey(readFileSync("./shoggoth-service.pub"));
 
 function validateToken(authHeader: string): ServiceTokenPayload | null {
   const token = authHeader.replace("Bearer ", "");
-  const [payloadB64, signature] = token.split(".");
-  const expected = createHmac("sha256", SECRET).update(payloadB64).digest("base64url");
-  if (signature !== expected) return null;
+  const [payloadB64, signatureB64] = token.split(".");
+  const signature = Buffer.from(signatureB64, "base64url");
+  const valid = verify(null, Buffer.from(payloadB64), PUBLIC_KEY, signature);
+  if (!valid) return null;
   const payload: ServiceTokenPayload = JSON.parse(Buffer.from(payloadB64, "base64url").toString());
   if (payload.exp < Math.floor(Date.now() / 1000)) return null;
   return payload;
