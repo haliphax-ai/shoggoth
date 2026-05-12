@@ -32,15 +32,15 @@ All configuration is provided via `services.canvas` in the Shoggoth config. No e
 }
 ```
 
-| Field             | Type     | Default       | Description                                     |
-| ----------------- | -------- | ------------- | ----------------------------------------------- |
-| `host`            | string   | `"127.0.0.1"` | Bind address for the canvas server              |
-| `port`            | number   | `3100`        | Port for HTTP + WebSocket server                |
-| `basePath`        | string   | `"/"`         | Base path for serving the canvas SPA            |
-| `skipConfirm`     | boolean  | `false`       | Skip confirmation prompts for destructive ops   |
-| `a2uiDbPath`      | string   | `""`          | Path to A2UI state database (empty = in-memory) |
-| `ignoreDirs`      | string[] | `[]`          | Directories to ignore in file watching          |
-| `agentWorkspaces` | object   | `{}`          | Map of agent IDs to workspace root paths        |
+| Field             | Type     | Default                             | Description                                   |
+| ----------------- | -------- | ----------------------------------- | --------------------------------------------- |
+| `host`            | string   | `"127.0.0.1"`                       | Bind address for the canvas server            |
+| `port`            | number   | `3100`                              | Port for HTTP + WebSocket server              |
+| `basePath`        | string   | `"/"`                               | Base path for serving the canvas SPA          |
+| `skipConfirm`     | boolean  | `false`                             | Skip confirmation prompts for destructive ops |
+| `a2uiDbPath`      | string   | `"/var/lib/shoggoth/state/a2ui.db"` | Path to A2UI state database                   |
+| `ignoreDirs`      | string[] | `[]`                                | Directories to ignore in file watching        |
+| `agentWorkspaces` | object   | `{}`                                | Map of agent IDs to workspace root paths      |
 
 ## Architecture
 

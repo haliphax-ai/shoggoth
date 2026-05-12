@@ -17,7 +17,7 @@ export const DEFAULT_CANVAS_CONFIG: CanvasConfig = {
   port: 3456,
   basePath: "/",
   skipConfirm: false,
-  a2uiDbPath: "~/.shoggoth/canvas/a2ui-cache.db",
+  a2uiDbPath: "/var/lib/shoggoth/state/a2ui.db",
   ignoreDirs: ["tmp", "jsonl"],
   agentWorkspaces: {},
 };
