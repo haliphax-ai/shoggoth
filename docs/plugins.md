@@ -246,8 +246,79 @@ Error behavior by hook:
 
 ---
 
+## Service Plugin Guide
+
+Service plugins expose HTTP/WebSocket servers and register direct-call tools that bypass the MCP layer. They use `kind: "general"` and tap into the `service.register` hook.
+
+### Required Hooks
+
+| Hook               | Purpose                                                 |
+| ------------------ | ------------------------------------------------------- |
+| `service.register` | Start the server, register service entry and tools      |
+| `health.register`  | Register a health probe for the service                 |
+| `daemon.shutdown`  | Graceful shutdown (close server, watchers, connections) |
+
+### Example: Canvas Service
+
+The `@shoggoth/service-canvas` plugin is the reference service plugin. It provides:
+
+- An Express + WebSocket server for canvas SPA clients
+- 8 direct service tools (`canvas.present`, `canvas.hide`, `canvas.navigate`, `canvas.eval`, `canvas.snapshot`, `canvas.a2ui.push`, `canvas.a2ui.pushJSONL`, `canvas.a2ui.reset`)
+- Health probe reporting server listening state
+- Trusted identity auth — no token needed for in-process session spawning
+
+```ts
+import type { Plugin } from "hooks-plugin";
+import type { ShoggothHooks } from "@shoggoth/plugins";
+
+export default function createCanvasPlugin(): Plugin<ShoggothHooks> {
+  let server: CanvasServer | undefined;
+
+  return {
+    name: "service-canvas",
+    hooks: {
+      async "service.register"(ctx) {
+        server = createCanvasServer(ctx.config.services?.canvas ?? {});
+        ctx.registerService({ id: "canvas", expose: "both", protocol: "http+ws", port });
+        ctx.registerTools(canvasTools);
+      },
+      "health.register"(ctx) {
+        ctx.registerProbe({
+          name: "canvas",
+          check: async () => ({
+            status: server?.server.listening ? "pass" : "fail",
+          }),
+        });
+      },
+      async "daemon.shutdown"() {
+        await server?.close();
+      },
+    },
+  };
+}
+```
+
+**Configuration** is provided via `services.canvas` in the Shoggoth config — no environment variables:
+
+```json
+{
+  "services": {
+    "canvas": {
+      "host": "127.0.0.1",
+      "port": 3100,
+      "basePath": "/"
+    }
+  }
+}
+```
+
+See [Canvas Tools](tools/canvas.md) for the full tool reference.
+
+---
+
 ## See Also
 
 - [Daemon](daemon.md) — boot sequence and plugin loading
 - [Discord Platform](platform-discord.md) — reference platform plugin implementation
+- [Canvas Tools](tools/canvas.md) — reference service plugin tool documentation
 - [Shared](shared.md) — `ShoggothPluginEntry` config schema
