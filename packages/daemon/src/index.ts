@@ -447,6 +447,32 @@ void (async () => {
   stateShutdown.db = db;
   stateShutdown.toolRuns = createToolRunStore(db);
 
+  // --- HTTP Gateway: start if enabled in config ---
+  if (config.gateway?.enabled) {
+    const { ServiceGateway } = await import("./gateway");
+    const gateway = new ServiceGateway(serviceRegistry, {
+      port: config.gateway.port,
+      host: config.gateway.host,
+      prefix: config.gateway.prefix,
+      cors: config.gateway.cors,
+      rateLimit: config.gateway.rateLimit,
+    });
+    try {
+      await gateway.start();
+      getLogger("daemon").info("gateway started", {
+        port: config.gateway.port,
+        host: config.gateway.host,
+        prefix: config.gateway.prefix,
+      });
+      rt.shutdown.registerDrain("gateway", async () => {
+        await gateway.stop();
+      });
+    } catch (e) {
+      getLogger("daemon").error("gateway failed to start", { err: String(e) });
+    }
+  }
+
+
   // --- Timer Scheduler: init, restore, register shutdown ---
   const timerScheduler = new TimerScheduler(async (sessionId, message) => {
     const ext = subagentRuntimeExtensionRef.current;
