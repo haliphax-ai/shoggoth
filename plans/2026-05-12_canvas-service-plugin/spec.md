@@ -156,7 +156,7 @@ Navigate to a session/path or external URL.
     properties: {
       session: { type: "string", description: "Session ID. Defaults to 'main'." },
       path: { type: "string", description: "File path within the session directory." },
-      url: { type: "string", description: "External URL (http/https) or openclaw-canvas:// URL." },
+      url: { type: "string", description: "External URL (http/https) or shoggoth-canvas:// URL." },
     },
   },
   async handler(args, ctx) { /* ... */ },
@@ -287,7 +287,120 @@ For `canvas.snapshot`, the handler uses `gateway.requestSnapshot()` which return
 
 ---
 
-## 7. Health Probe
+## 7. Proxy Routes (Adapted, Not Removed)
+
+### 7.1 `POST /api/agent` (Agent Deep Link Proxy)
+
+**Purpose:** Lets the browser spawn a subagent by clicking an `openclaw://agent?message=...` deep link in canvas content. The SPA POSTs to this route; the plugin spawns the subagent in-process.
+
+**OpenClaw behavior:** HTTP-proxies to the gateway's `/tools/invoke` with `sessions_spawn`.
+
+**Shoggoth behavior:** Calls Shoggoth's internal session spawn mechanism directly. No external HTTP call, no gateway token needed — the plugin is a trusted in-process extension.
+
+**Request body:**
+
+```ts
+{
+  message: string;       // Required. The task/prompt for the subagent.
+  agentId?: string;      // Optional. Target agent ID.
+  model?: string;        // Optional. Model override.
+  thinking?: string;     // Optional. Thinking mode.
+  timeoutSeconds?: number;  // Optional. Run timeout.
+  sessionKey?: string;   // Optional. Session routing key (default: 'devnull').
+}
+```
+
+**Handler implementation:**
+
+```ts
+router.post("/api/agent", (req, res) => {
+  // ... parse body, validate message ...
+
+  // Instead of HTTP-proxying to external gateway:
+  //   → call Shoggoth's internal session spawn
+  const result = await shoggothSessionsSpawn({
+    task: parsed.message,
+    mode: "run",
+    agentId: parsed.agentId,
+    model: parsed.model,
+    runTimeoutSeconds: parsed.timeoutSeconds,
+    sessionKey: parsed.sessionKey || "devnull",
+  });
+
+  res.json({ ok: true, result });
+});
+```
+
+The SPA-facing API is identical — only the server-side implementation changes.
+
+### 7.2 `POST /api/file-spawn` (File Prompt Spawn)
+
+**Purpose:** Lets the browser spawn a subagent from a prompt file stored in the canvas workspace. The SPA POSTs a file path; the plugin reads the prompt text and spawns the subagent. This is how `openclaw-fileprompt://` links work.
+
+**OpenClaw behavior:** Reads the prompt file, then HTTP-proxies to the gateway's `/tools/invoke` with `sessions_spawn`.
+
+**Shoggoth behavior:** Reads the prompt file, then calls Shoggoth's internal session spawn mechanism directly.
+
+**Request body:**
+
+```ts
+{
+  file: string;          // Required. Path to the prompt file (relative to session canvas dir).
+  agentId?: string;      // Optional. Target agent ID.
+  model?: string;        // Optional. Model override.
+  sessionKey?: string;   // Optional. Session routing key (default: 'devnull').
+}
+```
+
+**Handler implementation:**
+
+```ts
+router.post("/api/file-spawn", async (req, res) => {
+  // ... parse body, validate file path, block traversal ...
+
+  const root = agentId ? agentWorkspaceMap.get(agentId) : canvasRoot;
+  const resolved = path.resolve(root, filePath);
+  // ... traversal guard ...
+
+  const prompt = await fs.readFile(resolved, "utf-8");
+
+  // Instead of HTTP-proxying to external gateway:
+  //   → call Shoggoth's internal session spawn
+  const result = await shoggothSessionsSpawn({
+    task: prompt,
+    mode: "run",
+    agentId: parsed.agentId,
+    model: parsed.model,
+    sessionKey: parsed.sessionKey || "devnull",
+  });
+
+  res.json({ ok: true, result });
+});
+```
+
+### 7.3 Why These Routes Must Be Preserved
+
+Both routes serve **operator-initiated** subagent spawning:
+
+1. **Operator** clicks an A2UI button or deep link in the Canvas SPA
+2. **Browser** POSTs to the canvas server route
+3. **Canvas server** spawns a subagent on the operator's behalf
+
+This is fundamentally different from agent-initiated spawning. The browser cannot call Shoggoth's session tools directly — it needs the canvas server as a trusted intermediary. In OpenClaw, the intermediary HTTP-proxies to the gateway. In Shoggoth, the intermediary calls session spawn in-process.
+
+### 7.4 Session Spawn Mechanism
+
+The plugin needs access to Shoggoth's session spawn capability. The exact mechanism depends on what the Shoggoth daemon exposes to plugins at `service.register` time. Options:
+
+1. **Pass a `sessionsSpawn` function** from the daemon context to the plugin (cleanest — same pattern as `registerService`/`registerTools`)
+2. **Use the `ServiceToolRegistry`** to look up and invoke the session spawn tool
+3. **Accept a `sessionsSpawn` callback** as part of the `PluginServiceEntry`
+
+The plan assumes option 1 — the daemon passes a spawn function in the registration context.
+
+---
+
+## 8. Health Probe
 
 ```ts
 "health.register"(ctx) {
@@ -303,12 +416,10 @@ For `canvas.snapshot`, the handler uses `gateway.requestSnapshot()` which return
 
 ---
 
-## 8. Shutdown
+## 9. Shutdown
 
 ```ts
 async "daemon.shutdown"() {
-  // Stop accepting new connections
-  nodeClient?.stop();       // if any WS client connections exist
   gateway.broadcastSpa({ type: "server.shutdown" });
   jsonlWatcher.close();
   await fileWatcher.close();
@@ -320,7 +431,7 @@ async "daemon.shutdown"() {
 
 ---
 
-## 9. Environment Variable Renaming
+## 10. Environment Variable Renaming
 
 All `OPENCLAW_CANVAS_*` variables are renamed to `SHOGGOTH_CANVAS_*`:
 
@@ -338,22 +449,31 @@ All `OPENCLAW_CANVAS_*` variables are renamed to `SHOGGOTH_CANVAS_*`:
 
 ---
 
-## 10. Removed Components
+## 11. Removed Components
 
 These OpenClaw-specific components are deleted entirely:
 
 | Component                                                     | Reason                                                              |
 | ------------------------------------------------------------- | ------------------------------------------------------------------- |
 | `NodeClient`                                                  | Shoggoth plugin system handles registration; no Ed25519 auth needed |
-| `agent-proxy` route (`POST /api/agent`)                       | Agents use direct tools, not HTTP proxy to gateway                  |
-| `file-spawn` route (`POST /api/file-spawn`)                   | Same — agents use native Shoggoth session tools                     |
 | MCP server (`mcp/`)                                           | Tools are natively exposed to Shoggoth agents                       |
 | `OPENCLAW_GATEWAY_WS_URL` / `OPENCLAW_GATEWAY_TOKEN` env vars | No gateway connection                                               |
 | `openclaw.json` config reading                                | Replaced by Shoggoth config (`ctx.config`)                          |
 
 ---
 
-## 11. Workspace Resolution
+## 12. Adapted Components
+
+These components are preserved with modified implementations:
+
+| Component           | Change                                                                                                                       |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `agent-proxy` route | Server-side: calls Shoggoth session spawn in-process instead of HTTP-proxying to external gateway. SPA-facing API unchanged. |
+| `file-spawn` route  | Server-side: calls Shoggoth session spawn in-process instead of HTTP-proxying to external gateway. SPA-facing API unchanged. |
+
+---
+
+## 13. Workspace Resolution
 
 OpenClaw reads agent workspace paths from `~/.openclaw/openclaw.json`. The Shoggoth plugin reads them from `ctx.config.agents.list` at `service.register` time:
 
@@ -370,7 +490,7 @@ for (const agent of agentsList) {
 
 ---
 
-## 12. Config Schema
+## 14. Config Schema
 
 The plugin is activated by adding an entry to the Shoggoth config's `plugins` array:
 
@@ -390,7 +510,7 @@ Or for local development:
 
 ---
 
-## 13. File Layout (Final)
+## 15. File Layout (Final)
 
 ```
 packages/service-canvas/
@@ -421,7 +541,9 @@ packages/service-canvas/
 │   │       ├── canvas.ts           # GET /:session/:path
 │   │       ├── catalogs.ts         # GET /api/catalogs
 │   │       ├── canvas-config.ts    # GET /api/canvas-config
-│   │       └── scaffold.ts         # GET /scaffold
+│   │       ├── scaffold.ts         # GET /scaffold
+│   │       ├── agent-proxy.ts      # POST /api/agent — operator-initiated spawn (adapted)
+│   │       └── file-spawn.ts       # POST /api/file-spawn — operator-initiated spawn (adapted)
 │   └── client/                     # Vue 3 SPA (unchanged)
 │       ├── main.ts
 │       ├── router.ts
@@ -441,24 +563,24 @@ packages/service-canvas/
 
 ---
 
-## 14. Documentation Files
+## 16. Documentation Files
 
 The following docs are ported and updated:
 
-| Source                                                  | Target                                                      | Changes                                                                                        |
-| ------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `openclaw-canvas-web/README.md`                         | `packages/service-canvas/README.md`                         | Rename all `openclaw` → `shoggoth`, update env vars, remove node client / MCP sections         |
-| `openclaw-canvas-web/AGENTS.md`                         | `packages/service-canvas/AGENTS.md`                         | Rename all `openclaw` → `shoggoth`, update architecture diagram, remove node client references |
-| `openclaw-canvas-web/docs/components.md`                | `packages/service-canvas/docs/components.md`                | Rename scope references                                                                        |
-| `openclaw-canvas-web/docs/creating-catalog-packages.md` | `packages/service-canvas/docs/creating-catalog-packages.md` | Rename scope references                                                                        |
-| `openclaw-canvas-web/docs/deep-linking.md`              | `packages/service-canvas/docs/deep-linking.md`              | Remove gateway proxy section, update env vars                                                  |
-| `openclaw-canvas-web/docs/a2ui-reactive.md`             | `packages/service-canvas/docs/a2ui-reactive.md`             | Rename scope references                                                                        |
-| `openclaw-canvas-web/docs/jsonl-watcher.md`             | `packages/service-canvas/docs/jsonl-watcher.md`             | Rename scope references                                                                        |
-| —                                                       | `docs/tools/canvas.md`                                      | **NEW** — tool reference for all 8 canvas tools                                                |
+| Source                                                  | Target                                                      | Changes                                                                                                                                           |
+| ------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `openclaw-canvas-web/README.md`                         | `packages/service-canvas/README.md`                         | Rename all `openclaw` → `shoggoth`, update env vars, remove node client / MCP sections, update proxy route descriptions                           |
+| `openclaw-canvas-web/AGENTS.md`                         | `packages/service-canvas/AGENTS.md`                         | Rename all `openclaw` → `shoggoth`, update architecture diagram, remove node client references, document proxy routes as in-process session spawn |
+| `openclaw-canvas-web/docs/components.md`                | `packages/service-canvas/docs/components.md`                | Rename scope references                                                                                                                           |
+| `openclaw-canvas-web/docs/creating-catalog-packages.md` | `packages/service-canvas/docs/creating-catalog-packages.md` | Rename scope references                                                                                                                           |
+| `openclaw-canvas-web/docs/deep-linking.md`              | `packages/service-canvas/docs/deep-linking.md`              | Update to describe in-process Shoggoth session spawn instead of gateway HTTP proxy                                                                |
+| `openclaw-canvas-web/docs/a2ui-reactive.md`             | `packages/service-canvas/docs/a2ui-reactive.md`             | Rename scope references                                                                                                                           |
+| `openclaw-canvas-web/docs/jsonl-watcher.md`             | `packages/service-canvas/docs/jsonl-watcher.md`             | Rename scope references                                                                                                                           |
+| —                                                       | `docs/tools/canvas.md`                                      | **NEW** — tool reference for all 8 canvas tools                                                                                                   |
 
 ---
 
-## 15. New Tool Reference Doc
+## 17. New Tool Reference Doc
 
 A new `docs/tools/canvas.md` is created in the main Shoggoth docs, following the same format as other tool docs. It documents all 8 canvas tools with:
 
@@ -466,3 +588,4 @@ A new `docs/tools/canvas.md` is created in the main Shoggoth docs, following the
 - Parameter schema
 - Example invocations
 - Notes on session scoping, A2UI catalogs, and snapshot limitations
+- Section on operator-initiated spawning via proxy routes (`/api/agent`, `/api/file-spawn`)

@@ -7,24 +7,21 @@ completed: never
 
 ## Summary
 
-Port the [OpenClaw Canvas web server](https://github.com/haliphax-ai/openclaw-canvas-web) to Shoggoth's plugin and service registry system. The Canvas server becomes a `service`-kind plugin (`@shoggoth/service-canvas`) that registers its HTTP/WebSocket endpoints through the `ServiceGateway` and exposes canvas manipulation commands as direct in-process tools. All `openclaw` package scopes are renamed to `shoggoth`, OpenClaw-specific components (node client, agent proxy, MCP server) are removed, and documentation is fully ported.
+Port the [OpenClaw Canvas web server](https://github.com/haliphax-ai/openclaw-canvas-web) to Shoggoth's plugin and service registry system. The Canvas server becomes a `service`-kind plugin (`@shoggoth/service-canvas`) that registers its HTTP/WebSocket endpoints through the `ServiceGateway` and exposes canvas manipulation commands as direct in-process tools. All `openclaw` package scopes are renamed to `shoggoth`, OpenClaw-specific components (node client, MCP server) are removed, and documentation is fully ported.
 
 ## Motivation
 
 The Canvas web server is a cross-platform canvas that agents control via WebSocket. It renders HTML content and A2UI (Agent-to-UI) surfaces in a Vue 3 SPA. Currently built for OpenClaw, it uses:
 
 - **NodeClient** — Ed25519-authenticated gateway node registration to receive `node.invoke` commands
-- **Agent proxy route** — HTTP proxy to the OpenClaw gateway's `/tools/invoke` for deep links
+- **HTTP proxy routes** (`/api/agent`, `/api/file-spawn`) — intermediaries that let the browser spawn subagents/prompt sessions by proxying to the gateway's `/tools/invoke` (the browser can't hold gateway credentials)
 - **MCP server** — separate process exposing canvas commands via MCP
 
-None of these exist in Shoggoth. Shoggoth's plugin system provides a cleaner model:
+In Shoggoth:
 
-- **Service registration** — plugins declare themselves via the `service.register` hook; the daemon's `ServiceGateway` proxies HTTP and WebSocket traffic
-- **Direct tools** — plugins register in-process tool handlers that agents call without HTTP overhead
-- **Health probes** — plugins register liveness checks via the `health.register` hook
-- **Lifecycle management** — startup and shutdown are handled through hooks, not manual signal handlers
-
-Porting Canvas to this model eliminates ~500 lines of OpenClaw-specific glue (node client, proxy routes, MCP server) and makes Canvas a first-class Shoggoth service.
+- NodeClient is replaced by the plugin system's `service.register` hook
+- The proxy routes stay but call Shoggoth's internal session mechanisms directly instead of HTTP-proxying to an external gateway
+- The MCP server is removed because tools are natively exposed to agents
 
 ## Design
 
@@ -33,14 +30,14 @@ Porting Canvas to this model eliminates ~500 lines of OpenClaw-specific glue (no
 ```
 Shoggoth Agent ──tool call──▶ DirectServiceTool handler ──▶ Gateway (in-memory)
                                                               │
-Shoggoth Agent ──HTTP request──▶ ServiceGateway ──proxy──▶ Express server
-                                                              │
-Browser ──WebSocket──▶ ServiceGateway ──proxy──▶ WS server (/ws, /ws/a2ui)
-                                                              │
-Browser ──HTTP──▶ ServiceGateway ──proxy──▶ Express (SPA, static files, API)
+Browser ──click A2UI element──▶ SPA ──POST /api/agent──▶ plugin route
+                                   │                        │
+                                   └──POST /api/file───┐   │
+                                                        ▼   ▼
+                                              Shoggoth session spawn (in-process)
 ```
 
-The plugin starts its own Express + WebSocket server on a configured port. The Shoggoth `ServiceGateway` proxies external HTTP and WebSocket traffic to it. Agent tool calls bypass HTTP entirely — they invoke the same in-memory `Gateway` object directly.
+The plugin starts its own Express + WebSocket server on a configured port. Agent tool calls bypass HTTP entirely — they invoke the same in-memory `Gateway` object directly. Browser-initiated spawns go through the Express routes, which call Shoggoth's internal session mechanisms in-process (no external HTTP proxy needed).
 
 ### Package Renaming
 
@@ -54,16 +51,26 @@ All `openclaw`-prefixed scopes become `shoggoth`:
 | `@haliphax-openclaw/a2ui-catalog-all`      | `@shoggoth/a2ui-catalog-all`        |
 | `openclaw-canvas-web` (project)            | `@shoggoth/service-canvas` (plugin) |
 
-### Removed Components
+### Removed vs. Adapted Components
 
-| Component                                            | Reason                                                              |
-| ---------------------------------------------------- | ------------------------------------------------------------------- |
-| `NodeClient`                                         | Shoggoth plugin system handles registration; no Ed25519 auth needed |
-| `agent-proxy` route                                  | Agents use direct tools, not HTTP proxy to gateway                  |
-| `file-spawn` route                                   | Same — agents use native Shoggoth session tools                     |
-| MCP server                                           | Tools are natively exposed to Shoggoth agents                       |
-| `OPENCLAW_GATEWAY_WS_URL` / `OPENCLAW_GATEWAY_TOKEN` | No gateway connection                                               |
-| `openclaw.json` config reading                       | Replaced by Shoggoth config via `ctx.config`                        |
+| Component                                            | Action    | Reason / Replacement                                                                                                                                     |
+| ---------------------------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NodeClient`                                         | Remove    | Shoggoth plugin system handles registration; no Ed25519 auth needed                                                                                      |
+| MCP server                                           | Remove    | Tools are natively exposed to Shoggoth agents                                                                                                            |
+| `agent-proxy` route                                  | **Adapt** | Operator-initiated subagent spawn from browser clicks. Stays but calls Shoggoth session spawn in-process instead of HTTP-proxying to external gateway    |
+| `file-spawn` route                                   | **Adapt** | Operator-initiated prompt file spawn from browser clicks. Stays but calls Shoggoth session spawn in-process instead of HTTP-proxying to external gateway |
+| `OPENCLAW_GATEWAY_WS_URL` / `OPENCLAW_GATEWAY_TOKEN` | Remove    | No external gateway connection                                                                                                                           |
+| `openclaw.json` config reading                       | Remove    | Replaced by Shoggoth config via `ctx.config`                                                                                                             |
+
+### Proxy Route Adaptation
+
+Both proxy routes (`/api/agent` and `/api/file-spawn`) serve a critical purpose: they let the **operator** (via the browser) spawn subagents or prompt existing sessions by clicking A2UI elements in the canvas. The browser can't call Shoggoth's session tools directly, so the canvas server acts as a trusted intermediary.
+
+In OpenClaw, these routes HTTP-proxy to the gateway's `/tools/invoke` endpoint. In Shoggoth, since the plugin runs in-process, the routes call Shoggoth's internal session spawn mechanism directly:
+
+- **No external HTTP call** — the plugin has direct access to Shoggoth's session runtime
+- **No gateway token needed** — the plugin is a trusted in-process extension
+- **Same browser-facing API** — the SPA sends the same POST requests; only the server-side implementation changes
 
 ### Tool Surface
 
@@ -82,7 +89,7 @@ Eight direct tools replace the OpenClaw `NodeClient.executeCommand()` dispatch:
 
 ### Environment Variables
 
-All `OPENCLAW_CANVAS_*` variables are renamed to `SHOGGOTH_CANVAS_*`. Gateway-related variables are removed.
+All `OPENCLAW_CANVAS_*` variables are renamed to `SHOGGOTH_CANVAS_*`. Gateway-related variables (`OPENCLAW_GATEWAY_WS_URL`, `OPENCLAW_GATEWAY_TOKEN`) are removed.
 
 ### Service Registration
 
@@ -106,14 +113,16 @@ All Canvas project documentation is ported and updated:
 
 - `README.md`, `AGENTS.md`, and all `docs/` files
 - References to `openclaw` replaced with `shoggoth`
-- Sections on node client, MCP, and gateway proxy removed
+- Node client and MCP sections removed
+- Proxy route docs updated to describe in-process Shoggoth session spawn instead of gateway HTTP proxy
 - New `docs/tools/canvas.md` created in the main Shoggoth docs
 
 ## Testing Strategy
 
 - **Unit tests:** Each tool handler, service registration, health probe, and shutdown hook
+- **Proxy route tests:** `/api/agent` and `/api/file-spawn` adapted to mock Shoggoth session spawn instead of HTTP proxying to external gateway
 - **Integration tests:** Plugin loads in the daemon, service appears in registry, tools are callable, SPA is accessible via gateway proxy
-- **Existing tests:** Ported from the OpenClaw Canvas project, adapted for the plugin model (no mocks for gateway node client)
+- **Existing tests:** Ported from the OpenClaw Canvas project, adapted for the plugin model (no mocks for gateway node client or external HTTP calls)
 - **Regression:** Full Shoggoth test suite must pass unchanged
 
 ## Considerations
@@ -123,8 +132,9 @@ All Canvas project documentation is ported and updated:
 - The Vue SPA client code is unchanged; only server-side code is ported
 - A2UI catalog packages (`a2ui-sdk`, `a2ui-catalog-basic`, `a2ui-catalog-extended`, `a2ui-catalog-all`) are ported as separate packages within the monorepo
 - The `ServiceGateway` handles WebSocket upgrade proxying — no special config needed for `/ws` and `/ws/a2ui`
-- Deep links (`openclaw://`) are handled client-side by the injected script; the server-side proxy to the gateway is removed. Deep link clicks in canvas content will need a new mechanism (TBD — possibly a Shoggoth session tool call from the client)
+- Deep links (`openclaw://`) are handled client-side by the injected script; the server-side route (`/api/agent`) now calls Shoggoth session spawn in-process instead of HTTP-proxying to an external gateway
 - The `openclaw-canvas://` URL scheme should be renamed to `shoggoth-canvas://` for consistency (TBD — may be deferred to avoid breaking existing canvas content)
+- **Operator-initiated spawning is the core use case for the proxy routes:** an operator clicks an A2UI button in the canvas → SPA POSTs to `/api/agent` or `/api/file-spawn` → plugin spawns a subagent or prompts an existing session. This is fundamentally different from agent-initiated spawning and must be preserved.
 
 ## Migration
 
