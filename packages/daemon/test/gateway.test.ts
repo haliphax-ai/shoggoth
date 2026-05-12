@@ -282,8 +282,8 @@ describe("ServiceGateway", () => {
     } catch {
       // Ignore errors if not running
     }
-    // Wait for port to be fully released
-    await new Promise((r) => setTimeout(r, 100));
+    // Allow port to be fully released between tests
+    await new Promise((r) => setTimeout(r, 50));
   });
 
   describe("start and port", () => {
@@ -325,8 +325,6 @@ describe("ServiceGateway", () => {
 
         await gateway.start();
 
-        // Wait for server to be ready
-        await new Promise((r) => setTimeout(r, 50));
 
         // Request through gateway
         const response = await httpRequest({
@@ -348,8 +346,6 @@ describe("ServiceGateway", () => {
     it("should return 404 for unknown service ID", async () => {
       await gateway.start();
 
-      // Wait for server to be ready
-      await new Promise((r) => setTimeout(r, 50));
 
       const response = await httpRequest({
         hostname: "127.0.0.1",
@@ -372,8 +368,6 @@ describe("ServiceGateway", () => {
 
       await gateway.start();
 
-      // Wait for server to be ready
-      await new Promise((r) => setTimeout(r, 50));
 
       const response = await httpRequest({
         hostname: "127.0.0.1",
@@ -411,7 +405,6 @@ describe("ServiceGateway", () => {
       registry.register(entry);
 
       await gateway.start();
-      await new Promise((r) => setTimeout(r, 50));
 
       const { statusCode, socket } = await sendUpgradeRequest(testPort, "/svc/ws-service/echo");
 
@@ -464,7 +457,6 @@ describe("ServiceGateway", () => {
       registry.register(entry);
 
       await gateway.start();
-      await new Promise((r) => setTimeout(r, 50));
 
       const { statusCode, socket } = await sendUpgradeRequest(
         testPort,
@@ -477,7 +469,6 @@ describe("ServiceGateway", () => {
 
     it("should return error for unknown service", async () => {
       await gateway.start();
-      await new Promise((r) => setTimeout(r, 50));
 
       const { statusCode, socket } = await sendUpgradeRequest(
         testPort,
@@ -499,7 +490,6 @@ describe("ServiceGateway", () => {
       registry.register(entry);
 
       await gateway.start();
-      await new Promise((r) => setTimeout(r, 50));
 
       const { statusCode, socket } = await sendUpgradeRequest(
         testPort,
@@ -578,3 +568,4 @@ describe("ServiceGateway", () => {
     });
   });
 });
+
