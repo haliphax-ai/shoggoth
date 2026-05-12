@@ -164,3 +164,60 @@ export interface HealthProbeResult {
   readonly status: "pass" | "fail" | "skipped";
   readonly detail?: string;
 }
+
+// -------------------------------------------------------------------------------
+// Service
+// -------------------------------------------------------------------------------
+
+/** Handler function for a direct service tool (plugin services). */
+export type DirectToolHandler = (
+  args: Record<string, unknown>,
+  ctx: DirectToolContext,
+) => Promise<{ resultJson: string }>;
+
+/** Context passed to a direct tool handler at invocation time. */
+export interface DirectToolContext {
+  /** Agent ID that invoked the tool. */
+  readonly agentId: string;
+  /** Session URN of the invoking session. */
+  readonly sessionUrn: string;
+}
+
+/** A tool provided by a plugin service with a direct handler function. */
+export interface DirectServiceTool {
+  /** Tool name as exposed to agents (e.g. "canvas.push"). */
+  readonly name: string;
+  /** Human-readable description for the tool descriptor. */
+  readonly description: string;
+  /** JSON Schema for the tool's parameters. */
+  readonly parameters: Record<string, unknown>;
+  /** Direct handler function invoked when an agent calls this tool. */
+  readonly handler: DirectToolHandler;
+}
+
+/** Entry describing a plugin service for the registry. */
+export interface PluginServiceEntry {
+  /** Unique service ID. */
+  readonly id: string;
+  /** Human-readable label. */
+  readonly label?: string;
+  /** Named capabilities this service provides. */
+  readonly capabilities?: string[];
+  /** Exposure mode. Plugin services without a port default to "direct". */
+  readonly expose?: "gateway" | "direct" | "both";
+  /** Optional port if the plugin also binds an HTTP listener. */
+  readonly port?: number;
+  /** Optional protocol (default "http"). */
+  readonly protocol?: "http" | "ws" | "http+ws";
+  /** Optional base path for gateway routing. */
+  readonly basePath?: string;
+}
+
+export interface ServiceRegisterCtx {
+  /** Register this plugin as a service in the ServiceRegistry. */
+  readonly registerService: (entry: PluginServiceEntry) => void;
+  /** Register tools with direct handler functions (no HTTP dispatch). */
+  readonly registerTools: (tools: DirectServiceTool[]) => void;
+  /** Resolved config (after daemon.configure waterfall). */
+  readonly config: Readonly<ShoggothConfig>;
+}

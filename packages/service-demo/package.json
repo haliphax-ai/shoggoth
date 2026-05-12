@@ -1,0 +1,26 @@
+{
+  "name": "@shoggoth/service-demo",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/plugin.ts",
+  "types": "./src/plugin.ts",
+  "exports": {
+    ".": {
+      "types": "./src/plugin.ts",
+      "import": "./src/plugin.ts",
+      "default": "./src/plugin.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@shoggoth/plugins": "*",
+    "@shoggoth/shared": "*"
+  },
+  "shoggothPlugin": {
+    "kind": "service",
+    "entrypoint": "./src/plugin.ts"
+  }
+}

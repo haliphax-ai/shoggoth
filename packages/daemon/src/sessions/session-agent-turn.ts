@@ -27,6 +27,7 @@ import { getAgentIntegrationInvoker } from "../control/agent-integration-invoke-
 import { getProcessManager } from "../process-manager-singleton";
 import { BuiltinToolRegistry, type BuiltinToolContext } from "./builtin-tool-registry";
 import { vaultServiceRef } from "../vault/vault-ref";
+import { serviceToolRegistryRef } from "./service-tool-registry-ref";
 import { registerAllBuiltinHandlers } from "./builtin-handlers/index";
 import { createMcpRoutingToolExecutor } from "../mcp/tool-loop-mcp";
 import { createToolLoopPolicyAndAudit } from "../policy/tool-loop-bridge";
@@ -471,6 +472,14 @@ export async function executeSessionAgentTurn(
         };
         if (builtinRegistry.has(originalName)) {
           return builtinRegistry.execute(originalName, args, toolCtx);
+        }
+        // Service tool dispatch (plugin services)
+        const svcRegistry = serviceToolRegistryRef.current;
+        if (svcRegistry?.getToolDeclaration(originalName)) {
+          return svcRegistry.invokeTool(originalName, args, {
+            agentId: parseAgentSessionUrn(input.sessionId)?.agentId ?? "unknown",
+            sessionUrn: input.sessionId,
+          });
         }
         // Preserve the original error for unrecognised session.* names
         if (originalName.startsWith("session-")) {

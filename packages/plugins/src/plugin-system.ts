@@ -25,6 +25,7 @@ import type {
   SessionTurnAfterCtx,
   SessionSegmentChangeCtx,
   HealthRegisterCtx,
+  ServiceRegisterCtx,
 } from "./hook-types";
 
 export function createShoggothHooks() {
@@ -52,6 +53,9 @@ export function createShoggothHooks() {
 
     // Health
     "health.register": new SyncHook<[HealthRegisterCtx]>(),
+
+    // Service
+    "service.register": new AsyncHook<[ServiceRegisterCtx]>(),
   };
 }
 

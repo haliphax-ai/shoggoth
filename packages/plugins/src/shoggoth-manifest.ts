@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const pluginKindSchema = z.enum(["messaging-platform", "observability", "general"]);
+const pluginKindSchema = z.enum(["messaging-platform", "observability", "general", "service"]);
 
 /** Validates the `shoggothPlugin` property bag from package.json. */
 export const shoggothPluginBagSchema = z

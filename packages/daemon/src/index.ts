@@ -104,6 +104,7 @@ import { TimerScheduler } from "./timers/timer-scheduler";
 import { setTimerScheduler } from "./sessions/builtin-handlers/timer-handler";
 import { ShoggothPluginSystem, type PlatformDeps } from "@shoggoth/plugins";
 import { fireDaemonHooks } from "./plugins/daemon-hooks";
+import { createServiceRegistry, createServiceToolRegistry } from "./service-lifecycle";
 import { appendAuditRow } from "./audit/append-audit";
 
 process.umask(0o007);
@@ -403,6 +404,14 @@ void (async () => {
     noticeResolver: daemonNotice as (key: string, params?: Record<string, unknown>) => string,
   };
 
+  // Create service registries for plugin service support
+  const serviceRegistry = createServiceRegistry();
+  const serviceToolRegistry = createServiceToolRegistry(serviceRegistry);
+
+  // Expose service tool registry to session context finalizers and tool executor
+  const { serviceToolRegistryRef } = await import("./sessions/service-tool-registry-ref");
+  serviceToolRegistryRef.current = serviceToolRegistry;
+
   // Fire daemon hooks — plugins handle platform.start, health.register, etc.
   const hookResult = await fireDaemonHooks(pluginSystem, {
     config,
@@ -428,6 +437,8 @@ void (async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       platformAdapterRef.current = adapter as any;
     },
+    serviceRegistry,
+    serviceToolRegistry,
   });
 
   // Register plugin shutdown drains
@@ -435,6 +446,32 @@ void (async () => {
   rt.shutdown.registerDrain("plugin-daemon-shutdown", hookResult.drains.daemonShutdown);
   stateShutdown.db = db;
   stateShutdown.toolRuns = createToolRunStore(db);
+
+  // --- HTTP Gateway: start if enabled in config ---
+  if (config.gateway?.enabled) {
+    const { ServiceGateway } = await import("./gateway");
+    const gateway = new ServiceGateway(serviceRegistry, {
+      port: config.gateway.port,
+      host: config.gateway.host,
+      prefix: config.gateway.prefix,
+      cors: config.gateway.cors,
+      rateLimit: config.gateway.rateLimit,
+    });
+    try {
+      await gateway.start();
+      getLogger("daemon").info("gateway started", {
+        port: config.gateway.port,
+        host: config.gateway.host,
+        prefix: config.gateway.prefix,
+      });
+      rt.shutdown.registerDrain("gateway", async () => {
+        await gateway.stop();
+      });
+    } catch (e) {
+      getLogger("daemon").error("gateway failed to start", { err: String(e) });
+    }
+  }
+
 
   // --- Timer Scheduler: init, restore, register shutdown ---
   const timerScheduler = new TimerScheduler(async (sessionId, message) => {

@@ -29,6 +29,11 @@ export {
   type MessagingPlatformPlugin,
 } from "./messaging-platform-plugin";
 export {
+  defineServicePlugin,
+  REQUIRED_SERVICE_PLUGIN_HOOKS,
+  type ServicePlugin,
+} from "./service-plugin";
+export {
   PlatformDeliveryRegistry,
   type PlatformDeliveryResolver,
   type OperatorDelivery,
@@ -51,4 +56,9 @@ export type {
   HealthRegisterCtx,
   HealthProbe,
   HealthProbeResult,
+  ServiceRegisterCtx,
+  DirectServiceTool,
+  DirectToolHandler,
+  DirectToolContext,
+  PluginServiceEntry,
 } from "./hook-types";

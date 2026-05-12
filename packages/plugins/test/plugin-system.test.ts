@@ -14,7 +14,7 @@ import type {
 } from "../src/hook-types";
 
 // ---------------------------------------------------------------------------
-// 1. ShoggothPluginSystem instantiation — all 14 hooks present
+// 1. ShoggothPluginSystem instantiation — all 15 hooks present
 // ---------------------------------------------------------------------------
 describe("ShoggothPluginSystem", () => {
   const ALL_HOOK_NAMES = [
@@ -34,7 +34,7 @@ describe("ShoggothPluginSystem", () => {
     "health.register",
   ] as const;
 
-  test("can be instantiated and exposes all 14 hooks via lifecycle", () => {
+  test("can be instantiated and exposes all 15 hooks via lifecycle", () => {
     const system = new ShoggothPluginSystem();
     assert.ok(system, "system should be truthy");
     assert.ok(system.lifecycle, "system.lifecycle should be truthy");
@@ -42,9 +42,9 @@ describe("ShoggothPluginSystem", () => {
     for (const name of ALL_HOOK_NAMES) {
       assert.ok(system.lifecycle[name], `hook "${name}" should exist on lifecycle`);
     }
-    // Exactly 14 hooks — no more, no less
+    // Exactly 15 hooks — no more, no less
     const hookKeys = Object.keys(system.lifecycle);
-    assert.strictEqual(hookKeys.length, 14, "should have exactly 14 hooks");
+    assert.strictEqual(hookKeys.length, 15, "should have exactly 15 hooks");
   });
 
   // -------------------------------------------------------------------------

@@ -1009,6 +1009,41 @@ const shoggothSearxngConfigSchema = z
 type _ShoggothSearxngConfig = z.infer<typeof shoggothSearxngConfigSchema>;
 
 /** Layered JSON fragments must satisfy this shape after merge; defaults fill the rest. */
+
+// ---------------------------------------------------------------------------
+// HTTP Gateway
+// ---------------------------------------------------------------------------
+
+export const gatewayConfigSchema = z
+  .object({
+    /** Whether the gateway is enabled. Default: false */
+    enabled: z.boolean().default(false),
+    /** Port to listen on. Default: 8000 */
+    port: z.number().int().min(1).max(65535).default(8000),
+    /** Host address to bind to. Default: "0.0.0.0" */
+    host: z.string().default("0.0.0.0"),
+    /** URL prefix for service routes. Default: "/svc" */
+    prefix: z.string().default("/svc"),
+    /** CORS configuration */
+    cors: z
+      .object({
+        origins: z.array(z.string()),
+        credentials: z.boolean().optional(),
+      })
+      .optional(),
+    /** Rate limiting configuration */
+    rateLimit: z
+      .object({
+        windowMs: z.number().int().positive(),
+        maxRequests: z.number().int().positive(),
+      })
+      .optional(),
+  })
+  .strict()
+  .optional();
+
+export type GatewayConfig = z.infer<typeof gatewayConfigSchema>;
+
 export const shoggothConfigFragmentSchema = z
   .object({
     logLevel: z.enum(["debug", "info", "warn", "error"]).optional(),
@@ -1090,6 +1125,8 @@ export const shoggothConfigFragmentSchema = z
     thinkingDisplay: thinkingDisplaySchema.optional(),
     /** Media generation configuration. */
     mediaGeneration: shoggothMediaGenerationConfigSchema.optional(),
+    /** HTTP gateway for plugin service proxy. */
+    gateway: gatewayConfigSchema,
   })
   .strict();
 
@@ -1145,6 +1182,8 @@ export const shoggothConfigSchema = z
     thinkingDisplay: thinkingDisplaySchema.optional(),
     /** Media generation configuration. */
     mediaGeneration: shoggothMediaGenerationConfigSchema.optional(),
+    /** HTTP gateway for plugin service proxy. */
+    gateway: gatewayConfigSchema,
   })
   .strict();
 

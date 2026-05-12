@@ -15,6 +15,9 @@ import type {
   PlatformAdapter,
 } from "@shoggoth/shared";
 import type { HealthProbe } from "@shoggoth/plugins";
+import type { ServiceRegistry } from "../service-registry";
+import type { ServiceToolRegistry } from "../service-tool-registry";
+import { fireServiceRegisterHook } from "../service-lifecycle";
 
 interface DaemonHooksContext {
   config: ShoggothConfig;
@@ -31,6 +34,10 @@ interface DaemonHooksContext {
   setSubagentRuntimeExtension: (ext: SubagentRuntimeExtension | undefined) => void;
   setMessageToolContext: (ctx: MessageToolContext) => void;
   setPlatformAdapter: (adapter: PlatformAdapter) => void;
+  /** Optional service registry for plugin service registration */
+  serviceRegistry?: ServiceRegistry;
+  /** Optional service tool registry for plugin tool registration */
+  serviceToolRegistry?: ServiceToolRegistry;
 }
 
 interface DaemonHooksResult {
@@ -49,8 +56,9 @@ interface DaemonHooksResult {
  * 3. health.register   (sync)
  * 4. platform.start    (async)
  * 5. daemon.startup    (async)
- * 6. Lock plugin system
- * 7. daemon.ready      (async)
+ * 6. service.register  (async) - plugin services register themselves
+ * 7. Lock plugin system
+ * 8. daemon.ready      (async)
  *
  * Returns the final config and drain functions for shutdown hooks.
  */
@@ -98,10 +106,15 @@ export async function fireDaemonHooks(
     registerDrain: ctx.registerDrain,
   });
 
-  // 6. Lock plugin system
+  // 6. service.register (async) - fire hook for plugin services to register
+  if (ctx.serviceRegistry && ctx.serviceToolRegistry) {
+    await fireServiceRegisterHook(system, ctx.serviceRegistry, ctx.serviceToolRegistry, config);
+  }
+
+  // 7. Lock plugin system
   system.lock();
 
-  // 7. daemon.ready (async)
+  // 8. daemon.ready (async)
   await system.lifecycle["daemon.ready"].emit({
     config,
     platforms: ctx.platforms,
