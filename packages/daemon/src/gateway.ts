@@ -3,6 +3,9 @@ import net from "node:net";
 import { ServiceRegistry } from "./service-registry";
 import { ServiceKeyStore } from "./service-key-store";
 import { TokenValidator } from "./service-auth";
+import { getLogger } from "./logging";
+
+const log = getLogger("gateway");
 
 /**
  * Gateway options for configuring the HTTP gateway.
@@ -77,7 +80,7 @@ export class ServiceGateway {
   async start(): Promise<void> {
     this.server = http.createServer((req, res) => {
       this.handleRequest(req, res).catch((err) => {
-        console.error("Gateway request error:", err);
+        log.error("gateway request error", { err: String(err) });
         if (!res.headersSent) {
           res.writeHead(500, { "Content-Type": "text/plain" });
           res.end("Internal Server Error");
@@ -200,13 +203,13 @@ export class ServiceGateway {
 
     // Handle errors on the backend socket
     backendSocket.on("error", (err) => {
-      console.error("WebSocket proxy backend error:", err);
+      log.error("websocket proxy backend error", { err: String(err) });
       socket.destroy();
     });
 
     // Handle errors on the client socket
     socket.on("error", (err) => {
-      console.error("WebSocket proxy client error:", err);
+      log.error("websocket proxy client error", { err: String(err) });
       backendSocket.destroy();
     });
 
@@ -365,7 +368,7 @@ export class ServiceGateway {
     );
 
     proxyReq.on("error", (err) => {
-      console.error("Proxy request error:", err);
+      log.error("proxy request error", { err: String(err) });
       if (!res.headersSent) {
         res.writeHead(502, { "Content-Type": "text/plain" });
         res.end("Bad Gateway");

@@ -31,6 +31,7 @@ import { parseAgentSessionUrn, resolveAgentWorkspacePath, LAYOUT } from "@shoggo
 import { resolve } from "node:path";
 import { createToolDiscoveryFinalizer } from "./session-tool-discovery";
 import { createElevationToolFinalizer } from "./elevation-tool-finalizer";
+import { createServiceToolFinalizer } from "./service-tool-finalizer";
 import { resolveAgentCreds } from "../agent-creds";
 
 const log = getLogger("session-mcp");
@@ -172,6 +173,9 @@ export async function createSessionMcpRuntime(
       ),
     };
   });
+
+  // Register service tool finalizer (injects tools from plugin/managed/external services).
+  registerContextFinalizer(createServiceToolFinalizer());
 
   // Register tool discovery finalizer (must be last — sees the full catalog including web-search).
   registerContextFinalizer(createToolDiscoveryFinalizer(opts.config, opts.db));

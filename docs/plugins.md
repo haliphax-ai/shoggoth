@@ -338,6 +338,51 @@ Plugin defaults can be overridden via the `services[]` config:
 
 This allows a service plugin to optionally bind an HTTP listener while still providing direct tool dispatch for internal use.
 
+### Demo Service Plugin (`@shoggoth/service-demo`)
+
+A minimal proof-of-concept service plugin is included in the repo at `packages/service-demo`. It starts an HTTP server displaying an in-memory string and exposes two tools for agents to read and change it.
+
+**Enabling the demo plugin:**
+
+Add it to your `plugins` array in config:
+
+```json
+{
+  "plugins": [{ "package": "@shoggoth/platform-discord" }, { "package": "@shoggoth/service-demo" }]
+}
+```
+
+**Enabling the gateway (optional):**
+
+To access the demo service via the HTTP gateway proxy, add a `gateway` block:
+
+```json
+{
+  "gateway": {
+    "enabled": true,
+    "port": 8000
+  }
+}
+```
+
+The demo page will then be available at `http://localhost:8000/svc/demo/`. Without the gateway, it's accessible directly at `http://127.0.0.1:3200/`.
+
+**Agent tools provided:**
+
+| Tool               | Description                                 |
+| ------------------ | ------------------------------------------- |
+| `demo.set_message` | Set the message displayed on the demo page. |
+| `demo.get_message` | Get the current message.                    |
+
+**Testing it out:**
+
+1. Add the plugin to config and restart the daemon.
+2. Visit `http://127.0.0.1:3200/` to see the default message.
+3. Have an agent call `demo.set_message` with a new message string.
+4. Refresh the page to see the updated message.
+
+This plugin serves as a reference for building service plugins. It demonstrates the full lifecycle: `daemon.configure` → `service.register` (with HTTP server + direct tools) → `health.register` → `daemon.shutdown`.
+
 ## Error Handling
 
 The `ShoggothPluginSystem` provides centralized error handling via `listenError`:

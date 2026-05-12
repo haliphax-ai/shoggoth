@@ -408,6 +408,10 @@ void (async () => {
     dispatch: () => Promise.reject(new Error("HTTP service dispatch not configured")),
   } as never);
 
+  // Expose service tool registry to session context finalizers and tool executor
+  const { serviceToolRegistryRef } = await import("./sessions/service-tool-registry-ref");
+  serviceToolRegistryRef.current = serviceToolRegistry;
+
   // Fire daemon hooks — plugins handle platform.start, health.register, etc.
   const hookResult = await fireDaemonHooks(pluginSystem, {
     config,
@@ -440,8 +444,31 @@ void (async () => {
   // Register plugin shutdown drains
   rt.shutdown.registerDrain("plugin-platform-stop", hookResult.drains.platformStop);
   rt.shutdown.registerDrain("plugin-daemon-shutdown", hookResult.drains.daemonShutdown);
-  stateShutdown.db = db;
-  stateShutdown.toolRuns = createToolRunStore(db);
+
+  // --- HTTP Gateway: start if enabled in config ---
+  if (config.gateway?.enabled) {
+    const { ServiceGateway } = await import("./gateway");
+    const gateway = new ServiceGateway(serviceRegistry, {
+      port: config.gateway.port,
+      host: config.gateway.host,
+      prefix: config.gateway.prefix,
+      cors: config.gateway.cors,
+      rateLimit: config.gateway.rateLimit,
+    });
+    try {
+      await gateway.start();
+      getLogger("daemon").info("gateway started", {
+        port: config.gateway.port,
+        host: config.gateway.host,
+        prefix: config.gateway.prefix,
+      });
+      rt.shutdown.registerDrain("gateway", async () => {
+        await gateway.stop();
+      });
+    } catch (e) {
+      getLogger("daemon").error("gateway failed to start", { err: String(e) });
+    }
+  }
 
   // --- Timer Scheduler: init, restore, register shutdown ---
   const timerScheduler = new TimerScheduler(async (sessionId, message) => {

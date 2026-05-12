@@ -1101,8 +1101,8 @@ export const gatewayConfigSchema = z
   .object({
     /** Whether the gateway is enabled. Default: false */
     enabled: z.boolean().default(false),
-    /** Port to listen on. Default: 8800 */
-    port: z.number().int().min(1).max(65535).default(8800),
+    /** Port to listen on. Default: 8000 */
+    port: z.number().int().min(1).max(65535).default(8000),
     /** Host address to bind to. Default: "0.0.0.0" */
     host: z.string().default("0.0.0.0"),
     /** URL prefix for service routes. Default: "/svc" */
@@ -1263,6 +1263,8 @@ export const shoggothConfigFragmentSchema = z
     /** Override default tool availability per context level. */
     contextLevelTools: contextLevelToolsConfigSchema.optional(),
     processes: z.array(processDeclarationSchema).optional(),
+    /** Daemon-writable directory for agent-requested config overrides. */
+    dynamicConfigDirectory: z.string().min(1).optional(),
     /** External service declarations for web services plugin. */
     services: z.array(externalServiceDeclarationSchema).optional(),
     /** HTTP gateway configuration for proxying service requests. */
@@ -1273,6 +1275,8 @@ export const shoggothConfigFragmentSchema = z
     thinkingDisplay: thinkingDisplaySchema.optional(),
     /** Media generation configuration. */
     mediaGeneration: shoggothMediaGenerationConfigSchema.optional(),
+    /** SearXNG web search configuration. */
+    searxng: shoggothSearxngConfigSchema.optional(),
   })
   .strict();
 
