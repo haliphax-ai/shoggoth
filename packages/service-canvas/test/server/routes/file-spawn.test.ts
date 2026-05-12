@@ -8,12 +8,6 @@ import request from "supertest";
 import { createFileSpawnRouter } from "../../../src/server/routes/file-spawn";
 import * as fs from "fs/promises";
 
-// Mock sessionsSpawn function
-const mockSessionsSpawn = vi.fn();
-vi.mock("../../../src/plugin", () => ({
-  sessionsSpawn: mockSessionsSpawn,
-}));
-
 // Mock fs/promises
 vi.mock("fs/promises", () => ({
   readFile: vi.fn(),
@@ -21,12 +15,13 @@ vi.mock("fs/promises", () => ({
 
 describe("File Spawn Router", () => {
   let app: express.Application;
+  const mockSessionsSpawn = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
     app = express();
     app.use(express.json());
-    app.use("/api/file-spawn", createFileSpawnRouter());
+    app.use("/api/file-spawn", createFileSpawnRouter({ sessionsSpawn: mockSessionsSpawn }));
   });
 
   describe("POST /api/file-spawn", () => {

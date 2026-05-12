@@ -7,20 +7,15 @@ import express from "express";
 import request from "supertest";
 import { createAgentProxyRouter } from "../../../src/server/routes/agent-proxy";
 
-// Mock sessionsSpawn function
-const mockSessionsSpawn = vi.fn();
-vi.mock("../../../src/plugin", () => ({
-  sessionsSpawn: mockSessionsSpawn,
-}));
-
 describe("Agent Proxy Router", () => {
   let app: express.Application;
+  const mockSessionsSpawn = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
     app = express();
     app.use(express.json());
-    app.use("/api/agent", createAgentProxyRouter());
+    app.use("/api/agent", createAgentProxyRouter({ sessionsSpawn: mockSessionsSpawn }));
   });
 
   describe("POST /api/agent", () => {

@@ -2,10 +2,30 @@
  * Tests for the Canvas Service Plugin
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import createCanvasPlugin from "../src/plugin.js";
 
 describe("createCanvasPlugin", () => {
+  // Track servers to clean up
+  const cleanups: Array<() => Promise<void>> = [];
+
+  afterEach(async () => {
+    for (const cleanup of cleanups) {
+      await cleanup();
+    }
+    cleanups.length = 0;
+  });
+
+  // Helper to invoke a hook, bypassing strict `this` typing
+  function callHook(
+    plugin: ReturnType<typeof createCanvasPlugin>,
+    hook: string,
+    ...args: unknown[]
+  ) {
+    const fn = plugin.hooks[hook as keyof typeof plugin.hooks] as Function;
+    return fn(...args);
+  }
+
   it("returns a plugin object with name 'service-canvas'", () => {
     const plugin = createCanvasPlugin();
     expect(plugin.name).toBe("service-canvas");
@@ -33,9 +53,9 @@ describe("createCanvasPlugin", () => {
       };
 
       const plugin = createCanvasPlugin();
-      await plugin.hooks["service.register"](ctx);
+      await callHook(plugin, "service.register", ctx);
+      cleanups.push(() => callHook(plugin, "daemon.shutdown"));
 
-      // Use objectContaining to allow additional properties like port
       expect(registerServiceMock).toHaveBeenCalledWith(
         expect.objectContaining({
           id: "canvas",
@@ -59,7 +79,8 @@ describe("createCanvasPlugin", () => {
       };
 
       const plugin = createCanvasPlugin();
-      await plugin.hooks["service.register"](ctx);
+      await callHook(plugin, "service.register", ctx);
+      cleanups.push(() => callHook(plugin, "daemon.shutdown"));
 
       expect(registerToolsMock).toHaveBeenCalledTimes(1);
       const tools = registerToolsMock.mock.calls[0][0];
@@ -90,9 +111,9 @@ describe("createCanvasPlugin", () => {
       };
 
       const plugin = createCanvasPlugin();
-      await plugin.hooks["service.register"](ctx);
+      await callHook(plugin, "service.register", ctx);
+      cleanups.push(() => callHook(plugin, "daemon.shutdown"));
 
-      // Server should have been started (registerService called with port)
       expect(registerServiceMock).toHaveBeenCalledWith(
         expect.objectContaining({
           port: expect.any(Number),
@@ -103,15 +124,15 @@ describe("createCanvasPlugin", () => {
 
   describe("health.register hook", () => {
     it("calls ctx.registerProbe() with name 'canvas'", () => {
-      const _registerProbeMock = vi.fn();
+      const registerProbeMock = vi.fn();
       const ctx = {
-        registerProbe: _registerProbeMock,
+        registerProbe: registerProbeMock,
       };
 
       const plugin = createCanvasPlugin();
-      plugin.hooks["health.register"](ctx);
+      callHook(plugin, "health.register", ctx);
 
-      expect(_registerProbeMock).toHaveBeenCalledWith({
+      expect(registerProbeMock).toHaveBeenCalledWith({
         name: "canvas",
         check: expect.any(Function),
       });
@@ -136,15 +157,15 @@ describe("createCanvasPlugin", () => {
       };
 
       const plugin = createCanvasPlugin();
-      await plugin.hooks["service.register"](ctx);
-      plugin.hooks["health.register"](ctx);
+      await callHook(plugin, "service.register", ctx);
+      cleanups.push(() => callHook(plugin, "daemon.shutdown"));
+      callHook(plugin, "health.register", ctx);
 
       const result = await checkFn!();
       expect(result.status).toBe("pass");
     });
 
     it("probe returns 'fail' when server is not listening", async () => {
-      const _registerProbeMock = vi.fn();
       let checkFn: (() => Promise<{ status: string }>) | undefined;
 
       const ctx = {
@@ -154,7 +175,7 @@ describe("createCanvasPlugin", () => {
       };
 
       const plugin = createCanvasPlugin();
-      plugin.hooks["health.register"](ctx);
+      callHook(plugin, "health.register", ctx);
 
       // Without registering service, server is not running
       const result = await checkFn!();
@@ -178,10 +199,10 @@ describe("createCanvasPlugin", () => {
       };
 
       const plugin = createCanvasPlugin();
-      await plugin.hooks["service.register"](ctx);
+      await callHook(plugin, "service.register", ctx);
 
       // Should not throw when shutting down
-      await expect(plugin.hooks["daemon.shutdown"]()).resolves.not.toThrow();
+      await expect(callHook(plugin, "daemon.shutdown")).resolves.not.toThrow();
     });
   });
 
@@ -200,7 +221,8 @@ describe("createCanvasPlugin", () => {
       };
 
       const plugin = createCanvasPlugin();
-      await plugin.hooks["service.register"](ctx);
+      await callHook(plugin, "service.register", ctx);
+      cleanups.push(() => callHook(plugin, "daemon.shutdown"));
 
       const tools = registerToolsMock.mock.calls[0][0];
       const presentTool = tools.find((t: { name: string }) => t.name === "canvas.present");
@@ -228,7 +250,8 @@ describe("createCanvasPlugin", () => {
       };
 
       const plugin = createCanvasPlugin();
-      await plugin.hooks["service.register"](ctx);
+      await callHook(plugin, "service.register", ctx);
+      cleanups.push(() => callHook(plugin, "daemon.shutdown"));
 
       const tools = registerToolsMock.mock.calls[0][0];
       const hideTool = tools.find((t: { name: string }) => t.name === "canvas.hide");
@@ -256,7 +279,8 @@ describe("createCanvasPlugin", () => {
       };
 
       const plugin = createCanvasPlugin();
-      await plugin.hooks["service.register"](ctx);
+      await callHook(plugin, "service.register", ctx);
+      cleanups.push(() => callHook(plugin, "daemon.shutdown"));
 
       const tools = registerToolsMock.mock.calls[0][0];
       const resetTool = tools.find((t: { name: string }) => t.name === "canvas.a2ui.reset");
