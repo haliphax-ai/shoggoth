@@ -24,6 +24,12 @@
     "mime-types": "^2.1.35",
     "ws": "^8.18.0"
   },
+  "devDependencies": {
+    "@types/express": "^5.0.1",
+    "@types/supertest": "^6.0.2",
+    "@types/ws": "^8.18.0",
+    "supertest": "^7.0.0"
+  },
   "shoggothPlugin": {
     "kind": "service",
     "entrypoint": "./src/plugin.ts"
