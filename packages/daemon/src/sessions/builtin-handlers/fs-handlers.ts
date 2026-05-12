@@ -197,7 +197,12 @@ async function writeHandler(
 
   const path = String(args.path ?? "");
   const content = String(args.content ?? "");
+  const append = args.append === true;
   const resolvedPath = resolveUserPath(ctx, path);
-  await toolWrite(ctx.workspacePath, { path: resolvedPath, content, mkdirp: true }, ctx.creds);
+  await toolWrite(
+    ctx.workspacePath,
+    { path: resolvedPath, content, append, mkdirp: true },
+    ctx.creds,
+  );
   return { resultJson: JSON.stringify({ ok: true, path }) };
 }

@@ -14,6 +14,11 @@ const writeArgs = {
       description: "File path relative to session workspace",
     },
     content: { type: "string", description: "Content to write to the file" },
+    append: {
+      type: "boolean",
+      description:
+        "When true, append content to the end of the file instead of overwriting. If the file does not exist, it is created. Default: false.",
+    },
   },
   required: ["path", "content"],
 } as const;
