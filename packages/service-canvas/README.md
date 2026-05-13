@@ -1,10 +1,10 @@
 # @shoggoth/service-canvas
 
-A Shoggoth service plugin that provides a browser-based canvas surface for agent-to-user interaction. Agents can present content, navigate pages, execute JavaScript, take snapshots, and push reactive A2UI components to connected clients via WebSocket.
+A Shoggoth service plugin that provides a cross-platform canvas server. Serves HTML content, renders A2UI v0.9 surfaces, and provides a WebSocket gateway for agent-driven UI control.
 
 ## Installation
 
-The plugin is included in the Shoggoth monorepo. Add it to your config:
+Add the plugin to your Shoggoth config:
 
 ```json
 {
@@ -20,128 +20,224 @@ All configuration is provided via `services.canvas` in the Shoggoth config. No e
 {
   "services": {
     "canvas": {
-      "host": "127.0.0.1",
-      "port": 3100,
+      "host": "0.0.0.0",
+      "port": 3456,
       "basePath": "/",
       "skipConfirm": false,
-      "a2uiDbPath": "",
-      "ignoreDirs": ["node_modules", ".git", "tmp"],
-      "agentWorkspaces": {}
+      "a2uiDbPath": "/var/lib/shoggoth/state/a2ui.db",
+      "ignoreDirs": ["tmp", "jsonl"],
+      "agentWorkspaces": {
+        "developer": "/var/lib/shoggoth/workspaces/developer",
+        "assistant": "/var/lib/shoggoth/workspaces/assistant"
+      }
     }
   }
 }
 ```
 
-| Field             | Type     | Default                             | Description                                   |
-| ----------------- | -------- | ----------------------------------- | --------------------------------------------- |
-| `host`            | string   | `"127.0.0.1"`                       | Bind address for the canvas server            |
-| `port`            | number   | `3100`                              | Port for HTTP + WebSocket server              |
-| `basePath`        | string   | `"/"`                               | Base path for serving the canvas SPA          |
-| `skipConfirm`     | boolean  | `false`                             | Skip confirmation prompts for destructive ops |
-| `a2uiDbPath`      | string   | `"/var/lib/shoggoth/state/a2ui.db"` | Path to A2UI state database                   |
-| `ignoreDirs`      | string[] | `[]`                                | Directories to ignore in file watching        |
-| `agentWorkspaces` | object   | `{}`                                | Map of agent IDs to workspace root paths      |
+| Field             | Default                             | Description                                                   |
+| ----------------- | ----------------------------------- | ------------------------------------------------------------- |
+| `host`            | `"0.0.0.0"`                         | Bind address                                                  |
+| `port`            | `3456`                              | Listen port                                                   |
+| `basePath`        | `"/"`                               | Public base path when behind a reverse proxy (e.g. `/canvas`) |
+| `skipConfirm`     | `false`                             | Skip deep link confirmation dialog when `true`                |
+| `a2uiDbPath`      | `"/var/lib/shoggoth/state/a2ui.db"` | Path to SQLite database for A2UI surface persistence          |
+| `ignoreDirs`      | `["tmp", "jsonl"]`                  | Directories excluded from file watching                       |
+| `agentWorkspaces` | `{}`                                | Map of agent IDs to workspace root paths                      |
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│              Shoggoth Daemon                 │
-│                                             │
-│  ┌───────────────────────────────────────┐  │
-│  │       service-canvas plugin           │  │
-│  │                                       │  │
-│  │  ┌─────────┐  ┌──────────────────┐   │  │
-│  │  │ Express │  │  WebSocket GW    │   │  │
-│  │  │ Server  │  │  (Gateway)       │   │  │
-│  │  └────┬────┘  └────────┬─────────┘   │  │
-│  │       │                 │             │  │
-│  │  ┌────┴────┐     ┌─────┴──────┐      │  │
-│  │  │ Routes  │     │ SPA Clients │      │  │
-│  │  └─────────┘     └────────────┘      │  │
-│  └───────────────────────────────────────┘  │
-│                                             │
-│  sessionsSpawn (trusted, in-process)        │
-└─────────────────────────────────────────────┘
+packages/
+├── a2ui-sdk/                     # @shoggoth/a2ui-sdk
+│   └── src/
+│       ├── index.ts              # Barrel exports
+│       ├── types.ts              # Shared types (A2UISurfaceState, DataSource, PackageDefinition, etc.)
+│       ├── filters.ts            # applyFilters, computeAggregate, formatCompact
+│       ├── ws.ts                 # sendEvent / registerWsSend
+│       ├── composables/          # useDataSource, useFilterBind, useOptionsFrom, useSortable
+│       └── utils/                # format-string, deep-link
+├── a2ui-catalog-basic/           # @shoggoth/a2ui-catalog-basic
+│   ├── catalog.json              # JSON Schema catalog definition
+│   └── src/
+│       ├── index.ts              # PackageDefinition
+│       └── *.vue                 # Component implementations
+├── a2ui-catalog-extended/        # @shoggoth/a2ui-catalog-extended
+│   ├── catalog.json
+│   └── src/
+│       ├── index.ts              # PackageDefinition
+│       └── *.vue
+├── a2ui-catalog-all/             # @shoggoth/a2ui-catalog-all
+│   ├── catalog.json
+│   └── src/
+│       └── index.ts              # Meta-catalog — re-exports basic + extended
+├── service-canvas/               # @shoggoth/service-canvas (this package)
+│   ├── src/
+│   │   ├── plugin.ts            # Plugin entrypoint (service.register, health, shutdown)
+│   │   └── server/
+│   │       ├── index.ts         # Express server, startup, shutdown
+│   │       ├── config.ts        # CanvasConfig interface and defaults
+│   │       ├── services/
+│   │       │   ├── gateway.ts           # WebSocket server (/gateway for agents, /ws for SPA)
+│   │       │   ├── session-manager.ts
+│   │       │   ├── file-resolver.ts     # Path resolution with traversal guard
+│   │       │   ├── file-watcher.ts      # chokidar live reload
+│   │       │   ├── jsonl-watcher.ts     # JSONL file watcher for A2UI auto-push
+│   │       │   ├── a2ui-manager.ts      # A2UI surface state (in-memory cache, backed by a2ui-store)
+│   │       │   ├── a2ui-store.ts        # SQLite persistence for A2UI surfaces (better-sqlite3)
+│   │       │   ├── a2ui-pipeline.ts     # A2UI command processing pipeline
+│   │       │   ├── a2ui-commands.ts     # v0.8 → v0.9 normalization layer
+│   │       │   └── catalog-registry.ts  # Discovers catalog packages in node_modules/
+│   │       ├── shared/
+│   │       │   ├── deep-link-script.ts  # Injected script for shoggoth:// deep links
+│   │       │   ├── snapshot-script.ts   # Injected script for canvas snapshots
+│   │       │   └── url-schemes.ts       # URL scheme constants and parser
+│   │       ├── commands/
+│   │       │   ├── canvas.ts            # show, hide, navigate, navigateExternal, eval, snapshot
+│   │       │   └── a2ui.ts              # push (JSONL), reset
+│   │       └── routes/
+│   │           ├── agent-proxy.ts       # POST /api/agent → sessionsSpawn (in-process)
+│   │           └── file-spawn.ts        # POST /api/file-spawn → read prompt → sessionsSpawn
+│   ├── test/
+│   └── docs/
 ```
 
-- **Express server** handles HTTP routes (`/api/agent`, `/api/file-spawn`)
-- **Gateway** manages WebSocket connections from canvas SPA clients
-- **Tools** (8 total) are registered as direct service tools — no MCP dispatch
-- **Session spawning** uses the daemon's in-process `sessionsSpawn` with trusted plugin identity (no token)
+## Monorepo Packages
+
+| Package                           | Description                                                                                     |
+| --------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `@shoggoth/a2ui-sdk`              | Component SDK — types, composables, filters, event helpers                                      |
+| `@shoggoth/a2ui-catalog-basic`    | Basic catalog — Column, Row, Text, Button, Image, Tabs, Divider, Slider, Checkbox, ChoicePicker |
+| `@shoggoth/a2ui-catalog-extended` | Extended catalog — Badge, Table, Stack, Spacer, ProgressBar, Repeat, Accordion                  |
+| `@shoggoth/a2ui-catalog-all`      | All catalog — re-exports basic + extended                                                       |
 
 ## Tools
 
-The plugin registers 8 tools:
+The plugin registers 8 direct service tools:
 
-| Tool                    | Description                               |
-| ----------------------- | ----------------------------------------- |
-| `canvas.present`        | Show a canvas surface to a session        |
-| `canvas.hide`           | Hide the canvas from all sessions         |
-| `canvas.navigate`       | Navigate a session's canvas to a URL/path |
-| `canvas.eval`           | Execute JavaScript in a session's canvas  |
-| `canvas.snapshot`       | Take a screenshot (base64 PNG)            |
-| `canvas.a2ui.push`      | Push A2UI reactive data to a session      |
-| `canvas.a2ui.pushJSONL` | Push A2UI data as JSONL (alias for push)  |
-| `canvas.a2ui.reset`     | Clear A2UI state for a session            |
+| Command                 | Description                                       |
+| ----------------------- | ------------------------------------------------- |
+| `canvas.present`        | Show/present canvas content                       |
+| `canvas.hide`           | Hide the canvas panel                             |
+| `canvas.navigate`       | Navigate to a canvas session/path or external URL |
+| `canvas.eval`           | Execute JavaScript in the canvas context          |
+| `canvas.snapshot`       | Capture the current canvas as a base64 PNG        |
+| `canvas.a2ui.push`      | Push A2UI surface commands (structured)           |
+| `canvas.a2ui.pushJSONL` | Push A2UI JSONL payload (string)                  |
+| `canvas.a2ui.reset`     | Clear A2UI surface state                          |
 
 See [Tool Reference](../../docs/tools/canvas.md) for full parameter documentation.
 
-## URL Schemes
+## Custom URL Schemes
 
-The canvas uses custom URL schemes for deep linking:
+### `shoggoth://` — Agent Deep Links
 
-| Scheme                   | Purpose                            |
-| ------------------------ | ---------------------------------- |
-| `shoggoth://`            | Agent interaction deep links       |
-| `shoggoth-fileprompt://` | File-based prompt spawning         |
-| `shoggoth-canvas://`     | Cross-session canvas URL rewriting |
+Trigger agent runs from links inside canvas HTML. When a user clicks a `shoggoth://` link in the canvas iframe, a confirmation dialog appears, and on approval the request spawns an agent session via `sessionsSpawn`.
 
-See [Deep Linking](docs/deep-linking.md) for details.
-
-## Proxy Routes
-
-Two HTTP endpoints support operator-initiated session spawning from the canvas SPA:
-
-### POST `/api/agent`
-
-Spawn a session with a text message.
-
-```json
-{
-  "message": "Explain this code",
-  "agentId": "developer",
-  "model": "anthropic/claude-sonnet-4-20250514",
-  "timeoutSeconds": 120,
-  "sessionKey": "optional-session-key"
-}
+```html
+<a href="shoggoth://agent?message=run+my+task">Run Task</a>
 ```
 
-### POST `/api/file-spawn`
+See [docs/deep-linking.md](docs/deep-linking.md) for the full URL format, parameters, confirmation dialog, script injection details, and security considerations.
 
-Read a file and spawn a session with its content.
+### `shoggoth-fileprompt://` — File-Based Subagent Spawn
 
-```json
-{
-  "file": "/path/to/prompt.md",
-  "agentId": "developer",
-  "model": "anthropic/claude-sonnet-4-20250514",
-  "sessionKey": "optional-session-key"
-}
+Spawn a subagent whose task is the contents of a file. The **path after the scheme** identifies the file (not `?file=`). The server resolves it under **`<agent workspace>/canvas`** when `agentId` matches a configured agent in `agentWorkspaces`, otherwise under `basePath`. See [docs/deep-linking.md](docs/deep-linking.md#file-based-subagent-spawn--shoggoth-fileprompt-urls).
+
+```html
+<a href="shoggoth-fileprompt://jsonl/deploy-notes.md?agentId=developer">Deploy</a>
 ```
 
-Path traversal is blocked — `..` segments are rejected.
+### `shoggoth-canvas://` — Canvas File References
 
-## Health
+Reference files in other canvas sessions without hardcoding the server origin or base path. The SPA rewrites these URLs at runtime to the correct `/_c/<session>/<path>` route.
 
-The plugin registers a health probe named `canvas` that reports:
+**Format:** `shoggoth-canvas://<session>/<path>`
 
-- `pass` when the HTTP server is listening
-- `fail` when the server is not running
+**Example:**
 
-## Related Packages
+```html
+<img src="shoggoth-canvas://my-project/logo.png" />
+<a href="shoggoth-canvas://dashboard/index.html">Open Dashboard</a>
+```
 
-- `@shoggoth/a2ui-sdk` — SDK for building A2UI catalog packages
-- `@shoggoth/a2ui-catalog-basic` — Basic UI component catalog
-- `@shoggoth/a2ui-catalog-extended` — Extended UI components
-- `@shoggoth/a2ui-catalog-all` — Meta-package including all catalogs
+## API Endpoints
+
+| Endpoint             | Method | Description                                                                     |
+| -------------------- | ------ | ------------------------------------------------------------------------------- |
+| `/api/agent`         | POST   | Calls `sessionsSpawn` in-process via trusted plugin identity                    |
+| `/api/file-spawn`    | POST   | Reads a prompt file from `<agent workspace>/canvas`; spawns via `sessionsSpawn` |
+| `/api/canvas-config` | GET    | Returns canvas configuration for the SPA                                        |
+
+## Canvas Session URLs
+
+Each canvas session is accessed via its session ID in the URL path:
+
+```
+http://<host>:<port>/<sessionId>/
+```
+
+For example:
+
+- `http://localhost:3456/main/` — the default `main` session
+- `http://localhost:3456/developer/` — the `developer` session
+
+When running behind a reverse proxy with a base path (e.g., `basePath: "/canvas"`):
+
+- `https://example.com/canvas/developer/`
+
+The root path (`/`) redirects to `/main/` by default.
+
+## Session Files
+
+Place HTML/CSS/JS files in the agent's `canvas/` workspace directory. The server serves them at `/<session>/<path>`. File changes trigger live reload in the browser.
+
+## A2UI Persistence
+
+A2UI surface state is persisted to a local SQLite database so it survives server restarts. On startup, all cached surfaces are loaded from the database and replayed to connecting SPA clients.
+
+- The database is managed by `A2UIStore` (`better-sqlite3`, synchronous)
+- The in-memory `Map` in `A2UIManager` remains the primary data source; SQLite is the backing store
+- Every mutation (`upsertSurface`, `setRoot`, `updateDataModel`, `deleteSurface`, `clearAll`) writes through to SQLite
+- DB location defaults to `/var/lib/shoggoth/state/a2ui.db`, configurable via `a2uiDbPath`
+
+## Backward Compatibility
+
+The server includes a normalization layer (`src/server/services/a2ui-commands.ts`) that auto-converts v0.8 commands and component shapes to v0.9 format with deprecation warnings logged. v0.8 payloads still work but are deprecated:
+
+| v0.8 (deprecated)                                                           | v0.9                                                             |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `surfaceUpdate`                                                             | `updateComponents`                                               |
+| `beginRendering`                                                            | `createSurface`                                                  |
+| `dataModelUpdate`                                                           | `updateDataModel`                                                |
+| `usageHint` (Text prop)                                                     | `variant`                                                        |
+| Wrapped component shape: `{ id, component: { "Text": { "text": "..." } } }` | Flat component shape: `{ id, component: "Text", "text": "..." }` |
+
+`dataSourcePush` and `deleteSurface` are unchanged.
+
+## Reactive Data Binding (A2UI)
+
+A2UI surfaces support a reactive data-binding layer that lets agents push structured data sources and bind UI components to live, filterable data.
+
+Key capabilities:
+
+- **Data Sources** — Push named datasets via `updateDataModel` (with `$sources`) or the `dataSourcePush` JSONL shorthand. Supports incremental merges with `primaryKey`.
+- **Filtering** — Select and MultiSelect components can `bind` to data sources, applying filter operations (`eq`, `contains`, `gte`, `lte`, `range`, `in`) that reactively update all bound displays. Clearing a MultiSelect shows all data.
+- **Sorting** — Table and Repeat components support optional sorting via the `sortable` prop. Tables sort by clicking column headers (⬆/⬇ indicators); Repeat components include a sort direction dropdown. Sorting operates on raw data values.
+- **Display Binding** — Table, Badge, and Text components accept a `dataSource` prop for dynamic content with built-in aggregates (`count`, `sum`, `avg`, `min`, `max`) and compact number formatting.
+- **Repeat** — The Repeat component iterates over filtered rows, rendering a template per row with `${field}` placeholders and transforms like `percentOfMax`.
+
+See [docs/a2ui-reactive.md](docs/a2ui-reactive.md) for the full data binding guide and [docs/components.md](docs/components.md) for the complete component reference.
+
+## Snapshot Capture
+
+The `canvas.snapshot` tool captures the canvas as a base64 PNG. A snapshot helper script (using `dom-to-image-more`) is injected into canvas HTML at serve time — the same pattern as deep link injection. When a snapshot is requested, the parent SPA sends a `postMessage` to the iframe, the injected script captures `document.body` from within the frame, and sends the image back via `postMessage`. This works for same-origin files and `data:` URLs. External cross-origin URLs cannot be captured. Falls back to parent-level DOM capture for A2UI surfaces. 30s timeout.
+
+## Documentation
+
+- [Component Reference](docs/components.md) — all A2UI components with props and examples
+- [Reactive Data Binding](docs/a2ui-reactive.md) — data sources, filtering, aggregates
+- [Deep Linking](docs/deep-linking.md) — URL schemes, confirmation dialog, file-spawn
+- [Creating Catalog Packages](docs/creating-catalog-packages.md) — third-party component catalogs
+- [JSONL Watcher](docs/jsonl-watcher.md) — auto-push from filesystem
+- [Tool Reference](../../docs/tools/canvas.md) — tool parameters and usage
