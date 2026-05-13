@@ -14,9 +14,7 @@ export function createServiceRegistry(): ServiceRegistry {
 /**
  * Create a new ServiceToolRegistry instance.
  */
-export function createServiceToolRegistry(
-  registry: ServiceRegistry,
-): ServiceToolRegistry {
+export function createServiceToolRegistry(registry: ServiceRegistry): ServiceToolRegistry {
   return new ServiceToolRegistry(registry);
 }
 
@@ -55,7 +53,7 @@ export async function fireServiceRegisterHook(
         url,
         wsUrl:
           entry.port && (entry.protocol === "ws" || entry.protocol === "http+ws")
-            ? `ws://localhost:${entry.port}${entry.basePath === "/" ? "" : entry.basePath}`
+            ? `ws://localhost:${entry.port}${(entry.basePath ?? "/") === "/" ? "" : entry.basePath}`
             : undefined,
         healthy: true,
         capabilities: entry.capabilities ?? [],
