@@ -19,6 +19,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mdi/js": "^7.4.47",
     "@shoggoth/plugins": "*",
     "@shoggoth/shared": "*",
     "better-sqlite3": "^12.8.0",

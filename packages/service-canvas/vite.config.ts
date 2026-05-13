@@ -21,9 +21,25 @@ function shoggothCatalogsPlugin(): Plugin {
     },
     load(id) {
       if (id === resolvedVirtualModuleId) {
-        // Export an empty catalog map for now.
-        // Catalog Vue components will be registered here once they are built.
-        return `export const catalogComponents = {};`;
+        return `
+import basicCatalog from "@shoggoth/a2ui-catalog-basic";
+import extendedCatalog from "@shoggoth/a2ui-catalog-extended";
+
+const catalogComponents = {};
+
+function registerCatalog(catalog) {
+  if (catalog && catalog.components) {
+    for (const entry of catalog.components) {
+      catalogComponents[entry.name] = { component: entry.component };
+    }
+  }
+}
+
+registerCatalog(basicCatalog);
+registerCatalog(extendedCatalog);
+
+export { catalogComponents };
+`;
       }
     },
   };

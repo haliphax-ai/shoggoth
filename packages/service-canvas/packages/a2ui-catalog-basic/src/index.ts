@@ -1,106 +1,44 @@
-/**
- * A2UI Basic Catalog - Core UI elements for Shoggoth canvas service
- */
+import type { PackageDefinition } from "@shoggoth/a2ui-sdk";
+import A2UIColumn from "./A2UIColumn.vue";
+import A2UIRow from "./A2UIRow.vue";
+import A2UIText from "./A2UIText.vue";
+import A2UIButton from "./A2UIButton.vue";
+import A2UIImage from "./A2UIImage.vue";
+import A2UITabs from "./A2UITabs.vue";
+import A2UIDivider from "./A2UIDivider.vue";
+import A2UISlider from "./A2UISlider.vue";
+import A2UICheckbox from "./A2UICheckbox.vue";
+import A2UIChoicePicker from "./A2UIChoicePicker.vue";
+import A2UIList from "./A2UIList.vue";
+import A2UICard from "./A2UICard.vue";
+import A2UIModal from "./A2UIModal.vue";
+import A2UITextField from "./A2UITextField.vue";
+import A2UIDateTimeInput from "./A2UIDateTimeInput.vue";
+import A2UIIcon from "./A2UIIcon.vue";
+import A2UIAudioPlayer from "./A2UIAudioPlayer.vue";
+import A2UIVideo from "./A2UIVideo.vue";
 
-import { A2UIElement, createCommand, A2UICommand } from "@shoggoth/a2ui-sdk";
-
-// Button element
-export interface ButtonElement extends A2UIElement {
-  type: "button";
-  props: {
-    label: string;
-    variant?: "primary" | "secondary" | "danger";
-    disabled?: boolean;
-    onClick?: string;
-  };
-}
-
-// Text element
-export interface TextElement extends A2UIElement {
-  type: "text";
-  props: {
-    content: string;
-    size?: "small" | "medium" | "large";
-    color?: string;
-  };
-}
-
-// Input element
-export interface InputElement extends A2UIElement {
-  type: "input";
-  props: {
-    placeholder?: string;
-    value?: string;
-    type?: "text" | "number" | "email" | "password";
-    disabled?: boolean;
-  };
-}
-
-// Factory functions for creating elements
-export function createButton(
-  id: string,
-  label: string,
-  options?: { variant?: "primary" | "secondary" | "danger"; disabled?: boolean; onClick?: string },
-): ButtonElement {
-  return {
-    type: "button",
-    id,
-    props: {
-      label,
-      variant: options?.variant ?? "primary",
-      disabled: options?.disabled ?? false,
-      onClick: options?.onClick,
-    },
-  };
-}
-
-export function createText(
-  id: string,
-  content: string,
-  options?: { size?: "small" | "medium" | "large"; color?: string },
-): TextElement {
-  return {
-    type: "text",
-    id,
-    props: {
-      content,
-      size: options?.size ?? "medium",
-      color: options?.color,
-    },
-  };
-}
-
-export function createInput(
-  id: string,
-  options?: {
-    placeholder?: string;
-    value?: string;
-    type?: "text" | "number" | "email" | "password";
-    disabled?: boolean;
-  },
-): InputElement {
-  return {
-    type: "input",
-    id,
-    props: {
-      placeholder: options?.placeholder,
-      value: options?.value,
-      type: options?.type ?? "text",
-      disabled: options?.disabled ?? false,
-    },
-  };
-}
-
-// Export all element types
-export type CatalogElement = ButtonElement | TextElement | InputElement;
-
-// Catalog metadata
-export const catalogInfo = {
-  name: "@shoggoth/a2ui-catalog-basic",
-  version: "0.1.0",
-  description: "Basic A2UI catalog for Shoggoth",
-  elements: ["button", "text", "input"] as const,
+const definition: PackageDefinition = {
+  components: [
+    { name: "Column", component: A2UIColumn },
+    { name: "Row", component: A2UIRow },
+    { name: "Text", component: A2UIText },
+    { name: "Button", component: A2UIButton },
+    { name: "Image", component: A2UIImage },
+    { name: "Tabs", component: A2UITabs },
+    { name: "Divider", component: A2UIDivider },
+    { name: "Slider", component: A2UISlider },
+    { name: "Checkbox", component: A2UICheckbox },
+    { name: "ChoicePicker", component: A2UIChoicePicker },
+    { name: "List", component: A2UIList },
+    { name: "Card", component: A2UICard },
+    { name: "Modal", component: A2UIModal },
+    { name: "TextField", component: A2UITextField },
+    { name: "DateTimeInput", component: A2UIDateTimeInput },
+    { name: "Icon", component: A2UIIcon },
+    { name: "AudioPlayer", component: A2UIAudioPlayer },
+    { name: "Video", component: A2UIVideo },
+  ],
 };
 
-// Re-export from SDK
-export { createCommand, A2UICommand };
+export default definition;
