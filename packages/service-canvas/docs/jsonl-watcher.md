@@ -11,21 +11,44 @@ The canvas server includes a file watcher that monitors each agent's `canvas/jso
 
 ## Usage
 
-Write JSONL files to your agent's `canvas/jsonl/` directory:
+Write JSONL files to your agent's `canvas/jsonl/` directory using `builtin-write`:
 
-```bash
-# Layout file
-cat > /var/lib/shoggoth/workspaces/developer/canvas/jsonl/dashboard-layout.jsonl << 'EOF'
-{"updateComponents":{"surfaceId":"main","components":[{"id":"root","component":"Column","children":["title","table"]}]}}
-{"updateComponents":{"surfaceId":"main","components":[{"id":"title","component":"Text","text":"Dashboard"}]}}
-{"createSurface":{"surfaceId":"main","root":"root"}}
-EOF
-
-# Data file (can target the same surfaceId)
-cat > /var/lib/shoggoth/workspaces/developer/canvas/jsonl/dashboard-data.jsonl << 'EOF'
-{"dataSourcePush":{"surfaceId":"main","sources":{"users":{"fields":["name","role"],"rows":[{"name":"Alice","role":"admin"}]}}}}
-EOF
+```json
+// Layout file — write all commands at once
+{
+  "path": "canvas/jsonl/dashboard-layout.jsonl",
+  "content": "{\"updateComponents\":{\"surfaceId\":\"main\",\"components\":[{\"id\":\"root\",\"component\":\"Column\",\"children\":[\"title\",\"table\"]}]}}\n{\"updateComponents\":{\"surfaceId\":\"main\",\"components\":[{\"id\":\"title\",\"component\":\"Text\",\"text\":\"Dashboard\"}]}}\n{\"createSurface\":{\"surfaceId\":\"main\",\"root\":\"root\"}}\n"
+}
 ```
+
+```json
+// Data file (can target the same surfaceId)
+{
+  "path": "canvas/jsonl/dashboard-data.jsonl",
+  "content": "{\"dataSourcePush\":{\"surfaceId\":\"main\",\"sources\":{\"users\":{\"fields\":[\"name\",\"role\"],\"rows\":[{\"name\":\"Alice\",\"role\":\"admin\"}]}}}}\n"
+}
+```
+
+### Building JSONL files in chunks
+
+Use `builtin-write` with `append: true` to add commands incrementally:
+
+```json
+// First command — creates the file
+{
+  "path": "canvas/jsonl/dashboard.jsonl",
+  "content": "{\"updateComponents\":{\"surfaceId\":\"main\",\"components\":[{\"id\":\"root\",\"component\":\"Column\",\"children\":[\"title\"]}]}}\n"
+}
+
+// Subsequent commands — append mode adds to the existing file
+{
+  "path": "canvas/jsonl/dashboard.jsonl",
+  "content": "{\"createSurface\":{\"surfaceId\":\"main\",\"root\":\"root\"}}\n",
+  "append": true
+}
+```
+
+Each line must be a complete JSON object followed by a newline (`\n`). The watcher debounces file changes, so rapid appends are batched into a single read.
 
 ## Multiple files per surface
 
