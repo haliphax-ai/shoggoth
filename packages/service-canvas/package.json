@@ -24,6 +24,7 @@
     "@shoggoth/shared": "*",
     "better-sqlite3": "^12.8.0",
     "chokidar": "^4.0.0",
+    "daisyui": "^5.5.19",
     "dom-to-image-more": "^3.4.5",
     "express": "^5.1.0",
     "mime-types": "^2.1.35",
