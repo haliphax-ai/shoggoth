@@ -7,6 +7,8 @@ WORKDIR /app
 COPY package.json package-lock.json* tsconfig.base.json ./
 COPY packages ./packages
 RUN npm ci
+# build canvas service
+RUN npm run -w @shoggoth/service-canvas build:client
 RUN npm prune --omit=dev
 
 # Extract short git commit hash from build context
