@@ -1,6 +1,11 @@
 <template>
   <div class="a2ui-wrap" :style="wrapStyle">
-    <slot />
+    <A2UINode
+      v-for="childId in children"
+      :key="childId"
+      :component-id="childId"
+      :surface-id="surfaceId"
+    />
   </div>
 </template>
 
@@ -11,23 +16,18 @@ export default defineComponent({
   name: "A2UIWrap",
   props: {
     def: { type: Object, required: true },
-    componentId: { type: String, required: true },
-    surfaceId: { type: String, default: "" },
+    surfaceId: { type: String, required: true },
   },
   setup(props) {
-    const gap = computed(() => (props.def as any).gap ?? "8px");
-    const align = computed(() => (props.def as any).align ?? "start");
-
-    const wrapStyle = computed(() => {
-      const g = typeof gap.value === "number" ? `${gap.value}px` : gap.value;
-      return {
-        gap: g,
-        alignItems:
-          align.value === "center" ? "center" : align.value === "end" ? "flex-end" : "flex-start",
-      };
+    const children = computed(() => {
+      const c = (props.def as any).children;
+      return c?.explicitList ?? c ?? [];
     });
-
-    return { wrapStyle };
+    const wrapStyle = computed(() => {
+      const gap = (props.def as any).gap;
+      return gap ? { gap } : undefined;
+    });
+    return { children, wrapStyle };
   },
 });
 </script>
@@ -36,6 +36,6 @@ export default defineComponent({
 .a2ui-wrap {
   display: flex;
   flex-wrap: wrap;
-  width: 100%;
+  gap: 8px;
 }
 </style>

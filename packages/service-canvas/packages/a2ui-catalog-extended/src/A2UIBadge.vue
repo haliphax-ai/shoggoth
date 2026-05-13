@@ -1,75 +1,41 @@
 <template>
-  <span class="a2ui-badge" :class="[variantClass, sizeClass]">
-    <slot>{{ label }}</slot>
-  </span>
+  <span class="badge" :class="badgeClass">{{ displayText }}</span>
 </template>
 
 <script lang="ts">
 import { defineComponent, computed } from "vue";
+import { useDataSource } from "@shoggoth/a2ui-sdk";
+
+const validVariants = ["success", "warning", "error", "info"];
+const variantClassMap: Record<string, string> = {
+  info: "badge-info",
+  success: "badge-success",
+  warning: "badge-warning",
+  error: "badge-error",
+};
 
 export default defineComponent({
   name: "A2UIBadge",
   props: {
     def: { type: Object, required: true },
+    surfaceId: { type: String, required: true },
     componentId: { type: String, required: true },
-    surfaceId: { type: String, default: "" },
   },
   setup(props) {
-    const label = computed(() => (props.def as any).label ?? (props.def as any).text ?? "");
-    const variant = computed(() => (props.def as any).variant ?? "default");
-    const size = computed(() => (props.def as any).size ?? "md");
-
-    const variantClass = computed(() => `badge-${variant.value}`);
-    const sizeClass = computed(() => `badge-size-${size.value}`);
-
-    return { label, variantClass, sizeClass };
+    const { aggregatedValue, mappedProps, binding } = useDataSource(props as any);
+    const displayText = computed(() => {
+      if (binding.value) {
+        if (mappedProps.value.text != null) return mappedProps.value.text;
+        if (aggregatedValue.value != null) return aggregatedValue.value;
+      }
+      return (props.def as any).text ?? "";
+    });
+    const variant = computed(() => {
+      const v = (props.def as any).variant;
+      return validVariants.includes(v) ? v : "info";
+    });
+    const badgeClass = computed(() => variantClassMap[variant.value] ?? "badge-info");
+    return { displayText, badgeClass };
   },
 });
 </script>
-
-<style scoped>
-.a2ui-badge {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 9999px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-.badge-size-sm {
-  padding: 0.125rem 0.5rem;
-  font-size: 0.7rem;
-}
-.badge-size-md {
-  padding: 0.2rem 0.625rem;
-  font-size: 0.75rem;
-}
-.badge-size-lg {
-  padding: 0.25rem 0.75rem;
-  font-size: 0.85rem;
-}
-
-.badge-default {
-  background: var(--a2ui-muted, #e5e7eb);
-  color: var(--a2ui-text, #374151);
-}
-.badge-primary {
-  background: var(--a2ui-primary, #3b82f6);
-  color: #fff;
-}
-.badge-success {
-  background: #22c55e;
-  color: #fff;
-}
-.badge-warning {
-  background: #f59e0b;
-  color: #fff;
-}
-.badge-error {
-  background: #ef4444;
-  color: #fff;
-}
-.badge-info {
-  background: #06b6d4;
-  color: #fff;
-}
-</style>
