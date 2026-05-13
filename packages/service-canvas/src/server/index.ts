@@ -125,6 +125,7 @@ export function createCanvasServer(
       if (
         req.path.startsWith("/api/") ||
         req.path.startsWith("/_c/") ||
+        req.path.startsWith("/scaffold") ||
         req.path.startsWith("/ws") ||
         req.path.startsWith("/gateway")
       ) {
