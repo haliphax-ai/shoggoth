@@ -440,17 +440,49 @@ void (async () => {
     serviceRegistry,
     serviceToolRegistry,
     spawnSession: async (opts) => {
-      return platformDeps.invokeControlOp("subagent_spawn", {
-        mode: opts.mode ?? "run",
-        prompt: opts.message,
-        agent_id: opts.agentId,
-        model: opts.model,
-        parent_session_id: opts.sessionKey,
+      const sessions = createSessionStore(db);
+      const canvasSessionManager = createSessionManager({
+        db,
+        sessions,
+        agentTokens: createSqliteAgentTokenStore(db),
+        workspacesRoot: config.workspacesRoot,
+        agentId: resolveShoggothAgentId(config),
+        agentsConfig: config.agents,
       });
+      const ctx: IntegrationOpsContext = {
+        config: configRef.current,
+        stateDb: db,
+        acpxStore: undefined,
+        sessions,
+        sessionManager: canvasSessionManager,
+        acpxSupervisor: undefined,
+        hitlPending: hitlStack?.pending,
+        recordIntegrationAudit: () => {},
+      };
+      const req = {
+        v: WIRE_VERSION,
+        id: randomUUID(),
+        op: "subagent_spawn" as const,
+        auth: { kind: "operator_token" as const, token: "__internal__" },
+        payload: {
+          mode: opts.mode ?? "run",
+          prompt: opts.message,
+          agent_id: opts.agentId,
+          model: opts.model,
+          parent_session_id: opts.sessionKey,
+        },
+      };
+      const principal = {
+        kind: "operator" as const,
+        operatorId: "canvas-service",
+        roles: ["admin"],
+        source: "cli_operator_token" as const,
+      };
+      const result = await handleIntegrationControlOp(req, principal, ctx);
+      return { ok: true, result };
+      return { ok: true, result };
     },
   });
-
-  // Register plugin shutdown drains
   rt.shutdown.registerDrain("plugin-platform-stop", hookResult.drains.platformStop);
   rt.shutdown.registerDrain("plugin-daemon-shutdown", hookResult.drains.daemonShutdown);
   stateShutdown.db = db;
