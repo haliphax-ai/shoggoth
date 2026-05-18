@@ -462,10 +462,13 @@ void (async () => {
       };
 
       // Resolve parent session: use explicit sessionKey, or resolve from the
-      // default agent's bootstrap primary session URN.
+      // requested agent's (or default agent's) bootstrap primary session URN.
       const parentSessionId =
         opts.sessionKey ||
-        resolveSessionTargetFromCliArg(resolveShoggothAgentId(config) ?? "main", configRef.current);
+        resolveSessionTargetFromCliArg(
+          opts.agentId ?? resolveShoggothAgentId(config) ?? "main",
+          configRef.current,
+        );
 
       const req = {
         v: WIRE_VERSION,
