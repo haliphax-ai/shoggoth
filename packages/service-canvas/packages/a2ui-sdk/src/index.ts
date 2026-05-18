@@ -30,3 +30,8 @@ export {
   resolveDynamicString,
   resolveDynamicBoolean,
 } from "./utils/data-model-resolve";
+
+// URL utilities
+export { rewriteCanvasUrl } from "./utils/url-rewriter";
+export { parseShoggothUrl } from "./utils/url-schemes";
+export type { ParsedScheme, SchemeType } from "./utils/url-schemes";

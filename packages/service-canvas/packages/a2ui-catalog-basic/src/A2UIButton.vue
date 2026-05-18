@@ -7,7 +7,7 @@
 <script lang="ts">
 import { defineComponent, computed, ref } from "vue";
 import { sendEvent } from "@shoggoth/a2ui-sdk";
-import { parseShoggothUrl } from "./url-schemes";
+import { parseShoggothUrl } from "@shoggoth/a2ui-sdk";
 
 const variantClassMap: Record<string, string> = {
   default: "btn-neutral",

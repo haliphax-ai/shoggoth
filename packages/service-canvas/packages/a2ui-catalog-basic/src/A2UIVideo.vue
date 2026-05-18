@@ -20,7 +20,7 @@
 <script lang="ts">
 import { defineComponent, ref, computed, onMounted } from "vue";
 import { sendEvent } from "@shoggoth/a2ui-sdk";
-import { rewriteCanvasUrl } from "./url-rewriter";
+import { rewriteCanvasUrl } from "@shoggoth/a2ui-sdk";
 
 export default defineComponent({
   name: "A2UIVideo",

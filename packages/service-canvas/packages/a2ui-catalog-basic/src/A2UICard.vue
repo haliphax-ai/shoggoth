@@ -20,7 +20,7 @@
 
 <script lang="ts">
 import { defineComponent, computed } from "vue";
-import { rewriteCanvasUrl } from "./url-rewriter";
+import { rewriteCanvasUrl } from "@shoggoth/a2ui-sdk";
 
 const variantMap: Record<string, string> = {
   base: "bg-base-100",

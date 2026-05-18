@@ -59,7 +59,7 @@
 <script lang="ts">
 import { defineComponent, ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { sendEvent } from "@shoggoth/a2ui-sdk";
-import { rewriteCanvasUrl } from "./url-rewriter";
+import { rewriteCanvasUrl } from "@shoggoth/a2ui-sdk";
 
 /** Emoji presentation (U+FE0F) so play/pause match width/font with each other */
 const ICON_PLAY = "\u25B6\uFE0F";

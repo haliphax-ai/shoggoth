@@ -4,7 +4,7 @@
 
 <script lang="ts">
 import { defineComponent, computed } from "vue";
-import { rewriteCanvasUrl } from "./url-rewriter";
+import { rewriteCanvasUrl } from "@shoggoth/a2ui-sdk";
 
 export default defineComponent({
   name: "A2UIImage",

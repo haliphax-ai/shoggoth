@@ -35,7 +35,7 @@ import {
   fetchCanvasConfig,
   type DeepLinkRequest,
 } from "../services/deep-link";
-import { parseShoggothUrl as parseSchemeUrl } from "../utils/url-schemes";
+import { parseShoggothUrl as parseSchemeUrl } from "@shoggoth/a2ui-sdk";
 import A2UIRenderer from "../components/A2UIRenderer.vue";
 import DeepLinkConfirm from "../components/DeepLinkConfirm.vue";
 import domtoimage from "dom-to-image-more";
