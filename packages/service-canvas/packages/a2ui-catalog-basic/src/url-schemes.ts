@@ -7,20 +7,20 @@ export interface ParsedScheme {
 }
 
 const SCHEMES: [string, SchemeType][] = [
-  ["openclaw-canvas://", "canvas"],
-  ["openclaw-fileprompt://", "fileprompt"],
-  ["openclaw://", "agent"],
+  ["shoggoth-canvas://", "canvas"],
+  ["shoggoth-fileprompt://", "fileprompt"],
+  ["shoggoth://", "agent"],
 ];
 
 /**
- * Parse an openclaw custom scheme URL.
+ * Parse a shoggoth custom scheme URL.
  * All schemes use the same structure: scheme://path?key=value&key=value
  *
- *   openclaw://agent?message=hello&agentId=dev
- *   openclaw-fileprompt://path/to/file.md?agentId=dev
- *   openclaw-canvas://subpath
+ *   shoggoth://agent?message=hello&agentId=dev
+ *   shoggoth-fileprompt://path/to/file.md?agentId=dev
+ *   shoggoth-canvas://subpath
  */
-export function parseOpenClawUrl(url: string): ParsedScheme | null {
+export function parseShoggothUrl(url: string): ParsedScheme | null {
   for (const [prefix, type] of SCHEMES) {
     if (!url.startsWith(prefix)) continue;
     const rest = url.slice(prefix.length);

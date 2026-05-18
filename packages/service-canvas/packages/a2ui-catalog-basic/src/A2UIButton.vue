@@ -7,7 +7,7 @@
 <script lang="ts">
 import { defineComponent, computed, ref } from "vue";
 import { sendEvent } from "@shoggoth/a2ui-sdk";
-import { parseOpenClawUrl } from "./url-schemes";
+import { parseShoggothUrl } from "./url-schemes";
 
 const variantClassMap: Record<string, string> = {
   default: "btn-neutral",
@@ -54,7 +54,7 @@ export default defineComponent({
     const onClick = () => {
       sendEvent("a2ui.buttonClick", { componentId: props.componentId });
       if (!href.value) return;
-      const parsed = parseOpenClawUrl(href.value);
+      const parsed = parseShoggothUrl(href.value);
       if (!parsed) return;
       if (parsed.type === "agent") {
         fetch(`${base}/api/agent`, {

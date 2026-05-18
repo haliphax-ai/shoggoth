@@ -35,6 +35,7 @@ import {
   fetchCanvasConfig,
   type DeepLinkRequest,
 } from "../services/deep-link";
+import { parseShoggothUrl as parseSchemeUrl } from "../utils/url-schemes";
 import A2UIRenderer from "../components/A2UIRenderer.vue";
 import DeepLinkConfirm from "../components/DeepLinkConfirm.vue";
 import domtoimage from "dom-to-image-more";
@@ -240,10 +241,35 @@ export default defineComponent({
       { immediate: true },
     );
 
-    // Handle postMessage from iframes for shoggoth:// deep links
+    // Handle postMessage from iframes for shoggoth:// and shoggoth-fileprompt:// deep links
     async function onDeepLinkMessage(e: MessageEvent) {
       if (e.data?.type !== "shoggoth-deeplink" || !e.data?.url) return;
-      const req = parseShoggothUrl(e.data.url);
+      const url: string = e.data.url;
+
+      // Handle shoggoth-fileprompt:// URLs → /api/file-spawn
+      const scheme = parseSchemeUrl(url);
+      if (scheme?.type === "fileprompt") {
+        const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+        const config = await fetchCanvasConfig();
+        if (scheme.params.key || config.skipConfirmation) {
+          fetch(`${baseUrl}/api/file-spawn`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ file: scheme.path, ...scheme.params }),
+          }).catch(() => {});
+        } else {
+          // Build a DeepLinkRequest-compatible object for the confirmation dialog
+          const req: DeepLinkRequest = {
+            message: `[file-spawn] ${scheme.path}`,
+            ...scheme.params,
+          };
+          deepLinkConfirm.value?.show(req);
+        }
+        return;
+      }
+
+      // Handle shoggoth:// URLs → /api/agent
+      const req = parseShoggothUrl(url);
       if (!req) return;
       const config = await fetchCanvasConfig();
       if (req.key || config.skipConfirmation) {
