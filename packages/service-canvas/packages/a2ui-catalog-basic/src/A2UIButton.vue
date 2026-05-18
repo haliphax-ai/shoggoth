@@ -39,7 +39,7 @@ export default defineComponent({
     const href = computed(() => (props.def as any).href as string | undefined);
     const base = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "");
     const sentFlash = ref(false);
-    const displayLabel = computed(() => (sentFlash.value ? "Sent!" : label.value));
+    const displayLabel = computed(() => (sentFlash.value ? "Submitted" : label.value));
 
     let flashTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -56,24 +56,22 @@ export default defineComponent({
       if (!href.value) return;
       const parsed = parseShoggothUrl(href.value);
       if (!parsed) return;
+      flashSent();
       if (parsed.type === "agent") {
         fetch(`${base}/api/agent`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(parsed.params),
-        })
-          .then(flashSent)
-          .catch(() => {});
+        }).catch(() => {});
       } else if (parsed.type === "fileprompt") {
         fetch(`${base}/api/file-spawn`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ file: parsed.path, ...parsed.params }),
-        })
-          .then(flashSent)
-          .catch(() => {});
+        }).catch(() => {});
       }
     };
+    return { displayLabel, variantClass, onClick, sentFlash };
     return { displayLabel, variantClass, onClick, sentFlash };
   },
 });
