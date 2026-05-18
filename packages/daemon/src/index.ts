@@ -439,6 +439,15 @@ void (async () => {
     },
     serviceRegistry,
     serviceToolRegistry,
+    spawnSession: async (opts) => {
+      return platformDeps.invokeControlOp("subagent_spawn", {
+        mode: opts.mode ?? "run",
+        prompt: opts.message,
+        agent_id: opts.agentId,
+        model: opts.model,
+        parent_session_id: opts.sessionKey,
+      });
+    },
   });
 
   // Register plugin shutdown drains

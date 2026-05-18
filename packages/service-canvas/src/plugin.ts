@@ -80,8 +80,10 @@ export default function createCanvasPlugin(): Plugin<ShoggothHooks> {
         };
 
         // Create and start the canvas server
-        canvasServer = createCanvasServer(config);
-        gateway = canvasServer.gateway;
+        // Create and start the canvas server
+        canvasServer = createCanvasServer(config, {
+          sessionsSpawn: ctx.spawnSession,
+        });
 
         // Wait for server to start listening
         await new Promise<void>((resolve) => {

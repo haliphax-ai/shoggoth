@@ -220,4 +220,12 @@ export interface ServiceRegisterCtx {
   readonly registerTools: (tools: DirectServiceTool[]) => void;
   /** Resolved config (after daemon.configure waterfall). */
   readonly config: Readonly<ShoggothConfig>;
+  /** Spawn a one-shot session (in-process, trusted identity). Returns the session result. */
+  readonly spawnSession?: (opts: {
+    message: string;
+    agentId?: string;
+    model?: string;
+    sessionKey?: string;
+    mode?: string;
+  }) => Promise<unknown>;
 }

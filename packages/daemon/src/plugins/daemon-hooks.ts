@@ -38,6 +38,14 @@ interface DaemonHooksContext {
   serviceRegistry?: ServiceRegistry;
   /** Optional service tool registry for plugin tool registration */
   serviceToolRegistry?: ServiceToolRegistry;
+  /** Optional session spawn function for service plugins */
+  spawnSession?: (opts: {
+    message: string;
+    agentId?: string;
+    model?: string;
+    sessionKey?: string;
+    mode?: string;
+  }) => Promise<unknown>;
 }
 
 interface DaemonHooksResult {
@@ -108,7 +116,9 @@ export async function fireDaemonHooks(
 
   // 6. service.register (async) - fire hook for plugin services to register
   if (ctx.serviceRegistry && ctx.serviceToolRegistry) {
-    await fireServiceRegisterHook(system, ctx.serviceRegistry, ctx.serviceToolRegistry, config);
+    await fireServiceRegisterHook(system, ctx.serviceRegistry, ctx.serviceToolRegistry, config, {
+      spawnSession: ctx.spawnSession,
+    });
   }
 
   // 7. Lock plugin system

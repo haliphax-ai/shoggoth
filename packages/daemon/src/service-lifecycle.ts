@@ -2,7 +2,7 @@ import type { ShoggothConfig } from "@shoggoth/shared";
 import { ServiceRegistry, type ServiceEntry } from "./service-registry";
 import { ServiceToolRegistry } from "./service-tool-registry";
 import type { ShoggothPluginSystem } from "@shoggoth/plugins";
-import type { PluginServiceEntry, DirectServiceTool } from "@shoggoth/plugins";
+import type { PluginServiceEntry, DirectServiceTool, ServiceRegisterCtx } from "@shoggoth/plugins";
 
 /**
  * Create a new ServiceRegistry instance.
@@ -18,6 +18,10 @@ export function createServiceToolRegistry(registry: ServiceRegistry): ServiceToo
   return new ServiceToolRegistry(registry);
 }
 
+export interface FireServiceRegisterHookOptions {
+  spawnSession?: ServiceRegisterCtx["spawnSession"];
+}
+
 /**
  * Fire the service.register hook to allow plugin services to register themselves.
  * This should be called after plugins are loaded but before daemon.ready fires.
@@ -26,16 +30,18 @@ export function createServiceToolRegistry(registry: ServiceRegistry): ServiceToo
  * @param registry - The service registry
  * @param toolRegistry - The service tool registry
  * @param config - The resolved config (after daemon.configure waterfall)
+ * @param opts - Optional capabilities to expose to service plugins
  */
 export async function fireServiceRegisterHook(
   system: ShoggothPluginSystem,
   registry: ServiceRegistry,
   toolRegistry: ServiceToolRegistry,
   config: ShoggothConfig,
+  opts?: FireServiceRegisterHookOptions,
 ): Promise<void> {
   let lastRegisteredServiceId: string | undefined;
 
-  const ctx = {
+  const ctx: ServiceRegisterCtx = {
     registerService: (entry: PluginServiceEntry): void => {
       // Build URL if port is provided
       let url: string | null = null;
@@ -71,6 +77,7 @@ export async function fireServiceRegisterHook(
       toolRegistry.registerDirectTools(lastRegisteredServiceId, tools);
     },
     config: config as Readonly<ShoggothConfig>,
+    spawnSession: opts?.spawnSession,
   };
 
   // Fire the async hook - plugins can implement this as async
