@@ -48,6 +48,7 @@ export { catalogComponents };
 export default defineConfig({
   plugins: [tailwindcss(), vue(), shoggothCatalogsPlugin()],
   base: process.env.VITE_BASE || "/svc/canvas/",
+  root: "src/client",
   resolve: {
     alias: {
       "@shoggoth/a2ui-sdk": path.resolve(__dirname, "packages/a2ui-sdk/src/index.ts"),
@@ -66,7 +67,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: "dist/client",
+    outDir: "../../dist/client",
     emptyOutDir: true,
   },
   server: {

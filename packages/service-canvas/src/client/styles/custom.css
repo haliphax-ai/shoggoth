@@ -19,6 +19,12 @@ h3 {
   font-size: 1.25rem;
   font-weight: 600;
 }
+/* When a spacer is present, columns should use content width, not grow */
+.a2ui-row:has(> .a2ui-spacer) > .a2ui-column {
+  flex: 0 1 auto;
+}
+
+
 h4 {
   font-size: 1.125rem;
   font-weight: 600;
