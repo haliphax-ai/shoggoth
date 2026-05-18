@@ -462,13 +462,10 @@ void (async () => {
       };
 
       // Resolve parent session: use explicit sessionKey, or resolve from the
-      // requested agent's (or default agent's) bootstrap primary session URN.
+      // canvas-owning agent's (daemon default) bootstrap primary session URN.
       const parentSessionId =
         opts.sessionKey ||
-        resolveSessionTargetFromCliArg(
-          opts.agentId ?? resolveShoggothAgentId(config) ?? "main",
-          configRef.current,
-        );
+        resolveSessionTargetFromCliArg(resolveShoggothAgentId(config) ?? "main", configRef.current);
 
       const req = {
         v: WIRE_VERSION,
