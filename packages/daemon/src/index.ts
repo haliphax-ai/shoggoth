@@ -461,11 +461,27 @@ void (async () => {
         recordIntegrationAudit: () => {},
       };
 
-      // Resolve parent session: use explicit sessionKey, or resolve from the
-      // canvas-owning agent's (daemon default) bootstrap primary session URN.
-      const parentSessionId =
-        opts.sessionKey ||
-        resolveSessionTargetFromCliArg(resolveShoggothAgentId(config) ?? "main", configRef.current);
+      // Resolve parent session: use explicit sessionKey, or read the canvas-owning
+      // agent's primary session URN directly from config (same source as bootstrap).
+      let parentSessionId = opts.sessionKey;
+      if (!parentSessionId) {
+        const ownerAgentId = resolveShoggothAgentId(config) ?? "main";
+        const ownerAgent = configRef.current.agents?.list?.[ownerAgentId];
+        const ownerPlatformKeys = ownerAgent?.platforms
+          ? Object.keys(ownerAgent.platforms as Record<string, unknown>)
+          : [];
+        const ownerPlatform = ownerPlatformKeys[0];
+        if (ownerAgent && ownerPlatform) {
+          const platformConfig = (
+            ownerAgent.platforms as Record<string, Record<string, unknown>>
+          )?.[ownerPlatform];
+          const routes = platformConfig?.routes as Array<{ sessionId?: string }> | undefined;
+          parentSessionId = routes?.[0]?.sessionId?.trim();
+        }
+        if (!parentSessionId) {
+          parentSessionId = resolveSessionTargetFromCliArg(ownerAgentId, configRef.current);
+        }
+      }
 
       const req = {
         v: WIRE_VERSION,
