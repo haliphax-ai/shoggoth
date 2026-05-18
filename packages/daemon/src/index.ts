@@ -45,6 +45,7 @@ import {
 } from "./config/effective-runtime";
 import { startControlPlane } from "./control/control-plane";
 import { handleIntegrationControlOp, type IntegrationOpsContext } from "./control/integration-ops";
+import { resolveSessionTargetFromCliArg } from "./control/resolve-session-cli-target";
 import { WIRE_VERSION } from "@shoggoth/authn";
 import { requestSessionTurnAbort } from "./sessions/session-turn-abort";
 import { createSessionStore } from "./sessions/session-store";
@@ -459,6 +460,16 @@ void (async () => {
         hitlPending: hitlStack?.pending,
         recordIntegrationAudit: () => {},
       };
+
+      // Resolve parent session: use explicit sessionKey, or resolve from the
+      // default agent's bootstrap primary session URN.
+      const parentSessionId =
+        opts.sessionKey ||
+        resolveSessionTargetFromCliArg(
+          resolveShoggothAgentId(config) ?? "main",
+          configRef.current,
+        );
+
       const req = {
         v: WIRE_VERSION,
         id: randomUUID(),
@@ -469,7 +480,7 @@ void (async () => {
           prompt: opts.message,
           agent_id: opts.agentId,
           model: opts.model,
-          parent_session_id: opts.sessionKey,
+          parent_session_id: parentSessionId,
         },
       };
       const principal = {
@@ -479,7 +490,6 @@ void (async () => {
         source: "cli_operator_token" as const,
       };
       const result = await handleIntegrationControlOp(req, principal, ctx);
-      return { ok: true, result };
       return { ok: true, result };
     },
   });
