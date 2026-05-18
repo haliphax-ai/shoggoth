@@ -27,12 +27,3 @@ export default defineComponent({
   },
 });
 </script>
-
-<style scoped>
-.stack {
-  display: grid;
-}
-.stack > * {
-  grid-area: 1 / 1;
-}
-</style>

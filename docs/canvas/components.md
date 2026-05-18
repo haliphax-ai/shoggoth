@@ -36,16 +36,15 @@ Horizontal flex container. Renders children left-to-right with a 16px gap.
 
 ### Stack
 
-Layered container. Children are positioned absolutely on top of each other (z-stacked).
+Layered container. Children are stacked on top of each other. The **first child** in the array has the highest z-index (renders on top); subsequent children layer behind it in order. Place background elements last and foreground/overlay elements first.
 
 ```json
-{ "Stack": { "children": ["background", "overlay"] } }
+{ "Stack": { "children": ["overlay", "background"] } }
 ```
 
-| Prop       | Type       | Description                                                     |
-| ---------- | ---------- | --------------------------------------------------------------- |
-| `children` | `string[]` | Ordered list of child component IDs (later items render on top) |
-
+| Prop       | Type       | Description                                                          |
+| ---------- | ---------- | -------------------------------------------------------------------- |
+| `children` | `string[]` | Ordered list of child component IDs (first item renders on top) |
 ### Wrap
 
 Flex-wrap container. Children flow left-to-right and wrap onto new lines when they exceed the container width. Useful for groups of buttons, badges, or any set of items that should reflow responsively.
