@@ -442,7 +442,7 @@ void (async () => {
     serviceToolRegistry,
     spawnSession: async (opts) => {
       const sessions = createSessionStore(db);
-      const canvasSessionManager = createSessionManager({
+      const serviceSessionManager = createSessionManager({
         db,
         sessions,
         agentTokens: createSqliteAgentTokenStore(db),
@@ -455,14 +455,14 @@ void (async () => {
         stateDb: db,
         acpxStore: undefined,
         sessions,
-        sessionManager: canvasSessionManager,
+        sessionManager: serviceSessionManager,
         acpxSupervisor: undefined,
         hitlPending: hitlStack?.pending,
         recordIntegrationAudit: () => {},
       };
 
-      // Resolve parent session: use explicit sessionKey, or read the canvas-owning
-      // agent's primary session URN directly from config (same source as bootstrap).
+      // Resolve parent session: use explicit sessionKey, or read the daemon's
+      // default agent's primary session URN directly from config.
       let parentSessionId = opts.sessionKey;
       if (!parentSessionId) {
         const ownerAgentId = resolveShoggothAgentId(config) ?? "main";
@@ -498,7 +498,7 @@ void (async () => {
       };
       const principal = {
         kind: "operator" as const,
-        operatorId: "canvas-service",
+        operatorId: "service-plugin",
         roles: ["admin"],
         source: "cli_operator_token" as const,
       };
