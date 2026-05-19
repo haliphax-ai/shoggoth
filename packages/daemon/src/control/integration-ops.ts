@@ -79,6 +79,13 @@ import {
   handleVaultImport,
   handleVaultRotateKey,
 } from "./vault-ops";
+import {
+  handleServiceList,
+  handleServiceRequests,
+  handleServiceRequest,
+  handleServiceApprove,
+  handleServiceRevoke,
+} from "./service-ops";
 
 export class IntegrationOpError extends Error {
   constructor(
@@ -122,6 +129,12 @@ export type IntegrationOpsContext = {
    */
   /** The vault service for credential management. */
   readonly vault?: import("../vault/vault-service").VaultService;
+  /** The service approval store for managed services. */
+  readonly serviceApprovalStore?: import("../service-approval-store").ServiceApprovalStore;
+  /** The service registry for managed services. */
+  readonly serviceRegistry?: import("../service-registry").ServiceRegistry;
+  /** The service tool registry for managed services. */
+  readonly serviceToolRegistry?: import("../service-tool-registry").ServiceToolRegistry;
   readonly cancelMcpHttpRequest?: (input: {
     readonly sessionId: string;
     readonly sourceId: string;
@@ -2352,6 +2365,17 @@ export async function handleIntegrationControlOp(
       return handleVaultImport(req, principal, ctx);
     case "vault.rotate-key":
       return handleVaultRotateKey(req, principal, ctx);
+
+    case "service.list":
+      return handleServiceList(req, principal, ctx);
+    case "service.requests":
+      return handleServiceRequests(req, principal, ctx);
+    case "service.request":
+      return handleServiceRequest(req, principal, ctx);
+    case "service.approve":
+      return handleServiceApprove(req, principal, ctx);
+    case "service.revoke":
+      return handleServiceRevoke(req, principal, ctx);
 
     case "media_generate": {
       if (principal.kind !== "agent") {

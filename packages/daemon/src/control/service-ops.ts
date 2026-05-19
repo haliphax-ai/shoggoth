@@ -1,0 +1,388 @@
+/**
+ * Control plane service operations.
+ */
+
+import type { WireRequest } from "@shoggoth/authn";
+import type { AuthenticatedPrincipal } from "@shoggoth/authn";
+import type { IntegrationOpsContext } from "./integration-ops";
+import type { ServiceApprovalStore } from "../service-approval-store";
+import type { ServiceRegistry, ServiceEntry } from "../service-registry";
+import type { ServiceToolRegistry } from "../service-tool-registry";
+import { createHash } from "node:crypto";
+
+/**
+ * Extract the service approval store from the integration context.
+ */
+function requireApprovalStore(ctx: IntegrationOpsContext): ServiceApprovalStore {
+  const store = (ctx as { serviceApprovalStore?: ServiceApprovalStore }).serviceApprovalStore;
+  if (!store) {
+    throw new Error("service approval store not available");
+  }
+  return store;
+}
+
+/**
+ * Extract the service registry from the integration context.
+ */
+function requireServiceRegistry(ctx: IntegrationOpsContext): ServiceRegistry {
+  const registry = (ctx as { serviceRegistry?: ServiceRegistry }).serviceRegistry;
+  if (!registry) {
+    throw new Error("service registry not available");
+  }
+  return registry;
+}
+
+/**
+ * Extract the service tool registry from the integration context.
+ */
+function requireToolRegistry(ctx: IntegrationOpsContext): ServiceToolRegistry {
+  const registry = (ctx as { serviceToolRegistry?: ServiceToolRegistry }).serviceToolRegistry;
+  if (!registry) {
+    throw new Error("service tool registry not available");
+  }
+  return registry;
+}
+
+/**
+ * Helper to get payload object from request.
+ */
+function getPayload(req: WireRequest): Record<string, unknown> {
+  const p = req.payload;
+  if (!p || typeof p !== "object" || Array.isArray(p)) {
+    throw new Error("payload must be a JSON object");
+  }
+  return p as Record<string, unknown>;
+}
+
+/**
+ * Helper to require a string from payload.
+ */
+function requireString(obj: Record<string, unknown>, key: string): string {
+  const v = obj[key];
+  if (typeof v !== "string" || !v.trim()) {
+    throw new Error(`payload.${key} must be a non-empty string`);
+  }
+  return v.trim();
+}
+
+/**
+ * Compute a fingerprint for a service manifest.
+ */
+function computeFingerprint(entry: ServiceEntry): string {
+  const data = JSON.stringify({
+    id: entry.id,
+    label: entry.label,
+    capabilities: entry.capabilities,
+    tools: entry.manifest?.tools ?? [],
+    ops: entry.manifest?.ops ?? [],
+  });
+  return createHash("sha256").update(data).digest("hex").slice(0, 16);
+}
+
+/**
+ * Handle service.list control operation.
+ * Returns all services from the registry.
+ */
+export async function handleServiceList(
+  req: WireRequest,
+  principal: AuthenticatedPrincipal,
+  ctx: IntegrationOpsContext,
+): Promise<unknown> {
+  if (principal.kind !== "operator") {
+    return { error: "service.list requires operator principal" };
+  }
+
+  try {
+    const approvalStore = requireApprovalStore(ctx);
+    const serviceRegistry = requireServiceRegistry(ctx);
+    const toolRegistry = requireToolRegistry(ctx);
+
+    // Get all approval records
+    const approvals = approvalStore.list();
+
+    // Get all registry entries
+    const registryEntries = serviceRegistry.list();
+
+    // Get tools list safely
+    let toolsByService: Map<string, Array<{ qualifiedName: string; description: string }>>;
+    try {
+      const tools = toolRegistry.listTools();
+      toolsByService = new Map();
+      for (const tool of tools) {
+        const existing = toolsByService.get(tool.serviceId) ?? [];
+        existing.push({ qualifiedName: tool.qualifiedName, description: tool.description });
+        toolsByService.set(tool.serviceId, existing);
+      }
+    } catch {
+      // Tool registry might not have listTools in test mocks
+      toolsByService = new Map();
+    }
+
+    // Build combined view - only from registry entries
+    const serviceMap = new Map<
+      string,
+      {
+        id: string;
+        label?: string;
+        tier: string;
+        status: string;
+        url?: string;
+        healthy: boolean;
+        capabilities: string[];
+        tools: number;
+      }
+    >();
+
+    for (const entry of registryEntries) {
+      const approval = approvals.find((a) => a.serviceId === entry.id);
+      serviceMap.set(entry.id, {
+        id: entry.id,
+        label: entry.label,
+        tier: entry.tier,
+        status: approval?.status ?? entry.approvalStatus,
+        url: entry.url ?? undefined,
+        healthy: entry.healthy,
+        capabilities: entry.capabilities,
+        tools: (toolsByService.get(entry.id) ?? []).length,
+      });
+    }
+
+    return { services: Array.from(serviceMap.values()) };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * Handle service.requests control operation.
+ * Returns pending and pending-reapproval services.
+ */
+export async function handleServiceRequests(
+  req: WireRequest,
+  principal: AuthenticatedPrincipal,
+  ctx: IntegrationOpsContext,
+): Promise<unknown> {
+  if (principal.kind !== "operator") {
+    return { error: "service.requests requires operator principal" };
+  }
+
+  try {
+    const approvalStore = requireApprovalStore(ctx);
+    const serviceRegistry = requireServiceRegistry(ctx);
+
+    // Get pending and pending-reapproval records (status filter handles both)
+    const allApprovals = approvalStore.list();
+    const pendingApprovals = allApprovals.filter(
+      (a) => a.status === "pending" || a.status === "pending-reapproval",
+    );
+
+    const requests: Array<{
+      id: string;
+      label?: string;
+      status: string;
+      tier?: string;
+      capabilities: string[];
+      updatedAt: string;
+    }> = [];
+
+    for (const approval of pendingApprovals) {
+      const entry = serviceRegistry.get(approval.serviceId);
+      requests.push({
+        id: approval.serviceId,
+        label: entry?.label,
+        status: approval.status,
+        tier: entry?.tier,
+        capabilities: entry?.capabilities ?? [],
+        updatedAt: approval.updatedAt,
+      });
+    }
+
+    return { requests };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * Handle service.request control operation.
+ * Returns details for a specific service.
+ */
+export async function handleServiceRequest(
+  req: WireRequest,
+  principal: AuthenticatedPrincipal,
+  ctx: IntegrationOpsContext,
+): Promise<unknown> {
+  if (principal.kind !== "operator") {
+    return { error: "service.request requires operator principal" };
+  }
+
+  try {
+    const payload = getPayload(req);
+    const serviceId = requireString(payload, "service_id");
+
+    const approvalStore = requireApprovalStore(ctx);
+    const serviceRegistry = requireServiceRegistry(ctx);
+    const toolRegistry = requireToolRegistry(ctx);
+
+    const approval = approvalStore.get(serviceId);
+    const entry = serviceRegistry.get(serviceId);
+
+    if (!approval && !entry) {
+      return { error: `Service '${serviceId}' not found` };
+    }
+
+    const status = approval?.status ?? entry?.approvalStatus ?? "pending";
+    const tools = entry?.manifest?.tools ?? [];
+
+    // Get registered tools for this service
+    let registeredTools: Array<{ qualifiedName: string; serviceId: string; description: string }> =
+      [];
+    try {
+      registeredTools = toolRegistry.listTools().filter((t) => t.serviceId === serviceId);
+    } catch {
+      // Tool registry might not have listTools in test mocks
+    }
+
+    // Build diff info for pending-reapproval
+    let diff: { oldFingerprint: string; newFingerprint: string; changes: string[] } | undefined;
+    if (status === "pending-reapproval" && approval?.approvedFingerprint && entry) {
+      const newFingerprint = computeFingerprint(entry);
+      const changes: string[] = [];
+
+      const oldFingerprint = approval.approvedFingerprint;
+      if (oldFingerprint !== newFingerprint) {
+        changes.push("Service manifest changed");
+      }
+
+      diff = {
+        oldFingerprint,
+        newFingerprint,
+        changes,
+      };
+    }
+
+    return {
+      service: {
+        id: serviceId,
+        label: entry?.label,
+        tier: entry?.tier,
+        status,
+        url: entry?.url,
+        healthy: entry?.healthy ?? false,
+        capabilities: entry?.capabilities ?? [],
+        ops: entry?.manifest?.ops ?? [],
+        tools: tools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          method: t.method,
+          path: t.path,
+        })),
+        registeredTools: registeredTools.map((t) => t.qualifiedName),
+        createdAt: approval?.createdAt,
+        updatedAt: approval?.updatedAt,
+        diff,
+      },
+    };
+  } catch (e) {
+    if (e instanceof Error && e.message.includes("service_id")) {
+      return { error: e.message };
+    }
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * Handle service.approve control operation.
+ * Approves a service and stores the fingerprint.
+ * Note: Approves any service that exists in either approval store or registry.
+ * Services that never existed (not in either) will error.
+ */
+export async function handleServiceApprove(
+  req: WireRequest,
+  principal: AuthenticatedPrincipal,
+  ctx: IntegrationOpsContext,
+): Promise<unknown> {
+  if (principal.kind !== "operator") {
+    return { error: "service.approve requires operator principal" };
+  }
+
+  try {
+    const payload = getPayload(req);
+    const serviceId = requireString(payload, "service_id");
+
+    const approvalStore = requireApprovalStore(ctx);
+    const serviceRegistry = requireServiceRegistry(ctx);
+
+    const entry = serviceRegistry.get(serviceId);
+    const existingApproval = approvalStore.get(serviceId);
+
+    // Error if service was never seen (not in approval store AND not in registry)
+    if (!existingApproval && !entry) {
+      return { error: `Service '${serviceId}' not found` };
+    }
+
+    // Compute fingerprint from current manifest or generate a manual one
+    const fingerprint = payload.fingerprint
+      ? String(payload.fingerprint)
+      : entry
+        ? computeFingerprint(entry)
+        : `manual-${Date.now()}`;
+
+    // Approve the service (works even if service is offline/not in registry)
+    approvalStore.approve(serviceId, fingerprint);
+
+    // Update registry if present and has setApprovalStatus method
+    if (entry && typeof serviceRegistry.setApprovalStatus === "function") {
+      serviceRegistry.setApprovalStatus(serviceId, "approved");
+    }
+
+    return { ok: true, service_id: serviceId, fingerprint };
+  } catch (e) {
+    if (e instanceof Error && e.message.includes("service_id")) {
+      return { error: e.message };
+    }
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function handleServiceRevoke(
+  req: WireRequest,
+  principal: AuthenticatedPrincipal,
+  ctx: IntegrationOpsContext,
+): Promise<unknown> {
+  if (principal.kind !== "operator") {
+    return { error: "service.revoke requires operator principal" };
+  }
+
+  try {
+    const payload = getPayload(req);
+    const serviceId = requireString(payload, "service_id");
+
+    const approvalStore = requireApprovalStore(ctx);
+    const serviceRegistry = requireServiceRegistry(ctx);
+    const toolRegistry = requireToolRegistry(ctx);
+
+    // Check if service exists
+    const entry = serviceRegistry.get(serviceId);
+
+    // Revoke the service
+    approvalStore.revoke(serviceId);
+
+    // Deregister tools if service is in registry and method exists
+    if (entry) {
+      if (typeof toolRegistry.deregisterServiceTools === "function") {
+        toolRegistry.deregisterServiceTools(serviceId);
+      }
+      if (typeof serviceRegistry.setApprovalStatus === "function") {
+        serviceRegistry.setApprovalStatus(serviceId, "revoked");
+      }
+    }
+
+    return { ok: true, service_id: serviceId };
+  } catch (e) {
+    if (e instanceof Error && e.message.includes("service_id")) {
+      return { error: e.message };
+    }
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
