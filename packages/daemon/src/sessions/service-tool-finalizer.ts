@@ -1,12 +1,63 @@
 import type { SessionMcpToolContext } from "./session-mcp-tool-context";
 import { openAiToolsFromCatalog } from "./session-mcp-tool-context";
 import { mcpToolsForToolLoop } from "../mcp/tool-loop-mcp";
-import { serviceToolRegistryRef } from "./service-tool-registry-ref";
+import { serviceToolRegistryRef, serviceRegistryRef } from "./service-tool-registry-ref";
+import type { ServiceToolRegistry } from "../service-tool-registry";
+import type { ServiceRegistry } from "../service-registry";
 import type { AggregateMcpCatalogResult, AggregatedTool } from "@shoggoth/mcp-integration";
+
+/**
+ * Get approved service tools - filters tools from the registry to only include
+ * those from services where approvalStatus === 'approved'.
+ *
+ * @param serviceRegistry - The service registry to check approval status
+ * @param toolRegistry - The tool registry to get tools from
+ * @returns Array of tool descriptors from approved services
+ */
+export function getApprovedServiceTools(
+  serviceRegistry: ServiceRegistry,
+  toolRegistry: ServiceToolRegistry,
+): Array<{ name: string; description: string; parameters: Record<string, unknown> }> {
+  const allTools = toolRegistry.listTools();
+
+  const approvedTools: Array<{
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  }> = [];
+
+  for (const tool of allTools) {
+    const entry = serviceRegistry.get(tool.serviceId);
+    if (entry?.approvalStatus !== "approved") {
+      continue;
+    }
+
+    // Get the parameters schema from the registered tool
+    const registered = toolRegistry.get(tool.qualifiedName);
+    if (!registered) continue;
+
+    let parameters: Record<string, unknown> = {};
+    if (registered.kind === "direct") {
+      parameters = (registered.tool.parameters as Record<string, unknown>) ?? {};
+    } else {
+      parameters = (registered.decl.parameters as Record<string, unknown>) ?? {};
+    }
+
+    approvedTools.push({
+      name: tool.qualifiedName,
+      description: tool.description,
+      parameters,
+    });
+  }
+
+  return approvedTools;
+}
 
 /**
  * Context finalizer that injects service-registered tools (from plugin services)
  * into the session's tool catalog so agents can see and invoke them.
+ *
+ * Only includes tools from services with approvalStatus === 'approved'.
  */
 export function createServiceToolFinalizer(): (
   ctx: SessionMcpToolContext,
@@ -14,33 +65,26 @@ export function createServiceToolFinalizer(): (
 ) => SessionMcpToolContext {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   return (ctx, _sessionId) => {
-    const registry = serviceToolRegistryRef.current;
-    if (!registry) return ctx;
+    const toolRegistry = serviceToolRegistryRef.current;
+    const serviceRegistry = serviceRegistryRef.current;
+    if (!toolRegistry || !serviceRegistry) return ctx;
 
-    const serviceTools = registry.listTools();
-    if (serviceTools.length === 0) return ctx;
+    const approvedTools = getApprovedServiceTools(serviceRegistry, toolRegistry);
+    if (approvedTools.length === 0) return ctx;
 
-    // Build AggregatedTool entries for each service tool
+    // Build AggregatedTool entries for each approved service tool
     const extraTools: AggregatedTool[] = [];
-    for (const st of serviceTools) {
+    for (const st of approvedTools) {
       // Skip if already present (avoid duplicates)
-      if (ctx.aggregated.tools.some((t) => t.namespacedName === st.qualifiedName)) continue;
-
-      const registered = registry.getToolDeclaration(st.qualifiedName);
-      if (!registered) continue;
-
-      const inputSchema =
-        registered.kind === "direct"
-          ? (registered.tool.parameters as Record<string, unknown>)
-          : (registered.decl.parameters as Record<string, unknown>);
+      if (ctx.aggregated.tools.some((t) => t.namespacedName === st.name)) continue;
 
       extraTools.push({
-        namespacedName: st.qualifiedName,
+        namespacedName: st.name,
         sourceId: "builtin",
-        originalName: st.qualifiedName,
-        name: st.qualifiedName,
+        originalName: st.name,
+        name: st.name,
         description: st.description,
-        inputSchema: inputSchema ?? { type: "object", properties: {} },
+        inputSchema: st.parameters ?? { type: "object", properties: {} },
       });
     }
 

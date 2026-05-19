@@ -50,6 +50,7 @@ export class ServiceToolRegistry {
   private toolMap = new Map<string, RegisteredServiceTool>();
   private serviceRegistry: ServiceRegistry;
   private dispatcher?: ServiceToolDispatcher;
+  private eventHandlerAttached = false;
 
   constructor(options: ServiceToolRegistryOptions);
   constructor(serviceRegistry: ServiceRegistry, dispatcher?: ServiceToolDispatcher);
@@ -66,6 +67,23 @@ export class ServiceToolRegistry {
       this.serviceRegistry = serviceRegistryOrOptions;
       this.dispatcher = dispatcher;
     }
+
+    // Attach event listener for service deregistration
+    this.attachEventHandlers();
+  }
+
+  /**
+   * Attach event handlers to the service registry to automatically
+   * deregister tools when a service is removed.
+   */
+  private attachEventHandlers(): void {
+    if (this.eventHandlerAttached) return;
+
+    this.serviceRegistry.on("deregistered", (id: string) => {
+      this.deregisterServiceTools(id);
+    });
+
+    this.eventHandlerAttached = true;
   }
 
   /**
