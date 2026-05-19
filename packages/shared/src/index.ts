@@ -99,6 +99,8 @@ export {
   type ServiceDeclaration,
   type ServiceToolDeclaration,
   type ServiceManifest,
+  type ApprovalStatus,
+  type ServiceApprovalRecord,
   attachmentHandlingSchema,
   attachmentHandlingModes,
   type AttachmentHandlingMode,

@@ -1001,6 +1001,27 @@ export const serviceManifestSchema = z
 export type ServiceManifest = z.infer<typeof serviceManifestSchema>;
 
 // ---------------------------------------------------------------------------
+// Service Approval Types
+// ---------------------------------------------------------------------------
+
+export const approvalStatusValues = [
+  "pending",
+  "approved",
+  "pending-reapproval",
+  "revoked",
+] as const;
+
+export type ApprovalStatus = (typeof approvalStatusValues)[number];
+
+export interface ServiceApprovalRecord {
+  serviceId: string;
+  status: ApprovalStatus;
+  approvedFingerprint: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // Service Port Conflict Validation
 // ---------------------------------------------------------------------------
 
