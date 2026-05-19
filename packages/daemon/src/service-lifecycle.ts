@@ -64,7 +64,9 @@ export async function fireServiceRegisterHook(
         healthy: true,
         capabilities: entry.capabilities ?? [],
         expose: entry.expose ?? "direct",
+        manifest: null,
         registeredTools: [],
+        approvalStatus: "approved",
       };
 
       registry.register(serviceEntry);

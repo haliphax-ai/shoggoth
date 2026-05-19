@@ -29,7 +29,10 @@ export function createServiceToolFinalizer(): (
       const registered = registry.getToolDeclaration(st.qualifiedName);
       if (!registered) continue;
 
-      const inputSchema = registered.tool.parameters as Record<string, unknown>;
+      const inputSchema =
+        registered.kind === "direct"
+          ? (registered.tool.parameters as Record<string, unknown>)
+          : (registered.decl.parameters as Record<string, unknown>);
 
       extraTools.push({
         namespacedName: st.qualifiedName,

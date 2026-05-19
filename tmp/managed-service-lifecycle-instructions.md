@@ -5,6 +5,15 @@ Working directory for all commands: `/var/lib/shoggoth/workspaces/developer/proj
 
 ## Global Rules
 
+### ANTI-LOOP RULES (critical)
+
+- If you've read the same file more than twice without making progress, STOP reading and run a command instead (typecheck, tests, etc.) to get concrete error output.
+- Never read a file just to "understand" it after you've already read it once in this session. You already have the information.
+- When fixing type errors: run `tsc --noEmit`, read the EXACT error message, make ONE targeted fix, then re-run `tsc`. Do not speculatively read files.
+- After tests pass and typecheck passes, commit IMMEDIATELY. Do not re-read files or re-verify.
+- The pre-commit hook runs the full test suite (~90s). This is normal. Set timeout to 180000 for git commit commands.
+- Budget your time: you have 20 minutes total. Spend no more than 5 minutes reading/planning, then execute.
+
 - Use `builtin-write` to create/modify files. NEVER use `node -e`, `cat`, `echo >`, or shell commands to write files.
 - Use `builtin-read` to read files before modifying them.
 - Use `builtin-exec` only for running tests, typecheck, and git commands.
