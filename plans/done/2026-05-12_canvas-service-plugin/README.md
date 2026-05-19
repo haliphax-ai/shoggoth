@@ -1,6 +1,6 @@
 ---
 date: 2026-05-12
-completed: never
+completed: 2026-05-18
 ---
 
 # Canvas Web Server — Shoggoth Service Plugin Port
