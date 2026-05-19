@@ -149,14 +149,6 @@ export class ServiceToolRegistry {
   }
 
   /**
-   * Get the registered tool info for a qualified tool name.
-   * @deprecated Use get() instead
-   */
-  getToolDeclaration(toolName: string): RegisteredServiceTool | undefined {
-    return this.toolMap.get(toolName);
-  }
-
-  /**
    * List all registered tools with their metadata.
    *
    * @returns Array of tool summaries

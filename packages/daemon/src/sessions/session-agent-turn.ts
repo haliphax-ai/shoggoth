@@ -475,7 +475,7 @@ export async function executeSessionAgentTurn(
         }
         // Service tool dispatch (plugin services)
         const svcRegistry = serviceToolRegistryRef.current;
-        if (svcRegistry?.getToolDeclaration(originalName)) {
+        if (svcRegistry?.get(originalName)) {
           return svcRegistry.invokeTool(originalName, args, {
             agentId: parseAgentSessionUrn(input.sessionId)?.agentId ?? "unknown",
             sessionUrn: input.sessionId,
