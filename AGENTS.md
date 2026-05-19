@@ -31,3 +31,22 @@ Message platform code should maintain separation between a platform implementati
 Platforms should plug into system internals using hook points so that the implementation remains packaged and separate.
 
 Discord is currently the only available platform, but it should not be treated as such--future platform development and layers of abstraction should always be considered when making changes to the messaging system. Platform capabilities and transport should be registered and routed through the presentation layer.
+
+## Tech Stack
+
+- typescript: code
+- json: structured data
+- markdown: documentation
+- sqlite: "live" data storage
+- npm workspaces: package separation
+
+### Packages Used
+
+- pino: structured logging
+- vitest: testing
+- tsx: executing typescript
+- tsgo: type checking
+- oxfmt: formatting
+- oxlint: linting
+- plugin-hooks: extensible hook points
+- knip: finding dead code
