@@ -63,7 +63,7 @@ describe("ServiceLifecycleManager", () => {
 
   beforeEach(() => {
     registry = new ServiceRegistry();
-    toolRegistry = new ServiceToolRegistry({ serviceRegistry: registry });
+    toolRegistry = new ServiceToolRegistry(registry);
     mockLogger = {
       debug: vi.fn(),
       warn: vi.fn(),

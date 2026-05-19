@@ -35,12 +35,6 @@ export type RegisteredServiceTool = RegisteredDirectTool | RegisteredHttpTool;
 /**
  * Options for creating a ServiceToolRegistry.
  */
-export interface ServiceToolRegistryOptions {
-  /** The service registry to use for looking up service entries. */
-  serviceRegistry: ServiceRegistry;
-  /** Optional HTTP dispatcher for managed/external service tools. */
-  dispatcher?: ServiceToolDispatcher;
-}
 
 /**
  * ServiceToolRegistry handles dynamic registration and invocation of tools
@@ -52,21 +46,9 @@ export class ServiceToolRegistry {
   private dispatcher?: ServiceToolDispatcher;
   private eventHandlerAttached = false;
 
-  constructor(options: ServiceToolRegistryOptions);
-  constructor(serviceRegistry: ServiceRegistry, dispatcher?: ServiceToolDispatcher);
-  constructor(
-    serviceRegistryOrOptions: ServiceRegistry | ServiceToolRegistryOptions,
-    dispatcher?: ServiceToolDispatcher,
-  ) {
-    if ("serviceRegistry" in serviceRegistryOrOptions) {
-      // Called with options object
-      this.serviceRegistry = serviceRegistryOrOptions.serviceRegistry;
-      this.dispatcher = serviceRegistryOrOptions.dispatcher;
-    } else {
-      // Called with positional arguments (backwards compatibility)
-      this.serviceRegistry = serviceRegistryOrOptions;
-      this.dispatcher = dispatcher;
-    }
+  constructor(serviceRegistry: ServiceRegistry, dispatcher?: ServiceToolDispatcher) {
+    this.serviceRegistry = serviceRegistry;
+    this.dispatcher = dispatcher;
 
     // Attach event listener for service deregistration
     this.attachEventHandlers();
