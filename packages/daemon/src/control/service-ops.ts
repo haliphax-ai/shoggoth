@@ -294,8 +294,7 @@ export async function handleServiceRequest(
 /**
  * Handle service.approve control operation.
  * Approves a service and stores the fingerprint.
- * Note: Approves any service that exists in either approval store or registry.
- * Services that never existed (not in either) will error.
+ * Requires the service to be running with a manifest (otherwise there's nothing to fingerprint).
  */
 export async function handleServiceApprove(
   req: WireRequest,
@@ -314,25 +313,24 @@ export async function handleServiceApprove(
     const serviceRegistry = requireServiceRegistry(ctx);
 
     const entry = serviceRegistry.get(serviceId);
-    const existingApproval = approvalStore.get(serviceId);
 
-    // Error if service was never seen (not in approval store AND not in registry)
-    if (!existingApproval && !entry) {
-      return { error: `Service '${serviceId}' not found` };
+    // Service must be running with a manifest to approve
+    if (!entry) {
+      return { error: `Service '${serviceId}' not found in registry (is it running?)` };
     }
 
-    // Compute fingerprint from current manifest or generate a manual one
-    const fingerprint = payload.fingerprint
-      ? String(payload.fingerprint)
-      : entry
-        ? computeFingerprint(entry)
-        : `manual-${Date.now()}`;
+    if (!entry.manifest) {
+      return { error: `Service '${serviceId}' has no manifest (cannot compute fingerprint)` };
+    }
 
-    // Approve the service (works even if service is offline/not in registry)
+    // Compute fingerprint from current manifest
+    const fingerprint = computeFingerprint(entry);
+
+    // Approve the service
     approvalStore.approve(serviceId, fingerprint);
 
-    // Update registry if present and has setApprovalStatus method
-    if (entry && typeof serviceRegistry.setApprovalStatus === "function") {
+    // Update registry approval status
+    if (typeof serviceRegistry.setApprovalStatus === "function") {
       serviceRegistry.setApprovalStatus(serviceId, "approved");
     }
 

@@ -424,15 +424,7 @@ describe("service-ops", () => {
       expect((result as { error: string }).error).toContain("not found");
     });
 
-    it("approves a service even if not currently running", async () => {
-      vi.mocked(mockApprovalStore.approve).mockReturnValue(undefined);
-      vi.mocked(mockApprovalStore.get).mockReturnValue({
-        serviceId: "offline-service",
-        status: "pending",
-        approvedFingerprint: null,
-        createdAt: "2024-01-01T00:00:00Z",
-        updatedAt: "2024-01-01T00:00:00Z",
-      });
+    it("returns error when service is not running (no registry entry)", async () => {
       vi.mocked(mockServiceRegistry.get).mockReturnValue(undefined);
 
       const req: WireRequest = {
@@ -444,8 +436,35 @@ describe("service-ops", () => {
 
       const result = await handleServiceApprove(req, mockPrincipal, mockCtx);
 
-      expect(mockApprovalStore.approve).toHaveBeenCalledWith("offline-service", expect.any(String));
-      expect(result).toHaveProperty("ok", true);
+      expect(result).toHaveProperty("error");
+      expect((result as { error: string }).error).toContain("not found");
+    });
+
+    it("returns error when service has no manifest", async () => {
+      vi.mocked(mockServiceRegistry.get).mockReturnValue({
+        id: "svc-no-manifest",
+        label: "No Manifest Service",
+        tier: "managed" as const,
+        url: "http://localhost:8080",
+        healthy: true,
+        capabilities: [],
+        expose: "gateway" as const,
+        manifest: null,
+        registeredTools: [],
+        approvalStatus: "pending" as const,
+      });
+
+      const req: WireRequest = {
+        id: "test-10b",
+        op: "service.approve",
+        auth: { kind: "operator_token", token: "test" },
+        payload: { service_id: "svc-no-manifest" },
+      };
+
+      const result = await handleServiceApprove(req, mockPrincipal, mockCtx);
+
+      expect(result).toHaveProperty("error");
+      expect((result as { error: string }).error).toContain("no manifest");
     });
   });
 
