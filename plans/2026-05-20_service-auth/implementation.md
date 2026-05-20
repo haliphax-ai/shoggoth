@@ -22,7 +22,7 @@ Implement the core key management layer. This is the foundation everything else 
 
 ## Phase 2: Token Minter & Validator
 
-Implement token minting (daemon-side) and validation (service-side). These are the runtime primitives used by the dispatcher and gateway.
+Implement token minting (daemon-side) and validation (service-side). These are the runtime primitives used by the dispatcher.
 
 - Create `TokenMinter` class that takes a `ServiceKeyStore` reference
 - `mint(agentId, serviceId, sessionUrn?)` — build payload, encrypt with age to recipient, encode as base64url
@@ -75,30 +75,7 @@ Wire key lifecycle into the existing CLI commands. After this phase, operators c
 - `packages/daemon/test/service-control-auth.test.ts`
 - `packages/daemon/src/state-db.ts` (migration for approval table columns)
 
-## Phase 5: Gateway Auth Enforcement
-
-Add token validation to the HTTP gateway. After this phase, external clients must present valid tokens to access services through the gateway.
-
-- Add `auth` config option to gateway schema (`enabled`, `exempt[]`)
-- Add `authRequired` field to service declarations (default `true` for managed/external)
-- In `ServiceGateway.handleRequest()`, check auth before proxying:
-  - Extract `Authorization: Bearer <token>` header
-  - If service has `authRequired: true` and no valid token → 401
-  - Validate token is decryptable for the target service (proves it was minted by the daemon)
-  - Pass token through to backend service
-- Add `Token-Expired: true` response header on expiry for client retry logic
-- Plugin services exposed via gateway default to `authRequired: false`
-- Add `/health` endpoint to gateway (already partially exists, formalize it)
-- Unit tests: missing token, invalid token, expired token, valid token pass-through, exempt services, authRequired=false bypass
-- Integration test with mock service behind gateway
-
-**Files:**
-
-- `packages/daemon/src/gateway.ts`
-- `packages/daemon/test/gateway.test.ts`
-- `packages/shared/src/schema.ts` (gateway auth config, service authRequired field)
-
-## Phase 6: Standalone `@shoggoth/service-auth` Package
+## Phase 5: Standalone `@shoggoth/service-auth` Package
 
 Extract `TokenValidator` into a standalone package that service authors can import without depending on the full daemon.
 
@@ -119,7 +96,7 @@ Extract `TokenValidator` into a standalone package that service authors can impo
 - `packages/service-auth/test/validator.test.ts`
 - `packages/service-auth/README.md`
 
-## Phase 7: Scoped Control Plane Access
+## Phase 6: Scoped Control Plane Access
 
 Enable managed/external services to connect to the control plane and perform operations within their approved scope. This is the most complex phase — it adds a new authentication path to the control plane.
 
@@ -146,7 +123,7 @@ Enable managed/external services to connect to the control plane and perform ope
 - `packages/shared/src/schema.ts` (manifest ops field)
 - `packages/daemon/src/service-lifecycle.ts` (notify control plane on revoke/rotate)
 
-## Phase 8: Service Consumer Integration (Demo & Canvas)
+## Phase 7: Service Consumer Integration (Demo & Canvas)
 
 Update the existing service packages to consume the auth system, serving as reference implementations for service authors.
 
@@ -169,20 +146,14 @@ The demo service is a standalone managed process and the primary example of a se
 - `packages/service-demo/package.json` (add `@shoggoth/service-auth` dependency)
 - `packages/service-demo/README.md` (document auth setup)
 
-### service-canvas (plugin service — gateway auth awareness)
+### service-canvas (plugin service — no auth changes)
 
-The canvas service is a plugin (in-process, trusted) so it does not validate tokens on direct tool calls. However, it binds a port and can be exposed via the gateway, where external browser clients need to authenticate.
+The canvas service is a plugin (in-process, trusted). Plugin services are exempt from auth — they don't receive tokens on direct tool calls and don't need to validate anything. No code changes required for the auth layer itself.
 
-- Add optional token validation on HTTP routes when accessed through the gateway (detected via `X-Forwarded-By: shoggoth-gateway` header)
-- WebSocket connections through the gateway validate the token on the upgrade handshake
-- Direct in-process tool calls (via `ServiceRegisterCtx`) remain unauthenticated (plugin trust model)
-- Document the dual access pattern: direct (trusted, no auth) vs. gateway (untrusted, auth required)
-- If `authRequired` is set to `false` in the canvas service config (default for plugins), skip validation entirely — expected default for local-only deployments
-- Add `@shoggoth/service-auth` as an optional peer dependency
+- Verify canvas continues to work unchanged with the new dispatcher (plugin tools bypass `ServiceToolDispatcher` entirely)
+- Document in canvas README that plugin services are inherently trusted and don't participate in the token auth flow
+- If canvas ever moves to a managed/external service tier in the future, it would need to add `@shoggoth/service-auth` at that point
 
 **Files:**
 
-- `packages/service-canvas/src/server/index.ts` (optional auth middleware for gateway-routed requests)
-- `packages/service-canvas/src/server/services/gateway.ts` (WebSocket upgrade auth for gateway clients)
-- `packages/service-canvas/src/plugin.ts` (pass auth config through)
-- `packages/service-canvas/package.json` (add optional `@shoggoth/service-auth` peer dep)
+- `packages/service-canvas/README.md` (document auth exemption for plugin tier)

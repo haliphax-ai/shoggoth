@@ -103,28 +103,6 @@ export class TokenValidator {
 }
 ```
 
-### Gateway Auth
-
-```ts
-/**
- * Configuration for gateway auth enforcement.
- */
-interface GatewayAuthConfig {
-  /** Whether auth is enforced globally. Default true. */
-  enabled: boolean;
-  /** Services exempt from auth enforcement (by ID). */
-  exempt?: string[];
-}
-
-/**
- * Per-service auth override in service declarations.
- */
-interface ServiceAuthConfig {
-  /** Whether this service requires auth on gateway requests. Default true. */
-  authRequired?: boolean;
-}
-```
-
 ### Scoped Control Plane Access
 
 ```ts
@@ -209,46 +187,6 @@ ALTER TABLE service_approvals ADD COLUMN key_fingerprint TEXT;
 ALTER TABLE service_approvals ADD COLUMN approved_ops TEXT; -- JSON array
 ```
 
-### Config schema additions
-
-```ts
-// In gateway config
-const gatewayConfigSchema = z.object({
-  enabled: z.boolean().default(false),
-  port: z.number().default(8000),
-  host: z.string().default("127.0.0.1"),
-  prefix: z.string().default("/svc"),
-  cors: z
-    .object({
-      /* existing */
-    })
-    .optional(),
-  rateLimit: z
-    .object({
-      /* existing */
-    })
-    .optional(),
-  auth: z
-    .object({
-      enabled: z.boolean().default(true),
-      exempt: z.array(z.string()).optional(),
-    })
-    .optional(),
-});
-
-// In external service declaration
-const externalServiceDeclarationSchema = z.object({
-  // ... existing fields ...
-  authRequired: z.boolean().default(true),
-});
-
-// In managed service (process) declaration
-const managedServiceSchema = z.object({
-  // ... existing fields ...
-  authRequired: z.boolean().default(true),
-});
-```
-
 ## Code Examples
 
 ### Minting a token during tool dispatch
@@ -282,31 +220,6 @@ async function authMiddleware(req, res, next) {
 
   req.serviceAuth = payload; // { sub: "agent-id", scope: "my-service", ... }
   next();
-}
-```
-
-### Gateway auth enforcement
-
-```ts
-// In ServiceGateway.handleRequest()
-if (this.isAuthRequired(serviceId)) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
-    res.writeHead(401, { "Content-Type": "text/plain" });
-    res.end("Unauthorized");
-    return;
-  }
-
-  const token = authHeader.slice(7);
-  const valid = await this.validateGatewayToken(token, serviceId);
-  if (!valid) {
-    res.writeHead(401, {
-      "Content-Type": "text/plain",
-      "Token-Expired": "true",
-    });
-    res.end("Unauthorized");
-    return;
-  }
 }
 ```
 

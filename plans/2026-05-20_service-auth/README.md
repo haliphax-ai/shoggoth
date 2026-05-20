@@ -7,17 +7,16 @@ completed: never
 
 ## Summary
 
-Implement cryptographic authentication and authorization for managed/external services using age X25519 key pairs. Replaces the placeholder bearer token in the tool dispatcher with real per-request minted tokens, adds auth enforcement to the HTTP gateway, and enables scoped control plane access for services.
+Implement cryptographic authentication and authorization for managed/external services using age X25519 key pairs. Replaces the placeholder bearer token in the tool dispatcher with real per-request minted tokens and enables scoped control plane access for services.
 
 ## Motivation
 
-The service plugin system currently uses a hardcoded `"shoggoth-placeholder"` token in the tool dispatcher and has no auth enforcement on the HTTP gateway. This means:
+The service plugin system currently uses a hardcoded `"shoggoth-placeholder"` token in the tool dispatcher. This means:
 
 - Any process that can reach a managed/external service's port can impersonate Shoggoth
-- Any client that can reach the gateway can access any service without authentication
 - Services cannot authenticate back to the control plane for privileged operations
 
-The approval flow (approve/revoke via CLI + fingerprint tracking) is already in place, but it only gates tool registration — it doesn't provide runtime authentication. This plan closes that gap by giving each approved service a unique age identity, minting short-lived encrypted tokens per request, and enforcing token validation at both the dispatcher and gateway layers.
+The approval flow (approve/revoke via CLI + fingerprint tracking) is already in place, but it only gates tool registration — it doesn't provide runtime authentication. This plan closes that gap by giving each approved service a unique age identity, minting short-lived encrypted tokens per request, and enforcing token validation at the dispatcher layer.
 
 ## Design
 
@@ -53,18 +52,6 @@ Service receives request
   → Service knows which agent/session is calling and can enforce its own logic
 ```
 
-### Token Flow (Gateway)
-
-```
-External client → GET /svc/{serviceId}/path
-  → Gateway extracts Authorization header
-  → If service has authRequired: true (default for managed/external):
-    → Validate token using the service's recipient (re-encrypt check) or
-      a gateway-specific validation mechanism
-    → Reject with 401 if missing/invalid/expired
-  → Proxy request to backend service (token passed through)
-```
-
 ### Key Store
 
 `ServiceKeyStore` manages age key material in the daemon's data directory:
@@ -85,14 +72,6 @@ Key material is stored in the state DB alongside approval records, encrypted at 
 
 The existing `list`, `requests`, and `request` commands already work and need no changes beyond displaying key fingerprints.
 
-### Gateway Auth Enforcement
-
-The gateway gains a per-service `authRequired` flag (default `true` for managed/external, `false` for plugin services that opt into gateway exposure). When enabled:
-
-- Requests without a valid `Authorization: Bearer <token>` header receive 401
-- The gateway validates the token can be decrypted by the service's recipient (proof the token was minted by the daemon for this service)
-- Expired tokens receive 401 with `Token-Expired: true` header for client retry logic
-
 ### Scoped Control Plane Access
 
 Managed/external services can connect to the control plane and perform operations within their approved scope:
@@ -106,10 +85,8 @@ Managed/external services can connect to the control plane and perform operation
 ### Integration Points
 
 - `ServiceToolDispatcher` — replace `placeholderToken` with `TokenMinter.mint()` call
-- `ServiceGateway.handleRequest()` — add auth validation before proxying
 - `ServiceLifecycleManager` — generate key pair on approval, delete on revocation
 - `service-ops.ts` — wire key generation into approve/revoke control operations
-- Config schema — add `authRequired` to service declarations and gateway config
 
 ## Testing Strategy
 
@@ -117,7 +94,6 @@ Managed/external services can connect to the control plane and perform operation
 - Unit tests for `TokenMinter` (mint produces valid base64url, payload contains correct fields, expiry is set)
 - Unit tests for `TokenValidator` (valid token decrypts, expired token rejected, wrong identity rejected, malformed token rejected)
 - Unit tests for round-trip: mint with recipient → validate with identity
-- Unit tests for gateway auth enforcement (missing token → 401, invalid token → 401, valid token → proxy, authRequired=false → pass-through)
 - Unit tests for scoped control plane access (valid scope → allowed, missing scope → rejected, revoked service → connection dropped)
 - Integration test: approve service → key generated → tool dispatch uses real token → service validates successfully
 - Integration test: rotate key → old tokens fail → new tokens succeed
@@ -130,17 +106,16 @@ Managed/external services can connect to the control plane and perform operation
 - **Clock skew** — Services with significant clock drift will reject valid tokens. Document that NTP sync is expected. A future enhancement could add a `leeway` parameter to `TokenValidator`.
 - **Performance** — Age encryption per tool call adds latency (~1-5ms). For high-throughput services, consider a token cache with TTL < expiry. Deferred to a future optimization if profiling shows it matters.
 - **Backward compatibility** — Services that don't validate auth today will continue to work (they ignore the Authorization header). The placeholder token is replaced transparently.
-- **Gateway vs. dispatcher auth** — These serve different purposes. Dispatcher auth proves to the service that Shoggoth is calling. Gateway auth proves to the gateway that the external client is authorized. Both use the same token format but different validation paths.
-- **Plugin services** — Exempt from all auth. They run in the daemon process and are trusted by definition. No key generation, no token minting, no gateway auth enforcement.
+- **Plugin services** — Exempt from all auth. They run in the daemon process and are trusted by definition. No key generation, no token minting.
 - **`packages/service-auth` helper** — A standalone npm package containing only `TokenValidator` so service authors can validate tokens without depending on the full daemon. Minimal dependencies (just `age-encryption`).
-- **User-facing auth is out of scope** — This plan covers service-to-service (backchannel) authentication only. Browser clients accessing services through the gateway (e.g., the canvas SPA) have no mechanism to obtain age-encrypted tokens. A user-facing auth layer (session cookies, OAuth, etc.) will be tackled in a future plan.
+- **Gateway auth is out of scope** — This plan covers backchannel (daemon → service) authentication and scoped control plane access only. Gateway auth enforcement for external clients (browsers, third-party callers) requires a user-facing auth layer (session cookies, OAuth, etc.) and will be tackled in a future plan.
 
 ## Migration
 
 - The `service_approvals` table gains an optional `key_fingerprint` column for tracking which key pair is active
 - Existing approved services (approved before this feature) will need re-approval to generate a key pair, or the operator can run `rotate-key` to generate one without revoking
 - The `ServiceKeyStore` creates its own table (`service_keys`) in the state DB on first use
-- No breaking changes to existing config — `authRequired` defaults to `true` for managed/external but the gateway gracefully degrades (logs a warning if no key exists yet)
+- No breaking changes to existing config
 
 ## References
 
