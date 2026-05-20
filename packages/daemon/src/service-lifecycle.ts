@@ -1,4 +1,5 @@
 import type { ShoggothConfig, ProcessDeclaration } from "@shoggoth/shared";
+import { type ExternalServiceDeclaration } from "./external-service-health-poller";
 import { ServiceRegistry, type ServiceEntry } from "./service-registry";
 import { ServiceToolRegistry } from "./service-tool-registry";
 import type { ShoggothPluginSystem } from "@shoggoth/plugins";
@@ -210,7 +211,10 @@ export class ServiceLifecycleManager {
     if (!entry) return;
 
     const approval = this.approvalStore.get(processId);
-    const currentFingerprint = computeManifestFingerprint(manifest, capabilities);
+    const currentFingerprint = computeManifestFingerprint(manifest, capabilities, {
+      tier: entry.tier,
+      url: entry.url,
+    });
 
     if (!approval) {
       // Never seen - pending initial approval
@@ -308,7 +312,10 @@ export class ServiceLifecycleManager {
     }
 
     // Compute and store fingerprint
-    const fingerprint = computeManifestFingerprint(entry.manifest, entry.capabilities);
+    const fingerprint = computeManifestFingerprint(entry.manifest, entry.capabilities, {
+      tier: entry.tier,
+      url: entry.url,
+    });
     this.approvalStore.approve(serviceId, fingerprint);
     this.registry.setApprovalStatus(serviceId, "approved");
 
@@ -345,5 +352,141 @@ export class ServiceLifecycleManager {
     }
 
     this.logger.info(`Shutdown: deregistered ${services.length} managed services`);
+  }
+
+  // ---------------------------------------------------------------------------
+  // External Service Lifecycle
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Called when an external service becomes healthy.
+   * - Registers the service in the registry with tier 'external'
+   * - Fetches its manifest
+   * - Checks approval status and conditionally registers tools
+   */
+  async onExternalServiceHealthy(
+    id: string,
+    declaration: ExternalServiceDeclaration,
+  ): Promise<void> {
+    // Build URL from declaration
+    const host = declaration.host;
+    const port = declaration.port;
+    const basePath = declaration.basePath ?? "/";
+
+    // Normalize basePath: if '/' or undefined, use just host:port with trailing slash
+    // otherwise append basePath
+    let url: string;
+    if (basePath === "/" || basePath === undefined) {
+      url = `http://${host}:${port}/`;
+    } else {
+      url = `http://${host}:${port}${basePath}`;
+    }
+
+    // If already registered, deregister first to allow re-registration on recovery
+    if (this.registry.get(id)) {
+      this.toolRegistry.deregisterServiceTools(id);
+      this.registry.deregister(id);
+    }
+
+    // Register service in registry
+    const entry: ServiceEntry = {
+      id,
+      label: declaration.label,
+      tier: "external",
+      url,
+      healthy: true,
+      capabilities: declaration.capabilities ?? [],
+      expose: declaration.expose ?? "direct",
+      manifest: null,
+      registeredTools: [],
+      approvalStatus: "pending",
+    };
+
+    this.registry.register(entry);
+
+    // Fetch manifest
+    const manifestPath = declaration.manifestPath ?? "/manifest";
+    const manifest = await this.manifestFetcher.fetchAndStore(id, manifestPath);
+
+    if (!manifest) {
+      // Manifest fetch failed - log warning and return (service stays registered but no tools)
+      this.logger.warn(`Failed to fetch manifest for external service "${id}"`);
+      return;
+    }
+
+    // Check approval status
+    await this.checkApprovalAndRegisterTools(id, manifest, entry.capabilities);
+  }
+
+  /**
+   * Called when an external service becomes unhealthy.
+   * - Deregisters tools for the service
+   * - Marks the service as unhealthy in the registry
+   */
+  onExternalServiceUnhealthy(id: string): void {
+    // Deregister tools
+    this.toolRegistry.deregisterServiceTools(id);
+
+    // Mark unhealthy in registry
+    this.registry.markUnhealthy(id);
+  }
+
+  /**
+   * Reconcile external services with the given declarations.
+   * - Removes services no longer in declarations
+   * - Adds new services
+   * - Updates existing services if config changed
+   */
+  async reconcileExternalServices(declarations: ExternalServiceDeclaration[]): Promise<void> {
+    // Get all external services currently in registry
+    const currentExternalServices = this.registry.list().filter((s) => s.tier === "external");
+
+    // Create a map of declarations by ID for easy lookup
+    const declarationMap = new Map(declarations.map((d) => [d.id, d]));
+
+    // Remove services no longer in declarations
+    for (const service of currentExternalServices) {
+      if (!declarationMap.has(service.id)) {
+        // Deregister tools first
+        this.toolRegistry.deregisterServiceTools(service.id);
+        // Deregister from registry
+        this.registry.deregister(service.id);
+      }
+    }
+
+    // Process each declaration
+    for (const declaration of declarations) {
+      const existingEntry = this.registry.get(declaration.id);
+
+      if (!existingEntry) {
+        // New service - add it
+        await this.onExternalServiceHealthy(declaration.id, declaration);
+      } else {
+        // Existing service - check if config changed
+        const host = declaration.host;
+        const port = declaration.port;
+        const basePath = declaration.basePath ?? "/";
+        let newUrl: string;
+        if (basePath === "/" || basePath === undefined) {
+          newUrl = `http://${host}:${port}/`;
+        } else {
+          newUrl = `http://${host}:${port}${basePath}`;
+        }
+
+        // Update registry entry if config changed
+        if (
+          existingEntry.label !== declaration.label ||
+          existingEntry.url !== newUrl ||
+          JSON.stringify(existingEntry.capabilities) !==
+            JSON.stringify(declaration.capabilities ?? [])
+        ) {
+          // Deregister tools first
+          this.toolRegistry.deregisterServiceTools(declaration.id);
+          // Deregister and re-register
+          this.registry.deregister(declaration.id);
+          await this.onExternalServiceHealthy(declaration.id, declaration);
+        }
+      }
+    }
   }
 }

@@ -5,8 +5,9 @@
  * Run with: npx tsx packages/service-demo/src/server.ts [port]
  *
  * Exposes:
- *   GET  /           — HTML page showing current message
- *   GET  /manifest   — Service manifest for Shoggoth discovery
+ *   GET  /              — HTML page showing current message
+ *   GET  /health        — Lightweight health check (returns "ok")
+ *   GET  /manifest      — Service manifest for Shoggoth discovery
  *   POST /api/set_message  — Set the displayed message
  *   GET  /api/get_message  — Get the current message
  */
@@ -102,6 +103,14 @@ async function handler(req: IncomingMessage, res: ServerResponse): Promise<void>
     return;
   }
 
+  // GET /health — lightweight health check
+  if (url.pathname === "/health" && method === "GET") {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("ok");
+    return;
+  }
+
+  // GET /manifest — service manifest
   // GET /manifest — service manifest
   if (url.pathname === "/manifest" && method === "GET") {
     json(res, 200, manifest);

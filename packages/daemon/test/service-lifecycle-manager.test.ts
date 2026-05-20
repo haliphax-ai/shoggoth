@@ -281,7 +281,10 @@ describe("ServiceLifecycleManager", () => {
       };
 
       // Pre-approve the service with the CORRECT fingerprint computed from the manifest
-      const fingerprint = computeManifestFingerprint(mockManifest, []);
+      const fingerprint = computeManifestFingerprint(mockManifest, [], {
+        tier: "managed",
+        url: "http://127.0.0.1:3000",
+      });
       approvalStore.approve("test-service", fingerprint);
 
       // Return the manifest when fetching
@@ -418,7 +421,10 @@ describe("ServiceLifecycleManager", () => {
       await lifecycleManager.onProcessStarted("test-service", processDecl);
 
       // Approve and register tools using the correct fingerprint
-      const fingerprint = computeManifestFingerprint(mockManifest, []);
+      const fingerprint = computeManifestFingerprint(mockManifest, [], {
+        tier: "managed",
+        url: "http://127.0.0.1:3000",
+      });
       approvalStore.approve("test-service", fingerprint);
       const entry = registry.get("test-service");
       if (entry?.manifest) {
@@ -469,7 +475,10 @@ describe("ServiceLifecycleManager", () => {
       await lifecycleManager.onProcessStarted("test-service", processDecl);
 
       // Approve with correct fingerprint
-      const fingerprint = computeManifestFingerprint(mockManifest, ["test-capability"]);
+      const fingerprint = computeManifestFingerprint(mockManifest, ["test-capability"], {
+        tier: "managed",
+        url: "http://127.0.0.1:3000",
+      });
       approvalStore.approve("test-service", fingerprint);
 
       const entry = registry.get("test-service");
@@ -517,7 +526,10 @@ describe("ServiceLifecycleManager", () => {
       await lifecycleManager.onProcessHealthChanged("test-service", false);
 
       // Now approve with correct fingerprint
-      const fingerprint = computeManifestFingerprint(mockManifest, ["test-capability"]);
+      const fingerprint = computeManifestFingerprint(mockManifest, ["test-capability"], {
+        tier: "managed",
+        url: "http://127.0.0.1:3000",
+      });
       approvalStore.approve("test-service", fingerprint);
 
       // Mark as healthy again - should re-check approval
@@ -596,7 +608,10 @@ describe("ServiceLifecycleManager", () => {
       await lifecycleManager.onProcessStarted("test-service", processDecl);
 
       // Approve with correct fingerprint
-      const fingerprint = computeManifestFingerprint(mockManifest, ["test-capability"]);
+      const fingerprint = computeManifestFingerprint(mockManifest, ["test-capability"], {
+        tier: "managed",
+        url: "http://127.0.0.1:3000",
+      });
       approvalStore.approve("test-service", fingerprint);
 
       const entry = registry.get("test-service");

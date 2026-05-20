@@ -1048,6 +1048,78 @@ export function validateServicePortConflicts(processes: ProcessDeclaration[]): v
   }
 }
 
+// ---------------------------------------------------------------------------
+// External Service Declaration (services not managed by procman)
+// ---------------------------------------------------------------------------
+
+export const externalServiceHealthSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("tcp"),
+      port: z.number().int().min(1).max(65535).optional(),
+      timeoutMs: z.number().int().positive().optional().default(5000),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("http"),
+      url: z.string().url(),
+      expectedStatus: z.number().int().optional().default(200),
+      timeoutMs: z.number().int().positive().optional().default(5000),
+    })
+    .strict(),
+]);
+
+export type ExternalServiceHealth = z.infer<typeof externalServiceHealthSchema>;
+
+export const externalServiceDeclarationSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1).optional(),
+    host: z.string().min(1),
+    port: z.number().int().min(1).max(65535),
+    protocol: z.enum(["http", "ws", "http+ws"]),
+    basePath: z.string().optional().default("/"),
+    capabilities: z.array(z.string().min(1)).optional(),
+    expose: z.enum(["gateway", "direct", "both"]).optional().default("direct"),
+    manifestPath: z.string().optional().default("/manifest"),
+    health: externalServiceHealthSchema,
+    healthIntervalMs: z.number().int().positive().optional().default(30000),
+    unhealthyThreshold: z.number().int().positive().optional().default(3),
+  })
+  .strict();
+
+export type ExternalServiceDeclaration = z.infer<typeof externalServiceDeclarationSchema>;
+
+// ---------------------------------------------------------------------------
+// External + Managed Service ID Conflict Validation
+// ---------------------------------------------------------------------------
+
+export function validateServiceIdConflicts(config: {
+  services?: ExternalServiceDeclaration[];
+  processes?: ProcessDeclaration[];
+}): string[] {
+  const errors: string[] = [];
+  const ids = new Set<string>();
+
+  for (const proc of config.processes ?? []) {
+    if (!proc.service) continue;
+    if (ids.has(proc.id)) {
+      errors.push(`Duplicate service ID: "${proc.id}"`);
+    }
+    ids.add(proc.id);
+  }
+
+  for (const svc of config.services ?? []) {
+    if (ids.has(svc.id)) {
+      errors.push(`Duplicate service ID: "${svc.id}"`);
+    }
+    ids.add(svc.id);
+  }
+
+  return errors;
+}
+
 const processDeclarationHealthSchema = z
   .object({
     kind: z.enum(["tcp", "http", "stdout-match"]),
@@ -1149,18 +1221,78 @@ export const gatewayConfigSchema = z
 
 export type GatewayConfig = z.infer<typeof gatewayConfigSchema>;
 
+/**
+ * Shared config fields identical in both fragment and full schemas.
+ * Add new config fields here to avoid updating two places.
+ */
+const sharedConfigFields = {
+  /** Octal mode for the control socket after bind (e.g. 0o600 or 416 decimal). Default 0o600. */
+  controlSocketMode: z.number().int().optional(),
+  /** If both uid and gid are set, `chown` the socket after listen (requires privileges when not self). */
+  controlSocketUid: z.number().int().nonnegative().optional(),
+  controlSocketGid: z.number().int().nonnegative().optional(),
+  /** Optional operator token file (trimmed); same constant-time validation as `SHOGGOTH_OPERATOR_TOKEN`. */
+  operatorTokenPath: z.string().min(1).optional(),
+  /**
+   * Absolute or operator-relative path to global instructions. Resolved file must lie under the
+   * resolved `operatorDirectory`. Default: `{operatorDirectory}/GLOBAL.md`.
+   */
+  globalInstructionsPath: z.string().min(1).optional(),
+  models: shoggothModelsConfigSchema.optional(),
+  /** Generic platforms bag — each key is a platform id with common fields validated by core. */
+  platforms: z
+    .object({ attachmentHandling: attachmentHandlingSchema })
+    .catchall(platformCommonConfigSchema)
+    .optional(),
+  runtime: shoggothRuntimeConfigSchema.optional(),
+  agents: shoggothAgentsConfigSchema.optional(),
+  agentToAgent: shoggothAgentToAgentConfigSchema.optional(),
+  /**
+   * Default for all agents unless overridden by `agents.list.<id>.spawnSubagents`.
+   * When false, agents cannot use subagent tools / related control ops (operators unaffected).
+   */
+  spawnSubagents: z.boolean().optional(),
+  /**
+   * Default allowlist of logical agent ids subagents may be spawned for, merged with per-agent
+   * `agents.list.<id>.subagentSpawnAllow.allow`. Omitted everywhere for a sender ⇒ only that sender's own id.
+   */
+  subagentSpawnAllow: shoggothSubagentSpawnAllowSchema.optional(),
+  /** Global session query access control: agent ids any agent may query transcripts for. */
+  sessionQuery: shoggothSessionQueryConfigSchema.optional(),
+  /** Override default tool availability per context level. */
+  contextLevelTools: contextLevelToolsConfigSchema.optional(),
+  /** Declarative sidecar process definitions managed by procman. */
+  processes: z.array(processDeclarationSchema).optional(),
+  /** External service declarations (not managed by procman). */
+  services: z.array(externalServiceDeclarationSchema).optional(),
+  /** Daemon-writable directory for agent-requested config overrides. */
+  dynamicConfigDirectory: z.string().min(1).optional(),
+  /** SearXNG web search integration. */
+  searxng: shoggothSearxngConfigSchema.optional(),
+  /** Dynamic tool discovery / collapse configuration. */
+  toolDiscovery: shoggothToolDiscoveryConfigSchema.optional(),
+  /** How to display model thinking output. Default: "none" if omitted. */
+  thinkingDisplay: thinkingDisplaySchema.optional(),
+  /** Media generation configuration. */
+  mediaGeneration: shoggothMediaGenerationConfigSchema.optional(),
+  /** HTTP gateway for plugin service proxy. */
+  gateway: gatewayConfigSchema,
+  retention: shoggothRetentionConfigSchema.optional(),
+};
+
+/**
+ * Schema for individual config fragment files (loaded from config.d/).
+ * Each JSON file is validated against this schema during loadLayeredConfig().
+ * All fields are optional since fragments are partial overlays that get deep-merged.
+ * Uses .strict() so unrecognized keys are rejected early — add new fields to
+ * sharedConfigFields (or here if fragment-specific) to avoid "unrecognized_keys" errors.
+ */
 export const shoggothConfigFragmentSchema = z
   .object({
+    ...sharedConfigFields,
     logLevel: z.enum(["debug", "info", "warn", "error"]).optional(),
     stateDbPath: z.string().min(1).optional(),
     socketPath: z.string().min(1).optional(),
-    /** Octal mode for the control socket after bind (e.g. 0o600 or 416 decimal). Default 0o600. */
-    controlSocketMode: z.number().int().optional(),
-    /** If both uid and gid are set, `chown` the socket after listen (requires privileges when not self). */
-    controlSocketUid: z.number().int().nonnegative().optional(),
-    controlSocketGid: z.number().int().nonnegative().optional(),
-    /** Optional operator token file (trimmed); same constant-time validation as `SHOGGOTH_OPERATOR_TOKEN`. */
-    operatorTokenPath: z.string().min(1).optional(),
     workspacesRoot: z.string().min(1).optional(),
     secretsDirectory: z.string().min(1).optional(),
     inboundMediaRoot: z.string().min(1).optional(),
@@ -1168,13 +1300,7 @@ export const shoggothConfigFragmentSchema = z
      * Operator-only directory (default {@link LAYOUT.operatorDir}). Host global instructions are read from here.
      */
     operatorDirectory: z.string().min(1).optional(),
-    /**
-     * Absolute or operator-relative path to global instructions. Resolved file must lie under the
-     * resolved `operatorDirectory`. Default: `{operatorDirectory}/GLOBAL.md`.
-     */
-    globalInstructionsPath: z.string().min(1).optional(),
     configDirectory: z.string().min(1).optional(),
-    models: shoggothModelsConfigSchema.optional(),
     hitl: shoggothHitlConfigSchema.partial().optional(),
     memory: z
       .object({
@@ -1191,104 +1317,40 @@ export const shoggothConfigFragmentSchema = z
       .strict()
       .optional(),
     plugins: z.array(shoggothPluginEntrySchema).optional(),
-    retention: shoggothRetentionConfigSchema.optional(),
     reactions: shoggothReactionsConfigSchema.partial().optional(),
     mcp: shoggothMcpConfigSchema.optional(),
     acpx: shoggothAcpxConfigSchema.partial().optional(),
-    /** Generic platforms bag — each key is a platform id with common fields validated by core. */
-    platforms: z
-      .object({ attachmentHandling: attachmentHandlingSchema })
-      .catchall(platformCommonConfigSchema)
-      .optional(),
-    runtime: shoggothRuntimeConfigSchema.optional(),
-    agents: shoggothAgentsConfigSchema.optional(),
-    agentToAgent: shoggothAgentToAgentConfigSchema.optional(),
-    /**
-     * Default for all agents unless overridden by `agents.list.<id>.spawnSubagents`.
-     * When false, agents cannot use subagent tools / related control ops (operators unaffected).
-     */
-    spawnSubagents: z.boolean().optional(),
-    /**
-     * Default allowlist of logical agent ids subagents may be spawned for, merged with per-agent
-     * `agents.list.<id>.subagentSpawnAllow.allow`. Omitted everywhere for a sender ⇒ only that sender’s own id.
-     */
-    subagentSpawnAllow: shoggothSubagentSpawnAllowSchema.optional(),
-    /** Global session query access control: agent ids any agent may query transcripts for. */
-    sessionQuery: shoggothSessionQueryConfigSchema.optional(),
     policy: shoggothPolicyFragmentSchema,
-    /** Override default tool availability per context level. */
-    contextLevelTools: contextLevelToolsConfigSchema.optional(),
-    /** Declarative sidecar process definitions managed by procman. */
-    processes: z.array(processDeclarationSchema).optional(),
-    /** Daemon-writable directory for agent-requested config overrides. */
-    dynamicConfigDirectory: z.string().min(1).optional(),
-    /** SearXNG web search integration. */
-    searxng: shoggothSearxngConfigSchema.optional(),
-    /** Dynamic tool discovery / collapse configuration. */
-    toolDiscovery: shoggothToolDiscoveryConfigSchema.optional(),
-    /** How to display model thinking output. Default: "none" if omitted. */
-    thinkingDisplay: thinkingDisplaySchema.optional(),
-    /** Media generation configuration. */
-    mediaGeneration: shoggothMediaGenerationConfigSchema.optional(),
-    /** HTTP gateway for plugin service proxy. */
-    gateway: gatewayConfigSchema,
   })
   .strict();
 
 export type ShoggothConfigFragment = z.infer<typeof shoggothConfigFragmentSchema>;
 
+/**
+ * Schema for the fully-merged daemon config (after all fragments are deep-merged with defaults).
+ * Validated once at the end of loadLayeredConfig() before the daemon boots.
+ * Fields that are required here (non-optional) are guaranteed by defaultConfig() —
+ * they may be optional in fragments but must resolve to a value after merging.
+ */
 export const shoggothConfigSchema = z
   .object({
+    ...sharedConfigFields,
     logLevel: z.enum(["debug", "info", "warn", "error"]),
     stateDbPath: z.string().min(1),
     socketPath: z.string().min(1),
-    controlSocketMode: z.number().int().optional(),
-    controlSocketUid: z.number().int().nonnegative().optional(),
-    controlSocketGid: z.number().int().nonnegative().optional(),
-    operatorTokenPath: z.string().min(1).optional(),
     workspacesRoot: z.string().min(1),
     secretsDirectory: z.string().min(1),
     inboundMediaRoot: z.string().min(1),
     operatorDirectory: z.string().min(1),
-    globalInstructionsPath: z.string().min(1).optional(),
     configDirectory: z.string(),
-    models: shoggothModelsConfigSchema.optional(),
     hitl: shoggothHitlConfigSchema,
     memory: shoggothMemoryConfigSchema,
     skills: shoggothSkillsConfigSchema,
     plugins: z.array(shoggothPluginEntrySchema),
-    retention: shoggothRetentionConfigSchema.optional(),
     reactions: shoggothReactionsConfigSchema.optional(),
     mcp: shoggothMcpConfigSchema,
     acpx: shoggothAcpxConfigSchema.optional(),
-    /** Generic platforms bag — each key is a platform id with common fields validated by core. */
-    platforms: z
-      .object({ attachmentHandling: attachmentHandlingSchema })
-      .catchall(platformCommonConfigSchema)
-      .optional(),
-    runtime: shoggothRuntimeConfigSchema.optional(),
-    agents: shoggothAgentsConfigSchema.optional(),
-    agentToAgent: shoggothAgentToAgentConfigSchema.optional(),
-    spawnSubagents: z.boolean().optional(),
-    subagentSpawnAllow: shoggothSubagentSpawnAllowSchema.optional(),
-    sessionQuery: shoggothSessionQueryConfigSchema.optional(),
     policy: shoggothPolicyConfigSchema,
-    /** Override default tool availability per context level. */
-    contextLevelTools: contextLevelToolsConfigSchema.optional(),
-    /** Declarative sidecar process definitions managed by procman. */
-    processes: z.array(processDeclarationSchema).optional(),
-    /** Daemon-writable directory for agent-requested config overrides. */
-    dynamicConfigDirectory: z.string().min(1).optional(),
-    /** SearXNG web search integration. */
-    searxng: shoggothSearxngConfigSchema.optional(),
-    /** Dynamic tool discovery / collapse configuration. */
-    toolDiscovery: shoggothToolDiscoveryConfigSchema.optional(),
-    /** How to display model thinking output. Default: "none" if omitted. */
-    thinkingDisplay: thinkingDisplaySchema.optional(),
-    /** Media generation configuration. */
-    mediaGeneration: shoggothMediaGenerationConfigSchema.optional(),
-    /** HTTP gateway for plugin service proxy. */
-    gateway: gatewayConfigSchema,
   })
   .strict();
 
