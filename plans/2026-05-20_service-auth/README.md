@@ -133,6 +133,7 @@ Managed/external services can connect to the control plane and perform operation
 - **Gateway vs. dispatcher auth** — These serve different purposes. Dispatcher auth proves to the service that Shoggoth is calling. Gateway auth proves to the gateway that the external client is authorized. Both use the same token format but different validation paths.
 - **Plugin services** — Exempt from all auth. They run in the daemon process and are trusted by definition. No key generation, no token minting, no gateway auth enforcement.
 - **`packages/service-auth` helper** — A standalone npm package containing only `TokenValidator` so service authors can validate tokens without depending on the full daemon. Minimal dependencies (just `age-encryption`).
+- **User-facing auth is out of scope** — This plan covers service-to-service (backchannel) authentication only. Browser clients accessing services through the gateway (e.g., the canvas SPA) have no mechanism to obtain age-encrypted tokens. A user-facing auth layer (session cookies, OAuth, etc.) will be tackled in a future plan.
 
 ## Migration
 
