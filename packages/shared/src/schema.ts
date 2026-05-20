@@ -945,6 +945,109 @@ export const DEFAULT_SKILLS_CONFIG: ShoggothSkillsConfig = {
 // Declarative sidecar process definitions (Phase 4 — procman)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Managed Service Declaration (defined before ProcessDeclaration to avoid circular ref)
+// ---------------------------------------------------------------------------
+
+export const serviceDeclarationSchema = z
+  .object({
+    port: z.number().int().min(1).max(65535),
+    protocol: z.enum(["http", "ws", "http+ws"]),
+    basePath: z.string().optional().default("/"),
+    capabilities: z.array(z.string().min(1)).optional(),
+    expose: z.enum(["gateway", "direct", "both"]).optional().default("direct"),
+    manifestPath: z.string().optional().default("/manifest"),
+    host: z.string().optional().default("127.0.0.1"),
+  })
+  .strict();
+
+export type ServiceDeclaration = z.infer<typeof serviceDeclarationSchema>;
+
+// ---------------------------------------------------------------------------
+// Service Manifest
+// ---------------------------------------------------------------------------
+
+export const serviceToolDeclarationSchema = z
+  .object({
+    name: z.string().min(1),
+    description: z.string().min(1),
+    parameters: z.record(z.unknown()),
+    method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+    path: z.string().min(1),
+    dispatch: z.enum(["body", "query", "path"]).optional().default("body"),
+  })
+  .strict();
+
+export type ServiceToolDeclaration = z.infer<typeof serviceToolDeclarationSchema>;
+
+const manifestWsEndpointSchema = z
+  .object({
+    path: z.string().min(1),
+    description: z.string().optional(),
+    protocol: z.string().optional(),
+  })
+  .strict();
+
+export const serviceManifestSchema = z
+  .object({
+    name: z.string().min(1),
+    version: z.string().min(1),
+    tools: z.array(serviceToolDeclarationSchema).optional(),
+    ops: z.array(z.string().min(1)).optional(),
+    wsEndpoints: z.array(manifestWsEndpointSchema).optional(),
+  })
+  .strict();
+
+export type ServiceManifest = z.infer<typeof serviceManifestSchema>;
+
+// ---------------------------------------------------------------------------
+// Service Approval Types
+// ---------------------------------------------------------------------------
+
+export const approvalStatusValues = [
+  "pending",
+  "approved",
+  "pending-reapproval",
+  "revoked",
+] as const;
+
+export type ApprovalStatus = (typeof approvalStatusValues)[number];
+
+export interface ServiceApprovalRecord {
+  serviceId: string;
+  status: ApprovalStatus;
+  approvedFingerprint: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Service Port Conflict Validation
+// ---------------------------------------------------------------------------
+
+export function validateServicePortConflicts(processes: ProcessDeclaration[]): void {
+  const portMap = new Map<string, string>();
+
+  for (const proc of processes) {
+    if (!proc.service) {
+      continue;
+    }
+
+    const host = proc.service.host ?? "127.0.0.1";
+    const port = proc.service.port;
+    const key = `${host}:${port}`;
+
+    const existing = portMap.get(key);
+    if (existing) {
+      throw new Error(
+        `Service port conflict: processes "${existing}" and "${proc.id}" both declare ${key}`,
+      );
+    }
+
+    portMap.set(key, proc.id);
+  }
+}
+
 const processDeclarationHealthSchema = z
   .object({
     kind: z.enum(["tcp", "http", "stdout-match"]),
@@ -975,11 +1078,13 @@ export const processDeclarationSchema = z
     /** Max restart retries. Default 5. */
     maxRetries: z.number().int().nonnegative().optional(),
     health: processDeclarationHealthSchema.optional(),
+    service: serviceDeclarationSchema.optional(),
   })
   .strict();
 
 export type ProcessDeclaration = z.infer<typeof processDeclarationSchema>;
 
+// ---------------------------------------------------------------------------
 // SearXNG web search
 // ---------------------------------------------------------------------------
 

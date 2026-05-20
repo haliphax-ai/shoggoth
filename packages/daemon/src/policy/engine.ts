@@ -61,7 +61,13 @@ export const DEFINED_CONTROL_OPS = [
   "vault.delete",
   "vault.list",
   "vault.import",
+  "vault.import",
   "vault.rotate-key",
+  "service.list",
+  "service.requests",
+  "service.request",
+  "service.approve",
+  "service.revoke",
 ] as const;
 type DefinedControlOp = (typeof DEFINED_CONTROL_OPS)[number];
 

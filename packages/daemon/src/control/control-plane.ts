@@ -38,6 +38,11 @@ import {
 import { createInProcessAgentIntegrationInvoker } from "./integration-invoke";
 import { dispatchMcpHttpCancelRequest } from "../mcp/mcp-http-cancel-registry";
 import { vaultServiceRef } from "../vault/vault-ref";
+import {
+  serviceRegistryRef,
+  serviceToolRegistryRef,
+  serviceApprovalStoreRef,
+} from "../service-refs";
 
 type ControlPlaneOptions = {
   config: ShoggothConfig;
@@ -258,6 +263,9 @@ async function handleOneLine(
       hitlClear: deps.integration.hitlClear,
       cancelMcpHttpRequest: deps.integration.cancelMcpHttpRequest,
       vault: vaultServiceRef.current,
+      serviceApprovalStore: serviceApprovalStoreRef.current,
+      serviceRegistry: serviceRegistryRef.current,
+      serviceToolRegistry: serviceToolRegistryRef.current,
       recordIntegrationAudit: (extras) =>
         recordControlPlaneAudit(deps.stateDb, {
           ...auditBaseFields(),

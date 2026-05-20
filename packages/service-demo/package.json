@@ -13,6 +13,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
+    "start": "tsx src/server.ts",
     "typecheck": "tsgo --noEmit -p tsconfig.json"
   },
   "dependencies": {

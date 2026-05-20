@@ -105,7 +105,14 @@ import { TimerScheduler } from "./timers/timer-scheduler";
 import { setTimerScheduler } from "./sessions/builtin-handlers/timer-handler";
 import { ShoggothPluginSystem, type PlatformDeps } from "@shoggoth/plugins";
 import { fireDaemonHooks } from "./plugins/daemon-hooks";
-import { createServiceRegistry, createServiceToolRegistry } from "./service-lifecycle";
+import {
+  createServiceRegistry,
+  createServiceToolRegistry,
+  ServiceLifecycleManager,
+  type ServiceLifecycleLogger,
+} from "./service-lifecycle";
+import { ManifestFetcher } from "./manifest-fetcher";
+import { ServiceApprovalStore } from "./service-approval-store";
 import { appendAuditRow } from "./audit/append-audit";
 
 process.umask(0o007);
@@ -377,7 +384,10 @@ void (async () => {
         acpxSupervisor: undefined,
         hitlPending: hitlStack?.pending,
         recordIntegrationAudit: () => {},
-      };
+        serviceApprovalStore,
+        serviceRegistry,
+        serviceToolRegistry,
+      } as IntegrationOpsContext;
       const req = {
         v: WIRE_VERSION,
         id: randomUUID(),
@@ -407,11 +417,15 @@ void (async () => {
 
   // Create service registries for plugin service support
   const serviceRegistry = createServiceRegistry();
-  const serviceToolRegistry = createServiceToolRegistry(serviceRegistry);
+  const { ServiceToolDispatcher } = await import("./service-tool-dispatcher");
+  const serviceToolDispatcher = new ServiceToolDispatcher(serviceRegistry);
+  const serviceToolRegistry = createServiceToolRegistry(serviceRegistry, serviceToolDispatcher);
 
   // Expose service tool registry to session context finalizers and tool executor
-  const { serviceToolRegistryRef } = await import("./sessions/service-tool-registry-ref");
+  const { serviceToolRegistryRef, serviceRegistryRef: sessionSvcRegRef } =
+    await import("./sessions/service-tool-registry-ref");
   serviceToolRegistryRef.current = serviceToolRegistry;
+  sessionSvcRegRef.current = serviceRegistry;
 
   // Fire daemon hooks — plugins handle platform.start, health.register, etc.
   const hookResult = await fireDaemonHooks(pluginSystem, {
@@ -459,7 +473,10 @@ void (async () => {
         acpxSupervisor: undefined,
         hitlPending: hitlStack?.pending,
         recordIntegrationAudit: () => {},
-      };
+        serviceApprovalStore,
+        serviceRegistry,
+        serviceToolRegistry,
+      } as IntegrationOpsContext;
 
       // Resolve parent session: use explicit sessionKey, or read the daemon's
       // default agent's primary session URN directly from config.
@@ -608,6 +625,69 @@ void (async () => {
         : undefined,
     };
   }
+
+  // --- Service Lifecycle Manager: wire manifest fetch + tool registration ---
+  const serviceApprovalStore = new ServiceApprovalStore(db);
+
+  // Populate service refs so the control plane can access them
+  const {
+    serviceRegistryRef: svcRegRef,
+    serviceToolRegistryRef: svcToolRegRef,
+    serviceApprovalStoreRef: svcApprovalRef,
+    serviceLifecycleManagerRef: svcLifecycleRef,
+  } = await import("./service-refs");
+  svcRegRef.current = serviceRegistry;
+  svcToolRegRef.current = serviceToolRegistry;
+  svcApprovalRef.current = serviceApprovalStore;
+  svcRegRef.current = serviceRegistry;
+  svcToolRegRef.current = serviceToolRegistry;
+  svcApprovalRef.current = serviceApprovalStore;
+  const manifestFetcher = new ManifestFetcher({
+    registry: serviceRegistry,
+    timeoutMs: 5000,
+    logger: getLogger("manifest-fetcher") as unknown as {
+      debug: (msg: string, ...args: unknown[]) => void;
+      warn: (msg: string, ...args: unknown[]) => void;
+    },
+  });
+  const serviceLifecycleManager = new ServiceLifecycleManager({
+    registry: serviceRegistry,
+    manifestFetcher,
+    toolRegistry: serviceToolRegistry,
+    approvalStore: serviceApprovalStore,
+    logger: getLogger("service-lifecycle") as unknown as ServiceLifecycleLogger,
+  });
+  svcLifecycleRef.current = serviceLifecycleManager;
+  // Build a lookup from process ID to declaration for lifecycle events
+  const processDeclarations = new Map<string, ProcessDeclaration>();
+  for (const decl of config.processes ?? []) {
+    processDeclarations.set(decl.id, decl);
+  }
+
+  // Hook procman events to lifecycle manager
+  procman.on("process-started", (mp: { spec: { id: string } }) => {
+    const decl = processDeclarations.get(mp.spec.id);
+    if (decl?.service) {
+      serviceLifecycleManager.onProcessStarted(mp.spec.id, decl).catch((err) => {
+        getLogger("daemon").error("service lifecycle onProcessStarted failed", {
+          processId: mp.spec.id,
+          err: String(err),
+        });
+      });
+    }
+  });
+
+  procman.on("process-stopped", (mp: { spec: { id: string } }) => {
+    const decl = processDeclarations.get(mp.spec.id);
+    if (decl?.service) {
+      serviceLifecycleManager.onProcessStopped(mp.spec.id).catch((err) => {
+        getLogger("daemon").error("service lifecycle onProcessStopped failed", {
+          processId: mp.spec.id,
+          err: String(err),
+        });
+      });
+    }
+  });
 
   const bootProcesses = (config.processes ?? []).filter((d) => d.startPolicy === "boot");
   for (const decl of bootProcesses) {

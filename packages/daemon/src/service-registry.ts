@@ -1,6 +1,55 @@
 import { EventEmitter } from "node:events";
 
 /**
+ * Service manifest returned by GET /manifest on a managed service.
+ */
+export interface ServiceManifest {
+  /** Service name. */
+  name: string;
+  /** Semantic version. */
+  version: string;
+  /** Tools this service provides to agents. */
+  tools?: ServiceToolDeclaration[];
+  /** Control plane operations this service requests access to. */
+  ops?: string[];
+  /** WebSocket endpoints (informational). */
+  wsEndpoints?: ManifestWsEndpoint[];
+}
+
+/**
+ * WebSocket endpoint in a service manifest.
+ */
+export interface ManifestWsEndpoint {
+  path: string;
+  description?: string;
+  /** Message protocol (e.g. "jsonl", "json", "binary"). */
+  protocol?: string;
+}
+
+/**
+ * A tool declared by a managed service in its manifest.
+ */
+export interface ServiceToolDeclaration {
+  /** Tool name as exposed to agents (e.g. "canvas.push"). */
+  name: string;
+  /** Human-readable description for the tool descriptor. */
+  description: string;
+  /** JSON Schema for the tool's parameters. */
+  parameters: Record<string, unknown>;
+  /** HTTP method to use when dispatching to the service. */
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  /** Path on the service to dispatch to (e.g. "/api/a2ui/push"). */
+  path: string;
+  /** How to map tool args to the request. Default: "body". */
+  dispatch?: "body" | "query" | "path";
+}
+
+/**
+ * Approval status for a service.
+ */
+export type ApprovalStatus = "pending" | "approved" | "pending-reapproval" | "revoked";
+
+/**
  * Service entry representing a registered service.
  */
 export interface ServiceEntry {
@@ -9,7 +58,7 @@ export interface ServiceEntry {
   /** Human-readable label. */
   label?: string;
   /** How this service was loaded. */
-  tier: "plugin";
+  tier: "plugin" | "managed" | "external";
   /** Base URL for HTTP access. Null for plugin services that don't bind a port. */
   url: string | null;
   /** WebSocket URL (if applicable). */
@@ -20,8 +69,12 @@ export interface ServiceEntry {
   capabilities: string[];
   /** How this service is exposed. */
   expose: "gateway" | "direct" | "both";
+  /** Fetched manifest (null if fetch failed or not yet fetched). */
+  manifest: ServiceManifest | null;
   /** List of tools registered from this service. */
   registeredTools: string[];
+  /** Current approval status. */
+  approvalStatus: ApprovalStatus;
 }
 
 /**
@@ -72,6 +125,18 @@ export class ServiceRegistry extends EventEmitter {
     if (entry) {
       entry.healthy = true;
       this.emit("health-changed", { id, healthy: true });
+    }
+  }
+
+  /**
+   * Update approval status on a service entry.
+   * Emits "approval-changed" event.
+   */
+  setApprovalStatus(id: string, status: ApprovalStatus): void {
+    const entry = this.services.get(id);
+    if (entry) {
+      entry.approvalStatus = status;
+      this.emit("approval-changed", { id, status });
     }
   }
 
