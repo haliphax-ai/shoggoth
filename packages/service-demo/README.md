@@ -50,8 +50,10 @@ You can also pass the port as a CLI argument: `npx tsx src/server.ts 4000`
 
 ```json
 {
-  "processes": {
-    "demo": {
+  "processes": [
+    {
+      "id": "demo",
+      "startPolicy": "boot",
       "command": "npx tsx packages/service-demo/src/server.ts",
       "service": {
         "port": 3200,
@@ -62,7 +64,7 @@ You can also pass the port as a CLI argument: `npx tsx src/server.ts 4000`
         "expose": "gateway"
       }
     }
-  }
+  ]
 }
 ```
 
