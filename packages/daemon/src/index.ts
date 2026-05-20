@@ -630,7 +630,11 @@ void (async () => {
     serviceRegistryRef: svcRegRef,
     serviceToolRegistryRef: svcToolRegRef,
     serviceApprovalStoreRef: svcApprovalRef,
+    serviceLifecycleManagerRef: svcLifecycleRef,
   } = await import("./service-refs");
+  svcRegRef.current = serviceRegistry;
+  svcToolRegRef.current = serviceToolRegistry;
+  svcApprovalRef.current = serviceApprovalStore;
   svcRegRef.current = serviceRegistry;
   svcToolRegRef.current = serviceToolRegistry;
   svcApprovalRef.current = serviceApprovalStore;
@@ -649,7 +653,7 @@ void (async () => {
     approvalStore: serviceApprovalStore,
     logger: getLogger("service-lifecycle") as unknown as ServiceLifecycleLogger,
   });
-
+  svcLifecycleRef.current = serviceLifecycleManager;
   // Build a lookup from process ID to declaration for lifecycle events
   const processDeclarations = new Map<string, ProcessDeclaration>();
   for (const decl of config.processes ?? []) {

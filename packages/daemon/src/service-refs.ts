@@ -6,6 +6,7 @@
 import type { ServiceRegistry } from "./service-registry";
 import type { ServiceToolRegistry } from "./service-tool-registry";
 import type { ServiceApprovalStore } from "./service-approval-store";
+import type { ServiceLifecycleManager } from "./service-lifecycle";
 
 export const serviceRegistryRef: { current: ServiceRegistry | undefined } = {
   current: undefined,
@@ -16,5 +17,9 @@ export const serviceToolRegistryRef: { current: ServiceToolRegistry | undefined 
 };
 
 export const serviceApprovalStoreRef: { current: ServiceApprovalStore | undefined } = {
+  current: undefined,
+};
+
+export const serviceLifecycleManagerRef: { current: ServiceLifecycleManager | undefined } = {
   current: undefined,
 };

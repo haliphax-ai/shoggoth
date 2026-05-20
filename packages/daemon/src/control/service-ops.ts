@@ -9,6 +9,7 @@ import type { ServiceApprovalStore } from "../service-approval-store";
 import type { ServiceRegistry, ServiceEntry } from "../service-registry";
 import type { ServiceToolRegistry } from "../service-tool-registry";
 import { createHash } from "node:crypto";
+import { serviceLifecycleManagerRef } from "../service-refs";
 
 /**
  * Extract the service approval store from the integration context.
@@ -326,12 +327,16 @@ export async function handleServiceApprove(
     // Compute fingerprint from current manifest
     const fingerprint = computeFingerprint(entry);
 
-    // Approve the service
-    approvalStore.approve(serviceId, fingerprint);
-
-    // Update registry approval status
-    if (typeof serviceRegistry.setApprovalStatus === "function") {
-      serviceRegistry.setApprovalStatus(serviceId, "approved");
+    // Use lifecycle manager to approve (handles store + registry + tool registration)
+    const lifecycleManager = serviceLifecycleManagerRef.current;
+    if (lifecycleManager) {
+      lifecycleManager.onServiceApproved(serviceId);
+    } else {
+      // Fallback: approve in store and registry without tool registration
+      approvalStore.approve(serviceId, fingerprint);
+      if (typeof serviceRegistry.setApprovalStatus === "function") {
+        serviceRegistry.setApprovalStatus(serviceId, "approved");
+      }
     }
 
     return { ok: true, service_id: serviceId, fingerprint };
@@ -363,16 +368,20 @@ export async function handleServiceRevoke(
     // Check if service exists
     const entry = serviceRegistry.get(serviceId);
 
-    // Revoke the service
-    approvalStore.revoke(serviceId);
-
-    // Deregister tools if service is in registry and method exists
-    if (entry) {
-      if (typeof toolRegistry.deregisterServiceTools === "function") {
-        toolRegistry.deregisterServiceTools(serviceId);
-      }
-      if (typeof serviceRegistry.setApprovalStatus === "function") {
-        serviceRegistry.setApprovalStatus(serviceId, "revoked");
+    // Use lifecycle manager to revoke (handles store + registry + tool deregistration)
+    const lifecycleManager = serviceLifecycleManagerRef.current;
+    if (lifecycleManager) {
+      lifecycleManager.onServiceRevoked(serviceId);
+    } else {
+      // Fallback: revoke in store and deregister tools directly
+      approvalStore.revoke(serviceId);
+      if (entry) {
+        if (typeof toolRegistry.deregisterServiceTools === "function") {
+          toolRegistry.deregisterServiceTools(serviceId);
+        }
+        if (typeof serviceRegistry.setApprovalStatus === "function") {
+          serviceRegistry.setApprovalStatus(serviceId, "revoked");
+        }
       }
     }
 
