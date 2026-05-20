@@ -56,6 +56,11 @@ You can also pass the port as a CLI argument: `npx tsx src/server.ts 4000`
       "startPolicy": "boot",
       "command": "npx",
       "args": ["tsx", "packages/service-demo/src/server.ts"],
+      "health": {
+        "kind": "stdout-match",
+        "target": "Demo service listening on",
+        "timeoutMs": 10000
+      },
       "service": {
         "port": 3200,
         "protocol": "http",
@@ -69,4 +74,7 @@ You can also pass the port as a CLI argument: `npx tsx src/server.ts 4000`
 }
 ```
 
+```
+
 The daemon will start the process, poll `/manifest` for tool declarations, health-check it, and register the tools once healthy.
+```
