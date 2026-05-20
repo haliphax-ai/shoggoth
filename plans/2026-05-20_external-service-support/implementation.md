@@ -46,7 +46,6 @@ Add config-time validation for external service declarations and support hot rel
 - Add `externalServiceDeclarationSchema` to `@shoggoth/shared` schema (if not already present from PR #49 merge)
 - Add top-level `services` key to the config schema
 - Validate at config load: no ID conflicts between external services and managed services
-- Validate at config load: no port conflicts on the same host between external and managed services
 - Implement `reconcileExternalServices()` on lifecycle manager — diff current vs new declarations, add/remove/update pollers accordingly
 - Wire config hot-reload event to `reconcileExternalServices()`
 - On service removal via hot reload: stop poller, deregister tools, deregister from registry

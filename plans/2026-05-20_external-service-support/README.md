@@ -25,7 +25,7 @@ External services fill this gap: Shoggoth monitors their health via polling, fet
 2. **ExternalServiceHealthPoller** — Class that manages polling intervals, backoff on failure, and emits health state transitions
 3. **Integration with ServiceLifecycleManager** — Health transitions trigger the same manifest fetch → approval check → tool registration flow used by managed services
 4. **Config schema** — Top-level `services[]` array with `externalServiceDeclarationSchema` (already defined in shared schema from PR #49)
-5. **Config validation** — Detect port/ID conflicts between external services and managed services at load time
+5. **Config validation** — Detect ID conflicts between external services and managed services at load time
 6. **Operator approval** — External services use the same approval model as managed services (pending → approved → tools active). Reuses the `service_approvals` table and CLI commands.
 7. **CLI visibility** — External services appear in `shoggoth service list` / `requests` / `request <id>` with tier label "external"
 8. **Graceful startup** — External services that are unreachable at daemon boot are not errors; they transition to healthy/registered when they come online
@@ -123,7 +123,7 @@ Identical to managed services — HTTP proxy dispatch through `ServiceToolDispat
 - Unit tests for health check edge cases (timeout, connection refused, unexpected status codes, DNS failure)
 - Unit tests for `ServiceLifecycleManager` external service event handling (healthy/unhealthy transitions, approval gating)
 - Unit tests for config hot reload (add/remove/modify external services)
-- Unit tests for config validation (port/ID conflicts with managed services)
+- Unit tests for config validation (ID conflicts with managed services)
 - Integration test: external service comes online → pending → approve → tools active → goes offline → tools removed → comes back → tools restored (fingerprint unchanged)
 - Integration test: external service manifest changes → pending-reapproval → re-approve → tools updated
 - Integration test: revoked external service → stays revoked across restarts
