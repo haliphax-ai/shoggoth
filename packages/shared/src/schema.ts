@@ -1048,6 +1048,78 @@ export function validateServicePortConflicts(processes: ProcessDeclaration[]): v
   }
 }
 
+// ---------------------------------------------------------------------------
+// External Service Declaration (services not managed by procman)
+// ---------------------------------------------------------------------------
+
+export const externalServiceHealthSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("tcp"),
+      port: z.number().int().min(1).max(65535).optional(),
+      timeoutMs: z.number().int().positive().optional().default(5000),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("http"),
+      url: z.string().url(),
+      expectedStatus: z.number().int().optional().default(200),
+      timeoutMs: z.number().int().positive().optional().default(5000),
+    })
+    .strict(),
+]);
+
+export type ExternalServiceHealth = z.infer<typeof externalServiceHealthSchema>;
+
+export const externalServiceDeclarationSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1).optional(),
+    host: z.string().min(1),
+    port: z.number().int().min(1).max(65535),
+    protocol: z.enum(["http", "ws", "http+ws"]),
+    basePath: z.string().optional().default("/"),
+    capabilities: z.array(z.string().min(1)).optional(),
+    expose: z.enum(["gateway", "direct", "both"]).optional().default("direct"),
+    manifestPath: z.string().optional().default("/manifest"),
+    health: externalServiceHealthSchema,
+    healthIntervalMs: z.number().int().positive().optional().default(30000),
+    unhealthyThreshold: z.number().int().positive().optional().default(3),
+  })
+  .strict();
+
+export type ExternalServiceDeclaration = z.infer<typeof externalServiceDeclarationSchema>;
+
+// ---------------------------------------------------------------------------
+// External + Managed Service ID Conflict Validation
+// ---------------------------------------------------------------------------
+
+export function validateServiceIdConflicts(config: {
+  services?: ExternalServiceDeclaration[];
+  processes?: ProcessDeclaration[];
+}): string[] {
+  const errors: string[] = [];
+  const ids = new Set<string>();
+
+  for (const proc of config.processes ?? []) {
+    if (!proc.service) continue;
+    if (ids.has(proc.id)) {
+      errors.push(`Duplicate service ID: "${proc.id}"`);
+    }
+    ids.add(proc.id);
+  }
+
+  for (const svc of config.services ?? []) {
+    if (ids.has(svc.id)) {
+      errors.push(`Duplicate service ID: "${svc.id}"`);
+    }
+    ids.add(svc.id);
+  }
+
+  return errors;
+}
+
 const processDeclarationHealthSchema = z
   .object({
     kind: z.enum(["tcp", "http", "stdout-match"]),

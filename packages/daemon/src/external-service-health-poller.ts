@@ -1,23 +1,9 @@
+import type { ExternalServiceDeclaration } from "@shoggoth/shared";
+export type { ExternalServiceDeclaration } from "@shoggoth/shared";
+
 import { EventEmitter } from "events";
 import net from "node:net";
 import http from "node:http";
-
-export interface ExternalServiceDeclaration {
-  id: string;
-  label?: string;
-  host: string;
-  port: number;
-  protocol: "http" | "ws" | "http+ws";
-  basePath?: string;
-  capabilities?: string[];
-  expose?: "gateway" | "direct" | "both";
-  manifestPath?: string;
-  health:
-    | { kind: "tcp"; port?: number; timeoutMs?: number }
-    | { kind: "http"; url: string; expectedStatus?: number; timeoutMs?: number };
-  healthIntervalMs?: number;
-  unhealthyThreshold?: number;
-}
 
 interface Logger {
   debug: (message: string, ...args: unknown[]) => void;
