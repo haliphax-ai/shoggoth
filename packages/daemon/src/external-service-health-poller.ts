@@ -6,9 +6,9 @@ import net from "node:net";
 import http from "node:http";
 
 interface Logger {
-  debug: (message: string, ...args: unknown[]) => void;
-  warn: (message: string, ...args: unknown[]) => void;
-  info: (message: string, ...args: unknown[]) => void;
+  debug: (message: string, fields?: Record<string, unknown>) => void;
+  warn: (message: string, fields?: Record<string, unknown>) => void;
+  info: (message: string, fields?: Record<string, unknown>) => void;
 }
 
 interface ServiceState {
@@ -116,7 +116,7 @@ export class ExternalServiceHealthPoller extends EventEmitter {
 
     // Run the first health check immediately (don't wait for the first interval tick)
     this.runHealthCheck(declaration.id).catch((err) => {
-      this.logger.warn(`Initial health check failed for ${declaration.id}`, err);
+      this.logger.warn(`Initial health check failed for ${declaration.id}`, { err: String(err) });
     });
 
     // Schedule subsequent checks

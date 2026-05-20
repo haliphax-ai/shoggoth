@@ -111,6 +111,10 @@ import {
   ServiceLifecycleManager,
   type ServiceLifecycleLogger,
 } from "./service-lifecycle";
+import {
+  ExternalServiceHealthPoller,
+  type ExternalServiceDeclaration,
+} from "./external-service-health-poller";
 import { ManifestFetcher } from "./manifest-fetcher";
 import { ServiceApprovalStore } from "./service-approval-store";
 import { appendAuditRow } from "./audit/append-audit";
@@ -701,9 +705,43 @@ void (async () => {
       });
     }
   }
-
   rt.shutdown.registerDrain("procman", async () => {
     await procman.stopAll();
+  });
+
+  // --- External Service Health Poller ---
+  // Wire external service health monitoring into the service lifecycle manager
+  const externalServiceHealthPoller = new ExternalServiceHealthPoller(
+    getLogger("external-service-health"),
+  );
+
+  // Wire healthy event: register service, fetch manifest, check approval
+  externalServiceHealthPoller.on(
+    "healthy",
+    (id: string, declaration: ExternalServiceDeclaration) => {
+      serviceLifecycleManager.onExternalServiceHealthy(id, declaration).catch((err) => {
+        getLogger("daemon").error("service lifecycle onExternalServiceHealthy failed", {
+          serviceId: id,
+          err: String(err),
+        });
+      });
+    },
+  );
+
+  // Wire unhealthy event: deregister tools, mark unhealthy
+  externalServiceHealthPoller.on("unhealthy", (id: string) => {
+    serviceLifecycleManager.onExternalServiceUnhealthy(id);
+  });
+
+  // Add all configured external services to the health poller
+  for (const decl of config.services ?? []) {
+    externalServiceHealthPoller.add(decl);
+    getLogger("daemon").debug("external service added to health poller", { serviceId: decl.id });
+  }
+
+  // Register shutdown handler to stop all health pollers
+  rt.shutdown.registerDrain("external-service-health", async () => {
+    externalServiceHealthPoller.stopAll();
   });
 
   // --- Workflow tool: init server, resume incomplete workflows, register shutdown ---
