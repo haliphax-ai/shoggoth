@@ -9,11 +9,12 @@ Both modes expose the same tools (`demo.set_message`, `demo.get_message`) and se
 
 ## Plugin Mode
 
-Add the plugin to your `shoggoth.yml` (or equivalent config):
+Add the plugin to your configuration file:
 
-```yaml
-plugins:
-  - package: "@shoggoth/service-demo"
+```json
+{
+  "plugins": [{ "package": "@shoggoth/service-demo" }]
+}
 ```
 
 The daemon loads the plugin at startup and registers the service + tools automatically.
@@ -47,18 +48,22 @@ You can also pass the port as a CLI argument: `npx tsx src/server.ts 4000`
 
 ### Example procman config
 
-```yaml
-processes:
-  demo:
-    command: npx tsx packages/service-demo/src/server.ts
-    service:
-      port: 3200
-      protocol: http
-      basePath: /
-      manifestPath: /manifest
-      capabilities:
-        - demo
-      expose: gateway
+```json
+{
+  "processes": {
+    "demo": {
+      "command": "npx tsx packages/service-demo/src/server.ts",
+      "service": {
+        "port": 3200,
+        "protocol": "http",
+        "basePath": "/",
+        "manifestPath": "/manifest",
+        "capabilities": ["demo"],
+        "expose": "gateway"
+      }
+    }
+  }
+}
 ```
 
 The daemon will start the process, poll `/manifest` for tool declarations, health-check it, and register the tools once healthy.
