@@ -1,6 +1,6 @@
 ---
 date: 2026-05-20
-completed: never
+completed: 2026-05-20
 ---
 
 # External Service Support
