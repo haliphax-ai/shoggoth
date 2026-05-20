@@ -211,7 +211,10 @@ export class ServiceLifecycleManager {
     if (!entry) return;
 
     const approval = this.approvalStore.get(processId);
-    const currentFingerprint = computeManifestFingerprint(manifest, capabilities);
+    const currentFingerprint = computeManifestFingerprint(manifest, capabilities, {
+      tier: entry.tier,
+      url: entry.url,
+    });
 
     if (!approval) {
       // Never seen - pending initial approval
@@ -309,7 +312,10 @@ export class ServiceLifecycleManager {
     }
 
     // Compute and store fingerprint
-    const fingerprint = computeManifestFingerprint(entry.manifest, entry.capabilities);
+    const fingerprint = computeManifestFingerprint(entry.manifest, entry.capabilities, {
+      tier: entry.tier,
+      url: entry.url,
+    });
     this.approvalStore.approve(serviceId, fingerprint);
     this.registry.setApprovalStatus(serviceId, "approved");
 

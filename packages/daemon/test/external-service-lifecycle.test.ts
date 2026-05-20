@@ -284,7 +284,10 @@ describe("external service lifecycle", () => {
       };
 
       // Pre-approve the service with the CORRECT fingerprint
-      const fingerprint = computeManifestFingerprint(mockManifest, ["external-capability"]);
+      const fingerprint = computeManifestFingerprint(mockManifest, ["external-capability"], {
+        tier: "external",
+        url: "http://127.0.0.1:3000/",
+      });
       approvalStore.approve("ext-service", fingerprint);
 
       mockFetch.mockResolvedValue({
@@ -409,7 +412,10 @@ describe("external service lifecycle", () => {
       };
 
       // First, make the service healthy and approved
-      const fingerprint = computeManifestFingerprint(mockManifest, ["external-capability"]);
+      const fingerprint = computeManifestFingerprint(mockManifest, ["external-capability"], {
+        tier: "external",
+        url: "http://127.0.0.1:3000/",
+      });
       approvalStore.approve("ext-service", fingerprint);
 
       mockFetch.mockResolvedValue({
@@ -462,7 +468,10 @@ describe("external service lifecycle", () => {
       };
 
       // Pre-approve and have a running service
-      const fingerprint = computeManifestFingerprint(mockManifest, ["external-capability"]);
+      const fingerprint = computeManifestFingerprint(mockManifest, ["external-capability"], {
+        tier: "external",
+        url: "http://127.0.0.1:3000/",
+      });
       approvalStore.approve("removed-service", fingerprint);
 
       mockFetch.mockResolvedValue({
@@ -595,7 +604,10 @@ describe("external service lifecycle", () => {
       };
 
       // Pre-approve
-      const fingerprint = computeManifestFingerprint(mockManifest, ["external-capability"]);
+      const fingerprint = computeManifestFingerprint(mockManifest, ["external-capability"], {
+        tier: "external",
+        url: "http://127.0.0.1:3000/",
+      });
       approvalStore.approve("some-service", fingerprint);
 
       mockFetch.mockResolvedValue({
