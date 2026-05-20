@@ -2,6 +2,7 @@
 # SHOGGOTH_UID defaults to 1000 (common host user) so the host user has daemon-level file access by default.
 # AGENT_UID defaults to 900 to reduce collision risk with real host users.
 # Entrypoint (root) creates layout, fixes volume perms, then setpriv drops to shoggoth while retaining spawn caps.
+
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json* tsconfig.base.json ./
@@ -16,23 +17,26 @@ COPY .git/HEAD ./.git-meta/HEAD
 COPY .git/refs/ ./.git-meta/refs/
 COPY .git/packed-ref[s] ./.git-meta/
 RUN HASH=$(cat .git-meta/HEAD); \
-    if echo "$HASH" | grep -q "^ref:"; then \
-      REF=$(echo "$HASH" | sed 's/ref: //'); \
-      if [ -f ".git-meta/$REF" ]; then \
-        HASH=$(cat ".git-meta/$REF"); \
-      elif [ -f ".git-meta/packed-refs" ]; then \
-        HASH=$(grep " $REF\$" ".git-meta/packed-refs" | cut -d' ' -f1 || echo "unknown"); \
-      else \
-        HASH="unknown"; \
-      fi; \
+  if echo "$HASH" | grep -q "^ref:"; then \
+    REF=$(echo "$HASH" | sed 's/ref: //'); \
+    if [ -f ".git-meta/$REF" ]; then \
+      HASH=$(cat ".git-meta/$REF"); \
+    elif [ -f ".git-meta/packed-refs" ]; then \
+      HASH=$(grep " $REF\$" ".git-meta/packed-refs" | cut -d' ' -f1 || echo "unknown"); \
+    else \
+      HASH="unknown"; \
     fi; \
-    printf "%.7s" "$HASH" > /app/.git-hash
+  fi; \
+  printf "%.7s" "$HASH" > /app/.git-hash
 
 FROM node:22-bookworm-slim
 ARG SHOGGOTH_UID=1000
 ARG AGENT_UID=900
 ENV SHOGGOTH_AGENT_UID=${AGENT_UID}
-RUN apt-get update && apt-get install -y --no-install-recommends acl ca-certificates git ripgrep && rm -rf /var/lib/apt/lists/*
+RUN --mount=type=cache,mode=0755,target=/var/cache/apt \
+  rm -f /etc/apt/apt.conf.d/docker-clean \
+  && apt-get update && apt-get install -y --no-install-recommends acl ca-certificates git ripgrep \
+  && rm -rf /var/lib/apt/lists/*
 RUN userdel node 2>/dev/null; groupdel node 2>/dev/null; \
   (groupadd --system --gid ${SHOGGOTH_UID} shoggoth || true) \
   && useradd --system --uid ${SHOGGOTH_UID} --gid shoggoth --home-dir /var/lib/shoggoth --shell /usr/sbin/nologin shoggoth \
@@ -49,20 +53,22 @@ COPY scripts ./scripts
 COPY templates/agent-workspace /app/templates/agent-workspace
 COPY migrations /app/migrations
 COPY docs /app/docs
+
 # Ensure all app files are world-readable (build context from agent workspaces may have restrictive ACL-derived permissions)
 RUN chmod -R a+rX /app
+
 COPY docker/entrypoint.sh /usr/local/bin/shoggoth-entrypoint.sh
 COPY docker/shoggoth-wrapper.sh /usr/local/bin/shoggoth
-# Strip inherited ACLs from build context (cp without --preserve drops them), then set clean permissions
-# shoggoth wrapper is operator-only: root:shoggoth 0750 so agent (UID 900) cannot execute it
-RUN cp /usr/local/bin/shoggoth-entrypoint.sh /tmp/_ep && mv /tmp/_ep /usr/local/bin/shoggoth-entrypoint.sh \
-    && cp /usr/local/bin/shoggoth /tmp/_sh && mv /tmp/_sh /usr/local/bin/shoggoth \
-    && chown root:shoggoth /usr/local/bin/shoggoth \
-    && chmod 0755 /usr/local/bin/shoggoth-entrypoint.sh \
-    && chmod 0750 /usr/local/bin/shoggoth \
-    && git config --system core.sharedRepository group
 
-RUN mkdir -p /var/lib/shoggoth/skills && chown shoggoth:shoggoth /var/lib/shoggoth/skills && chmod 0755 /var/lib/shoggoth/skills
+# shoggoth wrapper is operator-only: root:shoggoth 0750 so agent (UID 900) cannot execute it
+RUN chown root:shoggoth /usr/local/bin/shoggoth \
+  && chown root:shoggoth /usr/local/bin/shoggoth-entrypoint.sh \
+  && chmod 0755 /usr/local/bin/shoggoth-entrypoint.sh \
+  && chmod 0750 /usr/local/bin/shoggoth \
+  && mkdir -p /var/lib/shoggoth/skills \
+  && chown shoggoth:shoggoth /var/lib/shoggoth/skills \
+  && chmod 0755 /var/lib/shoggoth/skills \
+  && git config --system core.sharedRepository group
 
 ENV NODE_ENV=production
 USER root

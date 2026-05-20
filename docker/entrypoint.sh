@@ -27,29 +27,30 @@ if [ -d /etc/shoggoth/config.d/dynamic ]; then
   fix_dir /etc/shoggoth/config.d/dynamic 0700 shoggoth shoggoth
 fi
 fix_dir /var/lib/shoggoth/daemon 0700 shoggoth shoggoth
-# Vault key: restrict to daemon user only
-if [ -f /var/lib/shoggoth/daemon/vault.key ]; then
-  chown shoggoth:shoggoth /var/lib/shoggoth/daemon/vault.key
-  chmod 0600 /var/lib/shoggoth/daemon/vault.key
-fi
 fix_dir /var/lib/shoggoth/state 0700 shoggoth shoggoth
+
 # Workspaces root: setgid (2…) so new session dirs inherit group `agent`; agent UID matches group perms.
 fix_dir /var/lib/shoggoth/workspaces 0770 agent agent
 fix_dir /var/lib/shoggoth/operator 0700 shoggoth shoggoth
 fix_dir /var/lib/shoggoth/skills 0755 shoggoth shoggoth
 fix_dir /var/lib/shoggoth/media/inbound 0750 shoggoth shoggoth
 fix_dir /run/shoggoth 0750 shoggoth shoggoth
-# Add agent ACL layer to workspaces
-setfacl -R -m u:shoggoth:rwX /var/lib/shoggoth/workspaces
-setfacl -R -d -m u:shoggoth:rwX /var/lib/shoggoth/workspaces
-# Fix .ssh permissions
-chmod 600 /var/lib/shoggoth/workspaces/*/.ssh/id_* || true
+
+# Vault key: restrict to daemon user only
+if [ -f /var/lib/shoggoth/daemon/vault.key ]; then
+  chown shoggoth:shoggoth /var/lib/shoggoth/daemon/vault.key
+  chmod 0600 /var/lib/shoggoth/daemon/vault.key
+fi
 
 # Compose secrets land under /run/secrets; default perms are root-only — do not loosen.
 if [ -d /run/secrets ]; then
   chown root:root /run/secrets 2>/dev/null || true
   chmod 0700 /run/secrets 2>/dev/null || true
 fi
+
+# Add agent ACL layer to workspaces (disabled)
+#setfacl -R -m u:shoggoth:rwX /var/lib/shoggoth/workspaces
+#setfacl -R -d -m u:shoggoth:rwX /var/lib/shoggoth/workspaces
 
 # gosu drops all capabilities on setuid; builtins need CAP_SETUID/CAP_SETGID on the daemon to spawn as agent.
 # Compose must set cap_add: SETUID, SETGID. setpriv keeps them in inh+ambient across the reuid/regid drop.
