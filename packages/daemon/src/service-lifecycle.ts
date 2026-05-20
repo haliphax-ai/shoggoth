@@ -211,6 +211,7 @@ export class ServiceLifecycleManager {
 
     if (!approval) {
       // Never seen - pending initial approval
+      this.approvalStore.upsert(processId, "pending");
       this.registry.setApprovalStatus(processId, "pending");
       return;
     }
