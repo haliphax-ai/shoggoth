@@ -14,8 +14,11 @@ export function createServiceRegistry(): ServiceRegistry {
 /**
  * Create a new ServiceToolRegistry instance.
  */
-export function createServiceToolRegistry(registry: ServiceRegistry): ServiceToolRegistry {
-  return new ServiceToolRegistry(registry);
+export function createServiceToolRegistry(
+  registry: ServiceRegistry,
+  dispatcher?: ConstructorParameters<typeof ServiceToolRegistry>[1],
+): ServiceToolRegistry {
+  return new ServiceToolRegistry(registry, dispatcher);
 }
 
 export interface FireServiceRegisterHookOptions {

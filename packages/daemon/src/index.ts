@@ -417,7 +417,9 @@ void (async () => {
 
   // Create service registries for plugin service support
   const serviceRegistry = createServiceRegistry();
-  const serviceToolRegistry = createServiceToolRegistry(serviceRegistry);
+  const { ServiceToolDispatcher } = await import("./service-tool-dispatcher");
+  const serviceToolDispatcher = new ServiceToolDispatcher(serviceRegistry);
+  const serviceToolRegistry = createServiceToolRegistry(serviceRegistry, serviceToolDispatcher);
 
   // Expose service tool registry to session context finalizers and tool executor
   const { serviceToolRegistryRef, serviceRegistryRef: sessionSvcRegRef } =
