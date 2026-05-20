@@ -145,3 +145,44 @@ Enable managed/external services to connect to the control plane and perform ope
 - `packages/daemon/src/control/control-plane.ts` (add service auth path)
 - `packages/shared/src/schema.ts` (manifest ops field)
 - `packages/daemon/src/service-lifecycle.ts` (notify control plane on revoke/rotate)
+
+## Phase 8: Service Consumer Integration (Demo & Canvas)
+
+Update the existing service packages to consume the auth system, serving as reference implementations for service authors.
+
+### service-demo (managed service — full auth validation)
+
+The demo service is a standalone managed process and the primary example of a service that validates Shoggoth tokens. It demonstrates the complete auth flow.
+
+- Add `@shoggoth/service-auth` as a dependency
+- Add auth middleware that extracts and validates the Bearer token on `/api/*` routes
+- Read the service identity from `SERVICE_IDENTITY` environment variable (injected by procman or set manually)
+- Reject unauthenticated requests to tool endpoints with 401
+- Leave `/health` and `/manifest` endpoints unauthenticated (called by the daemon before auth is established)
+- Log the decoded token payload (agent ID, session) for observability
+- Update the manifest to declare `ops: []` (no control plane access needed)
+- Add example in README showing how to test with a manually minted token
+
+**Files:**
+
+- `packages/service-demo/src/server.ts` (add auth middleware)
+- `packages/service-demo/package.json` (add `@shoggoth/service-auth` dependency)
+- `packages/service-demo/README.md` (document auth setup)
+
+### service-canvas (plugin service — gateway auth awareness)
+
+The canvas service is a plugin (in-process, trusted) so it does not validate tokens on direct tool calls. However, it binds a port and can be exposed via the gateway, where external browser clients need to authenticate.
+
+- Add optional token validation on HTTP routes when accessed through the gateway (detected via `X-Forwarded-By: shoggoth-gateway` header)
+- WebSocket connections through the gateway validate the token on the upgrade handshake
+- Direct in-process tool calls (via `ServiceRegisterCtx`) remain unauthenticated (plugin trust model)
+- Document the dual access pattern: direct (trusted, no auth) vs. gateway (untrusted, auth required)
+- If `authRequired` is set to `false` in the canvas service config (default for plugins), skip validation entirely — expected default for local-only deployments
+- Add `@shoggoth/service-auth` as an optional peer dependency
+
+**Files:**
+
+- `packages/service-canvas/src/server/index.ts` (optional auth middleware for gateway-routed requests)
+- `packages/service-canvas/src/server/services/gateway.ts` (WebSocket upgrade auth for gateway clients)
+- `packages/service-canvas/src/plugin.ts` (pass auth config through)
+- `packages/service-canvas/package.json` (add optional `@shoggoth/service-auth` peer dep)
