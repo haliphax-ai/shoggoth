@@ -151,7 +151,7 @@ describe("ExternalServiceHealthPoller", () => {
       tcpSpy.mockRestore();
     });
 
-    it("connection refused marks unhealthy after threshold", async () => {
+    it("connection refused stays unknown when never healthy", async () => {
       const tcpSpy = vi.spyOn(TcpHealthChecker.prototype, "check").mockResolvedValue(false);
 
       const declaration: ExternalServiceDeclaration = {
@@ -174,9 +174,9 @@ describe("ExternalServiceHealthPoller", () => {
       await vi.advanceTimersByTimeAsync(100);
       expect(poller.getState("tcp-unhealthy")).toBe("unknown");
 
-      // Third check (failure 3 = threshold)
+      // Third check (failure 3 = threshold) — stays unknown since never healthy
       await vi.advanceTimersByTimeAsync(100);
-      expect(poller.getState("tcp-unhealthy")).toBe("unhealthy");
+      expect(poller.getState("tcp-unhealthy")).toBe("unknown");
 
       tcpSpy.mockRestore();
     });
@@ -209,7 +209,7 @@ describe("ExternalServiceHealthPoller", () => {
       httpSpy.mockRestore();
     });
 
-    it("non-200 response marks unhealthy after threshold", async () => {
+    it("non-200 response stays unknown when never healthy", async () => {
       const httpSpy = vi
         .spyOn(HttpHealthChecker.prototype, "check")
         .mockResolvedValue({ success: false, error: new Error("HTTP 503") });
@@ -230,16 +230,16 @@ describe("ExternalServiceHealthPoller", () => {
 
       poller.add(declaration);
 
-      // 3 failures needed
+      // 3 failures — stays unknown since never healthy
       await vi.advanceTimersByTimeAsync(0); // failure 1
       await vi.advanceTimersByTimeAsync(100); // failure 2
       await vi.advanceTimersByTimeAsync(100); // failure 3
 
-      expect(poller.getState("http-unhealthy")).toBe("unhealthy");
+      expect(poller.getState("http-unhealthy")).toBe("unknown");
       httpSpy.mockRestore();
     });
 
-    it("timeout marks unhealthy after threshold", async () => {
+    it("timeout stays unknown when never healthy", async () => {
       const httpSpy = vi.spyOn(HttpHealthChecker.prototype, "check").mockResolvedValue({
         success: false,
         error: new Error("Request timeout"),
@@ -265,7 +265,7 @@ describe("ExternalServiceHealthPoller", () => {
       await vi.advanceTimersByTimeAsync(100); // failure 2
       await vi.advanceTimersByTimeAsync(100); // failure 3
 
-      expect(poller.getState("http-timeout")).toBe("unhealthy");
+      expect(poller.getState("http-timeout")).toBe("unknown");
       httpSpy.mockRestore();
     });
   });
@@ -274,7 +274,7 @@ describe("ExternalServiceHealthPoller", () => {
     it("interval doubles after consecutive failures beyond threshold", async () => {
       const httpSpy = vi
         .spyOn(HttpHealthChecker.prototype, "check")
-        .mockResolvedValue({ success: false, error: new Error("HTTP 503") });
+        .mockResolvedValue({ success: true });
 
       const initialInterval = 100;
 
@@ -293,8 +293,15 @@ describe("ExternalServiceHealthPoller", () => {
 
       poller.add(declaration);
 
-      // Initial check (failure 1)
+      // First become healthy
       await vi.advanceTimersByTimeAsync(0);
+      expect(poller.getState("backoff-test")).toBe("healthy");
+
+      // Now start failing
+      httpSpy.mockResolvedValue({ success: false, error: new Error("HTTP 503") });
+
+      // failure 1
+      await vi.advanceTimersByTimeAsync(100);
       // failure 2 (hits threshold, triggers backoff to 200ms)
       await vi.advanceTimersByTimeAsync(100);
 
@@ -305,7 +312,7 @@ describe("ExternalServiceHealthPoller", () => {
       await vi.advanceTimersByTimeAsync(200);
 
       // Verify it's still being polled (check count increases)
-      expect(httpSpy).toHaveBeenCalledTimes(3);
+      expect(httpSpy).toHaveBeenCalledTimes(4); // 1 healthy + 3 failures
 
       httpSpy.mockRestore();
     });
@@ -313,7 +320,7 @@ describe("ExternalServiceHealthPoller", () => {
     it("interval caps at maxBackoffMs (300000)", async () => {
       const httpSpy = vi
         .spyOn(HttpHealthChecker.prototype, "check")
-        .mockResolvedValue({ success: false, error: new Error("HTTP 503") });
+        .mockResolvedValue({ success: true });
 
       const declaration: ExternalServiceDeclaration = {
         id: "backoff-cap-test",
@@ -331,14 +338,21 @@ describe("ExternalServiceHealthPoller", () => {
 
       poller.add(declaration);
 
-      // Initial check (failure 1 = threshold, backoff to 300000 which is the cap)
+      // First become healthy
       await vi.advanceTimersByTimeAsync(0);
+      expect(poller.getState("backoff-cap-test")).toBe("healthy");
+
+      // Now fail
+      httpSpy.mockResolvedValue({ success: false, error: new Error("HTTP 503") });
+
+      // failure 1 = threshold, backoff to 300000 which is the cap
+      await vi.advanceTimersByTimeAsync(200000);
       expect(poller.getState("backoff-cap-test")).toBe("unhealthy");
 
       // Next check should be at 300000ms (capped), not 400000
       await vi.advanceTimersByTimeAsync(300000);
       // Should have gotten another check
-      expect(httpSpy).toHaveBeenCalledTimes(2);
+      expect(httpSpy).toHaveBeenCalledTimes(3); // 1 healthy + 2 failures
 
       httpSpy.mockRestore();
     });
@@ -346,7 +360,7 @@ describe("ExternalServiceHealthPoller", () => {
     it("resets to configured value on recovery", async () => {
       const httpSpy = vi
         .spyOn(HttpHealthChecker.prototype, "check")
-        .mockResolvedValue({ success: false, error: new Error("HTTP 503") });
+        .mockResolvedValue({ success: true });
 
       const declaration: ExternalServiceDeclaration = {
         id: "recovery-test",
@@ -363,8 +377,13 @@ describe("ExternalServiceHealthPoller", () => {
 
       poller.add(declaration);
 
-      // Fail to unhealthy
-      await vi.advanceTimersByTimeAsync(0); // failure 1
+      // First become healthy
+      await vi.advanceTimersByTimeAsync(0);
+      expect(poller.getState("recovery-test")).toBe("healthy");
+
+      // Now fail to unhealthy
+      httpSpy.mockResolvedValue({ success: false, error: new Error("HTTP 503") });
+      await vi.advanceTimersByTimeAsync(100); // failure 1
       await vi.advanceTimersByTimeAsync(100); // failure 2 → unhealthy, backoff to 200
 
       expect(poller.getState("recovery-test")).toBe("unhealthy");
@@ -386,7 +405,6 @@ describe("ExternalServiceHealthPoller", () => {
       httpSpy.mockRestore();
     });
   });
-
   describe("events", () => {
     it("emits healthy event on first success", async () => {
       const httpSpy = vi
@@ -420,8 +438,11 @@ describe("ExternalServiceHealthPoller", () => {
       httpSpy.mockRestore();
     });
 
-    it("emits unhealthy event after threshold failures", async () => {
-      const tcpSpy = vi.spyOn(TcpHealthChecker.prototype, "check").mockResolvedValue(false);
+    it("emits unhealthy event after threshold failures (only from healthy state)", async () => {
+      const tcpSpy = vi.spyOn(TcpHealthChecker.prototype, "check");
+
+      // First, make the service healthy
+      tcpSpy.mockResolvedValue(true);
 
       const unhealthyHandler = vi.fn();
       poller.on("unhealthy", unhealthyHandler);
@@ -441,7 +462,13 @@ describe("ExternalServiceHealthPoller", () => {
 
       poller.add(declaration);
 
-      await vi.advanceTimersByTimeAsync(0); // failure 1
+      await vi.advanceTimersByTimeAsync(0); // success → healthy
+      expect(poller.getState("event-unhealthy")).toBe("healthy");
+
+      // Now make it fail
+      tcpSpy.mockResolvedValue(false);
+
+      await vi.advanceTimersByTimeAsync(100); // failure 1
       await vi.advanceTimersByTimeAsync(100); // failure 2
       await vi.advanceTimersByTimeAsync(100); // failure 3
 

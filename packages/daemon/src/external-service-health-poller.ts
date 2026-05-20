@@ -227,30 +227,30 @@ export class ExternalServiceHealthPoller extends EventEmitter {
     } else {
       state.consecutiveFailures++;
 
-      // Check if we should emit unhealthy
+      // Check if we should transition to unhealthy
       if (state.consecutiveFailures >= unhealthyThreshold) {
-        // Only emit unhealthy on state transition
-        if (state.currentState !== "unhealthy") {
+        // Only transition to unhealthy (and emit event + backoff) from healthy state.
+        // If still in "unknown" (service never came up), stay in unknown and keep
+        // polling at the normal interval so we detect startup quickly.
+        if (state.currentState === "healthy") {
           state.currentState = "unhealthy";
           this.emit("unhealthy", serviceId, error ?? new Error("Health check failed"));
           this.logger.debug(`Service ${serviceId} is now unhealthy`, {
             consecutiveFailures: state.consecutiveFailures,
           });
-        }
 
-        // Apply exponential backoff (double the interval), cap at MAX_BACKOFF_MS
-        const newInterval = Math.min(state.currentIntervalMs * 2, MAX_BACKOFF_MS);
-
-        // Only update and reset timer if the interval actually changed
-        if (newInterval !== state.currentIntervalMs) {
-          state.currentIntervalMs = newInterval;
-          if (state.intervalTimer) {
-            clearInterval(state.intervalTimer);
-            state.intervalTimer = setInterval(() => this.runHealthCheck(serviceId), newInterval);
+          // Apply exponential backoff (double the interval), cap at MAX_BACKOFF_MS
+          const newInterval = Math.min(state.currentIntervalMs * 2, MAX_BACKOFF_MS);
+          if (newInterval !== state.currentIntervalMs) {
+            state.currentIntervalMs = newInterval;
+            if (state.intervalTimer) {
+              clearInterval(state.intervalTimer);
+              state.intervalTimer = setInterval(() => this.runHealthCheck(serviceId), newInterval);
+            }
+            this.logger.debug(`Backing off health checks for ${serviceId}`, {
+              newIntervalMs: newInterval,
+            });
           }
-          this.logger.debug(`Backing off health checks for ${serviceId}`, {
-            newIntervalMs: newInterval,
-          });
         }
       }
     }
