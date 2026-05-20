@@ -1292,6 +1292,8 @@ export const shoggothConfigFragmentSchema = z
     contextLevelTools: contextLevelToolsConfigSchema.optional(),
     /** Declarative sidecar process definitions managed by procman. */
     processes: z.array(processDeclarationSchema).optional(),
+    /** External service declarations (not managed by procman). */
+    services: z.array(externalServiceDeclarationSchema).optional(),
     /** Daemon-writable directory for agent-requested config overrides. */
     dynamicConfigDirectory: z.string().min(1).optional(),
     /** SearXNG web search integration. */
