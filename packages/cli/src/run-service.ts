@@ -277,7 +277,6 @@ export function formatServiceRevokeOutput(
   }
   return `Failed to revoke service '${serviceId}': ${error || "Unknown error"}`;
 }
-
 export async function runServiceListCli(
   params: Omit<ControlRequestParams, "op" | "payload">,
 ): Promise<void> {
@@ -286,15 +285,8 @@ export async function runServiceListCli(
     op: "service.list",
     payload: {},
   });
-
-  if (res.error) {
-    console.error(res.error);
-    process.exitCode = 1;
-    return;
-  }
-
-  const services = (res as unknown as { services: ServiceListItem[] }).services || [];
-  console.log(formatServiceListOutput(services));
+  console.log(JSON.stringify(res, null, 2));
+  if (res.error) process.exitCode = 1;
 }
 
 export async function runServiceRequestsCli(
@@ -305,15 +297,8 @@ export async function runServiceRequestsCli(
     op: "service.requests",
     payload: {},
   });
-
-  if (res.error) {
-    console.error(res.error);
-    process.exitCode = 1;
-    return;
-  }
-
-  const requests = (res as unknown as { requests: ServiceRequestItem[] }).requests || [];
-  console.log(formatServiceRequestsOutput(requests));
+  console.log(JSON.stringify(res, null, 2));
+  if (res.error) process.exitCode = 1;
 }
 
 export async function runServiceRequestCli(
@@ -325,15 +310,8 @@ export async function runServiceRequestCli(
     op: "service.request",
     payload: { service_id: serviceId },
   });
-
-  if (res.error) {
-    console.error(res.error);
-    process.exitCode = 1;
-    return;
-  }
-
-  const result = res as unknown as { service: ServiceDetail };
-  console.log(formatServiceRequestOutput(result.service));
+  console.log(JSON.stringify(res, null, 2));
+  if (res.error) process.exitCode = 1;
 }
 
 export async function runServiceApproveCli(
@@ -345,11 +323,8 @@ export async function runServiceApproveCli(
     op: "service.approve",
     payload: { service_id: serviceId },
   });
-
-  const success = (res as { ok: boolean }).ok === true;
-  const error = res.error ? String(res.error) : undefined;
-  console.log(formatServiceApproveOutput(serviceId, success, error));
-  if (!success) process.exitCode = 1;
+  console.log(JSON.stringify(res, null, 2));
+  if (res.error) process.exitCode = 1;
 }
 
 export async function runServiceRevokeCli(
@@ -361,11 +336,8 @@ export async function runServiceRevokeCli(
     op: "service.revoke",
     payload: { service_id: serviceId },
   });
-
-  const success = (res as { ok: boolean }).ok === true;
-  const error = res.error ? String(res.error) : undefined;
-  console.log(formatServiceRevokeOutput(serviceId, success, error));
-  if (!success) process.exitCode = 1;
+  console.log(JSON.stringify(res, null, 2));
+  if (res.error) process.exitCode = 1;
 }
 
 export async function runServiceCli(argv: string[]): Promise<void> {
