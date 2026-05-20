@@ -420,8 +420,10 @@ void (async () => {
   const serviceToolRegistry = createServiceToolRegistry(serviceRegistry);
 
   // Expose service tool registry to session context finalizers and tool executor
-  const { serviceToolRegistryRef } = await import("./sessions/service-tool-registry-ref");
+  const { serviceToolRegistryRef, serviceRegistryRef: sessionSvcRegRef } =
+    await import("./sessions/service-tool-registry-ref");
   serviceToolRegistryRef.current = serviceToolRegistry;
+  sessionSvcRegRef.current = serviceRegistry;
 
   // Fire daemon hooks — plugins handle platform.start, health.register, etc.
   const hookResult = await fireDaemonHooks(pluginSystem, {
