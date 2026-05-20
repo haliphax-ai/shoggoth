@@ -88,31 +88,39 @@ export class ServiceToolDispatcher {
 
     const dispatch = decl.dispatch ?? "body";
     let path = decl.path;
+    const method = (decl.method ?? "POST").toUpperCase();
+    const canHaveBody = method !== "GET" && method !== "HEAD";
 
-    // Build request options based on dispatch type
-    const requestInit: RequestInit = {
-      method: decl.method,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.placeholderToken}`,
-      },
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.placeholderToken}`,
     };
+    if (canHaveBody) {
+      headers["Content-Type"] = "application/json";
+    }
+
+    const requestInit: RequestInit = { method, headers };
 
     try {
-      // Map args based on dispatch type
       if (dispatch === "body") {
-        requestInit.body = JSON.stringify(args);
+        if (canHaveBody) {
+          requestInit.body = JSON.stringify(args);
+        } else {
+          // GET/HEAD cannot have body — fall back to query params
+          const url = new URL(path, entry.url);
+          for (const [key, value] of Object.entries(args)) {
+            url.searchParams.set(key, String(value));
+          }
+          return await this.executeRequest(url.toString(), requestInit);
+        }
         const url = new URL(path, entry.url);
         return await this.executeRequest(url.toString(), requestInit);
       } else if (dispatch === "query") {
-        // For query dispatch, build URL first then add query params
         const url = new URL(path, entry.url);
         for (const [key, value] of Object.entries(args)) {
           url.searchParams.set(key, String(value));
         }
         return await this.executeRequest(url.toString(), requestInit);
       } else if (dispatch === "path") {
-        // For path dispatch, replace path params in the path string BEFORE creating URL
         for (const [key, value] of Object.entries(args)) {
           path = path.split(`{${key}}`).join(String(value));
         }
@@ -120,7 +128,7 @@ export class ServiceToolDispatcher {
         return await this.executeRequest(url.toString(), requestInit);
       }
 
-      // Fallback (shouldn't reach here)
+      // Fallback
       const url = new URL(path, entry.url);
       return await this.executeRequest(url.toString(), requestInit);
     } catch (error) {
