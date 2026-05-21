@@ -643,7 +643,7 @@ describe("ServiceToolDispatcher", () => {
       const payload = await TokenValidator.validate(tokenPart, identity);
       expect(payload).not.toBeNull();
       expect(payload!.sub).toBe("agent-1");
-      expect(payload!.scope).toBe("service");
+      expect(payload!.scope).toBe("test-service");
       expect(payload!.session).toBe("urn:session:test-123");
       expect(payload!.exp - payload!.iat).toBe(300);
     });

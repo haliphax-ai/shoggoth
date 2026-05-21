@@ -23,7 +23,7 @@ export class TokenMinter {
 
     const payload: ServiceTokenPayload = {
       sub: agentId,
-      scope: "service",
+      scope: serviceId,
       iat,
       exp,
     };

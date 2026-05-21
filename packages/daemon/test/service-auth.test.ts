@@ -102,7 +102,7 @@ describe("TokenValidator", () => {
 
     expect(payload).not.toBeNull();
     expect(payload!.sub).toBe("agent-1");
-    expect(payload!.scope).toBe("service");
+    expect(payload!.scope).toBe("test-service");
     expect(typeof payload!.iat).toBe("number");
     expect(typeof payload!.exp).toBe("number");
     expect(payload!.exp).toBeGreaterThan(payload!.iat);

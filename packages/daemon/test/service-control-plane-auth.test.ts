@@ -57,7 +57,7 @@ describe("service-control-plane-auth (scoped access)", () => {
 
       expect(payload).not.toBeNull();
       expect(payload!.sub).toBe("agent-1");
-      expect(payload!.scope).toBe("service");
+      expect(payload!.scope).toBe("auth-service");
     });
 
     it("service authenticates with session context in the token", async () => {
