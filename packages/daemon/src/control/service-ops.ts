@@ -9,7 +9,7 @@ import type { ServiceApprovalStore } from "../service-approval-store";
 import type { ServiceRegistry, ServiceEntry } from "../service-registry";
 import type { ServiceToolRegistry } from "../service-tool-registry";
 import type { ServiceKeyStore } from "../service-key-store.js";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { serviceLifecycleManagerRef } from "../service-refs";
 
 /**
@@ -91,14 +91,29 @@ function computeFingerprint(entry: ServiceEntry): string {
 }
 
 /**
+ * Generate a random provision secret (hex-encoded, 32 bytes).
+ */
+function generateProvisionSecret(): string {
+  return randomBytes(32).toString("hex");
+}
+
+/**
  * Deliver an identity to a service via POST {url}/_shoggoth/identity.
+ * Includes X-Provision-Secret header for authentication.
  * Returns true if delivery succeeded, false otherwise.
  */
-async function deliverIdentity(serviceUrl: string, identity: string): Promise<boolean> {
+async function deliverIdentity(
+  serviceUrl: string,
+  identity: string,
+  provisionSecret: string,
+): Promise<boolean> {
   try {
     const res = await fetch(`${serviceUrl}/_shoggoth/identity`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Provision-Secret": provisionSecret,
+      },
       body: JSON.stringify({ identity }),
     });
     return res.ok;
@@ -370,7 +385,8 @@ export async function handleServiceApprove(
       // Deliver identity to the service
       delivery = "pending";
       if (entry.url) {
-        const delivered = await deliverIdentity(entry.url, keyPair.identity);
+        const provisionSecret = generateProvisionSecret();
+        const delivered = await deliverIdentity(entry.url, keyPair.identity, provisionSecret);
         if (delivered) {
           delivery = "delivered";
         } else {
@@ -456,7 +472,8 @@ export async function handleServiceRotateKey(
     // Deliver new identity to the service
     let delivery: "delivered" | "pending" = "pending";
     if (entry.url) {
-      const delivered = await deliverIdentity(entry.url, keyPair.identity);
+      const provisionSecret = generateProvisionSecret();
+      const delivered = await deliverIdentity(entry.url, keyPair.identity, provisionSecret);
       if (delivered) {
         delivery = "delivered";
       } else {

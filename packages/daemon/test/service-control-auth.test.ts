@@ -182,12 +182,17 @@ describe("service-control-auth (key provisioning)", () => {
           method: "POST",
           headers: expect.objectContaining({
             "Content-Type": "application/json",
+            "X-Provision-Secret": expect.any(String),
           }),
         }),
       );
 
-      // Verify the body contains the identity string
+      // Verify the X-Provision-Secret header is a non-empty hex string
       const fetchCall = vi.mocked(fetch).mock.calls[0];
+      const headers = (fetchCall[1] as RequestInit).headers as Record<string, string>;
+      expect(headers["X-Provision-Secret"]).toMatch(/^[0-9a-f]{64}$/);
+
+      // Verify the body contains the identity string
       const body = JSON.parse((fetchCall[1] as RequestInit).body as string);
       expect(body).toHaveProperty("identity");
       expect(typeof body.identity).toBe("string");
