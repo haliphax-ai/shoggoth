@@ -85,6 +85,7 @@ import {
   handleServiceRequest,
   handleServiceApprove,
   handleServiceRevoke,
+  handleServiceRotateKey,
 } from "./service-ops";
 
 export class IntegrationOpError extends Error {
@@ -2376,6 +2377,8 @@ export async function handleIntegrationControlOp(
       return handleServiceApprove(req, principal, ctx);
     case "service.revoke":
       return handleServiceRevoke(req, principal, ctx);
+    case "service.rotate-key":
+      return handleServiceRotateKey(req, principal, ctx);
 
     case "media_generate": {
       if (principal.kind !== "agent") {
