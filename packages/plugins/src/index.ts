@@ -38,6 +38,21 @@ export {
   type PlatformDeliveryResolver,
   type OperatorDelivery,
 } from "./platform-delivery-registry";
+
+// Plugin fingerprinting
+export { computePluginFingerprint, type PluginManifestForFingerprint } from "./plugin-fingerprint";
+
+// Plugin approval and ops enforcement
+export {
+  resolvePluginApprovalStatus,
+  enforcePluginOps,
+  createOpsEnforcementProxy,
+  type PluginApprovalRecord,
+  type PluginApprovalStatus,
+  type PluginOpsDeclaration,
+  type OpsEnforcementResult,
+} from "./plugin-approval";
+
 export type {
   DaemonConfigureCtx,
   DaemonStartupCtx,

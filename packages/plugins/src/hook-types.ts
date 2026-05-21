@@ -218,6 +218,8 @@ export interface ServiceRegisterCtx {
   readonly registerService: (entry: PluginServiceEntry) => void;
   /** Register tools with direct handler functions (no HTTP dispatch). */
   readonly registerTools: (tools: DirectServiceTool[]) => void;
+  /** Declare ops (capabilities/permissions) this plugin requires. */
+  readonly ops?: readonly string[];
   /** Resolved config (after daemon.configure waterfall). */
   readonly config: Readonly<ShoggothConfig>;
   /** Spawn a one-shot session (in-process, trusted identity). Returns the session result. */
