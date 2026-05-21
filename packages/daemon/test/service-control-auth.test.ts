@@ -13,6 +13,8 @@ import type { IntegrationOpsContext } from "../src/control/integration-ops";
 import type { ServiceApprovalStore } from "../src/service-approval-store";
 import type { ServiceRegistry } from "../src/service-registry";
 import type { ServiceToolRegistry } from "../src/service-tool-registry";
+import { serviceProvisionSecrets, tokenMinterRef } from "../src/service-refs";
+import { TokenMinter } from "../src/service-auth";
 
 import {
   handleServiceList,
@@ -77,9 +79,10 @@ describe("service-control-auth (key provisioning)", () => {
 
   afterEach(async () => {
     vi.unstubAllGlobals();
+    serviceProvisionSecrets.clear();
+    tokenMinterRef.current = undefined;
     await closeTestDb(db, tmpDir);
   });
-
   describe("service.approve key provisioning", () => {
     it("generates an age identity and stores recipient in ServiceKeyStore", async () => {
       vi.mocked(mockServiceRegistry.get).mockReturnValue({
@@ -160,6 +163,9 @@ describe("service-control-auth (key provisioning)", () => {
         registeredTools: [],
         approvalStatus: "pending" as const,
       });
+
+      // Seed provision secret so delivery can authenticate
+      serviceProvisionSecrets.set("svc-deliver", "deadbeef".repeat(8));
 
       // Mock fetch to succeed
       vi.mocked(fetch).mockResolvedValue(
@@ -318,6 +324,9 @@ describe("service-control-auth (key provisioning)", () => {
         registeredTools: ["tool1"],
         approvalStatus: "approved" as const,
       });
+
+      // Set up token minter so rotation can authenticate via Bearer token
+      tokenMinterRef.current = new TokenMinter(keyStore);
 
       // Mock fetch to succeed for identity delivery
       vi.mocked(fetch).mockResolvedValue(

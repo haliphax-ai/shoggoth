@@ -1,7 +1,8 @@
 import { DEFAULT_HITL_CONFIG, loadLayeredConfig, LAYOUT, VERSION } from "@shoggoth/shared";
+import { serviceProvisionSecrets } from "./service-refs";
 import { routeMcpToolInvocation } from "@shoggoth/mcp-integration";
 import { fileURLToPath } from "node:url";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -596,6 +597,14 @@ void (async () => {
   // (TurnQueue and ModelResilienceGate initialized earlier, before fireDaemonHooks)
 
   function processDeclarationToSpec(decl: ProcessDeclaration): ProcessSpec {
+    // For service processes, generate and inject a provision secret
+    let env = decl.env;
+    if (decl.service) {
+      const secret = randomBytes(32).toString("hex");
+      serviceProvisionSecrets.set(decl.id, secret);
+      env = { ...env, SHOGGOTH_PROVISION_SECRET: secret };
+    }
+
     return {
       id: decl.id,
       label: decl.label,
@@ -603,7 +612,7 @@ void (async () => {
       command: decl.command,
       args: decl.args,
       cwd: decl.cwd,
-      env: decl.env,
+      env,
       restart: {
         mode: decl.restartMode ?? "on-failure",
         maxRetries: decl.maxRetries ?? 5,
@@ -684,6 +693,7 @@ void (async () => {
   procman.on("process-stopped", (mp: { spec: { id: string } }) => {
     const decl = processDeclarations.get(mp.spec.id);
     if (decl?.service) {
+      serviceProvisionSecrets.delete(mp.spec.id);
       serviceLifecycleManager.onProcessStopped(mp.spec.id).catch((err) => {
         getLogger("daemon").error("service lifecycle onProcessStopped failed", {
           processId: mp.spec.id,

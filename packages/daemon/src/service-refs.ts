@@ -33,3 +33,9 @@ export const tokenMinterRef: { current: TokenMinter | undefined } = {
 export const serviceKeyStoreRef: { current: ServiceKeyStore | undefined } = {
   current: undefined,
 };
+
+/**
+ * In-memory map of provision secrets injected into managed service processes at spawn time.
+ * Keyed by process/service ID. Used by service-ops to authenticate identity delivery.
+ */
+export const serviceProvisionSecrets: Map<string, string> = new Map();

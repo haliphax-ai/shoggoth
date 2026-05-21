@@ -9,8 +9,8 @@ import type { ServiceApprovalStore } from "../service-approval-store";
 import type { ServiceRegistry, ServiceEntry } from "../service-registry";
 import type { ServiceToolRegistry } from "../service-tool-registry";
 import type { ServiceKeyStore } from "../service-key-store.js";
-import { createHash, randomBytes } from "node:crypto";
-import { serviceLifecycleManagerRef } from "../service-refs";
+import { createHash } from "node:crypto";
+import { serviceLifecycleManagerRef, serviceProvisionSecrets } from "../service-refs";
 
 /**
  * Extract the service approval store from the integration context.
@@ -91,15 +91,8 @@ function computeFingerprint(entry: ServiceEntry): string {
 }
 
 /**
- * Generate a random provision secret (hex-encoded, 32 bytes).
- */
-function generateProvisionSecret(): string {
-  return randomBytes(32).toString("hex");
-}
-
-/**
  * Deliver an identity to a service via POST {url}/_shoggoth/identity.
- * Includes X-Provision-Secret header for authentication.
+ * Includes X-Provision-Secret header for authentication (initial provisioning).
  * Returns true if delivery succeeded, false otherwise.
  */
 async function deliverIdentity(
@@ -115,6 +108,31 @@ async function deliverIdentity(
         "X-Provision-Secret": provisionSecret,
       },
       body: JSON.stringify({ identity }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Deliver a rotated identity to a service via POST {url}/_shoggoth/identity.
+ * Authenticates with a Bearer token minted using the current key (proves daemon identity).
+ * Returns true if delivery succeeded, false otherwise.
+ */
+async function deliverRotatedIdentity(
+  serviceUrl: string,
+  newIdentity: string,
+  rotationToken: string,
+): Promise<boolean> {
+  try {
+    const res = await fetch(`${serviceUrl}/_shoggoth/identity`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${rotationToken}`,
+      },
+      body: JSON.stringify({ identity: newIdentity }),
     });
     return res.ok;
   } catch {
@@ -383,16 +401,25 @@ export async function handleServiceApprove(
       const keyPair = await keyStore.generateIdentity(serviceId);
 
       // Deliver identity to the service
+      // Deliver identity to the service
       delivery = "pending";
       if (entry.url) {
-        const provisionSecret = generateProvisionSecret();
-        const delivered = await deliverIdentity(entry.url, keyPair.identity, provisionSecret);
-        if (delivered) {
-          delivery = "delivered";
+        // Use the provision secret that was injected at spawn time
+        const provisionSecret = serviceProvisionSecrets.get(serviceId);
+        if (provisionSecret) {
+          const delivered = await deliverIdentity(entry.url, keyPair.identity, provisionSecret);
+          if (delivered) {
+            delivery = "delivered";
+          } else {
+            // Log warning but don't fail the approval
+            console.warn(
+              `[service-ops] Failed to deliver identity to service '${serviceId}' at ${entry.url}/_shoggoth/identity`,
+            );
+          }
         } else {
-          // Log warning but don't fail the approval
+          // No stored secret — service wasn't spawned by procman (external) or was restarted outside our control
           console.warn(
-            `[service-ops] Failed to deliver identity to service '${serviceId}' at ${entry.url}/_shoggoth/identity`,
+            `[service-ops] No provision secret for service '${serviceId}' — cannot deliver identity automatically`,
           );
         }
       }
@@ -466,14 +493,25 @@ export async function handleServiceRotateKey(
       return { error: `Service '${serviceId}' has no existing key to rotate` };
     }
 
-    // Rotate the key
+    // Mint a rotation token with the current key (proves daemon identity to the service)
+    const { tokenMinterRef } = await import("../service-refs");
+    const tokenMinter = tokenMinterRef.current;
+    let rotationToken: string | null = null;
+    if (tokenMinter) {
+      try {
+        rotationToken = await tokenMinter.mint("daemon", serviceId);
+      } catch {
+        // If minting fails, we can't authenticate the rotation
+      }
+    }
+
+    // Rotate the key (generates new pair, replaces stored recipient)
     const keyPair = await keyStore.rotateIdentity(serviceId);
 
     // Deliver new identity to the service
     let delivery: "delivered" | "pending" = "pending";
-    if (entry.url) {
-      const provisionSecret = generateProvisionSecret();
-      const delivered = await deliverIdentity(entry.url, keyPair.identity, provisionSecret);
+    if (entry.url && rotationToken) {
+      const delivered = await deliverRotatedIdentity(entry.url, keyPair.identity, rotationToken);
       if (delivered) {
         delivery = "delivered";
       } else {
@@ -481,8 +519,11 @@ export async function handleServiceRotateKey(
           `[service-ops] Failed to deliver rotated identity to service '${serviceId}' at ${entry.url}/_shoggoth/identity`,
         );
       }
+    } else if (entry.url && !rotationToken) {
+      console.warn(
+        `[service-ops] Cannot deliver rotated identity to '${serviceId}' — no token minter available`,
+      );
     }
-
     // Update approval record fingerprint
     const keyFingerprint = keyStore.getFingerprint(serviceId);
     const approval = approvalStore.get(serviceId);
