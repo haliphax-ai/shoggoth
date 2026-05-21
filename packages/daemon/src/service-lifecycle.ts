@@ -3,7 +3,17 @@ import { type ExternalServiceDeclaration } from "./external-service-health-polle
 import { ServiceRegistry, type ServiceEntry } from "./service-registry";
 import { ServiceToolRegistry } from "./service-tool-registry";
 import type { ShoggothPluginSystem } from "@shoggoth/plugins";
-import type { PluginServiceEntry, DirectServiceTool, ServiceRegisterCtx } from "@shoggoth/plugins";
+
+import type {
+  PluginServiceEntry,
+  DirectServiceTool,
+  ServiceRegisterCtx,
+  PluginApprovalStore as PluginApprovalStoreInterface,
+  PluginApprovalRecord,
+  ServiceApprovalGate,
+} from "@shoggoth/plugins";
+import { createGatedServiceRegisterCtx } from "@shoggoth/plugins";
+import { ServiceApprovalStore } from "./service-approval-store";
 
 /**
  * Create a new ServiceRegistry instance.
@@ -23,6 +33,8 @@ export function createServiceToolRegistry(
 }
 
 export interface FireServiceRegisterHookOptions {
+  /** Optional approval store for plugin approval gating. */
+  approvalStore?: ServiceApprovalStore;
   spawnSession?: ServiceRegisterCtx["spawnSession"];
 }
 
@@ -36,6 +48,36 @@ export interface FireServiceRegisterHookOptions {
  * @param config - The resolved config (after daemon.configure waterfall)
  * @param opts - Optional capabilities to expose to service plugins
  */
+/**
+ * Adapter to bridge daemon's ServiceApprovalStore to the plugin's PluginApprovalStore interface.
+ */
+function createPluginApprovalStoreAdapter(
+  daemonStore: ServiceApprovalStore,
+): PluginApprovalStoreInterface {
+  return {
+    get(pluginName: string): PluginApprovalRecord | undefined {
+      const record = daemonStore.get(pluginName);
+      if (!record) return undefined;
+      return {
+        pluginName: record.serviceId,
+        fingerprint: record.approvedFingerprint ?? "",
+        approvedAt: record.createdAt,
+        approvedOps: daemonStore.getApprovedOps(pluginName),
+      };
+    },
+    set(pluginName: string, rec: PluginApprovalRecord): void {
+      daemonStore.upsert(
+        pluginName,
+        rec.approvedOps.length > 0 ? "approved" : "pending",
+        rec.fingerprint,
+      );
+      if (rec.approvedOps.length > 0) {
+        daemonStore.setApprovedOps(pluginName, [...rec.approvedOps]);
+      }
+    },
+  };
+}
+
 export async function fireServiceRegisterHook(
   system: ShoggothPluginSystem,
   registry: ServiceRegistry,
@@ -86,6 +128,14 @@ export async function fireServiceRegisterHook(
     spawnSession: opts?.spawnSession,
   };
 
+  // Wire approval gate if approval store is provided
+  if (opts?.approvalStore) {
+    (ctx as ServiceRegisterCtx & { approvalGate?: ServiceApprovalGate }).approvalGate = {
+      store: createPluginApprovalStoreAdapter(opts.approvalStore),
+      createGatedCtx: createGatedServiceRegisterCtx,
+    };
+  }
+
   // Fire the async hook - plugins can implement this as async
   await system.lifecycle["service.register"].emit(ctx);
 }
@@ -95,7 +145,6 @@ export async function fireServiceRegisterHook(
 // ---------------------------------------------------------------------------
 
 import { ManifestFetcher } from "./manifest-fetcher";
-import { ServiceApprovalStore } from "./service-approval-store";
 import { computeManifestFingerprint } from "./manifest-fingerprint";
 
 /**

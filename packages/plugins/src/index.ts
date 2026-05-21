@@ -86,4 +86,5 @@ export type {
   DirectToolHandler,
   DirectToolContext,
   PluginServiceEntry,
+  ServiceApprovalGate,
 } from "./hook-types";

@@ -213,6 +213,17 @@ export interface PluginServiceEntry {
   readonly basePath?: string;
 }
 
+/**
+ * Plugin approval gate - optionally attached to ServiceRegisterCtx
+ * to enable fingerprint-based approval gating for plugins.
+ */
+export interface ServiceApprovalGate {
+  /** Store for plugin approval records (get/set by plugin name). */
+  store: import("./plugin-registration-gate").PluginApprovalStore;
+  /** Function to create a gated context from an inner context. */
+  createGatedCtx: typeof import("./plugin-registration-gate").createGatedServiceRegisterCtx;
+}
+
 export interface ServiceRegisterCtx {
   /** Register this plugin as a service in the ServiceRegistry. */
   readonly registerService: (entry: PluginServiceEntry) => void;
@@ -230,4 +241,6 @@ export interface ServiceRegisterCtx {
     sessionKey?: string;
     mode?: string;
   }) => Promise<unknown>;
+  /** Optional approval gate for plugin fingerprint gating. */
+  readonly approvalGate?: ServiceApprovalGate;
 }
