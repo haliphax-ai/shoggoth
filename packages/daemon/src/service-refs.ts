@@ -7,6 +7,7 @@ import type { ServiceRegistry } from "./service-registry";
 import type { ServiceToolRegistry } from "./service-tool-registry";
 import type { ServiceApprovalStore } from "./service-approval-store";
 import type { ServiceLifecycleManager } from "./service-lifecycle";
+import type { TokenMinter } from "./service-auth.js";
 
 export const serviceRegistryRef: { current: ServiceRegistry | undefined } = {
   current: undefined,
@@ -21,5 +22,9 @@ export const serviceApprovalStoreRef: { current: ServiceApprovalStore | undefine
 };
 
 export const serviceLifecycleManagerRef: { current: ServiceLifecycleManager | undefined } = {
+  current: undefined,
+};
+
+export const tokenMinterRef: { current: TokenMinter | undefined } = {
   current: undefined,
 };
