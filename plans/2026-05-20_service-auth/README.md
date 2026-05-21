@@ -56,25 +56,34 @@ Service receives request
 
 `ServiceKeyStore` manages age key material in the daemon's data directory:
 
-- `generateIdentity(serviceId)` — creates a new X25519 key pair, stores the recipient, returns the identity (private key) for one-time display
+- `generateIdentity(serviceId)` — creates a new X25519 key pair, stores the recipient, returns the identity (private key) for provisioning
 - `getRecipient(serviceId)` — retrieves the stored public key for token minting
 - `rotateIdentity(serviceId)` — generates a new key pair, replaces the stored recipient, returns new identity
 - `deleteIdentity(serviceId)` — removes key material on revocation
 
-Key material is stored in the state DB alongside approval records, encrypted at rest using the daemon's master key (same pattern as the credential vault).
+Key material (recipients only) is stored in the state DB alongside approval records. The daemon does not persist private keys — they are generated, delivered to the service, and discarded.
+
+### Key Provisioning
+
+When a service is approved (or its key is rotated), the daemon delivers the private key directly to the service over its existing HTTP channel:
+
+1. Daemon generates the age key pair
+2. Daemon calls `POST {serviceUrl}/_shoggoth/identity` with the private key in the request body
+3. Service receives the key and stores it however it sees fit (memory, file, env, secrets manager)
+4. Daemon stores only the recipient (public key)
+
+The provisioning endpoint is part of the service contract — services that want to participate in authenticated dispatch must implement `POST /_shoggoth/identity`. The `@shoggoth/service-auth` package provides a handler for this.
+
+For external services that may not be reachable at approval time, the CLI falls back to displaying the key for manual delivery. The daemon retries provisioning on the next health check recovery if the initial delivery failed.
 
 ### CLI Commands
 
 - `shoggoth service register <id>` — submits a registration request (does not auto-approve)
-- `shoggoth service approve <id>` — approves the request, generates age identity, displays private key once
-- `shoggoth service rotate-key <id>` — generates new identity, displays new private key
+- `shoggoth service approve <id>` — approves the request, generates age identity, delivers key to service
+- `shoggoth service rotate-key <id>` — generates new identity, delivers new key to service
 - `shoggoth service revoke <id>` — revokes approval, deletes key material, deregisters tools
 
 The existing `list`, `requests`, and `request` commands already work and need no changes beyond displaying key fingerprints.
-
-### Scoped Control Plane Access
-
-Managed/external services can connect to the control plane and perform operations within their approved scope:
 
 - Service manifest declares `ops[]` — the operations it wants to perform (e.g., `session.send`, `kv.get`)
 - Scope is displayed during `shoggoth service approve` for operator review
@@ -101,7 +110,7 @@ Managed/external services can connect to the control plane and perform operation
 
 ## Considerations
 
-- **One-time key display** — The service's private key (identity) is shown exactly once at approval time. If the operator loses it, they must `rotate-key`. This matches the security model of age (no key escrow).
+- **Key provisioning endpoint** — Services must implement `POST /_shoggoth/identity` to receive their private key. If the service is unreachable at approval time (external services), the CLI falls back to displaying the key. The daemon never persists private keys — if a service loses its key, the operator runs `rotate-key` to generate and deliver a new one.
 - **Token expiry window** — 5 minutes is short enough to limit replay but long enough to tolerate clock skew between daemon and service. Configurable per-service if needed later.
 - **Clock skew** — Services with significant clock drift will reject valid tokens. Document that NTP sync is expected. A future enhancement could add a `leeway` parameter to `TokenValidator`.
 - **Performance** — Age encryption per tool call adds latency (~1-5ms). For high-throughput services, consider a token cache with TTL < expiry. Deferred to a future optimization if profiling shows it matters.

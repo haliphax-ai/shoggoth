@@ -53,38 +53,41 @@ Replace the placeholder token with real minted tokens. This is the critical inte
 - `packages/daemon/test/service-tool-dispatcher.test.ts`
 - `packages/daemon/src/service-refs.ts` (wire TokenMinter into DI)
 
-## Phase 4: CLI Key Generation on Approve/Rotate/Revoke
+## Phase 4: Key Provisioning on Approve/Rotate/Revoke
 
-Wire key lifecycle into the existing CLI commands. After this phase, operators can generate and manage service identities.
+Wire key lifecycle into the existing CLI commands and add the provisioning delivery mechanism. After this phase, operators can approve services and keys are delivered automatically.
 
-- Update `service.approve` control operation to call `keyStore.generateIdentity(serviceId)` and return the identity in the response
-- Update CLI `approve` command to display the private key with clear instructions
-- Add `service.rotate-key` control operation — calls `keyStore.rotateIdentity(serviceId)`, returns new identity
+- Update `service.approve` control operation to call `keyStore.generateIdentity(serviceId)` and deliver the identity to the service via `POST {serviceUrl}/_shoggoth/identity`
+- If the service is unreachable at approval time (external services), fall back to displaying the key in CLI output and queue retry on next health check recovery
+- Add `service.rotate-key` control operation — generates new identity, delivers to service, invalidates old tokens
 - Add `shoggoth service rotate-key <id>` CLI command
 - Update `service.revoke` control operation to call `keyStore.deleteIdentity(serviceId)`
 - Add `shoggoth service register <id>` CLI command — submits registration request without approval
 - Update `service.list` and `service.request` responses to include key fingerprint
 - Add `key_fingerprint` and `approved_ops` columns to `service_approvals` table (migration)
-- Unit tests for control operations with key generation
-- CLI output tests
+- Track provisioning state (`delivered` / `pending`) in the key store so the lifecycle manager knows to retry
+- Unit tests for control operations with key generation and delivery
+- Unit tests for fallback behavior when service is unreachable
 
 **Files:**
 
 - `packages/daemon/src/control/service-ops.ts`
 - `packages/cli/src/run-service.ts`
+- `packages/daemon/src/service-lifecycle.ts` (retry provisioning on health recovery)
 - `packages/daemon/test/service-control-auth.test.ts`
 - `packages/daemon/src/state-db.ts` (migration for approval table columns)
 
 ## Phase 5: Standalone `@shoggoth/service-auth` Package
 
-Extract `TokenValidator` into a standalone package that service authors can import without depending on the full daemon.
+Extract `TokenValidator` and the identity provisioning handler into a standalone package that service authors can import without depending on the full daemon.
 
 - Create `packages/service-auth/` package with minimal dependencies (`age-encryption` only)
 - Export `TokenValidator` class and `ServiceTokenPayload` interface
-- Export a convenience `createAuthMiddleware(identityString)` for Express/Koa-style services
+- Export `createAuthMiddleware(opts)` — convenience middleware for validating Bearer tokens
+- Export `createIdentityHandler(opts)` — HTTP handler for `POST /_shoggoth/identity` that receives and stores the private key via a caller-provided callback
 - Add README with usage examples
 - Add to monorepo workspace config
-- Unit tests (same validation tests, but running against the standalone package)
+- Unit tests (validation round-trip, identity handler acceptance/rejection)
 
 **Files:**
 
@@ -93,7 +96,9 @@ Extract `TokenValidator` into a standalone package that service authors can impo
 - `packages/service-auth/src/index.ts`
 - `packages/service-auth/src/validator.ts`
 - `packages/service-auth/src/middleware.ts`
+- `packages/service-auth/src/identity-handler.ts`
 - `packages/service-auth/test/validator.test.ts`
+- `packages/service-auth/test/identity-handler.test.ts`
 - `packages/service-auth/README.md`
 
 ## Phase 6: Scoped Control Plane Access

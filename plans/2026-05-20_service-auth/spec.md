@@ -15,7 +15,7 @@ export class ServiceKeyStore {
   /**
    * Generate a new age X25519 identity for a service.
    * Stores the recipient (public key) in the DB.
-   * @returns The identity (private key) string — displayed once to the operator.
+   * @returns The identity (private key) string — delivered to the service via provisioning endpoint.
    */
   async generateIdentity(serviceId: string): Promise<{ identity: string; recipient: string }>;
 
@@ -212,7 +212,7 @@ async function authMiddleware(req, res, next) {
   }
 
   const token = authHeader.slice(7);
-  const payload = await TokenValidator.validate(token, process.env.SERVICE_IDENTITY);
+  const payload = await TokenValidator.validate(token, myStoredIdentity);
 
   if (!payload) {
     return res.status(401).json({ error: "Invalid or expired token" });
@@ -223,7 +223,25 @@ async function authMiddleware(req, res, next) {
 }
 ```
 
-### CLI approval with key generation
+### Identity provisioning endpoint (service-side)
+
+```ts
+import { createIdentityHandler } from "@shoggoth/service-auth";
+
+// The handler stores the identity and returns 200 on success.
+// Services decide their own storage strategy (memory, file, etc.)
+app.post(
+  "/_shoggoth/identity",
+  createIdentityHandler({
+    onReceive: async (identity: string) => {
+      // Store the identity however the service prefers
+      currentIdentity = identity;
+    },
+  }),
+);
+```
+
+### CLI approval with key provisioning
 
 ```
 $ shoggoth service approve my-service
@@ -240,10 +258,25 @@ Approve this service? [y/N] y
 
 ✓ Service approved.
 ✓ Age identity generated.
+✓ Identity delivered to service via POST /_shoggoth/identity.
+```
 
-Service identity (private key) — save this securely, it will not be shown again:
+### CLI approval — fallback when service is unreachable
+
+```
+$ shoggoth service approve my-external-service
+
+Service: my-external-service
+Tier: external
+Manifest fingerprint: b7e1a9...
+
+Approve this service? [y/N] y
+
+✓ Service approved.
+✓ Age identity generated.
+⚠ Could not deliver identity (service unreachable). Will retry on next health check.
+
+  If manual delivery is needed, the identity is:
 
   AGE-SECRET-KEY-1QFZQHELX3...
-
-Set this as the SERVICE_IDENTITY environment variable in your service configuration.
 ```
