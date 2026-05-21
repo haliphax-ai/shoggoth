@@ -151,6 +151,7 @@ For managed/external services, the control plane authenticates the connection us
 - **Plugin fingerprint stability** — Plugin fingerprints must be deterministic across daemon restarts. The fingerprint is computed from the sorted, serialized tool declarations and ops array — not from file contents or load order.
 - **`packages/service-auth` helper** — A standalone npm package containing only `TokenValidator` so service authors can validate tokens without depending on the full daemon. Minimal dependencies (just `age-encryption`).
 - **Gateway auth is out of scope** — This plan covers backchannel (daemon → service) authentication and scoped control plane access only. Gateway auth enforcement for external clients (browsers, third-party callers) requires a user-facing auth layer (session cookies, OAuth, etc.) and will be tackled in a future plan.
+- **Non-service plugin auth is out of scope** — Platform plugins and other non-service plugins (e.g., Discord) receive `deps` with unscoped access to `invokeControlOp`, `abortSession`, raw `db`, etc. Scoping those contexts requires a broader plugin system refactor and will be addressed in a separate plan alongside gateway auth.
 
 ## Migration
 
