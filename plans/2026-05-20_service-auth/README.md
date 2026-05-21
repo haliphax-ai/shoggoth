@@ -34,7 +34,7 @@ All three service tiers participate in fingerprinting and ops authorization, but
 | Key provisioning           | ✗              | ✓       | ✓        |
 | Approval required          | ✓              | ✓       | ✓        |
 
-Plugin services are more trusted in that they don't need cryptographic proof on each tool call (they execute in-process, so impersonation isn't possible). But they are not unconditionally trusted — they must declare what operations they intend to perform, and those declarations are enforced at runtime.
+Plugin services are more trusted in that they don't need cryptographic proof on each tool call (they execute in-process, so impersonation isn't possible). But they are not unconditionally trusted — they require operator approval before activation (tools and ops remain suspended until approved), must declare what operations they intend to perform, and those declarations are enforced at runtime.
 
 ### Key Architecture
 
@@ -157,7 +157,7 @@ For managed/external services, the control plane authenticates the connection us
 - The `service_approvals` table gains an optional `key_fingerprint` column for tracking which key pair is active
 - The `service_approvals` table gains an `approved_ops` column (JSON array)
 - Existing approved services (approved before this feature) will need re-approval to generate a key pair (managed/external) or to record their ops (all tiers)
-- Existing plugin services that were auto-approved will enter `pending-reapproval` on first load after this feature lands (their fingerprint and ops need to be recorded)
+- Existing plugin services currently activate without approval. After this feature lands, they will enter `pending` on first load and remain inactive until the operator approves them via `shoggoth service approve`
 - The `ServiceKeyStore` creates its own table (`service_keys`) in the state DB on first use
 - No breaking changes to existing config
 
