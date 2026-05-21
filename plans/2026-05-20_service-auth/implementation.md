@@ -128,37 +128,26 @@ Enable managed/external services to connect to the control plane and perform ope
 - `packages/shared/src/schema.ts` (manifest ops field)
 - `packages/daemon/src/service-lifecycle.ts` (notify control plane on revoke/rotate)
 
-## Phase 7: Service Consumer Integration (Demo & Canvas)
+## Phase 7: Service Consumer Integration (Demo)
 
-Update the existing service packages to consume the auth system, serving as reference implementations for service authors.
+Update the demo service to consume the auth system, serving as the reference implementation for service authors.
 
 ### service-demo (managed service — full auth validation)
 
 The demo service is a standalone managed process and the primary example of a service that validates Shoggoth tokens. It demonstrates the complete auth flow.
 
 - Add `@shoggoth/service-auth` as a dependency
+- Implement `POST /_shoggoth/identity` endpoint using `createIdentityHandler()` — writes the received key to `/var/lib/shoggoth/daemon/demo_service_key` by default (configurable via `DEMO_SERVICE_KEY_PATH` env var)
+- On startup, read the identity from that file path if it exists
 - Add auth middleware that extracts and validates the Bearer token on `/api/*` routes
-- Read the service identity from `SERVICE_IDENTITY` environment variable (injected by procman or set manually)
 - Reject unauthenticated requests to tool endpoints with 401
-- Leave `/health` and `/manifest` endpoints unauthenticated (called by the daemon before auth is established)
+- Leave `/health`, `/manifest`, and `/_shoggoth/identity` endpoints unauthenticated (called by the daemon before auth is established)
 - Log the decoded token payload (agent ID, session) for observability
 - Update the manifest to declare `ops: []` (no control plane access needed)
 - Add example in README showing how to test with a manually minted token
 
 **Files:**
 
-- `packages/service-demo/src/server.ts` (add auth middleware)
+- `packages/service-demo/src/server.ts` (add identity endpoint, auth middleware)
 - `packages/service-demo/package.json` (add `@shoggoth/service-auth` dependency)
 - `packages/service-demo/README.md` (document auth setup)
-
-### service-canvas (plugin service — no auth changes)
-
-The canvas service is a plugin (in-process, trusted). Plugin services are exempt from auth — they don't receive tokens on direct tool calls and don't need to validate anything. No code changes required for the auth layer itself.
-
-- Verify canvas continues to work unchanged with the new dispatcher (plugin tools bypass `ServiceToolDispatcher` entirely)
-- Document in canvas README that plugin services are inherently trusted and don't participate in the token auth flow
-- If canvas ever moves to a managed/external service tier in the future, it would need to add `@shoggoth/service-auth` at that point
-
-**Files:**
-
-- `packages/service-canvas/README.md` (document auth exemption for plugin tier)
