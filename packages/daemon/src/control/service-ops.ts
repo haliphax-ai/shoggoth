@@ -396,11 +396,11 @@ export async function handleServiceApprove(
     // Generate age identity key for the service (if key store is available)
     let delivery: "delivered" | "pending" | undefined;
     let keyFingerprint: string | null = null;
+    let identityForOperator: string | undefined;
 
     if (keyStore) {
       const keyPair = await keyStore.generateIdentity(serviceId);
 
-      // Deliver identity to the service
       // Deliver identity to the service
       delivery = "pending";
       if (entry.url) {
@@ -422,6 +422,11 @@ export async function handleServiceApprove(
             `[service-ops] No provision secret for service '${serviceId}' — cannot deliver identity automatically`,
           );
         }
+      }
+
+      // If delivery didn't succeed, include the identity in the response for the operator
+      if (delivery !== "delivered") {
+        identityForOperator = keyPair.identity;
       }
 
       keyFingerprint = keyStore.getFingerprint(serviceId);
@@ -450,6 +455,7 @@ export async function handleServiceApprove(
       fingerprint,
       ...(keyFingerprint ? { key_fingerprint: keyFingerprint } : {}),
       ...(delivery ? { delivery } : {}),
+      ...(identityForOperator ? { identity: identityForOperator } : {}),
     };
   } catch (e) {
     if (e instanceof Error && e.message.includes("service_id")) {
@@ -536,7 +542,14 @@ export async function handleServiceRotateKey(
       );
     }
 
-    return { ok: true, service_id: serviceId, key_fingerprint: keyFingerprint, delivery };
+    return {
+      ok: true,
+      service_id: serviceId,
+      key_fingerprint: keyFingerprint,
+      delivery,
+      // If delivery didn't succeed, include the identity for the operator
+      ...(delivery !== "delivered" ? { identity: keyPair.identity } : {}),
+    };
   } catch (e) {
     if (e instanceof Error && e.message.includes("service_id")) {
       return { error: e.message };
