@@ -8,17 +8,49 @@
  *   GET  /              — HTML page showing current message
  *   GET  /health        — Lightweight health check (returns "ok")
  *   GET  /manifest      — Service manifest for Shoggoth discovery
- *   POST /api/set_message  — Set the displayed message
- *   GET  /api/get_message  — Get the current message
+ *   POST /_shoggoth/identity — Identity provisioning endpoint
+ *   POST /api/set_message  — Set the displayed message (auth required)
+ *   GET  /api/get_message  — Get the current message (auth required)
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { createIdentityHandler, TokenValidator } from "@shoggoth/service-auth";
 
 const PORT = Number(process.env.DEMO_SERVICE_PORT) || Number(process.argv[2]) || 3200;
 const HOST = process.env.DEMO_SERVICE_HOST || "127.0.0.1";
 
+const KEY_PATH = process.env.DEMO_SERVICE_KEY_PATH || "./demo-service-identity.key";
+const PROVISION_SECRET =
+  process.env.DEMO_PROVISION_SECRET || process.env.SHOGGOTH_PROVISION_SECRET || "";
+
 /** In-memory message displayed by the demo service. */
 let message = "Hello from the Shoggoth demo service!";
+
+/** Stored identity for token validation. */
+let storedIdentity: string | null = null;
+
+// Load identity from file on startup if it exists
+try {
+  if (existsSync(KEY_PATH)) {
+    storedIdentity = readFileSync(KEY_PATH, "utf-8").trim();
+  }
+} catch {
+  // Ignore read errors on startup
+}
+
+/** Identity handler using service-auth. */
+const identityHandler = createIdentityHandler({
+  provisionSecret: PROVISION_SECRET || undefined,
+  onReceive(identity: string) {
+    storedIdentity = identity;
+    try {
+      writeFileSync(KEY_PATH, identity, "utf-8");
+    } catch {
+      // Ignore write errors (e.g. read-only filesystem)
+    }
+  },
+});
 
 /** Service manifest returned at GET /manifest. */
 const manifest = {
@@ -111,10 +143,85 @@ async function handler(req: IncomingMessage, res: ServerResponse): Promise<void>
   }
 
   // GET /manifest — service manifest
-  // GET /manifest — service manifest
   if (url.pathname === "/manifest" && method === "GET") {
     json(res, 200, manifest);
     return;
+  }
+
+  // POST /_shoggoth/identity — identity provisioning
+  if (url.pathname === "/_shoggoth/identity" && method === "POST") {
+    const body = await readBody(req);
+    let parsed: { identity?: string };
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      json(res, 400, { error: "invalid JSON body" });
+      return;
+    }
+
+    const headers: Record<string, string | undefined> = {
+      "x-provision-secret": req.headers["x-provision-secret"] as string | undefined,
+      authorization: req.headers["authorization"] as string | undefined,
+    };
+
+    // Check if this is a rotation request (Bearer token with existing identity)
+    const authHeader = headers["authorization"];
+    if (authHeader && authHeader.startsWith("Bearer ") && storedIdentity) {
+      const token = authHeader.slice(7);
+      const payload = await TokenValidator.validate(token, storedIdentity);
+      if (payload) {
+        // Valid token — allow rotation
+        if (!parsed.identity) {
+          json(res, 400, { error: "Missing identity in request body" });
+          return;
+        }
+        storedIdentity = parsed.identity;
+        try {
+          writeFileSync(KEY_PATH, parsed.identity, "utf-8");
+        } catch {
+          // Ignore write errors
+        }
+        json(res, 200, { ok: true });
+        return;
+      }
+      // Invalid token — fall through to provision secret check
+    }
+
+    // Use the identity handler for provision-secret-based provisioning
+    try {
+      const result = identityHandler({
+        headers,
+        body: parsed as { identity: string },
+      });
+      json(res, 200, result);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Forbidden";
+      json(res, 403, { error: msg });
+    }
+    return;
+  }
+
+  // Auth middleware for /api/* routes
+  if (url.pathname.startsWith("/api/")) {
+    const authHeader = req.headers["authorization"];
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      json(res, 401, { error: "missing or invalid authorization header" });
+      return;
+    }
+
+    const token = authHeader.slice(7);
+    if (!storedIdentity) {
+      json(res, 401, { error: "service identity not provisioned" });
+      return;
+    }
+
+    const payload = await TokenValidator.validate(token, storedIdentity);
+    if (!payload) {
+      json(res, 401, { error: "invalid or expired token" });
+      return;
+    }
+
+    // Token is valid — proceed to route handling
   }
 
   // POST /api/set_message — set the message
