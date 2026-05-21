@@ -101,14 +101,38 @@ Extract `TokenValidator` and the identity provisioning handler into a standalone
 - `packages/service-auth/test/identity-handler.test.ts`
 - `packages/service-auth/README.md`
 
-## Phase 6: Scoped Control Plane Access
+## Phase 6: Plugin Fingerprinting & Ops Declaration
 
-Enable managed/external services to connect to the control plane and perform operations within their approved scope. This is the most complex phase — it adds a new authentication path to the control plane.
+Bring plugin services into the approval and scope enforcement model. After this phase, plugins must declare their ops and be approved before those ops are available at runtime.
 
-- Add `ops[]` field to service manifest schema
-- Display requested ops during `shoggoth service approve` for operator review
+- Compute a deterministic fingerprint for each plugin at load time from its sorted tool declarations and ops array
+- Add `ops` field to the `ServiceRegisterCtx` plugin registration API — plugins declare what control plane operations they intend to use
+- On plugin load, check the approval store:
+  - No record → create `pending` record with fingerprint and declared ops, suspend tools/ops until approved
+  - Approved + fingerprint matches → tools and ops active
+  - Approved + fingerprint changed → enter `pending-reapproval`, suspend tools/ops
+  - Revoked → log warning, no tools/ops
+- Add scope enforcement on plugin `deps` access — when a plugin calls a daemon operation via `deps`, check it against the plugin's approved ops list
+- Wrap `deps` in a scope-checking proxy that rejects undeclared operations
+- Plugin services appear in `shoggoth service list` / `requests` / `approve` / `revoke` like any other tier (with tier label "plugin")
+- Unit tests: fingerprint computation is deterministic, fingerprint changes on tool/ops change, ops enforcement rejects undeclared access
+- Integration test: plugin loads → pending → approve → ops work → plugin updates → pending-reapproval → re-approve → ops restored
+
+**Files:**
+
+- `packages/plugins/src/service-plugin.ts` (add ops declaration, fingerprint computation)
+- `packages/plugins/src/plugin-system.ts` (approval check on load, deps proxy)
+- `packages/plugins/test/plugin-system.test.ts`
+- `packages/daemon/src/service-lifecycle.ts` (plugin approval integration)
+
+## Phase 7: Scoped Control Plane Access (All Tiers)
+
+Enable managed/external services to connect to the control plane and perform operations within their approved scope. Plugin services already have scope enforcement via the `deps` proxy (Phase 6) — this phase adds the network authentication path for managed/external services.
+
+- Add `ops[]` field to service manifest schema (managed/external declare ops in their manifest)
+- Display requested ops during `shoggoth service approve` for operator review (all tiers)
 - Store approved ops in `service_approvals` table
-- Add service authentication to control plane connection handshake:
+- Add service authentication to control plane connection handshake (managed/external only):
   - Service sends `{ kind: "service_token", serviceId, token }` as auth
   - Control plane validates token using `ServiceKeyStore`
   - On success, connection is tagged with service ID and approved scope
@@ -128,7 +152,7 @@ Enable managed/external services to connect to the control plane and perform ope
 - `packages/shared/src/schema.ts` (manifest ops field)
 - `packages/daemon/src/service-lifecycle.ts` (notify control plane on revoke/rotate)
 
-## Phase 7: Service Consumer Integration (Demo)
+## Phase 8: Service Consumer Integration (Demo)
 
 Update the demo service to consume the auth system, serving as the reference implementation for service authors.
 

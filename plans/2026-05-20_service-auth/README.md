@@ -7,7 +7,7 @@ completed: never
 
 ## Summary
 
-Implement cryptographic authentication and authorization for managed/external services using age X25519 key pairs. Replaces the placeholder bearer token in the tool dispatcher with real per-request minted tokens and enables scoped control plane access for services.
+Implement cryptographic authentication and authorization for managed/external services using age X25519 key pairs. Replaces the placeholder bearer token in the tool dispatcher with real per-request minted tokens and enables scoped control plane access for all service tiers. Plugin services are fingerprinted and scope-checked like managed/external services, but exempt from token auth on direct tool calls.
 
 ## Motivation
 
@@ -15,21 +15,37 @@ The service plugin system currently uses a hardcoded `"shoggoth-placeholder"` to
 
 - Any process that can reach a managed/external service's port can impersonate Shoggoth
 - Services cannot authenticate back to the control plane for privileged operations
+- Plugin services have unchecked access to daemon internals via `deps` with no scope enforcement
 
-The approval flow (approve/revoke via CLI + fingerprint tracking) is already in place, but it only gates tool registration — it doesn't provide runtime authentication. This plan closes that gap by giving each approved service a unique age identity, minting short-lived encrypted tokens per request, and enforcing token validation at the dispatcher layer.
+The approval flow (approve/revoke via CLI + fingerprint tracking) is already in place, but it only gates tool registration — it doesn't provide runtime authentication or authorization. This plan closes that gap by giving each approved managed/external service a unique age identity, minting short-lived encrypted tokens per request, and enforcing scope-checked control plane access across all tiers.
 
 ## Design
+
+### Trust Model
+
+All three service tiers participate in fingerprinting and ops authorization, but with different levels of trust:
+
+|                            | Plugin         | Managed | External |
+| -------------------------- | -------------- | ------- | -------- |
+| Fingerprinted              | ✓              | ✓       | ✓        |
+| Declares ops               | ✓              | ✓       | ✓        |
+| Ops enforced               | ✓              | ✓       | ✓        |
+| Token auth (tool dispatch) | ✗ (in-process) | ✓       | ✓        |
+| Key provisioning           | ✗              | ✓       | ✓        |
+| Approval required          | ✓              | ✓       | ✓        |
+
+Plugin services are more trusted in that they don't need cryptographic proof on each tool call (they execute in-process, so impersonation isn't possible). But they are not unconditionally trusted — they must declare what operations they intend to perform, and those declarations are enforced at runtime.
 
 ### Key Architecture
 
 Each approved managed/external service receives a unique age X25519 key pair:
 
 - **Recipient (public key)** — stored by the daemon in the `ServiceKeyStore`, keyed by service ID
-- **Identity (private key)** — displayed to the operator once at approval time; the service uses it to decrypt tokens
+- **Identity (private key)** — delivered to the service at approval time; the service uses it to decrypt tokens
 
-Plugin services are exempt — they run in-process and are inherently trusted.
+Plugin services do not receive key pairs — their tool calls are direct function invocations within the daemon process.
 
-### Token Flow (Tool Dispatch)
+### Token Flow (Tool Dispatch — Managed/External Only)
 
 ```
 Agent calls service tool
@@ -52,6 +68,13 @@ Service receives request
   → Service knows which agent/session is calling and can enforce its own logic
 ```
 
+### Fingerprinting
+
+All service tiers are fingerprinted to detect changes that require re-approval:
+
+- **Plugin services** — fingerprint is computed from the plugin's declared tools and ops at load time. If the plugin is updated and its fingerprint changes, it enters `pending-reapproval` and its tools/ops are suspended until the operator re-approves.
+- **Managed/external services** — fingerprint is computed from the fetched manifest (existing behavior).
+
 ### Key Store
 
 `ServiceKeyStore` manages age key material in the daemon's data directory:
@@ -63,7 +86,7 @@ Service receives request
 
 Key material (recipients only) is stored in the state DB alongside approval records. The daemon does not persist private keys — they are generated, delivered to the service, and discarded.
 
-### Key Provisioning
+### Key Provisioning (Managed/External Only)
 
 When a service is approved (or its key is rotated), the daemon delivers the private key directly to the service over its existing HTTP channel:
 
@@ -79,23 +102,29 @@ For external services that may not be reachable at approval time, the CLI falls 
 ### CLI Commands
 
 - `shoggoth service register <id>` — submits a registration request (does not auto-approve)
-- `shoggoth service approve <id>` — approves the request, generates age identity, delivers key to service
-- `shoggoth service rotate-key <id>` — generates new identity, delivers new key to service
+- `shoggoth service approve <id>` — approves the request; for managed/external, generates age identity and delivers key to service
+- `shoggoth service rotate-key <id>` — generates new identity, delivers new key to service (managed/external only)
 - `shoggoth service revoke <id>` — revokes approval, deletes key material, deregisters tools
 
-The existing `list`, `requests`, and `request` commands already work and need no changes beyond displaying key fingerprints.
+The existing `list`, `requests`, and `request` commands already work and need no changes beyond displaying key fingerprints and approved ops.
 
-- Service manifest declares `ops[]` — the operations it wants to perform (e.g., `session.send`, `kv.get`)
+### Scoped Control Plane Access (All Tiers)
+
+All services — including plugins — must declare their intended operations and have them enforced:
+
+- Service manifest (or plugin registration) declares `ops[]` — the operations it wants to perform (e.g., `session.send`, `kv.get`)
 - Scope is displayed during `shoggoth service approve` for operator review
-- At runtime, the control plane authenticates the service connection using its age identity
-- Each operation is checked against the approved `ops[]` list
+- At runtime, every control plane operation is checked against the service's approved `ops[]` list
 - Unauthorized operations return a scope error without executing
+
+For managed/external services, the control plane authenticates the connection using the service's age identity. For plugin services, the caller is already identified (in-process), so only scope enforcement applies — no cryptographic handshake needed.
 
 ### Integration Points
 
-- `ServiceToolDispatcher` — replace `placeholderToken` with `TokenMinter.mint()` call
-- `ServiceLifecycleManager` — generate key pair on approval, delete on revocation
+- `ServiceToolDispatcher` — replace `placeholderToken` with `TokenMinter.mint()` call (managed/external only)
+- `ServiceLifecycleManager` — generate key pair on approval, delete on revocation (managed/external only)
 - `service-ops.ts` — wire key generation into approve/revoke control operations
+- Plugin system — compute fingerprint at load time, enforce ops on `deps` access
 
 ## Testing Strategy
 
@@ -104,9 +133,12 @@ The existing `list`, `requests`, and `request` commands already work and need no
 - Unit tests for `TokenValidator` (valid token decrypts, expired token rejected, wrong identity rejected, malformed token rejected)
 - Unit tests for round-trip: mint with recipient → validate with identity
 - Unit tests for scoped control plane access (valid scope → allowed, missing scope → rejected, revoked service → connection dropped)
+- Unit tests for plugin fingerprinting (fingerprint changes → pending-reapproval, stable fingerprint → no change)
+- Unit tests for plugin ops enforcement (allowed op → succeeds, disallowed op → rejected)
 - Integration test: approve service → key generated → tool dispatch uses real token → service validates successfully
 - Integration test: rotate key → old tokens fail → new tokens succeed
 - Integration test: revoke service → key deleted → dispatch fails → re-approve → new key works
+- Integration test: plugin declares ops → approved → calls allowed op → succeeds → calls undeclared op → rejected
 
 ## Considerations
 
@@ -115,14 +147,17 @@ The existing `list`, `requests`, and `request` commands already work and need no
 - **Clock skew** — Services with significant clock drift will reject valid tokens. Document that NTP sync is expected. A future enhancement could add a `leeway` parameter to `TokenValidator`.
 - **Performance** — Age encryption per tool call adds latency (~1-5ms). For high-throughput services, consider a token cache with TTL < expiry. Deferred to a future optimization if profiling shows it matters.
 - **Backward compatibility** — Services that don't validate auth today will continue to work (they ignore the Authorization header). The placeholder token is replaced transparently.
-- **Plugin services** — Exempt from all auth. They run in the daemon process and are trusted by definition. No key generation, no token minting.
+- **Plugin trust boundary** — Plugins run in-process so they can't be impersonated, but they can still exceed their declared scope. Ops enforcement on plugins prevents a compromised or buggy plugin from accessing operations it never declared. This is defense-in-depth, not a hard security boundary.
+- **Plugin fingerprint stability** — Plugin fingerprints must be deterministic across daemon restarts. The fingerprint is computed from the sorted, serialized tool declarations and ops array — not from file contents or load order.
 - **`packages/service-auth` helper** — A standalone npm package containing only `TokenValidator` so service authors can validate tokens without depending on the full daemon. Minimal dependencies (just `age-encryption`).
 - **Gateway auth is out of scope** — This plan covers backchannel (daemon → service) authentication and scoped control plane access only. Gateway auth enforcement for external clients (browsers, third-party callers) requires a user-facing auth layer (session cookies, OAuth, etc.) and will be tackled in a future plan.
 
 ## Migration
 
 - The `service_approvals` table gains an optional `key_fingerprint` column for tracking which key pair is active
-- Existing approved services (approved before this feature) will need re-approval to generate a key pair, or the operator can run `rotate-key` to generate one without revoking
+- The `service_approvals` table gains an `approved_ops` column (JSON array)
+- Existing approved services (approved before this feature) will need re-approval to generate a key pair (managed/external) or to record their ops (all tiers)
+- Existing plugin services that were auto-approved will enter `pending-reapproval` on first load after this feature lands (their fingerprint and ops need to be recorded)
 - The `ServiceKeyStore` creates its own table (`service_keys`) in the state DB on first use
 - No breaking changes to existing config
 
