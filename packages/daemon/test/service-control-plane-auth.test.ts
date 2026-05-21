@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import * as age from "age-encryption";
 import { ServiceKeyStore } from "../src/service-key-store";
 import { TokenMinter, TokenValidator } from "../src/service-auth";
+import { ServiceApprovalStore } from "../src/service-approval-store";
 import { openStateDb } from "../src/db/open";
 import { defaultMigrationsDir, migrate } from "../src/db/migrate";
 import { closeTestDb } from "./helpers/close-test-db";
@@ -23,6 +24,7 @@ describe("service-control-plane-auth (scoped access)", () => {
   let tmpDir: string;
   let keyStore: ServiceKeyStore;
   let minter: TokenMinter;
+  let approvalStore: ServiceApprovalStore;
   let serviceIdentity: string;
   let serviceRecipient: string;
 
@@ -32,6 +34,7 @@ describe("service-control-plane-auth (scoped access)", () => {
     tmpDir = dir;
     keyStore = new ServiceKeyStore(db);
     minter = new TokenMinter(keyStore);
+    approvalStore = new ServiceApprovalStore(db);
 
     // Generate a controlled identity for the test service
     serviceIdentity = await age.generateIdentity();
@@ -111,18 +114,9 @@ describe("service-control-plane-auth (scoped access)", () => {
 
   describe("isAuthorized returns true for approved ops", () => {
     it("returns true when the requested op is in the service manifest ops[]", async () => {
-      // Import the module under test (RED phase — may not exist yet)
-      let ServiceControlPlaneAuth: any;
-      try {
-        const mod = await import("../src/service-control-plane-auth");
-        ServiceControlPlaneAuth = mod.ServiceControlPlaneAuth;
-      } catch {
-        // Module doesn't exist yet — expected in RED phase
-        expect.fail("ServiceControlPlaneAuth module not found — implementation needed");
-        return;
-      }
+      const { ServiceControlPlaneAuth } = await import("../src/service-control-plane-auth");
 
-      const auth = new ServiceControlPlaneAuth(db);
+      const auth = new ServiceControlPlaneAuth(approvalStore);
 
       // Store approval with ops
       const approvedOps = ["session.query", "session.list", "agent.ping"];
@@ -136,16 +130,9 @@ describe("service-control-plane-auth (scoped access)", () => {
 
   describe("isAuthorized returns false for undeclared ops", () => {
     it("returns false when the requested op is NOT in the service manifest ops[]", async () => {
-      let ServiceControlPlaneAuth: any;
-      try {
-        const mod = await import("../src/service-control-plane-auth");
-        ServiceControlPlaneAuth = mod.ServiceControlPlaneAuth;
-      } catch {
-        expect.fail("ServiceControlPlaneAuth module not found — implementation needed");
-        return;
-      }
+      const { ServiceControlPlaneAuth } = await import("../src/service-control-plane-auth");
 
-      const auth = new ServiceControlPlaneAuth(db);
+      const auth = new ServiceControlPlaneAuth(approvalStore);
 
       // Store approval with limited ops
       const approvedOps = ["session.query"];
@@ -157,16 +144,9 @@ describe("service-control-plane-auth (scoped access)", () => {
     });
 
     it("returns false for a service with empty ops[]", async () => {
-      let ServiceControlPlaneAuth: any;
-      try {
-        const mod = await import("../src/service-control-plane-auth");
-        ServiceControlPlaneAuth = mod.ServiceControlPlaneAuth;
-      } catch {
-        expect.fail("ServiceControlPlaneAuth module not found — implementation needed");
-        return;
-      }
+      const { ServiceControlPlaneAuth } = await import("../src/service-control-plane-auth");
 
-      const auth = new ServiceControlPlaneAuth(db);
+      const auth = new ServiceControlPlaneAuth(approvalStore);
       auth.storeApprovedOps("svc-no-ops", []);
 
       expect(auth.isAuthorized("svc-no-ops", "session.query")).toBe(false);
@@ -176,16 +156,9 @@ describe("service-control-plane-auth (scoped access)", () => {
 
   describe("revoked service cannot authenticate", () => {
     it("isAuthorized returns false for a revoked service regardless of ops", async () => {
-      let ServiceControlPlaneAuth: any;
-      try {
-        const mod = await import("../src/service-control-plane-auth");
-        ServiceControlPlaneAuth = mod.ServiceControlPlaneAuth;
-      } catch {
-        expect.fail("ServiceControlPlaneAuth module not found — implementation needed");
-        return;
-      }
+      const { ServiceControlPlaneAuth } = await import("../src/service-control-plane-auth");
 
-      const auth = new ServiceControlPlaneAuth(db);
+      const auth = new ServiceControlPlaneAuth(approvalStore);
 
       // Store ops then revoke
       auth.storeApprovedOps("svc-revoked", ["session.query", "session.list"]);
@@ -196,16 +169,9 @@ describe("service-control-plane-auth (scoped access)", () => {
     });
 
     it("token validation succeeds but authorization check rejects revoked service", async () => {
-      let ServiceControlPlaneAuth: any;
-      try {
-        const mod = await import("../src/service-control-plane-auth");
-        ServiceControlPlaneAuth = mod.ServiceControlPlaneAuth;
-      } catch {
-        expect.fail("ServiceControlPlaneAuth module not found — implementation needed");
-        return;
-      }
+      const { ServiceControlPlaneAuth } = await import("../src/service-control-plane-auth");
 
-      const auth = new ServiceControlPlaneAuth(db);
+      const auth = new ServiceControlPlaneAuth(approvalStore);
 
       // Service was approved with ops, then revoked
       auth.storeApprovedOps("svc-revoked-2", ["session.query"]);
@@ -218,16 +184,9 @@ describe("service-control-plane-auth (scoped access)", () => {
 
   describe("ops[] field in manifest is stored on approval", () => {
     it("stores ops from manifest when service is approved", async () => {
-      let ServiceControlPlaneAuth: any;
-      try {
-        const mod = await import("../src/service-control-plane-auth");
-        ServiceControlPlaneAuth = mod.ServiceControlPlaneAuth;
-      } catch {
-        expect.fail("ServiceControlPlaneAuth module not found — implementation needed");
-        return;
-      }
+      const { ServiceControlPlaneAuth } = await import("../src/service-control-plane-auth");
 
-      const auth = new ServiceControlPlaneAuth(db);
+      const auth = new ServiceControlPlaneAuth(approvalStore);
 
       const manifest = {
         name: "test-service",
@@ -247,16 +206,9 @@ describe("service-control-plane-auth (scoped access)", () => {
     });
 
     it("stores empty ops when manifest has no ops field", async () => {
-      let ServiceControlPlaneAuth: any;
-      try {
-        const mod = await import("../src/service-control-plane-auth");
-        ServiceControlPlaneAuth = mod.ServiceControlPlaneAuth;
-      } catch {
-        expect.fail("ServiceControlPlaneAuth module not found — implementation needed");
-        return;
-      }
+      const { ServiceControlPlaneAuth } = await import("../src/service-control-plane-auth");
 
-      const auth = new ServiceControlPlaneAuth(db);
+      const auth = new ServiceControlPlaneAuth(approvalStore);
 
       const manifest = {
         name: "no-ops-service",
@@ -271,16 +223,9 @@ describe("service-control-plane-auth (scoped access)", () => {
     });
 
     it("retrieves stored ops for an approved service", async () => {
-      let ServiceControlPlaneAuth: any;
-      try {
-        const mod = await import("../src/service-control-plane-auth");
-        ServiceControlPlaneAuth = mod.ServiceControlPlaneAuth;
-      } catch {
-        expect.fail("ServiceControlPlaneAuth module not found — implementation needed");
-        return;
-      }
+      const { ServiceControlPlaneAuth } = await import("../src/service-control-plane-auth");
 
-      const auth = new ServiceControlPlaneAuth(db);
+      const auth = new ServiceControlPlaneAuth(approvalStore);
 
       const ops = ["session.query", "session.list"];
       auth.storeApprovedOps("svc-retrieve", ops);
@@ -292,16 +237,9 @@ describe("service-control-plane-auth (scoped access)", () => {
 
   describe("rate limiting: exceeding limit returns error", () => {
     it("allows requests within the rate limit", async () => {
-      let ServiceControlPlaneAuth: any;
-      try {
-        const mod = await import("../src/service-control-plane-auth");
-        ServiceControlPlaneAuth = mod.ServiceControlPlaneAuth;
-      } catch {
-        expect.fail("ServiceControlPlaneAuth module not found — implementation needed");
-        return;
-      }
+      const { ServiceControlPlaneAuth } = await import("../src/service-control-plane-auth");
 
-      const auth = new ServiceControlPlaneAuth(db, { maxRequestsPerMinute: 10 });
+      const auth = new ServiceControlPlaneAuth(approvalStore, { maxRequestsPerMinute: 10 });
       auth.storeApprovedOps("svc-rate", ["session.query"]);
 
       // First few requests should succeed
@@ -312,16 +250,9 @@ describe("service-control-plane-auth (scoped access)", () => {
     });
 
     it("rejects requests exceeding the rate limit", async () => {
-      let ServiceControlPlaneAuth: any;
-      try {
-        const mod = await import("../src/service-control-plane-auth");
-        ServiceControlPlaneAuth = mod.ServiceControlPlaneAuth;
-      } catch {
-        expect.fail("ServiceControlPlaneAuth module not found — implementation needed");
-        return;
-      }
+      const { ServiceControlPlaneAuth } = await import("../src/service-control-plane-auth");
 
-      const auth = new ServiceControlPlaneAuth(db, { maxRequestsPerMinute: 5 });
+      const auth = new ServiceControlPlaneAuth(approvalStore, { maxRequestsPerMinute: 5 });
       auth.storeApprovedOps("svc-rate-exceed", ["session.query"]);
 
       // Exhaust the rate limit
@@ -337,16 +268,9 @@ describe("service-control-plane-auth (scoped access)", () => {
     });
 
     it("rate limit resets after the window expires", async () => {
-      let ServiceControlPlaneAuth: any;
-      try {
-        const mod = await import("../src/service-control-plane-auth");
-        ServiceControlPlaneAuth = mod.ServiceControlPlaneAuth;
-      } catch {
-        expect.fail("ServiceControlPlaneAuth module not found — implementation needed");
-        return;
-      }
+      const { ServiceControlPlaneAuth } = await import("../src/service-control-plane-auth");
 
-      const auth = new ServiceControlPlaneAuth(db, {
+      const auth = new ServiceControlPlaneAuth(approvalStore, {
         maxRequestsPerMinute: 3,
         windowMs: 100, // 100ms window for testing
       });

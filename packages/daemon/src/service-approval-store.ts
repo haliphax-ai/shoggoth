@@ -13,6 +13,7 @@ export class ServiceApprovalStore {
         status TEXT NOT NULL DEFAULT 'pending',
         approved_fingerprint TEXT,
         key_fingerprint TEXT,
+        approved_ops TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       )
@@ -21,6 +22,13 @@ export class ServiceApprovalStore {
     // Add key_fingerprint column if missing (for existing databases)
     try {
       this._db.exec(`ALTER TABLE service_approvals ADD COLUMN key_fingerprint TEXT`);
+    } catch {
+      // Column already exists
+    }
+
+    // Add approved_ops column if missing (migration 0018)
+    try {
+      this._db.exec(`ALTER TABLE service_approvals ADD COLUMN approved_ops TEXT`);
     } catch {
       // Column already exists
     }
@@ -136,6 +144,49 @@ export class ServiceApprovalStore {
           "INSERT INTO service_approvals (service_id, status, approved_fingerprint, created_at, updated_at) VALUES (?, 'revoked', NULL, ?, ?)",
         )
         .run(serviceId, now, now);
+    }
+  }
+
+  /**
+   * Store the approved ops for a service as a JSON array in the approved_ops column.
+   * Also ensures the service record exists with 'approved' status.
+   */
+  setApprovedOps(serviceId: string, ops: string[]): void {
+    const now = new Date().toISOString();
+    const opsJson = JSON.stringify(ops);
+    const existing = this.get(serviceId);
+
+    if (existing) {
+      this._db
+        .prepare(
+          "UPDATE service_approvals SET approved_ops = ?, status = 'approved', updated_at = ? WHERE service_id = ?",
+        )
+        .run(opsJson, now, serviceId);
+    } else {
+      this._db
+        .prepare(
+          "INSERT INTO service_approvals (service_id, status, approved_ops, created_at, updated_at) VALUES (?, 'approved', ?, ?, ?)",
+        )
+        .run(serviceId, opsJson, now, now);
+    }
+  }
+
+  /**
+   * Get the approved ops for a service. Returns an empty array if none stored.
+   */
+  getApprovedOps(serviceId: string): string[] {
+    const row = this._db
+      .prepare("SELECT approved_ops FROM service_approvals WHERE service_id = ?")
+      .get(serviceId) as { approved_ops: string | null } | undefined;
+
+    if (!row || !row.approved_ops) {
+      return [];
+    }
+
+    try {
+      return JSON.parse(row.approved_ops) as string[];
+    } catch {
+      return [];
     }
   }
 
