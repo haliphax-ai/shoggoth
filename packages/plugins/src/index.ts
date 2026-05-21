@@ -42,6 +42,16 @@ export {
 // Plugin fingerprinting
 export { computePluginFingerprint, type PluginManifestForFingerprint } from "./plugin-fingerprint";
 
+// Plugin registration gate (fingerprinting integration)
+export {
+  createGatedServiceRegisterCtx,
+  buildManifestFromRegistration,
+  type PluginApprovalStore,
+  type GatedRegistrationResult,
+  type RegistrationGateLogger,
+  type CreateGatedContextOptions,
+} from "./plugin-registration-gate";
+
 // Plugin approval and ops enforcement
 export {
   resolvePluginApprovalStatus,
