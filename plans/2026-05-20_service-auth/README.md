@@ -86,18 +86,47 @@ All service tiers are fingerprinted to detect changes that require re-approval:
 
 Key material (recipients only) is stored in the state DB alongside approval records. The daemon does not persist private keys — they are generated, delivered to the service, and discarded.
 
-### Key Provisioning (Managed/External Only)
+### Key Provisioning
 
-When a service is approved (or its key is rotated), the daemon delivers the private key directly to the service over its existing HTTP channel:
+Key delivery differs by tier and lifecycle stage:
 
-1. Daemon generates the age key pair
-2. Daemon calls `POST {serviceUrl}/_shoggoth/identity` with the private key in the request body
-3. Service receives the key and stores it however it sees fit (memory, file, env, secrets manager)
-4. Daemon stores only the recipient (public key)
+**Initial provisioning — managed services:**
 
-The provisioning endpoint is part of the service contract — services that want to participate in authenticated dispatch must implement `POST /_shoggoth/identity`. The `@shoggoth/service-auth` package provides a handler for this.
+Procman injects a one-time `SHOGGOTH_PROVISION_SECRET` environment variable when spawning the service. The daemon uses this to authenticate the initial key delivery:
 
-For external services that may not be reachable at approval time, the CLI falls back to displaying the key for manual delivery. The daemon retries provisioning on the next health check recovery if the initial delivery failed.
+1. Procman spawns service with `SHOGGOTH_PROVISION_SECRET=<random>`
+2. Service starts, binds port, exposes `POST /_shoggoth/identity`
+3. Daemon calls `POST /_shoggoth/identity` with `X-Provision-Secret: <random>` header and the private key in the body
+4. Service validates the secret matches its env var, stores the key, discards the secret
+5. Daemon stores only the recipient (public key)
+
+This closes the race condition where another process could bind the port and intercept the key.
+
+**Initial provisioning — external services:**
+
+External services are not spawned by the daemon, so there's no secure channel for automatic delivery. The CLI displays the private key at approval time for the operator to deliver through their own secure channel (SSH, secrets manager, sealed config, etc.). The daemon does not attempt automatic delivery to external services.
+
+**Key rotation — managed services:**
+
+Rotation uses the existing authenticated channel (the service already has a key):
+
+1. Operator runs `shoggoth service rotate-key <id>`
+2. Daemon pauses tool dispatch to this service (queues incoming calls)
+3. Daemon generates new key pair
+4. Daemon mints a token using the _current_ recipient (proves daemon identity)
+5. Daemon calls `POST /_shoggoth/identity` with `Authorization: Bearer <rotation-token>` and the new private key in the body
+6. Service validates the rotation token with its current identity — confirms this is the real daemon
+7. Service stores the new identity, discards the old one, responds 200
+8. Daemon replaces stored recipient with the new one
+9. Daemon resumes dispatch (new tokens use the new recipient)
+
+If the service is unreachable during rotation, the old key remains active and the CLI displays the new key for manual delivery. Dispatch is not paused in this case (the old key still works).
+
+**Key rotation — external services:**
+
+Same as managed rotation (steps 2–9) if the service is reachable. Falls back to CLI display if not. The rotation token proves daemon identity regardless of network topology.
+
+The `@shoggoth/service-auth` package provides a `createIdentityHandler()` that handles both flows (provision-secret for initial, rotation-token for subsequent).
 
 ### CLI Commands
 
@@ -142,7 +171,8 @@ For managed/external services, the control plane authenticates the connection us
 
 ## Considerations
 
-- **Key provisioning endpoint** — Services must implement `POST /_shoggoth/identity` to receive their private key. If the service is unreachable at approval time (external services), the CLI falls back to displaying the key. The daemon never persists private keys — if a service loses its key, the operator runs `rotate-key` to generate and deliver a new one.
+- **Key provisioning security** — Initial delivery to managed services is authenticated via a procman-injected one-time secret. External services receive their key via CLI only (no automatic delivery over untrusted networks). Rotation is authenticated via a token minted with the current recipient. The daemon never persists private keys — if a service loses its key, the operator runs `rotate-key`.
+- **Dispatch pause during rotation** — Tool dispatch to a service is paused (queued) while rotation is in progress. This eliminates the window where tokens minted with the new recipient arrive before the service has the new identity. The pause is brief (single HTTP round-trip) and only affects the rotating service.
 - **Token expiry window** — 5 minutes is short enough to limit replay but long enough to tolerate clock skew between daemon and service. Configurable per-service if needed later.
 - **Clock skew** — Services with significant clock drift will reject valid tokens. Document that NTP sync is expected. A future enhancement could add a `leeway` parameter to `TokenValidator`.
 - **Performance** — Age encryption per tool call adds latency (~1-5ms). For high-throughput services, consider a token cache with TTL < expiry. Deferred to a future optimization if profiling shows it matters.
