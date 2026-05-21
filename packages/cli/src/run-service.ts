@@ -80,7 +80,8 @@ Usage:
   shoggoth service requests                List pending approval requests
   shoggoth service request <id>            Show service details
   shoggoth service approve <id>            Approve a service
-  shoggoth service revoke <id>             Revoke a service`);
+  shoggoth service revoke <id>             Revoke a service
+  shoggoth service rotate-key <id>         Rotate service identity key`);
 }
 
 export function parseServiceListArgs(argv: string[]): {
@@ -165,6 +166,23 @@ export function parseServiceRevokeArgs(argv: string[]): {
   if (argv.includes("--force")) {
     payload.force = true;
   }
+
+  return { ok: true, payload };
+}
+
+export function parseServiceRotateKeyArgs(argv: string[]): {
+  ok: boolean;
+  payload: Record<string, unknown>;
+} {
+  if (argv.length === 0) {
+    return { ok: false, payload: {} };
+  }
+  if (argv[0] === "--help" || argv[0] === "-h") {
+    return { ok: true, payload: {} };
+  }
+
+  const serviceId = argv[0];
+  const payload: Record<string, unknown> = { service_id: serviceId };
 
   return { ok: true, payload };
 }
@@ -277,6 +295,18 @@ export function formatServiceRevokeOutput(
   }
   return `Failed to revoke service '${serviceId}': ${error || "Unknown error"}`;
 }
+
+export function formatServiceRotateKeyOutput(
+  serviceId: string,
+  success: boolean,
+  error?: string,
+): string {
+  if (success) {
+    return `Key rotated for service '${serviceId}'.`;
+  }
+  return `Failed to rotate key for service '${serviceId}': ${error || "Unknown error"}`;
+}
+
 export async function runServiceListCli(
   params: Omit<ControlRequestParams, "op" | "payload">,
 ): Promise<void> {
@@ -334,6 +364,19 @@ export async function runServiceRevokeCli(
   const res = await invokeControlRequest({
     ...params,
     op: "service.revoke",
+    payload: { service_id: serviceId },
+  });
+  console.log(JSON.stringify(res, null, 2));
+  if (res.error) process.exitCode = 1;
+}
+
+export async function runServiceRotateKeyCli(
+  serviceId: string,
+  params: Omit<ControlRequestParams, "op" | "payload">,
+): Promise<void> {
+  const res = await invokeControlRequest({
+    ...params,
+    op: "service.rotate-key",
     payload: { service_id: serviceId },
   });
   console.log(JSON.stringify(res, null, 2));
@@ -404,6 +447,17 @@ export async function runServiceCli(argv: string[]): Promise<void> {
       return;
     }
     await runServiceRevokeCli(parsed.payload.service_id as string, { socketPath, auth });
+    return;
+  }
+
+  if (sub === "rotate-key") {
+    const parsed = parseServiceRotateKeyArgs(argv.slice(1));
+    if (!parsed.ok) {
+      console.error("usage: shoggoth service rotate-key <id>");
+      process.exitCode = 1;
+      return;
+    }
+    await runServiceRotateKeyCli(parsed.payload.service_id as string, { socketPath, auth });
     return;
   }
 

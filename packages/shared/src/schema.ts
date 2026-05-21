@@ -1017,6 +1017,7 @@ export interface ServiceApprovalRecord {
   serviceId: string;
   status: ApprovalStatus;
   approvedFingerprint: string | null;
+  keyFingerprint: string | null;
   createdAt: string;
   updatedAt: string;
 }

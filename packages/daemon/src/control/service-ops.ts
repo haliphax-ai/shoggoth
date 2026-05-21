@@ -8,6 +8,7 @@ import type { IntegrationOpsContext } from "./integration-ops";
 import type { ServiceApprovalStore } from "../service-approval-store";
 import type { ServiceRegistry, ServiceEntry } from "../service-registry";
 import type { ServiceToolRegistry } from "../service-tool-registry";
+import type { ServiceKeyStore } from "../service-key-store.js";
 import { createHash } from "node:crypto";
 import { serviceLifecycleManagerRef } from "../service-refs";
 
@@ -42,6 +43,15 @@ function requireToolRegistry(ctx: IntegrationOpsContext): ServiceToolRegistry {
     throw new Error("service tool registry not available");
   }
   return registry;
+}
+
+/**
+ * Extract the service key store from the integration context.
+ * Returns null if not configured (key provisioning will be skipped).
+ */
+function getKeyStore(ctx: IntegrationOpsContext): ServiceKeyStore | null {
+  const store = (ctx as { serviceKeyStore?: ServiceKeyStore }).serviceKeyStore;
+  return store ?? null;
 }
 
 /**
@@ -81,6 +91,23 @@ function computeFingerprint(entry: ServiceEntry): string {
 }
 
 /**
+ * Deliver an identity to a service via POST {url}/_shoggoth/identity.
+ * Returns true if delivery succeeded, false otherwise.
+ */
+async function deliverIdentity(serviceUrl: string, identity: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${serviceUrl}/_shoggoth/identity`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identity }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Handle service.list control operation.
  * Returns all services from the registry.
  */
@@ -97,6 +124,7 @@ export async function handleServiceList(
     const approvalStore = requireApprovalStore(ctx);
     const serviceRegistry = requireServiceRegistry(ctx);
     const toolRegistry = requireToolRegistry(ctx);
+    const keyStore = getKeyStore(ctx);
 
     // Get all approval records
     const approvals = approvalStore.list();
@@ -131,11 +159,13 @@ export async function handleServiceList(
         healthy: boolean;
         capabilities: string[];
         tools: number;
+        key_fingerprint?: string;
       }
     >();
 
     for (const entry of registryEntries) {
       const approval = approvals.find((a) => a.serviceId === entry.id);
+      const keyFingerprint = keyStore?.getFingerprint(entry.id) ?? null;
       serviceMap.set(entry.id, {
         id: entry.id,
         label: entry.label,
@@ -145,6 +175,7 @@ export async function handleServiceList(
         healthy: entry.healthy,
         capabilities: entry.capabilities,
         tools: (toolsByService.get(entry.id) ?? []).length,
+        ...(keyFingerprint ? { key_fingerprint: keyFingerprint } : {}),
       });
     }
 
@@ -295,6 +326,7 @@ export async function handleServiceRequest(
 /**
  * Handle service.approve control operation.
  * Approves a service and stores the fingerprint.
+ * Generates an age identity key and delivers it to the service.
  * Requires the service to be running with a manifest (otherwise there's nothing to fingerprint).
  */
 export async function handleServiceApprove(
@@ -312,6 +344,7 @@ export async function handleServiceApprove(
 
     const approvalStore = requireApprovalStore(ctx);
     const serviceRegistry = requireServiceRegistry(ctx);
+    const keyStore = getKeyStore(ctx);
 
     const entry = serviceRegistry.get(serviceId);
 
@@ -327,6 +360,30 @@ export async function handleServiceApprove(
     // Compute fingerprint from current manifest
     const fingerprint = computeFingerprint(entry);
 
+    // Generate age identity key for the service (if key store is available)
+    let delivery: "delivered" | "pending" | undefined;
+    let keyFingerprint: string | null = null;
+
+    if (keyStore) {
+      const keyPair = await keyStore.generateIdentity(serviceId);
+
+      // Deliver identity to the service
+      delivery = "pending";
+      if (entry.url) {
+        const delivered = await deliverIdentity(entry.url, keyPair.identity);
+        if (delivered) {
+          delivery = "delivered";
+        } else {
+          // Log warning but don't fail the approval
+          console.warn(
+            `[service-ops] Failed to deliver identity to service '${serviceId}' at ${entry.url}/_shoggoth/identity`,
+          );
+        }
+      }
+
+      keyFingerprint = keyStore.getFingerprint(serviceId);
+    }
+
     // Use lifecycle manager to approve (handles store + registry + tool registration)
     const lifecycleManager = serviceLifecycleManagerRef.current;
     if (lifecycleManager) {
@@ -339,7 +396,89 @@ export async function handleServiceApprove(
       }
     }
 
-    return { ok: true, service_id: serviceId, fingerprint };
+    // Update approval record with key fingerprint if upsert is available
+    if (keyFingerprint && typeof approvalStore.upsert === "function") {
+      approvalStore.upsert(serviceId, "approved", fingerprint, keyFingerprint);
+    }
+
+    return {
+      ok: true,
+      service_id: serviceId,
+      fingerprint,
+      ...(keyFingerprint ? { key_fingerprint: keyFingerprint } : {}),
+      ...(delivery ? { delivery } : {}),
+    };
+  } catch (e) {
+    if (e instanceof Error && e.message.includes("service_id")) {
+      return { error: e.message };
+    }
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * Handle service.rotate-key control operation.
+ * Rotates the age identity key for a service and delivers the new identity.
+ */
+export async function handleServiceRotateKey(
+  req: WireRequest,
+  principal: AuthenticatedPrincipal,
+  ctx: IntegrationOpsContext,
+): Promise<unknown> {
+  if (principal.kind !== "operator") {
+    return { error: "service.rotate-key requires operator principal" };
+  }
+
+  try {
+    const payload = getPayload(req);
+    const serviceId = requireString(payload, "service_id");
+
+    const approvalStore = requireApprovalStore(ctx);
+    const serviceRegistry = requireServiceRegistry(ctx);
+    const keyStore = getKeyStore(ctx);
+    if (!keyStore) {
+      return { error: "service key store not available" };
+    }
+
+    const entry = serviceRegistry.get(serviceId);
+    if (!entry) {
+      return { error: `Service '${serviceId}' not found in registry (is it running?)` };
+    }
+
+    // Service must have an existing key to rotate
+    if (!keyStore.hasIdentity(serviceId)) {
+      return { error: `Service '${serviceId}' has no existing key to rotate` };
+    }
+
+    // Rotate the key
+    const keyPair = await keyStore.rotateIdentity(serviceId);
+
+    // Deliver new identity to the service
+    let delivery: "delivered" | "pending" = "pending";
+    if (entry.url) {
+      const delivered = await deliverIdentity(entry.url, keyPair.identity);
+      if (delivered) {
+        delivery = "delivered";
+      } else {
+        console.warn(
+          `[service-ops] Failed to deliver rotated identity to service '${serviceId}' at ${entry.url}/_shoggoth/identity`,
+        );
+      }
+    }
+
+    // Update approval record fingerprint
+    const keyFingerprint = keyStore.getFingerprint(serviceId);
+    const approval = approvalStore.get(serviceId);
+    if (approval && keyFingerprint) {
+      approvalStore.upsert(
+        serviceId,
+        approval.status,
+        approval.approvedFingerprint ?? undefined,
+        keyFingerprint,
+      );
+    }
+
+    return { ok: true, service_id: serviceId, key_fingerprint: keyFingerprint, delivery };
   } catch (e) {
     if (e instanceof Error && e.message.includes("service_id")) {
       return { error: e.message };
@@ -364,9 +503,15 @@ export async function handleServiceRevoke(
     const approvalStore = requireApprovalStore(ctx);
     const serviceRegistry = requireServiceRegistry(ctx);
     const toolRegistry = requireToolRegistry(ctx);
+    const keyStore = getKeyStore(ctx);
 
     // Check if service exists
     const entry = serviceRegistry.get(serviceId);
+
+    // Delete key material from ServiceKeyStore (if available)
+    if (keyStore) {
+      keyStore.deleteIdentity(serviceId);
+    }
 
     // Use lifecycle manager to revoke (handles store + registry + tool deregistration)
     const lifecycleManager = serviceLifecycleManagerRef.current;
