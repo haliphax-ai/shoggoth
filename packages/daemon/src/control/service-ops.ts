@@ -6,10 +6,10 @@ import type { WireRequest } from "@shoggoth/authn";
 import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import type { IntegrationOpsContext } from "./integration-ops";
 import type { ServiceApprovalStore } from "../service-approval-store";
-import type { ServiceRegistry, ServiceEntry } from "../service-registry";
+import type { ServiceRegistry } from "../service-registry";
 import type { ServiceToolRegistry } from "../service-tool-registry";
 import type { ServiceKeyStore } from "../service-key-store.js";
-import { createHash } from "node:crypto";
+
 import { serviceLifecycleManagerRef, serviceProvisionSecrets } from "../service-refs";
 import { getLogger } from "../logging";
 
@@ -79,19 +79,7 @@ function requireString(obj: Record<string, unknown>, key: string): string {
   return v.trim();
 }
 
-/**
- * Compute a fingerprint for a service manifest.
- */
-function computeFingerprint(entry: ServiceEntry): string {
-  const data = JSON.stringify({
-    id: entry.id,
-    label: entry.label,
-    capabilities: entry.capabilities,
-    tools: entry.manifest?.tools ?? [],
-    ops: entry.manifest?.ops ?? [],
-  });
-  return createHash("sha256").update(data).digest("hex").slice(0, 16);
-}
+import { computeManifestFingerprint } from "../manifest-fingerprint";
 
 /**
  * Deliver an identity to a service via POST {url}/_shoggoth/identity.
@@ -314,7 +302,12 @@ export async function handleServiceRequest(
     // Build diff info for pending-reapproval
     let diff: { oldFingerprint: string; newFingerprint: string; changes: string[] } | undefined;
     if (status === "pending-reapproval" && approval?.approvedFingerprint && entry) {
-      const newFingerprint = computeFingerprint(entry);
+      const newFingerprint = entry.manifest
+        ? computeManifestFingerprint(entry.manifest, entry.capabilities, {
+            tier: entry.tier,
+            url: entry.url,
+          })
+        : "";
       const changes: string[] = [];
 
       const oldFingerprint = approval.approvedFingerprint;
@@ -394,7 +387,12 @@ export async function handleServiceApprove(
     }
 
     // Compute fingerprint from current manifest
-    const fingerprint = computeFingerprint(entry);
+    const fingerprint = entry.manifest
+      ? computeManifestFingerprint(entry.manifest, entry.capabilities, {
+          tier: entry.tier,
+          url: entry.url,
+        })
+      : "";
 
     // Generate age identity key for the service (if key store is available)
     let delivery: "delivered" | "pending" | undefined;
