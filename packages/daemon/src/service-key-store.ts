@@ -15,19 +15,6 @@ export class ServiceKeyStore {
 
   constructor(db: Database.Database) {
     this.db = db;
-    this.ensureTable();
-  }
-
-  private ensureTable(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS service_keys (
-        service_id TEXT PRIMARY KEY,
-        recipient TEXT NOT NULL,
-        fingerprint TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        rotated_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-    `);
   }
 
   /**

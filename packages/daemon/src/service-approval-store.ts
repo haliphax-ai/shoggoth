@@ -5,34 +5,7 @@ import { type ServiceApprovalRecord, type ApprovalStatus } from "@shoggoth/share
  * SQLite-backed store for service approval records.
  */
 export class ServiceApprovalStore {
-  constructor(private _db: Database.Database) {
-    // Ensure the table exists (migrations should create it, but be safe)
-    this._db.exec(`
-      CREATE TABLE IF NOT EXISTS service_approvals (
-        service_id TEXT PRIMARY KEY,
-        status TEXT NOT NULL DEFAULT 'pending',
-        approved_fingerprint TEXT,
-        key_fingerprint TEXT,
-        approved_ops TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-      )
-    `);
-
-    // Add key_fingerprint column if missing (for existing databases)
-    try {
-      this._db.exec(`ALTER TABLE service_approvals ADD COLUMN key_fingerprint TEXT`);
-    } catch {
-      // Column already exists
-    }
-
-    // Add approved_ops column if missing (migration 0018)
-    try {
-      this._db.exec(`ALTER TABLE service_approvals ADD COLUMN approved_ops TEXT`);
-    } catch {
-      // Column already exists
-    }
-  }
+  constructor(private _db: Database.Database) {}
 
   /**
    * Get the approval record for a service. Returns null if never seen.
