@@ -1,5 +1,5 @@
 /**
- * Phase 4 — MCP server allow/deny runtime filtering (RED phase).
+ * Phase 4 — MCP server allow/deny runtime filtering.
  *
  * These tests verify that `createSessionMcpRuntime` respects `McpServerRules`
  * when building the `SessionMcpToolContext`:

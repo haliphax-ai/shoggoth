@@ -89,7 +89,7 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
         },
       }),
       resolveMcpContext: async () => builtin,
-    } as any); // Cast to any for RED phase
+    } as any);
 
     assert.equal(result.latestAssistantText, "CORE_ISOLATION_REPLY");
     assert.equal(result.failoverMeta?.degraded, false);

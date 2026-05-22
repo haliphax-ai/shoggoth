@@ -340,22 +340,7 @@ describe("service-control-auth (key provisioning)", () => {
         payload: { service_id: "svc-rotate" },
       };
 
-      // Note: handleServiceRotateKey may not exist yet (RED phase).
-      // We import dynamically to allow the test to fail gracefully.
-      let handleServiceRotateKey: typeof handleServiceApprove;
-      try {
-        const mod = await import("../src/control/service-ops");
-        handleServiceRotateKey = (mod as any).handleServiceRotateKey;
-      } catch {
-        // Module import should work since we already import from it
-        handleServiceRotateKey = undefined as any;
-      }
-
-      if (!handleServiceRotateKey) {
-        // Function not yet implemented — test should fail in RED phase
-        expect(handleServiceRotateKey).toBeDefined();
-        return;
-      }
+      const { handleServiceRotateKey } = await import("../src/control/service-ops");
 
       const result = await handleServiceRotateKey(req, mockPrincipal, mockCtx);
 

@@ -1,7 +1,6 @@
 import assert from "node:assert";
 import { describe, test } from "vitest";
 
-// These imports target source that DOES NOT EXIST yet — tests must fail (RED phase).
 import {
   computePluginFingerprint,
   type PluginManifestForFingerprint,
