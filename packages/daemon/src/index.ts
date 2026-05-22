@@ -641,6 +641,8 @@ void (async () => {
 
   // --- Service Lifecycle Manager: wire manifest fetch + tool registration ---
   const serviceApprovalStore = new ServiceApprovalStore(db);
+  const { ServiceKeyStore } = await import("./service-key-store");
+  const serviceKeyStore = new ServiceKeyStore(db);
 
   // Populate service refs so the control plane can access them
   const {
@@ -648,13 +650,12 @@ void (async () => {
     serviceToolRegistryRef: svcToolRegRef,
     serviceApprovalStoreRef: svcApprovalRef,
     serviceLifecycleManagerRef: svcLifecycleRef,
+    serviceKeyStoreRef: svcKeyStoreRef,
   } = await import("./service-refs");
   svcRegRef.current = serviceRegistry;
   svcToolRegRef.current = serviceToolRegistry;
   svcApprovalRef.current = serviceApprovalStore;
-  svcRegRef.current = serviceRegistry;
-  svcToolRegRef.current = serviceToolRegistry;
-  svcApprovalRef.current = serviceApprovalStore;
+  svcKeyStoreRef.current = serviceKeyStore;
   const manifestFetcher = new ManifestFetcher({
     registry: serviceRegistry,
     timeoutMs: 5000,

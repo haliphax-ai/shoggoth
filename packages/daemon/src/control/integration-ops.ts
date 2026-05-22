@@ -135,7 +135,10 @@ export type IntegrationOpsContext = {
   /** The service registry for managed services. */
   readonly serviceRegistry?: import("../service-registry").ServiceRegistry;
   /** The service tool registry for managed services. */
+  /** The service tool registry for managed services. */
   readonly serviceToolRegistry?: import("../service-tool-registry").ServiceToolRegistry;
+  /** The service key store for age key management. */
+  readonly serviceKeyStore?: import("../service-key-store").ServiceKeyStore;
   readonly cancelMcpHttpRequest?: (input: {
     readonly sessionId: string;
     readonly sourceId: string;
