@@ -11,6 +11,9 @@ import type { ServiceToolRegistry } from "../service-tool-registry";
 import type { ServiceKeyStore } from "../service-key-store.js";
 import { createHash } from "node:crypto";
 import { serviceLifecycleManagerRef, serviceProvisionSecrets } from "../service-refs";
+import { getLogger } from "../logging";
+
+const log = getLogger("service-ops");
 
 /**
  * Extract the service approval store from the integration context.
@@ -410,17 +413,20 @@ export async function handleServiceApprove(
           const delivered = await deliverIdentity(entry.url, keyPair.identity, provisionSecret);
           if (delivered) {
             delivery = "delivered";
+            log.info("identity delivered to service", {
+              serviceId,
+              url: `${entry.url}/_shoggoth/identity`,
+            });
           } else {
-            // Log warning but don't fail the approval
-            console.warn(
-              `[service-ops] Failed to deliver identity to service '${serviceId}' at ${entry.url}/_shoggoth/identity`,
-            );
+            log.warn("failed to deliver identity to service", {
+              serviceId,
+              url: `${entry.url}/_shoggoth/identity`,
+            });
           }
         } else {
-          // No stored secret — service wasn't spawned by procman (external) or was restarted outside our control
-          console.warn(
-            `[service-ops] No provision secret for service '${serviceId}' — cannot deliver identity automatically`,
-          );
+          log.warn("no provision secret for service — cannot deliver identity automatically", {
+            serviceId,
+          });
         }
       }
 
@@ -520,15 +526,18 @@ export async function handleServiceRotateKey(
       const delivered = await deliverRotatedIdentity(entry.url, keyPair.identity, rotationToken);
       if (delivered) {
         delivery = "delivered";
+        log.info("rotated identity delivered to service", {
+          serviceId,
+          url: `${entry.url}/_shoggoth/identity`,
+        });
       } else {
-        console.warn(
-          `[service-ops] Failed to deliver rotated identity to service '${serviceId}' at ${entry.url}/_shoggoth/identity`,
-        );
+        log.warn("failed to deliver rotated identity to service", {
+          serviceId,
+          url: `${entry.url}/_shoggoth/identity`,
+        });
       }
     } else if (entry.url && !rotationToken) {
-      console.warn(
-        `[service-ops] Cannot deliver rotated identity to '${serviceId}' — no token minter available`,
-      );
+      log.warn("cannot deliver rotated identity — no token minter available", { serviceId });
     }
     // Update approval record fingerprint
     const keyFingerprint = keyStore.getFingerprint(serviceId);

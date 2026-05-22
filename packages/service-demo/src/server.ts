@@ -20,7 +20,8 @@ import { createIdentityHandler, TokenValidator } from "@shoggoth/service-auth";
 const PORT = Number(process.env.DEMO_SERVICE_PORT) || Number(process.argv[2]) || 3200;
 const HOST = process.env.DEMO_SERVICE_HOST || "127.0.0.1";
 
-const KEY_PATH = process.env.DEMO_SERVICE_KEY_PATH || "./demo-service-identity.key";
+const KEY_PATH =
+  process.env.DEMO_SERVICE_KEY_PATH || "/var/lib/shoggoth/daemon/demo-service-identity.key";
 const PROVISION_SECRET =
   process.env.DEMO_PROVISION_SECRET || process.env.SHOGGOTH_PROVISION_SECRET || "";
 
@@ -44,10 +45,12 @@ const identityHandler = createIdentityHandler({
   provisionSecret: PROVISION_SECRET || undefined,
   onReceive(identity: string) {
     storedIdentity = identity;
+    console.log(`[demo-service] Identity received and stored (${identity.slice(0, 20)}...)`);
     try {
       writeFileSync(KEY_PATH, identity, "utf-8");
-    } catch {
-      // Ignore write errors (e.g. read-only filesystem)
+      console.log(`[demo-service] Identity written to ${KEY_PATH}`);
+    } catch (err) {
+      console.warn(`[demo-service] Failed to write identity to ${KEY_PATH}:`, err);
     }
   },
 });
@@ -176,10 +179,12 @@ async function handler(req: IncomingMessage, res: ServerResponse): Promise<void>
           return;
         }
         storedIdentity = parsed.identity;
+        console.log(`[demo-service] Identity rotated (${parsed.identity.slice(0, 20)}...)`);
         try {
           writeFileSync(KEY_PATH, parsed.identity, "utf-8");
-        } catch {
-          // Ignore write errors
+          console.log(`[demo-service] Rotated identity written to ${KEY_PATH}`);
+        } catch (err) {
+          console.warn(`[demo-service] Failed to write rotated identity to ${KEY_PATH}:`, err);
         }
         json(res, 200, { ok: true });
         return;
