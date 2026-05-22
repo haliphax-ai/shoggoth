@@ -32,6 +32,11 @@ export class ServiceToolDispatcher {
     this.tokenMinter = tokenMinter;
   }
 
+  /** Set or replace the token minter (for late wiring after key store init). */
+  setTokenMinter(minter: TokenMinter): void {
+    this.tokenMinter = minter;
+  }
+
   /**
    * Execute HTTP request and handle response.
    */

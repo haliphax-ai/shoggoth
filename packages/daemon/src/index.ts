@@ -644,6 +644,11 @@ void (async () => {
   const { ServiceKeyStore } = await import("./service-key-store");
   const serviceKeyStore = new ServiceKeyStore(db);
 
+  // Wire TokenMinter into the dispatcher now that the key store exists
+  const { TokenMinter } = await import("./service-auth");
+  const tokenMinter = new TokenMinter(serviceKeyStore);
+  serviceToolDispatcher.setTokenMinter(tokenMinter);
+
   // Populate service refs so the control plane can access them
   const {
     serviceRegistryRef: svcRegRef,
@@ -651,11 +656,13 @@ void (async () => {
     serviceApprovalStoreRef: svcApprovalRef,
     serviceLifecycleManagerRef: svcLifecycleRef,
     serviceKeyStoreRef: svcKeyStoreRef,
+    tokenMinterRef: svcTokenMinterRef,
   } = await import("./service-refs");
   svcRegRef.current = serviceRegistry;
   svcToolRegRef.current = serviceToolRegistry;
   svcApprovalRef.current = serviceApprovalStore;
   svcKeyStoreRef.current = serviceKeyStore;
+  svcTokenMinterRef.current = tokenMinter;
   const manifestFetcher = new ManifestFetcher({
     registry: serviceRegistry,
     timeoutMs: 5000,
