@@ -1012,8 +1012,12 @@ describe("control plane (unix socket + JSONL)", () => {
         const res = parseResponseLine(line);
         assert.equal(res.ok, true);
         const rows = (res.result as { sessions: { id: string; status: string }[] }).sessions;
-        assert.ok(rows.length >= 2);
+        assert.ok(rows.length >= 1);
         assert.ok(rows.some((r) => r.id === "sess-list-a" && r.status === "active"));
+        assert.ok(
+          !rows.some((r) => r.id === "sess-list-z"),
+          "terminated sessions excluded by default",
+        );
 
         const lineF = await send({
           v: WIRE_VERSION,

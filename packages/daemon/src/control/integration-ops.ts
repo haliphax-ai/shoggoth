@@ -1616,7 +1616,8 @@ export async function handleIntegrationControlOp(
           activeSince,
           limit,
         });
-        return { sessions: rows.map(mapSessionListRow) };
+        const filtered = status ? rows : rows.filter((r) => r.status !== "terminated");
+        return { sessions: filtered.map(mapSessionListRow) };
       }
 
       if (agentFilter) {
@@ -1635,7 +1636,8 @@ export async function handleIntegrationControlOp(
         activeSince,
         limit,
       });
-      return { sessions: rows.map(mapSessionListRow) };
+      const filtered = status ? rows : rows.filter((r) => r.status !== "terminated");
+      return { sessions: filtered.map(mapSessionListRow) };
     }
 
     case "session_context_status": {
