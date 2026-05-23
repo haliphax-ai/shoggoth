@@ -68,6 +68,7 @@ export const DEFINED_CONTROL_OPS = [
   "service.request",
   "service.approve",
   "service.revoke",
+  "service.rotate-key",
 ] as const;
 type DefinedControlOp = (typeof DEFINED_CONTROL_OPS)[number];
 

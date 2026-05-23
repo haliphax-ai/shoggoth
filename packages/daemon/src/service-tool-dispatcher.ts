@@ -6,6 +6,7 @@
  */
 
 import type { ServiceRegistry, ServiceToolDeclaration } from "./service-registry";
+import type { TokenMinter } from "./service-auth.js";
 
 /**
  * Context for tool invocation.
@@ -23,10 +24,17 @@ export interface ToolInvokeContext {
  */
 export class ServiceToolDispatcher {
   private serviceRegistry: ServiceRegistry;
+  private tokenMinter?: TokenMinter;
   private placeholderToken = "shoggoth-placeholder";
 
-  constructor(serviceRegistry: ServiceRegistry) {
+  constructor(serviceRegistry: ServiceRegistry, tokenMinter?: TokenMinter) {
     this.serviceRegistry = serviceRegistry;
+    this.tokenMinter = tokenMinter;
+  }
+
+  /** Set or replace the token minter (for late wiring after key store init). */
+  setTokenMinter(minter: TokenMinter): void {
+    this.tokenMinter = minter;
   }
 
   /**
@@ -57,20 +65,20 @@ export class ServiceToolDispatcher {
 
   /**
    * Dispatch a tool call to a managed/external service via HTTP.
-   * Resolves service URL from registry, injects placeholder auth header,
+   * Resolves service URL from registry, injects auth header,
    * sends request, returns response body.
    *
    * @param serviceId - The service ID to dispatch to
    * @param decl - The tool declaration
    * @param args - Arguments to pass to the tool
-   * @param _ctx - Invocation context (reserved for future use)
+   * @param ctx - Invocation context
    * @returns The result as a JSON string
    */
   async dispatch(
     serviceId: string,
     decl: ServiceToolDeclaration,
     args: Record<string, unknown>,
-    _ctx: ToolInvokeContext,
+    ctx: ToolInvokeContext,
   ): Promise<{ resultJson: string }> {
     const entry = this.serviceRegistry.get(serviceId);
 
@@ -86,13 +94,25 @@ export class ServiceToolDispatcher {
       throw new Error(`Service ${serviceId} has no URL`);
     }
 
+    // Determine auth token
+    let token = this.placeholderToken;
+    if (this.tokenMinter) {
+      try {
+        token = await this.tokenMinter.mint(ctx.agentId, serviceId, ctx.sessionUrn);
+      } catch {
+        console.warn(
+          `TokenMinter: failed to mint token for service ${serviceId}, falling back to placeholder`,
+        );
+      }
+    }
+
     const dispatch = decl.dispatch ?? "body";
     let path = decl.path;
     const method = (decl.method ?? "POST").toUpperCase();
     const canHaveBody = method !== "GET" && method !== "HEAD";
 
     const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.placeholderToken}`,
+      Authorization: `Bearer ${token}`,
     };
     if (canHaveBody) {
       headers["Content-Type"] = "application/json";

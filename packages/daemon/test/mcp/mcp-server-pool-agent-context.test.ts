@@ -1,5 +1,5 @@
 /**
- * RED phase tests: verify that connectShoggothMcpServers threads AgentMcpContext
+ * Tests: verify that connectShoggothMcpServers threads AgentMcpContext
  * (uid, gid, workspacePath) through to the stdio connect options.
  *
  * These tests mock @shoggoth/mcp-integration so we can inspect the options

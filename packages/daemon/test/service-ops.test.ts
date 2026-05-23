@@ -13,6 +13,7 @@ import {
   handleServiceRequest,
   handleServiceApprove,
   handleServiceRevoke,
+  handleServiceRotateKey,
 } from "../src/control/service-ops";
 
 describe("service-ops", () => {
@@ -578,6 +579,66 @@ describe("service-ops", () => {
 
       expect(result).toHaveProperty("error");
       expect((result as { error: string }).error).toContain("operator");
+    });
+  });
+
+  describe("service.rotate-key", () => {
+    it("requires operator principal", async () => {
+      const agentPrincipal = { kind: "agent" as const, sessionId: "agent:123" };
+      const req: WireRequest = {
+        id: "test-rotate-1",
+        op: "service.rotate-key",
+        auth: { kind: "operator_token", token: "test" },
+        payload: { service_id: "svc-1" },
+      };
+
+      const result = await handleServiceRotateKey(req, agentPrincipal, mockCtx);
+      expect(result).toHaveProperty("error");
+      expect((result as { error: string }).error).toContain("operator");
+    });
+
+    it("requires service_id", async () => {
+      const req: WireRequest = {
+        id: "test-rotate-2",
+        op: "service.rotate-key",
+        auth: { kind: "operator_token", token: "test" },
+        payload: {},
+      };
+
+      const result = await handleServiceRotateKey(req, mockPrincipal, mockCtx);
+      expect(result).toHaveProperty("error");
+      expect((result as { error: string }).error).toContain("service_id");
+    });
+
+    it("returns error when key store is not available", async () => {
+      const req: WireRequest = {
+        id: "test-rotate-3",
+        op: "service.rotate-key",
+        auth: { kind: "operator_token", token: "test" },
+        payload: { service_id: "svc-1" },
+      };
+
+      // mockCtx has no serviceKeyStore
+      const result = await handleServiceRotateKey(req, mockPrincipal, mockCtx);
+      expect(result).toHaveProperty("error");
+      expect((result as { error: string }).error).toContain("key store");
+    });
+  });
+
+  describe("service.rotate-key dispatch routing", () => {
+    it("is routable via integration-ops dispatch", async () => {
+      const { handleIntegrationControlOp } = await import("../src/control/integration-ops");
+      const req: WireRequest = {
+        id: "test-dispatch-rotate",
+        op: "service.rotate-key",
+        auth: { kind: "operator_token", token: "test" },
+        payload: { service_id: "svc-1" },
+      };
+
+      // The dispatch should route to handleServiceRotateKey (not return undefined)
+      const result = await handleIntegrationControlOp(req, mockPrincipal, mockCtx);
+      // It should return a result (not undefined which means "unrecognized op")
+      expect(result).not.toBeUndefined();
     });
   });
 });

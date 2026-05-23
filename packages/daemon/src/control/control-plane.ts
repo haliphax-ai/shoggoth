@@ -42,6 +42,7 @@ import {
   serviceRegistryRef,
   serviceToolRegistryRef,
   serviceApprovalStoreRef,
+  serviceKeyStoreRef,
 } from "../service-refs";
 
 type ControlPlaneOptions = {
@@ -266,6 +267,7 @@ async function handleOneLine(
       serviceApprovalStore: serviceApprovalStoreRef.current,
       serviceRegistry: serviceRegistryRef.current,
       serviceToolRegistry: serviceToolRegistryRef.current,
+      serviceKeyStore: serviceKeyStoreRef.current,
       recordIntegrationAudit: (extras) =>
         recordControlPlaneAudit(deps.stateDb, {
           ...auditBaseFields(),

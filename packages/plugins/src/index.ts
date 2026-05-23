@@ -38,6 +38,31 @@ export {
   type PlatformDeliveryResolver,
   type OperatorDelivery,
 } from "./platform-delivery-registry";
+
+// Plugin fingerprinting
+export { computePluginFingerprint, type PluginManifestForFingerprint } from "./plugin-fingerprint";
+
+// Plugin registration gate (fingerprinting integration)
+export {
+  createGatedServiceRegisterCtx,
+  buildManifestFromRegistration,
+  type PluginApprovalStore,
+  type GatedRegistrationResult,
+  type RegistrationGateLogger,
+  type CreateGatedContextOptions,
+} from "./plugin-registration-gate";
+
+// Plugin approval and ops enforcement
+export {
+  resolvePluginApprovalStatus,
+  enforcePluginOps,
+  createOpsEnforcementProxy,
+  type PluginApprovalRecord,
+  type PluginApprovalStatus,
+  type PluginOpsDeclaration,
+  type OpsEnforcementResult,
+} from "./plugin-approval";
+
 export type {
   DaemonConfigureCtx,
   DaemonStartupCtx,
@@ -61,4 +86,5 @@ export type {
   DirectToolHandler,
   DirectToolContext,
   PluginServiceEntry,
+  ServiceApprovalGate,
 } from "./hook-types";

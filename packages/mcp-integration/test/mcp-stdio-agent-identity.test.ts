@@ -1,5 +1,5 @@
 /**
- * RED phase tests: verify that McpStdioConnectOptions forwards uid/gid to spawn().
+ * Tests: verify that McpStdioConnectOptions forwards uid/gid to spawn().
  *
  * These tests mock node:child_process so they don't conflict with the
  * integration tests in mcp-jsonrpc-transport.test.ts.

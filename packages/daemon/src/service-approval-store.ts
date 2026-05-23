@@ -5,18 +5,7 @@ import { type ServiceApprovalRecord, type ApprovalStatus } from "@shoggoth/share
  * SQLite-backed store for service approval records.
  */
 export class ServiceApprovalStore {
-  constructor(private _db: Database.Database) {
-    // Ensure the table exists (migrations should create it, but be safe)
-    this._db.exec(`
-      CREATE TABLE IF NOT EXISTS service_approvals (
-        service_id TEXT PRIMARY KEY,
-        status TEXT NOT NULL DEFAULT 'pending',
-        approved_fingerprint TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-      )
-    `);
-  }
+  constructor(private _db: Database.Database) {}
 
   /**
    * Get the approval record for a service. Returns null if never seen.
@@ -24,13 +13,14 @@ export class ServiceApprovalStore {
   get(serviceId: string): ServiceApprovalRecord | null {
     const row = this._db
       .prepare(
-        "SELECT service_id, status, approved_fingerprint, created_at, updated_at FROM service_approvals WHERE service_id = ?",
+        "SELECT service_id, status, approved_fingerprint, key_fingerprint, created_at, updated_at FROM service_approvals WHERE service_id = ?",
       )
       .get(serviceId) as
       | {
           service_id: string;
           status: string;
           approved_fingerprint: string | null;
+          key_fingerprint: string | null;
           created_at: string;
           updated_at: string;
         }
@@ -44,6 +34,7 @@ export class ServiceApprovalStore {
       serviceId: row.service_id,
       status: row.status as ApprovalStatus,
       approvedFingerprint: row.approved_fingerprint,
+      keyFingerprint: row.key_fingerprint,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -52,7 +43,12 @@ export class ServiceApprovalStore {
   /**
    * Create or update an approval record.
    */
-  upsert(serviceId: string, status: ApprovalStatus, fingerprint?: string): void {
+  upsert(
+    serviceId: string,
+    status: ApprovalStatus,
+    fingerprint?: string,
+    keyFingerprint?: string,
+  ): void {
     const now = new Date().toISOString();
     const existing = this.get(serviceId);
 
@@ -60,16 +56,22 @@ export class ServiceApprovalStore {
       // Update existing record
       this._db
         .prepare(
-          "UPDATE service_approvals SET status = ?, approved_fingerprint = ?, updated_at = ? WHERE service_id = ?",
+          "UPDATE service_approvals SET status = ?, approved_fingerprint = ?, key_fingerprint = ?, updated_at = ? WHERE service_id = ?",
         )
-        .run(status, fingerprint ?? null, now, serviceId);
+        .run(
+          status,
+          fingerprint ?? null,
+          keyFingerprint ?? existing.keyFingerprint ?? null,
+          now,
+          serviceId,
+        );
     } else {
       // Insert new record
       this._db
         .prepare(
-          "INSERT INTO service_approvals (service_id, status, approved_fingerprint, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+          "INSERT INTO service_approvals (service_id, status, approved_fingerprint, key_fingerprint, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
         )
-        .run(serviceId, status, fingerprint ?? null, now, now);
+        .run(serviceId, status, fingerprint ?? null, keyFingerprint ?? null, now, now);
     }
   }
 
@@ -119,6 +121,49 @@ export class ServiceApprovalStore {
   }
 
   /**
+   * Store the approved ops for a service as a JSON array in the approved_ops column.
+   * Also ensures the service record exists with 'approved' status.
+   */
+  setApprovedOps(serviceId: string, ops: string[]): void {
+    const now = new Date().toISOString();
+    const opsJson = JSON.stringify(ops);
+    const existing = this.get(serviceId);
+
+    if (existing) {
+      this._db
+        .prepare(
+          "UPDATE service_approvals SET approved_ops = ?, status = 'approved', updated_at = ? WHERE service_id = ?",
+        )
+        .run(opsJson, now, serviceId);
+    } else {
+      this._db
+        .prepare(
+          "INSERT INTO service_approvals (service_id, status, approved_ops, created_at, updated_at) VALUES (?, 'approved', ?, ?, ?)",
+        )
+        .run(serviceId, opsJson, now, now);
+    }
+  }
+
+  /**
+   * Get the approved ops for a service. Returns an empty array if none stored.
+   */
+  getApprovedOps(serviceId: string): string[] {
+    const row = this._db
+      .prepare("SELECT approved_ops FROM service_approvals WHERE service_id = ?")
+      .get(serviceId) as { approved_ops: string | null } | undefined;
+
+    if (!row || !row.approved_ops) {
+      return [];
+    }
+
+    try {
+      return JSON.parse(row.approved_ops) as string[];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * List all records, optionally filtered by status.
    * Note: filtering by "pending" matches both "pending" and "pending-reapproval".
    */
@@ -127,6 +172,7 @@ export class ServiceApprovalStore {
       service_id: string;
       status: string;
       approved_fingerprint: string | null;
+      key_fingerprint: string | null;
       created_at: string;
       updated_at: string;
     }>;
@@ -136,20 +182,20 @@ export class ServiceApprovalStore {
       if (status === "pending") {
         rows = this._db
           .prepare(
-            "SELECT service_id, status, approved_fingerprint, created_at, updated_at FROM service_approvals WHERE status = 'pending' OR status = 'pending-reapproval'",
+            "SELECT service_id, status, approved_fingerprint, key_fingerprint, created_at, updated_at FROM service_approvals WHERE status = 'pending' OR status = 'pending-reapproval'",
           )
           .all() as typeof rows;
       } else {
         rows = this._db
           .prepare(
-            "SELECT service_id, status, approved_fingerprint, created_at, updated_at FROM service_approvals WHERE status = ?",
+            "SELECT service_id, status, approved_fingerprint, key_fingerprint, created_at, updated_at FROM service_approvals WHERE status = ?",
           )
           .all(status) as typeof rows;
       }
     } else {
       rows = this._db
         .prepare(
-          "SELECT service_id, status, approved_fingerprint, created_at, updated_at FROM service_approvals",
+          "SELECT service_id, status, approved_fingerprint, key_fingerprint, created_at, updated_at FROM service_approvals",
         )
         .all() as typeof rows;
     }
@@ -158,6 +204,7 @@ export class ServiceApprovalStore {
       serviceId: row.service_id,
       status: row.status as ApprovalStatus,
       approvedFingerprint: row.approved_fingerprint,
+      keyFingerprint: row.key_fingerprint,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }));

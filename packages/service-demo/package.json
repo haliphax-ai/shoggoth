@@ -14,10 +14,12 @@
   },
   "scripts": {
     "start": "tsx src/server.ts",
-    "typecheck": "tsgo --noEmit -p tsconfig.json"
+    "typecheck": "tsgo --noEmit -p tsconfig.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "@shoggoth/plugins": "*",
+    "@shoggoth/service-auth": "*",
     "@shoggoth/shared": "*"
   },
   "shoggothPlugin": {

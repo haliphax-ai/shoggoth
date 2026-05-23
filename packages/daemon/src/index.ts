@@ -1,7 +1,8 @@
 import { DEFAULT_HITL_CONFIG, loadLayeredConfig, LAYOUT, VERSION } from "@shoggoth/shared";
+import { serviceProvisionSecrets } from "./service-refs";
 import { routeMcpToolInvocation } from "@shoggoth/mcp-integration";
 import { fileURLToPath } from "node:url";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -596,6 +597,14 @@ void (async () => {
   // (TurnQueue and ModelResilienceGate initialized earlier, before fireDaemonHooks)
 
   function processDeclarationToSpec(decl: ProcessDeclaration): ProcessSpec {
+    // For service processes, generate and inject a provision secret
+    let env = decl.env;
+    if (decl.service) {
+      const secret = randomBytes(32).toString("hex");
+      serviceProvisionSecrets.set(decl.id, secret);
+      env = { ...env, SHOGGOTH_PROVISION_SECRET: secret };
+    }
+
     return {
       id: decl.id,
       label: decl.label,
@@ -603,7 +612,7 @@ void (async () => {
       command: decl.command,
       args: decl.args,
       cwd: decl.cwd,
-      env: decl.env,
+      env,
       restart: {
         mode: decl.restartMode ?? "on-failure",
         maxRetries: decl.maxRetries ?? 5,
@@ -632,6 +641,13 @@ void (async () => {
 
   // --- Service Lifecycle Manager: wire manifest fetch + tool registration ---
   const serviceApprovalStore = new ServiceApprovalStore(db);
+  const { ServiceKeyStore } = await import("./service-key-store");
+  const serviceKeyStore = new ServiceKeyStore(db);
+
+  // Wire TokenMinter into the dispatcher now that the key store exists
+  const { TokenMinter } = await import("./service-auth");
+  const tokenMinter = new TokenMinter(serviceKeyStore);
+  serviceToolDispatcher.setTokenMinter(tokenMinter);
 
   // Populate service refs so the control plane can access them
   const {
@@ -639,13 +655,14 @@ void (async () => {
     serviceToolRegistryRef: svcToolRegRef,
     serviceApprovalStoreRef: svcApprovalRef,
     serviceLifecycleManagerRef: svcLifecycleRef,
+    serviceKeyStoreRef: svcKeyStoreRef,
+    tokenMinterRef: svcTokenMinterRef,
   } = await import("./service-refs");
   svcRegRef.current = serviceRegistry;
   svcToolRegRef.current = serviceToolRegistry;
   svcApprovalRef.current = serviceApprovalStore;
-  svcRegRef.current = serviceRegistry;
-  svcToolRegRef.current = serviceToolRegistry;
-  svcApprovalRef.current = serviceApprovalStore;
+  svcKeyStoreRef.current = serviceKeyStore;
+  svcTokenMinterRef.current = tokenMinter;
   const manifestFetcher = new ManifestFetcher({
     registry: serviceRegistry,
     timeoutMs: 5000,
@@ -684,6 +701,7 @@ void (async () => {
   procman.on("process-stopped", (mp: { spec: { id: string } }) => {
     const decl = processDeclarations.get(mp.spec.id);
     if (decl?.service) {
+      serviceProvisionSecrets.delete(mp.spec.id);
       serviceLifecycleManager.onProcessStopped(mp.spec.id).catch((err) => {
         getLogger("daemon").error("service lifecycle onProcessStopped failed", {
           processId: mp.spec.id,

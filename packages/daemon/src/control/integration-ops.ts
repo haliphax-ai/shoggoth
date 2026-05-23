@@ -85,6 +85,7 @@ import {
   handleServiceRequest,
   handleServiceApprove,
   handleServiceRevoke,
+  handleServiceRotateKey,
 } from "./service-ops";
 
 export class IntegrationOpError extends Error {
@@ -134,7 +135,10 @@ export type IntegrationOpsContext = {
   /** The service registry for managed services. */
   readonly serviceRegistry?: import("../service-registry").ServiceRegistry;
   /** The service tool registry for managed services. */
+  /** The service tool registry for managed services. */
   readonly serviceToolRegistry?: import("../service-tool-registry").ServiceToolRegistry;
+  /** The service key store for age key management. */
+  readonly serviceKeyStore?: import("../service-key-store").ServiceKeyStore;
   readonly cancelMcpHttpRequest?: (input: {
     readonly sessionId: string;
     readonly sourceId: string;
@@ -2376,6 +2380,8 @@ export async function handleIntegrationControlOp(
       return handleServiceApprove(req, principal, ctx);
     case "service.revoke":
       return handleServiceRevoke(req, principal, ctx);
+    case "service.rotate-key":
+      return handleServiceRotateKey(req, principal, ctx);
 
     case "media_generate": {
       if (principal.kind !== "agent") {
