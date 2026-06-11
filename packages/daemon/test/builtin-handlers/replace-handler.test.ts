@@ -109,12 +109,12 @@ describe("replace-handler", () => {
   });
 
   describe("pattern requirement for line operations", () => {
-    it("should not require pattern for deleteLine", async () => {
+    it("should not require pattern for deleteLines with single integer", async () => {
       writeFileSync(testFilePath, "line1\nline2\nline3");
 
       const result = await runReplace({
         path: "test.txt",
-        deleteLine: 2,
+        deleteLines: 2,
       });
 
       const parsed = JSON.parse(result.resultJson);
@@ -122,7 +122,7 @@ describe("replace-handler", () => {
       expect(readFileSync(testFilePath, "utf8")).toBe("line1\nline3");
     });
 
-    it("should not require pattern for deleteLines", async () => {
+    it("should not require pattern for deleteLines with array", async () => {
       writeFileSync(testFilePath, "line1\nline2\nline3\nline4");
 
       const result = await runReplace({
@@ -135,31 +135,17 @@ describe("replace-handler", () => {
       expect(readFileSync(testFilePath, "utf8")).toBe("line1\nline3");
     });
 
-    it("should not require pattern for deleteRange", async () => {
+    it("should not require pattern for deleteLines with range object", async () => {
       writeFileSync(testFilePath, "line1\nline2\nline3\nline4");
 
       const result = await runReplace({
         path: "test.txt",
-        deleteRange: { start: 2, end: 3 },
+        deleteLines: { start: 2, end: 3 },
       });
 
       const parsed = JSON.parse(result.resultJson);
       expect(parsed.success).toBe(true);
       expect(readFileSync(testFilePath, "utf8")).toBe("line1\nline4");
-    });
-
-    it("should not require pattern for replaceRange", async () => {
-      writeFileSync(testFilePath, "line1\nline2\nline3");
-
-      const result = await runReplace({
-        path: "test.txt",
-        replaceRange: { start: 2, end: 2 },
-        replacement: "new line",
-      });
-
-      const parsed = JSON.parse(result.resultJson);
-      expect(parsed.success).toBe(true);
-      expect(readFileSync(testFilePath, "utf8")).toBe("line1\nnew line\nline3");
     });
   });
 

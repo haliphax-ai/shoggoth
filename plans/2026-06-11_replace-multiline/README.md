@@ -1,6 +1,8 @@
 ---
 date: 2026-06-11
-completed: never
+completed: 2026-06-11
+---
+
 ---
 
 # Replace Tool Multiline Support
