@@ -885,6 +885,11 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
               type: "boolean",
               description: "Preview changes without modifying file (default: false)",
             },
+            multiline: {
+              type: "boolean",
+              description:
+                "When true, regex patterns are treated as multiline (m flag). Enables \\n in patterns and makes ^/$ match line boundaries.",
+            },
             deleteLines: {
               type: "array",
               items: { type: "integer" },

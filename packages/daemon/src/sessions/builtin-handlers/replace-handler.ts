@@ -17,7 +17,6 @@ async function replaceHandler(
   const gateCwd = ctx.workingDirectory ?? ctx.workspacePath;
   const gate = checkAgentsMdGate(ctx.db, ctx.sessionId, gateCwd, ctx.workspacePath);
   if (gate) return { resultJson: JSON.stringify(gate) };
-
   // Extract and validate parameters
   const path = args.path as string;
   const pattern = args.pattern as string;
@@ -25,8 +24,9 @@ async function replaceHandler(
   const caseSensitive = args.caseSensitive !== false; // default true
   const maxOccurrences = typeof args.maxOccurrences === "number" ? args.maxOccurrences : undefined;
   const dryRun = args.dryRun === true;
+  const multiline = args.multiline === true; // default false
 
-  const deleteLines = Array.isArray(args.deleteLines) ? args.deleteLines as number[] : [];
+  const deleteLines = Array.isArray(args.deleteLines) ? (args.deleteLines as number[]) : [];
   const deleteLine = typeof args.deleteLine === "number" ? args.deleteLine : undefined;
   const deleteRange = args.deleteRange as { start: number; end: number } | undefined;
   const replaceRange = args.replaceRange as { start: number; end: number } | undefined;
@@ -40,7 +40,7 @@ async function replaceHandler(
     return Number.isInteger(n) && n >= 1;
   };
 
-  if (deleteLines.length > 0 && deleteLines.some(n => !validateLineNumber(n))) {
+  if (deleteLines.some((n) => !validateLineNumber(n))) {
     return { resultJson: JSON.stringify({ error: "deleteLines must contain positive integers" }) };
   }
   if (deleteLine !== undefined && !validateLineNumber(deleteLine)) {
@@ -48,18 +48,26 @@ async function replaceHandler(
   }
   if (deleteRange) {
     if (!validateLineNumber(deleteRange.start) || !validateLineNumber(deleteRange.end)) {
-      return { resultJson: JSON.stringify({ error: "deleteRange start/end must be positive integers" }) };
+      return {
+        resultJson: JSON.stringify({ error: "deleteRange start/end must be positive integers" }),
+      };
     }
     if (deleteRange.start > deleteRange.end) {
-      return { resultJson: JSON.stringify({ error: "deleteRange.start must be <= deleteRange.end" }) };
+      return {
+        resultJson: JSON.stringify({ error: "deleteRange.start must be <= deleteRange.end" }),
+      };
     }
   }
   if (replaceRange) {
     if (!validateLineNumber(replaceRange.start) || !validateLineNumber(replaceRange.end)) {
-      return { resultJson: JSON.stringify({ error: "replaceRange start/end must be positive integers" }) };
+      return {
+        resultJson: JSON.stringify({ error: "replaceRange start/end must be positive integers" }),
+      };
     }
     if (replaceRange.start > replaceRange.end) {
-      return { resultJson: JSON.stringify({ error: "replaceRange.start must be <= replaceRange.end" }) };
+      return {
+        resultJson: JSON.stringify({ error: "replaceRange.start must be <= replaceRange.end" }),
+      };
     }
   }
 
@@ -116,7 +124,7 @@ async function replaceHandler(
 
     // Collect all line numbers to delete (1-indexed to 0-indexed)
     const linesToDelete = new Set<number>();
-    deleteLines.forEach(n => linesToDelete.add(n - 1));
+    deleteLines.forEach((n) => linesToDelete.add(n - 1));
     if (deleteLine !== undefined) linesToDelete.add(deleteLine - 1);
     if (deleteRange) {
       for (let i = deleteRange.start - 1; i <= deleteRange.end - 1; i++) {
@@ -131,16 +139,20 @@ async function replaceHandler(
     const newContent = originalTrailingNewline ? newLines.join("\n") + "\n" : newLines.join("\n");
 
     if (dryRun) {
-      return { resultJson: JSON.stringify({ preview: newContent, linesDeleted: Array.from(linesToDelete).sort((a, b) => a - b).map(n => n + 1) }) };
+      return {
+        resultJson: JSON.stringify({
+          preview: newContent,
+          linesDeleted: Array.from(linesToDelete)
+            .sort((a, b) => a - b)
+            .map((n) => n + 1),
+        }),
+      };
     }
 
     // Write back
     const writeResult = await runAsUser({
       file: process.execPath,
-      args: [
-        "-e",
-        `require("fs").writeFileSync(${JSON.stringify(absPath)}, process.env.CONTENT)`,
-      ],
+      args: ["-e", `require("fs").writeFileSync(${JSON.stringify(absPath)}, process.env.CONTENT)`],
       cwd,
       uid,
       gid,
@@ -155,7 +167,14 @@ async function replaceHandler(
       };
     }
 
-    return { resultJson: JSON.stringify({ success: true, linesDeleted: Array.from(linesToDelete).sort((a, b) => a - b).map(n => n + 1) }) };
+    return {
+      resultJson: JSON.stringify({
+        success: true,
+        linesDeleted: Array.from(linesToDelete)
+          .sort((a, b) => a - b)
+          .map((n) => n + 1),
+      }),
+    };
   }
 
   // Range replacement (replaceRange)
@@ -208,10 +227,7 @@ async function replaceHandler(
     // Write back
     const writeResult = await runAsUser({
       file: process.execPath,
-      args: [
-        "-e",
-        `require("fs").writeFileSync(${JSON.stringify(absPath)}, process.env.CONTENT)`,
-      ],
+      args: ["-e", `require("fs").writeFileSync(${JSON.stringify(absPath)}, process.env.CONTENT)`],
       cwd,
       uid,
       gid,
@@ -227,13 +243,13 @@ async function replaceHandler(
     }
 
     return { resultJson: JSON.stringify({ success: true }) };
-  }
+    // Pattern-based replacement (requires pattern and replacement unless line operations are specified)
+    const hasLineOperations =
+      deleteLines.length > 0 || deleteLine !== undefined || deleteRange || replaceRange;
 
-  // Pattern-based replacement (requires pattern and replacement)
-  if (pattern == null) {
-    return { resultJson: JSON.stringify({ error: "pattern is required for replacement" }) };
-  }
-  if (replacement == null) {
+    if (!hasLineOperations && pattern == null) {
+      return { resultJson: JSON.stringify({ error: "pattern is required for replacement" }) };
+    }
     return { resultJson: JSON.stringify({ error: "replacement is required" }) };
   }
 
@@ -248,8 +264,8 @@ async function replaceHandler(
   // Check for matches to warn about safety limit (>1000)
   const countArgs = ["--count-matches", "--no-filename"];
   if (!caseSensitive) countArgs.push("-i");
+  if (multiline) countArgs.push("--multiline");
   countArgs.push("--", pattern, absPath);
-
   const countResult = await runAsUser({
     file: "rg",
     args: countArgs,
@@ -265,17 +281,20 @@ async function replaceHandler(
       }),
     };
   }
-
   const totalMatches = parseInt(countResult.stdout.trim(), 10) || 0;
 
-  if (totalMatches === 0) {
-    return { resultJson: JSON.stringify({ error: "pattern not found in file" }) };
+  if (totalMatches > 1000) {
   }
 
   if (totalMatches > 1000) {
-    return { resultJson: JSON.stringify({ error: `Safety limit exceeded: found ${totalMatches} matches (max 1000)` }) };
+    return {
+      resultJson: JSON.stringify({
+        error: `Safety limit exceeded: found ${totalMatches} matches (max 1000)`,
+      }),
+    };
   }
 
+  // Read file content
   // Read file content
   const readResult = await runAsUser({
     file: process.execPath,
@@ -287,19 +306,9 @@ async function replaceHandler(
     uid,
     gid,
   });
-
-  if (readResult.exitCode !== 0) {
-    return {
-      resultJson: JSON.stringify({
-        error: readResult.stderr.trim() || "failed to read file",
-      }),
-    };
-  }
-
   const content = readResult.stdout;
-  const regexFlags = caseSensitive ? "g" : "gi";
+  const regexFlags = caseSensitive ? (multiline ? "gm" : "g") : multiline ? "gmi" : "gi";
   const regex = new RegExp(pattern, regexFlags);
-
   let replacements = 0;
   const maxReplacements = maxOccurrences ?? Infinity;
   const result = content.replace(regex, (match, ...rest) => {
@@ -316,10 +325,7 @@ async function replaceHandler(
   // Write back
   const writeResult = await runAsUser({
     file: process.execPath,
-    args: [
-      "-e",
-      `require("fs").writeFileSync(${JSON.stringify(absPath)}, process.env.CONTENT)`,
-    ],
+    args: ["-e", `require("fs").writeFileSync(${JSON.stringify(absPath)}, process.env.CONTENT)`],
     cwd,
     uid,
     gid,
