@@ -20,6 +20,10 @@ function buildGenerationConfig(req: MediaAdapterRequest): Record<string, unknown
     responseModalities: getResponseModalities(req.params),
   };
 
+  if (req.params.kind === "image" && req.params.aspectRatio) {
+    config.aspectRatio = req.params.aspectRatio;
+  }
+
   if (req.params.kind === "speech" && req.params.voice) {
     config.speechConfig = {
       voiceConfig: {

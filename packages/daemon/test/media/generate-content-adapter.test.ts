@@ -166,6 +166,48 @@ describe("generateContentAdapter", () => {
     assert.ok((result as MediaAdapterResult & { status: "error" }).error.length > 0);
   });
 
+  it("passes aspectRatio through generationConfig for image models", async () => {
+    const base64 = Buffer.from("fake-png-bytes").toString("base64");
+    mockFetch.mockResolvedValue(makeGenerateContentResponse("image/png", base64));
+
+    await generateContentAdapter(
+      makeRequest({
+        params: { kind: "image", aspectRatio: "16:9" },
+      }),
+    );
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    assert.strictEqual(body.generationConfig.aspectRatio, "16:9");
+  });
+
+  it("does not include aspectRatio in generationConfig when not provided", async () => {
+    const base64 = Buffer.from("fake-png-bytes").toString("base64");
+    mockFetch.mockResolvedValue(makeGenerateContentResponse("image/png", base64));
+
+    await generateContentAdapter(makeRequest());
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    assert.strictEqual(body.generationConfig.aspectRatio, undefined);
+  });
+
+  it("does not include aspectRatio in generationConfig for non-image kinds", async () => {
+    const base64 = Buffer.from("fake-audio-bytes").toString("base64");
+    mockFetch.mockResolvedValue(makeGenerateContentResponse("audio/wav", base64));
+
+    await generateContentAdapter(
+      makeRequest({
+        model: "gemini-2.5-flash-preview-tts",
+        params: { kind: "speech", voice: "Kore" },
+      }),
+    );
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    assert.strictEqual(body.generationConfig.aspectRatio, undefined);
+  });
+
   it("includes input_image as inlineData part when provided for image editing", async () => {
     const base64 = Buffer.from("edited-image").toString("base64");
     mockFetch.mockResolvedValue(makeGenerateContentResponse("image/png", base64));
