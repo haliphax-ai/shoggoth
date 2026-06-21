@@ -249,6 +249,9 @@ function boxTable(cells: string[][], aligns: Array<"left" | "right" | "center">)
 
   for (let i = 1; i < cells.length; i++) {
     renderRow(cells[i]);
+    if (needsWrap) {
+      lines.push(sep);
+    }
   }
 
   lines.push(bot);
