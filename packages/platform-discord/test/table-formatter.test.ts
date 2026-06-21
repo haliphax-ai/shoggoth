@@ -246,8 +246,8 @@ test("wide table adds row separator lines between every row when reflowing", () 
   const lines = box.split("\n");
   // Count separator rows (lines starting with ├)
   const sepLines = lines.filter((l) => l.startsWith("├"));
-  // With 3 data rows and reflow: header-sep + sep-after-row1 + sep-after-row2 + sep-after-row3 = 4
-  expect(sepLines.length).toBe(4);
+  // Header-sep + sep-after-row1 + sep-after-row2 = 3 (no sep after last row)
+  expect(sepLines.length).toBe(3);
 
   // Verify structure: top, header, sep, [row lines], sep, ... sep, bottom
   expect(lines[0]).toMatch(/^┌/);
