@@ -594,7 +594,7 @@ const fetchArgs = {
 const kvArgs = {
   type: "object",
   description:
-    "Lightweight key-value store scoped to the workspace. Backed by the state DB. Keys max 256 chars, values max 64KB serialized.",
+    "Lightweight key-value store scoped to the workspace. Backed by the state DB. Use for structured, machine-readable state (flags, counters, preferences). Keys max 256 chars, values max 64KB serialized.",
   properties: {
     action: {
       type: "string",
@@ -885,21 +885,40 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
               type: "boolean",
               description: "Preview changes without modifying file (default: false)",
             },
-            deleteLines: {
-              type: "array",
-              items: { type: "integer" },
-              description: "Array of line numbers to delete (1-indexed)",
+            multiline: {
+              type: "boolean",
+              description:
+                "When true, regex patterns are treated as multiline (m flag). Enables \\n in patterns and makes ^/$ match line boundaries.",
             },
-            deleteLine: { type: "integer", description: "Single line number to delete" },
-            deleteRange: {
-              type: "object",
-              properties: { start: { type: "integer" }, end: { type: "integer" } },
-              description: "Delete lines from start to end (inclusive)",
+            deleteLines: {
+              oneOf: [
+                { type: "integer", description: "Single line number to delete (1-indexed)" },
+                {
+                  type: "array",
+                  items: { type: "integer" },
+                  description: "Array of line numbers to delete (1-indexed)",
+                },
+                {
+                  type: "object",
+                  properties: {
+                    start: { type: "integer" },
+                    end: { type: "integer" },
+                  },
+                  required: ["start", "end"],
+                  description: "Range of lines to delete from start to end (inclusive, 1-indexed)",
+                },
+              ],
+              description:
+                "Line(s) to delete: single number, array of numbers, or {start, end} range",
             },
             replaceRange: {
               type: "object",
-              properties: { start: { type: "integer" }, end: { type: "integer" } },
-              description: "Replace lines from start to end (inclusive)",
+              properties: {
+                start: { type: "integer", description: "Start line number (1-indexed)" },
+                end: { type: "integer", description: "End line number (1-indexed, inclusive)" },
+              },
+              required: ["start", "end"],
+              description: "Range of lines to replace with replacement text (inclusive, 1-indexed)",
             },
           },
           required: ["path"],
