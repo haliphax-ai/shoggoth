@@ -25,6 +25,7 @@
     "remark-gfm": "^4.0.0",
     "remark-parse": "^11.0.0",
     "remark-stringify": "^11.0.0",
+    "string-width": "^8.2.1",
     "unified": "^11.0.0",
     "unist-util-visit": "^5.1.0",
     "zod": "^3.24.0"

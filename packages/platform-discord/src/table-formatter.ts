@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import remarkStringify from "remark-stringify";
 import { visit, SKIP } from "unist-util-visit";
 import type { Node } from "unist";
+import stringWidth from "string-width";
 
 type MdNode = Node & {
   children?: MdNode[];
@@ -24,66 +25,6 @@ function nodeText(node?: MdNode): string {
   }
   if (node.children) return node.children.map(nodeText).join("");
   return "";
-}
-
-function classifyCp(cp: number): 0 | 1 | 2 {
-  if (
-    cp === 0xfe0f ||
-    cp === 0xfe0e ||
-    cp === 0x200d ||
-    cp === 0x200c ||
-    (cp >= 0x0300 && cp <= 0x036f) ||
-    (cp >= 0x1ab0 && cp <= 0x1aff) ||
-    (cp >= 0x1dc0 && cp <= 0x1dff) ||
-    (cp >= 0x20d0 && cp <= 0x20ff) ||
-    (cp >= 0xfe00 && cp <= 0xfe0f) ||
-    (cp >= 0xe0100 && cp <= 0xe01ef)
-  ) {
-    return 0;
-  }
-  if (
-    (cp >= 0x1100 && cp <= 0x115f) ||
-    (cp >= 0x2e80 && cp <= 0x2fff) ||
-    (cp >= 0x3000 && cp <= 0x9fff) ||
-    (cp >= 0xac00 && cp <= 0xd7af) ||
-    (cp >= 0xf900 && cp <= 0xfaff) ||
-    (cp >= 0xfe30 && cp <= 0xfe6f) ||
-    (cp >= 0xff01 && cp <= 0xff60) ||
-    (cp >= 0xffe0 && cp <= 0xffe6) ||
-    (cp >= 0x1b000 && cp <= 0x1b0ff) ||
-    (cp >= 0x20000 && cp <= 0x2fffd) ||
-    (cp >= 0x30000 && cp <= 0x3fffd) ||
-    (cp >= 0x2300 && cp <= 0x23ff) ||
-    (cp >= 0x25a0 && cp <= 0x27bf) ||
-    (cp >= 0x1f000 && cp <= 0x1ffff)
-  ) {
-    return 2;
-  }
-  return 1;
-}
-
-function visualWidth(s: string): number {
-  let w = 0;
-  for (const ch of s) {
-    w += classifyCp(ch.codePointAt(0)!);
-  }
-  return w;
-}
-
-function padVisual(cell: string, targetWidth: number, align: "left" | "right" | "center"): string {
-  const cur = visualWidth(cell);
-  const padLen = targetWidth - cur;
-  if (padLen <= 0) return cell;
-  switch (align) {
-    case "center": {
-      const l = Math.floor(padLen / 2);
-      return " ".repeat(l) + cell + " ".repeat(padLen - l);
-    }
-    case "right":
-      return " ".repeat(padLen) + cell;
-    default:
-      return cell + " ".repeat(padLen);
-  }
 }
 
 const BOX = {
@@ -120,7 +61,7 @@ const MAX_COL_WIDTH = 20;
  * Prefers breaking at spaces; falls back to hard-breaking mid-word.
  */
 function wrapText(text: string, maxWidth: number): string[] {
-  if (visualWidth(text) <= maxWidth) return [text];
+  if (stringWidth(text) <= maxWidth) return [text];
 
   const words = text.split(/( +)/); // keep spaces as separate tokens
   const lines: string[] = [];
@@ -133,7 +74,7 @@ function wrapText(text: string, maxWidth: number): string[] {
    */
   function hardBreak(token: string): void {
     for (const ch of token) {
-      const cw = classifyCp(ch.codePointAt(0)!);
+      const cw = stringWidth(ch);
       if (curW + cw > maxWidth && cur.length > 0) {
         lines.push(cur);
         cur = "";
@@ -145,7 +86,7 @@ function wrapText(text: string, maxWidth: number): string[] {
   }
 
   for (const word of words) {
-    const ww = visualWidth(word);
+    const ww = stringWidth(word);
     if (curW + ww <= maxWidth) {
       cur += word;
       curW += ww;
@@ -159,11 +100,11 @@ function wrapText(text: string, maxWidth: number): string[] {
       curW = 0;
       // If the new word itself exceeds maxWidth, hard-break it too
       const trimmed = word.trimStart();
-      if (visualWidth(trimmed) > maxWidth) {
+      if (stringWidth(trimmed) > maxWidth) {
         hardBreak(trimmed);
       } else {
         cur = trimmed;
-        curW = visualWidth(cur);
+        curW = stringWidth(cur);
       }
     }
   }
@@ -176,12 +117,12 @@ function boxTable(cells: string[][], aligns: Array<"left" | "right" | "center">)
   const colCount = Math.max(...cells.map((r: string[]) => r.length));
   if (colCount === 0) return "";
 
-  // Compute natural (uncapped) column widths
+  // Compute natural (uncapped) column widths in visual columns
   const naturalWidths: number[] = Array.from({ length: colCount }, (_, c: number) =>
-    Math.max(...cells.map((r: string[]) => visualWidth(r[c] ?? "")), 1),
+    Math.max(...cells.map((r: string[]) => stringWidth(r[c] ?? "")), 1),
   );
 
-  // Total table width = sum(widths) + 3*colCount + 1
+  // Total table width = sum(visualWidths) + 3*colCount + 1
   // (each col has +2 padding, +1 separator except last, +2 outer borders)
   const totalWidth = naturalWidths.reduce((a, b) => a + b, 0) + 3 * colCount + 1;
 
@@ -248,11 +189,26 @@ function boxTable(cells: string[][], aligns: Array<"left" | "right" | "center">)
    */
   function renderRow(row: string[]): void {
     if (!needsWrap) {
-      // Simple single-line row
+      // Simple single-line row: pad each cell to widths[c] characters
+      // (not visual width).  This ensures the data row character count
+      // matches the border row, keeping box-drawing aligned.
       lines.push(
         BOX.v +
           row
-            .map((cell: string, c: number) => " " + padVisual(cell, widths[c], normAlign[c]) + " ")
+            .map((cell: string, c: number) => {
+              const padLen = widths[c] - cell.length;
+              if (padLen <= 0) return " " + cell + " ";
+              switch (normAlign[c]) {
+                case "center": {
+                  const l = Math.floor(padLen / 2);
+                  return " " + " ".repeat(l) + cell + " ".repeat(padLen - l) + " ";
+                }
+                case "right":
+                  return " " + " ".repeat(padLen) + cell + " ";
+                default:
+                  return " " + cell + " ".repeat(padLen) + " ";
+              }
+            })
             .join(BOX.v) +
           BOX.v,
       );
@@ -269,7 +225,18 @@ function boxTable(cells: string[][], aligns: Array<"left" | "right" | "center">)
           wrapped
             .map((cellLines: string[], c: number) => {
               const content = cellLines[ln] ?? "";
-              return " " + padVisual(content, widths[c], normAlign[c]) + " ";
+              const padLen = widths[c] - content.length;
+              if (padLen <= 0) return " " + content + " ";
+              switch (normAlign[c]) {
+                case "center": {
+                  const l = Math.floor(padLen / 2);
+                  return " " + " ".repeat(l) + content + " ".repeat(padLen - l) + " ";
+                }
+                case "right":
+                  return " " + " ".repeat(padLen) + content + " ";
+                default:
+                  return " " + content + " ".repeat(padLen) + " ";
+              }
             })
             .join(BOX.v) +
           BOX.v,
