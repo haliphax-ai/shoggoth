@@ -246,9 +246,11 @@ function boxTable(cells: string[][], aligns: Array<"left" | "right" | "center">)
 
   renderRow(cells[0]);
   lines.push(sep);
-
   for (let i = 1; i < cells.length; i++) {
     renderRow(cells[i]);
+    if (needsWrap && i < cells.length - 1) {
+      lines.push(sep);
+    }
   }
 
   lines.push(bot);

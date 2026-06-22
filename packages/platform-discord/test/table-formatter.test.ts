@@ -228,3 +228,50 @@ test("words wider than their column are hard-broken when column is narrower than
   // 2 logical rows, but the first has a long path that must wrap → more visual lines
   expect(dataLinesAfterSep.length).toBeGreaterThan(2);
 });
+
+test("wide table adds row separator lines between every row when reflowing", () => {
+  const wideMd = [
+    "| Feature | Description | Status | Notes |",
+    "|---|---|---|---|",
+    "| Auth overhaul | Migrate from session-based auth to JWT tokens with refresh | In Progress | Requires coordination with the frontend team and mobile apps |",
+    "| DB migration tooling | Automated schema migrations with rollback support | Planned | Should integrate with existing CI/CD pipeline |",
+    "| Logging pipeline | Centralized structured logging with retention policies | Done | Deployed to production last week |",
+    "",
+  ].join("\n");
+  const result = mdTableToAscii(wideMd);
+
+  const codeMatch = result.match(/```text\n([\s\S]*?)```/);
+  expect(codeMatch).toBeTruthy();
+  const box = codeMatch![1].trim();
+  const lines = box.split("\n");
+  // Count separator rows (lines starting with ├)
+  const sepLines = lines.filter((l) => l.startsWith("├"));
+  // Header-sep + sep-after-row1 + sep-after-row2 = 3 (no sep after last row)
+  expect(sepLines.length).toBe(3);
+
+  // Verify structure: top, header, sep, [row lines], sep, ... sep, bottom
+  expect(lines[0]).toMatch(/^┌/);
+  expect(lines[lines.length - 1]).toMatch(/^└/);
+  // First separator is right after the header row
+  expect(lines[1]).toMatch(/^│.*Feature/);
+  expect(lines[2]).toMatch(/^├/);
+});
+
+test("narrow table does NOT add row separators between data rows", () => {
+  const narrowMd = ["| A | B | C |", "|---|---|---|", "| 1 | 2 | 3 |", "| 4 | 5 | 6 |", ""].join(
+    "\n",
+  );
+  const result = mdTableToAscii(narrowMd);
+
+  const codeMatch = result.match(/```text\n([\s\S]*?)```/);
+  expect(codeMatch).toBeTruthy();
+  const box = codeMatch![1].trim();
+  const lines = box.split("\n");
+
+  // Narrow table: only 1 separator (header/data divider)
+  const sepLines = lines.filter((l) => l.startsWith("├"));
+  expect(sepLines.length).toBe(1);
+
+  // Structure: top, header, sep, row1, row2, bottom = 6 lines
+  expect(lines.length).toBe(6);
+});
