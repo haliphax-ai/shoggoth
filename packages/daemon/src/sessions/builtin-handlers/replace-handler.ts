@@ -1,4 +1,4 @@
-import { realpathSync, statSync } from "node:fs";
+import { realpathSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { runAsUser, resolvePathForWrite } from "@shoggoth/os-exec";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
 import { resolveUserPath } from "../builtin-tool-registry";
@@ -26,6 +26,7 @@ async function replaceHandler(
   const maxOccurrences = typeof args.maxOccurrences === "number" ? args.maxOccurrences : undefined;
   const dryRun = args.dryRun === true;
   const multiline = args.multiline === true; // default false
+  const fixedStrings = args.fixedStrings === true; // default false
 
   // Parse unified deleteLines parameter (accepts: number, number[], or {start, end})
   const deleteLinesSet = new Set<number>();
@@ -116,12 +117,14 @@ async function replaceHandler(
     return { resultJson: JSON.stringify({ error: "replacement is required" }) };
   }
 
-  // Validate regex pattern early
-  try {
-    new RegExp(pattern);
-  } catch (e: any) {
-    const errorData = formatRegexError(e, pattern);
-    return { resultJson: JSON.stringify(errorData) };
+  // Validate regex pattern early (only for pattern-based replacement, not for fixedStrings or line ops)
+  if (!hasLineOperations && !fixedStrings && pattern) {
+    try {
+      new RegExp(pattern);
+    } catch (e: any) {
+      const errorData = formatRegexError(e, pattern);
+      return { resultJson: JSON.stringify(errorData) };
+    }
   }
 
   // Line operations (deleteLines) - always perform these first
@@ -269,7 +272,90 @@ async function replaceHandler(
     return { resultJson: JSON.stringify({ success: true }) };
   }
 
-  // Check for matches to warn about safety limit (>1000)
+  // ── fixedStrings fast path: in-process, no rg, no subprocesses ──
+  if (fixedStrings) {
+    let content: string;
+    try {
+      content = readFileSync(absPath, "utf8");
+    } catch {
+      return { resultJson: JSON.stringify({ error: "failed to read file" }) };
+    }
+
+    if (caseSensitive) {
+      // Pure string indexOf — no regex
+      const maxReps = maxOccurrences ?? Infinity;
+      const needleLen = pattern.length;
+      let replacements = 0;
+      let pos = 0;
+      let result = "";
+      while (replacements < maxReps) {
+        const idx = content.indexOf(pattern, pos);
+        if (idx === -1) break;
+        result += content.slice(pos, idx) + replacement;
+        pos = idx + needleLen;
+        replacements++;
+      }
+      result += content.slice(pos);
+
+      if (replacements === 0) {
+        return { resultJson: JSON.stringify({ replacements: 0 }) };
+      }
+
+      if (dryRun) {
+        return { resultJson: JSON.stringify({ preview: result, replacements }) };
+      }
+
+      try {
+        writeFileSync(absPath, result, "utf8");
+      } catch {
+        return { resultJson: JSON.stringify({ error: "failed to write file" }) };
+      }
+      return { resultJson: JSON.stringify({ replacements }) };
+    }
+    // Case-insensitive fixedStrings: toLowerCase + indexOf, no regex
+    const maxReps = maxOccurrences ?? Infinity;
+    const lowerContent = content.toLowerCase();
+    const lowerPattern = pattern.toLowerCase();
+    const needleLen = pattern.length;
+    let replacements = 0;
+    let pos = 0;
+    let result = "";
+    while (replacements < maxReps) {
+      const idx = lowerContent.indexOf(lowerPattern, pos);
+      if (idx === -1) break;
+      result += content.slice(pos, idx) + replacement;
+      pos = idx + needleLen;
+      replacements++;
+    }
+    result += content.slice(pos);
+
+    if (replacements === 0) {
+      return { resultJson: JSON.stringify({ replacements: 0 }) };
+    }
+
+    if (dryRun) {
+      return { resultJson: JSON.stringify({ preview: result, replacements }) };
+    }
+
+    try {
+      writeFileSync(absPath, result, "utf8");
+    } catch {
+      return { resultJson: JSON.stringify({ error: "failed to write file" }) };
+    }
+    return { resultJson: JSON.stringify({ replacements }) };
+    if (dryRun) {
+      return { resultJson: JSON.stringify({ preview: result, replacements }) };
+    }
+
+    try {
+      writeFileSync(absPath, result, "utf8");
+    } catch {
+      return { resultJson: JSON.stringify({ error: "failed to write file" }) };
+    }
+    return { resultJson: JSON.stringify({ replacements }) };
+  }
+
+  // ── Standard regex path: rg for counting + safety limit ──
   const countArgs = ["--count-matches", "--no-filename"];
   if (!caseSensitive) countArgs.push("-i");
   if (multiline) countArgs.push("--multiline");
@@ -291,6 +377,13 @@ async function replaceHandler(
   }
 
   const totalMatches = parseInt(countResult.stdout.trim(), 10) || 0;
+
+  // Early return when no matches found
+  if (totalMatches === 0) {
+    return {
+      resultJson: JSON.stringify({ replacements: 0 }),
+    };
+  }
 
   if (totalMatches > 1000) {
     return {

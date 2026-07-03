@@ -890,6 +890,11 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
               description:
                 "When true, regex patterns are treated as multiline (m flag). Enables \\n in patterns and makes ^/$ match line boundaries.",
             },
+            fixedStrings: {
+              type: "boolean",
+              description:
+                "When true, pattern is treated as a fixed/literal string instead of a regex. All regex metacharacters are escaped before matching. Use with multiline: true for multiline literal search-and-replace.",
+            },
             deleteLines: {
               oneOf: [
                 { type: "integer", description: "Single line number to delete (1-indexed)" },
