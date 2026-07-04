@@ -21,7 +21,28 @@ import type {
   ModelToolCompleteInput,
   ModelToolCompleteOutput,
   ModelUsage,
+  OpenAIToolFunctionDefinition,
+  ResponseSchema,
 } from "./types";
+
+const STRUCTURED_OUTPUT_TOOL_NAME = "__structured_output__";
+
+function buildSyntheticTool(responseSchema: ResponseSchema): OpenAIToolFunctionDefinition {
+  return {
+    type: "function",
+    function: {
+      name: STRUCTURED_OUTPUT_TOOL_NAME,
+      description:
+        "Use this tool to provide your final structured response. " +
+        "Call it with your answer conforming to the schema.",
+      parameters: responseSchema.schema,
+    },
+  };
+}
+
+function isSyntheticToolCall(toolCall: ChatToolCall): boolean {
+  return toolCall.name === STRUCTURED_OUTPUT_TOOL_NAME;
+}
 
 /** Extract usage metadata from an OpenAI chat completions response. */
 function extractOpenAIUsage(json: unknown): ModelUsage | undefined {
@@ -63,7 +84,6 @@ function serializeContentParts(parts: ChatContentPart[]): unknown[] {
       return { type: "text", text: p.text };
     }
     if (p.type === "thinking") return { type: "text", text: "" };
-    // ImageBlock — use OpenAI codec
     return openaiImageBlockCodec.encode(p);
   });
 }
@@ -121,7 +141,6 @@ function applyToolCallDeltas(map: Map<number, ToolCallPartial>, deltas: unknown)
     }
   }
 }
-
 function finalizeToolCalls(
   map: Map<number, ToolCallPartial>,
   thinkingFormat?: "native" | "xml-tags" | "none",
@@ -174,7 +193,6 @@ async function consumeOpenAIChatCompletionStream(
       throw new ModelHttpError(502, "malformed SSE chunk", data.slice(0, 200));
     }
 
-    // Capture usage from the final chunk (sent when stream_options.include_usage is true).
     const u = (json as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage;
     if (u && typeof u.prompt_tokens === "number" && typeof u.completion_tokens === "number") {
       usage = {
@@ -211,7 +229,6 @@ async function consumeOpenAIChatCompletionStream(
 
     if (typeof d.reasoning_content === "string" && d.reasoning_content.length > 0) {
       reasoningBuf += d.reasoning_content;
-      // Cap at 200KB to prevent memory issues
       if (reasoningBuf.length > 200 * 1024) {
         reasoningBuf = reasoningBuf.slice(0, 200 * 1024);
       }
@@ -244,7 +261,6 @@ async function consumeOpenAIChatCompletionStream(
   }
   if (lineBuf.length > 0) flushLine(lineBuf);
 
-  // Flush any remaining buffered thinking content
   if (thinkNorm) {
     const flushed = thinkNorm.flush();
     if (flushed.text) {
@@ -313,12 +329,6 @@ export function createOpenAICompatibleProvider(
     }
   }
 
-  /**
-   * Retry wrapper for empty model responses. Free-tier models (e.g. on
-   * OpenRouter) occasionally return 200 OK with no content and no tool_calls.
-   * This retries the request using the same backoff parameters as the
-   * resilience gate before giving up and letting failover take over.
-   */
   async function withEmptyResponseRetry<T>(fn: () => Promise<T>): Promise<T> {
     const gate = getResilienceGate();
     const manager = gate.getOrCreateManager(id);
@@ -361,7 +371,6 @@ export function createOpenAICompatibleProvider(
         }
         applyOpenAICompatibleRequestExtensions(body, input);
 
-        // Structured output: apply response_format AFTER requestExtras so typed field wins
         const mode = resolveStructuredOutputMode(input.structuredOutputMode, "strict");
         if (input.responseSchema && mode !== "none") {
           body.response_format = {
@@ -455,7 +464,6 @@ export function createOpenAICompatibleProvider(
         const finalContent =
           typeof normalized === "string" ? normalized : JSON.stringify(normalized);
 
-        // Extract reasoning_content
         let reasoningContent: string | undefined;
         if (
           message &&
@@ -465,7 +473,6 @@ export function createOpenAICompatibleProvider(
           reasoningContent = message.reasoning_content;
         }
 
-        // Structured output: post-validate when mode is "best-effort"
         if (input.responseSchema && mode !== "strict" && mode !== "none") {
           const result = validateResponseSchema(finalContent, input.responseSchema.schema);
           if (!result.valid) {
@@ -489,10 +496,17 @@ export function createOpenAICompatibleProvider(
         };
         if (options.apiKey) headers.authorization = `Bearer ${options.apiKey}`;
 
+        const mode = resolveStructuredOutputMode(input.structuredOutputMode, "strict");
+        const hasSchema = input.responseSchema && mode !== "none";
+
+        const tools = hasSchema
+          ? [...input.tools, buildSyntheticTool(input.responseSchema!)]
+          : input.tools;
+
         const body: Record<string, unknown> = {
           model: input.model,
           messages: input.messages.map((m) => serializeChatMessage(m, input.thinkingFormat)),
-          tools: input.tools,
+          tools,
           tool_choice: "auto" as const,
           max_tokens: input.maxOutputTokens,
           temperature: input.temperature,
@@ -502,19 +516,6 @@ export function createOpenAICompatibleProvider(
           body.stream_options = { include_usage: true };
         }
         applyOpenAICompatibleRequestExtensions(body, input);
-
-        // Structured output: apply response_format AFTER requestExtras so typed field wins
-        const mode = resolveStructuredOutputMode(input.structuredOutputMode, "strict");
-        if (input.responseSchema && mode !== "none") {
-          body.response_format = {
-            type: "json_schema",
-            json_schema: {
-              name: "response",
-              schema: input.responseSchema.schema,
-              strict: mode === "strict",
-            },
-          };
-        }
 
         const res = await resilientFetch(url, {
           method: "POST",
@@ -550,6 +551,35 @@ export function createOpenAICompatibleProvider(
 
           if (toolCalls.length === 0 && (content === null || content === "")) {
             throw new EmptyModelResponseError();
+          }
+
+          if (hasSchema) {
+            const realCalls = toolCalls.filter((tc) => !isSyntheticToolCall(tc));
+            const syntheticCall = toolCalls.find((tc) => isSyntheticToolCall(tc));
+
+            if (syntheticCall && realCalls.length === 0) {
+              const structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
+              if (mode !== "strict") {
+                const result = validateResponseSchema(
+                  structuredContent,
+                  input.responseSchema!.schema,
+                );
+                if (!result.valid) {
+                  throw new StructuredOutputValidationError(
+                    result.error,
+                    result.rawContent,
+                    input.responseSchema!.schema,
+                  );
+                }
+              }
+              return { content: structuredContent, toolCalls: [], usage, reasoningContent };
+            }
+            if (syntheticCall && realCalls.length > 0) {
+              return { content, toolCalls: realCalls, usage, reasoningContent };
+            }
+            if (toolCalls.length > 0) {
+              return { content, toolCalls, usage, reasoningContent };
+            }
           }
 
           const normalized = content ? normalizeThinkingBlocks(content, thinkingFormat) : null;
@@ -616,7 +646,6 @@ export function createOpenAICompatibleProvider(
           }
         }
 
-        // Extract reasoning_content
         let reasoningContent: string | undefined;
         if (
           message &&
@@ -630,6 +659,149 @@ export function createOpenAICompatibleProvider(
           throw new EmptyModelResponseError(text.slice(0, 200));
         }
 
+        if (hasSchema) {
+          const realCalls = toolCalls.filter((tc) => !isSyntheticToolCall(tc));
+          const syntheticCall = toolCalls.find((tc) => isSyntheticToolCall(tc));
+
+          if (syntheticCall && realCalls.length === 0) {
+            const structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
+            if (mode !== "strict") {
+              const result = validateResponseSchema(
+                structuredContent,
+                input.responseSchema!.schema,
+              );
+              if (!result.valid) {
+                throw new StructuredOutputValidationError(
+                  result.error,
+                  result.rawContent,
+                  input.responseSchema!.schema,
+                );
+              }
+            }
+            return {
+              content: structuredContent,
+              toolCalls: [],
+              usage: extractOpenAIUsage(json),
+              reasoningContent,
+            };
+          }
+          if (syntheticCall && realCalls.length > 0) {
+            return {
+              content,
+              toolCalls: realCalls,
+              usage: extractOpenAIUsage(json),
+              reasoningContent,
+            };
+          }
+          if (!syntheticCall && toolCalls.length === 0) {
+            const followUpTools = [...input.tools, buildSyntheticTool(input.responseSchema!)];
+
+            const followUpMessages: ChatMessage[] = [
+              ...input.messages,
+              { role: "assistant" as const, content: content ?? "" },
+              {
+                role: "user" as const,
+                content: "Please provide your response using the __structured_output__ tool.",
+              },
+            ];
+
+            const followUpBody: Record<string, unknown> = {
+              model: input.model,
+              messages: followUpMessages.map((m) => serializeChatMessage(m, input.thinkingFormat)),
+              tools: followUpTools,
+              tool_choice: { type: "function", function: { name: STRUCTURED_OUTPUT_TOOL_NAME } },
+              max_tokens: input.maxOutputTokens,
+              temperature: input.temperature,
+            };
+            applyOpenAICompatibleRequestExtensions(followUpBody, input);
+
+            const followUpRes = await resilientFetch(url, {
+              method: "POST",
+              headers,
+              body: JSON.stringify(followUpBody),
+            });
+
+            const followUpRawText = await followUpRes.text();
+            if (!followUpRes.ok) {
+              throw new ModelHttpError(
+                followUpRes.status,
+                followUpRes.statusText || `HTTP ${followUpRes.status}`,
+                followUpRawText.slice(0, 500),
+              );
+            }
+
+            const followUpText =
+              thinkingFormat === "xml-tags"
+                ? stripXmlThinkingTags(followUpRawText)
+                : followUpRawText;
+            let followUpJson: unknown;
+            try {
+              followUpJson = JSON.parse(followUpText);
+            } catch {
+              throw new ModelHttpError(
+                502,
+                "invalid JSON from model endpoint",
+                followUpText.slice(0, 200),
+              );
+            }
+
+            const followUpChoices = (followUpJson as { choices?: unknown }).choices;
+            const followUpFirst = Array.isArray(followUpChoices) ? followUpChoices[0] : undefined;
+            const followUpMsg =
+              followUpFirst &&
+              typeof followUpFirst === "object" &&
+              followUpFirst !== null &&
+              "message" in followUpFirst
+                ? (followUpFirst as { message?: Record<string, unknown> }).message
+                : undefined;
+
+            const followUpToolCallsRaw = followUpMsg?.tool_calls;
+            const followUpForce: { id: string; name: string; arguments: string }[] = [];
+            if (Array.isArray(followUpToolCallsRaw)) {
+              for (const tc of followUpToolCallsRaw) {
+                if (!tc || typeof tc !== "object") continue;
+                const id =
+                  typeof (tc as { id?: unknown }).id === "string" ? (tc as { id: string }).id : "";
+                const fn = (tc as { function?: unknown }).function;
+                if (!fn || typeof fn !== "object") continue;
+                const name =
+                  typeof (fn as { name?: unknown }).name === "string"
+                    ? (fn as { name: string }).name
+                    : "";
+                const rawArgs =
+                  typeof (fn as { arguments?: unknown }).arguments === "string"
+                    ? (fn as { arguments: string }).arguments
+                    : "{}";
+                if (id && name) followUpForce.push({ id, name, arguments: rawArgs });
+              }
+            }
+
+            const forced = followUpForce.find((tc) => isSyntheticToolCall(tc));
+            if (forced) {
+              const structuredContent = forced.arguments;
+              if (mode !== "strict") {
+                const result = validateResponseSchema(
+                  structuredContent,
+                  input.responseSchema!.schema,
+                );
+                if (!result.valid) {
+                  throw new StructuredOutputValidationError(
+                    result.error,
+                    result.rawContent,
+                    input.responseSchema!.schema,
+                  );
+                }
+              }
+              return {
+                content: structuredContent,
+                toolCalls: [],
+                usage: extractOpenAIUsage(followUpJson),
+                reasoningContent,
+              };
+            }
+          }
+        }
+
         const normalized = content ? normalizeThinkingBlocks(content, thinkingFormat) : null;
         const finalContent =
           normalized === null
@@ -637,24 +809,6 @@ export function createOpenAICompatibleProvider(
             : typeof normalized === "string"
               ? normalized
               : JSON.stringify(normalized);
-
-        // Structured output: post-validate when mode is "best-effort"
-        if (
-          input.responseSchema &&
-          mode !== "strict" &&
-          mode !== "none" &&
-          finalContent !== null &&
-          toolCalls.length === 0
-        ) {
-          const result = validateResponseSchema(finalContent, input.responseSchema.schema);
-          if (!result.valid) {
-            throw new StructuredOutputValidationError(
-              result.error,
-              result.rawContent,
-              input.responseSchema.schema,
-            );
-          }
-        }
 
         return {
           content: finalContent,
