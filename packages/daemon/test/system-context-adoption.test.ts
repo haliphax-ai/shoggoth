@@ -461,6 +461,7 @@ describe("systemContext adoption: workflow completion notification", () => {
 });
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // 6. Workflow task spawning — systemContext
 // ---------------------------------------------------------------------------
 
@@ -476,6 +477,7 @@ describe("systemContext adoption: workflow task spawning", () => {
         agentToken: "tok",
         agentTokenEnvName: "SHOGGOTH_AGENT_TOKEN" as const,
       }),
+      kill: () => {},
     };
 
     const adapter = createDaemonSpawnAdapter({

@@ -63,7 +63,7 @@ export type CompletionMap = Map<string, CompletionEntry>;
 // ---------------------------------------------------------------------------
 
 export interface DaemonSpawnAdapterDeps {
-  readonly sessionManager: Pick<SessionManager, "spawn">;
+  readonly sessionManager: Pick<SessionManager, "spawn" | "kill">;
   readonly sessions: Pick<SessionStore, "update">;
   /**
    * Fixed parent session ID. When omitted, `req.replyTo` is used as the parent
@@ -179,6 +179,9 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
             taskId: req.taskId,
             error: String(err),
           });
+        })
+        .finally(() => {
+          deps.sessionManager.kill(childId);
         });
 
       return childId;

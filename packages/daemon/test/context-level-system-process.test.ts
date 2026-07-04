@@ -27,8 +27,10 @@ function openMigratedDb(): { db: Database.Database; dir: string } {
 
 function fakeSessionManager() {
   const spawnCalls: unknown[] = [];
+  const killCalls: string[] = [];
   return {
     spawnCalls,
+    killCalls,
     spawn: async (input: unknown) => {
       spawnCalls.push(input);
       return {
@@ -36,6 +38,9 @@ function fakeSessionManager() {
         agentToken: "tok",
         agentTokenEnvName: "SHOGGOTH_AGENT_TOKEN" as const,
       };
+    },
+    kill: (id: string) => {
+      killCalls.push(id);
     },
   };
 }
