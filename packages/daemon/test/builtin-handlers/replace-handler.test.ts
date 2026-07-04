@@ -149,6 +149,95 @@ describe("replace-handler", () => {
     });
   });
 
+  describe("fixedStrings mode", () => {
+    it("should replace literal text with regex metacharacters", async () => {
+      writeFileSync(testFilePath, "foo (bar) [baz] + qux");
+
+      const result = await runReplace({
+        path: "test.txt",
+        pattern: "(bar) [baz]",
+        replacement: "replaced",
+        fixedStrings: true,
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.replacements).toBe(1);
+      expect(readFileSync(testFilePath, "utf8")).toBe("foo replaced + qux");
+    });
+
+    it("should replace literal text with dots", async () => {
+      writeFileSync(testFilePath, "file.txt has a dot");
+
+      const result = await runReplace({
+        path: "test.txt",
+        pattern: "file.txt",
+        replacement: "document.txt",
+        fixedStrings: true,
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.replacements).toBe(1);
+      expect(readFileSync(testFilePath, "utf8")).toBe("document.txt has a dot");
+    });
+
+    it("should replace literal text with stars and plus", async () => {
+      writeFileSync(testFilePath, "a + b * c");
+
+      const result = await runReplace({
+        path: "test.txt",
+        pattern: "+ b *",
+        replacement: "- d -",
+        fixedStrings: true,
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.replacements).toBe(1);
+      expect(readFileSync(testFilePath, "utf8")).toBe("a - d - c");
+    });
+
+    it("should escape all regex metacharacters", async () => {
+      writeFileSync(testFilePath, "a+b*c?d.e(f)g[h]i{j}k^l$m|n");
+
+      const result = await runReplace({
+        path: "test.txt",
+        pattern: "a+b*c?d.e(f)g[h]i{j}k^l$m|n",
+        replacement: "replaced",
+        fixedStrings: true,
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.replacements).toBe(1);
+      expect(readFileSync(testFilePath, "utf8")).toBe("replaced");
+    });
+  });
+
+  describe("zero-match early return", () => {
+    it("should return replacements: 0 when pattern is not found", async () => {
+      writeFileSync(testFilePath, "hello world");
+
+      const result = await runReplace({
+        path: "test.txt",
+        pattern: "nonexistent",
+        replacement: "anything",
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.replacements).toBe(0);
+    });
+
+    it("should not modify the file when pattern is not found", async () => {
+      writeFileSync(testFilePath, "hello world");
+
+      await runReplace({
+        path: "test.txt",
+        pattern: "nonexistent",
+        replacement: "anything",
+      });
+
+      expect(readFileSync(testFilePath, "utf8")).toBe("hello world");
+    });
+  });
+
   describe("existing functionality", () => {
     it("should still work with basic pattern replacement", async () => {
       writeFileSync(testFilePath, "hello world");

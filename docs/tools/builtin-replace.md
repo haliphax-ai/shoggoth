@@ -4,18 +4,18 @@ Replace patterns in files with support for regex replacements, line-level operat
 
 ## Parameters
 
-| Param            | Type         | Required | Notes                                                             |
-| ---------------- | ------------ | -------- | ----------------------------------------------------------------- |
-| `path`           | string       | yes      | Workspace-relative path to the file to modify                     |
-| `pattern`        | string       | no       | Regex pattern to match (required for regex replacement)           |
-| `replacement`    | string       | no       | Replacement text (supports `$1`–`$9` capture groups)              |
-| `caseSensitive`  | boolean      | no       | Set `false` for case-insensitive (default: true)                  |
-| `maxOccurrences` | number       | no       | Maximum number of replacements to make (default: unlimited)       |
-| `dryRun`         | boolean      | no       | Preview changes without modifying file (default: false)           |
-| `deleteLines`    | number[]     | no       | Array of line numbers to delete                                   |
-| `deleteLine`     | number       | no       | Single line number to delete (singular form, backward compatible) |
-| `deleteRange`    | {start, end} | no       | Delete lines from start to end (inclusive)                        |
-| `replaceRange`   | {start, end} | no       | Replace lines from start to end (inclusive)                       |
+| Param            | Type                               | Required | Notes                                                                                 |
+| ---------------- | ---------------------------------- | -------- | ------------------------------------------------------------------------------------- |
+| `path`           | string                             | yes      | Workspace-relative path to the file to modify                                         |
+| `pattern`        | string                             | no       | Regex pattern to match (required for regex replacement)                               |
+| `replacement`    | string                             | no       | Replacement text (supports `$1`–`$9` capture groups)                                  |
+| `caseSensitive`  | boolean                            | no       | Set `false` for case-insensitive (default: true)                                      |
+| `maxOccurrences` | number                             | no       | Maximum number of replacements to make (default: unlimited)                           |
+| `dryRun`         | boolean                            | no       | Preview changes without modifying file (default: false)                               |
+| `fixedStrings`   | boolean                            | no       | Treat pattern as a literal string, not regex (default: false)                         |
+| `multiline`      | boolean                            | no       | Enable multiline mode (`m` flag) for regex patterns (default: false)                  |
+| `deleteLines`    | number \| number[] \| {start, end} | no       | Line(s) to delete: single 1-indexed number, array of numbers, or `{start, end}` range |
+| `replaceRange`   | {start, end}                       | no       | Replace lines from start to end (inclusive, 1-indexed)                                |
 
 ## Operation Modes
 
@@ -31,26 +31,32 @@ Replace text matching a regex pattern:
 }
 ```
 
-### 2. Line Deletion
+### 2. Literal (fixedStrings) Replacement
 
-Delete specific lines or ranges:
+Replace text matching a literal string — no regex escaping needed:
 
 ```json
 {
   "path": "src/foo.ts",
-  "deleteLines": [10, 20, 30]
+  "pattern": "fn(arg1, arg2)",
+  "replacement": "fn(arg1, arg2, arg3)",
+  "fixedStrings": true
 }
 ```
 
-### 3. Range Deletion
+### 3. Line Deletion
 
-Delete a contiguous range of lines:
+Delete a single line, multiple lines, or a range using the unified `deleteLines` parameter:
 
 ```json
-{
-  "path": "src/foo.ts",
-  "deleteRange": { "start": 10, "end": 20 }
-}
+// Single line
+{ "path": "src/foo.ts", "deleteLines": 42 }
+
+// Multiple lines
+{ "path": "src/foo.ts", "deleteLines": [10, 20, 30] }
+
+// Range
+{ "path": "src/foo.ts", "deleteLines": { "start": 10, "end": 20 } }
 ```
 
 ### 4. Range Replacement
@@ -141,8 +147,7 @@ When `dryRun: true` is specified, the tool returns a preview of changes without 
 {
   "path": "src/foo.ts",
   "pattern": "oldName",
-  "replacement": "newName",
-  "fixedStrings": true
+  "replacement": "newName"
 }
 ```
 
@@ -189,6 +194,31 @@ When `dryRun: true` is specified, the tool returns a preview of changes without 
 }
 ```
 
+### Literal (fixedStrings) Examples
+
+**Replace literal text with regex metacharacters — no escaping needed:**
+
+```json
+{
+  "path": "src/foo.ts",
+  "pattern": "(bar) [baz]",
+  "replacement": "replaced",
+  "fixedStrings": true
+}
+```
+
+**Multiline literal replace:**
+
+```json
+{
+  "path": "src/foo.ts",
+  "pattern": "if (old) {\n  return false;\n}",
+  "replacement": "if (updated) {\n  return true;\n}",
+  "fixedStrings": true,
+  "multiline": true
+}
+```
+
 ### Line Operation Examples
 
 **Delete specific lines:**
@@ -205,7 +235,7 @@ When `dryRun: true` is specified, the tool returns a preview of changes without 
 ```json
 {
   "path": "src/foo.ts",
-  "deleteLine": 42
+  "deleteLines": 42
 }
 ```
 
@@ -214,7 +244,7 @@ When `dryRun: true` is specified, the tool returns a preview of changes without 
 ```json
 {
   "path": "src/foo.ts",
-  "deleteRange": { "start": 10, "end": 20 }
+  "deleteLines": { "start": 10, "end": 20 }
 }
 ```
 
@@ -243,31 +273,19 @@ When `dryRun: true` is specified, the tool returns a preview of changes without 
 ```json
 {
   "path": "src/foo.ts",
-  "deleteRange": { "start": 10, "end": 15 },
+  "deleteLines": { "start": 10, "end": 15 },
   "dryRun": true
 }
 ```
 
 ### Multiline Examples
 
-**Multiline literal replace:**
-
-```json
-{
-  "path": "src/foo.ts",
-  "pattern": "if (old) {\\n  return false;\\n}",
-  "replacement": "if (updated) {\\n  return true;\\n}",
-  "fixedStrings": true,
-  "multiline": true
-}
-```
-
 **Multiline regex replace:**
 
 ```json
 {
   "path": "src/foo.ts",
-  "pattern": "// BEGIN BLOCK\\n[\\\\s\\\\S]*?// END BLOCK",
+  "pattern": "// BEGIN BLOCK\\n[\\s\\S]*?// END BLOCK",
   "replacement": "// cleaned",
   "multiline": true
 }
@@ -342,6 +360,7 @@ The tool preserves original line endings:
 - Use `maxOccurrences` to limit the scope of regex replacements
 - Range operations are inclusive (both start and end lines are affected)
 - Empty replacement strings are valid for range replacement
+- Use `fixedStrings: true` when matching literal text that contains regex metacharacters
 
 ## Automatic Escape Sanitization
 
