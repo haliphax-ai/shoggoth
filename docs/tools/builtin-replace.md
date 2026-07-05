@@ -98,6 +98,17 @@ When `dryRun: true` is specified, the tool returns a preview of changes without 
 
 ## Return Value Structure
 
+All successful operations include a `changed_lines` property that lists every line in the file that was affected by the operation — both directly modified AND shifted. The property is an array; each entry is either a single line (`{ line: N }`) or a range (`{ start: N, end: M }`). Entries are sorted by position and may be combined into ranges where contiguous.
+
+**Successful replacement (with `changed_lines`):**
+
+```json
+{
+  "replacements": 2,
+  "changed_lines": [{ "line": 3 }, { "start": 7, "end": 9 }]
+}
+```
+
 **Successful replacement:**
 
 ```json
