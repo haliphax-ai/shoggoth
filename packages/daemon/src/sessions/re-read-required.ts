@@ -89,9 +89,6 @@ export function clearReReadRequired(
  * Called when a new context segment is generated (or reset) so the new
  * segment starts with an empty list.
  */
-export function clearSessionReReadRequired(
-  db: Database.Database,
-  sessionId: string,
-): void {
+export function clearSessionReReadRequired(db: Database.Database, sessionId: string): void {
   db.prepare(`DELETE FROM re_read_required WHERE session_id = ?`).run(sessionId);
 }
