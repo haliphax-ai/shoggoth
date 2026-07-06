@@ -238,6 +238,65 @@ describe("replace-handler", () => {
     });
   });
 
+  describe("replaceRange true replace behavior", () => {
+    it("should replace a line range, not append, when replacement has more lines than the range", async () => {
+      // File has 3 lines: "line1", "line2", "line3"
+      writeFileSync(testFilePath, "line1\nline2\nline3");
+
+      // Replace line 2 (single line range) with 2 new lines
+      const result = await runReplace({
+        path: "test.txt",
+        replaceRange: { start: 2, end: 2 },
+        replacement: "new line 2a\nnew line 2b",
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.success).toBe(true);
+
+      // Should have 4 lines total (line1 + 2 new lines + line3), NOT 5 (append behavior)
+      const content = readFileSync(testFilePath, "utf8");
+      const actualLines = content.split("\n");
+      expect(actualLines).toHaveLength(4);
+      expect(actualLines).toEqual(["line1", "new line 2a", "new line 2b", "line3"]);
+    });
+
+    it("should replace a 2-line range with 1 line", async () => {
+      writeFileSync(testFilePath, "line1\nline2\nline3\nline4");
+
+      const result = await runReplace({
+        path: "test.txt",
+        replaceRange: { start: 2, end: 3 },
+        replacement: "replaced",
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.success).toBe(true);
+
+      const content = readFileSync(testFilePath, "utf8");
+      const actualLines = content.split("\n");
+      expect(actualLines).toHaveLength(3);
+      expect(actualLines).toEqual(["line1", "replaced", "line4"]);
+    });
+
+    it("should replace a 2-line range with 3 lines", async () => {
+      writeFileSync(testFilePath, "a\nb\nc");
+
+      const result = await runReplace({
+        path: "test.txt",
+        replaceRange: { start: 1, end: 2 },
+        replacement: "w\nx\ny",
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.success).toBe(true);
+
+      const content = readFileSync(testFilePath, "utf8");
+      const actualLines = content.split("\n");
+      expect(actualLines).toHaveLength(4);
+      expect(actualLines).toEqual(["w", "x", "y", "c"]);
+    });
+  });
+
   describe("existing functionality", () => {
     it("should still work with basic pattern replacement", async () => {
       writeFileSync(testFilePath, "hello world");
