@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { isAbsolute, resolve, dirname } from "node:path";
 import type { TaskDef, FailureBehavior, FailureNotification } from "./types.js";
 import type { WorkflowServer } from "./server.js";
 import type { ControlPlane } from "./control.js";
@@ -81,6 +82,8 @@ export interface WorkflowToolHandlerDeps {
   /** Current spawn depth of the calling session. */
   currentDepth: number;
   maxDepth: number;
+  /** Resolved workspace root. If omitted, derived from env/cwd. */
+  workspaceRoot?: string;
 }
 
 // --- Helpers ---
@@ -170,6 +173,21 @@ function serializeGraph(graph: Map<number, Set<number>>): Record<string, number[
   return out;
 }
 
+/** Resolve the workspace root: dep > env var > cwd walk for .git > cwd */
+function resolveWorkspaceRoot(provided?: string): string {
+  if (provided) return provided;
+  if (process.env.SHOGGOTH_WORKSPACE_ROOT) return process.env.SHOGGOTH_WORKSPACE_ROOT;
+  // Walk up from cwd looking for .git
+  let dir = process.cwd();
+  while (dir !== "/") {
+    if (existsSync(dir + "/.git")) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return process.cwd();
+}
+
 // --- Handler ---
 
 export async function handleWorkflowToolCall(
@@ -193,7 +211,7 @@ export async function handleWorkflowToolCall(
             return { ok: false, error: "definition_file must be an absolute path" };
           }
           const resolvedPath = resolve(filePath);
-          const workspaceRoot = "/var/lib/shoggoth/workspaces/developer";
+          const workspaceRoot = resolveWorkspaceRoot(deps.workspaceRoot);
           if (!resolvedPath.startsWith(workspaceRoot)) {
             return {
               ok: false,

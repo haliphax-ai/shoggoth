@@ -2,6 +2,7 @@ import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { writeFile, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
+import os from "node:os";
 import {
   handleWorkflowToolCall,
   type WorkflowToolArgs,
@@ -51,6 +52,7 @@ function makeDeps(overrides: Partial<WorkflowToolHandlerDeps> = {}): WorkflowToo
     stateDir: "/tmp/workflow-test",
     currentDepth: 0,
     maxDepth: 2,
+    workspaceRoot: os.tmpdir(),
     ...overrides,
   };
 }
@@ -168,7 +170,9 @@ describe("handleWorkflowToolCall", () => {
     });
 
     it("start with definition_file reads file and starts workflow", async () => {
-      const tmpDir = await mkdtemp(join(process.env.TEMP ?? "/tmp", "wf-test-"));
+      const deps = makeDeps();
+      const workspaceRoot = deps.workspaceRoot!;
+      const tmpDir = await mkdtemp(join(workspaceRoot, "wf-test-"));
       try {
         const defFile = join(tmpDir, "workflow.json");
         await writeFile(defFile, JSON.stringify({
@@ -183,14 +187,14 @@ describe("handleWorkflowToolCall", () => {
             return "wf-from-file";
           },
         });
-        const deps = makeDeps({ server });
+        const testDeps = makeDeps({ server });
         const result = await handleWorkflowToolCall(
           {
             action: "start",
             definition_file: defFile,
             reply_to: "session:parent",
           },
-          deps,
+          testDeps,
         );
 
         assert.equal(result.ok, true);
@@ -205,7 +209,9 @@ describe("handleWorkflowToolCall", () => {
     });
 
     it("start with definition_file and inline tasks — file wins", async () => {
-      const tmpDir = await mkdtemp(join(process.env.TEMP ?? "/tmp", "wf-test-"));
+      const deps = makeDeps();
+      const workspaceRoot = deps.workspaceRoot!;
+      const tmpDir = await mkdtemp(join(workspaceRoot, "wf-test-"));
       try {
         const defFile = join(tmpDir, "workflow.json");
         await writeFile(defFile, JSON.stringify({
@@ -221,7 +227,7 @@ describe("handleWorkflowToolCall", () => {
             return "wf-inline-wins";
           },
         });
-        const deps = makeDeps({ server });
+        const testDeps = makeDeps({ server });
         const result = await handleWorkflowToolCall(
           {
             action: "start",
@@ -231,7 +237,7 @@ describe("handleWorkflowToolCall", () => {
             name: "inline-workflow",
             reply_to: "session:parent",
           },
-          deps,
+          testDeps,
         );
 
         assert.equal(result.ok, true);
@@ -247,10 +253,14 @@ describe("handleWorkflowToolCall", () => {
 
     it("start with definition_file pointing to non-existent file returns error", async () => {
       const deps = makeDeps();
+      const workspaceRoot = deps.workspaceRoot!;
+      // Path must be inside workspace root but file must not exist
+      const nonExistentFile = join(workspaceRoot, "does-not-exist-012345.json");
+
       const result = await handleWorkflowToolCall(
         {
           action: "start",
-          definition_file: "/tmp/does-not-exist-012345.json",
+          definition_file: nonExistentFile,
           reply_to: "session:parent",
         },
         deps,
@@ -261,12 +271,13 @@ describe("handleWorkflowToolCall", () => {
     });
 
     it("start with malformed JSON returns error", async () => {
-      const tmpDir = await mkdtemp(join(process.env.TEMP ?? "/tmp", "wf-test-"));
+      const deps = makeDeps();
+      const workspaceRoot = deps.workspaceRoot!;
+      const tmpDir = await mkdtemp(join(workspaceRoot, "wf-test-"));
       try {
         const defFile = join(tmpDir, "bad.json");
         await writeFile(defFile, "{ this is not json }");
 
-        const deps = makeDeps();
         const result = await handleWorkflowToolCall(
           {
             action: "start",
@@ -314,7 +325,9 @@ describe("handleWorkflowToolCall", () => {
     });
 
     it("start with file containing reply_to — inline reply_to wins", async () => {
-      const tmpDir = await mkdtemp(join(process.env.TEMP ?? "/tmp", "wf-test-"));
+      const deps = makeDeps();
+      const workspaceRoot = deps.workspaceRoot!;
+      const tmpDir = await mkdtemp(join(workspaceRoot, "wf-test-"));
       try {
         const defFile = join(tmpDir, "workflow.json");
         await writeFile(defFile, JSON.stringify({
@@ -330,14 +343,14 @@ describe("handleWorkflowToolCall", () => {
             return "wf-reply-to";
           },
         });
-        const deps = makeDeps({ server });
+        const testDeps = makeDeps({ server });
         const result = await handleWorkflowToolCall(
           {
             action: "start",
             definition_file: defFile,
             reply_to: "caller-session-id",
           },
-          deps,
+          testDeps,
         );
 
         assert.equal(result.ok, true);
