@@ -35,7 +35,7 @@ The enforcement is implemented as a third gate alongside the existing
 compare the file's line count before and after. If the count changed (line
 numbers may have shifted), insert a row with the current
 `context_segment_id` and the canonical absolute path of the file. The
-producer always runs *after* a successful write to disk, so the new line
+producer always runs _after_ a successful write to disk, so the new line
 count reflects the on-disk state.
 
 **Consumer (`builtin-write` and `builtin-replace`):** Before applying any
@@ -46,7 +46,7 @@ agent typically uses it precisely to figure out the right edit.
 
 **Clear (`builtin-read`):** A successful read of the file deletes any matching
 rows for the current segment. Reading just a portion of the file is
-sufficient — the gate requires *some* view of the new content.
+sufficient — the gate requires _some_ view of the new content.
 
 **Segment reset:** `applySessionContextSegmentNew` and
 `applySessionContextSegmentReset` delete all re-read rows for the session.
@@ -89,7 +89,7 @@ and `packages/daemon/test/builtin-handlers/`.
 
 - **`dryRun: true` exemption.** The spec says the gate fires when the file
   "would be modified". A dry run is a preview, not a modification, and
-  intentionally lets the agent *check* the current state without committing.
+  intentionally lets the agent _check_ the current state without committing.
   The producer also skips flagging on dry runs.
 - **Pattern-based replacement and line count.** A regex replacement can
   change the line count (e.g. inserting/removing `\n`) even when the user
@@ -99,7 +99,7 @@ and `packages/daemon/test/builtin-handlers/`.
 - **File created from scratch by `write`.** A `write` to a path that does
   not exist is not in the flag list (no prior content means no prior line
   numbers), so it is not blocked. After a `write` of a brand-new file, the
-  file is *not* flagged (the spec says only `replace` adds to the list).
+  file is _not_ flagged (the spec says only `replace` adds to the list).
   A subsequent `replace` will succeed without re-reading, which is the
   intended behaviour: there were no line numbers to invalidate.
 - **Append mode.** `write` with `append: true` adds to the end of the file

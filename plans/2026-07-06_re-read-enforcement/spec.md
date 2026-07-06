@@ -53,10 +53,7 @@ export function clearReReadRequired(
  * Clear all re-read flags for a session across all segments.
  * Called when a new context segment is generated (or reset).
  */
-export function clearSessionReReadRequired(
-  db: Database.Database,
-  sessionId: string,
-): void;
+export function clearSessionReReadRequired(db: Database.Database, sessionId: string): void;
 ```
 
 ## Data Structures / Schemas

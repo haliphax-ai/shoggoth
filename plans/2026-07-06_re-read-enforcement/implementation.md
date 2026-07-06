@@ -27,7 +27,7 @@ Read the line count before the write and after the on-disk write; if the
 counts differ, insert a re-read-required row.
 
 `dryRun: true` must not flag. Zero-match returns (`replacements: 0`) must
-not flag. The flag is added *after* the on-disk write succeeds — if the
+not flag. The flag is added _after_ the on-disk write succeeds — if the
 write fails, no row is inserted.
 
 **Files:**
