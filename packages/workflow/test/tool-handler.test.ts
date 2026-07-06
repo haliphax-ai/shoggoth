@@ -1,5 +1,7 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
+import { writeFile, mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
 import {
   handleWorkflowToolCall,
   type WorkflowToolArgs,
@@ -163,6 +165,186 @@ describe("handleWorkflowToolCall", () => {
 
       assert.equal(result.ok, false);
       assert.match(result.error!, /message/);
+    });
+
+    it("start with definition_file reads file and starts workflow", async () => {
+      const tmpDir = await mkdtemp(join(process.env.TEMP ?? "/tmp", "wf-test-"));
+      try {
+        const defFile = join(tmpDir, "workflow.json");
+        await writeFile(defFile, JSON.stringify({
+          tasks: [{ id: 1, prompt: "Step 1" }, { id: 2, prompt: "Step 2" }],
+          graph: "1>2",
+        }));
+
+        let captured: unknown;
+        const server = mockServer({
+          start: async (tasks, graph, opts) => {
+            captured = { tasks, graph, opts };
+            return "wf-from-file";
+          },
+        });
+        const deps = makeDeps({ server });
+        const result = await handleWorkflowToolCall(
+          {
+            action: "start",
+            definition_file: defFile,
+            reply_to: "session:parent",
+          },
+          deps,
+        );
+
+        assert.equal(result.ok, true);
+        assert.deepEqual((result.data as Record<string, unknown>).workflow_id, "wf-from-file");
+        assert.ok(captured);
+        const c = captured as { tasks: unknown[]; graph: string };
+        assert.equal(c.tasks.length, 2);
+        assert.equal(c.graph, "1>2");
+      } finally {
+        await rm(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("start with definition_file and inline tasks — file wins", async () => {
+      const tmpDir = await mkdtemp(join(process.env.TEMP ?? "/tmp", "wf-test-"));
+      try {
+        const defFile = join(tmpDir, "workflow.json");
+        await writeFile(defFile, JSON.stringify({
+          tasks: [{ id: 1, prompt: "From file" }],
+          graph: "1",
+          name: "file-workflow",
+        }));
+
+        let captured: unknown;
+        const server = mockServer({
+          start: async (tasks, graph, opts) => {
+            captured = { tasks, graph, opts };
+            return "wf-inline-wins";
+          },
+        });
+        const deps = makeDeps({ server });
+        const result = await handleWorkflowToolCall(
+          {
+            action: "start",
+            definition_file: defFile,
+            tasks: [{ id: 99, prompt: "Inline task" }],
+            graph: "99",
+            name: "inline-workflow",
+            reply_to: "session:parent",
+          },
+          deps,
+        );
+
+        assert.equal(result.ok, true);
+        const c = captured as { tasks: unknown[]; graph: string; opts: { name: string } };
+        assert.equal(c.tasks.length, 1);
+        assert.equal((c.tasks[0] as { id: number }).id, 1);
+        assert.equal(c.graph, "1");
+        assert.equal(c.opts.name, "file-workflow");
+      } finally {
+        await rm(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("start with definition_file pointing to non-existent file returns error", async () => {
+      const deps = makeDeps();
+      const result = await handleWorkflowToolCall(
+        {
+          action: "start",
+          definition_file: "/tmp/does-not-exist-012345.json",
+          reply_to: "session:parent",
+        },
+        deps,
+      );
+
+      assert.equal(result.ok, false);
+      assert.match(result.error!, /definition_file not found/);
+    });
+
+    it("start with malformed JSON returns error", async () => {
+      const tmpDir = await mkdtemp(join(process.env.TEMP ?? "/tmp", "wf-test-"));
+      try {
+        const defFile = join(tmpDir, "bad.json");
+        await writeFile(defFile, "{ this is not json }");
+
+        const deps = makeDeps();
+        const result = await handleWorkflowToolCall(
+          {
+            action: "start",
+            definition_file: defFile,
+            reply_to: "session:parent",
+          },
+          deps,
+        );
+
+        assert.equal(result.ok, false);
+        assert.match(result.error!, /definition_file JSON parse error/);
+      } finally {
+        await rm(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("start with relative path returns error", async () => {
+      const deps = makeDeps();
+      const result = await handleWorkflowToolCall(
+        {
+          action: "start",
+          definition_file: "relative/path.json",
+          reply_to: "session:parent",
+        },
+        deps,
+      );
+
+      assert.equal(result.ok, false);
+      assert.match(result.error!, /definition_file must be an absolute path/);
+    });
+
+    it("start with definition_file outside workspace returns error", async () => {
+      const deps = makeDeps();
+      const result = await handleWorkflowToolCall(
+        {
+          action: "start",
+          definition_file: "/etc/passwd",
+          reply_to: "session:parent",
+        },
+        deps,
+      );
+
+      assert.equal(result.ok, false);
+      assert.match(result.error!, /definition_file must be inside workspace/);
+    });
+
+    it("start with file containing reply_to — inline reply_to wins", async () => {
+      const tmpDir = await mkdtemp(join(process.env.TEMP ?? "/tmp", "wf-test-"));
+      try {
+        const defFile = join(tmpDir, "workflow.json");
+        await writeFile(defFile, JSON.stringify({
+          tasks: [{ id: 1, prompt: "Step 1" }],
+          graph: "1",
+          reply_to: "file-session-id",
+        }));
+
+        let capturedReplyTo: string | undefined;
+        const server = mockServer({
+          start: async (_tasks, _graph, opts) => {
+            capturedReplyTo = opts.replyTo;
+            return "wf-reply-to";
+          },
+        });
+        const deps = makeDeps({ server });
+        const result = await handleWorkflowToolCall(
+          {
+            action: "start",
+            definition_file: defFile,
+            reply_to: "caller-session-id",
+          },
+          deps,
+        );
+
+        assert.equal(result.ok, true);
+        assert.equal(capturedReplyTo, "caller-session-id");
+      } finally {
+        await rm(tmpDir, { recursive: true, force: true });
+      }
     });
   });
 

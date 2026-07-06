@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { isAbsolute, resolve } from "node:path";
 import type { TaskDef, FailureBehavior, FailureNotification } from "./types.js";
 import type { WorkflowServer } from "./server.js";
 import type { ControlPlane } from "./control.js";
@@ -49,6 +51,7 @@ export interface WorkflowToolArgs {
   runtime_limit_ms?: number;
   reply_to?: string;
   concurrency?: number;
+  definition_file?: string;
   // workflow targeting
   workflow_id?: string;
   // edit / retry
@@ -176,25 +179,83 @@ export async function handleWorkflowToolCall(
   try {
     switch (args.action) {
       case "start": {
-        const tasks = requireField(args.tasks, "tasks");
-        const graph = requireField(args.graph, "graph");
-        const name = args.name ?? "unnamed-workflow";
+        let tasks = args.tasks;
+        let graph = args.graph;
+        let name = args.name;
+        let pollingIntervalMs = args.polling_interval_ms;
+        let runtimeLimitMs = args.runtime_limit_ms;
+        let concurrency = args.concurrency;
+
+        // --- definition_file handling ---
+        if (args.definition_file !== undefined) {
+          const filePath = args.definition_file;
+          if (!isAbsolute(filePath)) {
+            return { ok: false, error: "definition_file must be an absolute path" };
+          }
+          const resolvedPath = resolve(filePath);
+          const workspaceRoot = "/var/lib/shoggoth/workspaces/developer";
+          if (!resolvedPath.startsWith(workspaceRoot)) {
+            return {
+              ok: false,
+              error: `definition_file must be inside workspace (got "${resolvedPath}", workspace root is "${workspaceRoot}")`,
+            };
+          }
+          let fileContents: string;
+          try {
+            fileContents = await readFile(filePath, "utf-8");
+          } catch {
+            return {
+              ok: false,
+              error: `definition_file not found: ${filePath}`,
+            };
+          }
+          let parsed: {
+            tasks?: TaskInput[];
+            graph?: string;
+            name?: string;
+            polling_interval_ms?: number;
+            runtime_limit_ms?: number;
+            concurrency?: number;
+            reply_to?: string;
+          };
+          try {
+            parsed = JSON.parse(fileContents);
+          } catch (err) {
+            return {
+              ok: false,
+              error: `definition_file JSON parse error: ${err instanceof Error ? err.message : String(err)}`,
+            };
+          }
+          // Merge: file wins for tasks/graph/name/polling_interval_ms/runtime_limit_ms/concurrency
+          // reply_to from file is ignored (inline reply_to always wins)
+          tasks = parsed.tasks ?? tasks;
+          graph = parsed.graph ?? graph;
+          name = parsed.name ?? name;
+          pollingIntervalMs = parsed.polling_interval_ms ?? pollingIntervalMs;
+          runtimeLimitMs = parsed.runtime_limit_ms ?? runtimeLimitMs;
+          concurrency = parsed.concurrency ?? concurrency;
+        }
+        // --- end definition_file handling ---
+
+        const finalTasks = requireField(tasks, "tasks");
+        const finalGraph = requireField(graph, "graph");
+        const finalName = name ?? "unnamed-workflow";
         const replyTo = requireField(args.reply_to, "reply_to");
 
-        const taskDefs = toTaskDefs(tasks);
+        const taskDefs = toTaskDefs(finalTasks);
         const opts: OrchestratorOptions = {
           stateDir: deps.stateDir,
           currentDepth: deps.currentDepth,
           maxDepth: deps.maxDepth,
           replyTo,
-          pollingIntervalMs: args.polling_interval_ms ?? 10_000,
-          runtimeLimitMs: args.runtime_limit_ms ?? 600_000,
-          name,
-          ...(args.concurrency ? { concurrency: args.concurrency } : {}),
+          pollingIntervalMs: pollingIntervalMs ?? 10_000,
+          runtimeLimitMs: runtimeLimitMs ?? 600_000,
+          name: finalName,
+          ...(concurrency ? { concurrency } : {}),
         };
 
-        const workflowId = await deps.server.start(taskDefs, graph, opts);
-        return { ok: true, data: { workflow_id: workflowId, name } };
+        const workflowId = await deps.server.start(taskDefs, finalGraph, opts);
+        return { ok: true, data: { workflow_id: workflowId, name: finalName } };
       }
 
       case "abort": {
