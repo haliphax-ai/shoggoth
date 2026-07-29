@@ -47,16 +47,23 @@ export function summarizeApiMessage(raw: Record<string, unknown>): Record<string
     if (typeof a.bot === "boolean") bot = a.bot;
   }
   const att = raw.attachments;
-  const attachments = Array.isArray(att) ? att : [];
+  const attachmentsRaw = Array.isArray(att) ? att : [];
   const filenames: string[] = [];
-  for (const x of attachments) {
-    if (
-      x &&
-      typeof x === "object" &&
-      !Array.isArray(x) &&
-      typeof (x as { filename?: string }).filename === "string"
-    ) {
-      filenames.push((x as { filename: string }).filename);
+  const attachmentSummaries: Record<string, unknown>[] = [];
+  for (const x of attachmentsRaw) {
+    if (x && typeof x === "object" && !Array.isArray(x)) {
+      const obj = x as Record<string, unknown>;
+      if (typeof obj.filename === "string") {
+        filenames.push(obj.filename);
+        const summary: Record<string, unknown> = {
+          id: obj.id,
+          filename: obj.filename,
+          url: typeof obj.url === "string" ? obj.url : undefined,
+          content_type: typeof obj.content_type === "string" ? obj.content_type : undefined,
+          size: typeof obj.size === "number" ? obj.size : undefined,
+        };
+        attachmentSummaries.push(summary);
+      }
     }
   }
   return {
@@ -69,6 +76,7 @@ export function summarizeApiMessage(raw: Record<string, unknown>): Record<string
     bot,
     attachment_count: filenames.length,
     attachment_filenames: filenames,
+    attachments: attachmentSummaries.length > 0 ? attachmentSummaries : undefined,
   };
 }
 

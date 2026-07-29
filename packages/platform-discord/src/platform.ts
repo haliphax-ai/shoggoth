@@ -410,6 +410,12 @@ export async function startDiscordPlatform(
               return (resolved?.provider as any)?.imageUrlPassthrough === true;
             })(),
             formatAttachmentMetadata,
+            workspacePath: session.workspacePath,
+            messageId: msg.id,
+            creds: {
+              uid: session.runtimeUid ?? 0,
+              gid: session.runtimeGid ?? 0,
+            },
             buildTurn: async () => {
               const _mcpCtx = await mcpRuntime.resolveContext(msg.sessionId);
               return {
