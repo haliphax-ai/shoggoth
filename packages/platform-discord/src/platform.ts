@@ -412,10 +412,9 @@ export async function startDiscordPlatform(
             formatAttachmentMetadata,
             workspacePath: session.workspacePath,
             messageId: msg.id,
-            creds: {
-              uid: session.runtimeUid ?? 0,
-              gid: session.runtimeGid ?? 0,
-            },
+            ...(session.runtimeUid !== undefined && session.runtimeGid !== undefined
+              ? { creds: { uid: session.runtimeUid, gid: session.runtimeGid } }
+              : {}),
             buildTurn: async () => {
               const _mcpCtx = await mcpRuntime.resolveContext(msg.sessionId);
               return {
