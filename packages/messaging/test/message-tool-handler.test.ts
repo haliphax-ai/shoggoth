@@ -887,7 +887,16 @@ describe("executeMessageToolAction", () => {
       content: "hello",
       timestamp: "t",
       author: { id: "a1", username: "bob", bot: true },
-      attachments: [{ filename: "f.png" }, { filename: "g.txt" }],
+      attachments: [
+        {
+          id: "att1",
+          filename: "f.png",
+          url: "https://cdn.example.com/f.png",
+          content_type: "image/png",
+          size: 1024,
+        },
+        { id: "att2", filename: "g.txt" },
+      ],
     };
     const s = summarizeApiMessage(raw);
     assert.equal(s.id, "m1");
@@ -897,6 +906,35 @@ describe("executeMessageToolAction", () => {
     assert.equal(s.bot, true);
     assert.equal(s.attachment_count, 2);
     assert.deepEqual(s.attachment_filenames, ["f.png", "g.txt"]);
+    // New rich attachment metadata
+    const atts = s.attachments as Record<string, unknown>[];
+    assert.equal(atts.length, 2);
+    assert.equal(atts[0]!.id, "att1");
+    assert.equal(atts[0]!.filename, "f.png");
+    assert.equal(atts[0]!.url, "https://cdn.example.com/f.png");
+    assert.equal(atts[0]!.content_type, "image/png");
+    assert.equal(atts[0]!.size, 1024);
+    assert.equal(atts[1]!.id, "att2");
+    assert.equal(atts[1]!.filename, "g.txt");
+    // Attachments without url/content_type/size should still have undefined for those fields
+    assert.equal(atts[1]!.url, undefined);
+    assert.equal(atts[1]!.content_type, undefined);
+    assert.equal(atts[1]!.size, undefined);
+  });
+
+  it("summarizeApiMessage returns undefined attachments when message has none", () => {
+    const raw = {
+      id: "m2",
+      channel_id: "ch1",
+      content: "no files",
+      timestamp: "t",
+      author: { id: "a1", username: "bob" },
+      attachments: [],
+    };
+    const s = summarizeApiMessage(raw);
+    assert.equal(s.attachment_count, 0);
+    assert.deepEqual(s.attachment_filenames, []);
+    assert.equal(s.attachments, undefined);
   });
 
   // --- create_thread ---

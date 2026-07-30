@@ -1,7 +1,8 @@
 import type { MessageAttachment } from "@shoggoth/messaging";
 import { runAsUser } from "@shoggoth/os-exec";
 import { MAX_IMAGE_BLOCK_BYTES } from "@shoggoth/shared";
-import { join } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { getLogger } from "../logging.js";
 
 const log = getLogger("attachment-download");
@@ -10,7 +11,8 @@ export interface DownloadInboundAttachmentsOptions {
   readonly attachments: readonly MessageAttachment[];
   readonly messageId: string;
   readonly workspacePath: string;
-  readonly creds: { readonly uid: number; readonly gid: number };
+  /** When provided, write files as this sandbox user via `runAsUser`. When undefined, write directly as the daemon user. */
+  readonly creds?: { readonly uid: number; readonly gid: number };
   readonly maxBytes?: number;
   readonly fetchImpl?: typeof fetch;
 }
@@ -30,7 +32,7 @@ async function downloadOne(
   attachment: MessageAttachment,
   messageId: string,
   workspacePath: string,
-  creds: { readonly uid: number; readonly gid: number },
+  creds: { readonly uid: number; readonly gid: number } | undefined,
   maxBytes: number,
   fetchFn: typeof fetch,
 ): Promise<MessageAttachment> {
@@ -72,22 +74,28 @@ async function downloadOne(
       return attachment;
     }
 
-    // Write file via runAsUser using a Node one-liner that decodes base64 from env
-    const b64 = buffer.toString("base64");
-    await runAsUser({
-      file: process.execPath,
-      args: [
-        "-e",
-        'require("fs").writeFileSync(process.env._DEST, Buffer.from(process.env._DATA, "base64"));',
-      ],
-      cwd: "/tmp",
-      uid: creds.uid,
-      gid: creds.gid,
-      env: {
-        _DEST: absolutePath,
-        _DATA: b64,
-      },
-    });
+    if (creds) {
+      // Sandboxed: write via runAsUser to drop privileges
+      const b64 = buffer.toString("base64");
+      await runAsUser({
+        file: process.execPath,
+        args: [
+          "-e",
+          'require("fs").writeFileSync(process.env._DEST, Buffer.from(process.env._DATA, "base64"));',
+        ],
+        cwd: "/tmp",
+        uid: creds.uid,
+        gid: creds.gid,
+        env: {
+          _DEST: absolutePath,
+          _DATA: b64,
+        },
+      });
+    } else {
+      // No sandbox: write directly as the daemon user
+      await mkdir(dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, buffer);
+    }
 
     return { ...attachment, localPath: relativePath };
   } catch (err) {
