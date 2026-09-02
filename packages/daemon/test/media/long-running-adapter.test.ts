@@ -239,16 +239,19 @@ describe("longRunningAdapter", () => {
     mockFetch.mockResolvedValueOnce(makeInitiateResponse("operations/veo-img2vid", true));
     mockFetch.mockResolvedValueOnce(makeVideoDownloadResponse());
 
+    // PNG magic bytes so detectMediaTypeFromBytes infers image/png
+    const inputImageBase64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4, 5, 6, 7, 8]).toString(
+      "base64",
+    );
+
     await longRunningAdapter(
       makeRequest({
-        params: { kind: "video", input_image: "/workspace/reference.png" },
+        params: { kind: "video", input_image: inputImageBase64 },
       }),
     );
 
-    // readFile should have been called to read the input image
-    assert.ok(vi.mocked(readFile).mock.calls.length > 0);
-    const readPath = vi.mocked(readFile).mock.calls[0][0];
-    assert.strictEqual(readPath, "/workspace/reference.png");
+    // The handler base64-encodes the input; the adapter should pass it through.
+    assert.strictEqual(vi.mocked(readFile).mock.calls.length, 0);
 
     // The request body should include the image in instances
     const [, opts] = mockFetch.mock.calls[0];
@@ -261,7 +264,7 @@ describe("longRunningAdapter", () => {
     assert.strictEqual(
       instance.image?.mimeType,
       "image/png",
-      "instance.image should include mimeType",
+      "instance.image should include mimeType inferred from base64 magic bytes",
     );
     assert.strictEqual(
       instance.referenceImage,
@@ -274,20 +277,27 @@ describe("longRunningAdapter", () => {
     mockFetch.mockResolvedValueOnce(makeInitiateResponse("operations/veo-lastframe", true));
     mockFetch.mockResolvedValueOnce(makeVideoDownloadResponse());
 
+    // PNG magic bytes for first frame, JPEG magic bytes (FF D8 FF) for last frame.
+    // Buffers are 12 bytes so detectMediaTypeFromBytes (requires >= 12 bytes) can sniff them.
+    const firstFrameBase64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4, 5, 6, 7, 8]).toString(
+      "base64",
+    );
+    const lastFrameBase64 = Buffer.from([0xff, 0xd8, 0xff, 1, 2, 3, 4, 5, 6, 7, 8, 9]).toString(
+      "base64",
+    );
+
     await longRunningAdapter(
       makeRequest({
         params: {
           kind: "video",
-          input_image: "/workspace/first.png",
-          last_frame: "/workspace/last.jpg",
+          input_image: firstFrameBase64,
+          last_frame: lastFrameBase64,
         },
       }),
     );
 
-    // readFile should have been called twice: first frame + last frame
-    assert.strictEqual(vi.mocked(readFile).mock.calls.length, 2);
-    assert.strictEqual(vi.mocked(readFile).mock.calls[0][0], "/workspace/first.png");
-    assert.strictEqual(vi.mocked(readFile).mock.calls[1][0], "/workspace/last.jpg");
+    // The handler/agent supply base64; adapters pass them through (no readFile)
+    assert.strictEqual(vi.mocked(readFile).mock.calls.length, 0);
 
     const [, opts] = mockFetch.mock.calls[0];
     const body = JSON.parse(opts.body);
@@ -299,18 +309,29 @@ describe("longRunningAdapter", () => {
 
     // Last frame
     assert.ok(instance.lastFrame?.bytesBase64Encoded, "should have lastFrame for last frame");
-    assert.strictEqual(instance.lastFrame.mimeType, "image/jpeg", "should infer jpeg from .jpg");
+    assert.strictEqual(
+      instance.lastFrame.mimeType,
+      "image/jpeg",
+      "should infer jpeg from magic bytes",
+    );
   });
 
   it("omits lastFrame when last_frame is not provided", async () => {
     mockFetch.mockResolvedValueOnce(makeInitiateResponse("operations/veo-nolast", true));
     mockFetch.mockResolvedValueOnce(makeVideoDownloadResponse());
 
+    // PNG magic bytes for the first frame
+    const firstFrameBase64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4, 5, 6, 7, 8]).toString(
+      "base64",
+    );
+
     await longRunningAdapter(
       makeRequest({
-        params: { kind: "video", input_image: "/workspace/first.png" },
+        params: { kind: "video", input_image: firstFrameBase64 },
       }),
     );
+
+    assert.strictEqual(vi.mocked(readFile).mock.calls.length, 0);
 
     const [, opts] = mockFetch.mock.calls[0];
     const body = JSON.parse(opts.body);
