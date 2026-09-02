@@ -87,8 +87,8 @@ describe("session.query tool handler", { concurrency: false }, () => {
     });
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
+  afterEach(async () => {
+    await closeTestDb(db, tmp);
   });
 
   async function runWithToolArgs(

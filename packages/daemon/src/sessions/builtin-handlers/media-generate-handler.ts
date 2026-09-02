@@ -5,6 +5,7 @@
 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { readFile } from "node:fs/promises";
 import type {
   BuiltinToolRegistry,
   BuiltinToolContext,
@@ -13,6 +14,7 @@ import type {
 import { resolveUserPath } from "../builtin-tool-registry";
 import type { ChatContentPart } from "@shoggoth/models";
 import { getBlockResolver, type ShowToolParams } from "../../presentation/show-blocks.js";
+import { detectMediaTypeFromBytes } from "../../presentation/image-ingest.js";
 import { getLogger } from "../../logging.js";
 
 const log = getLogger("media-generate-handler");
@@ -31,6 +33,24 @@ function extensionForKind(kind: string): string {
     default:
       return ".bin";
   }
+}
+
+/**
+ * Read the input image for editing from a workspace-relative path, base64-encode it,
+ * and return the base64 string. The adapters receive this base64 data directly.
+ *
+ * Returns undefined when no input path was supplied.
+ */
+async function resolveInputImageBase64(
+  inputPath: unknown,
+  ctx: BuiltinToolContext,
+): Promise<string | undefined> {
+  if (typeof inputPath !== "string" || inputPath.length === 0) return undefined;
+  const abs = resolveUserPath(ctx, inputPath);
+  const bytes = await readFile(abs);
+  // Sniff the bytes so callers can (optionally) infer MIME; we accept any readable file.
+  void detectMediaTypeFromBytes(bytes);
+  return bytes.toString("base64");
 }
 
 export function register(registry: BuiltinToolRegistry): void {
@@ -79,6 +99,15 @@ async function mediaGenerateHandler(
   const timeoutMs = typeof args.timeout_ms === "number" ? args.timeout_ms : undefined;
 
   let result: Record<string, unknown>;
+  // Resolve input_path (if provided) into base64 and attach as input_image so
+  // the control op / adapters receive raw base64 rather than a file path.
+  if (params.input_path != null) {
+    const inputImageBase64 = await resolveInputImageBase64(params.input_path, ctx);
+    if (inputImageBase64 != null) {
+      (params as Record<string, unknown>).input_image = inputImageBase64;
+    }
+    delete (params as Record<string, unknown>).input_path;
+  }
   try {
     result = (await invoker(ctx.sessionId, "media_generate", {
       model,

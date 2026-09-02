@@ -1,4 +1,4 @@
-import { writeFile, mkdir, readFile } from "node:fs/promises";
+import { writeFile, mkdir } from "node:fs/promises";
 import { dirname, basename, extname, join } from "node:path";
 import type { MediaAdapterRequest, MediaAdapterResult } from "./types";
 
@@ -31,8 +31,8 @@ export async function predictAdapter(req: MediaAdapterRequest): Promise<MediaAda
   try {
     let inputImageBase64: string | undefined;
     if (req.params.kind === "image" && req.params.input_image) {
-      const imageBytes = await readFile(req.params.input_image);
-      inputImageBase64 = imageBytes.toString("base64");
+      // Handler already base64-encoded the input; adapters receive raw base64.
+      inputImageBase64 = req.params.input_image;
     }
 
     const body = buildRequestBody(req, inputImageBase64);

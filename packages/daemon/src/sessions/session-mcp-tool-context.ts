@@ -416,7 +416,7 @@ const MEDIA_GENERATE_TOOL_DESCRIPTOR: AggregatedTool = {
       params: {
         type: "object",
         description:
-          "Parameters discriminated by 'kind': image (aspectRatio, numberOfImages, input_image), video (aspectRatio, durationSeconds, input_image, last_frame), speech (voice), music (durationSeconds)",
+          "Parameters discriminated by 'kind': image (aspectRatio, numberOfImages, input_path), video (aspectRatio, durationSeconds, input_path, last_frame), speech (voice), music (durationSeconds)",
         properties: {
           kind: {
             type: "string",
@@ -437,9 +437,9 @@ const MEDIA_GENERATE_TOOL_DESCRIPTOR: AggregatedTool = {
             type: "number",
             description: "Number of images to generate (image only)",
           },
-          input_image: {
+          input_path: {
             type: "string",
-            description: "Base64-encoded input image for editing (image/video)",
+            description: "Workspace-relative path to an input image file for editing (image/video)",
           },
           last_frame: {
             type: "string",
@@ -462,7 +462,8 @@ const MEDIA_GENERATE_TOOL_DESCRIPTOR: AggregatedTool = {
       },
       show: {
         type: "boolean",
-        description: "When true, surface image results to the user via builtin-show. Default true.",
+        description:
+          "When true, include the generated image as content parts in the tool result so a multimodal agent can see and analyze it. Default true.",
       },
     },
     required: ["model", "prompt", "params"],

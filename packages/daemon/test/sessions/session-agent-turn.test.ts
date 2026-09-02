@@ -42,8 +42,8 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
     });
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
+  afterEach(async () => {
+    await closeTestDb(db, tmp);
   });
 
   it("runs builtin-only MCP context and returns assistant text", async () => {
@@ -368,8 +368,8 @@ describe(
       });
     });
 
-    afterEach(() => {
-      closeTestDb(db, tmp);
+    afterEach(async () => {
+      await closeTestDb(db, tmp);
     });
 
     it("prepends session modelSelection.model to the failover chain (deduped)", async () => {

@@ -178,7 +178,7 @@ export class PresentationTurnOrchestrator {
           attachments,
           messageId: input.messageId ?? "",
           workspacePath: input.workspacePath ?? "",
-          creds: input.creds ?? { uid: 0, gid: 0 },
+          creds: input.creds,
         });
 
         // Append metadata with file paths, no image blocks.
@@ -198,7 +198,7 @@ export class PresentationTurnOrchestrator {
           attachments,
           messageId: input.messageId ?? "",
           workspacePath: input.workspacePath ?? "",
-          creds: input.creds ?? { uid: 0, gid: 0 },
+          creds: input.creds,
         });
 
         return enrichTurnWithImageAttachments(
