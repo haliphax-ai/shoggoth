@@ -273,9 +273,8 @@ async function replaceHandler(
     deleteLinesSet.forEach((n) => linesToDelete.add(n - 1));
 
     const originalLineCount = lines.length;
-    const originalTrailingNewline = lines.length > 0 && lines[lines.length - 1] === "";
     const newLines = lines.filter((_, idx) => !linesToDelete.has(idx));
-    const newContent = newLines.join("\\n");
+    const newContent = newLines.join("\n");
 
     const sortedDeleted = Array.from(linesToDelete)
       .sort((a, b) => a - b)
@@ -370,9 +369,9 @@ async function replaceHandler(
       return { resultJson: JSON.stringify({ error: "replaceRange.start is beyond file length" }) };
     }
 
-    const replacementLines = replacement.split("\\n");
+    const replacementLines = replacement.split("\n");
     lines.splice(startIdx, endIdx - startIdx + 1, ...replacementLines);
-    const newContent = lines.join("\\n");
+    const newContent = lines.join("\n");
 
     const changed_lines: ChangedLines = [
       { start: replaceRange.start, end: replaceRange.start + replacementLines.length - 1 },
@@ -529,7 +528,7 @@ async function replaceHandler(
 
   const matchLineSet = new Set<number>();
   if (lineResult.exitCode === 0) {
-    const lineMatches = lineResult.stdout.trim().split("\\n");
+    const lineMatches = lineResult.stdout.trim().split("\n");
     for (const match of lineMatches) {
       const lineNum = parseInt(match.split(":")[0], 10);
       if (!isNaN(lineNum)) {
