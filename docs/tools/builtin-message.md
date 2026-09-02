@@ -11,7 +11,7 @@ Messaging surface control for the session's bound channel. Pure passthrough — 
 | `message_id`                    | string  | no       | get, edit, delete, create_thread, react, reactions, attachment-download | Target message identifier. For `get`, fetches a single message. For `create_thread`, optional anchor message (omit for standalone thread).                                           |
 | `name`                          | string  | no       | create_thread                                                           | Thread name.                                                                                                                                                                         |
 | `thread_id`                     | string  | no       | delete_thread                                                           | Thread/channel identifier.                                                                                                                                                           |
-| `channel_id`                    | string  | no       | get                                                                     | Channel or thread id; defaults to session's bound channel.                                                                                                                           |
+| `channel_id`                    | string  | no       | get                                                                     | Channel or thread id; defaults to session's bound channel. Returns messages with `attachments` array (id, filename, url, content_type, size) when available.                         |
 | `limit`                         | integer | no       | get, search                                                             | Max messages to return (get default 10, max 100; search default 25).                                                                                                                 |
 | `anchor_message_id`             | string  | no       | get                                                                     | Pivot message for pagination; use with `list_direction`.                                                                                                                             |
 | `list_direction`                | string  | no       | get                                                                     | `before`, `after`, or `around` relative to `anchor_message_id`.                                                                                                                      |
@@ -31,6 +31,37 @@ Messaging surface control for the session's bound channel. Pure passthrough — 
 | `filename`                      | string  | no       | attachment-download                                                     | Specific filename when message has multiple attachments.                                                                                                                             |
 | `index`                         | integer | no       | attachment-download                                                     | 0-based attachment index (default 0).                                                                                                                                                |
 | `path`                          | string  | no       | attachment-download                                                     | Local save path; defaults to workspace downloads dir.                                                                                                                                |
+
+## Response format
+
+The `get` and `search` actions return messages with attachment metadata. Each message includes:
+
+| Field                  | Type    | Description                                                               |
+| ---------------------- | ------- | ------------------------------------------------------------------------- |
+| `id`                   | string  | Message ID                                                                |
+| `channel_id`           | string  | Channel ID                                                                |
+| `content`              | string  | Message body text                                                         |
+| `timestamp`            | string  | ISO 8601 timestamp                                                        |
+| `author_id`            | string  | Author user ID                                                            |
+| `author_username`      | string  | Author username                                                           |
+| `bot`                  | boolean | Whether the author is a bot                                               |
+| `attachment_count`     | number  | Number of attachments                                                     |
+| `attachment_filenames` | array   | List of attachment filenames                                              |
+| `attachments`          | array   | **Rich attachment metadata** (see below); `undefined` when no attachments |
+
+Each entry in the `attachments` array:
+
+```json
+{
+  "id": "att1",
+  "filename": "EDID.txt",
+  "url": "https://cdn.discordapp.com/attachments/.../EDID.txt",
+  "content_type": "text/plain; charset=utf-8",
+  "size": 14745
+}
+```
+
+Fields `url`, `content_type`, and `size` are `undefined` when the platform does not provide them.
 
 ## Examples
 
@@ -52,10 +83,36 @@ Messaging surface control for the session's bound channel. Pure passthrough — 
 { "action": "get", "limit": 5 }
 ```
 
-**Read a single message:**
+**Read a single message (and inspect attachments):**
 
 ```json
 { "action": "get", "message_id": "123456" }
+```
+
+Response includes rich attachment metadata:
+
+```json
+{
+  "ok": true,
+  "channel_id": "123456",
+  "messages": [
+    {
+      "id": "123456",
+      "content": "Here's the file",
+      "attachment_count": 1,
+      "attachment_filenames": ["EDID.txt"],
+      "attachments": [
+        {
+          "id": "att1",
+          "filename": "EDID.txt",
+          "url": "https://cdn.example.com/EDID.txt",
+          "content_type": "text/plain",
+          "size": 14745
+        }
+      ]
+    }
+  ]
+}
 ```
 
 **Edit a message:**
@@ -122,3 +179,20 @@ Messaging surface control for the session's bound channel. Pure passthrough — 
 - Regular assistant replies are delivered by the platform automatically — use this tool only for explicit messaging operations.
 - Only actions supported by the current platform appear in `action`'s enum; unsupported actions will not be offered.
 - The schema is intentionally flat (no `oneOf`/`anyOf`) for broad model compatibility. Per-action requirements are enforced at execution time.
+- **Attachments on `get`:** The response includes a rich `attachments` array with `url`, `content_type`, and `size`. You can use `builtin-fetch` with the `url` to download an attachment directly, or use the `attachment-download` action to save it to your workspace.
+- **Attachment download flow:** After fetching a message with attachments, you can download a specific file using:
+  ```json
+  {
+    "action": "attachment-download",
+    "message_id": "123456",
+    "filename": "EDID.txt",
+    "path": "downloads/EDID.txt"
+  }
+  ```
+  Omit `filename` to download the first attachment, or use `index` for a specific position.
+- **Turn-level attachments:** When a user sends a message with attachments (e.g. an image or file), the turn orchestrator auto-downloads them and appends metadata to the user content. You'll see a block like:
+  ```
+  [message has 1 attachment(s)]
+  - EDID.txt (text/plain, 14.4 KB) → media/inbound/123456_EDID.txt
+  ```
+  The file is already in your workspace at the indicated path.

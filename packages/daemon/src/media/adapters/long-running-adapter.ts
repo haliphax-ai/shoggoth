@@ -1,7 +1,8 @@
-import { writeFile, mkdir, readFile } from "node:fs/promises";
+import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { MediaAdapterRequest, MediaAdapterResult } from "./types";
 import { getLogger } from "../../logging.js";
+import { detectMediaTypeFromBytes } from "../../presentation/image-ingest.js";
 
 const log = getLogger("long-running-adapter");
 
@@ -12,19 +13,9 @@ interface LongRunningRequest extends MediaAdapterRequest {
   timeout_ms?: number;
 }
 
-function inferImageMimeType(filePath: string): string {
-  const ext = filePath.split(".").pop()?.toLowerCase();
-  switch (ext) {
-    case "jpg":
-    case "jpeg":
-      return "image/jpeg";
-    case "webp":
-      return "image/webp";
-    case "gif":
-      return "image/gif";
-    default:
-      return "image/png";
-  }
+function inferImageMimeTypeFromBase64(base64: string): string {
+  const buf = Buffer.from(base64, "base64");
+  return detectMediaTypeFromBytes(buf) ?? "image/png";
 }
 
 function buildRequestBody(
@@ -35,18 +26,12 @@ function buildRequestBody(
   const instance: Record<string, unknown> = { prompt: req.prompt };
 
   if (inputImageBase64) {
-    const mimeType =
-      req.params.kind === "video" && req.params.input_image
-        ? inferImageMimeType(req.params.input_image)
-        : "image/png";
+    const mimeType = inferImageMimeTypeFromBase64(inputImageBase64);
     instance.image = { bytesBase64Encoded: inputImageBase64, mimeType };
   }
 
   if (lastFrameBase64) {
-    const mimeType =
-      req.params.kind === "video" && req.params.last_frame
-        ? inferImageMimeType(req.params.last_frame)
-        : "image/png";
+    const mimeType = inferImageMimeTypeFromBase64(lastFrameBase64);
     instance.lastFrame = { bytesBase64Encoded: lastFrameBase64, mimeType };
   }
 
@@ -142,18 +127,16 @@ async function parseCompletedResponse(
 
 export async function longRunningAdapter(req: LongRunningRequest): Promise<MediaAdapterResult> {
   try {
-    // Read input image (first frame) if provided
+    // Input image (first frame) — base64 already provided by the handler.
     let inputImageBase64: string | undefined;
     if (req.params.kind === "video" && req.params.input_image) {
-      const imageBytes = await readFile(req.params.input_image);
-      inputImageBase64 = imageBytes.toString("base64");
+      inputImageBase64 = req.params.input_image;
     }
 
-    // Read last frame if provided
+    // Last frame — base64 already provided by the agent.
     let lastFrameBase64: string | undefined;
     if (req.params.kind === "video" && req.params.last_frame) {
-      const lastFrameBytes = await readFile(req.params.last_frame);
-      lastFrameBase64 = lastFrameBytes.toString("base64");
+      lastFrameBase64 = req.params.last_frame;
     }
 
     const apiVersion = req.provider.apiVersion ?? "v1beta";

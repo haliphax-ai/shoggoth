@@ -214,14 +214,13 @@ describe("generateContentAdapter", () => {
 
     await generateContentAdapter(
       makeRequest({
-        params: { kind: "image", input_image: "/workspace/input.png" },
+        params: { kind: "image", input_image: base64 },
       }),
     );
 
-    // readFile should have been called to read the input image
-    assert.ok(vi.mocked(readFile).mock.calls.length > 0);
-    const readPath = vi.mocked(readFile).mock.calls[0][0];
-    assert.strictEqual(readPath, "/workspace/input.png");
+    // The handler base64-encodes the input; the adapter should pass it through.
+    // No readFile call expected — adapters receive raw base64.
+    assert.strictEqual(vi.mocked(readFile).mock.calls.length, 0);
 
     // The request body should include the image as an inlineData part
     const [, opts] = mockFetch.mock.calls[0];
@@ -229,6 +228,6 @@ describe("generateContentAdapter", () => {
     const parts = body.contents[0].parts;
     const imagePart = parts.find((p: { inlineData?: { mimeType: string } }) => p.inlineData);
     assert.ok(imagePart, "request should include an inlineData part for the input image");
-    assert.ok(imagePart.inlineData.data.length > 0);
+    assert.strictEqual(imagePart.inlineData.data, base64);
   });
 });
