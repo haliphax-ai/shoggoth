@@ -59,9 +59,9 @@ describe("cd handler AGENTS.md gate", () => {
     mkdirSync(join(wsPath, "sub"), { recursive: true });
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("gates cd when AGENTS.md exists in cwd", async () => {
     const store = createSessionStore(db);

@@ -34,9 +34,9 @@ describe("DLQ listing", () => {
     tmp = o.dir;
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("listDeadLetterEvents returns dead rows newest first", () => {
     emitEvent(db, {

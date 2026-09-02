@@ -31,9 +31,9 @@ describe("heartbeat consumer", () => {
     tmp = o.dir;
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("dispatches registered handler and completes event", async () => {
     let saw = 0;

@@ -35,9 +35,9 @@ describe("boot reconciliation", () => {
     tmp = o.dir;
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("requeues stale processing claims and fails orphaned tool runs", () => {
     emitEvent(db, { scope: EVENT_SCOPE_GLOBAL, eventType: "a", payload: {} });

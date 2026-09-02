@@ -35,9 +35,9 @@ describe("runToolLoop", () => {
     createSessionStore(db).create({ id: "sess", workspacePath: "/w" });
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("invokes executor and audit when policy allows", async () => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars

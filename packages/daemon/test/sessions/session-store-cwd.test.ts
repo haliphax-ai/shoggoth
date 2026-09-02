@@ -27,9 +27,9 @@ describe("SessionStore working_directory", () => {
     tmp = o.dir;
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("defaults workingDirectory to undefined on new session", () => {
     const store = createSessionStore(db);

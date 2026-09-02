@@ -27,9 +27,9 @@ describe("SessionStore", () => {
     tmp = o.dir;
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("creates and reads a session", () => {
     const store = createSessionStore(db);

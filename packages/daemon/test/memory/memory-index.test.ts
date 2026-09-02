@@ -33,9 +33,9 @@ describe("memory — markdown ingest + FTS/BM25", () => {
     tmp = o.dir;
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("ingestMemoryRoots indexes markdown under roots and searchMemoryFts finds terms", () => {
     const memRoot = join(tmp, "memory");
@@ -104,9 +104,9 @@ describe("memory — optional embeddings", () => {
     tmp = o.dir;
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("upsertMemoryEmbedding stores vector; search uses cosine when enabled", () => {
     const memRoot = join(tmp, "emb");
@@ -201,9 +201,9 @@ describe("memory — relevance scores", () => {
     tmp = o.dir;
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("searchMemoryFts returns scores when includeScores is true", () => {
     const memRoot = join(tmp, "scores");
@@ -305,9 +305,9 @@ describe("memory — search filters", () => {
     tmp = o.dir;
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("searchMemoryFts filters by path prefix", () => {
     const memRoot = join(tmp, "prefix");
@@ -520,9 +520,9 @@ describe("memory — ingest file reporting", () => {
     tmp = o.dir;
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("reports added files with status 'added'", () => {
     const memRoot = join(tmp, "report-add");
@@ -616,9 +616,9 @@ describe("memory — selective ingest (paths / exclude)", () => {
     tmp = o.dir;
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("paths filter restricts ingest to matching files only", () => {
     const memRoot = join(tmp, "sel-paths");

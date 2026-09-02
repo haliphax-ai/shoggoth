@@ -194,9 +194,9 @@ describe("mid-turn compaction in complete()", () => {
     vi.mocked(loadSessionTranscriptAsModelChat).mockReset();
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("triggers compaction when estimated tokens exceed budget", async () => {
     // Set up: large tool message content so token estimate exceeds budget.
@@ -499,9 +499,9 @@ describe("dedicated compaction model", () => {
     vi.mocked(createFailoverClientFromModelsConfig).mockReturnValue({} as any);
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("uses dedicated model when compactionModel is set", async () => {
     const bigToolContent = "x".repeat(400);
@@ -628,9 +628,9 @@ describe("abort during mid-turn compaction", () => {
     vi.mocked(loadSessionTranscriptAsModelChat).mockReset();
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   function makeCompactionConfig(overrides?: {
     turnAbortSignal?: AbortSignal;

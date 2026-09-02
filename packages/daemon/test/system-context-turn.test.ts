@@ -36,9 +36,9 @@ describe("SystemContext in session agent turns", { concurrency: false }, () => {
     createSessionStore(db).create({ id: SESSION_ID, workspacePath: tmp });
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   function buildTurnInput(overrides: { userContent: string; systemContext?: SystemContext }) {
     const config = defaultConfig(tmp);

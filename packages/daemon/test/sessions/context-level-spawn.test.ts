@@ -42,9 +42,9 @@ describe("context level spawn wiring", () => {
     workspacesRoot = mkdtempSync(join(tmpdir(), "shoggoth-ctx-"));
   });
 
-  afterEach(() => {
-    closeTestDb(db, workspacesRoot);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, workspacesRoot);
+});
 
   it("spawn with explicit contextLevel override persists it on the session row", async () => {
     const sessions = createSessionStore(db);
@@ -231,9 +231,9 @@ describe("context level session store persistence", () => {
     tmp = mkdtempSync(join(tmpdir(), "shoggoth-ctx-store-"));
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("persists contextLevel on create and returns it on read", () => {
     const store = createSessionStore(db);
