@@ -462,7 +462,8 @@ const MEDIA_GENERATE_TOOL_DESCRIPTOR: AggregatedTool = {
       },
       show: {
         type: "boolean",
-        description: "When true, surface image results to the user via builtin-show. Default true.",
+        description:
+          "When true, include the generated image as content parts in the tool result so a multimodal agent can see and analyze it. Default true.",
       },
     },
     required: ["model", "prompt", "params"],
