@@ -1,4 +1,4 @@
-import { writeFile, mkdir, readFile } from "node:fs/promises";
+import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { MediaAdapterRequest, MediaAdapterResult } from "./types";
 import { isRawPcmMime, parsePcmMimeParams, wrapPcmAsWav } from "../pcm-to-wav";
@@ -40,10 +40,10 @@ function buildGenerationConfig(req: MediaAdapterRequest): Record<string, unknown
 async function buildParts(req: MediaAdapterRequest): Promise<Array<Record<string, unknown>>> {
   const parts: Array<Record<string, unknown>> = [];
 
-  // If input_image is provided, include it as an inlineData part
+  // If input_image is provided, include it as an inlineData part.
+  // The handler base64-encodes the input; adapters receive raw base64.
   if (req.params.kind === "image" && req.params.input_image) {
-    const imageBytes = await readFile(req.params.input_image);
-    const base64Data = imageBytes.toString("base64");
+    const base64Data = req.params.input_image;
     parts.push({
       inlineData: {
         mimeType: "image/png",

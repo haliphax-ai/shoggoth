@@ -142,14 +142,13 @@ describe("predictAdapter", () => {
 
     await predictAdapter(
       makeRequest({
-        params: { kind: "image", input_image: "/workspace/input.png" },
+        params: { kind: "image", input_image: base64 },
       }),
     );
 
-    // readFile should have been called to read the input image
-    assert.ok(vi.mocked(readFile).mock.calls.length > 0);
-    const readPath = vi.mocked(readFile).mock.calls[0][0];
-    assert.strictEqual(readPath, "/workspace/input.png");
+    // The handler base64-encodes the input; the adapter should pass it through.
+    // No readFile call expected — adapters receive raw base64.
+    assert.strictEqual(vi.mocked(readFile).mock.calls.length, 0);
 
     // The request body should include the image in instances
     const [, opts] = mockFetch.mock.calls[0];
@@ -159,11 +158,11 @@ describe("predictAdapter", () => {
       instance.image?.bytesBase64Encoded,
       "instance should include image.bytesBase64Encoded for input image",
     );
-    assert.ok(instance.image.bytesBase64Encoded.length > 0);
+    assert.strictEqual(instance.image.bytesBase64Encoded, base64);
   });
 
   it("handles API error responses gracefully", async () => {
-    mockFetch.mockResolvedValue({
+    mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 429,
       statusText: "Too Many Requests",
