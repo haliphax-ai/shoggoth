@@ -6,6 +6,7 @@ import type { PendingActionsStore } from "../hitl/pending-actions-store";
 import type { SessionStore } from "./session-store";
 import { resetSegmentStats } from "./session-stats-store";
 import { pushSystemContext } from "./system-context-buffer";
+import { clearSessionReReadRequired } from "./re-read-required";
 
 function denyPendingForSession(pending: PendingActionsStore | undefined, sessionId: string): void {
   if (!pending) return;
@@ -22,11 +23,12 @@ function denyPendingForSession(pending: PendingActionsStore | undefined, session
  * by the new segment id) and left for the retention workflow to clean up.
  *
  * **New** mints a new segment id, denies pending HITL for the session, clears **per-session** tool
- * auto-approve (`hitl_session_tool_auto_approve`, e.g. ✅ "this tool for session"), and kills
+ * auto-approve (`hitl_session_tool_auto_approve`, e.g. ✅ "this tool for session"), clears the
+ * re-read-required list (stale line numbers no longer apply to the new segment), and kills
  * all subagents for the session (via the optional `killSubagents` callback).
  *
- * **Reset** mints a new segment id and denies pending HITL. Retains per-session auto-approvals and
- * does not touch subagents.
+ * **Reset** mints a new segment id, denies pending HITL, and clears the re-read-required list.
+ * Retains per-session auto-approvals and does not touch subagents.
  */
 export function applySessionContextSegmentNew(input: {
   readonly db: Database.Database;
@@ -43,6 +45,7 @@ export function applySessionContextSegmentNew(input: {
   if (!previousContextSegmentId) throw new Error("session missing context_segment_id");
   denyPendingForSession(input.pending, sessionId);
   clearSessionToolAutoApproveForSession(input.db, sessionId);
+  clearSessionReReadRequired(input.db, sessionId);
   const contextSegmentId = randomUUID();
   input.sessions.update(sessionId, {
     contextSegmentId,
@@ -72,6 +75,7 @@ export function applySessionContextSegmentReset(input: {
   const previousContextSegmentId = row.contextSegmentId.trim();
   if (!previousContextSegmentId) throw new Error("session missing context_segment_id");
   denyPendingForSession(input.pending, sessionId);
+  clearSessionReReadRequired(input.db, sessionId);
   const contextSegmentId = randomUUID();
   input.sessions.update(sessionId, {
     contextSegmentId,
