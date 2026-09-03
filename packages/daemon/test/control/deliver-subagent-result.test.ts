@@ -4,9 +4,11 @@
  * Tests max-char truncation (default 8000).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
 import {
   pushSteer,
   registerSteerChannel,
+  drainSteers,
   _resetAllChannels,
 } from "../../src/sessions/steer-channel";
 
@@ -226,6 +228,108 @@ describe("deliverSubagentResult", () => {
           userContent: expect.stringContaining(shortText),
         }),
       );
+    });
+  });
+
+  describe("delivery reminders (TDD)", () => {
+    const baseReminder =
+      "— Your reply text is delivered to the subagent, not to the operator.";
+    const asyncOnlyReminder =
+      "— This delivery was out of band (no active tool loop). To surface anything to the operator, call `builtin-message action=post`.";
+
+    it("inline+active-loop: appends base reminder, NOT the out-of-band reminder", async () => {
+      const handle = registerSteerChannel("parent-remind-steer");
+      const { deliverSubagentResult } = await import(
+        "../../src/control/integration-ops"
+      );
+
+      await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
+        childSessionId: "child-remind-1",
+        respondTo: "parent-remind-steer",
+        internalDelivery: true,
+        mode: "one_shot",
+        deliveryMode: "inline",
+        assistantText: "test result",
+        subLog: { info: vi.fn(), warn: vi.fn() } as never,
+      });
+
+      expect(mockRunSessionModelTurn).not.toHaveBeenCalled();
+      const steers = drainSteers("parent-remind-steer");
+      expect(steers).toHaveLength(1);
+      const content = steers[0];
+      expect(content).toContain("[Subagent completed]");
+      expect(content).toContain(baseReminder);
+      expect(content).not.toContain("out of band");
+      expect(content).not.toContain("no active tool loop");
+      handle.unregister();
+    });
+
+    it("async/queue (no active loop): appends both base and out-of-band reminders", async () => {
+      const { deliverSubagentResult } = await import(
+        "../../src/control/integration-ops"
+      );
+
+      await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
+        childSessionId: "child-remind-2",
+        respondTo: "parent-remind-queue",
+        internalDelivery: true,
+        mode: "one_shot",
+        deliveryMode: "queue",
+        assistantText: "test result",
+        subLog: { info: vi.fn(), warn: vi.fn() } as never,
+      });
+
+      expect(mockRunSessionModelTurn).toHaveBeenCalled();
+      const arg = mockRunSessionModelTurn.mock.calls[0][0];
+      const content: string = arg.userContent;
+      expect(content).toContain("[Subagent completed]");
+      expect(content).toContain(baseReminder);
+      expect(content).toContain(asyncOnlyReminder);
+      expect(content).toContain("out of band");
+    });
+
+    it("async/inline fallback (no active loop): appends both reminders", async () => {
+      mockRunSessionModelTurn.mockClear();
+      const { deliverSubagentResult } = await import(
+        "../../src/control/integration-ops"
+      );
+
+      await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
+        childSessionId: "child-remind-3",
+        respondTo: "parent-remind-fallback",
+        internalDelivery: true,
+        mode: "one_shot",
+        deliveryMode: "inline",
+        assistantText: "test result",
+        subLog: { info: vi.fn(), warn: vi.fn() } as never,
+      });
+
+      expect(mockRunSessionModelTurn).toHaveBeenCalled();
+      const arg = mockRunSessionModelTurn.mock.calls[0][0];
+      const content: string = arg.userContent;
+      expect(content).toContain("[Subagent completed]");
+      expect(content).toContain(baseReminder);
+      expect(content).toContain(asyncOnlyReminder);
+    });
+
+    it("reminders contain no platform-specific names", async () => {
+      const { deliverSubagentResult } = await import(
+        "../../src/control/integration-ops"
+      );
+      mockRunSessionModelTurn.mockClear();
+
+      await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
+        childSessionId: "child-remind-4",
+        respondTo: "parent-remind-platform",
+        internalDelivery: true,
+        mode: "one_shot",
+        deliveryMode: "queue",
+        assistantText: "test result",
+        subLog: { info: vi.fn(), warn: vi.fn() } as never,
+      });
+
+      const content: string = mockRunSessionModelTurn.mock.calls[0][0].userContent;
+      expect(content).not.toMatch(/discord|slack|telegram|teams/i);
     });
   });
 });

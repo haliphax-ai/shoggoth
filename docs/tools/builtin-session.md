@@ -175,6 +175,10 @@ No additional parameters. Returns info about the current session.
 }
 ```
 
+- **Content**: `[Subagent completed] session_id: <child_id>\n\n<assistant text>`
+  - Both delivery paths append a trailing reminder: `— Your reply text is delivered to the subagent, not to the operator.` This tells the receiving agent that any assistant text it produces in response is routed back to the subagent, not to the operator.
+  - The async/queue (out-of-band) delivery path additionally appends: `— This delivery was out of band (no active tool loop). To surface anything to the operator, call \`builtin-message action=post\`.` This signals that the parent was woken out of band and must call `builtin-message action=post` to reach the operator.
+
 **Wait for multiple subagents:**
 
 ```json
