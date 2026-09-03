@@ -1,6 +1,12 @@
 import type { McpSourceCatalog } from "@shoggoth/mcp-integration";
 import type Database from "better-sqlite3";
-import { SHOGGOTH_DEFAULT_MCP_INSTANCE_IDLE_MS, type ShoggothConfig } from "@shoggoth/shared";
+import {
+  SHOGGOTH_DEFAULT_MCP_INSTANCE_IDLE_MS,
+  type ShoggothConfig,
+  evaluateMcpServerRules,
+  resolveEffectiveMcpServerRules,
+  isSubagentSessionUrn,
+} from "@shoggoth/shared";
 import { getLogger } from "../logging";
 import {
   connectShoggothMcpServers,
@@ -399,7 +405,15 @@ export async function createSessionMcpRuntime(
             ...mcpConnectOpts,
             agentContext,
           };
-          const { pool, external } = await connectMcpPool(perAgentServers, connectOpts);
+          // Filter out servers denied for this agent in BOTH top-level and
+          // subagent contexts. The pool is shared across sessions of the same
+          // agent, so keep any server allowed for at least one session type.
+          const topRules = resolveEffectiveMcpServerRules(opts.config, agentId, false);
+          const subRules = resolveEffectiveMcpServerRules(opts.config, agentId, true);
+          const allowedServers = perAgentServers.filter(
+            (s) => evaluateMcpServerRules(s.id, topRules) || evaluateMcpServerRules(s.id, subRules),
+          );
+          const { pool, external } = await connectMcpPool(allowedServers, connectOpts);
           const cancelKey = mcpAgentPoolKey(agentId);
           const unregister = registerMcpHttpCancelHandler(
             cancelKey,
@@ -451,6 +465,7 @@ export async function createSessionMcpRuntime(
     // Extract agent ID from session URN (needed for per-agent pool keying).
     const parsed = parseAgentSessionUrn(sessionId);
     const agentId = parsed?.agentId ?? null;
+    const isSubagent = isSubagentSessionUrn(sessionId);
 
     // ── Resolve per-agent pool (if applicable) ──────────────────
     let agentSources: readonly McpSourceCatalog[] = [];
@@ -494,7 +509,19 @@ export async function createSessionMcpRuntime(
                 agentContext: resolveAgentMcpContext(opts.db, agentId, workspacesRoot),
               }
             : { ...mcpConnectOpts };
-          const { pool, external } = await connectMcpPool(perSessionServers, perSessionConnectOpts);
+          // Filter out servers denied by effective rules for this session.
+          const sessionRules = resolveEffectiveMcpServerRules(
+            opts.config,
+            agentId ?? "",
+            isSubagent,
+          );
+          const allowedPerSessionServers = perSessionServers.filter((s) =>
+            evaluateMcpServerRules(s.id, sessionRules),
+          );
+          const { pool, external } = await connectMcpPool(
+            allowedPerSessionServers,
+            perSessionConnectOpts,
+          );
           const unregister = registerMcpHttpCancelHandler(
             sessionId,
             (sourceId, requestId) => pool.cancelMcpRequest?.(sourceId, requestId) ?? false,

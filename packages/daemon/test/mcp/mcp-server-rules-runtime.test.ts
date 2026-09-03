@@ -56,9 +56,13 @@ function fakeSourceCatalog(serverId: string, toolName: string): McpSourceCatalog
 /**
  * Build a mock `connectShoggothMcpServers` that returns pre-built catalogs
  * and records invocations for assertions.
+ *
+ * `connectCallServers` records every `servers` array passed to the mock,
+ * enabling tests to assert which servers were (or were not) started.
  */
 function mockConnectMcp(catalogs: McpSourceCatalog[]) {
   const invokeCalls: { sourceId: string; originalName: string }[] = [];
+  const connectCallServers: readonly ShoggothMcpServerEntry[][] = [];
   let closed = false;
 
   const external: ExternalMcpInvoke = async ({ sourceId, originalName }) => {
@@ -73,9 +77,12 @@ function mockConnectMcp(catalogs: McpSourceCatalog[]) {
     },
   };
 
-  const connect = async () => ({ pool, external });
+  const connect = async (servers: readonly ShoggothMcpServerEntry[]) => {
+    connectCallServers.push(servers);
+    return { pool, external };
+  };
 
-  return { connect, invokeCalls, isClosed: () => closed };
+  return { connect, invokeCalls, connectCallServers, isClosed: () => closed };
 }
 
 /** Minimal valid config with two MCP servers and optional serverRules. */
@@ -304,5 +311,164 @@ describe("MCP server rules — runtime filtering", () => {
       ext2.some((t) => t.namespacedName === "denied-server-bad-tool"),
       "denied-server-bad-tool should be in the catalog after re-enable",
     );
+  });
+
+  // ── 4. Per-agent deny rules prevent servers from being connected ─────
+
+  it("per-agent denied server is NOT passed to connectShoggothMcpServers", async () => {
+    const catalogs = [
+      fakeSourceCatalog("allowed-server", "good-tool"),
+      fakeSourceCatalog("denied-server", "bad-tool"),
+    ];
+    const mock = mockConnectMcp(catalogs);
+    db = makeDb();
+
+    const config = buildConfig({
+      mcp: {
+        servers: [
+          {
+            id: "allowed-server",
+            transport: "stdio",
+            command: "true",
+            poolScope: "per_agent",
+          } as ShoggothMcpServerEntry,
+          {
+            id: "denied-server",
+            transport: "stdio",
+            command: "true",
+            poolScope: "per_agent",
+          } as ShoggothMcpServerEntry,
+        ],
+        poolScope: "per_agent",
+        serverRules: { allow: ["*"], deny: ["denied-server"] },
+      },
+    });
+
+    runtime = await createSessionMcpRuntime({
+      config,
+      env: {},
+      db,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      deps: { connectShoggothMcpServers: mock.connect as any },
+    });
+
+    await runtime.resolveContext(SESSION_ID);
+
+    assert.equal(
+      mock.connectCallServers.length,
+      1,
+      "connect should be called once for the per-agent pool",
+    );
+    const connectedIds = mock.connectCallServers[0].map((s) => s.id);
+    assert.ok(connectedIds.includes("allowed-server"), "allowed-server should be connected");
+    assert.ok(!connectedIds.includes("denied-server"), "denied-server should NOT be connected");
+    assert.equal(connectedIds.length, 1, "only one server should be connected");
+  });
+
+  // ── 5. Per-session deny rules prevent servers from being connected ───
+
+  it("per-session denied server is NOT passed to connectShoggothMcpServers", async () => {
+    const catalogs = [
+      fakeSourceCatalog("allowed-server", "good-tool"),
+      fakeSourceCatalog("denied-server", "bad-tool"),
+    ];
+    const mock = mockConnectMcp(catalogs);
+    db = makeDb();
+
+    const config = buildConfig({
+      mcp: {
+        servers: [
+          {
+            id: "allowed-server",
+            transport: "stdio",
+            command: "true",
+            poolScope: "per_session",
+          } as ShoggothMcpServerEntry,
+          {
+            id: "denied-server",
+            transport: "stdio",
+            command: "true",
+            poolScope: "per_session",
+          } as ShoggothMcpServerEntry,
+        ],
+        poolScope: "per_session",
+        serverRules: { allow: ["*"], deny: ["denied-server"] },
+      },
+    });
+
+    runtime = await createSessionMcpRuntime({
+      config,
+      env: {},
+      db,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      deps: { connectShoggothMcpServers: mock.connect as any },
+    });
+
+    await runtime.resolveContext(SESSION_ID);
+
+    assert.equal(
+      mock.connectCallServers.length,
+      1,
+      "connect should be called once for the per-session pool",
+    );
+    const connectedIds = mock.connectCallServers[0].map((s) => s.id);
+    assert.ok(connectedIds.includes("allowed-server"), "allowed-server should be connected");
+    assert.ok(!connectedIds.includes("denied-server"), "denied-server should NOT be connected");
+    assert.equal(connectedIds.length, 1, "only one server should be connected");
+  });
+
+  // ── 6. Per-agent deny prevents ALL denied servers from being started ─
+
+  it("per-agent pool does not start servers denied in both top-level and subagent rules", async () => {
+    const catalogs = [
+      fakeSourceCatalog("allowed-server", "good-tool"),
+      fakeSourceCatalog("denied-server", "bad-tool"),
+    ];
+    const mock = mockConnectMcp(catalogs);
+    db = makeDb();
+
+    const config = buildConfig({
+      mcp: {
+        servers: [
+          {
+            id: "allowed-server",
+            transport: "stdio",
+            command: "true",
+            poolScope: "per_agent",
+          } as ShoggothMcpServerEntry,
+          {
+            id: "denied-server",
+            transport: "stdio",
+            command: "true",
+            poolScope: "per_agent",
+          } as ShoggothMcpServerEntry,
+        ],
+        poolScope: "per_agent",
+        serverRules: { allow: ["*"], deny: ["denied-server"] },
+      },
+      agents: {
+        list: {
+          test: {
+            mcp: { serverRules: { allow: ["*"], deny: ["denied-server"] } },
+            subagentMcp: { serverRules: { allow: ["*"], deny: ["denied-server"] } },
+          },
+        },
+      },
+    });
+
+    runtime = await createSessionMcpRuntime({
+      config,
+      env: {},
+      db,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      deps: { connectShoggothMcpServers: mock.connect as any },
+    });
+
+    await runtime.resolveContext(SESSION_ID);
+
+    assert.equal(mock.connectCallServers.length, 1, "connect should be called once");
+    const connectedIds = mock.connectCallServers[0].map((s) => s.id);
+    assert.ok(!connectedIds.includes("denied-server"), "denied-server should NOT be connected");
+    assert.ok(connectedIds.includes("allowed-server"), "allowed-server should be connected");
   });
 });
