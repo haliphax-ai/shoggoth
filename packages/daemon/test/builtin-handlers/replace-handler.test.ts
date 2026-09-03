@@ -518,3 +518,144 @@ describe("replace-handler", () => {
     });
   });
 });
+
+describe("replacement counts", () => {
+  let registry: BuiltinToolRegistry;
+  let workspacePath: string;
+  let testFilePath: string;
+  let ctx: BuiltinToolContext;
+
+  beforeEach(() => {
+    registry = new BuiltinToolRegistry();
+    register(registry);
+
+    workspacePath = mkdtempSync(join(tmpdir(), "shoggoth-test-count-"));
+    testFilePath = join(workspacePath, "test.txt");
+
+    ctx = {
+      sessionId: "test-session",
+      db: {} as Database.Database,
+      config: {} as any,
+      env: {},
+      workspacePath,
+      creds: { uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 },
+      orchestratorEnv: {},
+      getAgentIntegrationInvoker: () => undefined,
+      getProcessManager: () => undefined,
+      messageToolCtx: undefined,
+      memoryConfig: {} as any,
+      runtimeOpenaiBaseUrl: undefined,
+      isSubagentSession: false,
+    };
+  });
+
+  afterEach(() => {
+    rmSync(workspacePath, { recursive: true, force: true });
+  });
+
+  async function runReplace(args: Record<string, unknown>) {
+    return registry.execute("replace", args, ctx);
+  }
+
+  it("regex: returns replacements: 3 when pattern matches 3 times", async () => {
+    writeFileSync(testFilePath, "foo a\nfoo b\nfoo c\nother");
+
+    const result = await runReplace({
+      path: "test.txt",
+      pattern: "foo",
+      replacement: "bar",
+    });
+
+    const parsed = JSON.parse(result.resultJson);
+    expect(parsed.replacements).toBe(3);
+  });
+
+  it("fixedStrings: returns replacements: 2", async () => {
+    writeFileSync(testFilePath, "hello world\nfoo bar\nhello again");
+
+    const result = await runReplace({
+      path: "test.txt",
+      pattern: "hello",
+      replacement: "goodbye",
+      fixedStrings: true,
+    });
+
+    const parsed = JSON.parse(result.resultJson);
+    expect(parsed.replacements).toBe(2);
+  });
+
+  it("deleteLines (single number): returns replacements: 1 and keeps linesDeleted", async () => {
+    writeFileSync(testFilePath, "line1\nline2\nline3");
+
+    const result = await runReplace({ path: "test.txt", deleteLines: 2 });
+    const parsed = JSON.parse(result.resultJson);
+
+    expect(parsed.replacements).toBe(1);
+    expect(parsed.linesDeleted).toEqual([2]);
+  });
+
+  it("deleteLines (range): returns replacements: 3 for {start: 5, end: 7}", async () => {
+    writeFileSync(testFilePath, "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8");
+
+    const result = await runReplace({
+      path: "test.txt",
+      deleteLines: { start: 5, end: 7 },
+    });
+    const parsed = JSON.parse(result.resultJson);
+
+    expect(parsed.replacements).toBe(3);
+    expect(parsed.linesDeleted).toEqual([5, 6, 7]);
+  });
+
+  it("deleteLines with dryRun: same shape", async () => {
+    writeFileSync(testFilePath, "line1\nline2\nline3");
+
+    const result = await runReplace({ path: "test.txt", deleteLines: 2, dryRun: true });
+    const parsed = JSON.parse(result.resultJson);
+
+    expect(parsed.replacements).toBe(1);
+    expect(parsed.linesDeleted).toEqual([2]);
+  });
+
+  it("replaceRange: returns replacements: 1 and preserves changed_lines", async () => {
+    writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5");
+
+    const result = await runReplace({
+      path: "test.txt",
+      replaceRange: { start: 2, end: 3 },
+      replacement: "new",
+    });
+    const parsed = JSON.parse(result.resultJson);
+
+    expect(parsed.replacements).toBe(1);
+    expect(parsed.changed_lines).toBeDefined();
+  });
+
+  it("replaceRange with dryRun: same shape", async () => {
+    writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5");
+
+    const result = await runReplace({
+      path: "test.txt",
+      replaceRange: { start: 2, end: 3 },
+      replacement: "new",
+      dryRun: true,
+    });
+    const parsed = JSON.parse(result.resultJson);
+
+    expect(parsed.replacements).toBe(1);
+    expect(parsed.changed_lines).toBeDefined();
+  });
+
+  it("replaceRange edge: multi-line replacement still reports replacements: 1", async () => {
+    writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5");
+
+    const result = await runReplace({
+      path: "test.txt",
+      replaceRange: { start: 2, end: 2 },
+      replacement: "a\nb\nc",
+    });
+    const parsed = JSON.parse(result.resultJson);
+
+    expect(parsed.replacements).toBe(1);
+  });
+});
