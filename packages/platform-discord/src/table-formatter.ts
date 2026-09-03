@@ -189,14 +189,12 @@ function boxTable(cells: string[][], aligns: Array<"left" | "right" | "center">)
    */
   function renderRow(row: string[]): void {
     if (!needsWrap) {
-      // Simple single-line row: pad each cell to widths[c] characters
-      // (not visual width).  This ensures the data row character count
-      // matches the border row, keeping box-drawing aligned.
+      // Simple single-line row: pad each cell so its visual width equals\n      // widths[c].  This keeps the data row's visual width equal to the\n      // border row, keeping box-drawing aligned even with wide codepoints.
       lines.push(
         BOX.v +
           row
             .map((cell: string, c: number) => {
-              const padLen = widths[c] - cell.length;
+              const padLen = widths[c] - stringWidth(cell);
               if (padLen <= 0) return " " + cell + " ";
               switch (normAlign[c]) {
                 case "center": {
@@ -225,7 +223,7 @@ function boxTable(cells: string[][], aligns: Array<"left" | "right" | "center">)
           wrapped
             .map((cellLines: string[], c: number) => {
               const content = cellLines[ln] ?? "";
-              const padLen = widths[c] - content.length;
+              const padLen = widths[c] - stringWidth(content);
               if (padLen <= 0) return " " + content + " ";
               switch (normAlign[c]) {
                 case "center": {
