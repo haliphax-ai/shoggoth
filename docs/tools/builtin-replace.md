@@ -98,7 +98,27 @@ When `dryRun: true` is specified, the tool returns a preview of changes without 
 
 ## Return Value Structure
 
-All successful operations include a `changed_lines` property that lists every line in the file that was affected by the operation — both directly modified AND shifted. The property is an array; each entry is either a single line (`{ line: N }`) or a range (`{ start: N, end: M }`). Entries are sorted by position and may be combined into ranges where contiguous.
+Entries are sorted by position and may be combined into ranges where contiguous.
+
+### Replacement Count
+
+Every successful operation — across **all** modes (regex, `fixedStrings`, `deleteLines`, `replaceRange`) and including `dryRun` — also returns a `replacements` count indicating how many operations were performed:
+
+- **regex / `fixedStrings`**: number of pattern matches replaced.
+- **`deleteLines`**: number of lines deleted (`deleteLinesSet.size`).
+- **`replaceRange`**: always `1`, because replacing a contiguous block counts as a single logical replacement, even when that block spans multiple lines.
+
+When zero matches are found (regex / `fixedStrings` fast-paths), `replacements` is `0`. This makes unexpected behavior from over-broad patterns immediately visible instead of silently compounding editing errors.
+
+**Examples:**
+
+```json
+{ "replacements": 3, "changed_lines": [{ "line": 1 }, { "line": 3 }, { "line": 5 }] }
+```
+
+```json
+{ "replacements": 1, "changed_lines": [{ "start": 2, "end": 4 }] }
+```
 
 **Successful replacement (with `changed_lines`):**
 
