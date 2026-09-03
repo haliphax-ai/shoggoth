@@ -44,7 +44,7 @@ describe("workflow tool descriptor response_schema", () => {
     expect(schemaProp.type).toBe("object");
   });
 
-  it("response_schema requires the 'schema' field", () => {
+it("response_schema requires the 'schema' field", () => {
     const descriptor = buildWorkflowToolDescriptor();
     const schema = descriptor.inputSchema as Record<string, unknown>;
     const properties = schema.properties as Record<string, unknown>;
@@ -54,5 +54,24 @@ describe("workflow tool descriptor response_schema", () => {
     const responseSchema = itemProps.response_schema as Record<string, unknown>;
 
     expect(responseSchema.required).toContain("schema");
+  });
+});
+
+describe("workflow tool descriptor definition_file", () => {
+  it("includes definition_file in the schema properties", () => {
+    const descriptor = buildWorkflowToolDescriptor();
+    const schema = descriptor.inputSchema as Record<string, unknown>;
+    const properties = schema.properties as Record<string, unknown>;
+
+    expect(properties).toHaveProperty("definition_file");
+  });
+
+  it("definition_file is of type string", () => {
+    const descriptor = buildWorkflowToolDescriptor();
+    const schema = descriptor.inputSchema as Record<string, unknown>;
+    const properties = schema.properties as Record<string, unknown>;
+    const defFile = properties.definition_file as Record<string, unknown>;
+
+    expect(defFile.type).toBe("string");
   });
 });
