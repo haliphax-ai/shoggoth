@@ -371,14 +371,24 @@ export async function deliverSubagentResult(
     });
     return;
   }
-
   // Truncate to maxChars
   const truncatedText =
     assistantText.length > maxChars ? assistantText.slice(0, maxChars) : assistantText;
-  const content = `[Subagent completed] session_id: ${childSessionId}\n\n${truncatedText}`;
+  const baseContent = `[Subagent completed] session_id: ${childSessionId}\n\n${truncatedText}`;
+
+  // Reminders appended to every delivery path:
+  // - baseReminder tells the parent its reply routes back to the subagent, not the operator.
+  // - asyncOnlyReminder (async/queue paths only) notes the delivery was out of band and
+  //   that reaching the operator requires `builtin-message action=post`.
+  const baseReminder =
+    "\n\n— Your reply text is delivered to the subagent, not to the operator.";
+  const asyncOnlyReminder =
+    "\n— This delivery was out of band (no active tool loop). To surface anything to the operator, call `builtin-message action=post`.";
+  const steerContent = baseContent + baseReminder;
+  const asyncContent = baseContent + baseReminder + asyncOnlyReminder;
 
   // inline mode: attempt steer injection first
-  if (deliveryMode === "inline" && pushSteer(respondTo, content)) {
+  if (deliveryMode === "inline" && pushSteer(respondTo, steerContent)) {
     subLog.info("subagent result injected inline via steer channel", {
       childSessionId,
       respondTo,
@@ -387,10 +397,11 @@ export async function deliverSubagentResult(
     });
     return;
   }
+
   try {
     await ext.runSessionModelTurn({
       sessionId: respondTo,
-      userContent: content,
+      userContent: asyncContent,
       userMetadata: {
         subagent_result: true,
         child_session_id: childSessionId,
