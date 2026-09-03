@@ -37,9 +37,9 @@ describe("events queue", () => {
     tmp = o.dir;
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("emitEvent writes durable global and session-scoped rows", () => {
     const g = emitEvent(db, {

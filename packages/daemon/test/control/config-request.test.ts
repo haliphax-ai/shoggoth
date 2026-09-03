@@ -75,9 +75,9 @@ describe("config_request control op", { concurrency: false }, () => {
     migrate(db, defaultMigrationsDir());
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("succeeds with a valid fragment and writes the file", async () => {
     const dynDir = join(tmp, "dynamic");

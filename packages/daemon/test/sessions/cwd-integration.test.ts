@@ -64,9 +64,9 @@ describe("BuiltinToolContext workingDirectory integration", () => {
     writeFileSync(join(wsPath, "subdir", "child.txt"), "child-content");
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("read resolves relative path from workingDirectory", async () => {
     const store = createSessionStore(db);

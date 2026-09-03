@@ -76,9 +76,9 @@ describe("read handler re-read clear", () => {
     ctx = makeCtx(db, wsPath);
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("clears the flag after a successful read", async () => {
     writeFileSync(join(wsPath, "f.txt"), "hello");

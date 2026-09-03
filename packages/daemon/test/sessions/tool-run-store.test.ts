@@ -29,9 +29,9 @@ describe("ToolRunStore", () => {
     createSessionStore(db).create({ id: "s", workspacePath: "/w" });
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("markAllRunningFailed sets failure_reason", () => {
     const tr = createToolRunStore(db);

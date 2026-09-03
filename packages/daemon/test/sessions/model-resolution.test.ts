@@ -82,9 +82,9 @@ describe("model-resolution", () => {
     db = openTestDb();
   });
 
-  afterEach(() => {
-    closeTestDb(db, TMP);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, TMP);
+});
 
   describe("resolveModel", () => {
     it("resolves the first chain entry by default (happy path)", () => {

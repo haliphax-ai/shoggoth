@@ -60,9 +60,9 @@ describe("builtin-cd handler", () => {
     mkdirSync(join(wsPath, "subdir", "nested"), { recursive: true });
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("registers as 'cd' in the registry", () => {
     const registry = new BuiltinToolRegistry();

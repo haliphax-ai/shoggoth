@@ -112,7 +112,7 @@ describe("unified MCP idle eviction — trackInstanceIdle", () => {
   });
 
   afterEach(async () => {
-    closeTestDb(db, tmp);
+    await closeTestDb(db, tmp);
   });
 
   it("trackInstanceIdle is true when perInstanceIdleTimeoutMs > 0 and at least one MCP server is configured", async () => {
@@ -199,9 +199,9 @@ describe("unified MCP idle eviction — turn lifecycle wiring", () => {
     migrate(db, defaultMigrationsDir());
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("runInboundSessionTurn calls mcpLifecycle.onTurnBegin at start and onTurnEnd at end (success path)", async () => {
     const onTurnBegin = vi.fn();
@@ -313,7 +313,7 @@ describe("unified MCP idle eviction — per-session pool", () => {
 
   afterEach(async () => {
     vi.useRealTimers();
-    closeTestDb(db, tmp);
+    await closeTestDb(db, tmp);
   });
 
   it("notifyTurnEnd schedules an idle timer that evicts the per-session pool", async () => {
@@ -427,7 +427,7 @@ describe("unified MCP idle eviction — global pool", () => {
 
   afterEach(async () => {
     vi.useRealTimers();
-    closeTestDb(db, tmp);
+    await closeTestDb(db, tmp);
   });
 
   it("notifyTurnEnd with no subsequent notifyTurnBegin evicts the global pool after timeout", async () => {
@@ -556,7 +556,7 @@ describe("unified MCP idle eviction — turn begin cancels all scopes", () => {
 
   afterEach(async () => {
     vi.useRealTimers();
-    closeTestDb(db, tmp);
+    await closeTestDb(db, tmp);
   });
 
   it("notifyTurnBegin cancels pending eviction timers for global, per-agent, and per-session scopes", async () => {
@@ -631,7 +631,7 @@ describe("unified MCP idle eviction — shutdown clears all timers", () => {
 
   afterEach(async () => {
     vi.useRealTimers();
-    closeTestDb(db, tmp);
+    await closeTestDb(db, tmp);
   });
 
   it("shutdown clears global idle timer so eviction callback does not fire", async () => {

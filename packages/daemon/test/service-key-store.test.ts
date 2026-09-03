@@ -28,9 +28,9 @@ describe("ServiceKeyStore", () => {
     store = new ServiceKeyStore(db);
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmpDir);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmpDir);
+});
 
   describe("generateIdentity", () => {
     it("should return identity and recipient where recipient starts with 'age1'", async () => {

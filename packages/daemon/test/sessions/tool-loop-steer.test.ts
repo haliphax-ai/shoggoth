@@ -31,9 +31,9 @@ describe("runToolLoop steer injection", () => {
     createSessionStore(db).create({ id: "sess", workspacePath: "/w" });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     _resetAllChannels();
-    closeTestDb(db, tmp);
+    await closeTestDb(db, tmp);
   });
 
   it("injects steer messages between tool calls as user messages", async () => {

@@ -30,8 +30,8 @@ describe("retention jobs", () => {
     tmp = o.dir;
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
+  afterEach(async () => {
+    await closeTestDb(db, tmp);
   });
 
   it("no-op when retention is unset", async () => {

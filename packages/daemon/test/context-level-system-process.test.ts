@@ -153,9 +153,9 @@ describe("cron job context level", () => {
     tmp = o.dir;
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("persists per-job contextLevel and includes it in event payload", () => {
     upsertCronJob(db, {

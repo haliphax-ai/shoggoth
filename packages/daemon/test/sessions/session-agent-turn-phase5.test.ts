@@ -69,9 +69,9 @@ describe(
       createSessionStore(db).create({ id: "sess-p5", workspacePath: tmp });
     });
 
-    afterEach(() => {
+    afterEach(async () => {
       vi.restoreAllMocks();
-      closeTestDb(db, tmp);
+      await closeTestDb(db, tmp);
     });
 
     it("resolves ctxWindowTokens from metadata store (not resolveModel) when session has a valid model ref", async () => {

@@ -62,9 +62,9 @@ describe("runToolLoop structured output validation retry", () => {
     createSessionStore(db).create({ id: "sess", workspacePath: "/w" });
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("retries after StructuredOutputValidationError and succeeds on second attempt", async () => {
     const steered: string[] = [];
