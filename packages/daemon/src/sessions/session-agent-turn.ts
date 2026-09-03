@@ -575,10 +575,14 @@ export async function executeSessionAgentTurn(
       // Workflow tasks opt into throwOnError so the orchestrator can mark the task as failed.
       if (input.throwOnError) throw e;
       const failoverMeta = model.getSessionToolLoopFailoverState();
+      const primaryModel = modelsForSession?.failoverChain?.[0];
       const latestAssistantText =
         (extractLatestTranscriptAssistantText(input.db, input.sessionId, ctxSeg) ?? "") +
         "\n\n<Aborted>";
-      return { failoverMeta, latestAssistantText };
+      return {
+        failoverMeta: failoverMeta ? { ...failoverMeta, primaryModel } : undefined,
+        latestAssistantText,
+      };
     }
     // Catch-all: log the error and return whatever partial response exists
     // rather than killing the turn entirely.
@@ -595,11 +599,12 @@ export async function executeSessionAgentTurn(
 
     pushSystemContext(input.sessionId, `Previous turn encountered an error: ${errMsg}`);
     const failoverMeta2 = model.getSessionToolLoopFailoverState();
+    const primaryModel2 = modelsForSession?.failoverChain?.[0];
     const latestAssistantText2 =
       extractLatestTranscriptAssistantText(input.db, input.sessionId, ctxSeg) ??
       `_Turn failed: ${errMsg}_`;
     return {
-      failoverMeta: failoverMeta2,
+      failoverMeta: failoverMeta2 ? { ...failoverMeta2, primaryModel: primaryModel2 } : undefined,
       latestAssistantText: latestAssistantText2,
     };
   } finally {
@@ -607,6 +612,7 @@ export async function executeSessionAgentTurn(
   }
 
   const failoverMeta = model.getSessionToolLoopFailoverState();
+  const effectivePrimaryModel = modelsForSession?.failoverChain?.[0];
   const latestAssistantText =
     extractLatestTranscriptAssistantText(input.db, input.sessionId, ctxSeg) ?? "_No reply text._";
 
@@ -665,15 +671,14 @@ export async function executeSessionAgentTurn(
   );
 
   return {
-    failoverMeta,
+    failoverMeta: failoverMeta
+      ? { ...failoverMeta, primaryModel: effectivePrimaryModel }
+      : undefined,
     latestAssistantText,
     showAttachments: showAttachments.length > 0 ? showAttachments : undefined,
   };
 }
 
-/**
- * Export the builtin tool registry for use by workflow tool executor.
- */
 export function getBuiltinToolRegistry(): BuiltinToolRegistry {
   return builtinRegistry;
 }

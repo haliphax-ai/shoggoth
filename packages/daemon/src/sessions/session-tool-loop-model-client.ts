@@ -31,6 +31,8 @@ export interface SessionToolLoopFailoverState {
   readonly degraded: boolean;
   readonly usedModel: string;
   readonly usedProviderId: string;
+  /** The actual primary model tried first (may differ from config's failoverChain[0] when a session model override is active). */
+  readonly primaryModel?: string;
 }
 
 /**
