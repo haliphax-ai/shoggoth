@@ -1,4 +1,5 @@
 import { test, expect } from "vitest";
+import stringWidth from "string-width";
 import { mdTableToAscii } from "../src/table-formatter";
 
 const md = [
@@ -106,9 +107,9 @@ test("wide table reflows columns to max 20 chars and wraps text", () => {
   const lines = box.split("\n");
 
   // All lines should be the same width (box-drawing consistency)
-  const firstLineWidth = lines[0].length;
+  const firstLineWidth = stringWidth(lines[0]);
   for (const line of lines) {
-    expect(line.length).toBe(firstLineWidth);
+    expect(stringWidth(line)).toBe(firstLineWidth);
   }
 
   // Table should be narrower than the uncapped version would be
@@ -211,9 +212,9 @@ test("words wider than their column are hard-broken when column is narrower than
   const lines = box.split("\n");
 
   // All lines must be the same width (no overflow past the box border)
-  const firstLineWidth = lines[0].length;
+  const firstLineWidth = stringWidth(lines[0]);
   for (const line of lines) {
-    expect(line.length).toBe(firstLineWidth);
+    expect(stringWidth(line)).toBe(firstLineWidth);
   }
 
   // Table must fit within 80 chars
@@ -274,4 +275,71 @@ test("narrow table does NOT add row separators between data rows", () => {
 
   // Structure: top, header, sep, row1, row2, bottom = 6 lines
   expect(lines.length).toBe(6);
+});
+
+test("emoji cells keep box alignment in narrow (no-reflow) table", () => {
+  // Regression test: cells containing wide codepoints (emoji) previously
+  // under-padded because padding was computed from cell.length (UTF-16 code
+  // units) instead of stringWidth(). Data rows then overflowed the border.
+  const mdEmoji = [
+    "| Status | Enabled |",
+    "|---|---|",
+    "| ✅ | Yes |",
+    "| ❌ | No |",
+    "| 😀 | Maybe |",
+    "",
+  ].join("\n");
+  const result = mdTableToAscii(mdEmoji);
+
+  const codeMatch = result.match(/```text\n([\s\S]*?)```/);
+  expect(codeMatch).toBeTruthy();
+  const box = codeMatch![1].trim();
+  const lines = box.split("\n");
+
+  // Every line must have the same visual width.
+  const borderWidth = stringWidth(lines[0]);
+  for (const line of lines) {
+    expect(stringWidth(line)).toBe(borderWidth);
+  }
+
+  // No data row may exceed the border row's visual width.
+  for (const line of lines) {
+    expect(stringWidth(line)).toBeLessThanOrEqual(borderWidth);
+  }
+
+  expect(box).toContain("✅");
+  expect(box).toContain("❌");
+  expect(box).toContain("😀");
+});
+
+test("emoji cells keep box alignment in wide table that reflows and wraps", () => {
+  // Cover the wrapped branch of renderRow(): emoji in a wide column that
+  // triggers reflow + wrapping must still pad by visual width.
+  const mdWideEmoji = [
+    "| Status | Description |",
+    "|---|---|",
+    "| ✅ | Everything is working correctly and the pipeline is green |",
+    "| ❌ | Something failed during the deploy and needs attention |",
+    "| 😀 | Smiling because the release went out without a hitch |",
+    "",
+  ].join("\n");
+  const result = mdTableToAscii(mdWideEmoji);
+
+  const codeMatch = result.match(/```text\n([\s\S]*?)```/);
+  expect(codeMatch).toBeTruthy();
+  const box = codeMatch![1].trim();
+  const lines = box.split("\n");
+
+  const borderWidth = stringWidth(lines[0]);
+  for (const line of lines) {
+    expect(stringWidth(line)).toBe(borderWidth);
+  }
+
+  for (const line of lines) {
+    expect(stringWidth(line)).toBeLessThanOrEqual(borderWidth);
+  }
+
+  expect(box).toContain("✅");
+  expect(box).toContain("❌");
+  expect(box).toContain("😀");
 });
