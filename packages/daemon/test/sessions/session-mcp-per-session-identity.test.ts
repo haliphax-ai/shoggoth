@@ -115,7 +115,7 @@ describe("per-session MCP pool agent identity (Phase 4)", () => {
   });
 
   afterEach(async () => {
-    closeTestDb(db, tmp);
+    await closeTestDb(db, tmp);
   });
 
   // -----------------------------------------------------------------------

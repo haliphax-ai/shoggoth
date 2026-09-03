@@ -27,9 +27,9 @@ describe("PendingActionsStore", () => {
     tmp = o.dir;
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("enqueue and getById round-trip", () => {
     const store = createPendingActionsStore(db);

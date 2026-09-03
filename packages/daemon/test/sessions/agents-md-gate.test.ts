@@ -30,9 +30,9 @@ describe("checkAgentsMdGate", () => {
     mkdirSync(wsPath, { recursive: true });
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("returns null when no AGENTS.md files exist below workspace root", () => {
     mkdirSync(join(wsPath, "sub"), { recursive: true });

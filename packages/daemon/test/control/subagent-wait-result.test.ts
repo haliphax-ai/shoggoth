@@ -96,9 +96,9 @@ describe("subagent_wait and subagent_result control ops", { concurrency: false }
     };
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   // --- subagent_result tests ---
 

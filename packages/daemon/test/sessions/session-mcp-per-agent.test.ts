@@ -148,7 +148,7 @@ describe("per-agent MCP pool scope", () => {
   });
 
   afterEach(async () => {
-    closeTestDb(db, tmp);
+    await closeTestDb(db, tmp);
   });
 
   // -----------------------------------------------------------------------
@@ -386,7 +386,7 @@ describe("per-agent MCP pool idle eviction", () => {
 
   afterEach(async () => {
     vi.useRealTimers();
-    closeTestDb(db, tmp);
+    await closeTestDb(db, tmp);
   });
 
   // -----------------------------------------------------------------------

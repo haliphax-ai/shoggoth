@@ -24,9 +24,9 @@ describe("reconcilePersistentSubagents", () => {
     migrate(db, defaultMigrationsDir());
   });
 
-  afterEach(() => {
-    closeTestDb(db, dir);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, dir);
+});
 
   it("restores active persistent rows and registers thread + bus hooks", () => {
     const sessions = createSessionStore(db);

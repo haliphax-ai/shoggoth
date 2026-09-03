@@ -43,9 +43,9 @@ describe("session context segment re-read clearing", () => {
     createSessionStore(db).create({ id: SESSION_ID, workspacePath: tmp });
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("applySessionContextSegmentNew clears re-read rows for the session", () => {
     const sessions = createSessionStore(db);

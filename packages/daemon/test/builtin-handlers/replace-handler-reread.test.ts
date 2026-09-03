@@ -74,9 +74,9 @@ describe("replace-handler re-read producer", () => {
     ctx = makeCtx(db, wsPath);
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("flags the file when the line count increases", async () => {
     writeFileSync(join(wsPath, "f.txt"), "a\nb\nc\n");
@@ -184,9 +184,9 @@ describe("replace-handler re-read consumer", () => {
     ctx = makeCtx(db, wsPath);
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("blocks replace when the file is already flagged", async () => {
     writeFileSync(join(wsPath, "f.txt"), "a\nb\nc\n");

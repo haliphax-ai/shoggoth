@@ -60,9 +60,9 @@ describe("write handler AGENTS.md gate", () => {
     mkdirSync(wsPath, { recursive: true });
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("gates write when AGENTS.md exists in cwd", async () => {
     const sub = join(wsPath, "sub");
@@ -109,9 +109,9 @@ describe("replace handler AGENTS.md gate", () => {
     mkdirSync(wsPath, { recursive: true });
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("gates replace when AGENTS.md exists in cwd", async () => {
     const sub = join(wsPath, "sub");

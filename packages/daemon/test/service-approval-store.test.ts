@@ -28,9 +28,9 @@ describe("ServiceApprovalStore", () => {
     store = new ServiceApprovalStore(db);
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmpDir);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmpDir);
+});
 
   describe("get", () => {
     it("should return null for non-existent service", () => {

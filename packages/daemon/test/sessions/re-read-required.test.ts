@@ -34,9 +34,9 @@ describe("re-read-required", () => {
     migrate(db, defaultMigrationsDir());
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("mark then check returns a gate for the flagged file", () => {
     markReReadRequired(db, "sess-a", "seg-1", "/ws/foo.ts");

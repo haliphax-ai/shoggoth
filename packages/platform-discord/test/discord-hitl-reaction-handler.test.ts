@@ -35,7 +35,7 @@ describe("classifyHitlDiscordReaction", () => {
 });
 
 describe("handleDiscordHitlReactionAdd", () => {
-  it("approve-once resolves pending for owner only", () => {
+  it("approve-once resolves pending for owner only", async () => {
     const tmp = mkdtempSync(join(tmpdir(), "shoggoth-hitl-react-"));
     const db = new Database(join(tmp, "s.db"));
     try {
@@ -95,7 +95,7 @@ describe("handleDiscordHitlReactionAdd", () => {
       });
       assert.equal(pending.getById(id)!.status, "approved");
     } finally {
-      closeTestDb(db, tmp);
+      await closeTestDb(db, tmp);
     }
   });
 });

@@ -29,9 +29,9 @@ describe("TranscriptStore", () => {
     createSessionStore(db).create({ id: "sess", workspacePath: "/w" });
   });
 
-  afterEach(() => {
-    closeTestDb(db, tmp);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, tmp);
+});
 
   it("appends with monotonic seq", () => {
     const tr = createTranscriptStore(db);

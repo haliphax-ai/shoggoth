@@ -33,9 +33,9 @@ describe("session-stats-store", () => {
     db = openTestDb();
   });
 
-  afterEach(() => {
-    closeTestDb(db, TMP);
-  });
+  afterEach(async () => {
+  await closeTestDb(db, TMP);
+});
 
   it("resetSegmentStats resets compaction_count to 0", () => {
     // Record some compactions
