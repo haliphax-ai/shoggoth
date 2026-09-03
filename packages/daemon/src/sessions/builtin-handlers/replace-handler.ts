@@ -298,6 +298,7 @@ async function replaceHandler(
       return {
         resultJson: JSON.stringify({
           preview: newContent,
+          replacements: linesToDelete.size,
           linesDeleted: sortedDeleted,
           changed_lines,
         }),
@@ -327,6 +328,7 @@ async function replaceHandler(
     return {
       resultJson: JSON.stringify({
         success: true,
+        replacements: linesToDelete.size,
         linesDeleted: sortedDeleted,
         changed_lines,
       }),
@@ -385,7 +387,7 @@ async function replaceHandler(
 
     if (dryRun) {
       return {
-        resultJson: JSON.stringify({ preview: newContent, changed_lines }),
+        resultJson: JSON.stringify({ preview: newContent, replacements: 1, changed_lines }),
       };
     }
 
@@ -409,7 +411,7 @@ async function replaceHandler(
       maybeMarkReReadRequired(ctx, absPath, beforeLineCount);
     }
 
-    return { resultJson: JSON.stringify({ success: true, changed_lines }) };
+    return { resultJson: JSON.stringify({ success: true, replacements: 1, changed_lines }) };
   }
 
   // ── fixedStrings fast path: in-process, no rg, no subprocesses ──
@@ -555,7 +557,7 @@ async function replaceHandler(
   const result = content.replace(regex, (match, ...rest) => {
     if (replacements >= maxReplacements) return match;
     replacements++;
-    return replacement.replace(/\\$(\\d)/g, (_, n) => rest[parseInt(n, 10) - 1] ?? _);
+    return replacement.replace(/\\$(\d)/g, (_, n) => rest[parseInt(n, 10) - 1] ?? _);
   });
 
   const changed_lines = buildChangedLines(Array.from(matchLineSet).sort((a, b) => a - b));
