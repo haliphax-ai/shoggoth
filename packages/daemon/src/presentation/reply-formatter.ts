@@ -14,6 +14,8 @@ export interface FailoverMeta {
   readonly degraded: boolean;
   readonly usedModel: string;
   readonly usedProviderId: string;
+  /** The actual primary model tried first. When set, used for the degraded banner instead of re-reading config's failoverChain[0]. */
+  readonly primaryModel?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,7 +83,9 @@ export function formatDegradedPrefix(
 ): string {
   if (!meta?.degraded) return "";
   const primaryModel =
-    resolveEffectiveModelsConfig(config, sessionId)?.failoverChain?.[0] ?? "primary";
+    meta.primaryModel ??
+    resolveEffectiveModelsConfig(config, sessionId)?.failoverChain?.[0] ??
+    "primary";
   return `${daemonNotice("degraded-banner", {
     primaryModel,
     usedModel: meta.usedModel,
