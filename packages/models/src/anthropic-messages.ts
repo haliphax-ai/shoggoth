@@ -98,10 +98,6 @@ function trimSlash(u: string): string {
   return u.replace(/\/+$/, "");
 }
 
-function sanitizeAnthropicToolNameBase(name: string): string {
-  return sanitizeToolName(name);
-}
-
 /**
  * OpenAI tool name → Anthropic-safe name for this request. Resolves collisions when two names
  * sanitize to the same string (e.g. `a.b` and `a_b`).
@@ -113,7 +109,7 @@ export function buildOpenAiToAnthropicToolNameMap(
   const used = new Set<string>();
   for (const t of tools) {
     const orig = t.function.name;
-    const base = sanitizeAnthropicToolNameBase(orig);
+    const base = sanitizeToolName(orig);
     let candidate = base;
     let i = 0;
     while (used.has(candidate)) {
@@ -202,7 +198,7 @@ function mapOpenAIToolsToAnthropic(
 ): unknown[] {
   return tools.map((t) => {
     const anthropicName =
-      openAiToAnthropicName.get(t.function.name) ?? sanitizeAnthropicToolNameBase(t.function.name);
+      openAiToAnthropicName.get(t.function.name) ?? sanitizeToolName(t.function.name);
     return {
       name: anthropicName,
       ...(t.function.description !== undefined ? { description: t.function.description } : {}),
@@ -311,7 +307,7 @@ export function mapChatMessagesToAnthropicPayload(
             );
           }
           const anthropicToolName =
-            openAiToAnthropicToolName?.get(tc.name) ?? sanitizeAnthropicToolNameBase(tc.name);
+            openAiToAnthropicToolName?.get(tc.name) ?? sanitizeToolName(tc.name);
           blocks.push({
             type: "tool_use",
             id: tc.id,
