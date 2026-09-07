@@ -87,9 +87,14 @@ export function getWorkflowControlPlane(): ControlPlane | undefined {
 }
 
 /** Execute a workflow tool call. Returns structured result. */
+/** Execute a workflow tool call. Returns structured result. */
 export async function executeWorkflowToolCall(
   args: WorkflowToolArgs,
-  sessionContext: { currentDepth: number; maxDepth: number },
+  sessionContext: {
+    currentDepth: number;
+    maxDepth: number;
+    agentWorkspaceRoot?: string;
+  },
 ): Promise<WorkflowToolResult> {
   if (!server || !controlPlane || !stateDir) {
     return { ok: false, error: "workflow server not initialized" };
@@ -101,9 +106,11 @@ export async function executeWorkflowToolCall(
     stateDir,
     currentDepth: sessionContext.currentDepth,
     maxDepth: sessionContext.maxDepth,
+    ...(sessionContext.agentWorkspaceRoot
+      ? { agentWorkspaceRoot: sessionContext.agentWorkspaceRoot }
+      : {}),
   });
 }
-
 /** Reset the singleton state. For testing only. */
 export function resetWorkflowSingleton(): void {
   server = undefined;

@@ -84,6 +84,8 @@ export interface WorkflowToolHandlerDeps {
   maxDepth: number;
   /** Resolved workspace root. If omitted, derived from env/cwd. */
   workspaceRoot?: string;
+  /** Agent-specific workspace root. Used for definition_file path resolution. Falls back to workspaceRoot. */
+  agentWorkspaceRoot?: string;
 }
 
 // --- Helpers ---
@@ -207,24 +209,28 @@ export async function handleWorkflowToolCall(
         // --- definition_file handling ---
         if (args.definition_file !== undefined) {
           const filePath = args.definition_file;
-          if (!isAbsolute(filePath)) {
-            return { ok: false, error: "definition_file must be an absolute path" };
+          // Resolve agent workspace root: prefer agentWorkspaceRoot, fall back to workspaceRoot
+          const agentWpRoot = resolveWorkspaceRoot(deps.agentWorkspaceRoot ?? deps.workspaceRoot);
+          let resolvedPath: string;
+          if (isAbsolute(filePath)) {
+            resolvedPath = resolve(filePath);
+          } else {
+            // Relative paths are resolved against the agent's workspace root
+            resolvedPath = resolve(agentWpRoot, filePath);
           }
-          const resolvedPath = resolve(filePath);
-          const workspaceRoot = resolveWorkspaceRoot(deps.workspaceRoot);
-          if (!resolvedPath.startsWith(workspaceRoot)) {
+          if (!resolvedPath.startsWith(agentWpRoot)) {
             return {
               ok: false,
-              error: `definition_file must be inside workspace (got "${resolvedPath}", workspace root is "${workspaceRoot}")`,
+              error: `definition_file must be inside workspace (got "${resolvedPath}", workspace root is "${agentWpRoot}")`,
             };
           }
           let fileContents: string;
           try {
-            fileContents = await readFile(filePath, "utf-8");
+            fileContents = await readFile(resolvedPath, "utf-8");
           } catch {
             return {
               ok: false,
-              error: `definition_file not found: ${filePath}`,
+              error: `definition_file not found: ${resolvedPath}`,
             };
           }
           let parsed: {
@@ -253,6 +259,7 @@ export async function handleWorkflowToolCall(
           runtimeLimitMs = parsed.runtime_limit_ms ?? runtimeLimitMs;
           concurrency = parsed.concurrency ?? concurrency;
         }
+        // --- end definition_file handling ---
         // --- end definition_file handling ---
 
         const finalTasks = requireField(tasks, "tasks");
@@ -304,9 +311,8 @@ export async function handleWorkflowToolCall(
           if (task.startedAt == null) {
             return task;
           }
-          const duration = task.completedAt != null
-            ? task.completedAt - task.startedAt
-            : now - task.startedAt;
+          const duration =
+            task.completedAt != null ? task.completedAt - task.startedAt : now - task.startedAt;
           return { ...task, duration };
         });
 
