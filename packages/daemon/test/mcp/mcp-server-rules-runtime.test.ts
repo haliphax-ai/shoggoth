@@ -471,4 +471,65 @@ describe("MCP server rules — runtime filtering", () => {
     assert.ok(!connectedIds.includes("denied-server"), "denied-server should NOT be connected");
     assert.ok(connectedIds.includes("allowed-server"), "allowed-server should be connected");
   });
+
+  it("per-agent pool excludes server denied in top-level even if subagent rules allow it", async () => {
+    const catalogs = [
+      fakeSourceCatalog("allowed-server", "good-tool"),
+      fakeSourceCatalog("denied-server", "bad-tool"),
+    ];
+    const mock = mockConnectMcp(catalogs);
+    db = makeDb();
+
+    // Top-level rules deny "denied-server", but NO subagentMcp rules configured.
+    // resolveEffectiveMcpServerRules for subagent falls back to global defaults
+    // { allow: ["*"], deny: [] }, which would allow "denied-server".
+    // With || logic, denied-server would be included (subagent path overrides).
+    // With && logic, denied-server is excluded (denied in ANY context).
+    const config = buildConfig({
+      mcp: {
+        servers: [
+          {
+            id: "allowed-server",
+            transport: "stdio",
+            command: "true",
+            poolScope: "per_agent",
+          } as ShoggothMcpServerEntry,
+          {
+            id: "denied-server",
+            transport: "stdio",
+            command: "true",
+            poolScope: "per_agent",
+          } as ShoggothMcpServerEntry,
+        ],
+        poolScope: "per_agent",
+        serverRules: { allow: ["*"], deny: ["denied-server"] },
+      },
+      agents: {
+        list: {
+          test: {
+            mcp: { serverRules: { allow: ["*"], deny: ["denied-server"] } },
+            // No subagentMcp configured — subagent rules fall back to defaults
+          },
+        },
+      },
+    });
+
+    runtime = await createSessionMcpRuntime({
+      config,
+      env: {},
+      db,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      deps: { connectShoggothMcpServers: mock.connect as any },
+    });
+
+    await runtime.resolveContext(SESSION_ID);
+
+    assert.equal(mock.connectCallServers.length, 1, "connect should be called once");
+    const connectedIds = mock.connectCallServers[0].map((s) => s.id);
+    assert.ok(
+      !connectedIds.includes("denied-server"),
+      "denied-server should NOT be connected when denied in top-level even if subagent defaults allow it",
+    );
+    assert.ok(connectedIds.includes("allowed-server"), "allowed-server should be connected");
+  });
 });
