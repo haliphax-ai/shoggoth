@@ -7,6 +7,9 @@
  */
 
 import type { VaultService } from "../vault/vault-service";
+import { getLogger } from "../logging";
+
+const log = getLogger("vault-env-resolve");
 
 const VAULT_PREFIX = "$vault:";
 const VAULT_PREFIX_LEN = VAULT_PREFIX.length;
@@ -53,23 +56,21 @@ export function extractVaultName(value: string): string | null {
  *
  * Finds every valid $vault:<name> reference in the string, resolves each
  * using the vault service with the agent's scope precedence, and returns
- * the fully resolved string.
- *
- * If any referenced credential is not found, the entire env var is omitted
- * (returns null) with a warning logged.
+ * the fully resolved string. If any referenced credential is not found, the
+ * `$vault:<name>` literal is left in place and a warning is logged.
  *
  * @param value - The env var value that may contain $vault:<name> substrings.
  * @param vault - The vault service instance.
  * @param agentId - The connecting agent's ID for scope resolution.
  * @param envKey - The env var key (for warning messages).
- * @returns The resolved string, or null if any credential was not found.
+ * @returns The resolved string with vault references replaced.
  */
 async function resolveVaultSubstrings(
   value: string,
   vault: VaultService,
   agentId?: string,
   envKey?: string,
-): Promise<string | null> {
+): Promise<string> {
   // Quick check: if no $vault: at all, return as-is without regex overhead
   if (!value.includes(VAULT_PREFIX)) {
     return value;
@@ -98,26 +99,23 @@ async function resolveVaultSubstrings(
         : await vault.get("global", match.name);
       resolved.set(match.name, cred);
       if (cred === null) {
-        const scope = agentId ? `agent "${agentId}"` : "global";
-        console.warn(
-          `[vault] Credential "${match.name}" not found for ${scope}, omitting env var "${envKey ?? "unknown"}"`,
-        );
+        const scope = agentId ? `agent:${agentId}` : "global";
+        log.warn("vault credential not found, leaving unresolved", {
+          credential: match.name,
+          scope,
+          envKey: envKey ?? "unknown",
+        });
       }
     }
   }
 
-  // If any credential was not found, omit the entire env var
-  for (const match of matches) {
-    if (resolved.get(match.name) === null) {
-      return null;
-    }
-  }
-
   // Build the resolved string by replacing each reference (in reverse order to preserve indices)
+  // Unresolved references (null) are left as-is ($vault:NAME literal stays in the string)
   let result = value;
   for (let i = matches.length - 1; i >= 0; i--) {
     const match = matches[i];
-    const credValue = resolved.get(match.name)!;
+    const credValue = resolved.get(match.name);
+    if (credValue === null) continue;
     result =
       result.slice(0, match.index) + credValue + result.slice(match.index + match.full.length);
   }
@@ -133,8 +131,8 @@ async function resolveVaultSubstrings(
  * agent's scope precedence (agent:<agentId> first, then global), and replaces
  * references with plaintext values.
  *
- * If a credential is not found, the env var is omitted from the result (with
- * a warning logged). Non-vault env vars are left unchanged.
+ * If a credential is not found, the `$vault:<name>` literal is left in place.
+ * Non-vault env vars are left unchanged.
  *
  * @param env - The environment variable map from the MCP server config.
  * @param vault - The vault service instance.
@@ -149,10 +147,7 @@ export async function resolveVaultEnv(
   const result: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(env)) {
-    const resolved = await resolveVaultSubstrings(value, vault, agentId, key);
-    if (resolved !== null) {
-      result[key] = resolved;
-    }
+    result[key] = await resolveVaultSubstrings(value, vault, agentId, key);
   }
 
   return result;

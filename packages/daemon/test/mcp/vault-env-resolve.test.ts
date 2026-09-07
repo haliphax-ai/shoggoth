@@ -105,8 +105,10 @@ describe("resolveVaultEnv", () => {
       "developer",
     );
 
-    expect(result).toEqual({ PLAIN_VAR: "plain-value", ANOTHER: "also-plain" });
-    expect(mockVault.resolve).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      PLAIN_VAR: "plain-value",
+      ANOTHER: "also-plain",
+    });
   });
 
   it("handles mixed plain and vault env vars", async () => {
@@ -129,7 +131,7 @@ describe("resolveVaultEnv", () => {
     });
   });
 
-  it("omits env var if vault credential not found (with warning)", async () => {
+  it("passes through $vault:NAME literal when credential not found", async () => {
     mockVault.resolve.mockResolvedValue(null);
 
     const result = await resolveVaultEnv(
@@ -138,9 +140,10 @@ describe("resolveVaultEnv", () => {
       "developer",
     );
 
-    // The env var should be omitted when credential is not found
-    expect(result).toEqual({ PLAIN_VAR: "plain" });
-    expect(result.MISSING_CRED).toBeUndefined();
+    expect(result).toEqual({
+      MISSING_CRED: "$vault:MISSING_CRED",
+      PLAIN_VAR: "plain",
+    });
     expect(mockVault.resolve).toHaveBeenCalledWith("developer", "MISSING_CRED");
   });
 
@@ -175,29 +178,22 @@ describe("resolveVaultEnv", () => {
 
     const result = await resolveVaultEnv(
       {
-        // These should NOT be resolved: the credential name is followed by
-        // additional letters making it ambiguous (lookahead prevents match)
         PARTIAL_SUFFIX: "$vault:API_KEYsuffix",
         PARTIAL_BOTH: "pre$vault:API_KEYpost",
-        // This SHOULD be resolved: $vault:API_KEY is at end of string
         END_OF_STRING: "prefix$vault:API_KEY",
       },
       mockVault,
       "developer",
     );
 
-    // Ambiguous suffix/postfix matches are left unchanged
     expect(result.PARTIAL_SUFFIX).toBe("$vault:API_KEYsuffix");
     expect(result.PARTIAL_BOTH).toBe("pre$vault:API_KEYpost");
-    // Inline reference at end of string IS resolved
     expect(result.END_OF_STRING).toBe("prefixsecret");
-    // Only the END_OF_STRING var triggers a resolve call
     expect(mockVault.resolve).toHaveBeenCalledTimes(1);
     expect(mockVault.resolve).toHaveBeenCalledWith("developer", "API_KEY");
   });
 
   it("uses agent scope precedence via vault.resolve()", async () => {
-    // vault.resolve checks agent:<agentId> first, then global
     mockVault.resolve.mockResolvedValue("agent-scoped-secret");
 
     const result = await resolveVaultEnv({ CRED: "$vault:CRED" }, mockVault, "developer-agent-123");
@@ -213,7 +209,7 @@ describe("resolveVaultEnv", () => {
     expect(mockVault.resolve).not.toHaveBeenCalled();
   });
 
-  it("handles env map with only vault references that are not found", async () => {
+  it("passes through all $vault:NAME literals when none are found", async () => {
     mockVault.resolve.mockResolvedValue(null);
 
     const result = await resolveVaultEnv(
@@ -222,8 +218,10 @@ describe("resolveVaultEnv", () => {
       "developer",
     );
 
-    // Both should be omitted
-    expect(result).toEqual({});
+    expect(result).toEqual({
+      CRED1: "$vault:MISSING_1",
+      CRED2: "$vault:MISSING_2",
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -269,13 +267,11 @@ describe("resolveVaultEnv", () => {
       "developer",
     );
 
-    // Space after $vault: means no valid credential name, left unchanged
     expect(result).toEqual({ NO_MATCH: "partial $vault: match" });
     expect(mockVault.resolve).not.toHaveBeenCalled();
   });
 
-  it("omits env var when an inline vault credential is not found", async () => {
-    // First credential resolves, second does not
+  it("leaves unresolved $vault: literal in place when inline credential not found", async () => {
     mockVault.resolve.mockResolvedValueOnce("example.com").mockResolvedValueOnce(null);
 
     const result = await resolveVaultEnv(
@@ -284,9 +280,7 @@ describe("resolveVaultEnv", () => {
       "developer",
     );
 
-    // Entire env var is omitted when any credential is missing
-    expect(result).toEqual({});
-    expect(result.ENDPOINT).toBeUndefined();
+    expect(result).toEqual({ ENDPOINT: "example.com:$vault:PORT" });
   });
 
   it("still works as full-value $vault:NAME (backward compatible)", async () => {
@@ -310,7 +304,6 @@ describe("resolveVaultEnv", () => {
     expect(result).toEqual({
       CONN: "user=user123 pass=pass456",
     });
-    // Each unique credential resolved once
     expect(mockVault.resolve).toHaveBeenCalledTimes(2);
   });
 
@@ -324,24 +317,21 @@ describe("resolveVaultEnv", () => {
     );
 
     expect(result).toEqual({ BOTH: "shared-secret:shared-secret" });
-    // Only resolved once despite appearing twice
     expect(mockVault.resolve).toHaveBeenCalledTimes(1);
     expect(mockVault.resolve).toHaveBeenCalledWith("developer", "SHARED");
   });
 
-  it("omits env var when a full-value vault credential is not found", async () => {
+  it("passes through $vault:NAME literal when full-value credential is not found", async () => {
     mockVault.resolve.mockResolvedValue(null);
 
     const result = await resolveVaultEnv({ MISSING: "$vault:NOPE" }, mockVault, "developer");
 
-    expect(result).toEqual({});
-    expect(result.MISSING).toBeUndefined();
+    expect(result).toEqual({ MISSING: "$vault:NOPE" });
   });
 
   it("does not resolve $vault:NAMEsuffix where suffix is lowercase", async () => {
     const result = await resolveVaultEnv({ VAL: "$vault:API_KEYsuffix" }, mockVault, "developer");
 
-    // The credential name would be API_KEYsuffix which mixes case — not valid
     expect(result).toEqual({ VAL: "$vault:API_KEYsuffix" });
     expect(mockVault.resolve).not.toHaveBeenCalled();
   });
@@ -351,7 +341,6 @@ describe("resolveVaultEnv", () => {
 
     const result = await resolveVaultEnv({ AUTH: "$vault:TOKEN " }, mockVault, "developer");
 
-    // Trailing space is not a valid name character, so TOKEN is the full name
     expect(result).toEqual({ AUTH: "tok_999 " });
     expect(mockVault.resolve).toHaveBeenCalledWith("developer", "TOKEN");
   });
