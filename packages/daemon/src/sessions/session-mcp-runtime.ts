@@ -39,6 +39,7 @@ import { createToolDiscoveryFinalizer } from "./session-tool-discovery";
 import { createElevationToolFinalizer } from "./elevation-tool-finalizer";
 import { createServiceToolFinalizer } from "./service-tool-finalizer";
 import { resolveAgentCreds } from "../agent-creds";
+import { vaultServiceRef } from "../vault/vault-ref";
 
 const log = getLogger("session-mcp");
 export type SessionMcpContextFinalizer = (
@@ -81,14 +82,18 @@ export interface SessionMcpRuntime {
 
 function buildMcpPoolConnectOptions(
   env: NodeJS.ProcessEnv,
-): ConnectShoggothMcpPoolOptions | undefined {
-  if (env.SHOGGOTH_MCP_LOG_SERVER_MESSAGES !== "1") return undefined;
-  const child = log.child({ component: "mcp-sse" });
-  return {
-    onMcpServerMessage: ({ sourceId, msg }) => {
-      child.debug("mcp.server_message", { sourceId, msg });
-    },
-  };
+): ConnectShoggothMcpPoolOptions {
+  const vault = vaultServiceRef.current;
+  if (env.SHOGGOTH_MCP_LOG_SERVER_MESSAGES === "1") {
+    const child = log.child({ component: "mcp-sse" });
+    return {
+      vault,
+      onMcpServerMessage: ({ sourceId, msg }) => {
+        child.debug("mcp.server_message", { sourceId, msg });
+      },
+    };
+  }
+  return { vault };
 }
 
 /** Default UID/GID for agent processes when no session row is available. */
