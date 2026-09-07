@@ -10,11 +10,11 @@ Orchestrate multi-task workflows with dependency graphs. Supports agent, tool, g
 | `workflow_id`          | string        | per-action | Required for: `abort`, `pause`, `resume`, `status`, `post`, `edit`, `retry`                         |
 | `name`                 | string        | no         | Workflow name (default: `"unnamed-workflow"`)                                                       |
 | `tasks`                | array         | start      | Array of task objects (see below)                                                                   |
-| `graph`                | string        | start      | Dependency graph — task id → dependency ids                                                         |
+| `graph`                | string        | start      | Dependency graph DSL — see Graph DSL section below                                                  |
 | `reply_to`             | string        | start      | Session id to receive completion                                                                    |
 | `polling_interval_ms`  | number        | no         | Poll interval (default: 10000)                                                                      |
-| `graph`                | string        | start      | Dependency graph DSL — see Graph DSL section below                                                  |
 | `concurrency`          | number        | no         | Max concurrent tasks                                                                                |
+| `runtime_limit_ms`     | integer       | no         | Default runtime limit per task in ms (default: 600000). Can also be overridden per-task. Min: 1000  |
 | `task_id`              | number        | edit/retry | Target task id                                                                                      |
 | `prompt`               | string        | no         | New prompt (edit action)                                                                            |
 | `failure_behavior`     | string        | no         | `"abort"`, `"pause"`, or `"continue"` (edit action)                                                 |
@@ -177,6 +177,8 @@ The `graph` string uses a space-separated lane syntax to encode task dependencie
 ```
 
 Tasks with no dependencies can be omitted from the graph (they run immediately).
+
+> **⚠️ Important:** Every task defined in the `tasks` array **must** also appear in the `graph` string. Any task not referenced in the graph will be **silently skipped** and never executed. Always include at least a bare entry (e.g. `3:` for a root task with no dependencies) for every task you define.
 
 ## Tips
 
