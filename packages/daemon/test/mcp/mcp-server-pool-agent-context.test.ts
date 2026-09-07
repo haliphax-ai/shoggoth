@@ -324,4 +324,53 @@ describe("connectShoggothMcpServers — agentContext forwarding", () => {
       await pool.close();
     }
   });
+
+  it("resolves $vault: references in server env when vault is provided", async () => {
+    const mockVault = {
+      resolve: vi.fn().mockResolvedValue("resolved-secret-value"),
+      get: vi.fn(),
+      put: vi.fn(),
+      delete: vi.fn(),
+      list: vi.fn(),
+      listScopes: vi.fn(),
+      rotateKey: vi.fn(),
+      publicKey: "age1test",
+    };
+
+    const { pool } = await connectShoggothMcpServers(
+      [
+        {
+          id: "srv-vault",
+          transport: "stdio",
+          command: "/usr/bin/echo",
+          env: { API_KEY: "$vault:MY_SECRET", PLAIN: "plain-value" },
+        },
+      ],
+      {
+        vault: mockVault as any,
+        agentId: "developer",
+      } as ConnectShoggothMcpPoolOptions,
+    );
+
+    try {
+      assert.equal(capturedStdioOpts.length, 1);
+      const opts = capturedStdioOpts[0]!;
+
+      // $vault: reference should be resolved
+      assert.equal(
+        opts.env?.API_KEY,
+        "resolved-secret-value",
+        "$vault:MY_SECRET should be resolved via vault service",
+      );
+
+      // Plain values should be preserved
+      assert.equal(opts.env?.PLAIN, "plain-value", "plain env vars should be preserved");
+
+      // Vault resolve should have been called with agentId and credential name
+      assert.equal(mockVault.resolve.callCount, 1);
+      assert.deepEqual(mockVault.resolve.calls[0], ["developer", "MY_SECRET"]);
+    } finally {
+      await pool.close();
+    }
+  });
 });

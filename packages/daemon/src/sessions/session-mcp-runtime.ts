@@ -29,7 +29,8 @@ import {
   createMcpServerRulesFinalizer,
   createMediaGenerateToolFinalizer,
   createVaultToolFinalizer,
-  createWebSearchToolFinalizer,
+import { resolveAgentCreds } from "../agent-creds";
+import { vaultServiceRef } from "../vault/vault-ref";
   type SessionMcpToolContext,
 } from "./session-mcp-tool-context";
 import { listSkillsForConfig } from "@shoggoth/skills";
@@ -81,14 +82,17 @@ export interface SessionMcpRuntime {
 
 function buildMcpPoolConnectOptions(
   env: NodeJS.ProcessEnv,
-): ConnectShoggothMcpPoolOptions | undefined {
-  if (env.SHOGGOTH_MCP_LOG_SERVER_MESSAGES !== "1") return undefined;
-  const child = log.child({ component: "mcp-sse" });
-  return {
-    onMcpServerMessage: ({ sourceId, msg }) => {
-      child.debug("mcp.server_message", { sourceId, msg });
-    },
+): ConnectShoggothMcpPoolOptions {
+  const opts: ConnectShoggothMcpPoolOptions = {
+    vault: vaultServiceRef.current,
   };
+  if (env.SHOGGOTH_MCP_LOG_SERVER_MESSAGES === "1") {
+    const child = log.child({ component: "mcp-sse" });
+    opts.onMcpServerMessage = ({ sourceId, msg }) => {
+      child.debug("mcp.server_message", { sourceId, msg });
+    };
+  }
+  return opts;
 }
 
 /** Default UID/GID for agent processes when no session row is available. */
