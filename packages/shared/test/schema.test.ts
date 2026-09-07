@@ -501,3 +501,69 @@ describe("attachmentHandling — full shoggothConfigSchema end-to-end", () => {
     assert.ok(r.success, JSON.stringify((r as any).error?.issues));
   });
 });
+
+// ---------------------------------------------------------------------------
+// fetch config — SSRF protection settings
+// ---------------------------------------------------------------------------
+describe("fetch config", () => {
+  function fullConfigWith(overrides: Record<string, unknown>) {
+    return { ...defaultConfig("/etc/shoggoth/config.d"), ...overrides };
+  }
+
+  it("accepts fetch with allowPrivateIps: true in full config", () => {
+    const r = shoggothConfigSchema.safeParse(
+      fullConfigWith({
+        fetch: { allowPrivateIps: true },
+      }),
+    );
+    assert.ok(r.success, JSON.stringify((r as any).error?.issues));
+    assert.equal((r.data as any).fetch?.allowPrivateIps, true);
+  });
+
+  it("accepts fetch with privateIpAllowlist in full config", () => {
+    const r = shoggothConfigSchema.safeParse(
+      fullConfigWith({
+        fetch: { privateIpAllowlist: ["myhost.local", "10.0.0.1"] },
+      }),
+    );
+    assert.ok(r.success, JSON.stringify((r as any).error?.issues));
+    assert.deepEqual((r.data as any).fetch?.privateIpAllowlist, ["myhost.local", "10.0.0.1"]);
+  });
+
+  it("accepts config without fetch (optional)", () => {
+    const r = shoggothConfigSchema.safeParse(fullConfigWith({}));
+    assert.ok(r.success, JSON.stringify((r as any).error?.issues));
+  });
+
+  it("rejects fetch with invalid allowPrivateIps type", () => {
+    const r = shoggothConfigSchema.safeParse(
+      fullConfigWith({
+        fetch: { allowPrivateIps: "yes" },
+      }),
+    );
+    assert.ok(!r.success);
+  });
+
+  it("rejects fetch with unknown keys (strict)", () => {
+    const r = shoggothConfigSchema.safeParse(
+      fullConfigWith({
+        fetch: { bogusKey: true },
+      }),
+    );
+    assert.ok(!r.success);
+  });
+
+  it("accepts fetch in config fragment schema", () => {
+    const r = shoggothConfigFragmentSchema.safeParse({
+      fetch: { allowPrivateIps: true, privateIpAllowlist: ["local.host"] },
+    });
+    assert.ok(r.success);
+  });
+
+  it("rejects fetch with invalid privateIpAllowlist type", () => {
+    const r = shoggothConfigFragmentSchema.safeParse({
+      fetch: { privateIpAllowlist: 123 },
+    });
+    assert.ok(!r.success);
+  });
+});
