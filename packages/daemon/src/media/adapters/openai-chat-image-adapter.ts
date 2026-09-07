@@ -2,7 +2,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { MediaAdapterRequest, MediaAdapterResult, ImageGenerateParams } from "./types";
 import { normalizeBaseUrl } from "./utils";
-import { resolveImageSize } from "./aspect-ratio-utils";
+import { resolveImageTier } from "./aspect-ratio-utils";
 
 /**
  * Parse a data URI and extract mime type and base64 content.
@@ -138,7 +138,7 @@ export async function openAIChatImageAdapter(
 
     // Resolve image size from aspectRatio / size params
     const imageParams = req.params as ImageGenerateParams;
-    const resolvedSize = resolveImageSize(imageParams);
+    const resolvedTier = resolveImageTier(imageParams);
 
     const requestBody: Record<string, unknown> = {
       model: req.model,
@@ -146,11 +146,14 @@ export async function openAIChatImageAdapter(
       modalities,
     };
 
-    if (resolvedSize.error) {
-      return { status: "error", error: resolvedSize.error };
+    if (resolvedTier.error) {
+      return { status: "error", error: resolvedTier.error };
     }
-    if (resolvedSize.size) {
-      requestBody.size = resolvedSize.size;
+    if (resolvedTier.resolution) {
+      requestBody.resolution = resolvedTier.resolution;
+    }
+    if (resolvedTier.aspect_ratio) {
+      requestBody.aspect_ratio = resolvedTier.aspect_ratio;
     }
 
     const response = await fetch(`${normalizedBaseUrl}/chat/completions`, {

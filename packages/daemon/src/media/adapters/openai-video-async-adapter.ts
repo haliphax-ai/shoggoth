@@ -41,7 +41,7 @@ export async function openaiVideoAsyncAdapter(req: VideoRequest): Promise<MediaA
         messages: [{ role: "user", content: req.prompt }],
         ...(req.params.kind === "video"
           ? {
-              aspectRatio: (req.params as VideoGenerateParams).aspectRatio,
+              aspect_ratio: (req.params as VideoGenerateParams).aspectRatio,
               durationSeconds: (req.params as VideoGenerateParams).durationSeconds,
             }
           : {}),
