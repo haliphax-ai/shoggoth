@@ -105,8 +105,12 @@ export async function connectShoggothMcpServers(
     let session: McpJsonRpcSession;
 
     if (s.transport === "stdio") {
-      // Build env: agent workspace as HOME, then server config env on top
-      let baseEnv = agentCtx ? { HOME: agentCtx.workspacePath, ...s.env } : s.env;
+      // Build env: inherit process.env, override HOME for agent workspace, server config env takes highest priority
+      let baseEnv = {
+        ...process.env,
+        ...(agentCtx ? { HOME: agentCtx.workspacePath } : {}),
+        ...s.env,
+      };
       // Resolve $vault: references in env vars if vault is available
       if (baseEnv && options?.vault) {
         baseEnv = await resolveVaultEnv(baseEnv, options.vault, options.agentId);

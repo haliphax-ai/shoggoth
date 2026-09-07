@@ -1,6 +1,7 @@
 /**
  * Tests: verify that connectShoggothMcpServers threads AgentMcpContext
- * (uid, gid, workspacePath) through to the stdio connect options.
+ * (uid, gid, workspacePath) through to the stdio connect options,
+ * and that process.env is inherited as the base environment.
  *
  * These tests mock @shoggoth/mcp-integration so we can inspect the options
  * passed to openMcpStdioClient without spawning real processes.
@@ -144,7 +145,7 @@ describe("connectShoggothMcpServers — agentContext forwarding", () => {
     }
   });
 
-  it("preserves existing behavior when agentContext is absent", async () => {
+  it("inherits process.env and preserves server-level env when agentContext is absent", async () => {
     const { pool } = await connectShoggothMcpServers([
       {
         id: "srv-no-ctx",
@@ -170,13 +171,14 @@ describe("connectShoggothMcpServers — agentContext forwarding", () => {
         "gid should not be set when agentContext is absent",
       );
 
-      // env should pass through server-level env only
-      assert.equal(opts.env?.FOO, "bar", "server-level env should be preserved");
-      assert.equal(
-        opts.env?.HOME,
-        undefined,
-        "HOME should not be injected when agentContext is absent",
+      // process.env should be inherited
+      assert.ok(
+        opts.env?.PATH !== undefined,
+        "process.env should be inherited when agentContext is absent",
       );
+
+      // Server-level env should be present on top of process.env
+      assert.equal(opts.env?.FOO, "bar", "server-level env should be preserved");
     } finally {
       await pool.close();
     }
@@ -211,6 +213,112 @@ describe("connectShoggothMcpServers — agentContext forwarding", () => {
         opts.env?.HOME,
         "/home/agent-c/workspace",
         "HOME should be merged from agentContext",
+      );
+    } finally {
+      await pool.close();
+    }
+  });
+
+  it("inherits process.env variables like PATH", async () => {
+    const { pool } = await connectShoggothMcpServers(
+      [
+        {
+          id: "srv-env-inherit",
+          transport: "stdio",
+          command: "/usr/bin/echo",
+          args: ["hello"],
+        },
+      ],
+      {
+        agentContext: {
+          uid: 5001,
+          gid: 5001,
+          workspacePath: "/home/agent-d/workspace",
+        },
+      } as ConnectShoggothMcpPoolOptions,
+    );
+
+    try {
+      assert.equal(capturedStdioOpts.length, 1);
+      const opts = capturedStdioOpts[0]!;
+
+      // process.env.PATH should be inherited
+      assert.equal(
+        opts.env?.PATH,
+        process.env.PATH,
+        "process.env.PATH should be inherited into the stdio env",
+      );
+
+      // HOME should still be overridden by agentContext
+      assert.equal(
+        opts.env?.HOME,
+        "/home/agent-d/workspace",
+        "agentContext HOME should override process.env HOME",
+      );
+    } finally {
+      await pool.close();
+    }
+  });
+
+  it("server config env vars override process.env values", async () => {
+    const { pool } = await connectShoggothMcpServers(
+      [
+        {
+          id: "srv-env-override",
+          transport: "stdio",
+          command: "/usr/bin/echo",
+          env: { SSL_CERT_FILE: "/custom/cert.pem" },
+        },
+      ],
+      {
+        agentContext: {
+          uid: 6001,
+          gid: 6001,
+          workspacePath: "/home/agent-e/workspace",
+        },
+      } as ConnectShoggothMcpPoolOptions,
+    );
+
+    try {
+      assert.equal(capturedStdioOpts.length, 1);
+      const opts = capturedStdioOpts[0]!;
+
+      // Server config env should override any process.env value
+      assert.equal(
+        opts.env?.SSL_CERT_FILE,
+        "/custom/cert.pem",
+        "server config env vars should override process.env",
+      );
+
+      // process.env values not overridden should still be present
+      assert.equal(
+        opts.env?.PATH,
+        process.env.PATH,
+        "non-overridden process.env values should be inherited",
+      );
+    } finally {
+      await pool.close();
+    }
+  });
+
+  it("inherits process.env even when agentContext is absent and no server env", async () => {
+    const { pool } = await connectShoggothMcpServers([
+      {
+        id: "srv-env-only-process",
+        transport: "stdio",
+        command: "/usr/bin/echo",
+      },
+    ]);
+
+    try {
+      assert.equal(capturedStdioOpts.length, 1);
+      const opts = capturedStdioOpts[0]!;
+
+      // process.env should be inherited as the base
+      assert.equal(
+        opts.env?.PATH,
+        process.env.PATH,
+        "process.env.PATH should be inherited without agentContext",
       );
     } finally {
       await pool.close();
