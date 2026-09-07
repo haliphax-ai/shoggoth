@@ -1,4 +1,5 @@
 import { ModelHttpError } from "./errors";
+import { sanitizeToolName } from "@shoggoth/shared";
 import { anthropicImageBlockCodec } from "./image-codec";
 import { getResilienceGate, parseRateLimitHeaders } from "./resilience";
 import {
@@ -98,9 +99,7 @@ function trimSlash(u: string): string {
 }
 
 function sanitizeAnthropicToolNameBase(name: string): string {
-  let s = name.replace(/[^a-zA-Z0-9_-]/g, "_");
-  if (s.length === 0) s = "tool";
-  return s.length > ANTHROPIC_TOOL_NAME_MAX ? s.slice(0, ANTHROPIC_TOOL_NAME_MAX) : s;
+  return sanitizeToolName(name);
 }
 
 /**
