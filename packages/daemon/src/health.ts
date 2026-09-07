@@ -180,8 +180,11 @@ function resolveModelProbeUrl(
   if (p === "/") {
     return new URL("/v1/models", u.origin).href;
   }
-  // Non-root path (e.g. /v1beta/openai) — append /models for OpenAI-compat endpoints
-  return new URL(`${p}/models`, u.origin).href;
+  // Non-root path — append /models for OpenAI-compat endpoints.
+  // Ensure /v1 is present when the path has no version segment, mirroring
+  // how the OpenAI-compatible client normalizes the base URL (normalizeOpenAIBaseUrl).
+  const versionedPath = /\/v\d/.test(p) ? p : `${p}/v1`;
+  return new URL(`${versionedPath}/models`, u.origin).href;
 }
 
 async function fetchModelEndpoint(

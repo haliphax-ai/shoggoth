@@ -196,4 +196,43 @@ describe("HealthRegistry", () => {
       else process.env.ANTHROPIC_BASE_URL = prev;
     }
   });
+
+  it("model probe appends /v1 when base URL has no version segment", async () => {
+    globalThis.fetch = (async (url, init) => {
+      assert.equal(String(url), "https://openrouter.ai/api/v1/models");
+      assert.equal((init as RequestInit).method, "HEAD");
+      return new Response(null, { status: 200 });
+    }) as typeof fetch;
+    const p = createModelEndpointProbe({
+      getBaseUrl: () => "https://openrouter.ai/api",
+    });
+    const c = await p.check();
+    assert.equal(c.status, "pass");
+  });
+
+  it("model probe does not double /v1 when base URL already has it", async () => {
+    globalThis.fetch = (async (url, init) => {
+      assert.equal(String(url), "https://openrouter.ai/api/v1/models");
+      assert.equal((init as RequestInit).method, "HEAD");
+      return new Response(null, { status: 200 });
+    }) as typeof fetch;
+    const p = createModelEndpointProbe({
+      getBaseUrl: () => "https://openrouter.ai/api/v1",
+    });
+    const c = await p.check();
+    assert.equal(c.status, "pass");
+  });
+
+  it("model probe keeps existing version segments like /v1beta", async () => {
+    globalThis.fetch = (async (url, init) => {
+      assert.equal(String(url), "http://localhost:11434/v1beta/openai/models");
+      assert.equal((init as RequestInit).method, "HEAD");
+      return new Response(null, { status: 200 });
+    }) as typeof fetch;
+    const p = createModelEndpointProbe({
+      getBaseUrl: () => "http://localhost:11434/v1beta/openai",
+    });
+    const c = await p.check();
+    assert.equal(c.status, "pass");
+  });
 });
