@@ -80,9 +80,7 @@ export interface SessionMcpRuntime {
   readonly trackInstanceIdle: boolean;
 }
 
-function buildMcpPoolConnectOptions(
-  env: NodeJS.ProcessEnv,
-): ConnectShoggothMcpPoolOptions {
+function buildMcpPoolConnectOptions(env: NodeJS.ProcessEnv): ConnectShoggothMcpPoolOptions {
   const vault = vaultServiceRef.current;
   if (env.SHOGGOTH_MCP_LOG_SERVER_MESSAGES === "1") {
     const child = log.child({ component: "mcp-sse" });
@@ -411,13 +409,13 @@ export async function createSessionMcpRuntime(
             agentContext,
             agentId,
           };
-          // Filter out servers denied for this agent in BOTH top-level and
-          // subagent contexts. The pool is shared across sessions of the same
-          // agent, so keep any server allowed for at least one session type.
+          // Filter out servers denied for this agent in any context (top-level
+          // or subagent). If a server is denied in ANY context, it should not
+          // be started in the shared per-agent pool.
           const topRules = resolveEffectiveMcpServerRules(opts.config, agentId, false);
           const subRules = resolveEffectiveMcpServerRules(opts.config, agentId, true);
           const allowedServers = perAgentServers.filter(
-            (s) => evaluateMcpServerRules(s.id, topRules) || evaluateMcpServerRules(s.id, subRules),
+            (s) => evaluateMcpServerRules(s.id, topRules) && evaluateMcpServerRules(s.id, subRules),
           );
           const { pool, external } = await connectMcpPool(allowedServers, connectOpts);
           const cancelKey = mcpAgentPoolKey(agentId);
