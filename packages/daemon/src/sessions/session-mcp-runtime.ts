@@ -409,6 +409,7 @@ export async function createSessionMcpRuntime(
           const connectOpts: ConnectShoggothMcpPoolOptions = {
             ...mcpConnectOpts,
             agentContext,
+            agentId,
           };
           // Filter out servers denied for this agent in BOTH top-level and
           // subagent contexts. The pool is shared across sessions of the same
@@ -512,6 +513,7 @@ export async function createSessionMcpRuntime(
             ? {
                 ...mcpConnectOpts,
                 agentContext: resolveAgentMcpContext(opts.db, agentId, workspacesRoot),
+                agentId,
               }
             : { ...mcpConnectOpts };
           // Filter out servers denied by effective rules for this session.
