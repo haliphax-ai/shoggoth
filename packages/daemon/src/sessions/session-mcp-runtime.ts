@@ -29,8 +29,7 @@ import {
   createMcpServerRulesFinalizer,
   createMediaGenerateToolFinalizer,
   createVaultToolFinalizer,
-import { resolveAgentCreds } from "../agent-creds";
-import { vaultServiceRef } from "../vault/vault-ref";
+  createWebSearchToolFinalizer,
   type SessionMcpToolContext,
 } from "./session-mcp-tool-context";
 import { listSkillsForConfig } from "@shoggoth/skills";
@@ -40,6 +39,7 @@ import { createToolDiscoveryFinalizer } from "./session-tool-discovery";
 import { createElevationToolFinalizer } from "./elevation-tool-finalizer";
 import { createServiceToolFinalizer } from "./service-tool-finalizer";
 import { resolveAgentCreds } from "../agent-creds";
+import { vaultServiceRef } from "../vault/vault-ref";
 
 const log = getLogger("session-mcp");
 export type SessionMcpContextFinalizer = (
