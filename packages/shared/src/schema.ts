@@ -1321,6 +1321,13 @@ export const shoggothConfigFragmentSchema = z
     reactions: shoggothReactionsConfigSchema.partial().optional(),
     mcp: shoggothMcpConfigSchema.optional(),
     acpx: shoggothAcpxConfigSchema.partial().optional(),
+    fetch: z
+      .object({
+        allowPrivateIps: z.boolean().optional(),
+        privateIpAllowlist: z.array(z.string()).optional(),
+      })
+      .strict()
+      .optional(),
     policy: shoggothPolicyFragmentSchema,
   })
   .strict();
@@ -1351,10 +1358,16 @@ export const shoggothConfigSchema = z
     reactions: shoggothReactionsConfigSchema.optional(),
     mcp: shoggothMcpConfigSchema,
     acpx: shoggothAcpxConfigSchema.optional(),
+    fetch: z
+      .object({
+        allowPrivateIps: z.boolean().optional(),
+        privateIpAllowlist: z.array(z.string()).optional(),
+      })
+      .strict()
+      .optional(),
     policy: shoggothPolicyConfigSchema,
   })
   .strict();
-
 export type ShoggothConfig = z.infer<typeof shoggothConfigSchema>;
 
 export const DEFAULT_HITL_CONFIG: ShoggothHitlConfig = {
