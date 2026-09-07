@@ -1,6 +1,6 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { MediaAdapterRequest, MediaAdapterResult } from "./types";
+import type { MediaAdapterRequest, MediaAdapterResult, VideoGenerateParams } from "./types";
 import { normalizeBaseUrl } from "./utils";
 
 interface VideoRequest extends MediaAdapterRequest {
@@ -39,6 +39,12 @@ export async function openaiVideoAsyncAdapter(req: VideoRequest): Promise<MediaA
       body: JSON.stringify({
         model: req.model,
         messages: [{ role: "user", content: req.prompt }],
+        ...(req.params.kind === "video"
+          ? {
+              aspectRatio: (req.params as VideoGenerateParams).aspectRatio,
+              durationSeconds: (req.params as VideoGenerateParams).durationSeconds,
+            }
+          : {}),
       }),
     });
 

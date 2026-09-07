@@ -2,39 +2,14 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { MediaAdapterRequest, MediaAdapterResult, ImageGenerateParams } from "./types";
 import { normalizeBaseUrl } from "./utils";
+import { resolveImageSize } from "./aspect-ratio-utils";
 
-const SUPPORTED_ASPECT_RATIOS: Record<string, string> = {
-  "1:1": "1024x1024",
-  "16:9": "1792x1024",
-  "9:16": "1024x1792",
-  "4:3": "1536x1024",
-  "3:4": "1024x1536",
-};
-
-function resolveSize(params: ImageGenerateParams): { size?: string; error?: string } {
-  // Raw size takes precedence when no aspectRatio is given
-  if (params.size && !params.aspectRatio) {
-    return { size: params.size };
-  }
-  if (params.aspectRatio) {
-    const mapped = SUPPORTED_ASPECT_RATIOS[params.aspectRatio];
-    if (!mapped) {
-      const supported = Object.keys(SUPPORTED_ASPECT_RATIOS).join(", ");
-      return {
-        error: `Unsupported aspectRatio "${params.aspectRatio}". Supported: ${supported}. Use "size" for custom dimensions.`,
-      };
-    }
-    return { size: mapped };
-  }
-  // Neither provided — use default
-  return { size: "1024x1024" };
-}
 export async function openAIImagesAdapter(req: MediaAdapterRequest): Promise<MediaAdapterResult> {
   try {
     const { baseUrl, apiKey } = req.provider;
     const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
     const imageParams = req.params as ImageGenerateParams;
-    const resolved = resolveSize(imageParams);
+    const resolved = resolveImageSize(imageParams);
     if (resolved.error) {
       return { status: "error", error: resolved.error };
     }
