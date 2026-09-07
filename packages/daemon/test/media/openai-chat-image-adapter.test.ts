@@ -207,4 +207,77 @@ describe("openAIChatImageAdapter", () => {
     expect(url).toBe("https://custom.api.com/v1/chat/completions");
     expect(url).toContain("/chat/completions");
   });
+
+  it("sends resolution and aspect_ratio for aspectRatio 1:1", async () => {
+    const base64 = Buffer.from("test").toString("base64");
+    mockFetch.mockResolvedValue(makeImageResponse(base64));
+
+    await openAIChatImageAdapter(makeRequest({ params: { kind: "image", aspectRatio: "1:1" } }));
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body as string);
+    expect(body.resolution).toBe("2K");
+    expect(body.aspect_ratio).toBe("1:1");
+    expect(body.size).toBeUndefined();
+  });
+
+  it("sends resolution and aspect_ratio for aspectRatio 16:9", async () => {
+    const base64 = Buffer.from("test").toString("base64");
+    mockFetch.mockResolvedValue(makeImageResponse(base64));
+
+    await openAIChatImageAdapter(makeRequest({ params: { kind: "image", aspectRatio: "16:9" } }));
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body as string);
+    expect(body.resolution).toBe("2K");
+    expect(body.aspect_ratio).toBe("16:9");
+  });
+
+  it("sends resolution and aspect_ratio for aspectRatio 9:16", async () => {
+    const base64 = Buffer.from("test").toString("base64");
+    mockFetch.mockResolvedValue(makeImageResponse(base64));
+
+    await openAIChatImageAdapter(makeRequest({ params: { kind: "image", aspectRatio: "9:16" } }));
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body as string);
+    expect(body.resolution).toBe("2K");
+    expect(body.aspect_ratio).toBe("9:16");
+  });
+
+  it("defaults to resolution 2K and aspect_ratio 1:1 when no params", async () => {
+    const base64 = Buffer.from("test").toString("base64");
+    mockFetch.mockResolvedValue(makeImageResponse(base64));
+
+    await openAIChatImageAdapter(makeRequest({ params: { kind: "image" } }));
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body as string);
+    expect(body.resolution).toBe("2K");
+    expect(body.aspect_ratio).toBe("1:1");
+  });
+
+  it("converts raw size string to resolution tier", async () => {
+    const base64 = Buffer.from("test").toString("base64");
+    mockFetch.mockResolvedValue(makeImageResponse(base64));
+
+    await openAIChatImageAdapter(makeRequest({ params: { kind: "image", size: "2048x2048" } }));
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body as string);
+    expect(body.resolution).toBe("2K");
+    expect(body.aspect_ratio).toBe("1:1");
+  });
+
+  it("returns error on unsupported aspectRatio", async () => {
+    const result = await openAIChatImageAdapter(
+      makeRequest({ params: { kind: "image", aspectRatio: "3:2" } }),
+    );
+
+    expect(result.status).toBe("error");
+    const error = result as MediaAdapterResult & { status: "error" };
+    expect(error.error).toContain("Unsupported aspectRatio");
+    expect(error.error).toContain("3:2");
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
 });

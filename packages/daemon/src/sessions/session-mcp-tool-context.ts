@@ -416,7 +416,7 @@ const MEDIA_GENERATE_TOOL_DESCRIPTOR: AggregatedTool = {
       params: {
         type: "object",
         description:
-          "Parameters discriminated by 'kind': image (aspectRatio, numberOfImages, input_path), video (aspectRatio, durationSeconds, input_path, last_frame), speech (voice), music (durationSeconds)",
+          "Parameters discriminated by 'kind': image (aspectRatio, size, numberOfImages, input_path), video (aspectRatio, durationSeconds, input_path, last_frame), speech (voice), music (durationSeconds)",
         properties: {
           kind: {
             type: "string",
@@ -426,12 +426,12 @@ const MEDIA_GENERATE_TOOL_DESCRIPTOR: AggregatedTool = {
           aspectRatio: {
             type: "string",
             description:
-              "Aspect ratio (image/video, e.g. '16:9', '1:1'). For OpenAI-compatible image APIs, supported values: 1:1, 16:9, 9:16, 4:3, 3:4",
+              "Normalized aspect ratio string (e.g. '16:9', '1:1', '9:16', '4:3', '3:4'). Passed through to providers as-is. For OpenAI DALL-E (images endpoint), it maps to fixed pixel sizes. For OpenRouter and GPT-image chat completions, it maps to the provider's normalized ratio and a tiered resolution (default '2K'). Providers may clamp to their supported subset.",
           },
           size: {
             type: "string",
             description:
-              "Raw size string (e.g. '1024x1024', '512x512'). Alternative to aspectRatio for OpenAI-compatible image APIs. Ignored if aspectRatio is set.",
+              "Image size. Can be a pixel string (e.g. '1024x1024') for DALL-E, a tier string ('512', '1K', '2K', '4K'), or auto-inferred from a pixel string. For chat-image adapters the pixel string is converted to a tiered resolution. Ignored when aspectRatio is set.",
           },
           numberOfImages: {
             type: "number",

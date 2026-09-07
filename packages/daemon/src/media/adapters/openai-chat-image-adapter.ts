@@ -1,7 +1,8 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { MediaAdapterRequest, MediaAdapterResult } from "./types";
+import type { MediaAdapterRequest, MediaAdapterResult, ImageGenerateParams } from "./types";
 import { normalizeBaseUrl } from "./utils";
+import { resolveImageTier } from "./aspect-ratio-utils";
 
 /**
  * Parse a data URI and extract mime type and base64 content.
@@ -135,17 +136,33 @@ export async function openAIChatImageAdapter(
     const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
     const modalities = req.modalities ?? ["image"];
 
+    // Resolve image size from aspectRatio / size params
+    const imageParams = req.params as ImageGenerateParams;
+    const resolvedTier = resolveImageTier(imageParams);
+
+    const requestBody: Record<string, unknown> = {
+      model: req.model,
+      messages: [{ role: "user", content: req.prompt }],
+      modalities,
+    };
+
+    if (resolvedTier.error) {
+      return { status: "error", error: resolvedTier.error };
+    }
+    if (resolvedTier.resolution) {
+      requestBody.resolution = resolvedTier.resolution;
+    }
+    if (resolvedTier.aspect_ratio) {
+      requestBody.aspect_ratio = resolvedTier.aspect_ratio;
+    }
+
     const response = await fetch(`${normalizedBaseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: req.model,
-        messages: [{ role: "user", content: req.prompt }],
-        modalities,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
