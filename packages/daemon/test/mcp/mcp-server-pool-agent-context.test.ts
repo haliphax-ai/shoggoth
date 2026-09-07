@@ -367,8 +367,8 @@ describe("connectShoggothMcpServers — agentContext forwarding", () => {
       assert.equal(opts.env?.PLAIN, "plain-value", "plain env vars should be preserved");
 
       // Vault resolve should have been called with agentId and credential name
-      assert.equal(mockVault.resolve.callCount, 1);
-      assert.deepEqual(mockVault.resolve.calls[0], ["developer", "MY_SECRET"]);
+      assert.equal(mockVault.resolve.mock.calls.length, 1);
+      assert.deepEqual(mockVault.resolve.mock.calls[0], ["developer", "MY_SECRET"]);
     } finally {
       await pool.close();
     }
