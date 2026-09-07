@@ -140,7 +140,7 @@ function normalizeSession(session: string): string {
 function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
   return [
     {
-      name: "canvas.present",
+      name: "canvas-present",
       description:
         "Present a canvas surface to a session. Opens a canvas for the user to interact with.",
       parameters: {
@@ -172,7 +172,7 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
       },
     },
     {
-      name: "canvas.hide",
+      name: "canvas-hide",
       description: "Hide the canvas from all connected sessions.",
       parameters: {
         type: "object",
@@ -184,7 +184,7 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
       },
     },
     {
-      name: "canvas.navigate",
+      name: "canvas-navigate",
       description: "Navigate a session's canvas to a path.",
       parameters: {
         type: "object",
@@ -210,7 +210,7 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
       },
     },
     {
-      name: "canvas.navigateExternal",
+      name: "canvas-navigateExternal",
       description: "Navigate the canvas to an external URL (http/https only).",
       parameters: {
         type: "object",
@@ -230,7 +230,7 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
       },
     },
     {
-      name: "canvas.eval",
+      name: "canvas-eval",
       description: "Execute JavaScript in the canvas context.",
       parameters: {
         type: "object",
@@ -255,7 +255,7 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
       },
     },
     {
-      name: "canvas.snapshot",
+      name: "canvas-snapshot",
       description: "Request a screenshot/snapshot of a session's canvas. Returns base64 PNG.",
       parameters: {
         type: "object",
@@ -276,7 +276,7 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
       },
     },
     {
-      name: "canvas.a2ui.push",
+      name: "canvas-a2ui-push",
       description: "Push A2UI (Agent-to-User Interface) JSONL payload to a session.",
       parameters: {
         type: "object",
@@ -304,7 +304,7 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
       },
     },
     {
-      name: "canvas.a2ui.reset",
+      name: "canvas-a2ui-reset",
       description: "Reset/clear A2UI state for a session.",
       parameters: {
         type: "object",

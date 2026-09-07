@@ -1,4 +1,5 @@
 import { EmptyModelResponseError, ModelHttpError } from "./errors";
+import { sanitizeToolName } from "@shoggoth/shared";
 import { openaiImageBlockCodec } from "./image-codec";
 import { getResilienceGate, parseRateLimitHeaders } from "./resilience";
 import {
@@ -499,9 +500,15 @@ export function createOpenAICompatibleProvider(
         const mode = resolveStructuredOutputMode(input.structuredOutputMode, "strict");
         const hasSchema = input.responseSchema && mode !== "none";
 
-        const tools = hasSchema
+        const rawTools = hasSchema
           ? [...input.tools, buildSyntheticTool(input.responseSchema!)]
           : input.tools;
+
+        // Normalize tool names for providers that reject dots (e.g. Meta via OpenRouter)
+        const tools = rawTools.map((t) => ({
+          ...t,
+          function: { ...t.function, name: sanitizeToolName(t.function.name) },
+        }));
 
         const body: Record<string, unknown> = {
           model: input.model,
@@ -694,7 +701,11 @@ export function createOpenAICompatibleProvider(
             };
           }
           if (!syntheticCall && toolCalls.length === 0) {
-            const followUpTools = [...input.tools, buildSyntheticTool(input.responseSchema!)];
+            const followUpRawTools = [...input.tools, buildSyntheticTool(input.responseSchema!)];
+            const followUpTools = followUpRawTools.map((t) => ({
+              ...t,
+              function: { ...t.function, name: sanitizeToolName(t.function.name) },
+            }));
 
             const followUpMessages: ChatMessage[] = [
               ...input.messages,

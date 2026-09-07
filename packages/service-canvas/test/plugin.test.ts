@@ -87,14 +87,14 @@ describe("createCanvasPlugin", () => {
       expect(tools).toHaveLength(8);
 
       const toolNames = tools.map((t: { name: string }) => t.name);
-      expect(toolNames).toContain("canvas.present");
-      expect(toolNames).toContain("canvas.hide");
-      expect(toolNames).toContain("canvas.navigate");
-      expect(toolNames).toContain("canvas.eval");
-      expect(toolNames).toContain("canvas.snapshot");
-      expect(toolNames).toContain("canvas.a2ui.push");
-      expect(toolNames).toContain("canvas.navigateExternal");
-      expect(toolNames).toContain("canvas.a2ui.reset");
+      expect(toolNames).toContain("canvas-present");
+      expect(toolNames).toContain("canvas-hide");
+      expect(toolNames).toContain("canvas-navigate");
+      expect(toolNames).toContain("canvas-eval");
+      expect(toolNames).toContain("canvas-snapshot");
+      expect(toolNames).toContain("canvas-a2ui-push");
+      expect(toolNames).toContain("canvas-navigateExternal");
+      expect(toolNames).toContain("canvas-a2ui-reset");
     });
 
     it("starts the server on the configured port", async () => {
@@ -225,7 +225,7 @@ describe("createCanvasPlugin", () => {
       cleanups.push(() => callHook(plugin, "daemon.shutdown"));
 
       const tools = registerToolsMock.mock.calls[0][0];
-      const presentTool = tools.find((t: { name: string }) => t.name === "canvas.present");
+      const presentTool = tools.find((t: { name: string }) => t.name === "canvas-present");
 
       const result = await presentTool.handler(
         {},
@@ -252,7 +252,7 @@ describe("createCanvasPlugin", () => {
       cleanups.push(() => callHook(plugin, "daemon.shutdown"));
 
       const tools = registerToolsMock.mock.calls[0][0];
-      const hideTool = tools.find((t: { name: string }) => t.name === "canvas.hide");
+      const hideTool = tools.find((t: { name: string }) => t.name === "canvas-hide");
 
       const result = await hideTool.handler(
         {},
@@ -263,7 +263,7 @@ describe("createCanvasPlugin", () => {
       });
     });
 
-    it("canvas.a2ui.reset handler returns { resultJson } with { ok: true }", async () => {
+    it("canvas-a2ui-reset handler returns { resultJson } with { ok: true }", async () => {
       const registerServiceMock = vi.fn();
       const registerToolsMock = vi.fn();
       const ctx = {
@@ -281,7 +281,7 @@ describe("createCanvasPlugin", () => {
       cleanups.push(() => callHook(plugin, "daemon.shutdown"));
 
       const tools = registerToolsMock.mock.calls[0][0];
-      const resetTool = tools.find((t: { name: string }) => t.name === "canvas.a2ui.reset");
+      const resetTool = tools.find((t: { name: string }) => t.name === "canvas-a2ui-reset");
 
       const result = await resetTool.handler(
         {},

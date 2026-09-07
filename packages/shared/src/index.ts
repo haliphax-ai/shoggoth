@@ -180,6 +180,7 @@ export {
   MAX_IMAGE_BLOCK_BYTES,
 } from "./image";
 export { isPrivateIp } from "./network";
+export { sanitizeToolName, isToolNameValid } from "./tool-name";
 export type {
   HitlPendingStore,
   HitlPendingStack,
