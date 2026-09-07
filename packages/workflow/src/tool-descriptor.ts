@@ -145,7 +145,7 @@ const workflowToolArgs = {
       type: "string",
       description: "start: session ID where subagent results should be delivered.",
     },
-concurrency: {
+    concurrency: {
       type: "integer",
       description: "start: max tasks running in parallel. Default: unlimited.",
       minimum: 1,
@@ -153,9 +153,8 @@ concurrency: {
     definition_file: {
       type: "string",
       description:
-        "start: optional absolute path to a JSON file containing the workflow definition ({tasks: [...], graph: '...'}). When provided, takes precedence over inline tasks/graph. Lets callers build up large workflow definitions across multiple tool calls.",
+        "start: path to a JSON file containing the workflow definition ({tasks: [...], graph: '...'}). Relative paths are resolved against the agent's workspace. Absolute paths are validated against the agent's workspace. When provided, takes precedence over inline tasks/graph. Lets callers build up large workflow definitions across multiple tool calls.",
     },
-    // --- workflow targeting ---
     // --- workflow targeting ---
     workflow_id: {
       type: "string",

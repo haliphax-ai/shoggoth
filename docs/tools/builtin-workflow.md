@@ -10,11 +10,11 @@ Orchestrate multi-task workflows with dependency graphs. Supports agent, tool, g
 | `workflow_id`          | string        | per-action | Required for: `abort`, `pause`, `resume`, `status`, `post`, `edit`, `retry`                         |
 | `name`                 | string        | no         | Workflow name (default: `"unnamed-workflow"`)                                                       |
 | `tasks`                | array         | start      | Array of task objects (see below)                                                                   |
-| `graph`                | string        | start      | Dependency graph — task id → dependency ids                                                         |
+| `graph`                | string        | start      | Dependency graph DSL — see Graph DSL section below                                                  |
 | `reply_to`             | string        | start      | Session id to receive completion                                                                    |
 | `polling_interval_ms`  | number        | no         | Poll interval (default: 10000)                                                                      |
-| `runtime_limit_ms`     | number        | no         | Max workflow runtime (default: 600000)                                                              |
 | `concurrency`          | number        | no         | Max concurrent tasks                                                                                |
+| `runtime_limit_ms`     | integer       | no         | Default runtime limit per task in ms (default: 600000). Can also be overridden per-task. Min: 1000  |
 | `task_id`              | number        | edit/retry | Target task id                                                                                      |
 | `prompt`               | string        | no         | New prompt (edit action)                                                                            |
 | `failure_behavior`     | string        | no         | `"abort"`, `"pause"`, or `"continue"` (edit action)                                                 |
@@ -60,22 +60,53 @@ Orchestrate multi-task workflows with dependency graphs. Supports agent, tool, g
 
 **Check workflow status:**
 
+**Start a two-task workflow (task 2 depends on task 1):**
+
 ```json
-{ "action": "status", "workflow_id": "wf-123" }
+{
+  "action": "start",
+  "name": "build-and-test",
+  "reply_to": "session-abc",
+  "tasks": [
+    { "id": 1, "kind": "agent", "prompt": "Run the build", "title": "Build" },
+    { "id": 2, "kind": "agent", "prompt": "Run the tests", "title": "Test" }
+  ],
+  "graph": "1>2"
+}
 ```
 
-**Status response** includes a `tasks` array. Each task object contains:
+**Start a workflow using a definition file:**
 
-| Field           | Type    | Notes                                                                                              |
-| --------------- | ------- | -------------------------------------------------------------------------------------------------- |
-| `taskDef`       | object  | Task definition (id, kind, prompt, etc.)                                                          |
-| `status`        | string  | One of: `pending`, `in_progress`, `done`, `failed`, `paused`, `skipped`                          |
-| `startedAt`     | number? | Unix timestamp (ms) when task started — omitted for pending tasks                                 |
-| `completedAt`   | number? | Unix timestamp (ms) when task completed — omitted for non-terminal tasks                         |
-| `duration`      | number? | Elapsed time in ms — present on tasks that have started. Computed as `completedAt - startedAt` for completed tasks, `Date.now() - startedAt` for in-progress tasks. Omitted for pending tasks. |
-| `output`        | string? | Task output (if completed successfully)                                                           |
-| `error`         | string? | Error message (if failed)                                                                         |
-| `sessionKey`    | string? | Session key for agent tasks                                                                       |
+```json
+{
+  "action": "start",
+  "definition_file": "tmp/my-workflow.json",
+  "reply_to": "session-abc"
+}
+```
+
+**Start a complex workflow with group deps and chains:**
+
+```json
+{
+  "action": "start",
+  "name": "ci-pipeline",
+  "reply_to": "session-abc",
+  "tasks": [
+    { "id": 1, "prompt": "Install dependencies" },
+    { "id": 2, "prompt": "Run linter" },
+    { "id": 3, "prompt": "Run typecheck" },
+    { "id": 4, "prompt": "Run unit tests" },
+    { "id": 5, "prompt": "Run integration tests" },
+    { "id": 6, "prompt": "Build artifacts" },
+    { "id": 7, "prompt": "Deploy" }
+  ],
+  "graph": "1>2 1>3 1>4 2,3,4>5 5>6 6>7"
+}
+```
+
+| `error` | string? | Error message (if failed) |
+| `sessionKey` | string? | Session key for agent tasks |
 
 The response also includes workflow-level fields: `id`, `name`, `createdAt`, `pollingIntervalMs`, `concurrency`, and `graph` (serialized dependency map).
 
@@ -124,13 +155,33 @@ The response also includes workflow-level fields: `id`, `name`, `createdAt`, `po
 
 **Run retention cleanup:**
 
-```json
-{ "action": "retention" }
+## Graph DSL
+
+The `graph` string uses a space-separated lane syntax to encode task dependencies:
+
+| Syntax    | Meaning                                              | Example   | Equivalent edges          |
+| --------- | ---------------------------------------------------- | --------- | ------------------------- |
+| `1>2`     | Task 1 must complete before task 2                   | `1>2`     | 2 → {1}                   |
+| `1-3`     | Chain: 1 → 2 → 3 (sequential)                        | `1-3`     | 2 → {1}, 3 → {2}          |
+| `1,3,4>5` | Group: tasks 1, 3, 4 must all complete before task 5 | `1,3,4>5` | 5 → {1, 3, 4}             |
+| `1>2 3-5` | Multiple lanes separated by spaces                   | `1>2 3-5` | 2 → {1}, 4 → {3}, 5 → {4} |
+
+**Examples:**
+
 ```
+1>2          — 2 waits for 1
+1-3          — chain: 1→2→3
+1,3,4>5      — 5 waits for 1, 3, and 4
+1>2 3-5      — two independent lanes
+1>2 2>3 1>4  — diamond: 2 and 4 wait for 1, 3 waits for 2
+```
+
+Tasks with no dependencies can be omitted from the graph (they run immediately).
+
+> **⚠️ Important:** Every task defined in the `tasks` array **must** also appear in the `graph` string. Any task not referenced in the graph will be **silently skipped** and never executed. Always include at least a bare entry (e.g. `3:` for a root task with no dependencies) for every task you define.
 
 ## Tips
 
-- The `graph` string encodes dependencies. Format: `taskId:dep1,dep2;taskId:dep1`. Tasks with no dependencies use an empty dep list (e.g. `1:;2:1`).
 - Agent tasks spawn subagents; respect `maxDepth` (hardcoded to 2) to avoid unbounded recursion.
 - Use `concurrency` to limit parallel task execution.
 - `failure_behavior: "pause"` on a task lets you `edit` and `retry` without restarting the whole workflow.

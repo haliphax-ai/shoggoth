@@ -175,10 +175,16 @@ describe("handleWorkflowToolCall", () => {
       const tmpDir = await mkdtemp(join(workspaceRoot, "wf-test-"));
       try {
         const defFile = join(tmpDir, "workflow.json");
-        await writeFile(defFile, JSON.stringify({
-          tasks: [{ id: 1, prompt: "Step 1" }, { id: 2, prompt: "Step 2" }],
-          graph: "1>2",
-        }));
+        await writeFile(
+          defFile,
+          JSON.stringify({
+            tasks: [
+              { id: 1, prompt: "Step 1" },
+              { id: 2, prompt: "Step 2" },
+            ],
+            graph: "1>2",
+          }),
+        );
 
         let captured: unknown;
         const server = mockServer({
@@ -214,11 +220,14 @@ describe("handleWorkflowToolCall", () => {
       const tmpDir = await mkdtemp(join(workspaceRoot, "wf-test-"));
       try {
         const defFile = join(tmpDir, "workflow.json");
-        await writeFile(defFile, JSON.stringify({
-          tasks: [{ id: 1, prompt: "From file" }],
-          graph: "1",
-          name: "file-workflow",
-        }));
+        await writeFile(
+          defFile,
+          JSON.stringify({
+            tasks: [{ id: 1, prompt: "From file" }],
+            graph: "1",
+            name: "file-workflow",
+          }),
+        );
 
         let captured: unknown;
         const server = mockServer({
@@ -294,23 +303,84 @@ describe("handleWorkflowToolCall", () => {
       }
     });
 
-    it("start with relative path returns error", async () => {
-      const deps = makeDeps();
-      const result = await handleWorkflowToolCall(
-        {
-          action: "start",
-          definition_file: "relative/path.json",
-          reply_to: "session:parent",
-        },
-        deps,
-      );
+    it("start with relative path resolves against agentWorkspaceRoot", async () => {
+      const agentRoot = os.tmpdir();
+      // agentWorkspaceRoot is passed directly to makeDeps in the call below
+      const tmpDir = await mkdtemp(join(agentRoot, "wf-relative-"));
+      try {
+        const defFile = join(tmpDir, "workflow.json");
+        await writeFile(
+          defFile,
+          JSON.stringify({
+            tasks: [{ id: 1, prompt: "Relative task" }],
+            graph: "1",
+          }),
+        );
 
-      assert.equal(result.ok, false);
-      assert.match(result.error!, /definition_file must be an absolute path/);
+        let captured: unknown;
+        const server = mockServer({
+          start: async (tasks, graph) => {
+            captured = { tasks, graph };
+            return "wf-relative";
+          },
+        });
+        const result = await handleWorkflowToolCall(
+          {
+            action: "start",
+            // Pass relative path: tmp dir name + workflow.json
+            definition_file: `${tmpDir.replace(agentRoot + "/", "")}/workflow.json`,
+            reply_to: "session:parent",
+          },
+          makeDeps({ server, agentWorkspaceRoot: agentRoot }),
+        );
+
+        assert.equal(result.ok, true);
+        assert.ok(captured);
+      } finally {
+        await rm(tmpDir, { recursive: true, force: true });
+      }
     });
 
-    it("start with definition_file outside workspace returns error", async () => {
-      const deps = makeDeps();
+    it("start with absolute path inside agentWorkspaceRoot succeeds", async () => {
+      const agentRoot = os.tmpdir();
+      // agentWorkspaceRoot is passed directly to makeDeps in the call below
+      const tmpDir = await mkdtemp(join(agentRoot, "wf-abs-"));
+      try {
+        const defFile = join(tmpDir, "workflow.json");
+        await writeFile(
+          defFile,
+          JSON.stringify({
+            tasks: [{ id: 1, prompt: "Absolute task" }],
+            graph: "1",
+          }),
+        );
+
+        let captured: unknown;
+        const server = mockServer({
+          start: async (tasks, graph) => {
+            captured = { tasks, graph };
+            return "wf-abs";
+          },
+        });
+        const result = await handleWorkflowToolCall(
+          {
+            action: "start",
+            definition_file: defFile,
+            reply_to: "session:parent",
+          },
+          makeDeps({ server, agentWorkspaceRoot: agentRoot }),
+        );
+
+        assert.equal(result.ok, true);
+        assert.ok(captured);
+      } finally {
+        await rm(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("start with definition_file outside agentWorkspaceRoot returns error", async () => {
+      const agentRoot = os.tmpdir();
+      const deps = makeDeps({ agentWorkspaceRoot: agentRoot });
       const result = await handleWorkflowToolCall(
         {
           action: "start",
@@ -324,17 +394,58 @@ describe("handleWorkflowToolCall", () => {
       assert.match(result.error!, /definition_file must be inside workspace/);
     });
 
+    it("start with relative path and no agentWorkspaceRoot resolves against workspaceRoot", async () => {
+      // When agentWorkspaceRoot is not set, fall back to workspaceRoot
+      const deps = makeDeps();
+      const workspaceRoot = deps.workspaceRoot!;
+      const tmpDir = await mkdtemp(join(workspaceRoot, "wf-fallback-"));
+      try {
+        const defFile = join(tmpDir, "workflow.json");
+        await writeFile(
+          defFile,
+          JSON.stringify({
+            tasks: [{ id: 1, prompt: "Fallback task" }],
+            graph: "1",
+          }),
+        );
+
+        let captured: unknown;
+        const server = mockServer({
+          start: async (tasks, graph) => {
+            captured = { tasks, graph };
+            return "wf-fallback";
+          },
+        });
+        const result = await handleWorkflowToolCall(
+          {
+            action: "start",
+            definition_file: `${tmpDir.replace(workspaceRoot + "/", "")}/workflow.json`,
+            reply_to: "session:parent",
+          },
+          makeDeps({ server }),
+        );
+
+        assert.equal(result.ok, true);
+        assert.ok(captured);
+      } finally {
+        await rm(tmpDir, { recursive: true, force: true });
+      }
+    });
+
     it("start with file containing reply_to — inline reply_to wins", async () => {
       const deps = makeDeps();
       const workspaceRoot = deps.workspaceRoot!;
       const tmpDir = await mkdtemp(join(workspaceRoot, "wf-test-"));
       try {
         const defFile = join(tmpDir, "workflow.json");
-        await writeFile(defFile, JSON.stringify({
-          tasks: [{ id: 1, prompt: "Step 1" }],
-          graph: "1",
-          reply_to: "file-session-id",
-        }));
+        await writeFile(
+          defFile,
+          JSON.stringify({
+            tasks: [{ id: 1, prompt: "Step 1" }],
+            graph: "1",
+            reply_to: "file-session-id",
+          }),
+        );
 
         let capturedReplyTo: string | undefined;
         const server = mockServer({
