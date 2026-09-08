@@ -362,6 +362,18 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           ) => discordMessaging.discordRestTransport.createThread(channelId, body),
           resolveOutboundChannelIdForSession: (sessionId: string) =>
             discordMessaging.resolveOutboundChannelIdForSession?.(sessionId),
+          postToOperator: async (input: {
+            readonly sessionId: string;
+            readonly userContent: string;
+          }) => {
+            const delivery = deliveryRegistry.resolveOperatorDelivery(
+              input.sessionId,
+              configRef.current,
+            );
+            if (!delivery || delivery.kind !== "messaging_surface") return;
+            // Posts to the operator's bound surface (resolved platform channel for the session).
+            await discordPlatform.adapter.sendBody(input.sessionId, input.userContent);
+          },
         };
         setSubagentRuntimeExtension(subagentExt as any);
 

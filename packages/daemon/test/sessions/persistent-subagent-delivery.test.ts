@@ -7,6 +7,11 @@
  * 3. delivery_mode='drop' sessions do NOT deliver results
  *
  * The delivery hook is in runInboundSessionTurn after executeSessionAgentTurn completes.
+ *
+ * Phase 2: the queue path uses a structured-output OOB response (both
+ * to_operator and to_sender fields). The structured JSON is returned by the
+ * model turn; deliverOobStructuredResponse routes it to the operator surface
+ * and the sender session.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -16,12 +21,18 @@ import Database from "better-sqlite3";
 
 import { migrate, defaultMigrationsDir } from "../../src/db/migrate";
 import { createSessionStore, type SessionStore } from "../../src/sessions/session-store";
-import { registerSteerChannel, _resetAllChannels } from "../../src/sessions/steer-channel";
+import {
+  registerSteerChannel,
+  _resetAllChannels,
+  drainSteers,
+} from "../../src/sessions/steer-channel";
 import { subagentRuntimeExtensionRef } from "../../src/subagent/subagent-extension-ref";
 // Mock subagentRuntimeExtensionRef
-const mockRunSessionModelTurn = vi.fn().mockResolvedValue({});
+const mockRunSessionModelTurn = vi.fn().mockResolvedValue({ latestAssistantText: "" });
+const mockPostToOperator = vi.fn().mockResolvedValue(undefined);
 const mockSubagentExt = {
   runSessionModelTurn: mockRunSessionModelTurn,
+  postToOperator: mockPostToOperator,
 };
 
 // Test helper: create a persistent subagent session
@@ -67,6 +78,8 @@ describe("persistent subagent all-turn delivery", () => {
     subagentRuntimeExtensionRef.current = mockSubagentExt as never;
 
     vi.clearAllMocks();
+    mockRunSessionModelTurn.mockResolvedValue({ latestAssistantText: "" });
+    mockPostToOperator.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -144,8 +157,17 @@ describe("persistent subagent all-turn delivery", () => {
         info: vi.fn(),
         warn: vi.fn(),
       };
+      // Register a steer channel for the parent so to_sender is routed via steer.
+      const steerHandle = registerSteerChannel(respondTo);
 
-      // Act
+      // Act: the parent turn returns a structured OOB response
+      mockRunSessionModelTurn.mockResolvedValueOnce({
+        latestAssistantText: JSON.stringify({
+          to_operator: "Result for the operator channel",
+          to_sender: "Result for the sender session",
+        }),
+      });
+
       await deliverSubagentResult(mockSubagentExt as never, {
         childSessionId: childId,
         respondTo,
@@ -156,7 +178,7 @@ describe("persistent subagent all-turn delivery", () => {
         subLog: mockSubLog as never,
       });
 
-      // Assert: queue mode always uses runSessionModelTurn
+      // Assert: queue mode calls runSessionModelTurn with the structured output override
       expect(mockRunSessionModelTurn).toHaveBeenCalledWith(
         expect.objectContaining({
           sessionId: respondTo,
@@ -165,12 +187,33 @@ describe("persistent subagent all-turn delivery", () => {
             child_session_id: childId,
             mode: "persistent",
           }),
+          modelInvocationOverride: expect.objectContaining({
+            responseSchema: {
+              schema: expect.objectContaining({
+                type: "object",
+                required: expect.arrayContaining(["to_operator", "to_sender"]),
+              }),
+            },
+            structuredOutputMode: "best-effort",
+          }),
         }),
       );
+      // The structured response is parsed: to_operator is posted to the operator surface.
+      expect(mockPostToOperator).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: respondTo,
+          userContent: expect.stringContaining("Result for the operator channel"),
+        }),
+      );
+      // to_sender is delivered to the sender session via steer channel (queue mode).
+      const steers = drainSteers(respondTo);
+      expect(steers).toHaveLength(1);
+      expect(steers[0]).toContain("Result for the sender session");
       expect(mockSubLog.info).toHaveBeenCalledWith(
         expect.stringContaining("delivered to respond_to session"),
         expect.anything(),
       );
+      steerHandle.unregister();
     });
 
     it("does NOT deliver result for thread-bound session (has platform_thread_id)", async () => {
@@ -277,6 +320,7 @@ describe("persistent subagent all-turn delivery", () => {
 
       // Assert: inline with active steer channel uses pushSteer
       expect(mockRunSessionModelTurn).not.toHaveBeenCalled();
+      expect(mockPostToOperator).not.toHaveBeenCalled();
 
       handle.unregister();
     });

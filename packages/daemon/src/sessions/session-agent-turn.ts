@@ -3,7 +3,12 @@ import type Database from "better-sqlite3";
 import { parseAgentSessionUrn } from "@shoggoth/shared";
 import { buildSessionSystemContext } from "./session-system-prompt";
 import type { AuthenticatedPrincipal } from "@shoggoth/authn";
-import type { ChatMessage, ImageBlockCodec, OpenAIToolFunctionDefinition } from "@shoggoth/models";
+import type {
+  ChatMessage,
+  ImageBlockCodec,
+  ModelInvocationParams,
+  OpenAIToolFunctionDefinition,
+} from "@shoggoth/models";
 import {
   createFailoverToolCallingClientFromModelsConfig,
   getImageBlockCodec,
@@ -102,6 +107,8 @@ export interface ExecuteSessionAgentTurnInput {
   /** When true, errors during the tool loop are re-thrown instead of caught.
    *  Use for workflow tasks where a failed turn should mark the task as failed. */
   readonly throwOnError?: boolean;
+  /** Optional override merged into the session's model invocation params before the turn. */
+  readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
 }
 
 export interface SessionAgentTurnResult {
@@ -298,10 +305,10 @@ export async function executeSessionAgentTurn(
     },
   });
 
-  const modelInvocation = mergeModelInvocationParams(
-    modelsForSession,
-    input.session.modelSelection,
-  );
+  const baseInvocation = mergeModelInvocationParams(modelsForSession, input.session.modelSelection);
+  const modelInvocation = input.modelInvocationOverride
+    ? { ...baseInvocation, ...input.modelInvocationOverride }
+    : baseInvocation;
 
   const sessionPrimaryProviderId = sessionModelRef
     ? sessionModelRef.slice(0, sessionModelRef.indexOf("/"))

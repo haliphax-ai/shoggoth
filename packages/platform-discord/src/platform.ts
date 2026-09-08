@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getImageBlockCodec } from "@shoggoth/models";
 import type Database from "better-sqlite3";
 import { createOutboundMessage, type InternalMessage } from "@shoggoth/messaging";
+import type { ModelInvocationParams } from "@shoggoth/models";
 import {
   DEFAULT_HITL_CONFIG,
   formatAgentIdentityPrefix,
@@ -89,6 +90,7 @@ export interface DiscordPlatformHandle {
     readonly userMetadata?: Record<string, unknown>;
     readonly systemContext?: SystemContext;
     readonly delivery: SessionModelTurnDelivery;
+    readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
   }) => Promise<SessionAgentTurnResult>;
   readonly subscribeSubagentSession: (sessionId: string) => () => void;
   readonly announcePersistentSubagentSessionEnded: (input: {
@@ -489,6 +491,7 @@ export async function startDiscordPlatform(
     readonly userMetadata?: Record<string, unknown>;
     readonly systemContext?: SystemContext;
     readonly delivery: SessionModelTurnDelivery;
+    readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
   }): Promise<SessionAgentTurnResult> {
     const sid = input.sessionId.trim();
     const sessionRow = sessions.getById(sid);
@@ -548,6 +551,7 @@ export async function startDiscordPlatform(
           userContent: input.userContent,
           userMetadata,
           systemContext: input.systemContext,
+          modelInvocationOverride: input.modelInvocationOverride,
 
           env,
           config: opts.config,

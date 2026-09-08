@@ -54,6 +54,7 @@ import {
   createFailoverClientFromModelsConfig,
   resolveCompactionPolicyFromModelsConfig,
 } from "@shoggoth/models";
+import type { ModelInvocationParams } from "@shoggoth/models";
 import { compactSessionTranscript } from "../transcript-compact";
 import {
   getSessionStats,
@@ -70,6 +71,11 @@ import { extractLatestTranscriptAssistantText } from "../sessions/transcript-to-
 import { pushSystemContext } from "../sessions/system-context-buffer";
 import { pushSteer } from "../sessions/steer-channel";
 import { getTurnQueue } from "../sessions/session-turn-queue-singleton";
+import {
+  OOB_SCHEMA_WITH_SENDER,
+  OOB_WITH_SENDER_GUIDANCE,
+} from "../messaging/oob-response-schemas";
+// import type { SubagentRuntimeExtension } from "../subagent/subagent-extension-ref";
 import { MediaGenerationService } from "../media/media-generation-service";
 import {
   handleVaultSet,
@@ -335,6 +341,73 @@ function assertAgentSpawnSubagentsAllowed(
 }
 
 /**
+ * Parse a structured OOB response and deliver fields to destinations.
+ */
+export async function deliverOobStructuredResponse(opts: {
+  structuredResponse: string;
+  respondTo: string;
+  childSessionId?: string;
+  ext: NonNullable<typeof subagentRuntimeExtensionRef.current>;
+  subLog: ReturnType<typeof getLogger>;
+  maxChars?: number;
+  hasSender: boolean;
+}): Promise<void> {
+  const {
+    structuredResponse,
+    respondTo,
+    childSessionId,
+    ext,
+    subLog,
+    maxChars = 8000,
+    hasSender,
+  } = opts;
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(structuredResponse);
+  } catch {
+    subLog.warn("oob structured response parse failed", {
+      structuredResponse: structuredResponse.slice(0, 200),
+    });
+    return;
+  }
+
+  // Deliver to operator
+  const toOperator = parsed.to_operator;
+  if (typeof toOperator === "string" && toOperator.length > 0) {
+    const truncated = toOperator.length > maxChars ? toOperator.slice(0, maxChars) : toOperator;
+    await ext.postToOperator?.({ sessionId: respondTo, userContent: truncated });
+  }
+
+  // Deliver to sender (subagent results only)
+  if (hasSender) {
+    const toSender = parsed.to_sender;
+    if (typeof toSender === "string" && toSender.length > 0) {
+      const truncated = toSender.length > maxChars ? toSender.slice(0, maxChars) : toSender;
+      if (!pushSteer(respondTo, truncated)) {
+        try {
+          await ext.runSessionModelTurn({
+            sessionId: respondTo,
+            userContent: truncated,
+            userMetadata: {
+              subagent_result: true,
+              child_session_id: childSessionId,
+            },
+            delivery: { kind: "internal" },
+          });
+        } catch (err) {
+          subLog.warn("failed to deliver oob to_sender", {
+            respondTo,
+            childSessionId,
+            error: String(err),
+          });
+        }
+      }
+    }
+  }
+}
+
+/**
  * Deliver a subagent's completed result to the respond_to session.
  * Used by background one-shot and non-thread-bound persistent subagents.
  */
@@ -349,6 +422,8 @@ export async function deliverSubagentResult(
     maxChars?: number;
     assistantText: string;
     subLog: ReturnType<typeof getLogger>;
+    /** Optional override merged into the parent turn's model invocation params (e.g. responseSchema for structured output). */
+    modelInvocationOverride?: Partial<ModelInvocationParams>;
   },
 ): Promise<void> {
   const {
@@ -360,6 +435,7 @@ export async function deliverSubagentResult(
     assistantText,
     subLog,
     maxChars = 8000,
+    modelInvocationOverride,
   } = opts;
 
   // drop mode: do nothing
@@ -376,16 +452,14 @@ export async function deliverSubagentResult(
     assistantText.length > maxChars ? assistantText.slice(0, maxChars) : assistantText;
   const baseContent = `[Subagent completed] session_id: ${childSessionId}\n\n${truncatedText}`;
 
-  // Reminders appended to every delivery path:
+  // Reminders appended to the delivery paths:
   // - baseReminder tells the parent its reply routes back to the subagent, not the operator.
-  // - asyncOnlyReminder (async/queue paths only) notes the delivery was out of band and
-  //   that reaching the operator requires `builtin-message action=post`.
-  const baseReminder =
-    "\n\n— Your reply text is delivered to the subagent, not to the operator.";
-  const asyncOnlyReminder =
-    "\n— This delivery was out of band (no active tool loop). To surface anything to the operator, call `builtin-message action=post`.";
+  //   (inline steer path only)
+  // - OOB_WITH_SENDER_GUIDANCE instructs the parent to respond with structured OOB
+  //   output (to_operator / to_sender) on the async/queue path.
+  const baseReminder = "\n\n— Your reply text is delivered to the subagent, not to the operator.";
   const steerContent = baseContent + baseReminder;
-  const asyncContent = baseContent + baseReminder + asyncOnlyReminder;
+  const asyncContent = baseContent + OOB_WITH_SENDER_GUIDANCE;
 
   // inline mode: attempt steer injection first
   if (deliveryMode === "inline" && pushSteer(respondTo, steerContent)) {
@@ -399,7 +473,7 @@ export async function deliverSubagentResult(
   }
 
   try {
-    await ext.runSessionModelTurn({
+    const turnResult = await ext.runSessionModelTurn({
       sessionId: respondTo,
       userContent: asyncContent,
       userMetadata: {
@@ -416,7 +490,26 @@ export async function deliverSubagentResult(
         },
       },
       delivery: { kind: "internal" },
+      modelInvocationOverride: {
+        // OOB structured output is the default for the parent delivery turn; a
+        // caller-supplied override is shallow-merged on top so partial overrides
+        // (e.g. temperature) keep the OOB response schema intact.
+        responseSchema: { schema: OOB_SCHEMA_WITH_SENDER },
+        structuredOutputMode: "best-effort",
+        ...modelInvocationOverride,
+      },
     });
+    if (turnResult?.latestAssistantText) {
+      await deliverOobStructuredResponse({
+        structuredResponse: turnResult.latestAssistantText,
+        respondTo,
+        childSessionId,
+        ext,
+        subLog,
+        maxChars,
+        hasSender: true,
+      });
+    }
     subLog.info("subagent result delivered to respond_to session", {
       childSessionId,
       respondTo,

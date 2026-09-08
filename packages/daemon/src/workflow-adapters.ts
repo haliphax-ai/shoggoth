@@ -17,6 +17,7 @@ import type {
   ToolExecutor,
 } from "@shoggoth/workflow";
 import { routeMcpToolInvocation } from "@shoggoth/mcp-integration";
+import type { ModelInvocationParams } from "@shoggoth/models";
 import type { ContextLevel } from "@shoggoth/shared";
 import type { SessionManager } from "./sessions/session-manager.js";
 import type { SessionStore } from "./sessions/session-store.js";
@@ -83,6 +84,8 @@ export interface DaemonSpawnAdapterDeps {
     };
     readonly delivery: { kind: string };
     readonly throwOnError?: boolean;
+    /** Optional override merged into the session's model invocation params (e.g. responseSchema for structured output). */
+    readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
   }) => Promise<{ latestAssistantText: string; failoverMeta?: unknown }>;
   /** Abort an in-flight session turn by session ID. Uses the existing session turn abort scope. */
   readonly requestTurnAbort?: (sessionId: string) => boolean;
