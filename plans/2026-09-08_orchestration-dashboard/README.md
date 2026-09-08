@@ -48,9 +48,10 @@ This is especially valuable during multi-agent orchestration, debugging agent be
 ┌────────────────────▼────────────────────────────────────────────┐
 │ Daemon State (SQLite)                                           │
 │   ├─ sessions table (SessionStore)                              │
+│   ├─ session_stats table (token usage, turn count, context)     │
 │   ├─ timers table (TimerScheduler)                              │
 │   ├─ tool_runs table (ToolRunStore)                             │
-│   └─ Event emitter (session/timer/tool-run events)              │
+│   └─ In-process EventEmitter (session/timer/tool-run lifecycle) │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -62,7 +63,7 @@ The dashboard service plugin receives daemon dependencies via the `service.regis
 
 2. **Use existing stores** (`SessionStore`, `TimerScheduler`, `ToolRunStore`) for structured queries. The dashboard creates its own store instances from its read-only DB connection.
 
-3. **Subscribe to daemon events** for real-time updates. The plugin hooks into the daemon's event emitter (passed via the hook context or a shared event bus) to receive session create/update, timer fire, and tool run start/complete events.
+2. **Use existing stores** (`SessionStore`, `SessionStats`, `TimerScheduler`, `ToolRunStore`) for structured queries. The dashboard creates its own store instances from its read-only DB connection. The `session_stats` table provides token usage (input/output tokens), turn count, compaction count, context window size, and context fill percentage — enabling per-session utilization cards.
 
 ### Status Derivation
 
@@ -76,7 +77,7 @@ Session status displayed on cards is derived from multiple signals:
 | `terminated`   | Session status is `terminated`                                               |
 | `starting`     | Session status is `starting`                                                 |
 
-The "active turn" detection uses a combination of `updatedAt` freshness (updated within last 30s) and tool run status.
+The "active turn" detection uses `session_stats.last_turn_at` (set only on actual turns, not config mutations) combined with tool run status. A session is considered "generating" when `last_turn_at` is recent (within the last 30s) and no tool runs are in `running` status — avoiding false positives from `updatedAt` which changes on any mutation (e.g., config updates, working directory changes).
 
 ### Real-Time Updates
 
@@ -190,6 +191,8 @@ All endpoints in iteration 1 are GET-only. The API layer is structured so that P
 - [`implementation.md`](implementation.md) — phased implementation steps
 - [Service Canvas Plugin](../../packages/service-canvas/src/plugin.ts) — reference plugin pattern
 - [Session Store](../../packages/daemon/src/sessions/session-store.ts) — session data model
+- [Session Stats Store](../../packages/daemon/src/sessions/session-stats-store.ts) — token usage, turn count, context fill
 - [Timer Scheduler](../../packages/daemon/src/timers/timer-scheduler.ts) — timer data access
 - [Tool Run Store](../../packages/daemon/src/sessions/tool-run-store.ts) — tool run tracking
 - [Plugin Hook Types](../../packages/plugins/src/hook-types.ts) — ServiceRegisterCtx, PluginServiceEntry
+- [Events Queue](../../packages/daemon/src/events/events-queue.ts) — durable event queue (NOT suitable for real-time SSE; used for cron/retry jobs)

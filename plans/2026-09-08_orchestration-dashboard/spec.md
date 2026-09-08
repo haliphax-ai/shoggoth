@@ -9,7 +9,7 @@
 export interface DashboardServiceConfig {
   /** Port to listen on (default: 3457) */
   port?: number;
-  /** Host address to bind to (default: "0.0.0.0") */
+  /** Host address to bind to (default: "127.0.0.1") */
   host?: string;
   /** Base path for the dashboard (default: "/svc/dashboard") */
   basePath?: string;
@@ -23,7 +23,7 @@ export interface DashboardServiceConfig {
 
 export const DEFAULT_DASHBOARD_CONFIG: Required<DashboardServiceConfig> = {
   port: 3457,
-  host: "0.0.0.0",
+  host: "127.0.0.1",
   basePath: "/svc/dashboard",
   stateDbPath: "", // derived from config at runtime
   pollingIntervalMs: 5000,
@@ -84,6 +84,8 @@ export interface SessionCardData {
   subagentMode?: string;
   /** Subagent TTL expiry if applicable */
   subagentExpiresAt?: string;
+  /** Session stats summary (token usage, turns, context fill) — null if no stats row exists */
+  stats?: SessionStatsData | null;
 }
 
 /**
@@ -95,10 +97,8 @@ export interface SessionDetailData extends SessionCardData {
   /** Workspace path */
   workspacePath: string;
   /** Creation timestamp */
-  createdAt: string;
-  /** Whether the session has an active turn */
+  /** Whether the session has an active turn (based on last_turn_at freshness) */
   hasActiveTurn: boolean;
-}
 ```
 
 ### Subagent Data
@@ -162,9 +162,44 @@ export interface ToolRunData {
   startedAt: string;
   /** Failure reason if failed */
   failureReason?: string;
+  failureReason?: string;
 }
 ```
 
+### Session Stats Data
+
+```typescript
+/**
+ * Session statistics from the session_stats table.
+ * Provides token usage, turn counts, and context utilization.
+ */
+export interface SessionStatsData {
+  /** Session URN */
+  sessionId: string;
+  /** Number of completed turns in the current context segment */
+  turnCount: number;
+  /** Number of context compactions */
+  compactionCount: number;
+  /** Total input tokens consumed */
+  inputTokens: number;
+  /** Total output tokens produced */
+  outputTokens: number;
+  /** Context window size in tokens (from model), null if unknown */
+  contextWindowTokens: number | null;
+  /** Estimated current context fill in tokens (computed from transcript) */
+  contextFillTokens: number;
+  /** ISO 8601 timestamp of first turn */
+  firstTurnAt: string | null;
+  /** ISO 8601 timestamp of last turn (used for "generating" detection) */
+  lastTurnAt: string | null;
+  /** ISO 8601 timestamp of last compaction */
+  lastCompactedAt: string | null;
+  /** Number of transcript messages in current context segment */
+  transcriptMessageCount: number;
+}
+```
+
+### API Response Types
 ### API Response Types
 
 ```typescript
@@ -230,11 +265,42 @@ export interface SessionUpdatedPayload {
   updatedAt: string;
 }
 
-/** Tool run event payload */
+/** Tool run event payload — note: tool_runs table does not store tool_name;
+ *  the event emitter must attach it from the tool loop context at emit time. */
 export interface ToolRunEventPayload {
   toolRunId: string;
+  /** Attached by the lifecycle emitter from tool loop context, not from DB */
   toolName?: string;
   status: string;
+}
+
+### Lifecycle Event Emitter Types
+
+The SSE Event Relay requires a real-time event source. The existing `events-queue.ts` is a durable, retry-based queue for cron jobs — it does NOT provide in-process pub/sub. A new `DaemonEventEmitter` (Node.js `EventEmitter`) will be added to daemon stores to emit lifecycle events that the SSE relay subscribes to.
+
+```typescript
+/**
+ * Events emitted by daemon stores for real-time dashboard consumption.
+ * These are in-process EventEmitter events (NOT the durable events queue).
+ */
+export interface DaemonLifecycleEvents {
+  "session:created": { sessionId: string; agentId: string; status: string };
+  "session:updated": { sessionId: string; status: string; updatedAt: string };
+  "session:terminated": { sessionId: string };
+  "timer:scheduled": { sessionId: string; timerId: string; label: string; fireAt: string };
+  "timer:fired": { sessionId: string; timerId: string; label: string };
+  "tool-run:started": { sessionId: string; toolRunId: string; toolName?: string };
+  "tool-run:completed": { sessionId: string; toolRunId: string; toolName?: string };
+  "tool-run:failed": { sessionId: string; toolRunId: string; toolName?: string; reason: string };
+}
+
+/**
+ * Type-safe wrapper around Node.js EventEmitter for daemon lifecycle events.
+ */
+export interface IDaemonEventEmitter {
+  emit<K extends keyof DaemonLifecycleEvents>(event: K, payload: DaemonLifecycleEvents[K]): void;
+  on<K extends keyof DaemonLifecycleEvents>(event: K, listener: (payload: DaemonLifecycleEvents[K]) => void): void;
+  off<K extends keyof DaemonLifecycleEvents>(event: K, listener: (payload: DaemonLifecycleEvents[K]) => void): void;
 }
 ```
 
@@ -249,6 +315,7 @@ export interface ToolRunEventPayload {
  * and can be used programmatically or tested with a mock DB.
  */
 export interface IDashboardData {
+export interface IDashboardData {
   /** List all primary (non-subagent) sessions as card data */
   getSessions(filter?: {
     status?: string;
@@ -260,6 +327,9 @@ export interface IDashboardData {
   /** Get detailed data for a single session */
   getSessionDetail(sessionId: string): SessionDetailData | undefined;
 
+  /** Get session stats (token usage, turn count, context fill) */
+  getSessionStats(sessionId: string): SessionStatsData | null;
+
   /** List active subagents for a session */
   getSubagents(sessionId: string): SubagentData[];
 
@@ -270,12 +340,16 @@ export interface IDashboardData {
   getToolRuns(sessionId: string): ToolRunData[];
 
   /**
-   * Derive the dashboard status from session row and tool run state.
+   * Derive the dashboard status from session row, tool run state,
+   * and session_stats.last_turn_at.
+   * Uses last_turn_at instead of updatedAt to avoid false positives
+   * from non-turn mutations (config updates, working directory changes).
    * Exported for testability.
    */
   deriveStatus(
     session: SessionRow,
     activeToolRuns: number,
+    lastTurnAt: string | null,
     activeThresholdMs: number,
   ): DashboardSessionStatus;
 }
@@ -378,6 +452,7 @@ data: {"sessionId": "...", "timestamp": "...", "payload": {...}}
 function deriveStatus(
   session: SessionRow,
   activeToolRuns: number,
+  lastTurnAt: string | null,
   activeThresholdMs: number,
 ): DashboardSessionStatus {
   // Terminal states first
@@ -387,13 +462,19 @@ function deriveStatus(
   // For active sessions, check tool run state
   if (activeToolRuns > 0) return "tool-call";
 
-  // Check if session is actively processing (recent updatedAt)
-  const lastActivity = new Date(session.updatedAt).getTime();
-  const now = Date.now();
-  if (now - lastActivity < activeThresholdMs) return "generating";
+  // Use last_turn_at from session_stats instead of updatedAt.
+  // updatedAt is set on ANY mutation (config updates, working directory
+  // changes, etc.) which causes false "generating" states.
+  // last_turn_at is only set when a model turn actually completes.
+  if (lastTurnAt) {
+    const lastTurnMs = new Date(lastTurnAt).getTime();
+    const now = Date.now();
+    if (now - lastTurnMs < activeThresholdMs) return "generating";
+  }
 
   return "idle";
 }
+```
 ```
 
 ## Model Info Extraction

@@ -28,22 +28,25 @@
    - Constructor takes a `better-sqlite3` Database handle and config
    - `getSessions()` — query `sessions` table, filter out subagents (where `parent_session_id IS NULL`), map to `SessionCardData[]`
    - `getSessionDetail(sessionId)` — query single session, enrich with subagent count and timer count
+   - `getSessionStats(sessionId)` — query `session_stats` table, compute `contextFillTokens` via `estimateCurrentContextFill()`, return `SessionStatsData`
    - `getSubagents(sessionId)` — query sessions where `parent_session_id = sessionId`
    - `getTimers(sessionId)` — use `TimerScheduler.listForSession()` pattern (direct SQL: `SELECT ... FROM timers WHERE session_id = ? AND fired = 0`)
    - `getToolRuns(sessionId)` — query `tool_runs` table for the session's current `context_segment_id`
-   - `deriveStatus()` — status derivation algorithm from `spec.md`
+   - `deriveStatus()` — status derivation algorithm from `spec.md` (uses `last_turn_at` from session_stats, not `updatedAt`)
    - `extractModelInfo()` — model info extraction from `spec.md`
    - `formatTimeRemaining()` — countdown formatter
 
 5. Write tests in `test/server/services/dashboard-data.test.ts`:
    - Create in-memory SQLite DB with schema matching the real tables
-   - Insert test sessions (primary + subagent), timers, tool runs
+   - Insert test sessions (primary + subagent), timers, tool runs, session_stats
    - Test `getSessions` returns only primary sessions
    - Test `getSessionDetail` returns enriched data
+   - Test `getSessionStats` returns stats with computed context fill
    - Test `getSubagents` returns children of a given session
    - Test `getTimers` returns unfired timers sorted by fire_at
    - Test `getToolRuns` returns running/completed/failed runs
    - Test `deriveStatus` with all status combinations (idle, generating, tool-call, terminated, starting)
+   - Test `deriveStatus` uses `lastTurnAt` — a session with recent `updatedAt` but old `lastTurnAt` should be `idle`
    - Test `extractModelInfo` with various model selection formats
    - Test `formatTimeRemaining` for future, past, and boundary timestamps
 
@@ -57,7 +60,71 @@
 
 ---
 
-## Phase 2: API Routes & Express Server
+## Phase 2: Lifecycle Event Emission
+
+**Goal:** Add an in-process EventEmitter to daemon stores so that the SSE relay (Phase 4) has a real-time event source. The existing `events-queue.ts` is a durable, retry-based queue for cron jobs — it does NOT provide in-process pub/sub needed for SSE.
+
+**Why this phase exists:** The feasibility review identified that Phase 4 (SSE Event Relay) depends on lifecycle events that no current code emits. Without this phase, the SSE endpoint would have nothing to subscribe to.
+
+**Files created:**
+
+- `packages/daemon/src/events/daemon-event-emitter.ts`
+- `packages/daemon/src/events/daemon-event-emitter.test.ts`
+
+**Files modified:**
+
+- `packages/daemon/src/sessions/session-store.ts` — emit `session:created`, `session:updated`, `session:terminated`
+- `packages/daemon/src/timers/timer-scheduler.ts` — emit `timer:scheduled`, `timer:fired`
+- `packages/daemon/src/sessions/tool-run-store.ts` — emit `tool-run:started`, `tool-run:completed`, `tool-run:failed`
+- `packages/daemon/src/sessions/tool-loop.ts` — pass `toolName` to tool-run events
+
+**Steps:**
+
+1. Create `packages/daemon/src/events/daemon-event-emitter.ts`:
+   - Define `DaemonLifecycleEvents` interface (as specified in `spec.md`)
+   - Create `DaemonEventEmitter` class wrapping Node.js `EventEmitter` with type-safe `emit`/`on`/`off` methods
+   - Export as singleton or injectable dependency (prefer injectable for testability)
+
+2. Write tests for `DaemonEventEmitter`:
+   - Test that `emit` triggers registered listeners with correct payload
+   - Test that `off` removes listeners
+   - Test type safety (compile-time checks via TypeScript)
+
+3. Modify `session-store.ts`:
+   - Accept `IDaemonEventEmitter` in `createSessionStore()` (optional, backward-compatible)
+   - Emit `session:created` after successful INSERT in `create()`
+   - Emit `session:updated` after successful UPDATE in `update()`
+   - Emit `session:terminated` when status changes to `terminated` in `update()`
+
+4. Modify `tool-run-store.ts`:
+   - Accept `IDaemonEventEmitter` in `createToolRunStore()` (optional)
+   - Emit `tool-run:started` in `insertRunning()`
+   - Emit `tool-run:completed` in `markCompleted()`
+   - Emit `tool-run:failed` in `markFailed()`
+   - Note: `toolName` is not in the `tool_runs` table — the emitter must accept it as a parameter or the tool loop must pass it
+
+5. Modify `tool-loop.ts`:
+   - Pass `toolName` to the `ToolRunStore` emitter calls so events include the tool name
+   - This requires a thin adapter or passing the emitter through the options
+
+6. Modify `timer-scheduler.ts`:
+   - Accept `IDaemonEventEmitter` in `createTimerScheduler()` (optional)
+   - Emit `timer:scheduled` when a timer is created
+   - Emit `timer:fired` when a timer fires
+
+7. Wire the emitter into the daemon bootstrap so all stores share the same instance.
+
+**Acceptance criteria:**
+
+- All existing tests still pass (emitter is optional, backward-compatible)
+- New emitter tests pass
+- Stores emit events on state changes
+- No circular dependencies introduced
+- Typecheck passes
+
+---
+
+## Phase 3: API Routes & Express Server
 
 **Goal:** Wire up the Express server with all REST API endpoints. Serve test responses. Still no UI.
 
@@ -84,12 +151,12 @@
    - Opens read-only SQLite connection
    - Instantiates `DashboardData`
    - Mounts all route modules
-   - Creates HTTP server, starts listening
+   - Creates HTTP server, starts listening on `127.0.0.1` (not `0.0.0.0`)
    - Returns `DashboardServer` handle with `close()` method
    - Serves SPA static files from `dist/client/` (with SPA fallback, same pattern as canvas)
 
 3. Write route tests using supertest:
-   - Test `GET /api/sessions` returns session list
+   - Test `GET /api/sessions` returns session list with stats
    - Test `GET /api/sessions?agentId=X` filters correctly
    - Test `GET /api/sessions/:id` returns detail for valid session
    - Test `GET /api/sessions/:id` returns 404 for invalid session
@@ -102,13 +169,14 @@
 - All route tests pass
 - Server starts and responds to HTTP requests
 - 404 handling works for missing sessions
+- Server binds to `127.0.0.1` by default
 - Typecheck passes
 
 ---
 
-## Phase 3: SSE Event Relay
+## Phase 4: SSE Event Relay
 
-**Goal:** Add the SSE event stream endpoint for real-time updates.
+**Goal:** Add the SSE event stream endpoint for real-time updates, wired to the lifecycle emitter from Phase 2.
 
 **Files created:**
 
@@ -131,18 +199,24 @@
    - Calls `eventRelay.addClient(res, { sessionId })`
    - Handles connection close (client disconnect) via `req.on('close')`
 
-3. Wire `EventRelay` into `createDashboardServer()`:
+3. Wire `EventRelay` to the `DaemonEventEmitter` from Phase 2:
+   - Subscribe to all lifecycle events
+   - Translate daemon events to SSE `DashboardEvent` format
+   - Filter by session if client subscribed
+
+4. Wire `EventRelay` into `createDashboardServer()`:
    - Instantiate alongside `DashboardData`
    - Pass to events route
    - Call `eventRelay.close()` in server shutdown
 
-4. Write tests for `EventRelay`:
+5. Write tests for `EventRelay`:
    - Test that `broadcast` sends formatted SSE to connected clients
    - Test that session filter works (client only receives events for their session)
    - Test that `removeClient` stops delivery
    - Test sequence number increments monotonically
    - Test `close` disconnects all clients
    - Test `Last-Event-ID` handling (client reconnects with seq, gets missed events — or falls back to polling)
+   - Test that daemon lifecycle events are properly translated to SSE events
 
 **Acceptance criteria:**
 
@@ -150,11 +224,12 @@
 - Events are broadcast to all connected clients
 - Session filtering works
 - Client disconnect is handled gracefully
+- Events from Phase 2 lifecycle emitter appear on the SSE stream
 - Typecheck passes
 
 ---
 
-## Phase 4: Plugin Entry Point & Integration
+## Phase 5: Plugin Entry Point & Integration
 
 **Goal:** Wire up the plugin lifecycle so the dashboard activates with the daemon.
 
@@ -190,7 +265,7 @@
 
 ---
 
-## Phase 5: Vue SPA Client
+## Phase 6: Vue SPA Client
 
 **Goal:** Build the web UI with the main grid view and detail view.
 
@@ -234,13 +309,14 @@
 
 4. Build `SessionCard.vue`:
    - Displays: agent ID, status badge (color-coded), model, last activity
+   - Displays: token usage, turn count, context fill % from session stats
    - Expandable section: subagent count, timer count, context level
    - Click navigates to detail view
    - Status badges: idle=gray, generating=blue, tool-call=orange, terminated=red, starting=yellow
 
 5. Build `SessionView.vue`:
-   - Fetches session detail + subagents + timers + tool runs on mount
-   - Displays full session info at top
+   - Fetches session detail + subagents + timers + tool runs + stats on mount
+   - Displays full session info at top including token usage and context fill
    - Tabbed sections for subagents, timers, tool runs
    - Subscribes to SSE filtered to this session
    - Auto-refreshes on relevant events
@@ -261,15 +337,15 @@
 **Acceptance criteria:**
 
 - `npm run build:client` produces working SPA
-- Main view shows session grid with live updates
-- Detail view shows subagents, timers, tool runs
+- Main view shows session grid with live updates and token stats
+- Detail view shows subagents, timers, tool runs, and context utilization
 - SSE updates cards in real time
 - Polling fallback works when SSE disconnects
 - Responsive layout with DaisyUI styling
 
 ---
 
-## Phase 6: Polish, Documentation & PR
+## Phase 7: Polish, Documentation & PR
 
 **Goal:** Final integration, documentation, and opening the PR.
 
