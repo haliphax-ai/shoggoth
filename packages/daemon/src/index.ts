@@ -45,7 +45,11 @@ import {
   resolveEmbeddingsHealthProbeApiKey,
 } from "./config/effective-runtime";
 import { startControlPlane } from "./control/control-plane";
-import { handleIntegrationControlOp, type IntegrationOpsContext } from "./control/integration-ops";
+import {
+  deliverOobStructuredResponse,
+  handleIntegrationControlOp,
+  type IntegrationOpsContext,
+} from "./control/integration-ops";
 import { resolveSessionTargetFromCliArg } from "./control/resolve-session-cli-target";
 import { WIRE_VERSION } from "@shoggoth/authn";
 import { requestSessionTurnAbort } from "./sessions/session-turn-abort";
@@ -66,6 +70,7 @@ import { registerPlatform as registerMessagingPlatform } from "@shoggoth/messagi
 import { registerPlatform, stopAllPlatforms } from "./platforms/platform-registry";
 import { reconcilePersistentSubagents } from "./subagent/reconcile-persistent-subagents";
 import { messageToolContextRef } from "./messaging/message-tool-context-ref";
+import { OOB_SCHEMA_NO_SENDER, OOB_NO_SENDER_GUIDANCE } from "./messaging/oob-response-schemas";
 import {
   setSubagentRuntimeExtension,
   subagentRuntimeExtensionRef,
@@ -567,7 +572,7 @@ void (async () => {
       });
       return;
     }
-    await ext.runSessionModelTurn({
+    const turn = await ext.runSessionModelTurn({
       sessionId,
       userContent: message,
       userMetadata: { timer_fire: true },
@@ -575,10 +580,22 @@ void (async () => {
       systemContext: {
         kind: "timer.fire",
         summary: "This turn was triggered by a deferred timer.",
-        guidance:
-          "Replies to this turn will be dropped. Respond with NO_REPLY. If you need to surface information to the user, use alternate means such as the builtin-message tool.",
+        guidance: OOB_NO_SENDER_GUIDANCE,
+      },
+      modelInvocationOverride: {
+        responseSchema: { schema: OOB_SCHEMA_NO_SENDER },
+        structuredOutputMode: "best-effort",
       },
     });
+    if (turn?.latestAssistantText) {
+      await deliverOobStructuredResponse({
+        structuredResponse: turn.latestAssistantText,
+        respondTo: sessionId,
+        ext,
+        subLog: getLogger("timer"),
+        hasSender: false,
+      });
+    }
   });
   setTimerScheduler(timerScheduler);
   getTurnQueue().setOnTurnEnd((sessionId) => {

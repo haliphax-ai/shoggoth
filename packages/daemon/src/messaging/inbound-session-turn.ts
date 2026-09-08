@@ -169,6 +169,9 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
             deliveryMode: row.subagentDeliveryMode ?? "inline",
             assistantText: turnResult.latestAssistantText,
             subLog: log,
+            // Thread the turn's model invocation override (e.g. responseSchema for
+            // structured output) into the parent delivery turn when present.
+            modelInvocationOverride: turn.modelInvocationOverride,
           });
         }
       }

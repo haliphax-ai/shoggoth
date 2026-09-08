@@ -1,5 +1,6 @@
 import type { SessionModelTurnDelivery } from "../messaging/session-model-turn-delivery";
 import type { SessionAgentTurnResult } from "../sessions/session-agent-turn";
+import type { ModelInvocationParams } from "@shoggoth/models";
 import type { SystemContext } from "@shoggoth/shared";
 
 /** Why a persistent subagent session is being torn down (for optional thread status posts). */
@@ -15,6 +16,8 @@ export type SubagentRuntimeExtension = {
     readonly userMetadata?: Record<string, unknown>;
     readonly systemContext?: SystemContext;
     readonly delivery: SessionModelTurnDelivery;
+    /** Optional override merged into the session's model invocation params (e.g. responseSchema for structured output). */
+    readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
   }) => Promise<SessionAgentTurnResult>;
   readonly subscribeSubagentSession: (sessionId: string) => () => void;
   /** Register a platform thread ↔ session binding. Returns an idempotent unregister function. */
@@ -37,6 +40,11 @@ export type SubagentRuntimeExtension = {
   ) => Promise<{ readonly id: string }>;
   /** Resolve the outbound channel ID for a session (routes + thread bindings). */
   readonly resolveOutboundChannelIdForSession?: (sessionId: string) => string | undefined;
+  /** Best-effort: post a message to the operator's surface for a session (structured OOB delivery). */
+  readonly postToOperator?: (input: {
+    readonly sessionId: string;
+    readonly userContent: string;
+  }) => Promise<void>;
 };
 
 export const subagentRuntimeExtensionRef: {

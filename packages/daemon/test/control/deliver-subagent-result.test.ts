@@ -2,6 +2,7 @@
  * Tests for deliverSubagentResult function in integration-ops.ts.
  * Tests delivery_mode handling: drop, inline (with/without active loop), queue.
  * Tests max-char truncation (default 8000).
+ * Tests the Phase 2 structured-output OOB queue path (modelInvocationOverride).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -16,8 +17,6 @@ import {
 const mockRunSessionModelTurn = vi.fn().mockResolvedValue({});
 
 describe("deliverSubagentResult", () => {
-  // We'll import and test the function after it's exported
-  // For now, test the pushSteer behavior that deliverSubagentResult depends on
   beforeEach(() => {
     _resetAllChannels();
     vi.clearAllMocks();
@@ -43,8 +42,6 @@ describe("deliverSubagentResult", () => {
 
   describe("delivery_mode='drop'", () => {
     it("should not call pushSteer or runSessionModelTurn when delivery_mode is drop", async () => {
-      // This test verifies the expected behavior - it will fail until deliverSubagentResult is modified
-      // Import the module to get access to deliverSubagentResult when it's exported
       const { deliverSubagentResult } = await import("../../src/control/integration-ops");
 
       await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
@@ -57,14 +54,12 @@ describe("deliverSubagentResult", () => {
         subLog: { info: vi.fn(), warn: vi.fn() } as never,
       });
 
-      // Neither pushSteer nor runSessionModelTurn should be called in drop mode
       expect(mockRunSessionModelTurn).not.toHaveBeenCalled();
     });
   });
 
   describe("delivery_mode='inline' with active loop", () => {
     it("should call pushSteer and NOT call runSessionModelTurn when active loop exists", async () => {
-      // Register an active loop (steer channel)
       const handle = registerSteerChannel("parent-2");
 
       const { deliverSubagentResult } = await import("../../src/control/integration-ops");
@@ -79,15 +74,13 @@ describe("deliverSubagentResult", () => {
         subLog: { info: vi.fn(), warn: vi.fn() } as never,
       });
 
-      // pushSteer should have been called (returns true), so runSessionModelTurn should NOT be called
       expect(mockRunSessionModelTurn).not.toHaveBeenCalled();
       handle.unregister();
     });
   });
 
   describe("delivery_mode='inline' without active loop (fallback to queue)", () => {
-    it("should call runSessionModelTurn when no active loop exists", async () => {
-      // No steer channel registered - no active loop
+    it("should call runSessionModelTurn when no active loop exists, with OOB structured override", async () => {
       const { deliverSubagentResult } = await import("../../src/control/integration-ops");
 
       await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
@@ -100,7 +93,6 @@ describe("deliverSubagentResult", () => {
         subLog: { info: vi.fn(), warn: vi.fn() } as never,
       });
 
-      // Fallback to queue - runSessionModelTurn should be called
       expect(mockRunSessionModelTurn).toHaveBeenCalledWith({
         sessionId: "parent-3",
         userContent: expect.stringContaining("[Subagent completed]"),
@@ -115,13 +107,21 @@ describe("deliverSubagentResult", () => {
           data: { child_session_id: "child-3", mode: "one_shot" },
         },
         delivery: { kind: "internal" },
+        modelInvocationOverride: {
+          responseSchema: {
+            schema: expect.objectContaining({
+              type: "object",
+              required: expect.arrayContaining(["to_operator", "to_sender"]),
+            }),
+          },
+          structuredOutputMode: "best-effort",
+        },
       });
     });
   });
 
   describe("delivery_mode='queue'", () => {
     it("should always call runSessionModelTurn regardless of active loop", async () => {
-      // Even with an active loop, queue mode should always use runSessionModelTurn
       const handle = registerSteerChannel("parent-4");
 
       const { deliverSubagentResult } = await import("../../src/control/integration-ops");
@@ -136,7 +136,6 @@ describe("deliverSubagentResult", () => {
         subLog: { info: vi.fn(), warn: vi.fn() } as never,
       });
 
-      // queue mode always calls runSessionModelTurn
       expect(mockRunSessionModelTurn).toHaveBeenCalled();
       handle.unregister();
     });
@@ -173,13 +172,11 @@ describe("deliverSubagentResult", () => {
         subLog: { info: vi.fn(), warn: vi.fn() } as never,
       });
 
-      // Check that the userContent was truncated to 8000 chars
       expect(mockRunSessionModelTurn).toHaveBeenCalledWith(
         expect.objectContaining({
           userContent: expect.stringContaining("a".repeat(8000)),
         }),
       );
-      // And does NOT contain the 9000th char
       expect(mockRunSessionModelTurn).toHaveBeenCalledWith(
         expect.objectContaining({
           userContent: expect.not.stringContaining("a".repeat(8001)),
@@ -231,17 +228,12 @@ describe("deliverSubagentResult", () => {
     });
   });
 
-  describe("delivery reminders (TDD)", () => {
-    const baseReminder =
-      "— Your reply text is delivered to the subagent, not to the operator.";
-    const asyncOnlyReminder =
-      "— This delivery was out of band (no active tool loop). To surface anything to the operator, call `builtin-message action=post`.";
+  describe("delivery reminders (Phase 2 structured output queue path)", () => {
+    const baseReminder = "— Your reply text is delivered to the subagent, not to the operator.";
 
-    it("inline+active-loop: appends base reminder, NOT the out-of-band reminder", async () => {
+    it("inline+active-loop: appends base reminder, NOT the OOB guidance string", async () => {
       const handle = registerSteerChannel("parent-remind-steer");
-      const { deliverSubagentResult } = await import(
-        "../../src/control/integration-ops"
-      );
+      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
 
       await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
         childSessionId: "child-remind-1",
@@ -260,14 +252,12 @@ describe("deliverSubagentResult", () => {
       expect(content).toContain("[Subagent completed]");
       expect(content).toContain(baseReminder);
       expect(content).not.toContain("out of band");
-      expect(content).not.toContain("no active tool loop");
+      expect(content).not.toContain("Respond with structured output");
       handle.unregister();
     });
 
-    it("async/queue (no active loop): appends both base and out-of-band reminders", async () => {
-      const { deliverSubagentResult } = await import(
-        "../../src/control/integration-ops"
-      );
+    it("async/queue: appends guidance string instead of old reminders", async () => {
+      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
 
       await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
         childSessionId: "child-remind-2",
@@ -283,16 +273,14 @@ describe("deliverSubagentResult", () => {
       const arg = mockRunSessionModelTurn.mock.calls[0][0];
       const content: string = arg.userContent;
       expect(content).toContain("[Subagent completed]");
-      expect(content).toContain(baseReminder);
-      expect(content).toContain(asyncOnlyReminder);
-      expect(content).toContain("out of band");
+      // The structured output guidance replaces the old asyncOnlyReminder.
+      expect(content).toContain("Respond with structured output");
+      expect(content).not.toContain("builtin-message action=post");
     });
 
-    it("async/inline fallback (no active loop): appends both reminders", async () => {
+    it("async/inline fallback: appends guidance string", async () => {
       mockRunSessionModelTurn.mockClear();
-      const { deliverSubagentResult } = await import(
-        "../../src/control/integration-ops"
-      );
+      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
 
       await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
         childSessionId: "child-remind-3",
@@ -308,14 +296,12 @@ describe("deliverSubagentResult", () => {
       const arg = mockRunSessionModelTurn.mock.calls[0][0];
       const content: string = arg.userContent;
       expect(content).toContain("[Subagent completed]");
-      expect(content).toContain(baseReminder);
-      expect(content).toContain(asyncOnlyReminder);
+      expect(content).toContain("Respond with structured output");
+      expect(content).not.toContain("builtin-message action=post");
     });
 
     it("reminders contain no platform-specific names", async () => {
-      const { deliverSubagentResult } = await import(
-        "../../src/control/integration-ops"
-      );
+      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
       mockRunSessionModelTurn.mockClear();
 
       await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {

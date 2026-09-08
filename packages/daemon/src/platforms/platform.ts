@@ -7,6 +7,7 @@
 
 import type { SessionModelTurnDelivery } from "../messaging/session-model-turn-delivery";
 import type { SessionAgentTurnResult } from "../sessions/session-agent-turn";
+import type { ModelInvocationParams } from "@shoggoth/models";
 
 // ---------------------------------------------------------------------------
 // PlatformHandle
@@ -32,6 +33,8 @@ export interface PlatformHandle {
     readonly userContent: string;
     readonly userMetadata?: Record<string, unknown>;
     readonly delivery: SessionModelTurnDelivery;
+    /** Optional override merged into the session's model invocation params (e.g. responseSchema for structured output). */
+    readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
   }) => Promise<SessionAgentTurnResult>;
 
   /**
