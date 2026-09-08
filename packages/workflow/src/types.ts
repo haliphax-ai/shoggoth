@@ -1,6 +1,11 @@
 // Task status lifecycle
 export type TaskStatus = "pending" | "in_progress" | "done" | "failed" | "paused" | "skipped";
 
+/** Returns true when a task status represents a finished state (no further transitions). */
+export function isTerminal(status: TaskStatus): boolean {
+  return status === "done" || status === "failed" || status === "skipped";
+}
+
 // What to do when a task fails
 export type FailureBehavior = "abort" | "pause" | "continue";
 

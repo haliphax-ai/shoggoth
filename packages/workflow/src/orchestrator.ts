@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { TaskDef, TaskState, TaskList, DependencyGraph, ToolExecutor } from "./types.js";
-import { getTaskPromptOrLabel } from "./types.js";
+import { getTaskPromptOrLabel, isTerminal } from "./types.js";
 import { parseGraph, validateGraph } from "./graph.js";
 import { parseTemplateRefs, validateTemplateRefs, resolveTemplates } from "./templates.js";
 import { canSpawn } from "./depth.js";
@@ -76,10 +76,6 @@ export interface OrchestratorOptions {
 }
 
 // --- Helpers ---
-
-function isTerminal(status: TaskState["status"]): boolean {
-  return status === "done" || status === "failed" || status === "skipped";
-}
 
 function taskMap(tasks: TaskState[]): Map<number, TaskState> {
   const m = new Map<number, TaskState>();

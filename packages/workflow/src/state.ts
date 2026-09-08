@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { TaskList, TaskState, DependencyGraph } from "./types.js";
+import { isTerminal } from "./types.js";
 
 // --- Serialization helpers (Map ↔ JSON) ---
 
@@ -87,10 +88,6 @@ export function deleteWorkflow(baseDir: string, workflowId: string): void {
   } catch {
     // ignore if not found
   }
-}
-
-function isTerminal(status: TaskState["status"]): boolean {
-  return status === "done" || status === "failed";
 }
 
 export function listIncompleteWorkflows(baseDir: string): TaskList[] {
