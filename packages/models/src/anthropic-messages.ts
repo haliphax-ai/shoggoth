@@ -970,7 +970,16 @@ export function createAnthropicMessagesProvider(
 
           if (syntheticCall && realToolCalls.length === 0) {
             // Terminal: extract structured content from synthetic tool arguments
-            const structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
+            let structuredContent: string;
+            try {
+              structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
+            } catch (parseErr) {
+              throw new StructuredOutputValidationError(
+                `Response is not valid JSON: ${(parseErr as Error).message}`,
+                syntheticCall.arguments,
+                input.responseSchema!.schema,
+              );
+            }
             if (mode !== "strict") {
               const result = validateResponseSchema(structuredContent, input.responseSchema.schema);
               if (!result.valid) {
@@ -1134,7 +1143,16 @@ export function createAnthropicMessagesProvider(
 
         if (syntheticCall && realToolCalls.length === 0) {
           // Terminal: model is done, extract structured content
-          const structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
+          let structuredContent: string;
+          try {
+            structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
+          } catch (parseErr) {
+            throw new StructuredOutputValidationError(
+              `Response is not valid JSON: ${(parseErr as Error).message}`,
+              syntheticCall.arguments,
+              input.responseSchema!.schema,
+            );
+          }
           // Validate (mode is always "best-effort" or "none" for Anthropic)
           if (mode !== "strict") {
             const result = validateResponseSchema(structuredContent, input.responseSchema.schema);
