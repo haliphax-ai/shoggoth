@@ -6,7 +6,7 @@
  * - 60m+:       `XhYm`  (e.g. `1h3m`)
  */
 export function formatDuration(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1_000);
+  const totalSeconds = Math.floor(Math.max(0, ms) / 1_000);
   const totalMinutes = Math.floor(totalSeconds / 60);
   const totalHours = Math.floor(totalMinutes / 60);
 
