@@ -178,7 +178,7 @@ describe("generateContentAdapter", () => {
 
     const [, opts] = mockFetch.mock.calls[0];
     const body = JSON.parse(opts.body);
-    assert.strictEqual(body.generationConfig.aspectRatio, "16:9");
+    assert.strictEqual(body.generationConfig.imageConfig.aspectRatio, "16:9");
   });
 
   it("does not include aspectRatio in generationConfig when not provided", async () => {
@@ -189,7 +189,7 @@ describe("generateContentAdapter", () => {
 
     const [, opts] = mockFetch.mock.calls[0];
     const body = JSON.parse(opts.body);
-    assert.strictEqual(body.generationConfig.aspectRatio, undefined);
+    assert.strictEqual(body.generationConfig.imageConfig, undefined);
   });
 
   it("does not include aspectRatio in generationConfig for non-image kinds", async () => {
@@ -205,7 +205,7 @@ describe("generateContentAdapter", () => {
 
     const [, opts] = mockFetch.mock.calls[0];
     const body = JSON.parse(opts.body);
-    assert.strictEqual(body.generationConfig.aspectRatio, undefined);
+    assert.strictEqual(body.generationConfig.imageConfig, undefined);
   });
 
   it("includes input_image as inlineData part when provided for image editing", async () => {
