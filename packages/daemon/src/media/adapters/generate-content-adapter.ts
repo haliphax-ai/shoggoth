@@ -21,7 +21,7 @@ function buildGenerationConfig(req: MediaAdapterRequest): Record<string, unknown
   };
 
   if (req.params.kind === "image" && req.params.aspectRatio) {
-    config.aspectRatio = req.params.aspectRatio;
+    config.imageConfig = { aspectRatio: req.params.aspectRatio };
   }
 
   if (req.params.kind === "speech" && req.params.voice) {
