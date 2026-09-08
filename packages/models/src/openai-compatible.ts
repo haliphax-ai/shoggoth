@@ -565,7 +565,16 @@ export function createOpenAICompatibleProvider(
             const syntheticCall = toolCalls.find((tc) => isSyntheticToolCall(tc));
 
             if (syntheticCall && realCalls.length === 0) {
-              const structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
+              let structuredContent: string;
+              try {
+                structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
+              } catch (parseErr) {
+                throw new StructuredOutputValidationError(
+                  `Response is not valid JSON: ${(parseErr as Error).message}`,
+                  syntheticCall.arguments,
+                  input.responseSchema!.schema,
+                );
+              }
               if (mode !== "strict") {
                 const result = validateResponseSchema(
                   structuredContent,
@@ -671,7 +680,16 @@ export function createOpenAICompatibleProvider(
           const syntheticCall = toolCalls.find((tc) => isSyntheticToolCall(tc));
 
           if (syntheticCall && realCalls.length === 0) {
-            const structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
+            let structuredContent: string;
+            try {
+              structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
+            } catch (parseErr) {
+              throw new StructuredOutputValidationError(
+                `Response is not valid JSON: ${(parseErr as Error).message}`,
+                syntheticCall.arguments,
+                input.responseSchema!.schema,
+              );
+            }
             if (mode !== "strict") {
               const result = validateResponseSchema(
                 structuredContent,
