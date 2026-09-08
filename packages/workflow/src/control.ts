@@ -1,4 +1,5 @@
 import type { TaskDef, TaskList, TaskStatus } from "./types.js";
+import { isTerminal } from "./types.js";
 import type { Orchestrator, KillAdapter, SpawnAdapter } from "./orchestrator.js";
 import { saveWorkflow, loadWorkflow } from "./state.js";
 import { retentionRun, type RetentionSummary, type RetentionOptions } from "./retention.js";
@@ -26,10 +27,6 @@ export interface ControlPlaneOptions {
 }
 
 // --- Helpers ---
-
-function isTerminal(status: TaskStatus): boolean {
-  return status === "done" || status === "failed";
-}
 
 function countStatuses(wf: TaskList): Record<TaskStatus, number> {
   const counts: Record<TaskStatus, number> = {
