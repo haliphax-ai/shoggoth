@@ -1,5 +1,6 @@
 import type { TaskDef, TaskList, TaskStatus } from "./types.js";
 import { isTerminal } from "./types.js";
+import { getTransitiveDependents } from "./graph.js";
 import type { Orchestrator, KillAdapter, SpawnAdapter } from "./orchestrator.js";
 import { saveWorkflow, loadWorkflow } from "./state.js";
 import { retentionRun, type RetentionSummary, type RetentionOptions } from "./retention.js";
@@ -41,28 +42,6 @@ function countStatuses(wf: TaskList): Record<TaskStatus, number> {
     counts[t.status]++;
   }
   return counts;
-}
-
-/**
- * Get all downstream task IDs (tasks that transitively depend on the given task).
- * This is the reverse of getTransitiveDeps — we want tasks that have `taskId` as
- * a transitive dependency.
- */
-function getDownstreamIds(wf: TaskList, taskId: number): Set<number> {
-  const downstream = new Set<number>();
-  const stack = [taskId];
-
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    for (const [tid, deps] of wf.graph) {
-      if (deps.has(current) && !downstream.has(tid)) {
-        downstream.add(tid);
-        stack.push(tid);
-      }
-    }
-  }
-
-  return downstream;
 }
 
 // --- ControlPlane ---
@@ -306,7 +285,7 @@ export class ControlPlane {
     this.resetTask(task);
 
     // Get all downstream task IDs
-    const downstreamIds = getDownstreamIds(wf, taskId);
+    const downstreamIds = getTransitiveDependents(taskId, wf.graph);
 
     for (const t of wf.tasks) {
       if (!downstreamIds.has(t.taskDef.id)) continue;

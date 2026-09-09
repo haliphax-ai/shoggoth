@@ -175,6 +175,37 @@ function detectCycles(graph: DependencyGraph): void {
 /**
  * Get all transitive dependencies for a given task ID.
  */
+/**
+ * Get all transitive dependents of a task (tasks that depend on it, directly or transitively).
+ * This is the reverse of getTransitiveDeps — it finds all tasks that have `taskId`
+ * as a transitive dependency.
+ */
+export function getTransitiveDependents(taskId: number, graph: DependencyGraph): Set<number> {
+  // Build reverse graph: for each task, which tasks depend on it
+  const reverse = new Map<number, Set<number>>();
+  for (const [tid, deps] of graph) {
+    for (const depId of deps) {
+      if (!reverse.has(depId)) reverse.set(depId, new Set());
+      reverse.get(depId)!.add(tid);
+    }
+  }
+
+  const visited = new Set<number>();
+  const stack = [...(reverse.get(taskId) ?? [])];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    for (const dep of reverse.get(current) ?? []) {
+      stack.push(dep);
+    }
+  }
+  return visited;
+}
+
+/**
+ * Get all transitive dependencies for a given task ID.
+ */
 export function getTransitiveDeps(graph: DependencyGraph, taskId: number): Set<number> {
   const visited = new Set<number>();
   const stack = [...(graph.get(taskId) ?? [])];
