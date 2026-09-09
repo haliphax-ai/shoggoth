@@ -108,13 +108,14 @@ describe("replace-handler", () => {
     });
   });
 
-  describe("pattern requirement for line operations", () => {
-    it("should not require pattern for deleteLines with single integer", async () => {
+  describe("positional edits don't require pattern", () => {
+    it("should not require pattern for single positional delete", async () => {
       writeFileSync(testFilePath, "line1\nline2\nline3");
 
       const result = await runReplace({
         path: "test.txt",
-        deleteLines: 2,
+        start: 2,
+        end: 2,
       });
 
       const parsed = JSON.parse(result.resultJson);
@@ -122,12 +123,15 @@ describe("replace-handler", () => {
       expect(readFileSync(testFilePath, "utf8")).toBe("line1\nline3");
     });
 
-    it("should not require pattern for deleteLines with array", async () => {
+    it("should not require pattern for batch deletes", async () => {
       writeFileSync(testFilePath, "line1\nline2\nline3\nline4");
 
       const result = await runReplace({
         path: "test.txt",
-        deleteLines: [2, 4],
+        edits: [
+          { start: 2, end: 2 },
+          { start: 4, end: 4 },
+        ],
       });
 
       const parsed = JSON.parse(result.resultJson);
@@ -135,12 +139,13 @@ describe("replace-handler", () => {
       expect(readFileSync(testFilePath, "utf8")).toBe("line1\nline3");
     });
 
-    it("should not require pattern for deleteLines with range object", async () => {
+    it("should not require pattern for positional range delete", async () => {
       writeFileSync(testFilePath, "line1\nline2\nline3\nline4");
 
       const result = await runReplace({
         path: "test.txt",
-        deleteLines: { start: 2, end: 3 },
+        start: 2,
+        end: 3,
       });
 
       const parsed = JSON.parse(result.resultJson);
@@ -269,75 +274,62 @@ describe("replace-handler", () => {
   });
 
   describe("changed_lines return value", () => {
-    describe("deleteLines", () => {
-      it("returns {line: N} for a single line deletion", async () => {
+    describe("positional delete", () => {
+      it("returns shifted range for a single line deletion", async () => {
         writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5");
 
-        const result = await runReplace({ path: "test.txt", deleteLines: 3 });
+        const result = await runReplace({ path: "test.txt", start: 3, end: 3 });
         const parsed = JSON.parse(result.resultJson);
 
         expect(parsed.success).toBe(true);
-        // Deleted line 3; lines 4-5 shift up to 3-4
-        const entries = parsed.changed_lines;
-        expect(entries).toEqual(expect.arrayContaining([{ line: 3 }]));
-        // The original line 4 (now at position 3) and line 5 (now at 4) are also affected
-        expect(entries.length).toBeGreaterThan(1);
-      });
-
-      it("returns individual {line: N} entries for non-contiguous array delete", async () => {
-        writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5");
-
-        const result = await runReplace({ path: "test.txt", deleteLines: [2, 4] });
-        const parsed = JSON.parse(result.resultJson);
-
-        expect(parsed.success).toBe(true);
-        // Deleted lines 2 and 4; both are isolated deletions so they appear as {line: N}
-        const lineEntries = parsed.changed_lines.filter(
-          (e: any) => typeof e === "object" && "line" in e,
-        );
-        expect(lineEntries).toEqual(expect.arrayContaining([{ line: 2 }, { line: 4 }]));
-      });
-
-      it("returns {start, end} range for contiguous range delete", async () => {
-        writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5\nline6\nline7");
-
-        const result = await runReplace({ path: "test.txt", deleteLines: { start: 3, end: 5 } });
-        const parsed = JSON.parse(result.resultJson);
-
-        expect(parsed.success).toBe(true);
+        expect(parsed.edits_applied).toBe(1);
+        // Deleting line 3: lines 4-5 shift to positions 3-4
         const rangeEntries = parsed.changed_lines.filter(
           (e: any) => typeof e === "object" && "start" in e,
         );
-        // The deleted range itself should be a {start, end} entry
-        expect(rangeEntries.length).toBeGreaterThan(0);
-        const hasDeletedRange = rangeEntries.some((e: any) => e.start === 3 && e.end === 5);
-        expect(hasDeletedRange).toBe(true);
+        expect(rangeEntries).toEqual([{ start: 3, end: 4 }]);
       });
 
-      it("includes shifted lines for deleteLines", async () => {
-        writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5\nline6\nline7");
+      it("returns correct range for batch delete of non-contiguous lines", async () => {
+        writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5");
 
-        const result = await runReplace({ path: "test.txt", deleteLines: { start: 3, end: 5 } });
+        const result = await runReplace({
+          path: "test.txt",
+          edits: [
+            { start: 2, end: 2 },
+            { start: 4, end: 4 },
+          ],
+        });
         const parsed = JSON.parse(result.resultJson);
 
         expect(parsed.success).toBe(true);
-        // After deleting lines 3-5, original lines 6 and 7 shift to positions 3 and 4.
-        // Those should be in changed_lines too.
-        const lineEntries = parsed.changed_lines.filter(
-          (e: any) => typeof e === "object" && "line" in e,
+        expect(parsed.edits_applied).toBe(2);
+        expect(readFileSync(testFilePath, "utf8")).toBe("line1\nline3\nline5");
+      });
+
+      it("returns shifted range for contiguous range delete", async () => {
+        writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5\nline6\nline7");
+
+        const result = await runReplace({ path: "test.txt", start: 3, end: 5 });
+        const parsed = JSON.parse(result.resultJson);
+
+        expect(parsed.success).toBe(true);
+        // After deleting lines 3-5, original lines 6-7 shift to positions 3-4
+        const rangeEntries = parsed.changed_lines.filter(
+          (e: any) => typeof e === "object" && "start" in e,
         );
-        const allLineNumbers = lineEntries.map((e: any) => e.line);
-        expect(allLineNumbers).toEqual(expect.arrayContaining([3, 4]));
+        expect(rangeEntries).toEqual([{ start: 3, end: 4 }]);
       });
     });
 
-    describe("replaceRange", () => {
+    describe("positional replace", () => {
       it("returns the new content range when replacing 3 lines with 5 new lines", async () => {
         writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5\nline6\nline7");
 
         const result = await runReplace({
           path: "test.txt",
-          replaceRange: { start: 2, end: 4 },
+          start: 2,
+          end: 4,
           replacement: "new1\nnew2\nnew3\nnew4\nnew5",
         });
         const parsed = JSON.parse(result.resultJson);
@@ -351,12 +343,13 @@ describe("replace-handler", () => {
         expect(rangeEntries[0]).toEqual({ start: 2, end: 6 });
       });
 
-      it("includes shifted lines for replaceRange", async () => {
+      it("includes shifted lines for positional replace", async () => {
         writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5\nline6\nline7");
 
         const result = await runReplace({
           path: "test.txt",
-          replaceRange: { start: 2, end: 4 },
+          start: 2,
+          end: 4,
           replacement: "new1\nnew2\nnew3\nnew4\nnew5",
         });
         const parsed = JSON.parse(result.resultJson);
@@ -374,7 +367,8 @@ describe("replace-handler", () => {
 
         const result = await runReplace({
           path: "test.txt",
-          replaceRange: { start: 2, end: 4 },
+          start: 2,
+          end: 4,
           replacement: "newonly",
         });
         const parsed = JSON.parse(result.resultJson);
@@ -394,7 +388,8 @@ describe("replace-handler", () => {
 
         const result = await runReplace({
           path: "test.txt",
-          replaceRange: { start: 1, end: 2 },
+          start: 1,
+          end: 2,
           replacement: "replaced",
           dryRun: true,
         });
@@ -525,8 +520,8 @@ describe("replace-handler", () => {
       const result = await runReplace({
         path: "test.txt",
         edits: [
-          { replaceRange: { start: 2, end: 3 }, replacement: "B\nC" },
-          { replaceRange: { start: 5, end: 6 }, replacement: "E\nF" },
+          { start: 2, end: 3, replacement: "B\nC" },
+          { start: 5, end: 6, replacement: "E\nF" },
         ],
       });
 
@@ -540,7 +535,10 @@ describe("replace-handler", () => {
 
       const result = await runReplace({
         path: "test.txt",
-        edits: [{ replaceRange: { start: 2, end: 3 }, replacement: "TWO" }, { deleteLines: 7 }],
+        edits: [
+          { start: 2, end: 3, replacement: "TWO" },
+          { start: 7, end: 7 },
+        ],
       });
 
       const parsed = JSON.parse(result.resultJson);
@@ -549,16 +547,13 @@ describe("replace-handler", () => {
     });
 
     it("applies edits bottom-up even when lower line numbers are listed first", async () => {
-      // Edits are listed top-down (line 2 before line 5) but must be applied
-      // bottom-up (highest line number first) so earlier edits don't shift the
-      // line numbers of later edits.
       writeFileSync(testFilePath, "a\nb\nc\nd\ne\nf\ng");
 
       const result = await runReplace({
         path: "test.txt",
         edits: [
-          { replaceRange: { start: 2, end: 3 }, replacement: "B" },
-          { replaceRange: { start: 5, end: 6 }, replacement: "E" },
+          { start: 2, end: 3, replacement: "B" },
+          { start: 5, end: 6, replacement: "E" },
         ],
       });
 
@@ -573,8 +568,8 @@ describe("replace-handler", () => {
       const result = await runReplace({
         path: "test.txt",
         edits: [
-          { replaceRange: { start: 2, end: 4 }, replacement: "x" },
-          { replaceRange: { start: 4, end: 5 }, replacement: "y" },
+          { start: 2, end: 4, replacement: "x" },
+          { start: 4, end: 5, replacement: "y" },
         ],
       });
 
@@ -591,7 +586,7 @@ describe("replace-handler", () => {
 
       const result = await runReplace({
         path: "test.txt",
-        edits: [{ replaceRange: { start: 9, end: 10 }, replacement: "x" }],
+        edits: [{ start: 9, end: 10, replacement: "x" }],
       });
 
       const parsed = JSON.parse(result.resultJson);
@@ -609,7 +604,7 @@ describe("replace-handler", () => {
         path: "test.txt",
         pattern: "line",
         replacement: "LINE",
-        edits: [{ replaceRange: { start: 2, end: 2 }, replacement: "new" }],
+        edits: [{ start: 2, end: 2, replacement: "new" }],
       });
 
       const parsed = JSON.parse(result.resultJson);
@@ -617,28 +612,14 @@ describe("replace-handler", () => {
       expect(parsed.error).toMatch(/mutually exclusive/i);
     });
 
-    it("rejects edits combined with deleteLines", async () => {
+    it("rejects edits combined with start/end", async () => {
       writeFileSync(testFilePath, "line1\nline2\nline3");
 
       const result = await runReplace({
         path: "test.txt",
-        deleteLines: 2,
-        edits: [{ replaceRange: { start: 2, end: 2 }, replacement: "new" }],
-      });
-
-      const parsed = JSON.parse(result.resultJson);
-      expect(parsed.error).toBeDefined();
-      expect(parsed.error).toMatch(/mutually exclusive/i);
-    });
-
-    it("rejects edits combined with replaceRange", async () => {
-      writeFileSync(testFilePath, "line1\nline2\nline3");
-
-      const result = await runReplace({
-        path: "test.txt",
-        replaceRange: { start: 2, end: 2 },
-        replacement: "new",
-        edits: [{ replaceRange: { start: 2, end: 2 }, replacement: "new" }],
+        start: 2,
+        end: 2,
+        edits: [{ start: 2, end: 2, replacement: "new" }],
       });
 
       const parsed = JSON.parse(result.resultJson);
@@ -664,7 +645,7 @@ describe("replace-handler", () => {
 
       const result = await runReplace({
         path: "test.txt",
-        edits: [{ replaceRange: { start: 2, end: 2 }, replacement: "NEW" }],
+        edits: [{ start: 2, end: 2, replacement: "NEW" }],
       });
 
       const parsed = JSON.parse(result.resultJson);
@@ -677,7 +658,7 @@ describe("replace-handler", () => {
 
       const result = await runReplace({
         path: "test.txt",
-        edits: [{ replaceRange: { start: 2, end: 2 }, replacement: "a\nb\nc" }],
+        edits: [{ start: 2, end: 2, replacement: "a\nb\nc" }],
       });
 
       const parsed = JSON.parse(result.resultJson);
@@ -690,7 +671,138 @@ describe("replace-handler", () => {
 
       const result = await runReplace({
         path: "test.txt",
-        edits: [{ replaceRange: { start: 2, end: 3 }, replacement: "NEW" }],
+        edits: [{ start: 2, end: 3, replacement: "NEW" }],
+        dryRun: true,
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.preview).toBeDefined();
+      expect(parsed.preview).toBe("l1\nNEW\nl4\nl5");
+      expect(readFileSync(testFilePath, "utf8")).toBe("l1\nl2\nl3\nl4\nl5");
+    });
+  });
+
+  describe("single positional edits", () => {
+    it("deletes a range when replacement is absent", async () => {
+      writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5");
+
+      const result = await runReplace({
+        path: "test.txt",
+        start: 2,
+        end: 3,
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.success).toBe(true);
+      expect(parsed.edits_applied).toBe(1);
+      expect(readFileSync(testFilePath, "utf8")).toBe("line1\nline4\nline5");
+    });
+
+    it("replaces a range when replacement is present", async () => {
+      writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5");
+
+      const result = await runReplace({
+        path: "test.txt",
+        start: 2,
+        end: 3,
+        replacement: "NEW",
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.success).toBe(true);
+      expect(parsed.edits_applied).toBe(1);
+      expect(readFileSync(testFilePath, "utf8")).toBe("line1\nNEW\nline4\nline5");
+    });
+
+    it("handles multi-line replacement content", async () => {
+      writeFileSync(testFilePath, "l1\nl2\nl3\nl4\nl5");
+
+      const result = await runReplace({
+        path: "test.txt",
+        start: 2,
+        end: 2,
+        replacement: "a\nb\nc",
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.success).toBe(true);
+      expect(readFileSync(testFilePath, "utf8")).toBe("l1\na\nb\nc\nl3\nl4\nl5");
+    });
+
+    it("rejects start without end", async () => {
+      const result = await runReplace({
+        path: "test.txt",
+        start: 2,
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.error).toBeDefined();
+      expect(parsed.error).toMatch(/start and end/i);
+    });
+
+    it("rejects end without start", async () => {
+      const result = await runReplace({
+        path: "test.txt",
+        end: 3,
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.error).toBeDefined();
+      expect(parsed.error).toMatch(/start and end/i);
+    });
+
+    it("rejects start > end", async () => {
+      writeFileSync(testFilePath, "line1\nline2\nline3");
+
+      const result = await runReplace({
+        path: "test.txt",
+        start: 5,
+        end: 2,
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.error).toBeDefined();
+      expect(parsed.error).toMatch(/start must be <= end/i);
+    });
+
+    it("rejects start beyond file length", async () => {
+      writeFileSync(testFilePath, "line1\nline2\nline3");
+
+      const result = await runReplace({
+        path: "test.txt",
+        start: 10,
+        end: 12,
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.error).toBeDefined();
+      expect(parsed.error).toMatch(/beyond/i);
+    });
+
+    it("rejects positional edit combined with pattern", async () => {
+      writeFileSync(testFilePath, "line1\nline2\nline3");
+
+      const result = await runReplace({
+        path: "test.txt",
+        start: 1,
+        end: 3,
+        pattern: "line",
+        replacement: "LINE",
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.error).toBeDefined();
+      expect(parsed.error).toMatch(/mutually exclusive/i);
+    });
+
+    it("returns a preview and does not modify the file when dryRun is true", async () => {
+      writeFileSync(testFilePath, "l1\nl2\nl3\nl4\nl5");
+
+      const result = await runReplace({
+        path: "test.txt",
+        start: 2,
+        end: 3,
+        replacement: "NEW",
         dryRun: true,
       });
 
@@ -767,78 +879,101 @@ describe("replacement counts", () => {
     expect(parsed.replacements).toBe(2);
   });
 
-  it("deleteLines (single number): returns replacements: 1 and keeps linesDeleted", async () => {
+  it("positional delete (single line): returns edits_applied: 1", async () => {
     writeFileSync(testFilePath, "line1\nline2\nline3");
 
-    const result = await runReplace({ path: "test.txt", deleteLines: 2 });
+    const result = await runReplace({ path: "test.txt", start: 2, end: 2 });
     const parsed = JSON.parse(result.resultJson);
 
-    expect(parsed.replacements).toBe(1);
-    expect(parsed.linesDeleted).toEqual([2]);
+    expect(parsed.edits_applied).toBe(1);
+    expect(readFileSync(testFilePath, "utf8")).toBe("line1\nline3");
   });
 
-  it("deleteLines (range): returns replacements: 3 for {start: 5, end: 7}", async () => {
+  it("positional delete (range): returns edits_applied: 1", async () => {
     writeFileSync(testFilePath, "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8");
 
     const result = await runReplace({
       path: "test.txt",
-      deleteLines: { start: 5, end: 7 },
+      start: 5,
+      end: 7,
     });
     const parsed = JSON.parse(result.resultJson);
 
-    expect(parsed.replacements).toBe(3);
-    expect(parsed.linesDeleted).toEqual([5, 6, 7]);
+    expect(parsed.edits_applied).toBe(1);
+    expect(readFileSync(testFilePath, "utf8")).toBe("l1\nl2\nl3\nl4\nl8");
   });
 
-  it("deleteLines with dryRun: same shape", async () => {
+  it("positional delete with dryRun: same shape", async () => {
     writeFileSync(testFilePath, "line1\nline2\nline3");
 
-    const result = await runReplace({ path: "test.txt", deleteLines: 2, dryRun: true });
+    const result = await runReplace({ path: "test.txt", start: 2, end: 2, dryRun: true });
     const parsed = JSON.parse(result.resultJson);
 
-    expect(parsed.replacements).toBe(1);
-    expect(parsed.linesDeleted).toEqual([2]);
+    expect(parsed.edits_applied).toBe(1);
+    expect(parsed.preview).toBeDefined();
+    // File should not be modified
+    expect(readFileSync(testFilePath, "utf8")).toBe("line1\nline2\nline3");
   });
 
-  it("replaceRange: returns replacements: 1 and preserves changed_lines", async () => {
+  it("positional replace: returns edits_applied: 1", async () => {
     writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5");
 
     const result = await runReplace({
       path: "test.txt",
-      replaceRange: { start: 2, end: 3 },
+      start: 2,
+      end: 3,
       replacement: "new",
     });
     const parsed = JSON.parse(result.resultJson);
 
-    expect(parsed.replacements).toBe(1);
-    expect(parsed.changed_lines).toBeDefined();
+    expect(parsed.edits_applied).toBe(1);
+    expect(readFileSync(testFilePath, "utf8")).toBe("line1\nnew\nline4\nline5");
   });
 
-  it("replaceRange with dryRun: same shape", async () => {
+  it("positional replace with dryRun: same shape", async () => {
     writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5");
 
     const result = await runReplace({
       path: "test.txt",
-      replaceRange: { start: 2, end: 3 },
+      start: 2,
+      end: 3,
       replacement: "new",
       dryRun: true,
     });
     const parsed = JSON.parse(result.resultJson);
 
-    expect(parsed.replacements).toBe(1);
-    expect(parsed.changed_lines).toBeDefined();
+    expect(parsed.edits_applied).toBe(1);
+    expect(parsed.preview).toBeDefined();
+    expect(readFileSync(testFilePath, "utf8")).toBe("line1\nline2\nline3\nline4\nline5");
   });
 
-  it("replaceRange edge: multi-line replacement still reports replacements: 1", async () => {
+  it("positional replace edge: multi-line replacement still reports edits_applied: 1", async () => {
     writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5");
 
     const result = await runReplace({
       path: "test.txt",
-      replaceRange: { start: 2, end: 2 },
+      start: 2,
+      end: 2,
       replacement: "a\nb\nc",
     });
     const parsed = JSON.parse(result.resultJson);
 
-    expect(parsed.replacements).toBe(1);
+    expect(parsed.edits_applied).toBe(1);
+  });
+
+  it("batch edits: returns edits_applied: 2 for two edits", async () => {
+    writeFileSync(testFilePath, "a\nb\nc\nd\ne");
+
+    const result = await runReplace({
+      path: "test.txt",
+      edits: [
+        { start: 1, end: 1, replacement: "A" },
+        { start: 5, end: 5, replacement: "E" },
+      ],
+    });
+    const parsed = JSON.parse(result.resultJson);
+
+    expect(parsed.edits_applied).toBe(2);
+    expect(readFileSync(testFilePath, "utf8")).toBe("A\nb\nc\nd\nE");
   });
 });

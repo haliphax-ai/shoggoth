@@ -75,8 +75,8 @@ describe("replace-handler re-read producer", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("flags the file when the line count increases", async () => {
     writeFileSync(join(wsPath, "f.txt"), "a\nb\nc\n");
@@ -123,21 +123,22 @@ describe("replace-handler re-read producer", () => {
     assert.equal(readFileSync(join(wsPath, "f.txt"), "utf8"), "a\nb\nc\n");
   });
 
-  it("deleteLines flags when the line count changes", async () => {
+  it("positional delete flags when the line count changes", async () => {
     writeFileSync(join(wsPath, "f.txt"), "a\nb\nc\nd\n");
-    await registry.execute("replace", { path: "f.txt", deleteLines: 2 }, ctx);
+    await registry.execute("replace", { path: "f.txt", start: 2, end: 2 }, ctx);
     const segment = createSessionStore(db).getById("s1")!.contextSegmentId;
     const gate = checkReReadRequired(db, "s1", segment, join(wsPath, "f.txt"));
     assert.ok(gate);
   });
 
-  it("replaceRange flags when the replacement line count differs", async () => {
+  it("positional replace flags when the replacement line count differs", async () => {
     writeFileSync(join(wsPath, "f.txt"), "a\nb\nc\nd\n");
     await registry.execute(
       "replace",
       {
         path: "f.txt",
-        replaceRange: { start: 2, end: 2 },
+        start: 2,
+        end: 2,
         replacement: "b1\nb2\nb3",
       },
       ctx,
@@ -147,13 +148,14 @@ describe("replace-handler re-read producer", () => {
     assert.ok(gate);
   });
 
-  it("replaceRange does not flag when the replacement has the same line count", async () => {
+  it("positional replace does not flag when the replacement has the same line count", async () => {
     writeFileSync(join(wsPath, "f.txt"), "a\nb\nc\nd\n");
     await registry.execute(
       "replace",
       {
         path: "f.txt",
-        replaceRange: { start: 2, end: 2 },
+        start: 2,
+        end: 2,
         replacement: "B",
       },
       ctx,
@@ -185,8 +187,8 @@ describe("replace-handler re-read consumer", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("blocks replace when the file is already flagged", async () => {
     writeFileSync(join(wsPath, "f.txt"), "a\nb\nc\n");

@@ -1,26 +1,45 @@
 # builtin-replace
 
-Replace patterns in files with support for regex replacements, line-level operations, and dry-run mode. Provides safety warnings for large numbers of replacements and preserves line endings.
+Replace patterns in files with support for regex replacements, positional line-level edits, and dry-run mode. Provides safety warnings for large numbers of replacements and preserves line endings.
 
 ## Parameters
 
-| Param            | Type                               | Required | Notes                                                                                 |
-| ---------------- | ---------------------------------- | -------- | ------------------------------------------------------------------------------------- |
-| `path`           | string                             | yes      | Workspace-relative path to the file to modify                                         |
-| `pattern`        | string                             | no       | Regex pattern to match (required for regex replacement)                               |
-| `replacement`    | string                             | no       | Replacement text (supports `$1`–`$9` capture groups)                                  |
-| `caseSensitive`  | boolean                            | no       | Set `false` for case-insensitive (default: true)                                      |
-| `maxOccurrences` | number                             | no       | Maximum number of replacements to make (default: unlimited)                           |
-| `dryRun`         | boolean                            | no       | Preview changes without modifying file (default: false)                               |
-| `fixedStrings`   | boolean                            | no       | Treat pattern as a literal string, not regex (default: false)                         |
-| `multiline`      | boolean                            | no       | Enable multiline mode (`m` flag) for regex patterns (default: false)                  |
-| `deleteLines`    | number \| number[] \| {start, end} | no       | Line(s) to delete: single 1-indexed number, array of numbers, or `{start, end}` range |
-| `replaceRange`   | {start, end}                       | no       | Replace lines from start to end (inclusive, 1-indexed)                                |
-| `edits`          | array of edit objects              | no       | Apply multiple edits referencing original file state (see Batch Edits mode)           |
+| Param            | Type                                  | Required | Notes                                                                                                                                       |
+| ---------------- | ------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `path`           | string                                | yes      | Workspace-relative path to the file to modify                                                                                               |
+| `start`          | number                                | no       | Start line number (1-indexed). Use with `end` for a single positional edit.                                                                 |
+| `end`            | number                                | no       | End line number (1-indexed, inclusive). Use with `start` for a single positional edit.                                                      |
+| `replacement`    | string                                | no       | Replacement text. For regex: supports `$1`–`$9` capture groups. For positional: content to insert. Omit with `start`/`end` to delete lines. |
+| `pattern`        | string                                | no       | Regex pattern to match (required for regex replacement mode)                                                                                |
+| `caseSensitive`  | boolean                               | no       | Set `false` for case-insensitive (default: true)                                                                                            |
+| `maxOccurrences` | number                                | no       | Maximum number of replacements to make (default: unlimited)                                                                                 |
+| `dryRun`         | boolean                               | no       | Preview changes without modifying file (default: false)                                                                                     |
+| `fixedStrings`   | boolean                               | no       | Treat pattern as a literal string, not regex (default: false)                                                                               |
+| `multiline`      | boolean                               | no       | Enable multiline mode (`m` flag) for regex patterns (default: false)                                                                        |
+| `edits`          | array of `{start, end, replacement?}` | no       | Apply multiple positional edits in a single call (see Batch Edits mode)                                                                     |
 
 ## Operation Modes
 
-### 1. Regex Replacement
+The three modes — **positional edits**, **batch edits**, and **regex** — are mutually exclusive.
+
+### 1. Positional Edit (single)
+
+Replace or delete a contiguous range of lines using `start` and `end`. If `replacement` is provided, the range is replaced; if absent, the range is deleted.
+
+```json
+// Delete lines 10 through 20
+{ "path": "src/foo.ts", "start": 10, "end": 20 }
+
+// Replace lines 10 through 15 with new content
+{
+  "path": "src/foo.ts",
+  "start": 10,
+  "end": 15,
+  "replacement": "new content"
+}
+```
+
+### 2. Regex Replacement
 
 Replace text matching a regex pattern:
 
@@ -32,7 +51,7 @@ Replace text matching a regex pattern:
 }
 ```
 
-### 2. Literal (fixedStrings) Replacement
+### 3. Literal (fixedStrings) Replacement
 
 Replace text matching a literal string — no regex escaping needed:
 
@@ -45,78 +64,16 @@ Replace text matching a literal string — no regex escaping needed:
 }
 ```
 
-### 3. Line Deletion
+### 4. Batch Edits
 
-Delete a single line, multiple lines, or a range using the unified `deleteLines` parameter:
+Apply multiple positional edits to a file in a single tool call. All line numbers reference the **original file** (before any edits are applied). Edits are sorted internally by highest line number first (bottom-up) to prevent line-shifting corruption.
 
-```json
-// Single line
-{ "path": "src/foo.ts", "deleteLines": 42 }
+`edits` is **mutually exclusive** with `pattern` and `start`/`end`.
 
-// Multiple lines
-{ "path": "src/foo.ts", "deleteLines": [10, 20, 30] }
+Each edit object uses the normalized format `{ start, end, replacement? }`:
 
-// Range
-{ "path": "src/foo.ts", "deleteLines": { "start": 10, "end": 20 } }
-```
-
-### 4. Range Replacement
-
-Replace a contiguous range of lines:
-
-```json
-{
-  "path": "src/foo.ts",
-  "replaceRange": { "start": 10, "end": 15 },
-  "replacement": "new content"
-}
-```
-
-### 5. Batch Edits
-
-Apply multiple edits to a file in a single tool call. All line numbers reference the **original file** (before any edits are applied). Edits are sorted internally by highest line number first (bottom-up) to prevent line-shifting corruption.
-
-`edits` is **mutually exclusive** with `pattern`, `deleteLines`, and `replaceRange`.
-
-Each edit object has a `type` field (`"replace"` or `"delete"`) and type-specific fields:
-
-#### Replace edit
-
-```json
-{
-  "type": "replace",
-  "start": 10,
-  "end": 15,
-  "replacement": "new content here"
-}
-```
-
-#### Delete edit (single line)
-
-```json
-{
-  "type": "delete",
-  "line": 42
-}
-```
-
-#### Delete edit (multiple lines)
-
-```json
-{
-  "type": "delete",
-  "lines": [10, 20, 30]
-}
-```
-
-#### Delete edit (range)
-
-```json
-{
-  "type": "delete",
-  "range": { "start": 10, "end": 20 }
-}
-```
+- **Replace:** include `replacement` to replace lines `start..end` with that content
+- **Delete:** omit `replacement` to delete lines `start..end`
 
 #### Batch example — two non-overlapping replaces
 
@@ -124,8 +81,8 @@ Each edit object has a `type` field (`"replace"` or `"delete"`) and type-specifi
 {
   "path": "src/foo.ts",
   "edits": [
-    { "type": "replace", "start": 2, "end": 3, "replacement": "new lines 2-3" },
-    { "type": "replace", "start": 10, "end": 12, "replacement": "new lines 10-12" }
+    { "start": 2, "end": 3, "replacement": "new lines 2-3" },
+    { "start": 10, "end": 12, "replacement": "new lines 10-12" }
   ]
 }
 ```
@@ -136,8 +93,8 @@ Each edit object has a `type` field (`"replace"` or `"delete"`) and type-specifi
 {
   "path": "src/foo.ts",
   "edits": [
-    { "type": "replace", "start": 5, "end": 7, "replacement": "replaced block" },
-    { "type": "delete", "line": 20 }
+    { "start": 5, "end": 7, "replacement": "replaced block" },
+    { "start": 20, "end": 20 }
   ]
 }
 ```
@@ -148,8 +105,8 @@ Each edit object has a `type` field (`"replace"` or `"delete"`) and type-specifi
 {
   "path": "src/foo.ts",
   "edits": [
-    { "type": "replace", "start": 1, "end": 3, "replacement": "header" },
-    { "type": "delete", "range": { "start": 50, "end": 60 } }
+    { "start": 1, "end": 3, "replacement": "header" },
+    { "start": 50, "end": 60 }
   ],
   "dryRun": true
 }
@@ -170,100 +127,104 @@ Lower-cost LLMs frequently mangle files when making successive edits in a single
 
 When `dryRun: true` is specified, the tool returns a preview of changes without modifying the file:
 
+**Positional edit preview:**
+
+```json
+{
+  "success": true,
+  "edits_applied": 1,
+  "preview": "line1\nnew content\nline4\nline5"
+}
+```
+
 **Regex replacement preview:**
 
 ```json
 {
-  "modified": false,
-  "changesMade": 3,
-  "preview": "Dry-run mode: No files will be modified.\n  Line 5: Change\n    Before: const oldName = \"test\";\n    After:  const newName = \"test\";\n...\n3 replacements would be made."
-}
-```
-
-**Line deletion preview:**
-
-```json
-{
-  "modified": false,
-  "changesMade": 2,
-  "deletedLines": 2,
-  "preview": "Dry-run mode: No files will be modified.\n  Line 10: Delete\n    Content: // deprecated code\n  Line 20: Delete\n    Content: // another deprecated line\n\n2 lines would be deleted."
+  "replacements": 3,
+  "changed_lines": [{ "line": 1 }, { "line": 3 }, { "line": 5 }],
+  "preview": "new content for line 1\n..."
 }
 ```
 
 ## Return Value Structure
 
-Entries are sorted by position and may be combined into ranges where contiguous.
-
-### Replacement Count
-
-Every successful operation — across **all** modes (regex, `fixedStrings`, `deleteLines`, `replaceRange`) and including `dryRun` — also returns a `replacements` count indicating how many operations were performed:
-
-- **regex / `fixedStrings`**: number of pattern matches replaced.
-- **`deleteLines`**: number of lines deleted (`deleteLinesSet.size`).
-- **`replaceRange`**: always `1`, because replacing a contiguous block counts as a single logical replacement, even when that block spans multiple lines.
-
-When zero matches are found (regex / `fixedStrings` fast-paths), `replacements` is `0`. This makes unexpected behavior from over-broad patterns immediately visible instead of silently compounding editing errors.
-
-**Examples:**
+### Positional / Batch Edits
 
 ```json
-{ "replacements": 3, "changed_lines": [{ "line": 1 }, { "line": 3 }, { "line": 5 }] }
+{
+  "success": true,
+  "edits_applied": 3
+}
 ```
+
+For single positional edits, `changed_lines` is also included:
 
 ```json
-{ "replacements": 1, "changed_lines": [{ "start": 2, "end": 4 }] }
+{
+  "success": true,
+  "edits_applied": 1,
+  "changed_lines": [
+    { "start": 2, "end": 6 },
+    { "start": 7, "end": 9 }
+  ]
+}
 ```
 
-**Successful replacement (with `changed_lines`):**
+### Regex / fixedStrings
 
 ```json
 {
   "replacements": 2,
-  "changed_lines": [{ "line": 3 }, { "start": 7, "end": 9 }]
+  "changed_lines": [{ "line": 1 }, { "line": 3 }]
 }
 ```
 
-**Successful replacement:**
+### Error
 
 ```json
 {
-  "modified": true,
-  "changesMade": 5
-}
-```
-
-**With line operations:**
-
-```json
-{
-  "modified": true,
-  "changesMade": 3,
-  "deletedLines": 3 // or "replacedLines": 3 for range replacement
-}
-```
-
-**Dry run with preview:**
-
-```json
-{
-  "modified": false,
-  "changesMade": 2,
-  "preview": "Dry-run mode: No files will be modified.\n..."
-}
-```
-
-**Safety warning (too many matches):**
-
-```json
-{
-  "warning": "Large number of replacements (1500) detected. Use with caution.",
-  "modified": false,
-  "changesMade": 1500
+  "error": "edits contain overlapping line ranges"
 }
 ```
 
 ## Examples
+
+### Positional Edit Examples
+
+**Delete a single line:**
+
+```json
+{ "path": "src/foo.ts", "start": 42, "end": 42 }
+```
+
+**Delete a range:**
+
+```json
+{ "path": "src/foo.ts", "start": 10, "end": 20 }
+```
+
+**Replace a range with a single string:**
+
+```json
+{
+  "path": "src/foo.ts",
+  "start": 10,
+  "end": 15,
+  "replacement": "// Updated section"
+}
+```
+
+**Replace a range with multiple lines:**
+
+```json
+{
+  "path": "src/foo.ts",
+  "start": 10,
+  "end": 12,
+  "replacement": "line 1\nline 2\nline 3"
+}
+```
 
 ### Regex Replacement Examples
 
@@ -345,62 +306,30 @@ When zero matches are found (regex / `fixedStrings` fast-paths), `replacements` 
 }
 ```
 
-### Line Operation Examples
+### Batch Edit Examples
 
-**Delete specific lines:**
+**Delete two non-contiguous lines:**
 
 ```json
 {
   "path": "src/foo.ts",
-  "deleteLines": [10, 25, 30]
+  "edits": [
+    { "start": 10, "end": 10 },
+    { "start": 30, "end": 30 }
+  ]
 }
 ```
 
-**Delete single line:**
+**Replace two ranges and delete another:**
 
 ```json
 {
   "path": "src/foo.ts",
-  "deleteLines": 42
-}
-```
-
-**Delete line range:**
-
-```json
-{
-  "path": "src/foo.ts",
-  "deleteLines": { "start": 10, "end": 20 }
-}
-```
-
-**Replace line range with single string:**
-
-```json
-{
-  "path": "src/foo.ts",
-  "replaceRange": { "start": 10, "end": 15 },
-  "replacement": "// Updated section"
-}
-```
-
-**Replace line range with multiple lines:**
-
-```json
-{
-  "path": "src/foo.ts",
-  "replaceRange": { "start": 10, "end": 12 },
-  "replacement": "line 1\nline 2\nline 3"
-}
-```
-
-**Preview line deletion:**
-
-```json
-{
-  "path": "src/foo.ts",
-  "deleteLines": { "start": 10, "end": 15 },
-  "dryRun": true
+  "edits": [
+    { "start": 5, "end": 7, "replacement": "replaced block" },
+    { "start": 20, "end": 25, "replacement": "new block" },
+    { "start": 50, "end": 55 }
+  ]
 }
 ```
 
@@ -423,69 +352,57 @@ When zero matches are found (regex / `fixedStrings` fast-paths), `replacements` 
 
 When more than 1000 matches are detected:
 
-- The tool returns a warning instead of making changes
+- The tool returns an error instead of making changes
 - User must reduce the pattern scope or confirm the large operation
-- Example warning: `"Large number of replacements (1500) detected. Use with caution."`
 
 ### Line Number Validation
 
 - Line numbers must be positive integers
 - Line numbers cannot exceed total lines in file
+- `start` must be ≤ `end`
 - Invalid line numbers trigger an error with details
-
-## Line Ending Preservation
-
-The tool preserves original line endings:
-
-- Files with LF (`\n`) keep LF endings
-- Files with CRLF (`\r\n`) keep CRLF endings
-- Files with CR (`\r`) keep CR endings
-- Trailing newlines are preserved
-- Empty files remain empty after operations
 
 ## Error Handling
 
 **Path not found:**
 
 ```json
-{
-  "error": "Path not found: src/nonexistent.ts"
-}
+{ "error": "path does not exist or is not a file" }
 ```
 
-**Invalid line numbers:**
+**Line range beyond file length:**
 
 ```json
-{
-  "error": "Invalid line numbers: 100, 200. Total lines: 50"
-}
-```
-
-**Out of range:**
-
-```json
-{
-  "error": "Out of range: start=10, end=20, totalLines=15"
-}
+{ "error": "line range is beyond file length" }
 ```
 
 **Invalid range:**
 
 ```json
-{
-  "error": "Invalid range: start=20 is greater than end=10"
-}
+{ "error": "start must be <= end" }
+```
+
+**Overlapping edits:**
+
+```json
+{ "error": "edits contain overlapping line ranges" }
+```
+
+**Mutual exclusivity:**
+
+```json
+{ "error": "edits is mutually exclusive with start/end" }
 ```
 
 ## Tips
 
 - Use `dryRun: true` to preview changes before applying them
 - For large replacements, consider breaking into smaller operations
-- Line operations are more efficient than regex for structural changes
+- Positional edits are more efficient than regex for structural changes
 - The tool automatically handles line ending preservation
 - Use `maxOccurrences` to limit the scope of regex replacements
 - Range operations are inclusive (both start and end lines are affected)
-- Empty replacement strings are valid for range replacement
+- Empty replacement strings are valid for range replacement (deletes the range)
 - Use `fixedStrings: true` when matching literal text that contains regex metacharacters
 - Use `edits` when making multiple changes to a single file to avoid line-shifting errors — all edits reference the original file state
 

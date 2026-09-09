@@ -871,8 +871,22 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
           type: "object",
           properties: {
             path: { type: "string", description: "Workspace-relative path to the file to modify" },
+            start: {
+              type: "integer",
+              description:
+                "Start line number (1-indexed). Use with end for a single positional edit (delete if no replacement, replace if replacement provided). Mutually exclusive with pattern and edits.",
+            },
+            end: {
+              type: "integer",
+              description:
+                "End line number (1-indexed, inclusive). Use with start for a single positional edit. Mutually exclusive with pattern and edits.",
+            },
+            replacement: {
+              type: "string",
+              description:
+                "Replacement text. For regex mode: replacement for pattern matches (supports $1–$9). For positional edits: content to replace the line range with. Omit with start/end to delete lines.",
+            },
             pattern: { type: "string", description: "Regex pattern to match" },
-            replacement: { type: "string", description: "Replacement text" },
             caseSensitive: {
               type: "boolean",
               description: "Case-sensitive matching. Default: false",
@@ -888,117 +902,36 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
             multiline: {
               type: "boolean",
               description:
-                "When true, regex patterns are treated as multiline (m flag). Enables \\n in patterns and makes ^/$ match line boundaries.",
+                "When true, regex patterns are treated as multiline (m flag). Enables \\\\n in patterns and makes ^/$ match line boundaries.",
             },
             fixedStrings: {
+              type: "boolean",
               description:
                 "When true, pattern is treated as a fixed/literal string instead of a regex. No regex escaping is performed — string matching is used directly. Use with multiline: true for multiline literal search-and-replace.",
-            },
-            deleteLines: {
-              oneOf: [
-                { type: "integer", description: "Single line number to delete (1-indexed)" },
-                {
-                  type: "array",
-                  items: { type: "integer" },
-                  description: "Array of line numbers to delete (1-indexed)",
-                },
-                {
-                  type: "object",
-                  properties: {
-                    start: { type: "integer" },
-                    end: { type: "integer" },
-                  },
-                  required: ["start", "end"],
-                  description: "Range of lines to delete from start to end (inclusive, 1-indexed)",
-                },
-              ],
-              description:
-                "Line(s) to delete: single number, array of numbers, or {start, end} range",
-            },
-            replaceRange: {
-              type: "object",
-              properties: {
-                start: { type: "integer", description: "Start line number (1-indexed)" },
-                end: { type: "integer", description: "End line number (1-indexed, inclusive)" },
-              },
-              required: ["start", "end"],
-              description: "Range of lines to replace with replacement text (inclusive, 1-indexed)",
             },
             edits: {
               type: "array",
               description:
-                "Batch of edits applied to the ORIGINAL file state in a single call (max 50). Each edit references 1-indexed original line numbers; edits are applied bottom-up (highest line first) so earlier edits do not shift later line numbers. Mutually exclusive with pattern, deleteLines, and replaceRange.",
+                "Batch of positional edits applied to the ORIGINAL file state in a single call (max 50). Each edit references 1-indexed original line numbers; edits are applied bottom-up (highest line first) so earlier edits do not shift later line numbers. Mutually exclusive with pattern and start/end.",
               items: {
                 type: "object",
                 description:
-                  "Replace or delete edit referencing original line numbers. For replace: use type=replace with start/end/replacement. For delete: use type=delete with line, lines, or range.",
+                  "Positional edit: replace or delete a line range. Omit replacement to delete.",
                 properties: {
-                  type: {
-                    type: "string",
-                    enum: ["replace", "delete"],
-                    description: "Edit kind: replace a line range or delete line(s)",
-                  },
                   start: {
                     type: "integer",
-                    description: "Start line number (1-indexed, replace edits)",
+                    description: "1-indexed start line (inclusive)",
                   },
                   end: {
                     type: "integer",
-                    description: "End line number (1-indexed, inclusive, replace edits)",
+                    description: "1-indexed end line (inclusive)",
                   },
                   replacement: {
                     type: "string",
-                    description: "Replacement text (replace edits)",
-                  },
-                  line: {
-                    type: "integer",
-                    description: "Single line number to delete (delete edits)",
-                  },
-                  lines: {
-                    type: "array",
-                    items: { type: "integer" },
-                    description: "Line numbers to delete (delete edits)",
-                  },
-                  range: {
-                    type: "object",
-                    properties: {
-                      start: { type: "integer" },
-                      end: { type: "integer" },
-                    },
-                    required: ["start", "end"],
-                    description: "Range of lines to delete (delete edits)",
-                  },
-                  replaceRange: {
-                    type: "object",
-                    properties: {
-                      start: { type: "integer" },
-                      end: { type: "integer" },
-                    },
-                    required: ["start", "end"],
-                    description: "Range of lines to replace (alternative to start/end)",
-                  },
-                  deleteLines: {
-                    oneOf: [
-                      { type: "integer", description: "Single line number to delete" },
-                      {
-                        type: "array",
-                        items: { type: "integer" },
-                        description: "Array of line numbers to delete",
-                      },
-                      {
-                        type: "object",
-                        properties: {
-                          start: { type: "integer" },
-                          end: { type: "integer" },
-                        },
-                        required: ["start", "end"],
-                        description: "Range of lines to delete",
-                      },
-                    ],
-                    description: "Line(s) to delete (alternative to line/lines/range)",
+                    description: "Replacement content. Omit to delete the range.",
                   },
                 },
-                required: ["type"],
+                required: ["start", "end"],
               },
             },
           },
