@@ -285,12 +285,7 @@ async function replaceHandler(
     for (const edit of sortedEdits) {
       const startIdx = edit.start - 1;
       const endIdx = edit.end - 1;
-      const replacementLines =
-        edit.replacement !== undefined
-          ? edit.replacement
-              .split("\n")
-              .flatMap((seg) => (seg.includes("\\n") ? seg.split("\\n") : [seg]))
-          : [];
+      const replacementLines = edit.replacement !== undefined ? edit.replacement.split("\n") : [];
       workLines.splice(startIdx, endIdx - startIdx + 1, ...replacementLines);
     }
     const newContent = workLines.join("\n");
@@ -303,11 +298,7 @@ async function replaceHandler(
     for (const edit of ascEdits) {
       const origLen = edit.end - edit.start + 1;
       const isDelete = edit.replacement === undefined;
-      const replLen = isDelete
-        ? 0
-        : edit
-            .replacement!.split("\n")
-            .flatMap((seg) => (seg.includes("\\n") ? seg.split("\\n") : [seg])).length;
+      const replLen = isDelete ? 0 : edit.replacement!.split("\n").length;
 
       if (!isDelete) {
         const newStart = edit.start + cumShift;
@@ -322,11 +313,7 @@ async function replaceHandler(
     if (edits.length === 1) {
       const edit = edits[0];
       const isDelete = edit.replacement === undefined;
-      const replLen = isDelete
-        ? 0
-        : edit
-            .replacement!.split("\n")
-            .flatMap((seg) => (seg.includes("\\n") ? seg.split("\\n") : [seg])).length;
+      const replLen = isDelete ? 0 : edit.replacement!.split("\n").length;
       const linesAfter = originalLineCount - edit.end;
       if (linesAfter > 0) {
         const shiftedStart = edit.start + replLen;
