@@ -16,6 +16,7 @@ Replace patterns in files with support for regex replacements, line-level operat
 | `multiline`      | boolean                            | no       | Enable multiline mode (`m` flag) for regex patterns (default: false)                  |
 | `deleteLines`    | number \| number[] \| {start, end} | no       | Line(s) to delete: single 1-indexed number, array of numbers, or `{start, end}` range |
 | `replaceRange`   | {start, end}                       | no       | Replace lines from start to end (inclusive, 1-indexed)                                |
+| `edits`          | array of edit objects              | no       | Apply multiple edits referencing original file state (see Batch Edits mode)           |
 
 ## Operation Modes
 
@@ -70,6 +71,100 @@ Replace a contiguous range of lines:
   "replacement": "new content"
 }
 ```
+
+### 5. Batch Edits
+
+Apply multiple edits to a file in a single tool call. All line numbers reference the **original file** (before any edits are applied). Edits are sorted internally by highest line number first (bottom-up) to prevent line-shifting corruption.
+
+`edits` is **mutually exclusive** with `pattern`, `deleteLines`, and `replaceRange`.
+
+Each edit object has a `type` field (`"replace"` or `"delete"`) and type-specific fields:
+
+#### Replace edit
+
+```json
+{
+  "type": "replace",
+  "start": 10,
+  "end": 15,
+  "replacement": "new content here"
+}
+```
+
+#### Delete edit (single line)
+
+```json
+{
+  "type": "delete",
+  "line": 42
+}
+```
+
+#### Delete edit (multiple lines)
+
+```json
+{
+  "type": "delete",
+  "lines": [10, 20, 30]
+}
+```
+
+#### Delete edit (range)
+
+```json
+{
+  "type": "delete",
+  "range": { "start": 10, "end": 20 }
+}
+```
+
+#### Batch example — two non-overlapping replaces
+
+```json
+{
+  "path": "src/foo.ts",
+  "edits": [
+    { "type": "replace", "start": 2, "end": 3, "replacement": "new lines 2-3" },
+    { "type": "replace", "start": 10, "end": 12, "replacement": "new lines 10-12" }
+  ]
+}
+```
+
+#### Batch example — mixed replace and delete
+
+```json
+{
+  "path": "src/foo.ts",
+  "edits": [
+    { "type": "replace", "start": 5, "end": 7, "replacement": "replaced block" },
+    { "type": "delete", "line": 20 }
+  ]
+}
+```
+
+#### Batch with dry run
+
+```json
+{
+  "path": "src/foo.ts",
+  "edits": [
+    { "type": "replace", "start": 1, "end": 3, "replacement": "header" },
+    { "type": "delete", "range": { "start": 50, "end": 60 } }
+  ],
+  "dryRun": true
+}
+```
+
+**Constraints:**
+
+- Maximum 50 edits per call
+- Edits must not have overlapping line ranges (returns an error)
+- All line numbers must be within the original file bounds
+- Empty `edits` array is rejected
+
+**Why batch edits?**
+
+Lower-cost LLMs frequently mangle files when making successive edits in a single turn because each edit shifts line numbers for subsequent edits. Batch edits solve this by having all edits reference the original file state and applying them bottom-up automatically.
 
 ## Dry Run Mode
 
@@ -392,6 +487,7 @@ The tool preserves original line endings:
 - Range operations are inclusive (both start and end lines are affected)
 - Empty replacement strings are valid for range replacement
 - Use `fixedStrings: true` when matching literal text that contains regex metacharacters
+- Use `edits` when making multiple changes to a single file to avoid line-shifting errors — all edits reference the original file state
 
 ## Automatic Escape Sanitization
 
