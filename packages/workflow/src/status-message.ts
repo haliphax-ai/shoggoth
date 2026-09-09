@@ -59,7 +59,7 @@ export function formatSummaryMessage(wf: TaskList): string {
   const completed = total - failed.length - skipped.length;
 
   // Total duration: createdAt → last completedAt
-  const lastCompleted = Math.max(...wf.tasks.map((t) => t.completedAt ?? 0));
+  const lastCompleted = total > 0 ? Math.max(...wf.tasks.map((t) => t.completedAt ?? 0)) : 0;
   const totalDuration = formatDuration(lastCompleted - wf.createdAt);
 
   const lines = [

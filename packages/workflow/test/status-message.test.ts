@@ -249,4 +249,15 @@ describe("formatSummaryMessage", () => {
     const msg = formatSummaryMessage(wf);
     assert.ok(msg.includes("⏱️ **Duration:** 21m18s"));
   });
+
+  it("handles empty task list without producing -Infinity duration", () => {
+    const graph: DependencyGraph = new Map();
+    const wf = makeWorkflow("empty-wf", [], graph);
+    wf.createdAt = Date.now();
+    const msg = formatSummaryMessage(wf);
+    assert.ok(msg.includes("**Task workflow complete:** empty-wf"));
+    assert.ok(msg.includes("✅ **Completed:** 0/0"));
+    assert.ok(!msg.includes("-Infinity"));
+    assert.ok(!msg.includes("NaN"));
+  });
 });
