@@ -84,6 +84,286 @@ async function replaceHandler(
   const gate = checkAgentsMdGate(ctx.db, ctx.sessionId, gateCwd, ctx.workspacePath);
   if (gate) return { resultJson: JSON.stringify(gate) };
 
+  // ── Mode detection ────────────────────────────────────────────────────────
+  const isBatch = Array.isArray(args.edits);
+  const hasStart = typeof args.start === "number";
+  const hasEnd = typeof args.end === "number";
+  const isPositional = hasStart || hasEnd;
+  const isRegex = typeof args.pattern === "string";
+
+  if (isBatch && isPositional) {
+    return {
+      resultJson: JSON.stringify({ error: "edits is mutually exclusive with start/end" }),
+    };
+  }
+  if (isBatch && isRegex) {
+    return {
+      resultJson: JSON.stringify({ error: "edits is mutually exclusive with pattern" }),
+    };
+  }
+  if (isPositional && isRegex) {
+    return {
+      resultJson: JSON.stringify({ error: "start/end is mutually exclusive with pattern" }),
+    };
+  }
+  if (hasStart !== hasEnd) {
+    return {
+      resultJson: JSON.stringify({ error: "start and end must both be provided" }),
+    };
+  }
+
+  // ── Positional edits mode (batch or single) ──────────────────────────────
+  // All positional edits use the normalized format: { start, end, replacement? }
+  // - replacement present → replace lines start..end with replacement content
+  // - replacement absent → delete lines start..end
+  if (isBatch || isPositional) {
+    const dryRun = args.dryRun === true;
+
+    // Build normalized edits array
+    const edits: Array<{ start: number; end: number; replacement?: string }> = [];
+
+    if (isBatch) {
+      const batchEdits = args.edits as unknown[];
+      if (batchEdits.length === 0) {
+        return {
+          resultJson: JSON.stringify({ error: "edits must be a non-empty array (max 50 entries)" }),
+        };
+      }
+      if (batchEdits.length > 50) {
+        return {
+          resultJson: JSON.stringify({ error: "edits cannot exceed 50 entries" }),
+        };
+      }
+      for (const raw of batchEdits as Array<Record<string, unknown>>) {
+        if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+          return {
+            resultJson: JSON.stringify({ error: "each edits entry must be an object" }),
+          };
+        }
+        if (typeof raw.start !== "number" || !Number.isInteger(raw.start) || raw.start < 1) {
+          return {
+            resultJson: JSON.stringify({ error: "edit start must be a positive integer" }),
+          };
+        }
+        if (typeof raw.end !== "number" || !Number.isInteger(raw.end) || raw.end < 1) {
+          return {
+            resultJson: JSON.stringify({ error: "edit end must be a positive integer" }),
+          };
+        }
+        if ((raw.start as number) > (raw.end as number)) {
+          return {
+            resultJson: JSON.stringify({ error: "edit start must be <= end" }),
+          };
+        }
+        if (raw.replacement !== undefined && typeof raw.replacement !== "string") {
+          return {
+            resultJson: JSON.stringify({ error: "edit replacement must be a string if provided" }),
+          };
+        }
+        edits.push({
+          start: raw.start as number,
+          end: raw.end as number,
+          replacement: raw.replacement as string | undefined,
+        });
+      }
+    } else {
+      // Single positional edit
+      const start = args.start as number;
+      const end = args.end as number;
+      if (!Number.isInteger(start) || start < 1) {
+        return {
+          resultJson: JSON.stringify({ error: "start must be a positive integer" }),
+        };
+      }
+      if (!Number.isInteger(end) || end < 1) {
+        return {
+          resultJson: JSON.stringify({ error: "end must be a positive integer" }),
+        };
+      }
+      if (start > end) {
+        return {
+          resultJson: JSON.stringify({ error: "start must be <= end" }),
+        };
+      }
+      if (args.replacement !== undefined && typeof args.replacement !== "string") {
+        return {
+          resultJson: JSON.stringify({ error: "replacement must be a string if provided" }),
+        };
+      }
+      edits.push({
+        start,
+        end,
+        replacement: args.replacement as string | undefined,
+      });
+    }
+
+    // Resolve absolute path
+    let absPath: string;
+    try {
+      absPath = resolvePathForWrite(ctx.workspacePath, resolveUserPath(ctx, args.path as string));
+    } catch {
+      return { resultJson: JSON.stringify({ error: "path escapes workspace" }) };
+    }
+
+    // Check if file exists
+    try {
+      const stat = statSync(absPath, { throwIfNoEntry: false });
+      if (!stat?.isFile()) {
+        return { resultJson: JSON.stringify({ error: "path does not exist or is not a file" }) };
+      }
+    } catch {
+      return { resultJson: JSON.stringify({ error: "cannot access file" }) };
+    }
+
+    // Re-read gate (consumer) and capture line count for producer
+    let beforeLineCount: number | undefined;
+    if (!dryRun) {
+      const reReadResult = reReadGate(ctx, absPath);
+      if (reReadResult) {
+        return { resultJson: JSON.stringify(reReadResult) };
+      }
+      try {
+        beforeLineCount = countLines(readFileSync(absPath, "utf8"));
+      } catch {
+        beforeLineCount = undefined;
+      }
+    }
+
+    const cwd = realpathSync(ctx.workspacePath);
+    const uid = ctx.creds.uid;
+    const gid = ctx.creds.gid;
+
+    // Read file into a lines array
+    const readResult = await runAsUser({
+      file: process.execPath,
+      args: [
+        "-e",
+        `const fs = require("fs"); const content = fs.readFileSync(${JSON.stringify(absPath)}, "utf8"); process.stdout.write(JSON.stringify(content.split("\\n")))`,
+      ],
+      cwd,
+      uid,
+      gid,
+    });
+
+    if (readResult.exitCode !== 0) {
+      return {
+        resultJson: JSON.stringify({
+          error: readResult.stderr.trim() || "failed to read file",
+        }),
+      };
+    }
+    let lines: string[];
+    try {
+      lines = JSON.parse(readResult.stdout);
+    } catch {
+      return { resultJson: JSON.stringify({ error: "failed to parse file content" }) };
+    }
+    const originalLineCount = lines.length;
+
+    // Validate line ranges against file length
+    for (const edit of edits) {
+      if (edit.start > originalLineCount || edit.end > originalLineCount) {
+        return {
+          resultJson: JSON.stringify({ error: "line range is beyond file length" }),
+        };
+      }
+    }
+
+    // Reject overlapping line ranges (checked against ORIGINAL line numbers)
+    const byStart = [...edits].sort((a, b) => a.start - b.start || a.end - b.end);
+    for (let i = 1; i < byStart.length; i++) {
+      if (byStart[i].start <= byStart[i - 1].end) {
+        return {
+          resultJson: JSON.stringify({ error: "edits contain overlapping line ranges" }),
+        };
+      }
+    }
+
+    // Apply edits bottom-up: highest applicable line number first
+    const sortedEdits = [...edits].sort((a, b) => b.start - a.start || b.end - a.end);
+    const workLines = lines.slice();
+    for (const edit of sortedEdits) {
+      const startIdx = edit.start - 1;
+      const endIdx = edit.end - 1;
+      const replacementLines = edit.replacement !== undefined ? edit.replacement.split("\n") : [];
+      workLines.splice(startIdx, endIdx - startIdx + 1, ...replacementLines);
+    }
+    const newContent = workLines.join("\n");
+    const editsApplied = edits.length;
+
+    // Compute changed_lines: track where each edit's content ended up
+    const ascEdits = [...edits].sort((a, b) => a.start - b.start);
+    let cumShift = 0;
+    const changedLines: ChangedLines = [];
+    for (const edit of ascEdits) {
+      const origLen = edit.end - edit.start + 1;
+      const isDelete = edit.replacement === undefined;
+      const replLen = isDelete ? 0 : edit.replacement!.split("\n").length;
+
+      if (!isDelete) {
+        const newStart = edit.start + cumShift;
+        const newEnd = newStart + replLen - 1;
+        changedLines.push({ start: newStart, end: newEnd });
+      }
+
+      cumShift += replLen - origLen;
+    }
+
+    // For single edits, also include shifted lines after the edit
+    if (edits.length === 1) {
+      const edit = edits[0];
+      const isDelete = edit.replacement === undefined;
+      const replLen = isDelete ? 0 : edit.replacement!.split("\n").length;
+      const linesAfter = originalLineCount - edit.end;
+      if (linesAfter > 0) {
+        const shiftedStart = edit.start + replLen;
+        const shiftedEnd = shiftedStart + linesAfter - 1;
+        changedLines.push({ start: shiftedStart, end: shiftedEnd });
+      }
+    }
+
+    if (dryRun) {
+      return {
+        resultJson: JSON.stringify({
+          success: true,
+          edits_applied: editsApplied,
+          changed_lines: changedLines,
+          preview: newContent,
+        }),
+      };
+    }
+
+    // Write file
+    const writeResult = await runAsUser({
+      file: process.execPath,
+      args: ["-e", `require("fs").writeFileSync(${JSON.stringify(absPath)}, process.env.CONTENT)`],
+      cwd,
+      uid,
+      gid,
+      env: { CONTENT: newContent },
+    });
+
+    if (writeResult.exitCode !== 0) {
+      return {
+        resultJson: JSON.stringify({
+          error: writeResult.stderr.trim() || "failed to write file",
+        }),
+      };
+    }
+    if (beforeLineCount !== undefined) {
+      maybeMarkReReadRequired(ctx, absPath, beforeLineCount);
+    }
+
+    return {
+      resultJson: JSON.stringify({
+        success: true,
+        edits_applied: editsApplied,
+        changed_lines: changedLines,
+      }),
+    };
+  }
+
+  // ── Regex mode ───────────────────────────────────────────────────────────
   // Extract and validate parameters
   const path = args.path as string;
   const pattern = args.pattern as string;
@@ -93,56 +373,6 @@ async function replaceHandler(
   const dryRun = args.dryRun === true;
   const multiline = args.multiline === true; // default false
   const fixedStrings = args.fixedStrings === true; // default false
-
-  // Parse unified deleteLines parameter (accepts: number, number[], or {start, end})
-  const deleteLinesSet = new Set<number>();
-  const deleteLinesInput = args.deleteLines;
-
-  if (deleteLinesInput !== undefined) {
-    if (typeof deleteLinesInput === "number") {
-      deleteLinesSet.add(deleteLinesInput);
-    } else if (Array.isArray(deleteLinesInput)) {
-      for (const n of deleteLinesInput) {
-        if (typeof n === "number") {
-          deleteLinesSet.add(n);
-        }
-      }
-    } else if (typeof deleteLinesInput === "object" && deleteLinesInput !== null) {
-      const range = deleteLinesInput as { start: number; end: number };
-      if (typeof range.start === "number" && typeof range.end === "number") {
-        for (let i = range.start; i <= range.end; i++) {
-          deleteLinesSet.add(i);
-        }
-      }
-    }
-  }
-
-  const replaceRange = args.replaceRange as { start: number; end: number } | undefined;
-
-  const validateLineNumber = (n: number): boolean => {
-    return Number.isInteger(n) && n >= 1;
-  };
-
-  for (const n of deleteLinesSet) {
-    if (!validateLineNumber(n)) {
-      return {
-        resultJson: JSON.stringify({ error: "deleteLines values must be positive integers" }),
-      };
-    }
-  }
-
-  if (replaceRange) {
-    if (!validateLineNumber(replaceRange.start) || !validateLineNumber(replaceRange.end)) {
-      return {
-        resultJson: JSON.stringify({ error: "replaceRange start/end must be positive integers" }),
-      };
-    }
-    if (replaceRange.start > replaceRange.end) {
-      return {
-        resultJson: JSON.stringify({ error: "replaceRange.start must be <= replaceRange.end" }),
-      };
-    }
-  }
 
   // Resolve absolute path
   let absPath: string;
@@ -180,16 +410,14 @@ async function replaceHandler(
   const uid = ctx.creds.uid;
   const gid = ctx.creds.gid;
 
-  const hasLineOperations = deleteLinesSet.size > 0 || replaceRange;
-
-  if (!hasLineOperations && !pattern) {
+  if (!pattern) {
     return { resultJson: JSON.stringify({ error: "pattern is required for replacement" }) };
   }
-  if (!hasLineOperations && !replacement) {
+  if (!replacement) {
     return { resultJson: JSON.stringify({ error: "replacement is required" }) };
   }
 
-  if (!hasLineOperations && !fixedStrings && pattern) {
+  if (!fixedStrings && pattern) {
     try {
       new RegExp(pattern);
     } catch (e: any) {
@@ -241,178 +469,6 @@ async function replaceHandler(
     }
     return line;
   };
-
-  // Line operations (deleteLines) - always perform these first
-  if (deleteLinesSet.size > 0) {
-    const readResult = await runAsUser({
-      file: process.execPath,
-      args: [
-        "-e",
-        `const fs = require("fs"); const content = fs.readFileSync(${JSON.stringify(absPath)}, "utf8"); process.stdout.write(JSON.stringify(content.split("\\n")))`,
-      ],
-      cwd,
-      uid,
-      gid,
-    });
-
-    if (readResult.exitCode !== 0) {
-      return {
-        resultJson: JSON.stringify({
-          error: readResult.stderr.trim() || "failed to read file",
-        }),
-      };
-    }
-    let lines: string[];
-    try {
-      lines = JSON.parse(readResult.stdout);
-    } catch {
-      return { resultJson: JSON.stringify({ error: "failed to parse file content" }) };
-    }
-
-    const linesToDelete = new Set<number>();
-    deleteLinesSet.forEach((n) => linesToDelete.add(n - 1));
-
-    const originalLineCount = lines.length;
-    const newLines = lines.filter((_, idx) => !linesToDelete.has(idx));
-    const newContent = newLines.join("\n");
-
-    const sortedDeleted = Array.from(linesToDelete)
-      .sort((a, b) => a - b)
-      .map((n) => n + 1);
-    const changed_lines: ChangedLines = buildChangedLines(sortedDeleted);
-
-    if (linesToDelete.size < originalLineCount) {
-      const shiftAmount = linesToDelete.size;
-      const shiftedNewLineNumbers: number[] = [];
-      for (let i = 0; i < originalLineCount; i++) {
-        if (!linesToDelete.has(i)) {
-          shiftedNewLineNumbers.push(i + 1 - shiftAmount);
-        }
-      }
-      for (const n of shiftedNewLineNumbers) {
-        changed_lines.push({ line: n });
-      }
-    }
-
-    if (dryRun) {
-      return {
-        resultJson: JSON.stringify({
-          preview: newContent,
-          replacements: linesToDelete.size,
-          linesDeleted: sortedDeleted,
-          changed_lines,
-        }),
-      };
-    }
-
-    const writeResult = await runAsUser({
-      file: process.execPath,
-      args: ["-e", `require("fs").writeFileSync(${JSON.stringify(absPath)}, process.env.CONTENT)`],
-      cwd,
-      uid,
-      gid,
-      env: { CONTENT: newContent },
-    });
-
-    if (writeResult.exitCode !== 0) {
-      return {
-        resultJson: JSON.stringify({
-          error: writeResult.stderr.trim() || "failed to write file",
-        }),
-      };
-    }
-    if (beforeLineCount !== undefined) {
-      maybeMarkReReadRequired(ctx, absPath, beforeLineCount);
-    }
-
-    return {
-      resultJson: JSON.stringify({
-        success: true,
-        replacements: linesToDelete.size,
-        linesDeleted: sortedDeleted,
-        changed_lines,
-      }),
-    };
-  }
-
-  // Range replacement (replaceRange)
-  if (replaceRange) {
-    const readResult = await runAsUser({
-      file: process.execPath,
-      args: [
-        "-e",
-        `const fs = require("fs"); const content = fs.readFileSync(${JSON.stringify(absPath)}, "utf8"); process.stdout.write(JSON.stringify(content.split("\\n")))`,
-      ],
-      cwd,
-      uid,
-      gid,
-    });
-
-    if (readResult.exitCode !== 0) {
-      return {
-        resultJson: JSON.stringify({
-          error: readResult.stderr.trim() || "failed to read file",
-        }),
-      };
-    }
-
-    let lines: string[];
-    try {
-      lines = JSON.parse(readResult.stdout);
-    } catch {
-      return { resultJson: JSON.stringify({ error: "failed to parse file content" }) };
-    }
-
-    const originalLineCount = lines.length;
-    const startIdx = replaceRange.start - 1;
-    const endIdx = replaceRange.end - 1;
-
-    if (startIdx >= lines.length) {
-      return { resultJson: JSON.stringify({ error: "replaceRange.start is beyond file length" }) };
-    }
-
-    const replacementLines = replacement.split("\n");
-    lines.splice(startIdx, endIdx - startIdx + 1, ...replacementLines);
-    const newContent = lines.join("\n");
-
-    const changed_lines: ChangedLines = [
-      { start: replaceRange.start, end: replaceRange.start + replacementLines.length - 1 },
-    ];
-    if (originalLineCount > endIdx + 1) {
-      const linesAfterReplace = originalLineCount - replaceRange.end;
-      const shiftedStart = replaceRange.start + replacementLines.length;
-      const shiftedEnd = shiftedStart + linesAfterReplace - 1;
-      changed_lines.push({ start: shiftedStart, end: shiftedEnd });
-    }
-
-    if (dryRun) {
-      return {
-        resultJson: JSON.stringify({ preview: newContent, replacements: 1, changed_lines }),
-      };
-    }
-
-    const writeResult = await runAsUser({
-      file: process.execPath,
-      args: ["-e", `require("fs").writeFileSync(${JSON.stringify(absPath)}, process.env.CONTENT)`],
-      cwd,
-      uid,
-      gid,
-      env: { CONTENT: newContent },
-    });
-
-    if (writeResult.exitCode !== 0) {
-      return {
-        resultJson: JSON.stringify({
-          error: writeResult.stderr.trim() || "failed to write file",
-        }),
-      };
-    }
-    if (beforeLineCount !== undefined) {
-      maybeMarkReReadRequired(ctx, absPath, beforeLineCount);
-    }
-
-    return { resultJson: JSON.stringify({ success: true, replacements: 1, changed_lines }) };
-  }
 
   // ── fixedStrings fast path: in-process, no rg, no subprocesses ──
   if (fixedStrings) {
@@ -502,9 +558,7 @@ async function replaceHandler(
   const totalMatches = parseInt(countResult.stdout.trim(), 10) || 0;
 
   if (totalMatches === 0) {
-    return {
-      resultJson: JSON.stringify({ replacements: 0, changed_lines: [] }),
-    };
+    return { resultJson: JSON.stringify({ replacements: 0, changed_lines: [] }) };
   }
 
   if (totalMatches > 1000) {
