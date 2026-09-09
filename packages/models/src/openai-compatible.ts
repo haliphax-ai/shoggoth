@@ -500,9 +500,7 @@ export function createOpenAICompatibleProvider(
         const mode = resolveStructuredOutputMode(input.structuredOutputMode, "strict");
         const hasSchema = input.responseSchema && mode !== "none";
 
-        const rawTools = hasSchema
-          ? [...input.tools, buildSyntheticTool(input.responseSchema!)]
-          : input.tools;
+        const rawTools = input.tools;
 
         // Normalize tool names for providers that reject dots (e.g. Meta via OpenRouter)
         const tools = rawTools.map((t) => ({
