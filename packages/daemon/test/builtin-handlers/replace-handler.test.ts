@@ -517,6 +517,189 @@ describe("replace-handler", () => {
       });
     });
   });
+
+  describe("batch edits mode", () => {
+    it("applies two non-overlapping replace edits in one batch", async () => {
+      writeFileSync(testFilePath, "a\nb\nc\nd\ne\nf\ng");
+
+      const result = await runReplace({
+        path: "test.txt",
+        edits: [
+          { replaceRange: { start: 2, end: 3 }, replacement: "B\nC" },
+          { replaceRange: { start: 5, end: 6 }, replacement: "E\nF" },
+        ],
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.success).toBe(true);
+      expect(readFileSync(testFilePath, "utf8")).toBe("a\nB\nC\nd\nE\nF\ng");
+    });
+
+    it("applies a mixed batch of delete and replace edits", async () => {
+      writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5\nline6\nline7");
+
+      const result = await runReplace({
+        path: "test.txt",
+        edits: [{ replaceRange: { start: 2, end: 3 }, replacement: "TWO" }, { deleteLines: 7 }],
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.success).toBe(true);
+      expect(readFileSync(testFilePath, "utf8")).toBe("line1\nTWO\nline4\nline5\nline6");
+    });
+
+    it("applies edits bottom-up even when lower line numbers are listed first", async () => {
+      // Edits are listed top-down (line 2 before line 5) but must be applied
+      // bottom-up (highest line number first) so earlier edits don't shift the
+      // line numbers of later edits.
+      writeFileSync(testFilePath, "a\nb\nc\nd\ne\nf\ng");
+
+      const result = await runReplace({
+        path: "test.txt",
+        edits: [
+          { replaceRange: { start: 2, end: 3 }, replacement: "B" },
+          { replaceRange: { start: 5, end: 6 }, replacement: "E" },
+        ],
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.success).toBe(true);
+      expect(readFileSync(testFilePath, "utf8")).toBe("a\nB\nd\nE\ng");
+    });
+
+    it("rejects edits with overlapping line ranges", async () => {
+      writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5\nline6\nline7");
+
+      const result = await runReplace({
+        path: "test.txt",
+        edits: [
+          { replaceRange: { start: 2, end: 4 }, replacement: "x" },
+          { replaceRange: { start: 4, end: 5 }, replacement: "y" },
+        ],
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.error).toBeDefined();
+      expect(parsed.error).toMatch(/overlap/i);
+      expect(readFileSync(testFilePath, "utf8")).toBe(
+        "line1\nline2\nline3\nline4\nline5\nline6\nline7",
+      );
+    });
+
+    it("rejects an edit with a start line beyond the file length", async () => {
+      writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5\nline6\nline7");
+
+      const result = await runReplace({
+        path: "test.txt",
+        edits: [{ replaceRange: { start: 9, end: 10 }, replacement: "x" }],
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.error).toBeDefined();
+      expect(parsed.error).toMatch(/beyond/i);
+      expect(readFileSync(testFilePath, "utf8")).toBe(
+        "line1\nline2\nline3\nline4\nline5\nline6\nline7",
+      );
+    });
+
+    it("rejects edits combined with pattern", async () => {
+      writeFileSync(testFilePath, "line1\nline2\nline3");
+
+      const result = await runReplace({
+        path: "test.txt",
+        pattern: "line",
+        replacement: "LINE",
+        edits: [{ replaceRange: { start: 2, end: 2 }, replacement: "new" }],
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.error).toBeDefined();
+      expect(parsed.error).toMatch(/mutually exclusive/i);
+    });
+
+    it("rejects edits combined with deleteLines", async () => {
+      writeFileSync(testFilePath, "line1\nline2\nline3");
+
+      const result = await runReplace({
+        path: "test.txt",
+        deleteLines: 2,
+        edits: [{ replaceRange: { start: 2, end: 2 }, replacement: "new" }],
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.error).toBeDefined();
+      expect(parsed.error).toMatch(/mutually exclusive/i);
+    });
+
+    it("rejects edits combined with replaceRange", async () => {
+      writeFileSync(testFilePath, "line1\nline2\nline3");
+
+      const result = await runReplace({
+        path: "test.txt",
+        replaceRange: { start: 2, end: 2 },
+        replacement: "new",
+        edits: [{ replaceRange: { start: 2, end: 2 }, replacement: "new" }],
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.error).toBeDefined();
+      expect(parsed.error).toMatch(/mutually exclusive/i);
+    });
+
+    it("rejects an empty edits array", async () => {
+      writeFileSync(testFilePath, "line1\nline2\nline3");
+
+      const result = await runReplace({
+        path: "test.txt",
+        edits: [],
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.error).toBeDefined();
+      expect(parsed.error).toMatch(/empty/i);
+    });
+
+    it("applies a single edit in the array like a normal edit", async () => {
+      writeFileSync(testFilePath, "line1\nline2\nline3");
+
+      const result = await runReplace({
+        path: "test.txt",
+        edits: [{ replaceRange: { start: 2, end: 2 }, replacement: "NEW" }],
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.success).toBe(true);
+      expect(readFileSync(testFilePath, "utf8")).toBe("line1\nNEW\nline3");
+    });
+
+    it("splits multi-line replacement content correctly", async () => {
+      writeFileSync(testFilePath, "l1\nl2\nl3\nl4\nl5");
+
+      const result = await runReplace({
+        path: "test.txt",
+        edits: [{ replaceRange: { start: 2, end: 2 }, replacement: "a\nb\nc" }],
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.success).toBe(true);
+      expect(readFileSync(testFilePath, "utf8")).toBe("l1\na\nb\nc\nl3\nl4\nl5");
+    });
+
+    it("returns a preview and does not modify the file when dryRun is true", async () => {
+      writeFileSync(testFilePath, "l1\nl2\nl3\nl4\nl5");
+
+      const result = await runReplace({
+        path: "test.txt",
+        edits: [{ replaceRange: { start: 2, end: 3 }, replacement: "NEW" }],
+        dryRun: true,
+      });
+
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.preview).toBeDefined();
+      expect(parsed.preview).toBe("l1\nNEW\nl4\nl5");
+      expect(readFileSync(testFilePath, "utf8")).toBe("l1\nl2\nl3\nl4\nl5");
+    });
+  });
 });
 
 describe("replacement counts", () => {

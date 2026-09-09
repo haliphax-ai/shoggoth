@@ -924,6 +924,83 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
               required: ["start", "end"],
               description: "Range of lines to replace with replacement text (inclusive, 1-indexed)",
             },
+            edits: {
+              type: "array",
+              description:
+                "Batch of edits applied to the ORIGINAL file state in a single call (max 50). Each edit references 1-indexed original line numbers; edits are applied bottom-up (highest line first) so earlier edits do not shift later line numbers. Mutually exclusive with pattern, deleteLines, and replaceRange.",
+              items: {
+                type: "object",
+                description:
+                  "Replace or delete edit referencing original line numbers. For replace: use type=replace with start/end/replacement. For delete: use type=delete with line, lines, or range.",
+                properties: {
+                  type: {
+                    type: "string",
+                    enum: ["replace", "delete"],
+                    description: "Edit kind: replace a line range or delete line(s)",
+                  },
+                  start: {
+                    type: "integer",
+                    description: "Start line number (1-indexed, replace edits)",
+                  },
+                  end: {
+                    type: "integer",
+                    description: "End line number (1-indexed, inclusive, replace edits)",
+                  },
+                  replacement: {
+                    type: "string",
+                    description: "Replacement text (replace edits)",
+                  },
+                  line: {
+                    type: "integer",
+                    description: "Single line number to delete (delete edits)",
+                  },
+                  lines: {
+                    type: "array",
+                    items: { type: "integer" },
+                    description: "Line numbers to delete (delete edits)",
+                  },
+                  range: {
+                    type: "object",
+                    properties: {
+                      start: { type: "integer" },
+                      end: { type: "integer" },
+                    },
+                    required: ["start", "end"],
+                    description: "Range of lines to delete (delete edits)",
+                  },
+                  replaceRange: {
+                    type: "object",
+                    properties: {
+                      start: { type: "integer" },
+                      end: { type: "integer" },
+                    },
+                    required: ["start", "end"],
+                    description: "Range of lines to replace (alternative to start/end)",
+                  },
+                  deleteLines: {
+                    oneOf: [
+                      { type: "integer", description: "Single line number to delete" },
+                      {
+                        type: "array",
+                        items: { type: "integer" },
+                        description: "Array of line numbers to delete",
+                      },
+                      {
+                        type: "object",
+                        properties: {
+                          start: { type: "integer" },
+                          end: { type: "integer" },
+                        },
+                        required: ["start", "end"],
+                        description: "Range of lines to delete",
+                      },
+                    ],
+                    description: "Line(s) to delete (alternative to line/lines/range)",
+                  },
+                },
+                required: ["type"],
+              },
+            },
           },
           required: ["path"],
         },
