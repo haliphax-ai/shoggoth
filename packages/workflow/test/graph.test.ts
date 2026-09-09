@@ -1,6 +1,11 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
-import { parseGraph, validateGraph, getTransitiveDeps } from "../src/graph.js";
+import {
+  parseGraph,
+  validateGraph,
+  getTransitiveDeps,
+  getTransitiveDependents,
+} from "../src/graph.js";
 
 describe("parseGraph", () => {
   it("parses a simple dependency: 1>2", () => {
@@ -159,5 +164,56 @@ describe("getTransitiveDeps", () => {
     const deps = getTransitiveDeps(g, 3);
     assert.ok(deps.has(1));
     assert.ok(deps.has(2));
+  });
+});
+
+describe("getTransitiveDependents", () => {
+  it("returns direct dependents", () => {
+    // 1>2: task 2 depends on task 1, so task 1's dependents = {2}
+    const g = parseGraph("1>2");
+    const deps = getTransitiveDependents(1, g);
+    assert.ok(deps.has(2));
+    assert.equal(deps.size, 1);
+  });
+
+  it("returns transitive dependents", () => {
+    // 1>2>3: task 3 depends on 2, task 2 depends on 1
+    // So task 1's dependents = {2, 3}
+    const g = parseGraph("1>2 2>3");
+    const deps = getTransitiveDependents(1, g);
+    assert.ok(deps.has(2));
+    assert.ok(deps.has(3));
+    assert.equal(deps.size, 2);
+  });
+
+  it("returns empty set for task with no dependents", () => {
+    const g = parseGraph("1>2");
+    const deps = getTransitiveDependents(2, g);
+    assert.equal(deps.size, 0);
+  });
+
+  it("returns empty set for unknown task", () => {
+    const g = parseGraph("1>2");
+    const deps = getTransitiveDependents(99, g);
+    assert.equal(deps.size, 0);
+  });
+
+  it("handles diamond dependencies", () => {
+    // 1>2 1>3 2>3: task 3 depends on 1 and 2, task 2 depends on 1
+    // So task 1's dependents = {2, 3}
+    const g = parseGraph("1>2 1>3 2>3");
+    const deps = getTransitiveDependents(1, g);
+    assert.ok(deps.has(2));
+    assert.ok(deps.has(3));
+    assert.equal(deps.size, 2);
+  });
+
+  it("handles multiple independent dependents", () => {
+    // 1>2 1>3: both 2 and 3 depend on 1 independently
+    const g = parseGraph("1>2 1>3");
+    const deps = getTransitiveDependents(1, g);
+    assert.ok(deps.has(2));
+    assert.ok(deps.has(3));
+    assert.equal(deps.size, 2);
   });
 });
