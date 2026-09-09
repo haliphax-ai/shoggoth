@@ -110,12 +110,14 @@ describe("OpenAI structured output — strict mode", () => {
 
     const body = JSON.parse(capturedBody ?? "{}") as Record<string, unknown>;
 
-    // response_format should NOT be set (synthetic tool replaces it)
-    assert.equal(
-      body.response_format,
-      undefined,
-      "response_format should NOT be present — synthetic tool replaces it",
-    );
+    // response_format should be set with strict: true (native enforcement + synthetic tool fallback)
+    const rf = body.response_format as {
+      type: string;
+      json_schema: { name: string; schema: unknown; strict: boolean };
+    };
+    assert.ok(rf, "response_format should be present in request body");
+    assert.equal(rf.type, "json_schema");
+    assert.equal(rf.json_schema.strict, true);
 
     // Synthetic __structured_output__ tool should be in the tools array
     const tools = body.tools as Array<{ type: string; function: { name: string } }>;
@@ -229,11 +231,14 @@ describe("OpenAI structured output — best-effort mode", () => {
     });
 
     const body = JSON.parse(capturedBody ?? "{}") as Record<string, unknown>;
-    assert.equal(
-      body.response_format,
-      undefined,
-      "response_format should NOT be present — synthetic tool replaces it",
-    );
+    // response_format should be set with strict: false (best-effort mode)
+    const rf = body.response_format as {
+      type: string;
+      json_schema: { name: string; schema: unknown; strict: boolean };
+    };
+    assert.ok(rf, "response_format should be present in request body");
+    assert.equal(rf.type, "json_schema");
+    assert.equal(rf.json_schema.strict, false);
     const tools = body.tools as Array<{ type: string; function: { name: string } }>;
     const syntheticTool = tools.find((t) => t.function.name === "__structured_output__");
     assert.ok(syntheticTool, "__structured_output__ synthetic tool should be in tools");

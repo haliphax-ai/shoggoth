@@ -524,6 +524,17 @@ export function createOpenAICompatibleProvider(
         }
         applyOpenAICompatibleRequestExtensions(body, input);
 
+        if (input.responseSchema && mode !== "none") {
+          body.response_format = {
+            type: "json_schema",
+            json_schema: {
+              name: "response",
+              schema: input.responseSchema.schema,
+              strict: mode === "strict",
+            },
+          };
+        }
+
         const res = await resilientFetch(url, {
           method: "POST",
           headers,
