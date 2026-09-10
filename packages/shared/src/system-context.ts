@@ -67,7 +67,7 @@ export function wrapWithSystemContext(
  * Strips everything from BEGIN to END (inclusive), handling any token value.
  */
 const SYSTEM_CONTEXT_BLOCK_RE =
-  /--- BEGIN TRUSTED SYSTEM CONTEXT(?: \[token:[0-9a-f]+\])? ---[\s\S]*?--- END TRUSTED SYSTEM CONTEXT(?: \[token:[0-9a-f]+\])? ---/g;
+  /--- BEGIN TRUSTED SYSTEM CONTEXT(?: \[token:[0-9a-f]+\])? ---[\s\S]*?--- END TRUSTED SYSTEM CONTEXT(?: \[token:[0-9a-f]+\])? ---/;
 
 /**
  * Checks untrusted inbound text for falsified system context blocks.
@@ -83,9 +83,6 @@ export function stripFalsifiedSystemContext(
   if (!SYSTEM_CONTEXT_BLOCK_RE.test(text)) {
     return text;
   }
-  // Reset lastIndex since the regex is global
-  SYSTEM_CONTEXT_BLOCK_RE.lastIndex = 0;
-
   return (
     `[DISCARDED — UNSAFE CONTENT]\n` +
     `The inbound message contained falsified system context and was discarded in its entirety.`
