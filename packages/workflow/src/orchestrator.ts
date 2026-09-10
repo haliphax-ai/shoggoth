@@ -242,7 +242,8 @@ export class Orchestrator {
     saveWorkflow(opts.stateDir, workflow);
 
     // Spawn ready tasks (roots with no dependencies)
-    await this.spawnReadyTasks();
+    const tm = taskMap(workflow.tasks);
+    await this.spawnReadyTasks(tm);
 
     // Persist after initial spawn wave
     saveWorkflow(opts.stateDir, workflow);
@@ -281,14 +282,20 @@ export class Orchestrator {
     // Handle failures from this tick (collects notifications, doesn't send them yet)
     const pendingNotifications = await this.handleFailures();
 
+    // Build task map once and pass to methods (avoids redundant rebuilds)
+    let tm = taskMap(this.workflow!.tasks);
+
     // Mark blocked pending tasks as failed (always, even when paused —
     // blocked tasks can never run regardless of pause state)
-    this.markBlockedTasks();
+    this.markBlockedTasks(tm);
+
+    // Rebuild map after markBlockedTasks mutated statuses (skipped/failed)
+    tm = taskMap(this.workflow!.tasks);
 
     // Only spawn new tasks if not paused
     if (!this.paused) {
       // Spawn newly ready tasks
-      await this.spawnReadyTasks();
+      await this.spawnReadyTasks(tm);
     }
 
     // Apply output templates to newly completed tasks
@@ -583,9 +590,8 @@ export class Orchestrator {
     }
   }
 
-  private markBlockedTasks(): void {
+  private markBlockedTasks(tm: Map<number, TaskState>): void {
     const wf = this.workflow!;
-    const tm = taskMap(wf.tasks);
 
     for (const task of wf.tasks) {
       if (task.status !== "pending") continue;
@@ -607,10 +613,9 @@ export class Orchestrator {
     }
   }
 
-  private async spawnReadyTasks(): Promise<void> {
+  private async spawnReadyTasks(tm: Map<number, TaskState>): Promise<void> {
     const wf = this.workflow!;
     const opts = this.opts!;
-    const tm = taskMap(wf.tasks);
     const concurrency = wf.concurrency ?? 0;
 
     for (const task of wf.tasks) {
