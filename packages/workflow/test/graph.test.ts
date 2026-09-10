@@ -127,6 +127,40 @@ describe("validateGraph", () => {
     assert.throws(() => validateGraph(g, new Set([1, 2])), /task 99 which is not in the task list/);
   });
 
+  it("throws when a task ID has no entry in the dependency graph", () => {
+    // Tasks 1, 2, 3 defined but graph only includes 1>2
+    const g = parseGraph("1>2");
+    assert.throws(
+      () => validateGraph(g, new Set([1, 2, 3])),
+      /Task 3 is defined but has no entry in the dependency graph/,
+    );
+  });
+
+  it("throws for each missing task ID", () => {
+    // Tasks 1-4 defined but graph only includes 1>2
+    const g = parseGraph("1>2");
+    // Should throw on task 3 (first missing)
+    assert.throws(
+      () => validateGraph(g, new Set([1, 2, 3, 4])),
+      /Task 3 is defined but has no entry in the dependency graph/,
+    );
+  });
+
+  it("passes when all task IDs have graph entries (including bare roots)", () => {
+    // Task 1, 2, 3 all appear in the graph: 1>2 and standalone 3
+    const g = parseGraph("1>2 3");
+    const warnings = validateGraph(g, new Set([1, 2, 3]));
+    assert.ok(Array.isArray(warnings));
+  });
+
+  it("suggests including a bare entry for missing tasks", () => {
+    const g = parseGraph("1>2");
+    assert.throws(
+      () => validateGraph(g, new Set([1, 2, 3])),
+      /Intentionally independent tasks should be included as a bare entry/,
+    );
+  });
+
   it("passes for an empty graph", () => {
     const g = parseGraph("");
     const warnings = validateGraph(g, new Set());

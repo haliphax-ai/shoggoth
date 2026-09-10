@@ -131,6 +131,7 @@ Chains expand to sequential dependencies: `1-4` creates edges `1→2`, `2→3`, 
 
 The graph is validated on workflow start:
 
+- Every task ID in the `tasks` array must have a corresponding entry in the graph. Tasks with no dependencies should use a bare entry (e.g. just `4` for a root with no deps). Missing entries cause a fast-fail error rather than silent skipping.
 - All referenced task IDs must exist in the task list
 - Cycle detection via iterative DFS with coloring (throws on cycle with path)
 - Template refs are validated to ensure they only reference direct or transitive dependencies
