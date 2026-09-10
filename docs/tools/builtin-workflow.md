@@ -4,23 +4,24 @@ Orchestrate multi-task workflows with dependency graphs. Supports agent, tool, g
 
 ## Top-Level Parameters
 
-| Param                  | Type          | Required   | Notes                                                                                               |
-| ---------------------- | ------------- | ---------- | --------------------------------------------------------------------------------------------------- |
-| `action`               | string        | yes        | One of: `start`, `abort`, `pause`, `resume`, `status`, `list`, `post`, `edit`, `retry`, `retention` |
-| `workflow_id`          | string        | per-action | Required for: `abort`, `pause`, `resume`, `status`, `post`, `edit`, `retry`                         |
-| `name`                 | string        | no         | Workflow name (default: `"unnamed-workflow"`)                                                       |
-| `tasks`                | array         | start      | Array of task objects (see below)                                                                   |
-| `graph`                | string        | start      | Dependency graph DSL — see Graph DSL section below                                                  |
-| `reply_to`             | string        | start      | Session id to receive completion                                                                    |
-| `polling_interval_ms`  | number        | no         | Poll interval (default: 10000)                                                                      |
-| `concurrency`          | number        | no         | Max concurrent tasks                                                                                |
-| `runtime_limit_ms`     | integer       | no         | Default runtime limit per task in ms (default: 600000). Can also be overridden per-task. Min: 1000  |
-| `task_id`              | number        | edit/retry | Target task id                                                                                      |
-| `prompt`               | string        | no         | New prompt (edit action)                                                                            |
-| `failure_behavior`     | string        | no         | `"abort"`, `"pause"`, or `"continue"` (edit action)                                                 |
-| `failure_notification` | string/object | no         | `"silent"`, `{ "kind": "notify-parent" }`, or `{ "kind": "notify-target", "target_id": "..." }`     |
-| `cascade`              | boolean       | no         | Retry downstream tasks too (retry action)                                                           |
-| `agent_chain_id`       | string        | no         | Filter by agent chain (list action)                                                                 |
+| Param                  | Type          | Required   | Notes                                                                                                       |
+| ---------------------- | ------------- | ---------- | ----------------------------------------------------------------------------------------------------------- |
+| `action`               | string        | yes        | One of: `start`, `abort`, `pause`, `resume`, `wait`, `status`, `list`, `post`, `edit`, `retry`, `retention` |
+| `workflow_id`          | string        | per-action | Required for: `abort`, `pause`, `resume`, `wait`, `status`, `post`, `edit`, `retry`                         |
+| `name`                 | string        | no         | Workflow name (default: `"unnamed-workflow"`)                                                               |
+| `tasks`                | array         | start      | Array of task objects (see below)                                                                           |
+| `graph`                | string        | start      | Dependency graph DSL — see Graph DSL section below                                                          |
+| `reply_to`             | string        | start      | Session id to receive completion                                                                            |
+| `polling_interval_ms`  | number        | no         | Poll interval (default: 10000)                                                                              |
+| `concurrency`          | number        | no         | Max concurrent tasks                                                                                        |
+| `runtime_limit_ms`     | integer       | no         | Default runtime limit per task in ms (default: 600000). Can also be overridden per-task. Min: 1000          |
+| `wait_timeout_ms`      | integer       | wait       | Max time in ms to block for workflow completion (default: 600000, min: 1000)                                |
+| `task_id`              | number        | edit/retry | Target task id                                                                                              |
+| `prompt`               | string        | no         | New prompt (edit action)                                                                                    |
+| `failure_behavior`     | string        | no         | `"abort"`, `"pause"`, or `"continue"` (edit action)                                                         |
+| `failure_notification` | string/object | no         | `"silent"`, `{ "kind": "notify-parent" }`, or `{ "kind": "notify-target", "target_id": "..." }`             |
+| `cascade`              | boolean       | no         | Retry downstream tasks too (retry action)                                                                   |
+| `agent_chain_id`       | string        | no         | Filter by agent chain (list action)                                                                         |
 
 ## Task Object
 
@@ -145,6 +146,16 @@ The response also includes workflow-level fields: `id`, `name`, `createdAt`, `po
 
 ```json
 { "action": "retry", "workflow_id": "wf-123", "task_id": 1, "cascade": true }
+```
+
+**Wait for a workflow to complete:**
+
+```json
+{ "action": "wait", "workflow_id": "wf-123" }
+```
+
+```json
+{ "action": "wait", "workflow_id": "wf-123", "wait_timeout_ms": 120000 }
 ```
 
 **Post workflow results:**

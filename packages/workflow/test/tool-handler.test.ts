@@ -41,6 +41,15 @@ function mockControlPlane(overrides: Partial<Record<string, unknown>> = {}): Con
     edit: async () => {},
     retry: async () => {},
     retention: async () => ({ prunedIds: [], prunedCount: 0 }),
+    wait: async () =>
+      ({
+        id: "wf-123",
+        name: "test",
+        tasks: [],
+        graph: new Map(),
+        pollingIntervalMs: 10000,
+        createdAt: Date.now(),
+      }) as TaskList,
     ...overrides,
   } as unknown as ControlPlane;
 }
@@ -642,6 +651,65 @@ describe("handleWorkflowToolCall", () => {
 
       assert.equal(result.ok, true);
       assert.deepEqual((result.data as Record<string, unknown>).prunedCount, 1);
+    });
+  });
+
+  describe("wait", () => {
+    it("calls controlPlane.wait and returns workflow data", async () => {
+      let capturedArgs: unknown;
+      const cp = mockControlPlane({
+        wait: async (wfId: string, timeoutMs?: number) => {
+          capturedArgs = { wfId, timeoutMs };
+          return {
+            id: "wf-wait",
+            name: "waited",
+            tasks: [{ status: "done" }],
+            graph: new Map(),
+            pollingIntervalMs: 5000,
+            createdAt: Date.now(),
+          } as TaskList;
+        },
+      });
+      const result = await handleWorkflowToolCall(
+        { action: "wait", workflow_id: "wf-wait" },
+        makeDeps({ controlPlane: cp as unknown as ControlPlane }),
+      );
+
+      assert.equal(result.ok, true);
+      const args = capturedArgs as { wfId: string; timeoutMs: number | undefined };
+      assert.equal(args.wfId, "wf-wait");
+      assert.equal(args.timeoutMs, undefined);
+    });
+
+    it("passes wait_timeout_ms through to controlPlane.wait", async () => {
+      let capturedArgs: unknown;
+      const cp = mockControlPlane({
+        wait: async (wfId: string, timeoutMs?: number) => {
+          capturedArgs = { wfId, timeoutMs };
+          return {
+            id: "wf-wait2",
+            name: "waited2",
+            tasks: [],
+            graph: new Map(),
+            pollingIntervalMs: 5000,
+            createdAt: Date.now(),
+          } as TaskList;
+        },
+      });
+      const result = await handleWorkflowToolCall(
+        { action: "wait", workflow_id: "wf-wait2", wait_timeout_ms: 30000 },
+        makeDeps({ controlPlane: cp as unknown as ControlPlane }),
+      );
+
+      assert.equal(result.ok, true);
+      const args = capturedArgs as { wfId: string; timeoutMs: number };
+      assert.equal(args.timeoutMs, 30000);
+    });
+
+    it("returns error when workflow_id is missing", async () => {
+      const result = await handleWorkflowToolCall({ action: "wait" }, makeDeps());
+      assert.equal(result.ok, false);
+      assert.match(result.error!, /workflow_id/);
     });
   });
 

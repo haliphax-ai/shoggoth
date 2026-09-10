@@ -21,9 +21,10 @@ const workflowToolArgs = {
         "edit",
         "retry",
         "retention",
+        "wait",
       ],
       description:
-        "start: kick off a new workflow. abort/pause/resume: control a running workflow. status: get task states. list: list workflows. post: repost status message. edit: modify a non-in-progress task. retry: redrive a failed task. retention: prune old workflows.",
+        "start: kick off a new workflow. abort/pause/resume: control a running workflow. status: get task states. list: list workflows. post: repost status message. edit: modify a non-in-progress task. retry: redrive a failed task. retention: prune old workflows. wait: block until a workflow completes.",
     },
     // --- start ---
     name: {
@@ -202,6 +203,12 @@ const workflowToolArgs = {
     agent_chain_id: {
       type: "string",
       description: "list: filter by agent chain ID. Defaults to calling agent's chain.",
+    },
+    // --- wait ---
+    wait_timeout_ms: {
+      type: "integer",
+      description: "wait: max time to wait in ms. Default: 600000 (10 min).",
+      minimum: 1000,
     },
   },
   required: ["action"],

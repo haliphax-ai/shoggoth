@@ -43,7 +43,8 @@ export interface WorkflowToolArgs {
     | "post"
     | "edit"
     | "retry"
-    | "retention";
+    | "retention"
+    | "wait";
   // start
   name?: string;
   tasks?: TaskInput[];
@@ -67,6 +68,8 @@ export interface WorkflowToolArgs {
   cascade?: boolean;
   // list
   agent_chain_id?: string;
+  // wait
+  wait_timeout_ms?: number;
 }
 
 export interface WorkflowToolResult {
@@ -369,6 +372,27 @@ export async function handleWorkflowToolCall(
       case "retention": {
         const summary = await deps.controlPlane.retention();
         return { ok: true, data: summary };
+      }
+
+      case "wait": {
+        const wfId = requireField(args.workflow_id, "workflow_id");
+        const wf = await deps.controlPlane.wait(wfId, args.wait_timeout_ms);
+
+        // Add duration field to each task (same as status)
+        const now = Date.now();
+        const tasksWithDuration = wf.tasks.map((task) => {
+          if (task.startedAt == null) {
+            return task;
+          }
+          const duration =
+            task.completedAt != null ? task.completedAt - task.startedAt : now - task.startedAt;
+          return { ...task, duration };
+        });
+
+        return {
+          ok: true,
+          data: { ...wf, tasks: tasksWithDuration, graph: serializeGraph(wf.graph) },
+        };
       }
 
       default:

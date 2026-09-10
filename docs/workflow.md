@@ -395,6 +395,7 @@ The workflow engine is exposed as a single tool called `workflow` with an `actio
 | `abort`     | `workflow_id`                                                                                |
 | `pause`     | `workflow_id`                                                                                |
 | `resume`    | `workflow_id`                                                                                |
+| `wait`      | `workflow_id`, optional `wait_timeout_ms`                                                    |
 | `status`    | `workflow_id`                                                                                |
 | `list`      | (optional `agent_chain_id`)                                                                  |
 | `post`      | `workflow_id`                                                                                |
