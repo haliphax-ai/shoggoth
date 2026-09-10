@@ -23,6 +23,18 @@ function setAtPath(root: unknown, segments: readonly string[]): void {
 }
 
 /**
+ * Clone a value and redact every dot-separated path in `jsonPaths`.
+ */
+function cloneAndRedact(value: unknown, jsonPaths: readonly string[]): unknown {
+  const clone = JSON.parse(JSON.stringify(value)) as unknown;
+  for (const p of jsonPaths) {
+    const segs = p.split(".").filter(Boolean);
+    if (segs.length) setAtPath(clone, segs);
+  }
+  return clone;
+}
+
+/**
  * Parses `argsJson` when possible, applies path redaction, returns JSON string for `args_redacted_json`.
  */
 export function redactToolArgsJson(
@@ -42,12 +54,7 @@ export function redactToolArgsJson(
     });
   }
   if (typeof parsed === "object" && parsed !== null) {
-    const clone = JSON.parse(JSON.stringify(parsed)) as unknown;
-    for (const p of jsonPaths) {
-      const segs = p.split(".").filter(Boolean);
-      if (segs.length) setAtPath(clone, segs);
-    }
-    return JSON.stringify(clone);
+    return JSON.stringify(cloneAndRedact(parsed, jsonPaths));
   }
   return JSON.stringify(parsed);
 }
@@ -59,12 +66,7 @@ export function redactJsonValue(value: unknown, jsonPaths: readonly string[]): s
   if (jsonPaths.length === 0) {
     return JSON.stringify(value);
   }
-  const clone = JSON.parse(JSON.stringify(value)) as unknown;
-  for (const p of jsonPaths) {
-    const segs = p.split(".").filter(Boolean);
-    if (segs.length) setAtPath(clone, segs);
-  }
-  return JSON.stringify(clone);
+  return JSON.stringify(cloneAndRedact(value, jsonPaths));
 }
 
 /**
