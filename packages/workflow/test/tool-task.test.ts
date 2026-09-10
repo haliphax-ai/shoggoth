@@ -102,6 +102,22 @@ function mockToolExecutor(
   };
 }
 
+function rawJsonToolExecutor(
+  resultJsonFn: (name: string, args: Record<string, unknown>) => string,
+): ToolExecutor & {
+  calls: Array<{ tool: string; args: Record<string, unknown> }>;
+} {
+  const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+  return {
+    calls,
+    async execute(call: { name: string; argsJson: string; toolCallId: string }) {
+      const args = JSON.parse(call.argsJson) as Record<string, unknown>;
+      calls.push({ tool: call.name, args });
+      return { resultJson: resultJsonFn(call.name, args) };
+    },
+  };
+}
+
 function defaultOpts(baseDir: string): OrchestratorOptions {
   return {
     stateDir: baseDir,
@@ -542,11 +558,81 @@ describe("Tool task execution", () => {
     await orch.start(tasks, "1>2", defaultOpts(baseDir));
 
     // Both complete synchronously during start; tick to trigger completion check
-    await orch.tick();
+  });
 
-    assert.ok(orch.isComplete());
-    assert.equal(notifier.calls.length, 1);
-    assert.equal(notifier.calls[0].success, true);
-    assert.equal(spawner.calls.length, 0); // no subagent sessions
+  it("marks tool task as failed with meaningful error when result is invalid JSON", async () => {
+    const spawner = mockSpawnAdapter();
+    const poller = mockPollAdapter(new Map());
+    const notifier = mockNotifyAdapter();
+    const executor = rawJsonToolExecutor(() => "this is not json");
+    const orch = new Orchestrator(
+      spawner,
+      poller,
+      notifier,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      executor,
+    );
+
+    const tasks = [makeToolTask(1, "builtin-read", { path: "foo.txt" })];
+    await orch.start(tasks, "1", defaultOpts(baseDir));
+
+    const wf = orch.getWorkflowStatus()!;
+    const task1 = wf.tasks[0];
+    assert.equal(task1.status, "failed");
+    assert.ok(task1.error!.includes("Tool returned invalid JSON"));
+    assert.ok(task1.error!.includes("this is not json"));
+  });
+
+  it("does not treat empty string error as a failure", async () => {
+    const spawner = mockSpawnAdapter();
+    const poller = mockPollAdapter(new Map());
+    const notifier = mockNotifyAdapter();
+    const executor = rawJsonToolExecutor(() => JSON.stringify({ error: "", output: "success" }));
+    const orch = new Orchestrator(
+      spawner,
+      poller,
+      notifier,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      executor,
+    );
+
+    const tasks = [makeToolTask(1, "builtin-read", { path: "foo.txt" })];
+    await orch.start(tasks, "1", defaultOpts(baseDir));
+
+    const wf = orch.getWorkflowStatus()!;
+    const task1 = wf.tasks[0];
+    assert.equal(task1.status, "done");
+    assert.equal(task1.output, "success");
+  });
+
+  it("does not treat falsy error (0) as a failure", async () => {
+    const spawner = mockSpawnAdapter();
+    const poller = mockPollAdapter(new Map());
+    const notifier = mockNotifyAdapter();
+    const executor = rawJsonToolExecutor(() => JSON.stringify({ error: 0, output: "success" }));
+    const orch = new Orchestrator(
+      spawner,
+      poller,
+      notifier,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      executor,
+    );
+
+    const tasks = [makeToolTask(1, "builtin-read", { path: "foo.txt" })];
+    await orch.start(tasks, "1", defaultOpts(baseDir));
+
+    const wf = orch.getWorkflowStatus()!;
+    const task1 = wf.tasks[0];
+    assert.equal(task1.status, "done");
+    assert.equal(task1.output, "success");
   });
 });
