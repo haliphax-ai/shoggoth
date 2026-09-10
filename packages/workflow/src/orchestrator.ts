@@ -587,9 +587,10 @@ export class Orchestrator {
         // Abort the in-flight model turn
         this.spawner.abortTask?.(task.sessionKey);
 
-        // Kill the session
+        // Kill the session (swallow errors for idempotency —
+        // sessions may already have been cleaned up)
         if (this.killer) {
-          await this.killer.kill(task.sessionKey);
+          await this.killer.kill(task.sessionKey).catch(() => {});
         }
 
         task.status = "failed";
@@ -664,12 +665,13 @@ export class Orchestrator {
   private async abortWorkflow(_triggerTask: TaskState): Promise<void> {
     const wf = this.workflow!;
 
-    // Kill all in-progress tasks
+    // Kill all in-progress tasks (swallow errors for idempotency —
+    // sessions may already have been cleaned up by a prior abort call)
     for (const task of wf.tasks) {
       if (task.status === "in_progress" && task.sessionKey) {
         this.spawner.abortTask?.(task.sessionKey);
         if (this.killer) {
-          await this.killer.kill(task.sessionKey);
+          await this.killer.kill(task.sessionKey).catch(() => {});
         }
         task.status = "failed";
         task.error = "aborted: workflow aborted due to task failure";
