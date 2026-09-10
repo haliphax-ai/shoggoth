@@ -42,7 +42,7 @@ jobs:
     steps:
       - uses: haliphax-ai/shoggoth/.github@main
       - name: Install ripgrep
-        run: apt-get update && apt-get install -y ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
         shell: bash
       - run: npm test
 
