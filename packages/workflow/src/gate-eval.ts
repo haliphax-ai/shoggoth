@@ -1,4 +1,5 @@
 import type { TaskState } from "./types.js";
+import { TEMPLATE_RE } from "./templates.js";
 
 /**
  * Context for gate condition evaluation.
@@ -29,7 +30,7 @@ export function buildGateContext(tasks: Map<number, TaskState>): GateContext {
  * Converts `{{task:N:field}}` syntax to `task.N.field` dot notation.
  */
 function resolveGateTemplates(condition: string): string {
-  return condition.replace(/\{\{task:(\d+):(output|success)\}\}/g, "task.$1.$2");
+  return condition.replace(TEMPLATE_RE, "task.$1.$2");
 }
 
 // --- Tokenizer ---
