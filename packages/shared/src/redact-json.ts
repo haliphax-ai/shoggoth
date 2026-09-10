@@ -2,9 +2,7 @@
  * Redaction hooks: replace values at dot-separated paths inside JSON-like trees.
  */
 
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
+import { isPlainObject } from "./utils";
 
 const REDACTED = "[REDACTED]";
 

@@ -1,8 +1,5 @@
 import type { ShoggothConfigFragment } from "./schema";
-
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
+import { isPlainObject } from "./utils";
 
 /** Deep merge JSON-like objects; later keys win. Arrays are replaced, not concatenated. */
 export function deepMerge(
