@@ -84,41 +84,85 @@ function taskMap(tasks: TaskState[]): Map<number, TaskState> {
 }
 
 /**
- * Check if a task has any dependency that failed (directly or transitively
- * blocking it). A task is blocked if any of its direct deps are failed,
- * or if any direct dep is pending and itself blocked.
+ * Precompute which pending tasks are blocked or skipped using single-pass
+ * graph traversals (BFS), replacing the previous per-task recursive approach.
+ *
+ * A task is **blocked** when at least one dependency is failed or transitively
+ * blocked. A task is **skipped** when at least one dependency is skipped or
+ * transitively skipped.
+ *
+ * Complexity: O(V + E) per call, compared to the previous O(V × E) worst case.
  */
-function isBlocked(taskId: number, graph: DependencyGraph, tasks: Map<number, TaskState>): boolean {
-  const deps = graph.get(taskId);
-  if (!deps || deps.size === 0) return false;
-
-  for (const depId of deps) {
-    const dep = tasks.get(depId);
-    if (!dep) return true; // missing dep = blocked
-    if (dep.status === "failed") return true;
-    if (dep.status === "pending" && isBlocked(depId, graph, tasks)) return true;
-  }
-  return false;
-}
-
-/**
- * Check if a task should be skipped because at least one dependency was skipped.
- */
-function shouldSkip(
-  taskId: number,
+function computeBlockedAndSkipped(
   graph: DependencyGraph,
   tasks: Map<number, TaskState>,
-): boolean {
-  const deps = graph.get(taskId);
-  if (!deps || deps.size === 0) return false;
-
-  for (const depId of deps) {
-    const dep = tasks.get(depId);
-    if (!dep) continue;
-    if (dep.status === "skipped") return true;
-    if (dep.status === "pending" && shouldSkip(depId, graph, tasks)) return true;
+): { blocked: Set<number>; skipped: Set<number> } {
+  // Build reverse adjacency: dep → set of tasks that depend on it
+  const reverse = new Map<number, Set<number>>();
+  for (const [taskId, deps] of graph) {
+    for (const depId of deps) {
+      if (!reverse.has(depId)) reverse.set(depId, new Set());
+      reverse.get(depId)!.add(taskId);
+    }
   }
-  return false;
+
+  const blocked = new Set<number>();
+  const skipped = new Set<number>();
+
+  // --- BFS from all failed tasks to find transitively blocked ---
+  {
+    const queue: number[] = [];
+    for (const [id, t] of tasks) {
+      if (t.status === "failed") {
+        queue.push(id);
+      }
+    }
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      for (const dependent of reverse.get(current) ?? []) {
+        if (blocked.has(dependent) || skipped.has(dependent)) continue;
+        if (tasks.get(dependent)?.status !== "pending") continue;
+        blocked.add(dependent);
+        queue.push(dependent);
+      }
+    }
+  }
+
+  // --- BFS from all skipped tasks to find transitively skipped ---
+  {
+    const queue: number[] = [];
+    for (const [id, t] of tasks) {
+      if (t.status === "skipped") {
+        queue.push(id);
+      }
+    }
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      for (const dependent of reverse.get(current) ?? []) {
+        if (skipped.has(dependent) || blocked.has(dependent)) continue;
+        if (tasks.get(dependent)?.status !== "pending") continue;
+        skipped.add(dependent);
+        queue.push(dependent);
+      }
+    }
+  }
+
+  // --- Handle tasks with missing deps (not in graph at all) ---
+  for (const [id, t] of tasks) {
+    if (t.status !== "pending") continue;
+    if (skipped.has(id) || blocked.has(id)) continue;
+    const deps = graph.get(id);
+    if (!deps || deps.size === 0) continue;
+
+    for (const depId of deps) {
+      if (!tasks.has(depId)) {
+        blocked.add(id);
+        break;
+      }
+    }
+  }
+
+  return { blocked, skipped };
 }
 
 /** Resolve outputTemplate for a completed task, replacing self.* refs. */
@@ -592,19 +636,20 @@ export class Orchestrator {
 
   private markBlockedTasks(tm: Map<number, TaskState>): void {
     const wf = this.workflow!;
+    const { blocked, skipped } = computeBlockedAndSkipped(wf.graph, tm);
 
     for (const task of wf.tasks) {
       if (task.status !== "pending") continue;
 
-      // Check for skipped dependencies first — skip takes priority over block
-      if (shouldSkip(task.taskDef.id, wf.graph, tm)) {
+      // Skip takes priority over block
+      if (skipped.has(task.taskDef.id)) {
         task.status = "skipped";
         task.completedAt = Date.now();
         this.dirty = true;
         continue;
       }
 
-      if (isBlocked(task.taskDef.id, wf.graph, tm)) {
+      if (blocked.has(task.taskDef.id)) {
         task.status = "failed";
         task.error = "blocked: dependency failed";
         task.completedAt = Date.now();
