@@ -173,15 +173,16 @@ function detectCycles(graph: DependencyGraph): void {
 }
 
 /**
- * Get all transitive dependencies for a given task ID.
+ * Build a reverse adjacency graph from a dependency graph.
+ *
+ * The forward graph maps each task to its dependencies (what it depends on).
+ * The reverse graph maps each task to its dependents (what depends on it).
+ *
+ * Building this once makes getTransitiveDependents O(V + E) instead of O(V²).
+ *
+ * @returns A map where each key is a task ID and the value is the set of task IDs that depend on it.
  */
-/**
- * Get all transitive dependents of a task (tasks that depend on it, directly or transitively).
- * This is the reverse of getTransitiveDeps — it finds all tasks that have `taskId`
- * as a transitive dependency.
- */
-export function getTransitiveDependents(taskId: number, graph: DependencyGraph): Set<number> {
-  // Build reverse graph: for each task, which tasks depend on it
+export function buildReverseGraph(graph: DependencyGraph): Map<number, Set<number>> {
   const reverse = new Map<number, Set<number>>();
   for (const [tid, deps] of graph) {
     for (const depId of deps) {
@@ -189,6 +190,28 @@ export function getTransitiveDependents(taskId: number, graph: DependencyGraph):
       reverse.get(depId)!.add(tid);
     }
   }
+  return reverse;
+}
+
+/**
+ * Get all transitive dependents of a task (tasks that depend on it, directly or transitively).
+ * This is the reverse of getTransitiveDeps — it finds all tasks that have `taskId`
+ * as a transitive dependency.
+ *
+ * @param taskId - The task to find dependents for.
+ * @param graph - The forward dependency graph.
+ * @param reverseGraph - Optional precomputed reverse graph (from buildReverseGraph).
+ *                       If provided, avoids O(V²) rebuild on each call.
+ *                       Pass the same reverse graph instance across multiple calls
+ *                       to amortize the build cost.
+ */
+export function getTransitiveDependents(
+  taskId: number,
+  graph: DependencyGraph,
+  reverseGraph?: Map<number, Set<number>>,
+): Set<number> {
+  // Use precomputed reverse graph if provided, otherwise build inline (legacy behavior)
+  const reverse = reverseGraph ?? buildReverseGraph(graph);
 
   const visited = new Set<number>();
   const stack = [...(reverse.get(taskId) ?? [])];

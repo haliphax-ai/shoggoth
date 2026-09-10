@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { TaskDef, TaskState, TaskList, DependencyGraph, ToolExecutor } from "./types.js";
 import { getTaskPromptOrLabel, isTerminal } from "./types.js";
-import { parseGraph, validateGraph, getTransitiveDependents } from "./graph.js";
+import { parseGraph, validateGraph, getTransitiveDependents, buildReverseGraph } from "./graph.js";
 import { parseTemplateRefs, validateTemplateRefs, resolveTemplates } from "./templates.js";
 import { canSpawn } from "./depth.js";
 import { saveWorkflow } from "./state.js";
@@ -663,6 +663,9 @@ export class Orchestrator {
     const opts = this.opts!;
     const concurrency = wf.concurrency ?? 0;
 
+    // Precompute reverse graph once for O(V + E) transitive dependent lookups
+    const reverseGraph = buildReverseGraph(wf.graph);
+
     for (const task of wf.tasks) {
       if (task.status !== "pending") continue;
 
@@ -712,7 +715,7 @@ export class Orchestrator {
             });
 
             // Propagate: mark all transitive dependents as skipped
-            const dependents = getTransitiveDependents(task.taskDef.id, wf.graph);
+            const dependents = getTransitiveDependents(task.taskDef.id, wf.graph, reverseGraph);
             for (const depId of dependents) {
               const depTask = tm.get(depId);
               if (depTask && depTask.status === "pending") {
