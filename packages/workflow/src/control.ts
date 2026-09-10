@@ -1,6 +1,6 @@
 import type { TaskDef, TaskList, TaskStatus } from "./types.js";
 import { isTerminal } from "./types.js";
-import { getTransitiveDependents } from "./graph.js";
+import { getTransitiveDependents, buildReverseGraph } from "./graph.js";
 import type { Orchestrator, KillAdapter, SpawnAdapter } from "./orchestrator.js";
 import { saveWorkflow, loadWorkflow } from "./state.js";
 import { retentionRun, type RetentionSummary, type RetentionOptions } from "./retention.js";
@@ -284,8 +284,9 @@ export class ControlPlane {
     // Reset the target task
     this.resetTask(task);
 
-    // Get all downstream task IDs
-    const downstreamIds = getTransitiveDependents(taskId, wf.graph);
+    // Get all downstream task IDs (precompute reverse graph for O(V + E) lookup)
+    const reverseGraph = buildReverseGraph(wf.graph);
+    const downstreamIds = getTransitiveDependents(taskId, wf.graph, reverseGraph);
 
     for (const t of wf.tasks) {
       if (!downstreamIds.has(t.taskDef.id)) continue;

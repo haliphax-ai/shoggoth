@@ -5,6 +5,7 @@ import {
   validateGraph,
   getTransitiveDeps,
   getTransitiveDependents,
+  buildReverseGraph,
 } from "../src/graph.js";
 
 describe("parseGraph", () => {
@@ -215,5 +216,69 @@ describe("getTransitiveDependents", () => {
     assert.ok(deps.has(2));
     assert.ok(deps.has(3));
     assert.equal(deps.size, 2);
+  });
+
+  it("works with precomputed reverse graph", () => {
+    // 1>2>3: with precomputed reverse graph
+    const g = parseGraph("1>2 2>3");
+    const reverse = buildReverseGraph(g);
+    const deps = getTransitiveDependents(1, g, reverse);
+    assert.ok(deps.has(2));
+    assert.ok(deps.has(3));
+    assert.equal(deps.size, 2);
+  });
+});
+
+describe("buildReverseGraph", () => {
+  it("builds reverse graph for a simple dependency", () => {
+    // 1>2: task 2 depends on task 1
+    // Reverse: task 1 has dependent {2}
+    const g = parseGraph("1>2");
+    const reverse = buildReverseGraph(g);
+    assert.deepStrictEqual(reverse.get(1), new Set([2]));
+    assert.ok(!reverse.has(2)); // task 2 has no dependents
+  });
+
+  it("builds reverse graph for a chain", () => {
+    // 1>2>3: task 3 depends on 2, task 2 depends on 1
+    // Reverse: task 1 has dependent {2}, task 2 has dependent {3}
+    const g = parseGraph("1>2 2>3");
+    const reverse = buildReverseGraph(g);
+    assert.deepStrictEqual(reverse.get(1), new Set([2]));
+    assert.deepStrictEqual(reverse.get(2), new Set([3]));
+    assert.ok(!reverse.has(3)); // task 3 has no dependents
+  });
+
+  it("builds reverse graph for a diamond", () => {
+    // 1>2 1>3 2>3: task 2 depends on 1, task 3 depends on 1 and 2
+    // Reverse: task 1 has dependents {2, 3}, task 2 has dependent {3}
+    const g = parseGraph("1>2 1>3 2>3");
+    const reverse = buildReverseGraph(g);
+    assert.deepStrictEqual(reverse.get(1), new Set([2, 3]));
+    assert.deepStrictEqual(reverse.get(2), new Set([3]));
+    assert.ok(!reverse.has(3));
+  });
+
+  it("returns empty map for empty graph", () => {
+    const g = parseGraph("");
+    const reverse = buildReverseGraph(g);
+    assert.equal(reverse.size, 0);
+  });
+
+  it("returns empty map for standalone tasks", () => {
+    const g = parseGraph("1,2,3");
+    const reverse = buildReverseGraph(g);
+    assert.equal(reverse.size, 0);
+  });
+
+  it("handles group dependencies", () => {
+    // 1,3,4>5: task 5 depends on tasks 1, 3, 4
+    // Reverse: tasks 1, 3, 4 each have dependent {5}
+    const g = parseGraph("1,3,4>5");
+    const reverse = buildReverseGraph(g);
+    assert.deepStrictEqual(reverse.get(1), new Set([5]));
+    assert.deepStrictEqual(reverse.get(3), new Set([5]));
+    assert.deepStrictEqual(reverse.get(4), new Set([5]));
+    assert.ok(!reverse.has(5));
   });
 });
