@@ -5,6 +5,7 @@ import {
   type PollAdapter,
   type NotifyAdapter,
   type NotificationAdapter,
+  type KillAdapter,
   type MessagePoster,
   type OrchestratorOptions,
 } from "./orchestrator.js";
@@ -27,6 +28,8 @@ export interface WorkflowServerOptions {
   createMessagePoster?: (sessionId: string) => MessagePoster;
   /** Factory to create a per-workflow ToolExecutor for tool tasks. */
   createToolExecutor?: (sessionId: string) => ToolExecutor;
+  /** Factory to create a per-workflow KillAdapter for task cleanup. */
+  createKiller?: (sessionId: string) => KillAdapter;
 }
 
 /**
@@ -51,22 +54,23 @@ export class WorkflowServer {
     const resumed: string[] = [];
 
     for (const wf of incomplete) {
+      const replyTo = wf.replyTo ?? "";
       const orch = new Orchestrator(
         this.opts.spawner,
         this.opts.poller,
         this.opts.notifier,
-        undefined,
-        undefined,
-        undefined,
-        this.opts.createMessagePoster?.(""),
-        undefined,
+        this.opts.createStatusManager?.(replyTo),
+        this.opts.createNotificationAdapter?.(replyTo),
+        this.opts.createKiller?.(replyTo),
+        this.opts.createMessagePoster?.(replyTo),
+        this.opts.createToolExecutor?.(replyTo),
       );
       // Restore workflow state into the orchestrator and start polling
       orch.restore(wf, {
         stateDir: this.opts.stateDir,
-        currentDepth: 0,
-        maxDepth: 2,
-        replyTo: "",
+        currentDepth: wf.currentDepth ?? 0,
+        maxDepth: wf.maxDepth ?? 2,
+        replyTo,
         pollingIntervalMs: wf.pollingIntervalMs,
         runtimeLimitMs: wf.runtimeLimitMs ?? 600_000,
       });
@@ -86,7 +90,7 @@ export class WorkflowServer {
       this.opts.notifier,
       this.opts.createStatusManager?.(opts.replyTo),
       this.opts.createNotificationAdapter?.(opts.replyTo),
-      undefined,
+      this.opts.createKiller?.(opts.replyTo),
       this.opts.createMessagePoster?.(opts.replyTo),
       this.opts.createToolExecutor?.(opts.replyTo),
     );

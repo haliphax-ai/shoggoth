@@ -18,6 +18,9 @@ export interface SerializedWorkflow {
   createdAt: number;
   concurrency?: number;
   runtimeLimitMs?: number;
+  currentDepth?: number;
+  maxDepth?: number;
+  replyTo?: string;
 }
 
 function serializeGraph(graph: DependencyGraph): SerializedGraph {
@@ -46,6 +49,9 @@ function serialize(wf: TaskList): SerializedWorkflow {
     createdAt: wf.createdAt,
     ...(wf.concurrency ? { concurrency: wf.concurrency } : {}),
     ...(wf.runtimeLimitMs ? { runtimeLimitMs: wf.runtimeLimitMs } : {}),
+    ...(wf.currentDepth != null ? { currentDepth: wf.currentDepth } : {}),
+    ...(wf.maxDepth != null ? { maxDepth: wf.maxDepth } : {}),
+    ...(wf.replyTo != null ? { replyTo: wf.replyTo } : {}),
   };
 }
 
@@ -59,6 +65,9 @@ function deserialize(raw: SerializedWorkflow): TaskList {
     createdAt: raw.createdAt,
     ...(raw.concurrency ? { concurrency: raw.concurrency } : {}),
     ...(raw.runtimeLimitMs ? { runtimeLimitMs: raw.runtimeLimitMs } : {}),
+    ...(raw.currentDepth != null ? { currentDepth: raw.currentDepth } : {}),
+    ...(raw.maxDepth != null ? { maxDepth: raw.maxDepth } : {}),
+    ...(raw.replyTo != null ? { replyTo: raw.replyTo } : {}),
   };
 }
 

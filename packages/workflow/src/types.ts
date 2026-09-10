@@ -131,6 +131,12 @@ export interface TaskList {
   concurrency?: number;
   /** Default per-task runtime limit in ms. Persisted for resume. */
   runtimeLimitMs?: number;
+  /** Spawn depth at which the workflow was started. Persisted for resume. */
+  currentDepth?: number;
+  /** Maximum allowed spawn depth. Persisted for resume. */
+  maxDepth?: number;
+  /** Session/channel ID to reply to. Persisted for resume. */
+  replyTo?: string;
 }
 
 // Template reference types

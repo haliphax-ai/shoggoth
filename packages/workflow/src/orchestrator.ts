@@ -290,6 +290,9 @@ export class Orchestrator {
       createdAt: Date.now(),
       ...(opts.concurrency ? { concurrency: opts.concurrency } : {}),
       ...(opts.runtimeLimitMs ? { runtimeLimitMs: opts.runtimeLimitMs } : {}),
+      currentDepth: opts.currentDepth,
+      maxDepth: opts.maxDepth,
+      replyTo: opts.replyTo,
     };
 
     this.workflow = workflow;

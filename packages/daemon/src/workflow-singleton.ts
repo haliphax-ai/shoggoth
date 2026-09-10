@@ -55,6 +55,8 @@ export function initWorkflow(opts: WorkflowSingletonOptions): {
     ? (sessionId: string) => new StatusManager(opts.createMessageAdapter!(sessionId))
     : undefined;
 
+  const createKiller = opts.killer ? (_sessionId: string) => opts.killer : undefined;
+
   server = new WorkflowServer({
     stateDir,
     spawner: opts.spawner,
@@ -64,6 +66,7 @@ export function initWorkflow(opts: WorkflowSingletonOptions): {
     createNotificationAdapter: opts.createNotificationAdapter,
     createMessagePoster: opts.createMessagePoster,
     createToolExecutor: opts.createToolExecutor,
+    createKiller,
   });
 
   controlPlane = new ControlPlane({
