@@ -187,9 +187,9 @@ The `graph` string uses a space-separated lane syntax to encode task dependencie
 1>2 2>3 1>4  — diamond: 2 and 4 wait for 1, 3 waits for 2
 ```
 
-Tasks with no dependencies can be omitted from the graph (they run immediately).
+Every task defined in the `tasks` array **must** have a corresponding entry in the `graph` string. Tasks with no dependencies should be listed as a bare ID (e.g. `4` for a root with no deps). Omitting a task from the graph causes a validation error.
 
-> **⚠️ Important:** Every task defined in the `tasks` array **must** also appear in the `graph` string. Any task not referenced in the graph will be **silently skipped** and never executed. Always include at least a bare entry (e.g. `3:` for a root task with no dependencies) for every task you define.
+> **⚠️ Important:** Every task defined in the `tasks` array **must** appear in the `graph` string. Tasks missing from the graph will cause a validation error at workflow start. Always include at least a bare entry (e.g. `4` for a root with no deps) for every task you define.
 
 ## Tips
 

@@ -101,6 +101,18 @@ function parseSegment(segment: string): number[] {
 export function validateGraph(graph: DependencyGraph, taskIds: Set<number>): string[] {
   const warnings: string[] = [];
 
+  // Check for task IDs that exist in the task list but have no graph entry.
+  // This catches accidentally omitted entries — the agent likely meant to
+  // include the task in the DAG rather than silently skip it.
+  for (const taskId of taskIds) {
+    if (!graph.has(taskId)) {
+      throw new Error(
+        `Task ${taskId} is defined but has no entry in the dependency graph. ` +
+          `Intentionally independent tasks should be included as a bare entry (e.g. just "${taskId}" for a root with no deps)`,
+      );
+    }
+  }
+
   // Check for references to tasks not in the task list
   for (const [taskId, deps] of graph) {
     if (!taskIds.has(taskId)) {

@@ -722,8 +722,7 @@ export class Orchestrator {
         if (inProgress >= concurrency) break;
       }
 
-      const deps = wf.graph.get(task.taskDef.id);
-      if (!deps) continue; // task not in graph — skip
+      const deps = wf.graph.get(task.taskDef.id)!;
 
       // All deps must be done
       const allDepsDone = [...deps].every((depId) => {
