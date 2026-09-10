@@ -1,27 +1,49 @@
-# See docs/runbook.md § CI test matrix.
-# - unit: default VM; `npm test` includes SHOGGOTH-READY compose tests when Docker/Compose is available (default stack).
-# - agent-uid-isolation: container root + uids 1000/900; SHOGGOTH_CI_STRICT_AGENT_TESTS enforces DAC tests.
 name: CI
 
 on:
-  push:
-    branches: [main, master]
   pull_request:
-    branches: [main, master]
+    branches: [main]
+    types: [opened, reopened, synchronize]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
 
 jobs:
+  docker:
+    runs-on: ubuntu-latest
+    services:
+      registry:
+        image: registry:3
+        ports: [5000:5000]
+    steps:
+      - uses: haliphax-ai/shoggoth/.github@main
+      - uses: docker/setup-buildx-action@v4
+        with:
+          driver-opts: network=host
+      - uses: docker/build-push-action@v7
+        with:
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          push: true
+          tags: localhost:5000/shoggoth:latest
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: haliphax-ai/shoggoth/.github@main
+      - run: npm run typecheck
+
   unit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: haliphax-ai/shoggoth/.github@main
       - name: Install ripgrep
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
+        run: apt-get update && apt-get install -y ripgrep
+        shell: bash
       - run: npm test
 
   agent-uid-isolation:
@@ -29,16 +51,28 @@ jobs:
     container:
       image: node:22-bookworm
     steps:
-      - uses: actions/checkout@v6
+      - uses: haliphax-ai/shoggoth/.github@main
       - name: create shoggoth (1000) and agent (900) users to match Docker image UIDs
         run: |
           groupadd --system --gid 1000 shoggoth || true
           useradd --system --uid 1000 --gid shoggoth --no-create-home shoggoth || true
           groupadd --system --gid 900 agent
           useradd --system --uid 900 --gid agent --no-create-home agent
-      - run: npm ci
-      - run: npm run typecheck -w @shoggoth/os-exec
       - name: strict DAC + agent UID integration tests
         env:
           SHOGGOTH_CI_STRICT_AGENT_TESTS: "1"
         run: npm run test -w @shoggoth/os-exec
+
+  oxlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: haliphax-ai/shoggoth/.github@main
+      - name: oxlint
+        run: npx oxlint .
+
+  oxfmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: haliphax-ai/shoggoth/.github@main
+      - name: oxfmt
+        run: npx oxfmt --no-error-on-unmatched-pattern .
