@@ -224,3 +224,140 @@ describe("Orchestrator restore()", () => {
     expect((orch as any).statusTimer).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Orchestrator — unique task ID validation
+// ---------------------------------------------------------------------------
+
+describe("Orchestrator unique task ID validation", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "shoggoth-orch-dup-id-"));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function makeOpts(): OrchestratorOptions {
+    return {
+      stateDir: tempDir,
+      currentDepth: 0,
+      maxDepth: 3,
+      replyTo: "agent:test",
+      pollingIntervalMs: 1000,
+      runtimeLimitMs: 60000,
+    };
+  }
+
+  it("throws when two tasks share the same ID", async () => {
+    const spawner = makeSpawner([]);
+    const poller = makePoller(new Map());
+    const notifier = makeNotifier();
+    const orch = new Orchestrator(spawner, poller, notifier);
+
+    const tasks: AgentTaskDef[] = [
+      {
+        kind: "agent",
+        id: 1,
+        prompt: "First task",
+        failureBehavior: "continue",
+        failureNotification: "silent",
+      },
+      {
+        kind: "agent",
+        id: 1,
+        prompt: "Second task with same ID",
+        failureBehavior: "continue",
+        failureNotification: "silent",
+      },
+    ];
+
+    await expect(orch.start(tasks, "1", makeOpts())).rejects.toThrow(
+      "Duplicate task IDs found: [1]",
+    );
+  });
+
+  it("throws when multiple IDs are duplicated", async () => {
+    const spawner = makeSpawner([]);
+    const poller = makePoller(new Map());
+    const notifier = makeNotifier();
+    const orch = new Orchestrator(spawner, poller, notifier);
+
+    const tasks: AgentTaskDef[] = [
+      {
+        kind: "agent",
+        id: 1,
+        prompt: "A",
+        failureBehavior: "continue",
+        failureNotification: "silent",
+      },
+      {
+        kind: "agent",
+        id: 2,
+        prompt: "B",
+        failureBehavior: "continue",
+        failureNotification: "silent",
+      },
+      {
+        kind: "agent",
+        id: 1,
+        prompt: "C",
+        failureBehavior: "continue",
+        failureNotification: "silent",
+      },
+      {
+        kind: "agent",
+        id: 2,
+        prompt: "D",
+        failureBehavior: "continue",
+        failureNotification: "silent",
+      },
+    ];
+
+    await expect(orch.start(tasks, "1>2", makeOpts())).rejects.toThrow(
+      /Duplicate task IDs found: \[1, 2\]/,
+    );
+  });
+
+  it("does not throw when all task IDs are unique", async () => {
+    const spawner = makeSpawner([]);
+    const poller = makePoller(new Map());
+    const notifier = makeNotifier();
+    const orch = new Orchestrator(spawner, poller, notifier);
+
+    const tasks: AgentTaskDef[] = [
+      {
+        kind: "agent",
+        id: 1,
+        prompt: "A",
+        failureBehavior: "continue",
+        failureNotification: "silent",
+      },
+      {
+        kind: "agent",
+        id: 2,
+        prompt: "B",
+        failureBehavior: "continue",
+        failureNotification: "silent",
+      },
+      {
+        kind: "agent",
+        id: 3,
+        prompt: "C",
+        failureBehavior: "continue",
+        failureNotification: "silent",
+      },
+    ];
+
+    // Should not throw — the graph "1->2" won't include 3, so validateGraph
+    // may reject it, but the unique-ID check should pass. We just verify no
+    // "Duplicate task IDs" error by catching a different error if any.
+    try {
+      await orch.start(tasks, "1>2>3", makeOpts());
+    } catch (err) {
+      expect((err as Error).message).not.toMatch(/Duplicate task IDs/);
+    }
+  });
+});

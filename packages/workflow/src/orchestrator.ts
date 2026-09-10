@@ -244,6 +244,21 @@ export class Orchestrator {
       throw new Error("Cannot start workflow: spawn depth limit reached");
     }
 
+    // Validate unique task IDs
+    const idSeen = new Set<number>();
+    const duplicates: number[] = [];
+    for (const task of tasks) {
+      if (idSeen.has(task.id)) {
+        duplicates.push(task.id);
+      } else {
+        idSeen.add(task.id);
+      }
+    }
+    if (duplicates.length > 0) {
+      const unique = [...new Set(duplicates)].join(", ");
+      throw new Error(`Duplicate task IDs found: [${unique}]`);
+    }
+
     // Parse and validate graph
     const graph = parseGraph(graphDsl);
     const taskIds = new Set(tasks.map((t) => t.id));
