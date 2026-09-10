@@ -869,14 +869,25 @@ export class Orchestrator {
             argsJson: JSON.stringify(resolvedArgs),
             toolCallId,
           });
-          const parsed = JSON.parse(result.resultJson);
-          if (parsed.error) {
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(result.resultJson) as Record<string, unknown>;
+          } catch {
             task.status = "failed";
-            task.error = parsed.error;
+            task.error = `Tool returned invalid JSON: ${result.resultJson.slice(0, 200)}`;
+            task.completedAt = Date.now();
+            this.dirty = true;
+            continue;
+          }
+          if (typeof parsed.error === "string" && parsed.error) {
+            task.status = "failed";
+            task.error = parsed.error as string;
           } else {
-            task.output = typeof parsed.output === "string" ? parsed.output : result.resultJson;
+            task.output =
+              typeof parsed.output === "string" ? (parsed.output as string) : result.resultJson;
             task.status = "done";
           }
+
           task.completedAt = Date.now();
           this.dirty = true;
           log.debug("tool task completed", {
