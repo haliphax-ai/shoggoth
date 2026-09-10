@@ -1,5 +1,5 @@
+import { TEMPLATE_PATTERN } from "./templates.js";
 import type { TaskState } from "./types.js";
-import { TEMPLATE_RE } from "./templates.js";
 
 /**
  * Context for gate condition evaluation.
@@ -30,7 +30,8 @@ export function buildGateContext(tasks: Map<number, TaskState>): GateContext {
  * Converts `{{task:N:field}}` syntax to `task.N.field` dot notation.
  */
 function resolveGateTemplates(condition: string): string {
-  return condition.replace(TEMPLATE_RE, "task.$1.$2");
+  const re = new RegExp(TEMPLATE_PATTERN, "g");
+  return condition.replace(re, "task.$1.$2");
 }
 
 // --- Tokenizer ---
