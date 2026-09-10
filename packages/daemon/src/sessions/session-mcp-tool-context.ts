@@ -403,7 +403,7 @@ const MEDIA_GENERATE_TOOL_DESCRIPTOR: AggregatedTool = {
   originalName: "media-generate",
   name: "media-generate",
   description:
-    "Generate images, audio, video, or music using Google AI models. Results are written to disk and optionally surfaced inline.",
+    "Generate images, audio, video, or music using Google AI models. Results are always saved to disk at the required output_path.",
   inputSchema: {
     type: "object",
     properties: {
@@ -458,15 +458,10 @@ const MEDIA_GENERATE_TOOL_DESCRIPTOR: AggregatedTool = {
       },
       output_path: {
         type: "string",
-        description: "Workspace-relative output path. Auto-generated if omitted.",
-      },
-      show: {
-        type: "boolean",
-        description:
-          "When true, include the generated image as content parts in the tool result so a multimodal agent can see and analyze it. Default true.",
+        description: "Workspace-relative output path for the generated file (required).",
       },
     },
-    required: ["model", "prompt", "params"],
+    required: ["model", "prompt", "params", "output_path"],
   },
 };
 

@@ -1,10 +1,8 @@
 // ---------------------------------------------------------------------------
 // builtin-media-generate — generate images, audio, video, or music via
-// the media_generate control plane op, then optionally surface via show.
+// the media_generate control plane op, saving the result to disk.
 // ---------------------------------------------------------------------------
 
-import { randomUUID } from "node:crypto";
-import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import type {
   BuiltinToolRegistry,
@@ -12,28 +10,9 @@ import type {
   BuiltinToolResult,
 } from "../builtin-tool-registry";
 import { resolveUserPath } from "../builtin-tool-registry";
-import type { ChatContentPart } from "@shoggoth/models";
-import { getBlockResolver, type ShowToolParams } from "../../presentation/show-blocks.js";
-import { detectMediaTypeFromBytes } from "../../presentation/image-ingest.js";
 import { getLogger } from "../../logging.js";
 
 const log = getLogger("media-generate-handler");
-
-/** Map params.kind to a sensible default file extension. */
-function extensionForKind(kind: string): string {
-  switch (kind) {
-    case "image":
-      return ".png";
-    case "video":
-      return ".mp4";
-    case "speech":
-      return ".wav";
-    case "music":
-      return ".wav";
-    default:
-      return ".bin";
-  }
-}
 
 /**
  * Read the input image for editing from a workspace-relative path, base64-encode it,
@@ -48,8 +27,6 @@ async function resolveInputImageBase64(
   if (typeof inputPath !== "string" || inputPath.length === 0) return undefined;
   const abs = resolveUserPath(ctx, inputPath);
   const bytes = await readFile(abs);
-  // Sniff the bytes so callers can (optionally) infer MIME; we accept any readable file.
-  void detectMediaTypeFromBytes(bytes);
   return bytes.toString("base64");
 }
 
@@ -89,13 +66,10 @@ async function mediaGenerateHandler(
     return { resultJson: JSON.stringify({ error: "Integration invoker unavailable" }) };
   }
 
-  const outputPath =
-    typeof args.output_path === "string" && args.output_path
-      ? resolveUserPath(ctx, args.output_path)
-      : join(
-          ctx.config.mediaGeneration?.outputDirectory ?? join(ctx.workspacePath, "tmp", "media"),
-          `${randomUUID()}${extensionForKind(params.kind as string)}`,
-        );
+  if (typeof args.output_path !== "string" || !args.output_path) {
+    return { resultJson: JSON.stringify({ error: "output_path is required" }) };
+  }
+  const outputPath = resolveUserPath(ctx, args.output_path);
   const timeoutMs = typeof args.timeout_ms === "number" ? args.timeout_ms : undefined;
 
   let result: Record<string, unknown>;
@@ -131,40 +105,9 @@ async function mediaGenerateHandler(
     return { resultJson: JSON.stringify(result) };
   }
 
-  // Complete — optionally surface via show.
-  const show = args.show !== false; // default true
-  const contentParts: ChatContentPart[] = [];
-
-  if (show && result.status === "complete" && result.path) {
-    const mimeType = result.mime_type as string | undefined;
-    // Only show images via builtin-show (audio/video are too large for inline content parts)
-    if (mimeType && mimeType.startsWith("image/")) {
-      try {
-        const resolver = getBlockResolver("image");
-        if (resolver) {
-          const showParams: ShowToolParams = {
-            type: "image",
-            path: result.path as string,
-          };
-          const resolved = await resolver(showParams, {
-            workspacePath: ctx.workspacePath,
-            creds: ctx.creds,
-          });
-          if (resolved.kind === "contentPart") {
-            contentParts.push(...resolved.parts);
-          }
-        }
-      } catch (err) {
-        log.warn("media_generate_show_failed", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
-  }
-
+  // Complete — file is on disk at outputPath.
   const response: BuiltinToolResult = {
     resultJson: JSON.stringify(result),
-    ...(contentParts.length > 0 ? { contentParts } : {}),
   };
   return response;
 }
