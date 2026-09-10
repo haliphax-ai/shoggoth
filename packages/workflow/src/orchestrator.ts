@@ -475,10 +475,39 @@ export class Orchestrator {
   private async pollInProgress(): Promise<void> {
     const wf = this.workflow!;
 
-    for (const task of wf.tasks) {
-      if (task.status !== "in_progress" || !task.sessionKey) continue;
+    // Collect in-progress tasks that have a session key
+    const tasksToPoll = wf.tasks.filter((t) => t.status === "in_progress" && t.sessionKey);
 
-      const result = await this.poller.poll(task.sessionKey);
+    if (tasksToPoll.length === 0) return;
+
+    // Poll all in-progress tasks in parallel
+    const pollResults = await Promise.allSettled(
+      tasksToPoll.map((task) => this.poller.poll(task.sessionKey!)),
+    );
+
+    // Process each poll result
+    for (let i = 0; i < tasksToPoll.length; i++) {
+      const task = tasksToPoll[i];
+      const settled = pollResults[i];
+
+      if (settled.status === "rejected") {
+        // Poll itself threw — treat the task as failed
+        task.status = "failed";
+        task.error = `poll error: ${settled.reason instanceof Error ? settled.reason.message : String(settled.reason)}`;
+        task.completedAt = Date.now();
+        this.dirty = true;
+        log.debug("task poll failed with exception", {
+          workflowId: wf.id,
+          taskId: task.taskDef.id,
+          error: settled.reason,
+        });
+        if (this.killer && task.sessionKey) {
+          await this.killer.kill(task.sessionKey).catch(() => {});
+        }
+        continue;
+      }
+
+      const result = settled.value;
 
       if (result.status === "done") {
         // Check for self-reported failure marker in the output
