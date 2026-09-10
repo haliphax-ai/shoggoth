@@ -42,6 +42,7 @@ export {
   saveWorkflow,
   loadWorkflow,
   deleteWorkflow,
+  listWorkflows,
   listIncompleteWorkflows,
   listAllWorkflows,
   type SerializedWorkflow,

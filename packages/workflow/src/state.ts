@@ -90,28 +90,7 @@ export function deleteWorkflow(baseDir: string, workflowId: string): void {
   }
 }
 
-export function listIncompleteWorkflows(baseDir: string): TaskList[] {
-  if (!fs.existsSync(baseDir)) return [];
-
-  const files = fs.readdirSync(baseDir).filter((f) => f.endsWith(".json"));
-  const incomplete: TaskList[] = [];
-
-  for (const file of files) {
-    const fp = path.join(baseDir, file);
-    try {
-      const raw: SerializedWorkflow = JSON.parse(fs.readFileSync(fp, "utf-8"));
-      const wf = deserialize(raw);
-      const allTerminal = wf.tasks.every((t) => isTerminal(t.status));
-      if (!allTerminal) incomplete.push(wf);
-    } catch {
-      // skip corrupt files
-    }
-  }
-
-  return incomplete;
-}
-
-export function listAllWorkflows(baseDir: string): TaskList[] {
+export function listWorkflows(baseDir: string, filter?: (wf: TaskList) => boolean): TaskList[] {
   if (!fs.existsSync(baseDir)) return [];
 
   const files = fs.readdirSync(baseDir).filter((f) => f.endsWith(".json"));
@@ -121,11 +100,20 @@ export function listAllWorkflows(baseDir: string): TaskList[] {
     const fp = path.join(baseDir, file);
     try {
       const raw: SerializedWorkflow = JSON.parse(fs.readFileSync(fp, "utf-8"));
-      workflows.push(deserialize(raw));
+      const wf = deserialize(raw);
+      if (!filter || filter(wf)) workflows.push(wf);
     } catch {
       // skip corrupt files
     }
   }
 
   return workflows;
+}
+
+export function listIncompleteWorkflows(baseDir: string): TaskList[] {
+  return listWorkflows(baseDir, (wf) => !wf.tasks.every((t) => isTerminal(t.status)));
+}
+
+export function listAllWorkflows(baseDir: string): TaskList[] {
+  return listWorkflows(baseDir);
 }
