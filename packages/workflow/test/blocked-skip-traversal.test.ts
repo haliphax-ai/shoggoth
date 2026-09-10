@@ -109,7 +109,7 @@ describe("Single-pass blocked/skipped traversal", () => {
       const pollResults = new Map<string, PollResult>();
       const poller = mockPollAdapter(pollResults);
       const notifier = mockNotifyAdapter();
-      const orch = new Orchestrator(spawner, poller, notifier);
+      const orch = new Orchestrator({ spawner, poller, notifier });
 
       await orch.start([makeTask(1), makeTask(2)], "1>2", defaultOpts(baseDir));
 
@@ -126,7 +126,7 @@ describe("Single-pass blocked/skipped traversal", () => {
       const pollResults = new Map<string, PollResult>();
       const poller = mockPollAdapter(pollResults);
       const notifier = mockNotifyAdapter();
-      const orch = new Orchestrator(spawner, poller, notifier);
+      const orch = new Orchestrator({ spawner, poller, notifier });
 
       // Chain: 1 > 2 > 3 > 4
       await orch.start(
@@ -152,7 +152,7 @@ describe("Single-pass blocked/skipped traversal", () => {
       const pollResults = new Map<string, PollResult>();
       const poller = mockPollAdapter(pollResults);
       const notifier = mockNotifyAdapter();
-      const orch = new Orchestrator(spawner, poller, notifier);
+      const orch = new Orchestrator({ spawner, poller, notifier });
 
       // Diamond: 1,2 > 3 > 4
       await orch.start(
@@ -187,7 +187,7 @@ describe("Single-pass blocked/skipped traversal", () => {
       const pollResults = new Map<string, PollResult>();
       const poller = mockPollAdapter(pollResults);
       const notifier = mockNotifyAdapter();
-      const orch = new Orchestrator(spawner, poller, notifier);
+      const orch = new Orchestrator({ spawner, poller, notifier });
 
       // Independent branches: 1>3 and 2>4
       await orch.start(
@@ -222,7 +222,7 @@ describe("Single-pass blocked/skipped traversal", () => {
       const pollResults = new Map<string, PollResult>();
       const poller = mockPollAdapter(pollResults);
       const notifier = mockNotifyAdapter();
-      const orch = new Orchestrator(spawner, poller, notifier);
+      const orch = new Orchestrator({ spawner, poller, notifier });
 
       // Task 1 is a gate that will fail (so it won't be spawned by the orchestrator)
       // Instead, we simulate the skip by directly failing task 1 then using a gate
@@ -265,7 +265,7 @@ describe("Single-pass blocked/skipped traversal", () => {
       const pollResults = new Map<string, PollResult>();
       const poller = mockPollAdapter(pollResults);
       const notifier = mockNotifyAdapter();
-      const orch = new Orchestrator(spawner, poller, notifier);
+      const orch = new Orchestrator({ spawner, poller, notifier });
 
       // Gate 1 (false) > 2 > 3
       const tasks: TaskDef[] = [
@@ -296,7 +296,7 @@ describe("Single-pass blocked/skipped traversal", () => {
       const pollResults = new Map<string, PollResult>();
       const poller = mockPollAdapter(pollResults);
       const notifier = mockNotifyAdapter();
-      const orch = new Orchestrator(spawner, poller, notifier);
+      const orch = new Orchestrator({ spawner, poller, notifier });
 
       // Gate 1 (false) and task 2 both feed into task 3
       // Task 2 fails, gate 1 evaluates to false (skip)
@@ -332,7 +332,7 @@ describe("Single-pass blocked/skipped traversal", () => {
       const pollResults = new Map<string, PollResult>();
       const poller = mockPollAdapter(pollResults);
       const notifier = mockNotifyAdapter();
-      const orch = new Orchestrator(spawner, poller, notifier);
+      const orch = new Orchestrator({ spawner, poller, notifier });
 
       // Independent root tasks
       const tasks = [makeTask(1), makeTask(2)];
@@ -356,7 +356,7 @@ describe("Single-pass blocked/skipped traversal", () => {
       const pollResults = new Map<string, PollResult>();
       const poller = mockPollAdapter(pollResults);
       const notifier = mockNotifyAdapter();
-      const orch = new Orchestrator(spawner, poller, notifier);
+      const orch = new Orchestrator({ spawner, poller, notifier });
 
       // Complex graph:
       //   Gate 1 (false) → 3 → 5
@@ -407,7 +407,7 @@ describe("Single-pass blocked/skipped traversal", () => {
       const pollResults = new Map<string, PollResult>();
       const poller = mockPollAdapter(pollResults);
       const notifier = mockNotifyAdapter();
-      const orch = new Orchestrator(spawner, poller, notifier);
+      const orch = new Orchestrator({ spawner, poller, notifier });
 
       // Chain: 1 > 2 > 3
       await orch.start(

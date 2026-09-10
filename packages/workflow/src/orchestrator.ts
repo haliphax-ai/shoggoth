@@ -63,6 +63,18 @@ export interface MessagePoster {
   post(sessionId: string, message: string): Promise<void>;
 }
 
+/** Constructor dependencies injected via options object. */
+export interface OrchestratorConfig {
+  spawner: SpawnAdapter;
+  poller: PollAdapter;
+  notifier: NotifyAdapter;
+  statusManager?: StatusManager;
+  notifications?: NotificationAdapter;
+  killer?: KillAdapter;
+  messagePoster?: MessagePoster;
+  toolExecutor?: ToolExecutor;
+}
+
 export interface OrchestratorOptions {
   stateDir: string;
   currentDepth: number;
@@ -217,24 +229,15 @@ export class Orchestrator {
   private statusTimer: ReturnType<typeof setInterval> | null = null;
   private dirty = false;
 
-  constructor(
-    spawner: SpawnAdapter,
-    poller: PollAdapter,
-    notifier: NotifyAdapter,
-    statusManager?: StatusManager,
-    notifications?: NotificationAdapter,
-    killer?: KillAdapter,
-    messagePoster?: MessagePoster,
-    toolExecutor?: ToolExecutor,
-  ) {
-    this.spawner = spawner;
-    this.poller = poller;
-    this.notifier = notifier;
-    this.statusManager = statusManager ?? null;
-    this.notifications = notifications ?? null;
-    this.killer = killer ?? null;
-    this.messagePoster = messagePoster ?? null;
-    this.toolExecutor = toolExecutor ?? null;
+  constructor(config: OrchestratorConfig) {
+    this.spawner = config.spawner;
+    this.poller = config.poller;
+    this.notifier = config.notifier;
+    this.statusManager = config.statusManager ?? null;
+    this.notifications = config.notifications ?? null;
+    this.killer = config.killer ?? null;
+    this.messagePoster = config.messagePoster ?? null;
+    this.toolExecutor = config.toolExecutor ?? null;
   }
 
   /** Start a new workflow. Returns the workflow ID. */

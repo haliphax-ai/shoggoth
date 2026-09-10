@@ -136,7 +136,7 @@ async function setupWorkflow(
   const msgAdapter = mockMessageAdapter();
   const statusManager = new StatusManager(msgAdapter);
 
-  const orch = new Orchestrator(spawner, poller, notifier, statusManager, undefined, killer);
+  const orch = new Orchestrator({ spawner, poller, notifier, statusManager, killer });
   const orchOpts = defaultOpts(baseDir);
   const wfId = await orch.start(tasks, graphDsl, orchOpts);
 
@@ -262,7 +262,7 @@ describe("ControlPlane", () => {
       const msgAdapter = mockMessageAdapter();
       const statusManager = new StatusManager(msgAdapter);
 
-      const orch = new Orchestrator(spawner, poller, notifier, statusManager, undefined, killer);
+      const orch = new Orchestrator({ spawner, poller, notifier, statusManager, killer });
       const wfId = await orch.start([makeTask(1), makeTask(2)], "1 2", defaultOpts(baseDir));
 
       const orchestrators = new Map<string, Orchestrator>();

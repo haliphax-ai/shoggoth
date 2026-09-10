@@ -68,7 +68,7 @@ describe("Orchestrator SpawnRequest responseSchema", () => {
     const poller = makePoller(pollResults);
     const notifier = makeNotifier();
 
-    const orchestrator = new Orchestrator(spawner, poller, notifier);
+    const orchestrator = new Orchestrator({ spawner, poller, notifier });
 
     const responseSchema = {
       schema: {
@@ -121,7 +121,7 @@ describe("Orchestrator SpawnRequest responseSchema", () => {
     const poller = makePoller(pollResults);
     const notifier = makeNotifier();
 
-    const orchestrator = new Orchestrator(spawner, poller, notifier);
+    const orchestrator = new Orchestrator({ spawner, poller, notifier });
 
     const taskDef: AgentTaskDef = {
       kind: "agent",
@@ -183,7 +183,11 @@ describe("Orchestrator restore()", () => {
   }
 
   it("resets paused to false", () => {
-    const orch = new Orchestrator(makeSpawner([]), makePoller(new Map()), makeNotifier());
+    const orch = new Orchestrator({
+      spawner: makeSpawner([]),
+      poller: makePoller(new Map()),
+      notifier: makeNotifier(),
+    });
     (orch as any).paused = true;
 
     orch.restore(makeTaskList(), makeOpts());
@@ -191,7 +195,11 @@ describe("Orchestrator restore()", () => {
   });
 
   it("resets dirty to false", () => {
-    const orch = new Orchestrator(makeSpawner([]), makePoller(new Map()), makeNotifier());
+    const orch = new Orchestrator({
+      spawner: makeSpawner([]),
+      poller: makePoller(new Map()),
+      notifier: makeNotifier(),
+    });
     (orch as any).dirty = true;
 
     orch.restore(makeTaskList(), makeOpts());
@@ -199,7 +207,11 @@ describe("Orchestrator restore()", () => {
   });
 
   it("resets completed to false", () => {
-    const orch = new Orchestrator(makeSpawner([]), makePoller(new Map()), makeNotifier());
+    const orch = new Orchestrator({
+      spawner: makeSpawner([]),
+      poller: makePoller(new Map()),
+      notifier: makeNotifier(),
+    });
     (orch as any).completed = true;
 
     orch.restore(makeTaskList(), makeOpts());
@@ -207,7 +219,11 @@ describe("Orchestrator restore()", () => {
   });
 
   it("clears stale pollingTimer", () => {
-    const orch = new Orchestrator(makeSpawner([]), makePoller(new Map()), makeNotifier());
+    const orch = new Orchestrator({
+      spawner: makeSpawner([]),
+      poller: makePoller(new Map()),
+      notifier: makeNotifier(),
+    });
     const fakeTimer = setTimeout(() => {}, 60_000);
     (orch as any).pollingTimer = fakeTimer;
 
@@ -216,7 +232,11 @@ describe("Orchestrator restore()", () => {
   });
 
   it("clears stale statusTimer", () => {
-    const orch = new Orchestrator(makeSpawner([]), makePoller(new Map()), makeNotifier());
+    const orch = new Orchestrator({
+      spawner: makeSpawner([]),
+      poller: makePoller(new Map()),
+      notifier: makeNotifier(),
+    });
     const fakeTimer = setInterval(() => {}, 60_000);
     (orch as any).statusTimer = fakeTimer;
 
@@ -255,7 +275,7 @@ describe("Orchestrator unique task ID validation", () => {
     const spawner = makeSpawner([]);
     const poller = makePoller(new Map());
     const notifier = makeNotifier();
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     const tasks: AgentTaskDef[] = [
       {
@@ -283,7 +303,7 @@ describe("Orchestrator unique task ID validation", () => {
     const spawner = makeSpawner([]);
     const poller = makePoller(new Map());
     const notifier = makeNotifier();
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     const tasks: AgentTaskDef[] = [
       {
@@ -325,7 +345,7 @@ describe("Orchestrator unique task ID validation", () => {
     const spawner = makeSpawner([]);
     const poller = makePoller(new Map());
     const notifier = makeNotifier();
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     const tasks: AgentTaskDef[] = [
       {
