@@ -134,11 +134,6 @@ export async function openrouterVideoAdapter(req: VideoRequest): Promise<MediaAd
         };
       }
 
-      // Sleep before polling (except on first iteration)
-      if (Date.now() !== startTime) {
-        await sleep(pollIntervalMs);
-      }
-
       const pollResponse = await fetch(pollingUrl, {
         method: "GET",
         headers: {
