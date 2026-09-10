@@ -101,6 +101,21 @@ describe("openrouterVideoAdapter", () => {
 
   // Test 4: Timeout
   it("should return in_progress when polling times out", async () => {
+    // Mock setTimeout so sleep() resolves instantly (no real timers)
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+      cb: TimerHandler,
+    ) => {
+      if (typeof cb === "function") cb();
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout);
+
+    // Mock Date.now() to control time progression deterministically
+    let mockTime = 0;
+    const dateNowSpy = vi.spyOn(Date, "now").mockImplementation(() => {
+      mockTime += 60;
+      return mockTime;
+    });
+
     mockFetch
       .mockResolvedValueOnce({
         ok: true,
@@ -126,6 +141,9 @@ describe("openrouterVideoAdapter", () => {
       outputPath: `/tmp/test-openrouter-video-${Date.now()}`,
       adapterDefaults: { timeoutMs: 100, pollIntervalMs: 50 },
     });
+
+    setTimeoutSpy.mockRestore();
+    dateNowSpy.mockRestore();
 
     expect(result.status).toBe("in_progress");
     expect(result.operation_id).toBe("job-123");
