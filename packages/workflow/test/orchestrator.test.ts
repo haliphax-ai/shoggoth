@@ -8,7 +8,9 @@ import type {
   SpawnAdapter,
   PollAdapter,
   NotifyAdapter,
+  OrchestratorOptions,
 } from "../src/orchestrator.js";
+import type { TaskList } from "../src/types.js";
 import type { AgentTaskDef } from "../src/types.js";
 
 // ---------------------------------------------------------------------------
@@ -140,5 +142,85 @@ describe("Orchestrator SpawnRequest responseSchema", () => {
 
     expect(capturedRequests).toHaveLength(1);
     expect(capturedRequests[0].responseSchema).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Orchestrator — restore() resets stale state
+// ---------------------------------------------------------------------------
+
+describe("Orchestrator restore()", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "shoggoth-orch-restore-"));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function makeTaskList(): TaskList {
+    return {
+      id: "wf-restore-test",
+      name: "restore-test",
+      tasks: [],
+      graph: new Map(),
+      pollingIntervalMs: 1000,
+      createdAt: Date.now(),
+    };
+  }
+
+  function makeOpts(): OrchestratorOptions {
+    return {
+      stateDir: tempDir,
+      currentDepth: 0,
+      maxDepth: 3,
+      replyTo: "agent:test",
+      pollingIntervalMs: 1000,
+      runtimeLimitMs: 60000,
+    };
+  }
+
+  it("resets paused to false", () => {
+    const orch = new Orchestrator(makeSpawner([]), makePoller(new Map()), makeNotifier());
+    (orch as any).paused = true;
+
+    orch.restore(makeTaskList(), makeOpts());
+    expect(orch.isPaused()).toBe(false);
+  });
+
+  it("resets dirty to false", () => {
+    const orch = new Orchestrator(makeSpawner([]), makePoller(new Map()), makeNotifier());
+    (orch as any).dirty = true;
+
+    orch.restore(makeTaskList(), makeOpts());
+    expect((orch as any).dirty).toBe(false);
+  });
+
+  it("resets completed to false", () => {
+    const orch = new Orchestrator(makeSpawner([]), makePoller(new Map()), makeNotifier());
+    (orch as any).completed = true;
+
+    orch.restore(makeTaskList(), makeOpts());
+    expect(orch.isComplete()).toBe(false);
+  });
+
+  it("clears stale pollingTimer", () => {
+    const orch = new Orchestrator(makeSpawner([]), makePoller(new Map()), makeNotifier());
+    const fakeTimer = setTimeout(() => {}, 60_000);
+    (orch as any).pollingTimer = fakeTimer;
+
+    orch.restore(makeTaskList(), makeOpts());
+    expect((orch as any).pollingTimer).toBeNull();
+  });
+
+  it("clears stale statusTimer", () => {
+    const orch = new Orchestrator(makeSpawner([]), makePoller(new Map()), makeNotifier());
+    const fakeTimer = setInterval(() => {}, 60_000);
+    (orch as any).statusTimer = fakeTimer;
+
+    orch.restore(makeTaskList(), makeOpts());
+    expect((orch as any).statusTimer).toBeNull();
   });
 });
