@@ -178,16 +178,17 @@ function computeBlockedAndSkipped(
 }
 
 /** Resolve outputTemplate for a completed task, replacing self.* refs. */
-function applyOutputTemplate(task: TaskState): void {
-  if (!task.taskDef.outputTemplate || task.status !== "done") return;
+function applyOutputTemplate(task: TaskState, applied: Set<number>): void {
+  if (task.status !== "done") return;
+  if (!task.taskDef.outputTemplate) return;
+  if (applied.has(task.taskDef.id)) return;
   const tpl = task.taskDef.outputTemplate;
   const resolved = tpl
     .replace(/{{self.output}}/g, task.output ?? "")
     .replace(/{{self.error}}/g, task.error ?? "")
     .replace(/{{self.exitCode}}/g, "");
   task.output = resolved;
-  // Clear to prevent re-application on subsequent ticks
-  (task.taskDef as { outputTemplate?: string }).outputTemplate = undefined;
+  applied.add(task.taskDef.id);
 }
 
 function formatFailureMessage(task: TaskState): string {
@@ -228,6 +229,7 @@ export class Orchestrator {
   private pollingTimer: ReturnType<typeof setTimeout> | null = null;
   private statusTimer: ReturnType<typeof setInterval> | null = null;
   private dirty = false;
+  private templateApplied = new Set<number>();
 
   constructor(config: OrchestratorConfig) {
     this.spawner = config.spawner;
@@ -302,6 +304,7 @@ export class Orchestrator {
     this.opts = opts;
     this.completed = false;
     this.paused = false;
+    this.templateApplied.clear();
 
     // Persist initial state
     saveWorkflow(opts.stateDir, workflow);
@@ -365,7 +368,7 @@ export class Orchestrator {
 
     // Apply output templates to newly completed tasks
     for (const task of this.workflow!.tasks) {
-      applyOutputTemplate(task);
+      applyOutputTemplate(task, this.templateApplied);
     }
 
     // Persist state
@@ -488,6 +491,7 @@ export class Orchestrator {
     this.completed = false;
     this.paused = false;
     this.dirty = false;
+    this.templateApplied.clear();
     this.stopPolling();
   }
 
