@@ -465,6 +465,9 @@ export class Orchestrator {
     this.workflow = wf;
     this.opts = opts;
     this.completed = false;
+    this.paused = false;
+    this.dirty = false;
+    this.stopPolling();
   }
 
   // --- Internal ---
