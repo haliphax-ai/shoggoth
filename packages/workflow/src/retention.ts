@@ -84,20 +84,52 @@ export function retentionRun(baseDir: string, opts?: RetentionOptions): Retentio
 
 // --- Scheduled retention ---
 
-let retentionTimer: ReturnType<typeof setInterval> | null = null;
+/**
+ * Manages a periodic retention schedule with its own timer instance.
+ *
+ * Unlike the module-level `startRetentionSchedule` / `stopRetentionSchedule`
+ * helpers (which share a single global timer), each `RetentionScheduler`
+ * instance holds its own timer handle so multiple schedulers can coexist
+ * without interfering with one another.
+ */
+export class RetentionScheduler {
+  private timer: ReturnType<typeof setInterval> | null = null;
+
+  /** Whether a schedule is currently active. */
+  get isRunning(): boolean {
+    return this.timer !== null;
+  }
+
+  /**
+   * Start a periodic retention schedule.
+   * If a schedule is already running, it is replaced.
+   */
+  start(baseDir: string, intervalMs: number, opts?: RetentionOptions): void {
+    this.stop();
+    this.timer = setInterval(() => retentionRun(baseDir, opts), intervalMs);
+  }
+
+  /** Stop the periodic retention schedule, if running. */
+  stop(): void {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+}
+
+// --- Module-level convenience (backward compatible) ---
+
+const defaultScheduler = new RetentionScheduler();
 
 export function startRetentionSchedule(
   baseDir: string,
   intervalMs: number,
   opts?: RetentionOptions,
 ): void {
-  stopRetentionSchedule();
-  retentionTimer = setInterval(() => retentionRun(baseDir, opts), intervalMs);
+  defaultScheduler.start(baseDir, intervalMs, opts);
 }
 
 export function stopRetentionSchedule(): void {
-  if (retentionTimer) {
-    clearInterval(retentionTimer);
-    retentionTimer = null;
-  }
+  defaultScheduler.stop();
 }

@@ -7,6 +7,7 @@ import type { TaskDef, TaskList } from "../src/types.js";
 import { saveWorkflow, loadWorkflow, listAllWorkflows } from "../src/state.js";
 import { parseGraph } from "../src/graph.js";
 import {
+  RetentionScheduler,
   retentionRun,
   startRetentionSchedule,
   stopRetentionSchedule,
@@ -399,5 +400,139 @@ describe("retention schedule", () => {
     startRetentionSchedule(baseDir, 100);
     stopRetentionSchedule();
     // No assertion needed — just verifying no double timers
+  });
+});
+
+describe("RetentionScheduler", () => {
+  let baseDir: string;
+
+  beforeEach(() => {
+    baseDir = makeTmpDir();
+  });
+  afterEach(() => {
+    fs.rmSync(baseDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  });
+
+  it("starts and stops independently", () => {
+    const scheduler = new RetentionScheduler();
+    assert.equal(scheduler.isRunning, false);
+
+    scheduler.start(baseDir, 50);
+    assert.equal(scheduler.isRunning, true);
+
+    scheduler.stop();
+    assert.equal(scheduler.isRunning, false);
+  });
+
+  it("stop is idempotent", () => {
+    const scheduler = new RetentionScheduler();
+    scheduler.stop();
+    scheduler.stop();
+    assert.equal(scheduler.isRunning, false);
+  });
+
+  it("replaces a previous schedule when started again", async () => {
+    const now = Date.now();
+    const oldTime = now - COMPLETED_MAX_AGE_MS - 1_000;
+
+    saveWorkflow(
+      baseDir,
+      makeWorkflow("wf-scheduler-1", {
+        createdAt: oldTime - 10_000,
+        tasks: [
+          {
+            taskDef: makeTask(1),
+            status: "done",
+            output: "ok",
+            startedAt: oldTime - 5_000,
+            completedAt: oldTime,
+          },
+        ],
+      }),
+    );
+
+    const scheduler = new RetentionScheduler();
+    scheduler.start(baseDir, 50);
+    scheduler.start(baseDir, 50); // replace — should not leak timer
+
+    await new Promise((r) => setTimeout(r, 120));
+    assert.equal(loadWorkflow(baseDir, "wf-scheduler-1"), undefined);
+    scheduler.stop();
+  });
+
+  it("multiple schedulers can run independently without interfering", async () => {
+    const now = Date.now();
+    const oldTime = now - COMPLETED_MAX_AGE_MS - 1_000;
+
+    // Scheduler 1 watches dirA, scheduler 2 watches dirB
+    const dirA = makeTmpDir();
+    const dirB = makeTmpDir();
+
+    saveWorkflow(
+      dirA,
+      makeWorkflow("wf-a-old", {
+        createdAt: oldTime - 10_000,
+        tasks: [
+          {
+            taskDef: makeTask(1),
+            status: "done",
+            output: "ok",
+            startedAt: oldTime - 5_000,
+            completedAt: oldTime,
+          },
+        ],
+      }),
+    );
+
+    // dirB has a recent workflow that should NOT be pruned
+    const recentTime = now - 1_000;
+    saveWorkflow(
+      dirB,
+      makeWorkflow("wf-b-recent", {
+        createdAt: recentTime - 10_000,
+        tasks: [
+          {
+            taskDef: makeTask(1),
+            status: "done",
+            output: "ok",
+            startedAt: recentTime - 500,
+            completedAt: recentTime,
+          },
+        ],
+      }),
+    );
+
+    const schedulerA = new RetentionScheduler();
+    const schedulerB = new RetentionScheduler();
+
+    schedulerA.start(dirA, 50);
+    schedulerB.start(dirB, 50);
+
+    await new Promise((r) => setTimeout(r, 120));
+
+    // dirA: old workflow should be pruned
+    assert.equal(loadWorkflow(dirA, "wf-a-old"), undefined);
+    // dirB: recent workflow should survive
+    assert.ok(loadWorkflow(dirB, "wf-b-recent"));
+
+    // Stop both schedulers and clean up
+    schedulerA.stop();
+    schedulerB.stop();
+    fs.rmSync(dirA, { recursive: true, force: true });
+    fs.rmSync(dirB, { recursive: true, force: true });
+  });
+
+  it("stopping one scheduler does not affect another", () => {
+    const schedulerA = new RetentionScheduler();
+    const schedulerB = new RetentionScheduler();
+
+    schedulerA.start(baseDir, 50);
+    schedulerB.start(baseDir, 50);
+
+    schedulerA.stop();
+    assert.equal(schedulerA.isRunning, false);
+    assert.equal(schedulerB.isRunning, true);
+
+    schedulerB.stop();
   });
 });
