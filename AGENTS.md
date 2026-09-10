@@ -45,8 +45,12 @@ Discord is currently the only available platform, but it should not be treated a
 - pino: structured logging
 - vitest: testing
 - tsx: executing typescript
-- tsgo: type checking
+- tsc: type checking
 - oxfmt: formatting
 - oxlint: linting
 - plugin-hooks: extensible hook points
 - knip: finding dead code
+
+## Git hooks
+
+This repository has a set of git hooks that will ensure tests for affected files are run commit and that a full type check is run on push. These steps do not need to be performed individually by agents unless there is a good reason.
