@@ -45,7 +45,7 @@ export default defineComponent({
           if (aggregatedValue.value != null) allKeys["$value"] = aggregatedValue.value;
           const row =
             filteredRows.value && filteredRows.value.length > 0 ? filteredRows.value[0] : null;
-          return formatString(raw, { ...allKeys, ...(row ?? {}) });
+          return formatString(raw, { ...allKeys, ...row });
         }
         if (aggregatedValue.value != null) return aggregatedValue.value;
       }

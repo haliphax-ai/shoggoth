@@ -7,7 +7,6 @@ import { randomUUID } from "node:crypto";
 import { migrate, defaultMigrationsDir } from "../../src/db/migrate";
 import { createVaultService, type VaultService } from "../../src/vault/vault-service";
 import { ageGenerateIdentity } from "../../src/vault/age-crypto";
-import { parseEnvFile } from "../../src/vault/env-parser";
 import { WIRE_VERSION } from "@shoggoth/authn";
 import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import type { IntegrationOpsContext } from "../../src/control/integration-ops";

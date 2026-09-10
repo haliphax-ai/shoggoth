@@ -29,7 +29,7 @@ export default defineComponent({
       if (aggregatedValue.value != null) allKeys["$value"] = aggregatedValue.value;
       const row =
         filteredRows.value && filteredRows.value.length > 0 ? filteredRows.value[0] : null;
-      return formatString(str, { ...allKeys, ...(row ?? {}) });
+      return formatString(str, { ...allKeys, ...row });
     }
 
     const resolvedLabel = computed(() => resolveTemplate((props.def as any).label ?? ""));
