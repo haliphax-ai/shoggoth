@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { TaskDef, TaskState, TaskList, DependencyGraph, ToolExecutor } from "./types.js";
 import { getTaskPromptOrLabel, isTerminal } from "./types.js";
-import { parseGraph, validateGraph } from "./graph.js";
+import { parseGraph, validateGraph, getTransitiveDependents } from "./graph.js";
 import { parseTemplateRefs, validateTemplateRefs, resolveTemplates } from "./templates.js";
 import { canSpawn } from "./depth.js";
 import { saveWorkflow } from "./state.js";
@@ -119,32 +119,6 @@ function shouldSkip(
     if (dep.status === "pending" && shouldSkip(depId, graph, tasks)) return true;
   }
   return false;
-}
-
-/**
- * Get all transitive dependents of a task (tasks that depend on it, directly or transitively).
- */
-function getTransitiveDependents(taskId: number, graph: DependencyGraph): Set<number> {
-  // Build reverse graph: for each task, which tasks depend on it
-  const reverse = new Map<number, Set<number>>();
-  for (const [tid, deps] of graph) {
-    for (const depId of deps) {
-      if (!reverse.has(depId)) reverse.set(depId, new Set());
-      reverse.get(depId)!.add(tid);
-    }
-  }
-
-  const visited = new Set<number>();
-  const stack = [...(reverse.get(taskId) ?? [])];
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    if (visited.has(current)) continue;
-    visited.add(current);
-    for (const dep of reverse.get(current) ?? []) {
-      stack.push(dep);
-    }
-  }
-  return visited;
 }
 
 /** Resolve outputTemplate for a completed task, replacing self.* refs. */

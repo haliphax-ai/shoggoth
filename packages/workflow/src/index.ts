@@ -23,7 +23,7 @@ export type {
 export { getTaskPromptOrLabel } from "./types.js";
 
 // Graph
-export { parseGraph, validateGraph, getTransitiveDeps } from "./graph.js";
+export { parseGraph, validateGraph, getTransitiveDeps, getTransitiveDependents } from "./graph.js";
 
 // Templates
 export { parseTemplateRefs, validateTemplateRefs, resolveTemplates } from "./templates.js";
