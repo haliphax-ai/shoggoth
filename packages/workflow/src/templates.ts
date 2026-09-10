@@ -1,7 +1,7 @@
 import type { DependencyGraph, TaskState, TemplateRef } from "./types.js";
 import { getTransitiveDeps } from "./graph.js";
 
-const TEMPLATE_RE = /\{\{task:(\d+):(output|success)\}\}/g;
+export const TEMPLATE_RE = /\{\{task:(\d+):(output|success)\}\}/g;
 
 /**
  * Parse template references from a prompt string.
