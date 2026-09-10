@@ -165,6 +165,47 @@ describe("Failure Handling", () => {
       // Workflow should be complete
       assert.ok(orch.isComplete());
     });
+
+    it("is idempotent when killer throws during abort", async () => {
+      const spawner = mockSpawnAdapter();
+      const pollResults = new Map<string, PollResult>();
+      const poller = mockPollAdapter(pollResults);
+      const notifier = mockNotifyAdapter();
+      const notifications = mockNotificationAdapter();
+
+      // Killer that always throws (simulates session already cleaned up)
+      const killer: KillAdapter = {
+        async kill(_sessionKey: string): Promise<void> {
+          throw new Error("session not found");
+        },
+      };
+
+      const orch = new Orchestrator({ spawner, poller, notifier, notifications, killer });
+
+      const tasks = [
+        makeTask(1, "do task 1", { failureBehavior: "abort" }),
+        makeTask(2, "do task 2"),
+      ];
+      const graphDsl = "1 2";
+      await orch.start(tasks, graphDsl, defaultOpts(baseDir));
+
+      // Both tasks spawned
+      assert.equal(spawner.calls.length, 2);
+
+      // Task 1 fails → triggers abort, which tries to kill task 2 but killer throws
+      pollResults.set("session-1", { status: "failed", error: "boom" });
+      await orch.tick();
+
+      // All tasks should still be marked failed despite killer errors
+      const wf = orch.getWorkflowStatus()!;
+      assert.ok(wf.tasks.every((t) => t.status === "failed"));
+
+      const task2 = wf.tasks.find((t) => t.taskDef.id === 2)!;
+      assert.equal(task2.status, "failed");
+      assert.match(task2.error!, /aborted/);
+
+      assert.ok(orch.isComplete());
+    });
   });
 
   describe("pause behavior", () => {
