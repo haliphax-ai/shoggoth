@@ -23,7 +23,13 @@ export type {
 export { getTaskPromptOrLabel } from "./types.js";
 
 // Graph
-export { parseGraph, validateGraph, getTransitiveDeps, getTransitiveDependents, buildReverseGraph } from "./graph.js";
+export {
+  parseGraph,
+  validateGraph,
+  getTransitiveDeps,
+  getTransitiveDependents,
+  buildReverseGraph,
+} from "./graph.js";
 
 // Templates
 export { parseTemplateRefs, validateTemplateRefs, resolveTemplates } from "./templates.js";
@@ -74,6 +80,7 @@ export { ControlPlane, type ControlPlaneOptions, type WorkflowSummary } from "./
 
 // Retention
 export {
+  RetentionScheduler,
   retentionRun,
   startRetentionSchedule,
   stopRetentionSchedule,
