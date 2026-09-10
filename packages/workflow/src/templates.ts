@@ -1,3 +1,5 @@
+export const TEMPLATE_PATTERN = "\\{\\{task:(\\d+):(output|success)\\}\\}";
+
 import type { DependencyGraph, TaskState, TemplateRef } from "./types.js";
 import { getTransitiveDeps } from "./graph.js";
 
@@ -7,7 +9,7 @@ import { getTransitiveDeps } from "./graph.js";
  */
 export function parseTemplateRefs(prompt: string): TemplateRef[] {
   const refs: TemplateRef[] = [];
-  const re = /\{\{task:(\d+):(output|success)\}\}/g;
+  const re = new RegExp(TEMPLATE_PATTERN, "g");
   for (const match of prompt.matchAll(re)) {
     const taskId = Number(match[1]);
     const kind = match[2] as "output" | "success";
@@ -47,7 +49,7 @@ export function validateTemplateRefs(
  * `{{task:N:success}}` with "true"/"false" based on status.
  */
 export function resolveTemplates(prompt: string, tasks: Map<number, TaskState>): string {
-  const re = /\{\{task:(\d+):(output|success)\}\}/g;
+  const re = new RegExp(TEMPLATE_PATTERN, "g");
   return prompt.replace(re, (fullMatch, idStr, kind) => {
     const taskId = Number(idStr);
     const task = tasks.get(taskId);

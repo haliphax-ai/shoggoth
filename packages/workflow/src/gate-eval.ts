@@ -1,3 +1,4 @@
+import { TEMPLATE_PATTERN } from "./templates.js";
 import type { TaskState } from "./types.js";
 
 /**
@@ -29,7 +30,7 @@ export function buildGateContext(tasks: Map<number, TaskState>): GateContext {
  * Converts `{{task:N:field}}` syntax to `task.N.field` dot notation.
  */
 function resolveGateTemplates(condition: string): string {
-  const re = /\{\{task:(\d+):(output|success)\}\}/g;
+  const re = new RegExp(TEMPLATE_PATTERN, "g");
   return condition.replace(re, "task.$1.$2");
 }
 
