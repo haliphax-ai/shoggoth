@@ -44,7 +44,7 @@ describe("workflow tool descriptor response_schema", () => {
     expect(schemaProp.type).toBe("object");
   });
 
-it("response_schema requires the 'schema' field", () => {
+  it("response_schema requires the 'schema' field", () => {
     const descriptor = buildWorkflowToolDescriptor();
     const schema = descriptor.inputSchema as Record<string, unknown>;
     const properties = schema.properties as Record<string, unknown>;
@@ -73,5 +73,34 @@ describe("workflow tool descriptor definition_file", () => {
     const defFile = properties.definition_file as Record<string, unknown>;
 
     expect(defFile.type).toBe("string");
+  });
+});
+
+describe("workflow tool descriptor wait action", () => {
+  it("includes 'wait' in the action enum", () => {
+    const descriptor = buildWorkflowToolDescriptor();
+    const schema = descriptor.inputSchema as Record<string, unknown>;
+    const properties = schema.properties as Record<string, unknown>;
+    const action = properties.action as Record<string, unknown>;
+
+    expect(action.enum).toContain("wait");
+  });
+
+  it("includes wait_timeout_ms in the schema properties", () => {
+    const descriptor = buildWorkflowToolDescriptor();
+    const schema = descriptor.inputSchema as Record<string, unknown>;
+    const properties = schema.properties as Record<string, unknown>;
+
+    expect(properties).toHaveProperty("wait_timeout_ms");
+  });
+
+  it("wait_timeout_ms is of type integer with minimum 1000", () => {
+    const descriptor = buildWorkflowToolDescriptor();
+    const schema = descriptor.inputSchema as Record<string, unknown>;
+    const properties = schema.properties as Record<string, unknown>;
+    const waitTimeout = properties.wait_timeout_ms as Record<string, unknown>;
+
+    expect(waitTimeout.type).toBe("integer");
+    expect(waitTimeout.minimum).toBe(1000);
   });
 });
