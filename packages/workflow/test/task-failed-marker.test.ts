@@ -121,7 +121,7 @@ describe("ERROR:TASK_FAILED marker detection", () => {
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
     const killer = mockKillAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier, undefined, undefined, killer);
+    const orch = new Orchestrator({ spawner, poller, notifier, killer });
 
     const tasks = [makeTask(1)];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -144,7 +144,7 @@ describe("ERROR:TASK_FAILED marker detection", () => {
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
     const killer = mockKillAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier, undefined, undefined, killer);
+    const orch = new Orchestrator({ spawner, poller, notifier, killer });
 
     const tasks = [makeTask(1)];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -166,7 +166,7 @@ describe("ERROR:TASK_FAILED marker detection", () => {
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
     const killer = mockKillAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier, undefined, undefined, killer);
+    const orch = new Orchestrator({ spawner, poller, notifier, killer });
 
     const tasks = [makeTask(1)];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -188,7 +188,7 @@ describe("ERROR:TASK_FAILED marker detection", () => {
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
     const killer = mockKillAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier, undefined, undefined, killer);
+    const orch = new Orchestrator({ spawner, poller, notifier, killer });
 
     const tasks = [makeTask(1)];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -213,7 +213,7 @@ describe("ERROR:TASK_FAILED marker detection", () => {
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
     const killer = mockKillAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier, undefined, undefined, killer);
+    const orch = new Orchestrator({ spawner, poller, notifier, killer });
 
     const tasks = [makeTask(1)];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -236,7 +236,7 @@ describe("ERROR:TASK_FAILED marker detection", () => {
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
     const killer = mockKillAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier, undefined, undefined, killer);
+    const orch = new Orchestrator({ spawner, poller, notifier, killer });
 
     const tasks = [makeTask(1), makeTask(2), makeTask(3)];
     await orch.start(tasks, "1 2 3", defaultOpts(baseDir));
@@ -280,7 +280,7 @@ describe("ERROR:TASK_FAILED marker detection", () => {
     const notifier = mockNotifyAdapter();
     const notifications = mockNotificationAdapter();
     const killer = mockKillAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier, undefined, notifications, killer);
+    const orch = new Orchestrator({ spawner, poller, notifier, notifications, killer });
 
     const tasks = [
       makeTask(1, "do task 1", {
@@ -310,7 +310,7 @@ describe("ERROR:TASK_FAILED marker detection", () => {
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
     const killer = mockKillAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier, undefined, undefined, killer);
+    const orch = new Orchestrator({ spawner, poller, notifier, killer });
 
     // Chain: 1 > 2
     const tasks = [makeTask(1), makeTask(2)];
@@ -339,7 +339,7 @@ describe("ERROR:TASK_FAILED marker detection", () => {
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
     const killer = mockKillAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier, undefined, undefined, killer);
+    const orch = new Orchestrator({ spawner, poller, notifier, killer });
 
     // Task 1 has abort behavior, task 2 is independent
     const tasks = [

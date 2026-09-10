@@ -148,16 +148,12 @@ describe("Tool task execution", () => {
       ok: true,
       output: "tool result",
     }));
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      executor,
-    );
+      toolExecutor: executor,
+    });
 
     const tasks = [makeToolTask(1, "builtin-read", { path: "foo.txt" })];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -181,16 +177,12 @@ describe("Tool task execution", () => {
       output: "",
       error: "file not found",
     }));
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      executor,
-    );
+      toolExecutor: executor,
+    });
 
     const tasks = [makeToolTask(1, "builtin-read", { path: "missing.txt" })];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -208,16 +200,12 @@ describe("Tool task execution", () => {
     const executor = mockToolExecutor(async () => {
       throw new Error("connection refused");
     });
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      executor,
-    );
+      toolExecutor: executor,
+    });
 
     const tasks = [makeToolTask(1, "builtin-exec", { argv: ["ls"] })];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -233,7 +221,7 @@ describe("Tool task execution", () => {
     const poller = mockPollAdapter(new Map());
     const notifier = mockNotifyAdapter();
     // No toolExecutor passed
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     const tasks = [makeToolTask(1, "builtin-read", { path: "foo.txt" })];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -250,16 +238,12 @@ describe("Tool task execution", () => {
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
     const executor = mockToolExecutor(async () => ({ ok: true, output: "ok" }));
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      executor,
-    );
+      toolExecutor: executor,
+    });
 
     const tasks: TaskDef[] = [
       makeAgentTask(1),
@@ -288,16 +272,12 @@ describe("Tool task execution", () => {
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
     const executor = mockToolExecutor(async () => ({ ok: true, output: "ok" }));
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      executor,
-    );
+      toolExecutor: executor,
+    });
 
     const tasks: TaskDef[] = [
       makeAgentTask(1),
@@ -326,16 +306,12 @@ describe("Tool task execution", () => {
       ok: true,
       output: "done",
     }));
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      executor,
-    );
+      toolExecutor: executor,
+    });
 
     const tasks = [makeToolTask(1, "some-tool")];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -354,16 +330,12 @@ describe("Tool task execution", () => {
       ok: true,
       output: "file contents here",
     }));
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      executor,
-    );
+      toolExecutor: executor,
+    });
 
     const tasks: TaskDef[] = [
       makeToolTask(1, "builtin-read", { path: "data.txt" }),
@@ -385,16 +357,12 @@ describe("Tool task execution", () => {
       ok: true,
       output: `executed: ${JSON.stringify(args)}`,
     }));
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      executor,
-    );
+      toolExecutor: executor,
+    });
 
     const tasks: TaskDef[] = [
       makeToolTask(1, "builtin-read", { path: "input.txt" }),
@@ -424,16 +392,12 @@ describe("Tool task execution", () => {
       output: "",
       error: "boom",
     }));
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      executor,
-    );
+      toolExecutor: executor,
+    });
 
     const tasks: TaskDef[] = [
       makeToolTask(1, "builtin-exec", { argv: ["fail"] }),
@@ -460,16 +424,12 @@ describe("Tool task execution", () => {
       output: "",
       error: "crash",
     }));
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      executor,
-    );
+      toolExecutor: executor,
+    });
 
     const failingTool: TaskDef = {
       kind: "tool",
@@ -502,16 +462,12 @@ describe("Tool task execution", () => {
       callCount++;
       return { ok: true, output: `result-${callCount}` };
     });
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      executor,
-    );
+      toolExecutor: executor,
+    });
 
     // 3 independent tasks: 1 agent + 2 tool, concurrency 1
     const tasks: TaskDef[] = [
@@ -540,16 +496,12 @@ describe("Tool task execution", () => {
       ok: true,
       output: "done",
     }));
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      executor,
-    );
+      toolExecutor: executor,
+    });
 
     const tasks: TaskDef[] = [
       makeToolTask(1, "builtin-read", { path: "a.txt" }),
@@ -565,16 +517,12 @@ describe("Tool task execution", () => {
     const poller = mockPollAdapter(new Map());
     const notifier = mockNotifyAdapter();
     const executor = rawJsonToolExecutor(() => "this is not json");
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      executor,
-    );
+      toolExecutor: executor,
+    });
 
     const tasks = [makeToolTask(1, "builtin-read", { path: "foo.txt" })];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -591,16 +539,12 @@ describe("Tool task execution", () => {
     const poller = mockPollAdapter(new Map());
     const notifier = mockNotifyAdapter();
     const executor = rawJsonToolExecutor(() => JSON.stringify({ error: "", output: "success" }));
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      executor,
-    );
+      toolExecutor: executor,
+    });
 
     const tasks = [makeToolTask(1, "builtin-read", { path: "foo.txt" })];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -616,16 +560,12 @@ describe("Tool task execution", () => {
     const poller = mockPollAdapter(new Map());
     const notifier = mockNotifyAdapter();
     const executor = rawJsonToolExecutor(() => JSON.stringify({ error: 0, output: "success" }));
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      executor,
-    );
+      toolExecutor: executor,
+    });
 
     const tasks = [makeToolTask(1, "builtin-read", { path: "foo.txt" })];
     await orch.start(tasks, "1", defaultOpts(baseDir));

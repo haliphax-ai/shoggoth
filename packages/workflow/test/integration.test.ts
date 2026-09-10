@@ -171,7 +171,14 @@ async function setup(
   const msgAdapter = mockMessageAdapter();
   const statusManager = new StatusManager(msgAdapter);
 
-  const orch = new Orchestrator(spawner, poller, notifier, statusManager, notifications, killer);
+  const orch = new Orchestrator({
+    spawner,
+    poller,
+    notifier,
+    statusManager,
+    notifications,
+    killer,
+  });
   const opts = defaultOpts(baseDir);
   const wfId = await orch.start(tasks, graphDsl, opts);
 

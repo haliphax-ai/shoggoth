@@ -124,7 +124,7 @@ describe("Transform tasks", () => {
     const spawner = mockSpawnAdapter();
     const poller = mockPollAdapter(new Map());
     const notifier = mockNotifyAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     const tasks: TaskDef[] = [makeTransformTask(1, "hello world")];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -141,7 +141,7 @@ describe("Transform tasks", () => {
     const spawner = mockSpawnAdapter();
     const poller = mockPollAdapter(new Map());
     const notifier = mockNotifyAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     const tasks: TaskDef[] = [makeTransformTask(1, "no agent needed")];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -154,7 +154,7 @@ describe("Transform tasks", () => {
     const pollResults = new Map<string, PollResult>();
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     const tasks: TaskDef[] = [
       makeAgentTask(1),
@@ -176,7 +176,7 @@ describe("Transform tasks", () => {
     const spawner = mockSpawnAdapter();
     const poller = mockPollAdapter(new Map());
     const notifier = mockNotifyAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     const tasks: TaskDef[] = [makeTransformTask(1, "step one")];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -193,7 +193,7 @@ describe("Transform tasks", () => {
     const spawner = mockSpawnAdapter();
     const poller = mockPollAdapter(new Map());
     const notifier = mockNotifyAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     const tasks: TaskDef[] = [
       makeTransformTask(1, "hello"),
@@ -214,7 +214,7 @@ describe("Transform tasks", () => {
     const spawner = mockSpawnAdapter();
     const poller = mockPollAdapter(new Map());
     const notifier = mockNotifyAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     // Task 1 references task 2 but doesn't depend on it
     const tasks: TaskDef[] = [
@@ -244,15 +244,12 @@ describe("Message tasks", () => {
     const poller = mockPollAdapter(new Map());
     const notifier = mockNotifyAdapter();
     const poster = mockMessagePoster();
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      poster,
-    );
+      messagePoster: poster,
+    });
 
     const tasks: TaskDef[] = [makeMessageTask(1, "hello from workflow")];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -272,15 +269,12 @@ describe("Message tasks", () => {
     const poller = mockPollAdapter(new Map());
     const notifier = mockNotifyAdapter();
     const poster = mockMessagePoster();
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      poster,
-    );
+      messagePoster: poster,
+    });
 
     const tasks: TaskDef[] = [makeMessageTask(1, "targeted message", "custom:channel:123")];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -295,15 +289,12 @@ describe("Message tasks", () => {
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
     const poster = mockMessagePoster();
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      poster,
-    );
+      messagePoster: poster,
+    });
 
     const tasks: TaskDef[] = [
       makeAgentTask(1),
@@ -326,7 +317,7 @@ describe("Message tasks", () => {
     const poller = mockPollAdapter(new Map());
     const notifier = mockNotifyAdapter();
     // No messagePoster passed
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     const tasks: TaskDef[] = [makeMessageTask(1, "this will fail")];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -346,15 +337,12 @@ describe("Message tasks", () => {
         throw new Error("network error");
       },
     };
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      poster,
-    );
+      messagePoster: poster,
+    });
 
     const tasks: TaskDef[] = [makeMessageTask(1, "will fail")];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -370,15 +358,12 @@ describe("Message tasks", () => {
     const poller = mockPollAdapter(new Map());
     const notifier = mockNotifyAdapter();
     const poster = mockMessagePoster();
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      poster,
-    );
+      messagePoster: poster,
+    });
 
     const tasks: TaskDef[] = [makeMessageTask(1, "no agent")];
     await orch.start(tasks, "1", defaultOpts(baseDir));
@@ -391,15 +376,12 @@ describe("Message tasks", () => {
     const poller = mockPollAdapter(new Map());
     const notifier = mockNotifyAdapter();
     const poster = mockMessagePoster();
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      poster,
-    );
+      messagePoster: poster,
+    });
 
     const tasks: TaskDef[] = [
       makeMessageTask(1, "{{task:2:output}}"),
@@ -429,15 +411,12 @@ describe("Mixed task type workflows", () => {
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
     const poster = mockMessagePoster();
-    const orch = new Orchestrator(
+    const orch = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
-      poster,
-    );
+      messagePoster: poster,
+    });
 
     const tasks: TaskDef[] = [
       makeAgentTask(1),
@@ -471,7 +450,7 @@ describe("Mixed task type workflows", () => {
     const spawner = mockSpawnAdapter();
     const poller = mockPollAdapter(new Map());
     const notifier = mockNotifyAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     const toolTask: TaskDef = {
       kind: "tool",

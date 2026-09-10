@@ -63,16 +63,13 @@ describe("Message task integration with all task types", () => {
       },
     };
 
-    const orchestrator = new Orchestrator(
+    const orchestrator = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
       messagePoster,
       toolExecutor,
-    );
+    });
 
     // Define workflow with all task types
     const tasks: TaskDef[] = [
@@ -197,16 +194,13 @@ describe("Message task integration with all task types", () => {
       }),
     };
 
-    const orchestrator = new Orchestrator(
+    const orchestrator = new Orchestrator({
       spawner,
       poller,
       notifier,
-      undefined,
-      undefined,
-      undefined,
       messagePoster,
       toolExecutor,
-    );
+    });
 
     const tasks: TaskDef[] = [
       {

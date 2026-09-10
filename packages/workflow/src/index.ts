@@ -59,6 +59,7 @@ export {
   type SpawnRequest,
   type PollResult,
   type OrchestratorOptions,
+  type OrchestratorConfig,
 } from "./orchestrator.js";
 
 // Server (procman integration)

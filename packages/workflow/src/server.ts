@@ -55,16 +55,16 @@ export class WorkflowServer {
 
     for (const wf of incomplete) {
       const replyTo = wf.replyTo ?? "";
-      const orch = new Orchestrator(
-        this.opts.spawner,
-        this.opts.poller,
-        this.opts.notifier,
-        this.opts.createStatusManager?.(replyTo),
-        this.opts.createNotificationAdapter?.(replyTo),
-        this.opts.createKiller?.(replyTo),
-        this.opts.createMessagePoster?.(replyTo),
-        this.opts.createToolExecutor?.(replyTo),
-      );
+      const orch = new Orchestrator({
+        spawner: this.opts.spawner,
+        poller: this.opts.poller,
+        notifier: this.opts.notifier,
+        statusManager: this.opts.createStatusManager?.(replyTo),
+        notifications: this.opts.createNotificationAdapter?.(replyTo),
+        killer: this.opts.createKiller?.(replyTo),
+        messagePoster: this.opts.createMessagePoster?.(replyTo),
+        toolExecutor: this.opts.createToolExecutor?.(replyTo),
+      });
       // Restore workflow state into the orchestrator and start polling
       orch.restore(wf, {
         stateDir: this.opts.stateDir,
@@ -84,16 +84,16 @@ export class WorkflowServer {
 
   /** Start a new workflow. Returns the workflow ID. */
   async start(tasks: TaskDef[], graphDsl: string, opts: OrchestratorOptions): Promise<string> {
-    const orch = new Orchestrator(
-      this.opts.spawner,
-      this.opts.poller,
-      this.opts.notifier,
-      this.opts.createStatusManager?.(opts.replyTo),
-      this.opts.createNotificationAdapter?.(opts.replyTo),
-      this.opts.createKiller?.(opts.replyTo),
-      this.opts.createMessagePoster?.(opts.replyTo),
-      this.opts.createToolExecutor?.(opts.replyTo),
-    );
+    const orch = new Orchestrator({
+      spawner: this.opts.spawner,
+      poller: this.opts.poller,
+      notifier: this.opts.notifier,
+      statusManager: this.opts.createStatusManager?.(opts.replyTo),
+      notifications: this.opts.createNotificationAdapter?.(opts.replyTo),
+      killer: this.opts.createKiller?.(opts.replyTo),
+      messagePoster: this.opts.createMessagePoster?.(opts.replyTo),
+      toolExecutor: this.opts.createToolExecutor?.(opts.replyTo),
+    });
     const wfId = await orch.start(tasks, graphDsl, opts);
     orch.startPolling();
     this.orchestrators.set(wfId, orch);

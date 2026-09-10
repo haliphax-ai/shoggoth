@@ -92,7 +92,7 @@ describe("Orchestrator concurrency", () => {
     const pollResults = new Map<string, PollResult>();
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     // 4 independent tasks, all roots
     const tasks = [makeTask(1), makeTask(2), makeTask(3), makeTask(4)];
@@ -115,7 +115,7 @@ describe("Orchestrator concurrency", () => {
     const pollResults = new Map<string, PollResult>();
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     const tasks = [makeTask(1), makeTask(2), makeTask(3), makeTask(4)];
     const graphDsl = "1 2 3 4";
@@ -145,7 +145,7 @@ describe("Orchestrator concurrency", () => {
     const pollResults = new Map<string, PollResult>();
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     const tasks = [makeTask(1), makeTask(2), makeTask(3), makeTask(4)];
     const graphDsl = "1 2 3 4";
@@ -160,7 +160,7 @@ describe("Orchestrator concurrency", () => {
     const pollResults = new Map<string, PollResult>();
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     const tasks = [makeTask(1), makeTask(2), makeTask(3), makeTask(4)];
     const graphDsl = "1 2 3 4";
@@ -175,7 +175,7 @@ describe("Orchestrator concurrency", () => {
     const pollResults = new Map<string, PollResult>();
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     // 1 and 2 are roots, 3 depends on 1, 4 depends on 2
     const tasks = [makeTask(1), makeTask(2), makeTask(3), makeTask(4)];
@@ -199,7 +199,7 @@ describe("Orchestrator concurrency", () => {
     const pollResults = new Map<string, PollResult>();
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     const tasks = [makeTask(1), makeTask(2), makeTask(3)];
     const graphDsl = "1 2 3";
@@ -221,7 +221,7 @@ describe("Orchestrator concurrency", () => {
     const pollResults = new Map<string, PollResult>();
     const poller = mockPollAdapter(pollResults);
     const notifier = mockNotifyAdapter();
-    const orch = new Orchestrator(spawner, poller, notifier);
+    const orch = new Orchestrator({ spawner, poller, notifier });
 
     const tasks = [makeTask(1), makeTask(2)];
     const graphDsl = "1 2";
