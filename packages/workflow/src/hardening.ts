@@ -112,7 +112,7 @@ export async function detectAndPersistOrphans(
 ): Promise<OrphanResult> {
   const result = await detectOrphans(wf, poller);
   if (result.orphanedCount > 0) {
-    saveWorkflow(stateDir, wf);
+    await saveWorkflow(stateDir, wf);
   }
   return result;
 }

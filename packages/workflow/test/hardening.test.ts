@@ -315,7 +315,7 @@ describe("detectAndPersistOrphans", () => {
       ],
       "1",
     );
-    saveWorkflow(baseDir, wf);
+    await saveWorkflow(baseDir, wf);
 
     const poller: PollAdapter = {
       async poll(): Promise<PollResult> {
@@ -327,7 +327,7 @@ describe("detectAndPersistOrphans", () => {
     assert.equal(result.orphanedCount, 1);
 
     // Verify persisted state
-    const loaded = loadWorkflow(baseDir, "wf-persist-orphan")!;
+    const loaded = (await loadWorkflow(baseDir, "wf-persist-orphan"))!;
     assert.equal(loaded.tasks[0].status, "failed");
     assert.ok(loaded.tasks[0].error?.includes("orphaned"));
   });
@@ -343,7 +343,7 @@ describe("detectAndPersistOrphans", () => {
       ],
       "1",
     );
-    saveWorkflow(baseDir, wf);
+    await saveWorkflow(baseDir, wf);
 
     // Get the file's mtime before
     const statBefore = fs.statSync(path.join(baseDir, "wf-no-orphan.json"));
@@ -375,15 +375,15 @@ describe("concurrent workflow isolation", () => {
     fs.rmSync(baseDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
-  it("state files for different workflows do not interfere", () => {
+  it("state files for different workflows do not interfere", async () => {
     const wf1 = makeWorkflow("wf-iso-1", [makeTaskState(1, "done", { output: "result-1" })], "1");
     const wf2 = makeWorkflow("wf-iso-2", [makeTaskState(1, "failed", { error: "boom" })], "1");
 
-    saveWorkflow(baseDir, wf1);
-    saveWorkflow(baseDir, wf2);
+    await saveWorkflow(baseDir, wf1);
+    await saveWorkflow(baseDir, wf2);
 
-    const loaded1 = loadWorkflow(baseDir, "wf-iso-1")!;
-    const loaded2 = loadWorkflow(baseDir, "wf-iso-2")!;
+    const loaded1 = (await loadWorkflow(baseDir, "wf-iso-1"))!;
+    const loaded2 = (await loadWorkflow(baseDir, "wf-iso-2"))!;
 
     assert.equal(loaded1.tasks[0].status, "done");
     assert.equal(loaded1.tasks[0].output, "result-1");
@@ -391,20 +391,20 @@ describe("concurrent workflow isolation", () => {
     assert.equal(loaded2.tasks[0].error, "boom");
   });
 
-  it("saving one workflow does not affect another", () => {
+  it("saving one workflow does not affect another", async () => {
     const wf1 = makeWorkflow("wf-iso-a", [makeTaskState(1, "pending")], "1");
     const wf2 = makeWorkflow("wf-iso-b", [makeTaskState(1, "done", { output: "ok" })], "1");
 
-    saveWorkflow(baseDir, wf1);
-    saveWorkflow(baseDir, wf2);
+    await saveWorkflow(baseDir, wf1);
+    await saveWorkflow(baseDir, wf2);
 
     // Modify and re-save wf1
     wf1.tasks[0].status = "in_progress";
     wf1.tasks[0].sessionKey = "s-1";
-    saveWorkflow(baseDir, wf1);
+    await saveWorkflow(baseDir, wf1);
 
     // wf2 should be unchanged
-    const loaded2 = loadWorkflow(baseDir, "wf-iso-b")!;
+    const loaded2 = (await loadWorkflow(baseDir, "wf-iso-b"))!;
     assert.equal(loaded2.tasks[0].status, "done");
     assert.equal(loaded2.tasks[0].output, "ok");
   });

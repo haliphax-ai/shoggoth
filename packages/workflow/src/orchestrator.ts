@@ -307,14 +307,14 @@ export class Orchestrator {
     this.templateApplied.clear();
 
     // Persist initial state
-    saveWorkflow(opts.stateDir, workflow);
+    await saveWorkflow(opts.stateDir, workflow);
 
     // Spawn ready tasks (roots with no dependencies)
     const tm = taskMap(workflow.tasks);
     await this.spawnReadyTasks(tm);
 
     // Persist after initial spawn wave
-    saveWorkflow(opts.stateDir, workflow);
+    await saveWorkflow(opts.stateDir, workflow);
 
     // Post initial status message
     if (this.statusManager) {
@@ -372,7 +372,7 @@ export class Orchestrator {
     }
 
     // Persist state
-    saveWorkflow(this.opts.stateDir, this.workflow);
+    await saveWorkflow(this.opts.stateDir, this.workflow);
 
     // Status updates run on their own independent timer (see startStatusTimer).
     // No status update here — keeps the tick cycle decoupled from Discord API latency.

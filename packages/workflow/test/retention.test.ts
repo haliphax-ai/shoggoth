@@ -65,7 +65,7 @@ describe("listAllWorkflows", () => {
     fs.rmSync(baseDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
-  it("returns all workflows including completed ones", () => {
+  it("returns all workflows including completed ones", async () => {
     const wf1 = makeWorkflow("wf-1");
     const wf2 = makeWorkflow("wf-2", {
       tasks: [
@@ -77,25 +77,25 @@ describe("listAllWorkflows", () => {
         },
       ],
     });
-    saveWorkflow(baseDir, wf1);
-    saveWorkflow(baseDir, wf2);
+    await saveWorkflow(baseDir, wf1);
+    await saveWorkflow(baseDir, wf2);
 
-    const all = listAllWorkflows(baseDir);
+    const all = await listAllWorkflows(baseDir);
     assert.equal(all.length, 2);
     const ids = all.map((w) => w.id).sort();
     assert.deepStrictEqual(ids, ["wf-1", "wf-2"]);
   });
 
-  it("returns empty array for nonexistent directory", () => {
-    const result = listAllWorkflows("/tmp/nonexistent-dir-xyz");
+  it("returns empty array for nonexistent directory", async () => {
+    const result = await listAllWorkflows("/tmp/nonexistent-dir-xyz");
     assert.deepStrictEqual(result, []);
   });
 
-  it("skips corrupt files", () => {
-    saveWorkflow(baseDir, makeWorkflow("wf-good"));
-    fs.writeFileSync(path.join(baseDir, "wf-bad.json"), "not json{{{", "utf-8");
+  it("skips corrupt files", async () => {
+    await saveWorkflow(baseDir, makeWorkflow("wf-good"));
+    fs.writeFileSync(path.join(baseDir, "wf-bad.json"), "not json{{{}", "utf-8");
 
-    const all = listAllWorkflows(baseDir);
+    const all = await listAllWorkflows(baseDir);
     assert.equal(all.length, 1);
     assert.equal(all[0].id, "wf-good");
   });
@@ -111,7 +111,7 @@ describe("retentionRun", () => {
     fs.rmSync(baseDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
-  it("prunes completed workflows older than 48 hours", () => {
+  it("prunes completed workflows older than 48 hours", async () => {
     const now = Date.now();
     const oldCompletedAt = now - COMPLETED_MAX_AGE_MS - 1_000;
 
@@ -127,15 +127,15 @@ describe("retentionRun", () => {
         },
       ],
     });
-    saveWorkflow(baseDir, wf);
+    await saveWorkflow(baseDir, wf);
 
-    const result = retentionRun(baseDir, { now });
+    const result = await retentionRun(baseDir, { now });
     assert.equal(result.pruned, 1);
     assert.deepStrictEqual(result.prunedIds, ["wf-old-done"]);
-    assert.equal(loadWorkflow(baseDir, "wf-old-done"), undefined);
+    assert.equal(await loadWorkflow(baseDir, "wf-old-done"), undefined);
   });
 
-  it("does not prune completed workflows younger than 48 hours", () => {
+  it("does not prune completed workflows younger than 48 hours", async () => {
     const now = Date.now();
     const recentCompletedAt = now - COMPLETED_MAX_AGE_MS + 60_000;
 
@@ -151,14 +151,14 @@ describe("retentionRun", () => {
         },
       ],
     });
-    saveWorkflow(baseDir, wf);
+    await saveWorkflow(baseDir, wf);
 
-    const result = retentionRun(baseDir, { now });
+    const result = await retentionRun(baseDir, { now });
     assert.equal(result.pruned, 0);
-    assert.ok(loadWorkflow(baseDir, "wf-recent-done"));
+    assert.ok(await loadWorkflow(baseDir, "wf-recent-done"));
   });
 
-  it("prunes failed (terminal) workflows older than 48 hours", () => {
+  it("prunes failed (terminal) workflows older than 48 hours", async () => {
     const now = Date.now();
     const oldCompletedAt = now - COMPLETED_MAX_AGE_MS - 1_000;
 
@@ -174,14 +174,14 @@ describe("retentionRun", () => {
         },
       ],
     });
-    saveWorkflow(baseDir, wf);
+    await saveWorkflow(baseDir, wf);
 
-    const result = retentionRun(baseDir, { now });
+    const result = await retentionRun(baseDir, { now });
     assert.equal(result.pruned, 1);
     assert.deepStrictEqual(result.prunedIds, ["wf-old-failed"]);
   });
 
-  it("prunes paused workflows older than 7 days", () => {
+  it("prunes paused workflows older than 7 days", async () => {
     const now = Date.now();
     const oldCreatedAt = now - PAUSED_MAX_AGE_MS - 1_000;
 
@@ -199,14 +199,14 @@ describe("retentionRun", () => {
       ],
       graph: parseGraph("1>2"),
     });
-    saveWorkflow(baseDir, wf);
+    await saveWorkflow(baseDir, wf);
 
-    const result = retentionRun(baseDir, { now });
+    const result = await retentionRun(baseDir, { now });
     assert.equal(result.pruned, 1);
     assert.deepStrictEqual(result.prunedIds, ["wf-old-paused"]);
   });
 
-  it("does not prune paused workflows younger than 7 days", () => {
+  it("does not prune paused workflows younger than 7 days", async () => {
     const now = Date.now();
     const recentCreatedAt = now - PAUSED_MAX_AGE_MS + 60_000;
 
@@ -224,14 +224,14 @@ describe("retentionRun", () => {
       ],
       graph: parseGraph("1>2"),
     });
-    saveWorkflow(baseDir, wf);
+    await saveWorkflow(baseDir, wf);
 
-    const result = retentionRun(baseDir, { now });
+    const result = await retentionRun(baseDir, { now });
     assert.equal(result.pruned, 0);
-    assert.ok(loadWorkflow(baseDir, "wf-recent-paused"));
+    assert.ok(await loadWorkflow(baseDir, "wf-recent-paused"));
   });
 
-  it("does not prune in-progress workflows", () => {
+  it("does not prune in-progress workflows", async () => {
     const now = Date.now();
     const oldCreatedAt = now - PAUSED_MAX_AGE_MS - 1_000;
 
@@ -248,18 +248,18 @@ describe("retentionRun", () => {
       ],
       graph: parseGraph("1>2"),
     });
-    saveWorkflow(baseDir, wf);
+    await saveWorkflow(baseDir, wf);
 
-    const result = retentionRun(baseDir, { now });
+    const result = await retentionRun(baseDir, { now });
     assert.equal(result.pruned, 0);
   });
 
-  it("prunes multiple workflows in one run", () => {
+  it("prunes multiple workflows in one run", async () => {
     const now = Date.now();
     const oldTime = now - COMPLETED_MAX_AGE_MS - 1_000;
 
     for (let i = 1; i <= 3; i++) {
-      saveWorkflow(
+      await saveWorkflow(
         baseDir,
         makeWorkflow(`wf-old-${i}`, {
           createdAt: oldTime - 10_000,
@@ -277,7 +277,7 @@ describe("retentionRun", () => {
     }
 
     // One recent workflow that should survive
-    saveWorkflow(
+    await saveWorkflow(
       baseDir,
       makeWorkflow("wf-recent", {
         createdAt: now - 1_000,
@@ -293,22 +293,22 @@ describe("retentionRun", () => {
       }),
     );
 
-    const result = retentionRun(baseDir, { now });
+    const result = await retentionRun(baseDir, { now });
     assert.equal(result.pruned, 3);
-    assert.ok(loadWorkflow(baseDir, "wf-recent"));
+    assert.ok(await loadWorkflow(baseDir, "wf-recent"));
   });
 
-  it("returns empty summary when nothing to prune", () => {
-    const result = retentionRun(baseDir);
+  it("returns empty summary when nothing to prune", async () => {
+    const result = await retentionRun(baseDir);
     assert.equal(result.pruned, 0);
     assert.deepStrictEqual(result.prunedIds, []);
   });
 
-  it("respects custom maxAge options", () => {
+  it("respects custom maxAge options", async () => {
     const now = Date.now();
     const completedAt = now - 10_000; // 10 seconds ago
 
-    saveWorkflow(
+    await saveWorkflow(
       baseDir,
       makeWorkflow("wf-custom", {
         createdAt: completedAt - 5_000,
@@ -325,19 +325,19 @@ describe("retentionRun", () => {
     );
 
     // With default thresholds, 10s old workflow should NOT be pruned
-    const result1 = retentionRun(baseDir, { now });
+    const result1 = await retentionRun(baseDir, { now });
     assert.equal(result1.pruned, 0);
 
     // With custom threshold of 5s, it SHOULD be pruned
-    const result2 = retentionRun(baseDir, { now, completedMaxAgeMs: 5_000 });
+    const result2 = await retentionRun(baseDir, { now, completedMaxAgeMs: 5_000 });
     assert.equal(result2.pruned, 1);
   });
 
-  it("uses createdAt as fallback when no completedAt timestamps exist", () => {
+  it("uses createdAt as fallback when no completedAt timestamps exist", async () => {
     const now = Date.now();
     const oldCreatedAt = now - COMPLETED_MAX_AGE_MS - 1_000;
 
-    saveWorkflow(
+    await saveWorkflow(
       baseDir,
       makeWorkflow("wf-no-timestamps", {
         createdAt: oldCreatedAt,
@@ -345,7 +345,7 @@ describe("retentionRun", () => {
       }),
     );
 
-    const result = retentionRun(baseDir, { now });
+    const result = await retentionRun(baseDir, { now });
     assert.equal(result.pruned, 1);
   });
 });
@@ -365,7 +365,7 @@ describe("retention schedule", () => {
     const now = Date.now();
     const oldTime = now - COMPLETED_MAX_AGE_MS - 1_000;
 
-    saveWorkflow(
+    await saveWorkflow(
       baseDir,
       makeWorkflow("wf-scheduled", {
         createdAt: oldTime - 10_000,
@@ -386,7 +386,7 @@ describe("retention schedule", () => {
     // Wait for at least one interval
     await new Promise((r) => setTimeout(r, 120));
 
-    assert.equal(loadWorkflow(baseDir, "wf-scheduled"), undefined);
+    assert.equal(await loadWorkflow(baseDir, "wf-scheduled"), undefined);
   });
 
   it("stopRetentionSchedule stops the timer", () => {
@@ -435,7 +435,7 @@ describe("RetentionScheduler", () => {
     const now = Date.now();
     const oldTime = now - COMPLETED_MAX_AGE_MS - 1_000;
 
-    saveWorkflow(
+    await saveWorkflow(
       baseDir,
       makeWorkflow("wf-scheduler-1", {
         createdAt: oldTime - 10_000,
@@ -456,7 +456,7 @@ describe("RetentionScheduler", () => {
     scheduler.start(baseDir, 50); // replace — should not leak timer
 
     await new Promise((r) => setTimeout(r, 120));
-    assert.equal(loadWorkflow(baseDir, "wf-scheduler-1"), undefined);
+    assert.equal(await loadWorkflow(baseDir, "wf-scheduler-1"), undefined);
     scheduler.stop();
   });
 
@@ -468,7 +468,7 @@ describe("RetentionScheduler", () => {
     const dirA = makeTmpDir();
     const dirB = makeTmpDir();
 
-    saveWorkflow(
+    await saveWorkflow(
       dirA,
       makeWorkflow("wf-a-old", {
         createdAt: oldTime - 10_000,
@@ -486,7 +486,7 @@ describe("RetentionScheduler", () => {
 
     // dirB has a recent workflow that should NOT be pruned
     const recentTime = now - 1_000;
-    saveWorkflow(
+    await saveWorkflow(
       dirB,
       makeWorkflow("wf-b-recent", {
         createdAt: recentTime - 10_000,
@@ -511,9 +511,9 @@ describe("RetentionScheduler", () => {
     await new Promise((r) => setTimeout(r, 120));
 
     // dirA: old workflow should be pruned
-    assert.equal(loadWorkflow(dirA, "wf-a-old"), undefined);
+    assert.equal(await loadWorkflow(dirA, "wf-a-old"), undefined);
     // dirB: recent workflow should survive
-    assert.ok(loadWorkflow(dirB, "wf-b-recent"));
+    assert.ok(await loadWorkflow(dirB, "wf-b-recent"));
 
     // Stop both schedulers and clean up
     schedulerA.stop();

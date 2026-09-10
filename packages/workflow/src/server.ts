@@ -50,7 +50,7 @@ export class WorkflowServer {
 
   /** Resume any incomplete workflows found on disk. */
   async resume(): Promise<string[]> {
-    const incomplete = listIncompleteWorkflows(this.opts.stateDir);
+    const incomplete = await listIncompleteWorkflows(this.opts.stateDir);
     const resumed: string[] = [];
 
     for (const wf of incomplete) {

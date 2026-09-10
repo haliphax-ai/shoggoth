@@ -58,12 +58,15 @@ function workflowAgeRef(wf: TaskList): number {
 /**
  * Run retention: prune old completed and paused workflows from disk.
  */
-export function retentionRun(baseDir: string, opts?: RetentionOptions): RetentionSummary {
+export async function retentionRun(
+  baseDir: string,
+  opts?: RetentionOptions,
+): Promise<RetentionSummary> {
   const completedMaxAge = opts?.completedMaxAgeMs ?? COMPLETED_MAX_AGE_MS;
   const pausedMaxAge = opts?.pausedMaxAgeMs ?? PAUSED_MAX_AGE_MS;
   const now = opts?.now ?? Date.now();
 
-  const workflows = listAllWorkflows(baseDir);
+  const workflows = await listAllWorkflows(baseDir);
   const prunedIds: string[] = [];
 
   for (const wf of workflows) {
@@ -71,10 +74,10 @@ export function retentionRun(baseDir: string, opts?: RetentionOptions): Retentio
     const age = now - ageRef;
 
     if (isAllTerminal(wf) && age > completedMaxAge) {
-      deleteWorkflow(baseDir, wf.id);
+      await deleteWorkflow(baseDir, wf.id);
       prunedIds.push(wf.id);
     } else if (isPaused(wf) && age > pausedMaxAge) {
-      deleteWorkflow(baseDir, wf.id);
+      await deleteWorkflow(baseDir, wf.id);
       prunedIds.push(wf.id);
     }
   }
@@ -106,7 +109,12 @@ export class RetentionScheduler {
    */
   start(baseDir: string, intervalMs: number, opts?: RetentionOptions): void {
     this.stop();
-    this.timer = setInterval(() => retentionRun(baseDir, opts), intervalMs);
+    this.timer = setInterval(() => {
+      retentionRun(baseDir, opts).catch((err) => {
+        // Swallow errors from periodic retention runs to prevent timer crash
+        console.error("retention run failed:", err);
+      });
+    }, intervalMs);
   }
 
   /** Stop the periodic retention schedule, if running. */
