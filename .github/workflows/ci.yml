@@ -26,6 +26,8 @@ jobs:
           driver-opts: network=host
       - uses: docker/build-push-action@v7
         with:
+          context: ${{ github.workspace }}
+          file: ${{ github.workspace }}/Dockerfile
           cache-from: type=gha
           cache-to: type=gha,mode=max
           push: true
