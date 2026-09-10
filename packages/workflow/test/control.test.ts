@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from "vitest";
+import { describe, it, beforeEach, afterEach, vi } from "vitest";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -810,6 +810,190 @@ describe("ControlPlane", () => {
 
       // Task 2 is pending (blocked by task 1)
       await assert.rejects(() => cp.retry(wfId, 2), /not retriable/i);
+    });
+  });
+
+  describe("wait", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("resolves immediately when all tasks are already terminal", async () => {
+      const wf = createPersistedWorkflow(baseDir, {
+        id: "wf-wait-terminal",
+        name: "wait-terminal",
+        tasks: [
+          {
+            taskDef: makeTask(1),
+            status: "done",
+            output: "ok",
+            startedAt: 1000,
+            completedAt: 2000,
+          },
+          {
+            taskDef: makeTask(2),
+            status: "failed",
+            error: "boom",
+            startedAt: 1000,
+            completedAt: 3000,
+          },
+          { taskDef: makeTask(3), status: "skipped", startedAt: 1000, completedAt: 1000 },
+        ],
+        graph: parseGraph("1>2>3"),
+        pollingIntervalMs: 50,
+        createdAt: 1000,
+      });
+
+      const cp = new ControlPlane({
+        orchestrators: new Map(),
+        stateDir: baseDir,
+        killer: mockKillAdapter(),
+      });
+
+      const result = await cp.wait(wf.id);
+      assert.equal(result.id, wf.id);
+      assert.equal(result.tasks.length, 3);
+      assert.ok(result.tasks.every((t) => ["done", "failed", "skipped"].includes(t.status)));
+    });
+
+    it("throws a timeout error when tasks never become terminal", async () => {
+      const wf = createPersistedWorkflow(baseDir, {
+        id: "wf-wait-timeout",
+        name: "wait-timeout",
+        tasks: [{ taskDef: makeTask(1), status: "pending" }],
+        graph: parseGraph("1"),
+        pollingIntervalMs: 50,
+        createdAt: 1000,
+      });
+
+      const cp = new ControlPlane({
+        orchestrators: new Map(),
+        stateDir: baseDir,
+        killer: mockKillAdapter(),
+      });
+
+      const waitPromise = cp.wait(wf.id, 100).catch((e: unknown) => e);
+
+      // Advance timers past the timeout
+      await vi.advanceTimersByTimeAsync(150);
+
+      const result = await waitPromise;
+      assert.ok(result instanceof Error);
+      assert.match(result.message, /wait timed out after 100ms for workflow wf-wait-timeout/);
+    });
+
+    it("uses default timeout of 10 minutes when not specified", async () => {
+      const wf = createPersistedWorkflow(baseDir, {
+        id: "wf-wait-default-timeout",
+        name: "wait-default",
+        tasks: [{ taskDef: makeTask(1), status: "in_progress" }],
+        graph: parseGraph("1"),
+        pollingIntervalMs: 50,
+        createdAt: 1000,
+      });
+
+      const cp = new ControlPlane({
+        orchestrators: new Map(),
+        stateDir: baseDir,
+        killer: mockKillAdapter(),
+      });
+
+      const waitPromise = cp.wait(wf.id).catch((e: unknown) => e);
+
+      // Advance past the default 10-minute timeout
+      await vi.advanceTimersByTimeAsync(600_001);
+
+      const result = await waitPromise;
+      assert.ok(result instanceof Error);
+      assert.match(result.message, /wait timed out after 600000ms/);
+    });
+
+    it("resolves when tasks become terminal before timeout", async () => {
+      // Create a workflow with a pending task
+      const wf = createPersistedWorkflow(baseDir, {
+        id: "wf-wait-becomes-terminal",
+        name: "wait-becomes-terminal",
+        tasks: [{ taskDef: makeTask(1), status: "pending" }],
+        graph: parseGraph("1"),
+        pollingIntervalMs: 50,
+        createdAt: 1000,
+      });
+
+      const cp = new ControlPlane({
+        orchestrators: new Map(),
+        stateDir: baseDir,
+        killer: mockKillAdapter(),
+      });
+
+      // Start waiting with a generous timeout
+      const waitPromise = cp.wait(wf.id, 5000);
+
+      // Before advancing timers, update the workflow on disk to be terminal
+      const updatedWf: TaskList = {
+        ...wf,
+        tasks: [
+          {
+            taskDef: makeTask(1),
+            status: "done",
+            output: "completed",
+            startedAt: 1000,
+            completedAt: 2000,
+          },
+        ],
+      };
+      saveWorkflow(baseDir, updatedWf);
+
+      // Advance timers to trigger the next poll iteration
+      await vi.advanceTimersByTimeAsync(60);
+
+      const result = await waitPromise;
+      assert.equal(result.id, wf.id);
+      assert.equal(result.tasks[0].status, "done");
+    });
+
+    it("resolves when workflow is loaded from active orchestrator", async () => {
+      const { cp, orch, wfId, pollResults } = await setupWorkflow(
+        baseDir,
+        [makeTask(1), makeTask(2)],
+        "1>2",
+      );
+
+      // Complete both tasks via the orchestrator
+      pollResults.set("session-1", { status: "done", output: "ok1" });
+      await orch.tick();
+      pollResults.set("session-2", { status: "done", output: "ok2" });
+      await orch.tick();
+
+      const result = await cp.wait(wfId);
+      assert.equal(result.id, wfId);
+      assert.ok(result.tasks.every((t) => t.status === "done"));
+    });
+
+    it("times out using orchestrator-backed workflow", async () => {
+      const { cp, wfId } = await setupWorkflow(baseDir, [makeTask(1)], "1");
+
+      // Task 1 is in_progress, never completes
+      const waitPromise = cp.wait(wfId, 100).catch((e: unknown) => e);
+
+      await vi.advanceTimersByTimeAsync(150);
+
+      const result = await waitPromise;
+      assert.ok(result instanceof Error);
+      assert.match(result.message, /wait timed out after 100ms/);
+    });
+
+    it("throws for unknown workflow", async () => {
+      const cp = new ControlPlane({
+        orchestrators: new Map(),
+        stateDir: baseDir,
+        killer: mockKillAdapter(),
+      });
+
+      await assert.rejects(() => cp.wait("nonexistent"), /not found/i);
     });
   });
 });
