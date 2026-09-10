@@ -7,7 +7,7 @@ import { retentionRun, type RetentionSummary, type RetentionOptions } from "./re
 
 import { getLogger } from "@shoggoth/shared";
 const log = getLogger("workflow");
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 
 // --- Public types ---
@@ -60,14 +60,15 @@ export class ControlPlane {
   }
 
   /** Resolve a workflow — prefer in-memory orchestrator, fall back to disk. */
-  private resolveWorkflow(workflowId: string): TaskList {
+  /** Resolve a workflow — prefer in-memory orchestrator, fall back to disk. */
+  private async resolveWorkflow(workflowId: string): Promise<TaskList> {
     const orch = this.orchestrators.get(workflowId);
     if (orch) {
       const wf = orch.getWorkflowStatus();
       if (wf) return wf;
     }
 
-    const wf = loadWorkflow(this.stateDir, workflowId);
+    const wf = await loadWorkflow(this.stateDir, workflowId);
     if (wf) return wf;
 
     throw new Error(`Workflow not found: ${workflowId}`);
@@ -119,7 +120,7 @@ export class ControlPlane {
     }
 
     // Persist
-    saveWorkflow(this.stateDir, wf);
+    await saveWorkflow(this.stateDir, wf);
     log.warn("workflow aborted", { workflowId });
   }
 
@@ -140,7 +141,7 @@ export class ControlPlane {
     }
 
     // Persist
-    saveWorkflow(this.stateDir, wf);
+    await saveWorkflow(this.stateDir, wf);
     log.info("workflow paused", { workflowId });
   }
 
@@ -161,7 +162,7 @@ export class ControlPlane {
     }
 
     // Persist
-    saveWorkflow(this.stateDir, wf);
+    await saveWorkflow(this.stateDir, wf);
     log.info("workflow resumed", { workflowId });
   }
 
@@ -176,15 +177,20 @@ export class ControlPlane {
    * List all workflows from disk with summary info.
    */
   async list(_agentChainId?: string): Promise<WorkflowSummary[]> {
-    if (!fs.existsSync(this.stateDir)) return [];
+    let entries: string[];
+    try {
+      entries = await fs.readdir(this.stateDir);
+    } catch {
+      return [];
+    }
 
-    const files = fs.readdirSync(this.stateDir).filter((f) => f.endsWith(".json"));
+    const files = entries.filter((f) => f.endsWith(".json"));
     const summaries: WorkflowSummary[] = [];
 
     for (const file of files) {
       try {
         const wfId = path.basename(file, ".json");
-        const wf = loadWorkflow(this.stateDir, wfId);
+        const wf = await loadWorkflow(this.stateDir, wfId);
         if (!wf) continue;
 
         summaries.push({
@@ -234,7 +240,7 @@ export class ControlPlane {
       wf = orch.getWorkflowStatus()!;
       if (!wf) throw new Error(`Workflow not found: ${workflowId}`);
     } else {
-      const loaded = loadWorkflow(this.stateDir, workflowId);
+      const loaded = await loadWorkflow(this.stateDir, workflowId);
       if (!loaded) throw new Error(`Workflow not found: ${workflowId}`);
       wf = loaded;
     }
@@ -259,7 +265,7 @@ export class ControlPlane {
     if (updates.runtimeLimitMs !== undefined) task.taskDef.runtimeLimitMs = updates.runtimeLimitMs;
 
     // Persist immediately
-    saveWorkflow(this.stateDir, wf);
+    await saveWorkflow(this.stateDir, wf);
   }
 
   /**
@@ -320,7 +326,7 @@ export class ControlPlane {
     }
 
     // Persist
-    saveWorkflow(this.stateDir, wf);
+    await saveWorkflow(this.stateDir, wf);
     log.info("workflow task retried", {
       workflowId,
       taskId,
@@ -337,7 +343,7 @@ export class ControlPlane {
     const start = Date.now();
 
     while (true) {
-      const wf = this.resolveWorkflow(workflowId);
+      const wf = await this.resolveWorkflow(workflowId);
       const allTerminal = wf.tasks.every((t) => isTerminal(t.status));
       if (allTerminal) return wf;
 
@@ -354,7 +360,7 @@ export class ControlPlane {
    * Run retention: prune old completed and paused workflows from disk.
    */
   async retention(opts?: RetentionOptions): Promise<RetentionSummary> {
-    const summary = retentionRun(this.stateDir, opts);
+    const summary = await retentionRun(this.stateDir, opts);
 
     // Remove pruned workflows from in-memory orchestrator map
     for (const id of summary.prunedIds) {

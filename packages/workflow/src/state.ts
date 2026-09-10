@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import type { TaskList, TaskState, DependencyGraph } from "./types.js";
 import { isTerminal } from "./types.js";
@@ -77,38 +77,52 @@ function statePath(baseDir: string, workflowId: string): string {
 
 // --- Public API ---
 
-export function saveWorkflow(baseDir: string, wf: TaskList): void {
-  fs.mkdirSync(baseDir, { recursive: true });
+export async function saveWorkflow(baseDir: string, wf: TaskList): Promise<void> {
+  await fs.mkdir(baseDir, { recursive: true });
   const data = JSON.stringify(serialize(wf), null, 2);
-  fs.writeFileSync(statePath(baseDir, wf.id), data, "utf-8");
+  await fs.writeFile(statePath(baseDir, wf.id), data, "utf-8");
 }
 
-export function loadWorkflow(baseDir: string, workflowId: string): TaskList | undefined {
-  const fp = statePath(baseDir, workflowId);
-  if (!fs.existsSync(fp)) return undefined;
-  const raw: SerializedWorkflow = JSON.parse(fs.readFileSync(fp, "utf-8"));
-  return deserialize(raw);
-}
-
-export function deleteWorkflow(baseDir: string, workflowId: string): void {
+export async function loadWorkflow(
+  baseDir: string,
+  workflowId: string,
+): Promise<TaskList | undefined> {
   const fp = statePath(baseDir, workflowId);
   try {
-    fs.unlinkSync(fp);
+    const raw: SerializedWorkflow = JSON.parse(await fs.readFile(fp, "utf-8"));
+    return deserialize(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+export async function deleteWorkflow(baseDir: string, workflowId: string): Promise<void> {
+  const fp = statePath(baseDir, workflowId);
+  try {
+    await fs.unlink(fp);
   } catch {
     // ignore if not found
   }
 }
 
-export function listWorkflows(baseDir: string, filter?: (wf: TaskList) => boolean): TaskList[] {
-  if (!fs.existsSync(baseDir)) return [];
+export async function listWorkflows(
+  baseDir: string,
+  filter?: (wf: TaskList) => boolean,
+): Promise<TaskList[]> {
+  let files: string[];
+  try {
+    const entries = await fs.readdir(baseDir);
+    files = entries.filter((f) => f.endsWith(".json"));
+  } catch {
+    return [];
+  }
 
-  const files = fs.readdirSync(baseDir).filter((f) => f.endsWith(".json"));
   const workflows: TaskList[] = [];
 
   for (const file of files) {
     const fp = path.join(baseDir, file);
     try {
-      const raw: SerializedWorkflow = JSON.parse(fs.readFileSync(fp, "utf-8"));
+      const raw: SerializedWorkflow = JSON.parse(await fs.readFile(fp, "utf-8"));
       const wf = deserialize(raw);
       if (!filter || filter(wf)) workflows.push(wf);
     } catch {
@@ -119,10 +133,10 @@ export function listWorkflows(baseDir: string, filter?: (wf: TaskList) => boolea
   return workflows;
 }
 
-export function listIncompleteWorkflows(baseDir: string): TaskList[] {
+export async function listIncompleteWorkflows(baseDir: string): Promise<TaskList[]> {
   return listWorkflows(baseDir, (wf) => !wf.tasks.every((t) => isTerminal(t.status)));
 }
 
-export function listAllWorkflows(baseDir: string): TaskList[] {
+export async function listAllWorkflows(baseDir: string): Promise<TaskList[]> {
   return listWorkflows(baseDir);
 }

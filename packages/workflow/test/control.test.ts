@@ -165,7 +165,10 @@ async function setupWorkflow(
 }
 
 /** Create a persisted-only workflow (no active orchestrator) for disk-based tests. */
-function createPersistedWorkflow(baseDir: string, overrides?: Partial<TaskList>): TaskList {
+async function createPersistedWorkflow(
+  baseDir: string,
+  overrides?: Partial<TaskList>,
+): Promise<TaskList> {
   const wf: TaskList = {
     id: "wf-persisted-1",
     name: "test-workflow",
@@ -191,7 +194,7 @@ function createPersistedWorkflow(baseDir: string, overrides?: Partial<TaskList>)
     createdAt: 1000,
     ...overrides,
   };
-  saveWorkflow(baseDir, wf);
+  await saveWorkflow(baseDir, wf);
   return wf;
 }
 
@@ -400,7 +403,7 @@ describe("ControlPlane", () => {
     });
 
     it("reads from persisted state when no active orchestrator", async () => {
-      const wf = createPersistedWorkflow(baseDir);
+      const wf = await createPersistedWorkflow(baseDir);
 
       const cp = new ControlPlane({
         orchestrators: new Map(),
@@ -426,12 +429,12 @@ describe("ControlPlane", () => {
 
   describe("list", () => {
     it("returns all workflows from disk", async () => {
-      createPersistedWorkflow(baseDir, {
+      await createPersistedWorkflow(baseDir, {
         id: "wf-1",
         name: "workflow-1",
         createdAt: 1000,
       });
-      createPersistedWorkflow(baseDir, {
+      await createPersistedWorkflow(baseDir, {
         id: "wf-2",
         name: "workflow-2",
         createdAt: 2000,
@@ -823,7 +826,7 @@ describe("ControlPlane", () => {
     });
 
     it("resolves immediately when all tasks are already terminal", async () => {
-      const wf = createPersistedWorkflow(baseDir, {
+      const wf = await createPersistedWorkflow(baseDir, {
         id: "wf-wait-terminal",
         name: "wait-terminal",
         tasks: [
@@ -861,7 +864,7 @@ describe("ControlPlane", () => {
     });
 
     it("throws a timeout error when tasks never become terminal", async () => {
-      const wf = createPersistedWorkflow(baseDir, {
+      const wf = await createPersistedWorkflow(baseDir, {
         id: "wf-wait-timeout",
         name: "wait-timeout",
         tasks: [{ taskDef: makeTask(1), status: "pending" }],
@@ -887,7 +890,7 @@ describe("ControlPlane", () => {
     });
 
     it("uses default timeout of 10 minutes when not specified", async () => {
-      const wf = createPersistedWorkflow(baseDir, {
+      const wf = await createPersistedWorkflow(baseDir, {
         id: "wf-wait-default-timeout",
         name: "wait-default",
         tasks: [{ taskDef: makeTask(1), status: "in_progress" }],
@@ -914,7 +917,7 @@ describe("ControlPlane", () => {
 
     it("resolves when tasks become terminal before timeout", async () => {
       // Create a workflow with a pending task
-      const wf = createPersistedWorkflow(baseDir, {
+      const wf = await createPersistedWorkflow(baseDir, {
         id: "wf-wait-becomes-terminal",
         name: "wait-becomes-terminal",
         tasks: [{ taskDef: makeTask(1), status: "pending" }],
@@ -945,7 +948,7 @@ describe("ControlPlane", () => {
           },
         ],
       };
-      saveWorkflow(baseDir, updatedWf);
+      await saveWorkflow(baseDir, updatedWf);
 
       // Advance timers to trigger the next poll iteration
       await vi.advanceTimersByTimeAsync(60);

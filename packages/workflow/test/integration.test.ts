@@ -260,7 +260,7 @@ describe("Integration: happy path", () => {
     assert.ok(summaryPost, "summary message should be posted");
 
     // State should be persisted
-    const loaded = loadWorkflow(baseDir, s.wfId)!;
+    const loaded = (await loadWorkflow(baseDir, s.wfId))!;
     assert.ok(loaded);
     assert.ok(loaded.tasks.every((t) => t.status === "done"));
   });
@@ -533,7 +533,7 @@ describe("Integration: retention via control plane", () => {
       pollingIntervalMs: 50,
       createdAt: oldTime - 10_000,
     };
-    saveWorkflow(baseDir, oldWf);
+    await saveWorkflow(baseDir, oldWf);
 
     // Create a recent workflow via the orchestrator
     const s = await setup(baseDir, [makeTask(1)], "1");
@@ -545,10 +545,10 @@ describe("Integration: retention via control plane", () => {
     assert.deepStrictEqual(result.prunedIds, ["wf-old"]);
 
     // Old workflow should be gone
-    assert.equal(loadWorkflow(baseDir, "wf-old"), undefined);
+    assert.equal(await loadWorkflow(baseDir, "wf-old"), undefined);
 
     // Active workflow should still exist
-    assert.ok(loadWorkflow(baseDir, s.wfId));
+    assert.ok(await loadWorkflow(baseDir, s.wfId));
   });
 
   it("removes pruned workflows from in-memory orchestrator map", async () => {
@@ -562,10 +562,10 @@ describe("Integration: retention via control plane", () => {
     assert.ok(s.orch.isComplete());
 
     // Manually backdate the persisted state to make it old
-    const wf = loadWorkflow(baseDir, s.wfId)!;
+    const wf = (await loadWorkflow(baseDir, s.wfId))!;
     wf.createdAt = oldTime - 10_000;
     wf.tasks[0].completedAt = oldTime;
-    saveWorkflow(baseDir, wf);
+    await saveWorkflow(baseDir, wf);
 
     // Run retention
     const result = await s.cp.retention({ now });
