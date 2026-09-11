@@ -1,3 +1,5 @@
+// Barrel — re-exports everything from domain modules for backward compatibility.
+// All existing imports from "./schema" continue to work unchanged.
 export * from "./schema/common";
 export * from "./schema/models";
 export * from "./schema/mcp";
