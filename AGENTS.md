@@ -50,6 +50,9 @@ Discord is currently the only available platform, but it should not be treated a
 - oxlint: linting
 - plugin-hooks: extensible hook points
 - knip: finding dead code
+- vue: front-end web UI
+- express: web server
+- daisy-ui: CSS framework
 
 ## Git hooks
 
