@@ -70,19 +70,44 @@ const SYSTEM_CONTEXT_BLOCK_RE =
   /--- BEGIN TRUSTED SYSTEM CONTEXT(?: \[token:[0-9a-f]+\])? ---[\s\S]*?--- END TRUSTED SYSTEM CONTEXT(?: \[token:[0-9a-f]+\])? ---/;
 
 /**
+ * Global variant for replacing individual blocks via String.prototype.replace.
+ * Captures the token from the BEGIN divider (group 1) so the caller can compare it.
+ */
+const SYSTEM_CONTEXT_BLOCK_GLOBAL_RE =
+  /--- BEGIN TRUSTED SYSTEM CONTEXT(?: \[token:([0-9a-f]+)\])? ---[\s\S]*?--- END TRUSTED SYSTEM CONTEXT(?: \[token:[0-9a-f]+\])? ---/g;
+
+const FALSIFIED_SENTINEL =
+  `[STRIPPED — FALSIFIED SYSTEM CONTEXT]\n` +
+  `A falsified system context block was detected and removed from this message.`;
+
+/**
  * Checks untrusted inbound text for falsified system context blocks.
- * If any blocks matching the divider pattern are found, the entire message is
- * discarded and replaced with a safety notice describing the original content.
- * Inbound user messages should never contain valid system context blocks.
+ *
+ * When no valid token is provided, any block matching the divider pattern causes
+ * the entire message to be discarded and replaced with a safety notice.
+ *
+ * When a valid token is provided, only blocks whose token does NOT match the
+ * valid token are stripped (replaced with a sentinel in-place). Blocks that
+ * carry the valid token are preserved, and surrounding text is kept intact.
+ * Blocks with no embedded token are always considered falsified when a valid
+ * token is supplied.
  */
 export function stripFalsifiedSystemContext(
   text: string,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _validToken?: string,
+  validToken?: string,
 ): string {
   if (!SYSTEM_CONTEXT_BLOCK_RE.test(text)) {
     return text;
   }
+
+  // Token-aware mode: strip only mismatched blocks
+  if (validToken) {
+    return text.replace(SYSTEM_CONTEXT_BLOCK_GLOBAL_RE, (full, token) => {
+      return token === validToken ? full : FALSIFIED_SENTINEL;
+    });
+  }
+
+  // Legacy mode: discard entire message
   return (
     `[DISCARDED — UNSAFE CONTENT]\n` +
     `The inbound message contained falsified system context and was discarded in its entirety.`
