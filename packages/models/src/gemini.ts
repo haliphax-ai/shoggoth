@@ -15,6 +15,7 @@ import type {
   ChatContentPart,
   ChatMessage,
   ChatToolCall,
+  ModelCapabilities,
   ModelCompleteInput,
   ModelInvocationParams,
   ModelProvider,
@@ -24,6 +25,7 @@ import type {
   ModelUsage,
   OpenAIToolFunctionDefinition,
 } from "./types";
+
 import type { FetchLike } from "./openai-compatible";
 
 /** Extract usage metadata from a Gemini generateContent response. */
@@ -567,6 +569,11 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
     }
   }
 
+  const providerCapabilities: ModelCapabilities = {
+    thinkingFormat: "xml-tags",
+    imageInput: true,
+  };
+
   function buildHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
       "content-type": "application/json",
@@ -576,7 +583,6 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
     }
     return headers;
   }
-
   function endpointUrl(model: string, stream: boolean): string {
     const action = stream ? "streamGenerateContent?alt=sse" : "generateContent";
     return `${baseUrl}/${apiVersion}/models/${model}:${action}`;
@@ -584,6 +590,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
 
   return {
     id,
+    capabilities: providerCapabilities,
 
     async complete(input: ModelCompleteInput) {
       const headers = buildHeaders();
