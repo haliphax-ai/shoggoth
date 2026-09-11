@@ -12,7 +12,7 @@
     }
   },
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --reporter=minimal",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
