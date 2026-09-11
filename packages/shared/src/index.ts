@@ -13,7 +13,6 @@ export {
   DEFAULT_HITL_CONFIG,
   DEFAULT_MEMORY_CONFIG,
   DEFAULT_POLICY_CONFIG,
-  CONTEXT_LEVELS,
   contextLevelSchema,
   contextLevelToolOverrideSchema,
   contextLevelToolsConfigSchema,
