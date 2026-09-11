@@ -2,8 +2,7 @@
 .DS_Store
 .env
 .env.shoggoth.local
+.ssh/
 dist/
 docker-compose.override.yml
-node_modules/
-Release/
-.ssh/
+node_modules
