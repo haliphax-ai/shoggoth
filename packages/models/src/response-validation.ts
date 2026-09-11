@@ -1,7 +1,7 @@
 import Ajv from "ajv";
 
 /** Mode strength ordering for min() comparison. */
-const MODE_RANK: Record<string, number> = {
+const MODE_RANK: Record<StructuredOutputMode, number> = {
   none: 0,
   "best-effort": 1,
   strict: 2,
