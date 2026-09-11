@@ -203,6 +203,9 @@ export function resolveEffectiveMcpServerRules(
   agentId: string,
   isSubagent: boolean,
 ): McpServerRules {
+  // Hoist agent entry lookup — used by both subagent and top-level branches
+  const entry = findAgentEntry(config, agentId);
+
   // Start with global rules
   let effective: McpServerRules = config.mcp?.serverRules
     ? { ...DEFAULT_MCP_SERVER_RULES, ...config.mcp.serverRules }
@@ -218,7 +221,6 @@ export function resolveEffectiveMcpServerRules(
       };
     }
     // Merge per-agent subagent rules
-    const entry = findAgentEntry(config, agentId);
     const perAgentSubagent = entry?.subagentMcp?.serverRules;
     if (perAgentSubagent) {
       effective = {
@@ -228,7 +230,6 @@ export function resolveEffectiveMcpServerRules(
     }
   } else {
     // Merge per-agent rules for top-level session
-    const entry = findAgentEntry(config, agentId);
     const perAgent = entry?.mcp?.serverRules;
     if (perAgent) {
       effective = {
