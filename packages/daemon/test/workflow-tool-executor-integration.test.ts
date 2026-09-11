@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createDaemonToolExecutor } from "../src/workflow-adapters.js";
 
 /** Build an aggregated entry so routeMcpToolInvocation can find it by namespacedName. */
@@ -26,6 +26,14 @@ function mockContext(
 }
 
 describe("createDaemonToolExecutor", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("should execute a tool with lazy-loaded context", async () => {
     const externalFn = vi.fn().mockResolvedValue({
       resultJson: JSON.stringify({ success: true, data: "result" }),
@@ -150,7 +158,7 @@ describe("createDaemonToolExecutor", () => {
       .fn()
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .mockImplementation(async ({ toolCallId }: any) => {
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await vi.advanceTimersByTimeAsync(10);
         return { resultJson: JSON.stringify({ toolCallId, result: "done" }) };
       });
     const ctx = mockContext(["tool-1", "tool-2", "tool-3"], externalFn);
@@ -164,7 +172,8 @@ describe("createDaemonToolExecutor", () => {
 
     const executor = createDaemonToolExecutor({ getToolContext, logger });
 
-    const results = await Promise.all([
+    // Start all executions without awaiting — timers fire via advanceTimersByTimeAsync
+    const resultsPromise = Promise.all([
       executor.execute({
         name: "tool-1",
         argsJson: JSON.stringify({}),
@@ -181,6 +190,8 @@ describe("createDaemonToolExecutor", () => {
         toolCallId: "concurrent-3",
       }),
     ]);
+    await vi.advanceTimersByTimeAsync(10);
+    const results = await resultsPromise;
 
     expect(results).toHaveLength(3);
     expect(externalFn).toHaveBeenCalledTimes(3);

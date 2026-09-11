@@ -282,6 +282,9 @@ describe("ServiceGateway", () => {
     } catch {
       // Ignore errors if not running
     }
+    // NOTE: Real timers are used intentionally here. This test file sets up real HTTP
+    // servers, WebSocket servers, and TCP connections. Fake timers would interfere with
+    // the event loop and cause real I/O operations to hang.
     // Allow port to be fully released between tests
     await new Promise((r) => setTimeout(r, 50));
   });
@@ -325,7 +328,6 @@ describe("ServiceGateway", () => {
 
         await gateway.start();
 
-
         // Request through gateway
         const response = await httpRequest({
           hostname: "127.0.0.1",
@@ -345,7 +347,6 @@ describe("ServiceGateway", () => {
 
     it("should return 404 for unknown service ID", async () => {
       await gateway.start();
-
 
       const response = await httpRequest({
         hostname: "127.0.0.1",
@@ -367,7 +368,6 @@ describe("ServiceGateway", () => {
       registry.register(entry);
 
       await gateway.start();
-
 
       const response = await httpRequest({
         hostname: "127.0.0.1",
@@ -568,4 +568,3 @@ describe("ServiceGateway", () => {
     });
   });
 });
-

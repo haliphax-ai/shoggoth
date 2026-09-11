@@ -4,7 +4,7 @@ import assert from "node:assert";
 import Database from "better-sqlite3";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
-import { describe, it } from "vitest";
+import { describe, it, vi, beforeEach, afterEach } from "vitest";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
 import { createPolicyEngine } from "../../src/policy/engine";
 import { createToolLoopPolicyAndAudit } from "../../src/policy/tool-loop-bridge";
@@ -88,6 +88,14 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
 }
 
 describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("routes external tool calls to stdio MCP", async () => {
     const { pool, external } = await connectShoggothMcpServers([
       {
@@ -161,7 +169,7 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
       assert.equal(row?.status, "completed");
       db.close();
     } finally {
-      await pool.close();
+      await pool.close().catch(() => {});
     }
   });
 
@@ -321,7 +329,7 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
       assert.equal(row?.status, "completed");
       db.close();
     } finally {
-      await pool.close();
+      await pool.close().catch(() => {});
       server.close();
     }
   });
@@ -424,12 +432,12 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
       },
     );
     try {
-      await new Promise((r) => setTimeout(r, 250));
+      await vi.advanceTimersByTimeAsync(250);
       assert.ok(
         received.some((x) => x.sourceId === "sse-src" && x.method === "notifications/progress"),
       );
     } finally {
-      await pool.close();
+      await pool.close().catch(() => {});
       server.close();
     }
   });
@@ -519,7 +527,7 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
     try {
       assert.equal(pool.cancelMcpRequest?.("missing", 1), false);
       assert.equal(pool.cancelMcpRequest?.("http-cancel-src", 99), true);
-      await new Promise((r) => setTimeout(r, 150));
+      await vi.advanceTimersByTimeAsync(150);
       assert.ok(
         cancelledParams.some((p) => {
           const o = p as { requestId?: number };
@@ -527,7 +535,7 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
         }),
       );
     } finally {
-      await pool.close();
+      await pool.close().catch(() => {});
       server.close();
     }
   });

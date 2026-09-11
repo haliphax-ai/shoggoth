@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -236,6 +236,14 @@ describe("service-control-plane-auth (scoped access)", () => {
   });
 
   describe("rate limiting: exceeding limit returns error", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
     it("allows requests within the rate limit", async () => {
       const { ServiceControlPlaneAuth } = await import("../src/service-control-plane-auth");
 
@@ -285,7 +293,7 @@ describe("service-control-plane-auth (scoped access)", () => {
       expect(auth.checkRateLimit("svc-rate-reset").allowed).toBe(false);
 
       // Wait for window to expire
-      await new Promise((r) => setTimeout(r, 150));
+      await vi.advanceTimersByTimeAsync(150);
 
       // Should be allowed again
       expect(auth.checkRateLimit("svc-rate-reset").allowed).toBe(true);

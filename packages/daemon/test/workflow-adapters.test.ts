@@ -1,4 +1,4 @@
-import { describe, it } from "vitest";
+import { describe, it, vi, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import {
   createDaemonSpawnAdapter,
@@ -77,6 +77,14 @@ function fakeRunSessionModelTurn(result?: { latestAssistantText: string }) {
 // ---------------------------------------------------------------------------
 
 describe("createDaemonSpawnAdapter", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("spawns a child session via sessionManager and returns the session id", async () => {
     const spawnCalls: unknown[] = [];
     const sm = fakeSessionManager({
@@ -136,7 +144,7 @@ describe("createDaemonSpawnAdapter", () => {
     });
 
     // Give the async fire-and-forget a tick to start
-    await new Promise((r) => setTimeout(r, 10));
+    await vi.advanceTimersByTimeAsync(10);
     assert.equal(turn.calls.length, 1);
     const turnInput = turn.calls[0] as Record<string, unknown>;
     assert.equal(turnInput.sessionId, "agent:main:discord:channel:abc:child-uuid");
@@ -207,7 +215,7 @@ describe("createDaemonSpawnAdapter", () => {
     });
 
     // Wait for the turn to complete
-    await new Promise((r) => setTimeout(r, 20));
+    await vi.advanceTimersByTimeAsync(20);
 
     // abortTask should be a no-op now (controller cleaned up)
     adapter.abortTask!(childId);

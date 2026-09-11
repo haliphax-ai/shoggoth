@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -8,10 +8,12 @@ describe("createSecretFifo", () => {
   let testDir: string;
 
   beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     testDir = mkdtempSync(join(tmpdir(), "vault-fifo-test-"));
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     try {
       rmSync(testDir, { recursive: true, force: true });
     } catch {
@@ -61,7 +63,7 @@ describe("createSecretFifo", () => {
     });
 
     // Give a small delay for cleanup to complete
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await vi.advanceTimersByTimeAsync(100);
 
     expect(existsSync(path)).toBe(false);
   });
@@ -74,7 +76,7 @@ describe("createSecretFifo", () => {
     expect(existsSync(path)).toBe(true);
 
     // Wait for timeout to expire
-    await new Promise((resolve) => setTimeout(resolve, timeoutMs + 200));
+    await vi.advanceTimersByTimeAsync(timeoutMs + 200);
 
     expect(existsSync(path)).toBe(false);
   });
