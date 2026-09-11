@@ -90,11 +90,21 @@ export function getLogger(component: string): Logger {
   }
 
   function makeProxy(fields: LogFields): Logger {
+    let cached: { root: Logger; child: Logger } | undefined;
+
+    function resolved(): Logger {
+      const root = current();
+      if (cached && cached.root === root) return cached.child;
+      const child = root.child(fields);
+      cached = { root, child };
+      return child;
+    }
+
     return {
-      debug: (msg, f) => current().child(fields).debug(msg, f),
-      info: (msg, f) => current().child(fields).info(msg, f),
-      warn: (msg, f) => current().child(fields).warn(msg, f),
-      error: (msg, f) => current().child(fields).error(msg, f),
+      debug: (msg, f) => resolved().debug(msg, f),
+      info: (msg, f) => resolved().info(msg, f),
+      warn: (msg, f) => resolved().warn(msg, f),
+      error: (msg, f) => resolved().error(msg, f),
       child: (extra) => makeProxy({ ...fields, ...extra }),
     };
   }
