@@ -109,8 +109,8 @@ export class RetentionScheduler {
    */
   start(baseDir: string, intervalMs: number, opts?: RetentionOptions): void {
     this.stop();
-    this.timer = setInterval(() => {
-      retentionRun(baseDir, opts).catch((err) => {
+    this.timer = setInterval(async () => {
+      await retentionRun(baseDir, opts).catch((err) => {
         // Swallow errors from periodic retention runs to prevent timer crash
         console.error("retention run failed:", err);
       });
