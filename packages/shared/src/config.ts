@@ -91,7 +91,7 @@ export async function loadLayeredConfigAsync(configDir: string): Promise<Shoggot
         });
       }
 
-      merged = deepMerge(merged as never, fragment) as Record<string, unknown>;
+      merged = deepMerge(merged, fragment);
     }
   }
 
