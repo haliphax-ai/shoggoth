@@ -252,7 +252,7 @@ describe("deliverSubagentResult", () => {
       expect(content).toContain("[Subagent completed]");
       expect(content).toContain(baseReminder);
       expect(content).not.toContain("out of band");
-      expect(content).not.toContain("Respond with structured output");
+      expect(content).not.toContain("respond with structured output");
       handle.unregister();
     });
 
@@ -274,7 +274,7 @@ describe("deliverSubagentResult", () => {
       const content: string = arg.userContent;
       expect(content).toContain("[Subagent completed]");
       // The structured output guidance replaces the old asyncOnlyReminder.
-      expect(content).toContain("Respond with structured output");
+      expect(content).toContain("respond with structured output");
       expect(content).not.toContain("builtin-message action=post");
     });
 
@@ -296,7 +296,7 @@ describe("deliverSubagentResult", () => {
       const arg = mockRunSessionModelTurn.mock.calls[0][0];
       const content: string = arg.userContent;
       expect(content).toContain("[Subagent completed]");
-      expect(content).toContain("Respond with structured output");
+      expect(content).toContain("respond with structured output");
       expect(content).not.toContain("builtin-message action=post");
     });
 

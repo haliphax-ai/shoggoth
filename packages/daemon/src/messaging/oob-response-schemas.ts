@@ -11,12 +11,12 @@ export const OOB_SCHEMA_WITH_SENDER: Record<string, unknown> = {
   properties: {
     to_operator: {
       type: ["string", "null"],
-      description: "Message to deliver to the operator's channel. Null = nothing to show.",
+      description: "Message to deliver to the operator's channel. `null` = nothing to show.",
     },
     to_sender: {
       type: ["string", "null"],
       description:
-        "Message to send back to the subagent/sender session. Null = nothing to send back.",
+        "Message to send back to the subagent/sender session. `null` = nothing to send back.",
     },
   },
   required: ["to_operator", "to_sender"],
@@ -29,7 +29,7 @@ export const OOB_SCHEMA_NO_SENDER: Record<string, unknown> = {
   properties: {
     to_operator: {
       type: ["string", "null"],
-      description: "Message to deliver to the operator's channel. Null = nothing to show.",
+      description: "Message to deliver to the operator's channel. `null` = nothing to show.",
     },
   },
   required: ["to_operator"],
@@ -37,12 +37,20 @@ export const OOB_SCHEMA_NO_SENDER: Record<string, unknown> = {
 };
 
 /** Guidance appended to subagent-result turns that must produce OOB structured output. */
-export const OOB_WITH_SENDER_GUIDANCE = `This is an out-of-band message. Respond with structured output.
+export const OOB_WITH_SENDER_GUIDANCE = `
+
+This is an out-of-band message. *After* performing any actions requested in the prompt, you must respond with structured output.
+
 - to_operator: Message to surface to the operator (null = nothing to show)
 - to_sender: Message to reply to the originating session (null = nothing to send back)
+
 Either field may be null. The system handles delivery.`;
 
 /** Guidance appended to timer-fire turns that must produce OOB structured output. */
-export const OOB_NO_SENDER_GUIDANCE = `This is an out-of-band message. Respond with structured output.
+export const OOB_NO_SENDER_GUIDANCE = `
+
+This is an out-of-band message. *After* performing any actions requested in the prompt, you must respond with structured output.
+
 - to_operator: Message to surface to the operator (null = nothing to show)
+
 The system handles delivery.`;
