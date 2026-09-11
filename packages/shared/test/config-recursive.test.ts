@@ -2,7 +2,7 @@ import { describe, it } from "vitest";
 import assert from "node:assert";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { loadLayeredConfig } from "../src/config";
+import { loadLayeredConfigAsync } from "../src/config";
 
 const TMP = join(import.meta.dirname ?? ".", ".tmp-config-test");
 
@@ -15,7 +15,7 @@ function teardown() {
 }
 
 describe("loadLayeredConfig recursive", () => {
-  it("loads JSON files from nested subdirectories in full-path order", () => {
+  it("loads JSON files from nested subdirectories in full-path order", async () => {
     setup();
     try {
       mkdirSync(join(TMP, "base"), { recursive: true });
@@ -27,14 +27,14 @@ describe("loadLayeredConfig recursive", () => {
         JSON.stringify({ logLevel: "debug" }),
       );
 
-      const cfg = loadLayeredConfig(TMP);
+      const cfg = await loadLayeredConfigAsync(TMP);
       assert.equal(cfg.logLevel, "debug");
     } finally {
       teardown();
     }
   });
 
-  it("base/ files are merged before dynamic/ files", () => {
+  it("base/ files are merged before dynamic/ files", async () => {
     setup();
     try {
       mkdirSync(join(TMP, "base"), { recursive: true });
@@ -53,26 +53,26 @@ describe("loadLayeredConfig recursive", () => {
         }),
       );
 
-      const cfg = loadLayeredConfig(TMP);
+      const cfg = await loadLayeredConfigAsync(TMP);
       assert.equal(cfg.hitl.bypassUpTo, "critical");
     } finally {
       teardown();
     }
   });
 
-  it("works with flat config directory (no subdirectories)", () => {
+  it("works with flat config directory (no subdirectories)", async () => {
     setup();
     try {
       writeFileSync(join(TMP, "00-main.json"), JSON.stringify({ logLevel: "warn" }));
 
-      const cfg = loadLayeredConfig(TMP);
+      const cfg = await loadLayeredConfigAsync(TMP);
       assert.equal(cfg.logLevel, "warn");
     } finally {
       teardown();
     }
   });
 
-  it("ignores non-JSON files everywhere", () => {
+  it("ignores non-JSON files everywhere", async () => {
     setup();
     try {
       mkdirSync(join(TMP, "base"), { recursive: true });
@@ -82,14 +82,14 @@ describe("loadLayeredConfig recursive", () => {
       writeFileSync(join(TMP, "dynamic", ".override.json.swp"), "vim swap garbage");
       writeFileSync(join(TMP, "base", "00-main.json"), JSON.stringify({ logLevel: "info" }));
 
-      const cfg = loadLayeredConfig(TMP);
+      const cfg = await loadLayeredConfigAsync(TMP);
       assert.equal(cfg.logLevel, "info");
     } finally {
       teardown();
     }
   });
 
-  it("throws on invalid JSON in non-dynamic directories", () => {
+  it("throws on invalid JSON in non-dynamic directories", async () => {
     setup();
     try {
       mkdirSync(join(TMP, "base"), { recursive: true });
@@ -97,8 +97,8 @@ describe("loadLayeredConfig recursive", () => {
       writeFileSync(join(TMP, "base", "00-main.json"), JSON.stringify({ logLevel: "info" }));
       writeFileSync(join(TMP, "base", "01-bad.json"), "{not valid json!!!");
 
-      assert.throws(
-        () => loadLayeredConfig(TMP),
+      await assert.rejects(
+        () => loadLayeredConfigAsync(TMP),
         (err: Error) => err.message.includes("Invalid JSON") && err.message.includes("01-bad.json"),
       );
     } finally {
@@ -106,7 +106,7 @@ describe("loadLayeredConfig recursive", () => {
     }
   });
 
-  it("skips invalid JSON in dynamic/ directory and continues loading", () => {
+  it("skips invalid JSON in dynamic/ directory and continues loading", async () => {
     setup();
     try {
       mkdirSync(join(TMP, "dynamic"), { recursive: true });
@@ -118,14 +118,14 @@ describe("loadLayeredConfig recursive", () => {
         JSON.stringify({ logLevel: "debug" }),
       );
 
-      const cfg = loadLayeredConfig(TMP);
+      const cfg = await loadLayeredConfigAsync(TMP);
       assert.equal(cfg.logLevel, "debug");
     } finally {
       teardown();
     }
   });
 
-  it("skips dynamic/ files with invalid schema and continues loading", () => {
+  it("skips dynamic/ files with invalid schema and continues loading", async () => {
     setup();
     try {
       mkdirSync(join(TMP, "dynamic"), { recursive: true });
@@ -141,7 +141,7 @@ describe("loadLayeredConfig recursive", () => {
         JSON.stringify({ logLevel: "debug" }),
       );
 
-      const cfg = loadLayeredConfig(TMP);
+      const cfg = await loadLayeredConfigAsync(TMP);
       assert.equal(cfg.logLevel, "debug");
     } finally {
       teardown();

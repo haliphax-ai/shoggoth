@@ -1,4 +1,4 @@
-export { loadLayeredConfig } from "./config";
+export { loadLayeredConfigAsync } from "./config";
 export { resolveContextLevel, validateContextLevel } from "./context-level";
 export {
   generateSystemContextToken,

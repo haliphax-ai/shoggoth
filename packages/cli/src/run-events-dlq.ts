@@ -1,4 +1,4 @@
-import { loadLayeredConfig } from "@shoggoth/shared";
+import { loadLayeredConfigAsync } from "@shoggoth/shared";
 import {
   assertMigrationsDirReadable,
   defaultMigrationsDir,
@@ -12,8 +12,8 @@ interface RunEventsDlqOptions {
   readonly limit: number;
 }
 
-export function runEventsDlqCli(options: RunEventsDlqOptions): void {
-  const config = loadLayeredConfig(options.configDir);
+export async function runEventsDlqCli(options: RunEventsDlqOptions): Promise<void> {
+  const config = await loadLayeredConfigAsync(options.configDir);
   const dir = defaultMigrationsDir();
   assertMigrationsDirReadable(dir);
   const db = openStateDb(config.stateDbPath);

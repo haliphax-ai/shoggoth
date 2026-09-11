@@ -3,7 +3,7 @@ import {
   resolveSessionTargetFromCliArg,
   SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS,
 } from "@shoggoth/daemon/lib";
-import { loadLayeredConfig, LAYOUT, VERSION } from "@shoggoth/shared";
+import { loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
 
 function controlAuth(): { kind: "operator_token"; token: string } {
   const token = process.env.SHOGGOTH_OPERATOR_TOKEN?.trim();
@@ -11,15 +11,15 @@ function controlAuth(): { kind: "operator_token"; token: string } {
   return { kind: "operator_token", token };
 }
 
-function socketPathFromEnv(configPath: string): string {
+async function socketPathFromEnv(configPath: string): Promise<string> {
   const fromEnv = process.env.SHOGGOTH_CONTROL_SOCKET?.trim();
   if (fromEnv) return fromEnv;
-  const config = loadLayeredConfig(configPath);
+  const config = await loadLayeredConfigAsync(configPath);
   return config.socketPath;
 }
 
-function resolveSessionTargetOrExit(configDir: string, raw: string): string | null {
-  const config = loadLayeredConfig(configDir);
+async function resolveSessionTargetOrExit(configDir: string, raw: string): Promise<string | null> {
+  const config = await loadLayeredConfigAsync(configDir);
   try {
     return resolveSessionTargetFromCliArg(raw, config);
   } catch (e) {
@@ -122,7 +122,7 @@ const SPAWN_USAGE =
 
 export async function runSubagentCli(argv: string[]): Promise<void> {
   const configDir = process.env.SHOGGOTH_CONFIG_DIR ?? LAYOUT.configDir;
-  const socketPath = socketPathFromEnv(configDir);
+  const socketPath = await socketPathFromEnv(configDir);
   const auth = controlAuth();
 
   if (!argv.length || argv[0] === "--help" || argv[0] === "-h") {
@@ -145,7 +145,7 @@ export async function runSubagentCli(argv: string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    const parentSessionId = resolveSessionTargetOrExit(configDir, parent);
+    const parentSessionId = await resolveSessionTargetOrExit(configDir, parent);
     if (!parentSessionId) return;
 
     let payload: Record<string, unknown>;

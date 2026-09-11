@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_HITL_CONFIG, loadLayeredConfig } from "@shoggoth/shared";
+import { DEFAULT_HITL_CONFIG, loadLayeredConfigAsync } from "@shoggoth/shared";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate.js";
 import { createPersistingHitlAutoApproveGate } from "../../src/hitl/hitl-auto-approve-persisting.js";
 import { createHitlAutoApproveGate } from "../../src/hitl/hitl-auto-approve.js";
@@ -12,12 +12,12 @@ import { createLogger } from "../../src/logging.js";
 
 describe("subagent HITL auto-approve inheritance", () => {
   describe("createPersistingHitlAutoApproveGate", () => {
-    it("subagent inherits session-scoped auto-approve from main session", () => {
+    it("subagent inherits session-scoped auto-approve from main session", async () => {
       const root = mkdtempSync(join(tmpdir(), "sh-hitl-sub-"));
       try {
         const dbPath = join(root, "state.db");
         const cfgDir = join(root, "cfg");
-        const baseCfg = loadLayeredConfig(cfgDir);
+        const baseCfg = await loadLayeredConfigAsync(cfgDir);
         const configRef = { current: baseCfg };
         const hitlRef = { value: { ...DEFAULT_HITL_CONFIG, ...baseCfg.hitl } };
         const log = createLogger({ component: "t", minLevel: "error" });
@@ -56,12 +56,12 @@ describe("subagent HITL auto-approve inheritance", () => {
       }
     });
 
-    it("subagent does not inherit from a different agent's main session", () => {
+    it("subagent does not inherit from a different agent's main session", async () => {
       const root = mkdtempSync(join(tmpdir(), "sh-hitl-sub-cross-"));
       try {
         const dbPath = join(root, "state.db");
         const cfgDir = join(root, "cfg");
-        const baseCfg = loadLayeredConfig(cfgDir);
+        const baseCfg = await loadLayeredConfigAsync(cfgDir);
         const configRef = { current: baseCfg };
         const hitlRef = { value: { ...DEFAULT_HITL_CONFIG, ...baseCfg.hitl } };
         const log = createLogger({ component: "t", minLevel: "error" });
@@ -94,12 +94,12 @@ describe("subagent HITL auto-approve inheritance", () => {
       }
     });
 
-    it("subagent's own session-scoped approval also works", () => {
+    it("subagent's own session-scoped approval also works", async () => {
       const root = mkdtempSync(join(tmpdir(), "sh-hitl-sub-own-"));
       try {
         const dbPath = join(root, "state.db");
         const cfgDir = join(root, "cfg");
-        const baseCfg = loadLayeredConfig(cfgDir);
+        const baseCfg = await loadLayeredConfigAsync(cfgDir);
         const configRef = { current: baseCfg };
         const hitlRef = { value: { ...DEFAULT_HITL_CONFIG, ...baseCfg.hitl } };
         const log = createLogger({ component: "t", minLevel: "error" });
@@ -131,12 +131,12 @@ describe("subagent HITL auto-approve inheritance", () => {
       }
     });
 
-    it("agent-scoped approval works for subagent sessions", () => {
+    it("agent-scoped approval works for subagent sessions", async () => {
       const root = mkdtempSync(join(tmpdir(), "sh-hitl-sub-agent-"));
       try {
         const dbPath = join(root, "state.db");
         const cfgDir = join(root, "cfg");
-        const baseCfg = loadLayeredConfig(cfgDir);
+        const baseCfg = await loadLayeredConfigAsync(cfgDir);
         const configRef = { current: baseCfg };
         const hitlRef = { value: { ...DEFAULT_HITL_CONFIG, ...baseCfg.hitl } };
         const log = createLogger({ component: "t", minLevel: "error" });
@@ -157,7 +157,7 @@ describe("subagent HITL auto-approve inheritance", () => {
         });
 
         // Agent-scoped approval
-        gate.enableAgentTool("main", "builtin-write");
+        await gate.enableAgentTool("main", "builtin-write");
 
         // Subagent should inherit agent-scoped approval
         assert.equal(gate.shouldAutoApprove(subagentSessionId, "builtin-write"), true);
@@ -170,7 +170,7 @@ describe("subagent HITL auto-approve inheritance", () => {
   });
 
   describe("createHitlAutoApproveGate (in-memory)", () => {
-    it("subagent inherits session-scoped auto-approve from main session", () => {
+    it("subagent inherits session-scoped auto-approve from main session", async () => {
       const gate = createHitlAutoApproveGate();
       const mainSessionId = "agent:main:discord:channel:10000000-0000-4000-8000-000000000001";
       const subagentSessionId =
@@ -183,7 +183,7 @@ describe("subagent HITL auto-approve inheritance", () => {
       assert.equal(gate.shouldAutoApprove(subagentSessionId, "builtin-exec"), false);
     });
 
-    it("subagent does not inherit from a different agent's main session", () => {
+    it("subagent does not inherit from a different agent's main session", async () => {
       const gate = createHitlAutoApproveGate();
       const mainSessionA = "agent:alpha:discord:channel:10000000-0000-4000-8000-000000000001";
       const subagentSessionB =
