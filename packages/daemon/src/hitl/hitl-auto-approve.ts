@@ -6,7 +6,7 @@ import { parseAgentSessionUrn, resolveTopLevelSessionUrn } from "@shoggoth/share
  */
 export type HitlAutoApproveGate = {
   enableSessionTool(sessionId: string, toolName: string): void;
-  enableAgentTool(agentId: string, toolName: string): void;
+  enableAgentTool(agentId: string, toolName: string): Promise<void>;
   shouldAutoApprove(sessionId: string, toolName: string): boolean;
   /**
    * Daemon persisting gate only: drop in-process ♾️ entries (optional).
@@ -32,7 +32,7 @@ export function createHitlAutoApproveGate(): HitlAutoApproveGate {
     enableSessionTool(sessionId: string, toolName: string) {
       addTo(sessionTools, sessionId.trim(), toolName.trim());
     },
-    enableAgentTool(agentId: string, toolName: string) {
+    async enableAgentTool(agentId: string, toolName: string) {
       addTo(agentTools, agentId.trim(), toolName.trim());
     },
     shouldAutoApprove(sessionId: string, toolName: string) {

@@ -1283,7 +1283,7 @@ const sharedConfigFields = {
 
 /**
  * Schema for individual config fragment files (loaded from config.d/).
- * Each JSON file is validated against this schema during loadLayeredConfig().
+ * Each JSON file is validated against this schema during loadLayeredConfigAsync().
  * All fields are optional since fragments are partial overlays that get deep-merged.
  * Uses .strict() so unrecognized keys are rejected early — add new fields to
  * sharedConfigFields (or here if fragment-specific) to avoid "unrecognized_keys" errors.
@@ -1336,7 +1336,7 @@ export type ShoggothConfigFragment = z.infer<typeof shoggothConfigFragmentSchema
 
 /**
  * Schema for the fully-merged daemon config (after all fragments are deep-merged with defaults).
- * Validated once at the end of loadLayeredConfig() before the daemon boots.
+ * Validated once at the end of loadLayeredConfigAsync() before the daemon boots.
  * Fields that are required here (non-optional) are guaranteed by defaultConfig() —
  * they may be optional in fragments but must resolve to a value after merging.
  */

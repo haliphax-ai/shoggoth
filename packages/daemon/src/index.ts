@@ -1,4 +1,4 @@
-import { DEFAULT_HITL_CONFIG, loadLayeredConfig, LAYOUT, VERSION } from "@shoggoth/shared";
+import { DEFAULT_HITL_CONFIG, loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
 import { serviceProvisionSecrets } from "./service-refs";
 import { routeMcpToolInvocation } from "@shoggoth/mcp-integration";
 import { fileURLToPath } from "node:url";
@@ -133,7 +133,7 @@ registerContextFinalizer(messageToolFinalizer);
 registerContextFinalizer(subagentToolStripFinalizer);
 
 const configDir = process.env.SHOGGOTH_CONFIG_DIR ?? LAYOUT.configDir;
-const config = loadLayeredConfig(configDir);
+const config = await loadLayeredConfigAsync(configDir);
 
 const configRef = { current: config };
 

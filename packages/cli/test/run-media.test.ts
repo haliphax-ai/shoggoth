@@ -9,7 +9,7 @@ vi.mock("@shoggoth/daemon/lib", () => ({
 
 const mockLoadLayeredConfig = vi.fn().mockReturnValue({ socketPath: "/tmp/test.sock" });
 vi.mock("@shoggoth/shared", () => ({
-  loadLayeredConfig: (...args: unknown[]) => mockLoadLayeredConfig(...args),
+  loadLayeredConfigAsync: (...args: unknown[]) => mockLoadLayeredConfig(...args),
   LAYOUT: { configDir: "/tmp/cfg" },
   VERSION: "0.0.0-test",
 }));

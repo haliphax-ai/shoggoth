@@ -39,7 +39,7 @@ export interface HitlPendingStack {
  */
 export interface HitlAutoApproveGate {
   enableSessionTool(sessionId: string, toolName: string): void;
-  enableAgentTool(agentId: string, toolName: string): void;
+  enableAgentTool(agentId: string, toolName: string): Promise<void>;
   shouldAutoApprove(sessionId: string, toolName: string): boolean;
   clearAutoApproveMemory?(input: { readonly agents: "all" | readonly string[] }): void;
 }

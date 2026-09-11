@@ -1,4 +1,4 @@
-import { DEFAULT_HITL_CONFIG, loadLayeredConfig, type ShoggothConfig } from "@shoggoth/shared";
+import { DEFAULT_HITL_CONFIG, loadLayeredConfigAsync, type ShoggothConfig } from "@shoggoth/shared";
 import { existsSync, watch, type FSWatcher } from "node:fs";
 import { CONFIG_RESTART_REQUIRED_KEYS, type ConfigRestartRequiredKey } from "./config-policy";
 import { createPolicyEngine, type PolicyEngine } from "./policy/engine";
@@ -62,10 +62,10 @@ export function startConfigHotReload(options: StartConfigHotReloadOptions): () =
   let timer: ReturnType<typeof setTimeout> | undefined;
   let watcher: FSWatcher | undefined;
 
-  const apply = (): void => {
+  const apply = async (): Promise<void> => {
     let next: ShoggothConfig;
     try {
-      next = loadLayeredConfig(dir);
+      next = await loadLayeredConfigAsync(dir);
     } catch (e) {
       log.warn("config hot-reload load failed; keeping previous config", {
         err: String(e),

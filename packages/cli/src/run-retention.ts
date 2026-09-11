@@ -1,4 +1,4 @@
-import { loadLayeredConfig } from "@shoggoth/shared";
+import { loadLayeredConfigAsync } from "@shoggoth/shared";
 import {
   assertMigrationsDirReadable,
   defaultMigrationsDir,
@@ -12,7 +12,7 @@ interface RunRetentionOptions {
 }
 
 export async function runRetentionCli(options: RunRetentionOptions): Promise<void> {
-  const config = loadLayeredConfig(options.configDir);
+  const config = await loadLayeredConfigAsync(options.configDir);
   const dir = defaultMigrationsDir();
   assertMigrationsDirReadable(dir);
   const db = openStateDb(config.stateDbPath);

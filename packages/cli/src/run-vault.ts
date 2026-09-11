@@ -1,4 +1,4 @@
-import { loadLayeredConfig, LAYOUT, VERSION } from "@shoggoth/shared";
+import { loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
 import { readFileSync } from "node:fs";
 import { resolve, isAbsolute } from "node:path";
@@ -16,10 +16,10 @@ function controlAuth(): { kind: "operator_token"; token: string } {
   return { kind: "operator_token", token };
 }
 
-function socketPathFromEnv(configPath: string): string {
+async function socketPathFromEnv(configPath: string): Promise<string> {
   const fromEnv = process.env.SHOGGOTH_CONTROL_SOCKET?.trim();
   if (fromEnv) return fromEnv;
-  const config = loadLayeredConfig(configPath);
+  const config = await loadLayeredConfigAsync(configPath);
   return config.socketPath;
 }
 
@@ -42,7 +42,7 @@ export async function runVaultCli(argv: string[]): Promise<void> {
     return;
   }
   const configDir = process.env.SHOGGOTH_CONFIG_DIR ?? LAYOUT.configDir;
-  const socketPath = socketPathFromEnv(configDir);
+  const socketPath = await socketPathFromEnv(configDir);
   const auth = controlAuth();
 
   const sub = argv[0];

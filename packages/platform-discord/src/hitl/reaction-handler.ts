@@ -23,14 +23,14 @@ export function classifyHitlDiscordReaction(emoji: {
   return null;
 }
 
-function applyKind(input: {
+async function applyKind(input: {
   readonly kind: HitlDiscordReactionKind;
   readonly pendingId: string;
   readonly sessionId: string;
   readonly toolName: string;
   readonly pending: PendingActionsStore;
   readonly autoApprove: HitlAutoApproveGate;
-}): void {
+}): Promise<void> {
   const { kind, pendingId, sessionId, toolName, pending, autoApprove } = input;
   switch (kind) {
     case "once":
@@ -56,7 +56,7 @@ function applyKind(input: {
           pending.approve(row.id, RESOLVER);
         }
       }
-      autoApprove.enableAgentTool(agentId, toolName);
+      await autoApprove.enableAgentTool(agentId, toolName);
       return;
     }
   }
@@ -65,7 +65,7 @@ function applyKind(input: {
 /**
  * Discord Gateway only: maps owner reactions on registered HITL notices to SQLite pending + auto gates.
  */
-export function handleDiscordHitlReactionAdd(input: {
+export async function handleDiscordHitlReactionAdd(input: {
   readonly ev: DiscordReactionAddEvent;
   readonly pending: PendingActionsStore;
   readonly registry: HitlDiscordNoticeRegistry;
@@ -73,7 +73,7 @@ export function handleDiscordHitlReactionAdd(input: {
   readonly ownerUserId: string | undefined;
   readonly botUserIdRef: { current: string | undefined };
   readonly logger: Logger;
-}): boolean {
+}): Promise<boolean> {
   const owner = input.ownerUserId?.trim();
   if (!owner) return false;
   if (input.ev.userId !== owner) return false;
@@ -88,7 +88,7 @@ export function handleDiscordHitlReactionAdd(input: {
   if (!kind) return false;
 
   try {
-    applyKind({
+    await applyKind({
       kind,
       pendingId: mapped.pendingId,
       sessionId: mapped.sessionId,
