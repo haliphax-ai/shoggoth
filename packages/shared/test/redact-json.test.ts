@@ -60,6 +60,20 @@ describe("redactDeep", () => {
     assert.strictEqual(result.other, "ok");
   });
 
+  it("skips recursion into fully-redacted intermediate objects", () => {
+    const obj = {
+      env: { API_KEY: "k1", SECRET: "s1" },
+      platforms: { env: { API_KEY: "k2" } },
+      deep: { a: { b: { TOKEN: "t1" } } },
+    };
+    const result = redactDeep(obj, ["env.API_KEY", "env.SECRET", "a.b.TOKEN"]);
+    assert.deepStrictEqual(result, {
+      env: { API_KEY: "[REDACTED]", SECRET: "[REDACTED]" },
+      platforms: { env: { API_KEY: "[REDACTED]" } },
+      deep: { a: { b: { TOKEN: "[REDACTED]" } } },
+    });
+  });
+
   it("does not mutate the original object", () => {
     const obj = { token: "secret" };
     redactDeep(obj, ["token"]);
