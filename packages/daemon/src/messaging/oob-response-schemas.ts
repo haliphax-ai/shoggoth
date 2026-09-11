@@ -37,7 +37,7 @@ export const OOB_SCHEMA_NO_SENDER: Record<string, unknown> = {
 };
 
 /** Guidance appended to subagent-result turns that must produce OOB structured output. */
-export const OOB_WITH_SENDER_GUIDANCE = "\n\nThis is an out-of-band subagent response. Perform any actions in reaction to this message **BEFORE** you respond with structured output!";
+export const OOB_WITH_SENDER_GUIDANCE = "\n\nThis is an out-of-band subagent response. Perform any actions in reaction to this message **BEFORE** you respond with structured output! Once you respond, your turn will end and you will not be able to act further, so act now!";
 
 /** Guidance appended to timer-fire turns that must produce OOB structured output. */
-export const OOB_NO_SENDER_GUIDANCE = "\n\nThis is an out-of-band message. You **MUST** perform any allowed actions necessary to follow its instructions **BEFORE** you respond with structured output!";
+export const OOB_NO_SENDER_GUIDANCE = "\n\nThis is an out-of-band message. You **MUST** perform any allowed actions necessary to follow its instructions **BEFORE** you respond with structured output! Once you respond, your turn will end and you will not be able to act further, so act now!";

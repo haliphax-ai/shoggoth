@@ -18,7 +18,7 @@
     "reinstall": "rm -rf node_modules **/node_modules && npm ci",
     "test": "vitest run --reporter=minimal",
     "test:ci-agent-isolation": "SHOGGOTH_CI_STRICT_AGENT_TESTS=1 vitest run packages/os-exec --reporter=minimal",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "lerna run typecheck --parallel --stream"
   },
   "dependencies": {
     "tsx": "^4.19.3"
@@ -29,6 +29,7 @@
     "commitlint": "^20.5.0",
     "globals": "^17.5.0",
     "husky": "^9.1.7",
+    "lerna": "^10.0.1",
     "nano-staged": "^1.0.2",
     "oxfmt": "^0.46.0",
     "oxlint": "^1.61.0",

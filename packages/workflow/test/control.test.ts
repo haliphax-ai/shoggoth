@@ -563,12 +563,20 @@ describe("ControlPlane", () => {
   });
 
   describe("retry", () => {
+    const activeOrchestrators: Orchestrator[] = [];
+
+    afterEach(() => {
+      for (const orch of activeOrchestrators) orch.stopPolling();
+      activeOrchestrators.length = 0;
+    });
+
     it("resets a failed task to pending and spawns it on next tick", async () => {
       const { cp, orch, wfId, spawner, pollResults } = await setupWorkflow(
         baseDir,
         [makeTask(1), makeTask(2)],
         "1>2",
       );
+      activeOrchestrators.push(orch);
 
       // Fail task 1
       pollResults.set("session-1", { status: "failed", error: "boom" });
@@ -603,6 +611,7 @@ describe("ControlPlane", () => {
         [makeTask(1), makeTask(2), makeTask(3)],
         "1>2>3",
       );
+      activeOrchestrators.push(orch);
 
       // Fail task 1 — tasks 2 and 3 become blocked/failed
       pollResults.set("session-1", { status: "failed", error: "boom" });
@@ -627,6 +636,7 @@ describe("ControlPlane", () => {
         [makeTask(1), makeTask(2), makeTask(3)],
         "1>2>3",
       );
+      activeOrchestrators.push(orch);
 
       // Complete the whole chain
       pollResults.set("session-1", { status: "done", output: "ok1" });
@@ -647,6 +657,7 @@ describe("ControlPlane", () => {
         [makeTask(1), makeTask(2), makeTask(3)],
         "1>2>3",
       );
+      activeOrchestrators.push(orch);
 
       // Complete task 1
       pollResults.set("session-1", { status: "done", output: "ok1" });
@@ -686,6 +697,7 @@ describe("ControlPlane", () => {
         [makeTask(1, "do task 1", { failureBehavior: "pause" })],
         "1",
       );
+      activeOrchestrators.push(orch);
 
       // Fail task 1 with pause behavior
       pollResults.set("session-1", { status: "failed", error: "boom" });
@@ -699,6 +711,7 @@ describe("ControlPlane", () => {
 
     it("persists state after retry", async () => {
       const { cp, orch, wfId, pollResults } = await setupWorkflow(baseDir, [makeTask(1)], "1");
+      activeOrchestrators.push(orch);
 
       pollResults.set("session-1", { status: "failed", error: "boom" });
       await orch.tick();
@@ -735,6 +748,7 @@ describe("ControlPlane", () => {
         [makeTask(1), makeTask(2)],
         "1>2",
       );
+      activeOrchestrators.push(orch);
 
       // Complete task 1
       pollResults.set("session-1", { status: "done", output: "result1" });
@@ -761,6 +775,7 @@ describe("ControlPlane", () => {
         [makeTask(1), makeTask(2), makeTask(3)],
         "1>2>3",
       );
+      activeOrchestrators.push(orch);
 
       // Complete the whole chain
       pollResults.set("session-1", { status: "done", output: "ok1" });
@@ -785,6 +800,7 @@ describe("ControlPlane", () => {
         [makeTask(1), makeTask(2)],
         "1>2",
       );
+      activeOrchestrators.push(orch);
 
       // Complete both tasks
       pollResults.set("session-1", { status: "done", output: "ok1" });
