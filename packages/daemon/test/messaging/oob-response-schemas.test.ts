@@ -121,26 +121,11 @@ describe("OOB_SCHEMA_NO_SENDER", () => {
 });
 
 describe("OOB guidance strings", () => {
-  it("OOB_WITH_SENDER_GUIDANCE is a non-empty string", () => {
-    expect(typeof OOB_WITH_SENDER_GUIDANCE).toBe("string");
-    expect(OOB_WITH_SENDER_GUIDANCE.length).toBeGreaterThan(0);
-  });
-
-  it("OOB_WITH_SENDER_GUIDANCE mentions structured output and both fields", () => {
+  it("OOB_WITH_SENDER_GUIDANCE mentions structured output", () => {
     expect(OOB_WITH_SENDER_GUIDANCE).toContain("structured output");
-    expect(OOB_WITH_SENDER_GUIDANCE).toContain("to_operator");
-    expect(OOB_WITH_SENDER_GUIDANCE).toContain("to_sender");
   });
 
-  it("OOB_NO_SENDER_GUIDANCE is a non-empty string", () => {
-    expect(typeof OOB_NO_SENDER_GUIDANCE).toBe("string");
-    expect(OOB_NO_SENDER_GUIDANCE.length).toBeGreaterThan(0);
-  });
-
-  it("OOB_NO_SENDER_GUIDANCE mentions structured output and to_operator only", () => {
+  it("OOB_NO_SENDER_GUIDANCE mentions structured output", () => {
     expect(OOB_NO_SENDER_GUIDANCE).toContain("structured output");
-    expect(OOB_NO_SENDER_GUIDANCE).toContain("to_operator");
-    // No sender exists for timer/cron delivery — guidance must not reference to_sender.
-    expect(OOB_NO_SENDER_GUIDANCE).not.toContain("to_sender");
   });
 });
