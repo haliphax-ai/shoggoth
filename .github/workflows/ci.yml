@@ -46,7 +46,7 @@ jobs:
       - name: Install ripgrep
         run: sudo apt-get update && sudo apt-get install -y ripgrep
         shell: bash
-      - run: npm test
+      - run: npx vitest run
 
   agent-uid-isolation:
     runs-on: ubuntu-latest
@@ -63,7 +63,7 @@ jobs:
       - name: strict DAC + agent UID integration tests
         env:
           SHOGGOTH_CI_STRICT_AGENT_TESTS: "1"
-        run: npm run test -w @shoggoth/os-exec
+        run: npx vitest run packages/os-exec
 
   oxlint:
     runs-on: ubuntu-latest
