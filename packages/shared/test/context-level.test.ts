@@ -181,15 +181,15 @@ describe("validateContextLevel", () => {
   });
 
   it("rejects invalid strings", () => {
-    assert.throws(() => validateContextLevel("invalid"), /Invalid context level/);
-    assert.throws(() => validateContextLevel(""), /Invalid context level/);
-    assert.throws(() => validateContextLevel("FULL"), /Invalid context level/);
+    assert.throws(() => validateContextLevel("invalid"), /Expected/);
+    assert.throws(() => validateContextLevel(""), /Expected/);
+    assert.throws(() => validateContextLevel("FULL"), /Expected/);
   });
 
   it("rejects non-string values", () => {
-    assert.throws(() => validateContextLevel(42), /Invalid context level/);
-    assert.throws(() => validateContextLevel(null), /Invalid context level/);
-    assert.throws(() => validateContextLevel(undefined), /Invalid context level/);
-    assert.throws(() => validateContextLevel(true), /Invalid context level/);
+    assert.throws(() => validateContextLevel(42), /Expected/);
+    assert.throws(() => validateContextLevel(null), /Expected/);
+    assert.throws(() => validateContextLevel(undefined), /Required/);
+    assert.throws(() => validateContextLevel(true), /Expected/);
   });
 });
