@@ -126,13 +126,24 @@ export class ThinkingStreamNormalizer {
 const THINKING_BLOCK_RE = /<(?:thinking|think)>([\s\S]*?)<\/(?:thinking|think)>/g;
 
 /**
+ * Memoized factory: re-instantiates RegExp from cached source/flags without
+ * re-accessing the prototype properties on every call.  Each invocation
+ * returns a **fresh** RegExp so lastIndex state is isolated per call.
+ */
+const createThinkingBlockRegex = (() => {
+  const source = THINKING_BLOCK_RE.source;
+  const flags = THINKING_BLOCK_RE.flags;
+  return () => new RegExp(source, flags);
+})();
+
+/**
  * Extracts thinking blocks from content that uses XML-style tags.
  * Recognizes both `<thinking>...</thinking>` and `<think>...</think>`.
  * Returns an array of ChatContentPart if thinking tags are found,
  * otherwise returns the original string unchanged.
  */
 export function extractXmlThinkingBlocks(content: string): string | ChatContentPart[] {
-  const regex = new RegExp(THINKING_BLOCK_RE.source, THINKING_BLOCK_RE.flags);
+  const regex = createThinkingBlockRegex();
 
   if (!regex.test(content)) {
     return content;
