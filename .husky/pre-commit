@@ -1,2 +1,3 @@
+node --import tsx/esm .husky/scripts/no-commit-to-main.ts
 node_modules/.bin/nano-staged
 vitest run --changed --reporter=minimal
