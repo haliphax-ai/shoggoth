@@ -89,7 +89,12 @@ function singleHopFromEnv(
       auth: env.ANTHROPIC_AUTH?.trim().toLowerCase() === "bearer" ? "bearer" : undefined,
       fetchImpl,
     });
-    const model = env.SHOGGOTH_MODEL?.trim() || "claude-3-5-sonnet-20241022";
+    const model = env.SHOGGOTH_MODEL?.trim();
+    if (!model) {
+      throw new Error(
+        "SHOGGOTH_MODEL environment variable is required when using env-based provider fallback (detected Anthropic via ANTHROPIC_BASE_URL). Set models.failoverChain in your config, or export SHOGGOTH_MODEL.",
+      );
+    }
     return { provider, model };
   }
 
@@ -100,7 +105,12 @@ function singleHopFromEnv(
       baseUrl: env.GEMINI_BASE_URL,
       fetchImpl,
     });
-    const model = env.SHOGGOTH_MODEL?.trim() || "gemini-2.5-flash";
+    const model = env.SHOGGOTH_MODEL?.trim();
+    if (!model) {
+      throw new Error(
+        "SHOGGOTH_MODEL environment variable is required when using env-based provider fallback (detected Gemini via GEMINI_API_KEY). Set models.failoverChain in your config, or export SHOGGOTH_MODEL.",
+      );
+    }
     return { provider, model };
   }
 
@@ -111,7 +121,12 @@ function singleHopFromEnv(
     apiKey: env.OPENAI_API_KEY,
     fetchImpl,
   });
-  const model = env.SHOGGOTH_MODEL?.trim() || "gpt-4o-mini";
+  const model = env.SHOGGOTH_MODEL?.trim();
+  if (!model) {
+    throw new Error(
+      "SHOGGOTH_MODEL environment variable is required when using env-based provider fallback (detected OpenAI-compatible via OPENAI_BASE_URL or OLLAMA_HOST). Set models.failoverChain in your config, or export SHOGGOTH_MODEL.",
+    );
+  }
   return { provider, model };
 }
 
