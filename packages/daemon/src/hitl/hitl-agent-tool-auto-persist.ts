@@ -1,4 +1,4 @@
-import { DEFAULT_HITL_CONFIG, loadLayeredConfig, type ShoggothConfig } from "@shoggoth/shared";
+import { DEFAULT_HITL_CONFIG, loadLayeredConfigAsync, type ShoggothConfig } from "@shoggoth/shared";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { HitlConfigRef } from "../config-hot-reload";
@@ -27,20 +27,20 @@ export function readAgentToolAutoApproveMap(config: ShoggothConfig): Record<stri
   return out;
 }
 
-export function persistAgentToolAutoApproveAndReload(input: {
+export async function persistAgentToolAutoApproveAndReload(input: {
   readonly configDirectory: string;
   readonly dynamicConfigDirectory: string;
   readonly configRef: { current: ShoggothConfig };
   readonly hitlRef: HitlConfigRef;
   readonly agentId: string;
   readonly toolName: string;
-}): void {
+}): Promise<void> {
   const dir = input.configDirectory.trim();
   const dynDir = input.dynamicConfigDirectory.trim();
   if (!dir) throw new Error("configDirectory required");
   if (!dynDir) throw new Error("dynamicConfigDirectory required");
   mkdirSync(dynDir, { recursive: true });
-  const merged = readAgentToolAutoApproveMap(loadLayeredConfig(dir));
+  const merged = readAgentToolAutoApproveMap(await loadLayeredConfigAsync(dir));
   const aid = input.agentId.trim();
   const tn = input.toolName.trim();
   const cur = new Set(merged[aid] ?? []);
@@ -54,7 +54,7 @@ export function persistAgentToolAutoApproveAndReload(input: {
   const tmp = `${full}.tmp`;
   writeFileSync(tmp, body, "utf8");
   renameSync(tmp, full);
-  const next = loadLayeredConfig(dir);
+  const next = await loadLayeredConfigAsync(dir);
   input.configRef.current = next;
   input.hitlRef.value = { ...DEFAULT_HITL_CONFIG, ...next.hitl };
 }
@@ -63,13 +63,13 @@ export function persistAgentToolAutoApproveAndReload(input: {
  * Rewrite `z-hitl-agent-tool-auto-approve.json` with a new per-agent toolAutoApprove map and reload config.
  * Use empty arrays per agent to clear entries (layered merge cannot remove keys with `{}`).
  */
-export function rewriteAgentToolAutoApproveMapAndReload(input: {
+export async function rewriteAgentToolAutoApproveMapAndReload(input: {
   readonly configDirectory: string;
   readonly dynamicConfigDirectory: string;
   readonly configRef: { current: ShoggothConfig };
   readonly hitlRef: HitlConfigRef;
   readonly nextAgentToolAutoApprove: Record<string, string[]>;
-}): void {
+}): Promise<void> {
   const dir = input.configDirectory.trim();
   const dynDir = input.dynamicConfigDirectory.trim();
   if (!dir) throw new Error("configDirectory required");
@@ -80,7 +80,7 @@ export function rewriteAgentToolAutoApproveMapAndReload(input: {
   const tmp = `${full}.tmp`;
   writeFileSync(tmp, body, "utf8");
   renameSync(tmp, full);
-  const next = loadLayeredConfig(dir);
+  const next = await loadLayeredConfigAsync(dir);
   input.configRef.current = next;
   input.hitlRef.value = { ...DEFAULT_HITL_CONFIG, ...next.hitl };
 }

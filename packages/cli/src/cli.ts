@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { loadLayeredConfig, LAYOUT, VERSION } from "@shoggoth/shared";
+import { loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
 import { formatSkillPathLine, formatSkillReadJson, formatSkillsListJson } from "./skills-cli";
 import { runRetentionCli } from "./run-retention";
 import { runEventsDlqCli } from "./run-events-dlq";
@@ -84,7 +84,7 @@ Usage:
   shoggoth skills read <id>   Print skill path and contents (JSON)`);
     process.exit(0);
   }
-  const config = loadLayeredConfig(configDir);
+  const config = await loadLayeredConfigAsync(configDir);
   if (rest[0] === "list") {
     process.stdout.write(formatSkillsListJson(config));
     process.exit(0);
@@ -148,7 +148,7 @@ if (argv[0] === "events") {
       console.error("usage: shoggoth events dlq [limit]");
       process.exit(1);
     }
-    runEventsDlqCli({ configDir, limit });
+    await runEventsDlqCli({ configDir, limit });
     process.exit(0);
   }
   console.error("usage: shoggoth events dlq [limit]");

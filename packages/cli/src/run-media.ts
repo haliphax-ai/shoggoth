@@ -1,5 +1,5 @@
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
-import { loadLayeredConfig, LAYOUT, VERSION } from "@shoggoth/shared";
+import { loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
 
 function controlAuth(): { kind: "operator_token"; token: string } {
   const token = process.env.SHOGGOTH_OPERATOR_TOKEN?.trim();
@@ -7,10 +7,10 @@ function controlAuth(): { kind: "operator_token"; token: string } {
   return { kind: "operator_token", token };
 }
 
-function socketPathFromEnv(configPath: string): string {
+async function socketPathFromEnv(configPath: string): Promise<string> {
   const fromEnv = process.env.SHOGGOTH_CONTROL_SOCKET?.trim();
   if (fromEnv) return fromEnv;
-  const config = loadLayeredConfig(configPath);
+  const config = await loadLayeredConfigAsync(configPath);
   return config.socketPath;
 }
 
@@ -128,7 +128,7 @@ export async function runMediaCli(argv: string[]): Promise<void> {
   const sub = argv[0];
 
   if (sub === "models") {
-    const config = loadLayeredConfig(configDir);
+    const config = await loadLayeredConfigAsync(configDir);
     const providers = config.mediaGeneration?.providers ?? [];
     if (!providers.length) {
       console.log("No media generation providers configured.");
@@ -162,7 +162,7 @@ export async function runMediaCli(argv: string[]): Promise<void> {
       return;
     }
 
-    const socketPath = socketPathFromEnv(configDir);
+    const socketPath = await socketPathFromEnv(configDir);
     const auth = controlAuth();
     const res = await invokeControlRequest({
       socketPath,
@@ -208,7 +208,7 @@ export async function runMediaCli(argv: string[]): Promise<void> {
       return;
     }
 
-    const socketPath = socketPathFromEnv(configDir);
+    const socketPath = await socketPathFromEnv(configDir);
     const auth = controlAuth();
     const res = await invokeControlRequest({
       socketPath,

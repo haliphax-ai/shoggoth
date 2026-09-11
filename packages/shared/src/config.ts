@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { deepMerge } from "./merge";
 import {
@@ -8,15 +8,15 @@ import {
   type ShoggothConfig,
 } from "./schema";
 
-function listJsonFilesRecursive(dir: string): string[] {
+async function listJsonFilesRecursiveAsync(dir: string): Promise<string[]> {
   const results: string[] = [];
-  const entries = readdirSync(dir);
+  const entries = await readdir(dir);
   for (const name of entries) {
     const full = join(dir, name);
     try {
-      const s = statSync(full);
+      const s = await stat(full);
       if (s.isDirectory()) {
-        results.push(...listJsonFilesRecursive(full));
+        results.push(...(await listJsonFilesRecursiveAsync(full)));
       } else if (s.isFile() && name.endsWith(".json")) {
         results.push(full);
       }
@@ -30,32 +30,31 @@ function listJsonFilesRecursive(dir: string): string[] {
 
 /**
  * Load configuration: built-in defaults, then each `*.json` found recursively under `configDir`,
- * merged in ascending full-path order (e.g. `base/00-main.json` before `dynamic/90-agent.json`).
  *
- * Non-JSON files are ignored entirely. For JSON files:
- * - Files under the dynamic config subdirectory (`<configDir>/dynamic/`): warn and skip on
- *   read/parse errors (these are written at runtime by agents via `config-request`).
- * - All other JSON files: throw on read/parse errors (these are operator-managed and must be valid).
+ * Identical merging semantics — built-in defaults followed by every `*.json`
+ * discovered recursively under `configDir`, in ascending full-path order.
+ *
+ * Suitable for async contexts where blocking the event loop is undesirable.
  */
-export function loadLayeredConfig(configDir: string): ShoggothConfig {
+export async function loadLayeredConfigAsync(configDir: string): Promise<ShoggothConfig> {
   let merged: Record<string, unknown> = { ...defaultConfig(configDir) };
 
-  let stat;
+  let s: import("node:fs").Stats | undefined;
   try {
-    stat = statSync(configDir, { throwIfNoEntry: false });
+    s = await stat(configDir);
   } catch {
-    stat = undefined;
+    s = undefined;
   }
 
   const dynamicPrefix = resolve(configDir, "dynamic") + "/";
 
-  if (stat?.isDirectory()) {
-    for (const file of listJsonFilesRecursive(configDir)) {
+  if (s?.isDirectory()) {
+    for (const file of await listJsonFilesRecursiveAsync(configDir)) {
       const isDynamic = resolve(file).startsWith(dynamicPrefix);
 
       let raw: string;
       try {
-        raw = readFileSync(file, "utf8");
+        raw = await readFile(file, "utf8");
       } catch (e) {
         if (isDynamic) {
           console.warn(`[config] skipping ${file}: ${(e as Error).message}`);

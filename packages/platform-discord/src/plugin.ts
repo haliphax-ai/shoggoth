@@ -238,8 +238,8 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           }),
           onMessageReactionAdd:
             hitlStack && hitlDiscordNoticeRegistry && hitlAutoApproveGate
-              ? (ev: any) => {
-                  const consumed = handleDiscordHitlReactionAdd({
+              ? async (ev: any) => {
+                  const consumed = await handleDiscordHitlReactionAdd({
                     ev,
                     pending: hitlStack.pending as any,
                     registry: hitlDiscordNoticeRegistry,

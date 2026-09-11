@@ -16,8 +16,8 @@
     "lint": "oxlint --fix .",
     "prepare": "husky || true",
     "reinstall": "rm -rf node_modules **/node_modules && npm ci",
-    "test": "vitest run --reporter=dot",
-    "test:ci-agent-isolation": "SHOGGOTH_CI_STRICT_AGENT_TESTS=1 npx vitest run packages/os-exec",
+    "test": "vitest run --reporter=minimal",
+    "test:ci-agent-isolation": "SHOGGOTH_CI_STRICT_AGENT_TESTS=1 vitest run packages/os-exec --reporter=minimal",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "dependencies": {
