@@ -61,7 +61,7 @@ describe("handleDiscordHitlReactionAdd", () => {
       );
       const autoApprove = createHitlAutoApproveGate();
       const log = createLogger({ component: "t", minLevel: "error" });
-      handleDiscordHitlReactionAdd({
+      await handleDiscordHitlReactionAdd({
         ev: {
           kind: "message_reaction_add",
           userId: "owner-snow",
@@ -78,7 +78,7 @@ describe("handleDiscordHitlReactionAdd", () => {
       });
       assert.equal(pending.getById(id)!.status, "approved");
 
-      handleDiscordHitlReactionAdd({
+      await handleDiscordHitlReactionAdd({
         ev: {
           kind: "message_reaction_add",
           userId: "stranger",

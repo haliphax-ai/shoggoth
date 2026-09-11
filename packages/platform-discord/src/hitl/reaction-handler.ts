@@ -73,7 +73,7 @@ export async function handleDiscordHitlReactionAdd(input: {
   readonly ownerUserId: string | undefined;
   readonly botUserIdRef: { current: string | undefined };
   readonly logger: Logger;
-}): boolean {
+}): Promise<boolean> {
   const owner = input.ownerUserId?.trim();
   if (!owner) return false;
   if (input.ev.userId !== owner) return false;
