@@ -16,12 +16,28 @@ function readRootVersion(): string {
   if (_version !== undefined) return _version;
   try {
     const here = dirname(fileURLToPath(import.meta.url));
-    const rootPkg = join(here, "..", "..", "..", "package.json");
-    const j = JSON.parse(readFileSync(rootPkg, "utf8")) as { version?: string };
-    if (!j.version || typeof j.version !== "string") {
-      throw new Error(`Missing version in ${rootPkg}`);
+    // Walk up from the current file until we find a package.json with a
+    // `version` field, rather than assuming a fixed directory depth.
+    let dir = here;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const candidate = join(dir, "package.json");
+      try {
+        const j = JSON.parse(readFileSync(candidate, "utf8")) as {
+          version?: string;
+        };
+        if (j.version && typeof j.version === "string") {
+          _version = j.version;
+          return _version;
+        }
+      } catch {
+        // not readable or not found — keep walking
+      }
+      const parent = dirname(dir);
+      if (parent === dir) break; // filesystem root
+      dir = parent;
     }
-    _version = j.version;
+    throw new Error("Could not find a root package.json with a version field");
   } catch {
     _version = "unknown";
   }
