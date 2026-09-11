@@ -65,7 +65,9 @@ describe("createSecretFifo", () => {
     // Give a small delay for cleanup to complete
     await vi.advanceTimersByTimeAsync(100);
 
-    expect(existsSync(path)).toBe(false);
+    await vi.waitFor(() => {
+      expect(existsSync(path)).toBe(false);
+    });
   });
 
   it("timeout cleanup removes FIFO if not read", async () => {
@@ -78,7 +80,9 @@ describe("createSecretFifo", () => {
     // Wait for timeout to expire
     await vi.advanceTimersByTimeAsync(timeoutMs + 200);
 
-    expect(existsSync(path)).toBe(false);
+    await vi.waitFor(() => {
+      expect(existsSync(path)).toBe(false);
+    });
   });
 
   it("sets permissions to 0644", async () => {

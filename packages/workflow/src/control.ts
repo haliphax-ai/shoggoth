@@ -25,6 +25,12 @@ export interface ControlPlaneOptions {
   killer: KillAdapter;
   /** Optional: spawner with abortTask for cancelling in-flight model turns. */
   spawner?: SpawnAdapter;
+  /**
+   * Optional: override the loadWorkflow function used to read persisted state
+   * from disk. Defaults to the real implementation from state.ts.
+   * Useful in tests to avoid real filesystem I/O with fake timers.
+   */
+  loadWorkflow?: (stateDir: string, workflowId: string) => Promise<TaskList | undefined>;
 }
 
 // --- Helpers ---
@@ -51,12 +57,17 @@ export class ControlPlane {
   private readonly stateDir: string;
   private readonly killer: KillAdapter;
   private readonly spawner: SpawnAdapter | undefined;
+  private readonly loadWorkflowFn: (
+    stateDir: string,
+    workflowId: string,
+  ) => Promise<TaskList | undefined>;
 
   constructor(opts: ControlPlaneOptions) {
     this.orchestrators = opts.orchestrators;
     this.stateDir = opts.stateDir;
     this.killer = opts.killer;
     this.spawner = opts.spawner;
+    this.loadWorkflowFn = opts.loadWorkflow ?? loadWorkflow;
   }
 
   /** Resolve a workflow — prefer in-memory orchestrator, fall back to disk. */
@@ -68,7 +79,7 @@ export class ControlPlane {
       if (wf) return wf;
     }
 
-    const wf = await loadWorkflow(this.stateDir, workflowId);
+    const wf = await this.loadWorkflowFn(this.stateDir, workflowId);
     if (wf) return wf;
 
     throw new Error(`Workflow not found: ${workflowId}`);
@@ -190,7 +201,7 @@ export class ControlPlane {
     for (const file of files) {
       try {
         const wfId = path.basename(file, ".json");
-        const wf = await loadWorkflow(this.stateDir, wfId);
+        const wf = await this.loadWorkflowFn(this.stateDir, wfId);
         if (!wf) continue;
 
         summaries.push({
@@ -240,7 +251,7 @@ export class ControlPlane {
       wf = orch.getWorkflowStatus()!;
       if (!wf) throw new Error(`Workflow not found: ${workflowId}`);
     } else {
-      const loaded = await loadWorkflow(this.stateDir, workflowId);
+      const loaded = await this.loadWorkflowFn(this.stateDir, workflowId);
       if (!loaded) throw new Error(`Workflow not found: ${workflowId}`);
       wf = loaded;
     }
