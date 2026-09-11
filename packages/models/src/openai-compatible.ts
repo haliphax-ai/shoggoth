@@ -578,10 +578,10 @@ export function createOpenAICompatibleProvider(
               try {
                 structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
               } catch (parseErr) {
-                throw new StructuredOutputValidationError(
-                  `Response is not valid JSON: ${(parseErr as Error).message}`,
+                throw new ModelHttpError(
+                  502,
+                  `Model returned malformed JSON in structured output: ${(parseErr as Error).message}`,
                   syntheticCall.arguments,
-                  input.responseSchema!.schema,
                 );
               }
               if (mode !== "strict") {
@@ -693,10 +693,10 @@ export function createOpenAICompatibleProvider(
             try {
               structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
             } catch (parseErr) {
-              throw new StructuredOutputValidationError(
-                `Response is not valid JSON: ${(parseErr as Error).message}`,
+              throw new ModelHttpError(
+                502,
+                `Model returned malformed JSON in structured output: ${(parseErr as Error).message}`,
                 syntheticCall.arguments,
-                input.responseSchema!.schema,
               );
             }
             if (mode !== "strict") {
