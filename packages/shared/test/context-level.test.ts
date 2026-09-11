@@ -189,7 +189,7 @@ describe("validateContextLevel", () => {
   it("rejects non-string values", () => {
     assert.throws(() => validateContextLevel(42), /Expected/);
     assert.throws(() => validateContextLevel(null), /Expected/);
-    assert.throws(() => validateContextLevel(undefined), /Expected/);
+    assert.throws(() => validateContextLevel(undefined), /Required/);
     assert.throws(() => validateContextLevel(true), /Expected/);
   });
 });
