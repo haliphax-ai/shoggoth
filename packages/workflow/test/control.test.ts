@@ -916,28 +916,18 @@ describe("ControlPlane", () => {
     });
 
     it("resolves when tasks become terminal before timeout", async () => {
-      // Create a workflow with a pending task
-      const wf = await createPersistedWorkflow(baseDir, {
+      // Define the pending and terminal workflow states
+      const pendingWf: TaskList = {
         id: "wf-wait-becomes-terminal",
         name: "wait-becomes-terminal",
         tasks: [{ taskDef: makeTask(1), status: "pending" }],
         graph: parseGraph("1"),
         pollingIntervalMs: 50,
         createdAt: 1000,
-      });
+      };
 
-      const cp = new ControlPlane({
-        orchestrators: new Map(),
-        stateDir: baseDir,
-        killer: mockKillAdapter(),
-      });
-
-      // Start waiting with a generous timeout
-      const waitPromise = cp.wait(wf.id, 5000);
-
-      // Before advancing timers, update the workflow on disk to be terminal
-      const updatedWf: TaskList = {
-        ...wf,
+      const terminalWf: TaskList = {
+        ...pendingWf,
         tasks: [
           {
             taskDef: makeTask(1),
@@ -948,13 +938,30 @@ describe("ControlPlane", () => {
           },
         ],
       };
-      await saveWorkflow(baseDir, updatedWf);
+
+      // Mock loadWorkflow: return pending on first call, terminal on subsequent calls.
+      // This avoids real filesystem I/O, eliminating the fake-timer race condition.
+      let loadCount = 0;
+      const mockLoad = async (): Promise<TaskList | undefined> => {
+        loadCount++;
+        return loadCount === 1 ? pendingWf : terminalWf;
+      };
+
+      const cp = new ControlPlane({
+        orchestrators: new Map(),
+        stateDir: baseDir,
+        killer: mockKillAdapter(),
+        loadWorkflow: mockLoad,
+      });
+
+      // Start waiting with a generous timeout
+      const waitPromise = cp.wait(pendingWf.id, 5000);
 
       // Advance timers to trigger the next poll iteration
       await vi.advanceTimersByTimeAsync(60);
 
       const result = await waitPromise;
-      assert.equal(result.id, wf.id);
+      assert.equal(result.id, pendingWf.id);
       assert.equal(result.tasks[0].status, "done");
     });
 
