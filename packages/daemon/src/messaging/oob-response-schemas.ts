@@ -37,7 +37,9 @@ export const OOB_SCHEMA_NO_SENDER: Record<string, unknown> = {
 };
 
 /** Guidance appended to subagent-result turns that must produce OOB structured output. */
-export const OOB_WITH_SENDER_GUIDANCE = `This is an out-of-band message. *After* performing any actions requested in the prompt, you must respond with structured output.
+export const OOB_WITH_SENDER_GUIDANCE = `
+
+This is an out-of-band message. *After* performing any actions requested in the prompt, you must respond with structured output.
 
 - to_operator: Message to surface to the operator (null = nothing to show)
 - to_sender: Message to reply to the originating session (null = nothing to send back)
@@ -45,7 +47,9 @@ export const OOB_WITH_SENDER_GUIDANCE = `This is an out-of-band message. *After*
 Either field may be null. The system handles delivery.`;
 
 /** Guidance appended to timer-fire turns that must produce OOB structured output. */
-export const OOB_NO_SENDER_GUIDANCE = `This is an out-of-band message. *After* performing any actions requested in the prompt, you must respond with structured output.
+export const OOB_NO_SENDER_GUIDANCE = `
+
+This is an out-of-band message. *After* performing any actions requested in the prompt, you must respond with structured output.
 
 - to_operator: Message to surface to the operator (null = nothing to show)
 
