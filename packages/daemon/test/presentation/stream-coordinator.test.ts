@@ -1,13 +1,21 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createCoalescingStreamPusher } from "../../src/presentation/stream-coordinator";
 
 describe("createCoalescingStreamPusher", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("calls setFull immediately when minIntervalMs is 0", async () => {
     const setFull = vi.fn().mockResolvedValue(undefined);
     const pusher = createCoalescingStreamPusher(setFull, 0);
     pusher.push("hello");
     // Allow microtask to resolve
-    await new Promise((r) => setTimeout(r, 10));
+    await vi.advanceTimersByTimeAsync(10);
     expect(setFull).toHaveBeenCalledWith("hello");
   });
 
@@ -17,7 +25,7 @@ describe("createCoalescingStreamPusher", () => {
 
     pusher.push("a");
     // First push fires immediately (elapsed > interval since lastSent=0)
-    await new Promise((r) => setTimeout(r, 10));
+    await vi.advanceTimersByTimeAsync(10);
     expect(setFull).toHaveBeenCalledWith("a");
 
     // Rapid pushes within interval should coalesce
@@ -26,7 +34,7 @@ describe("createCoalescingStreamPusher", () => {
     pusher.push("d");
 
     // Wait for the coalesced push to fire
-    await new Promise((r) => setTimeout(r, 150));
+    await vi.advanceTimersByTimeAsync(150);
     // Should have sent "d" (the latest) not "b" or "c"
     expect(setFull).toHaveBeenCalledWith("d");
   });
@@ -36,7 +44,7 @@ describe("createCoalescingStreamPusher", () => {
     const pusher = createCoalescingStreamPusher(setFull, 5000);
 
     pusher.push("first");
-    await new Promise((r) => setTimeout(r, 10));
+    await vi.advanceTimersByTimeAsync(10);
     setFull.mockClear();
 
     pusher.push("latest");
@@ -50,7 +58,7 @@ describe("createCoalescingStreamPusher", () => {
 
     // Should not throw
     pusher.push("x");
-    await new Promise((r) => setTimeout(r, 20));
+    await vi.advanceTimersByTimeAsync(20);
     expect(setFull).toHaveBeenCalled();
   });
 });

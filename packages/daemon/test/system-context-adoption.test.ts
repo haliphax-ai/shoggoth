@@ -5,7 +5,7 @@
  * `systemContext` with the expected `kind`, `summary`, and `data` fields.
  */
 
-import { describe, it, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 
 vi.mock("../src/workspaces/agent-workspace-layout", () => ({
   ensureAgentWorkspaceLayout: async () => {},
@@ -466,6 +466,14 @@ describe("systemContext adoption: workflow completion notification", () => {
 // ---------------------------------------------------------------------------
 
 describe("systemContext adoption: workflow task spawning", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("passes systemContext with kind 'workflow.task' and task data", async () => {
     const captured = capturingRunSessionModelTurn();
     const sessions = {
@@ -496,7 +504,7 @@ describe("systemContext adoption: workflow task spawning", () => {
     });
 
     // Give the async fire-and-forget a tick
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     assert.equal(captured.calls.length, 1);
     const sc = captured.calls[0].systemContext;
