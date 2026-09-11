@@ -905,6 +905,17 @@ describe("createGeminiProvider factory", () => {
     assert.equal(body.safetySettings!.length, 1);
   });
 
+  it("exposes capabilities with thinkingFormat and imageInput", () => {
+    const fetchImpl = async () =>
+      new Response(JSON.stringify(geminiTextResponse("ok")), { status: 200 });
+
+    const p = createGeminiProvider({ id: "g", fetchImpl });
+    assert.deepStrictEqual(p.capabilities, {
+      thinkingFormat: "xml-tags",
+      imageInput: true,
+    });
+  });
+
   it("strips trailing slashes from baseUrl", async () => {
     let capturedUrl: string | undefined;
     const fetchImpl = async (url: string | URL, _init?: RequestInit) => {
