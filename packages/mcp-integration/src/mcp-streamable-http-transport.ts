@@ -536,7 +536,10 @@ export function connectMcpStreamableHttpSession(
       method,
       params: params === undefined ? {} : params,
     };
-    return postOnce(body, { isNotification: true }).then(() => {});
+    return postOnce(body, { isNotification: true }).then(
+      () => {},
+      () => {},
+    );
   }
 
   /** Client-initiated cancel: MCP `notifications/cancelled` + `params.requestId`. */
