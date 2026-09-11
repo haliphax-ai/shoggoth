@@ -383,10 +383,22 @@ describe("retention schedule", () => {
 
     startRetentionSchedule(baseDir, 50);
 
-    // Wait for at least one interval
-    await new Promise((r) => setTimeout(r, 120));
+    // Poll for deletion — CI may delay timer ticks beyond a fixed timeout
+    const deadline = Date.now() + 2_000;
+    let loaded: TaskList | undefined = {
+      id: "",
+      name: "",
+      tasks: [],
+      graph: parseGraph("1"),
+      pollingIntervalMs: 0,
+      createdAt: 0,
+    };
+    while (loaded !== undefined && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 25));
+      loaded = await loadWorkflow(baseDir, "wf-scheduled");
+    }
 
-    assert.equal(await loadWorkflow(baseDir, "wf-scheduled"), undefined);
+    assert.equal(loaded, undefined);
   });
 
   it("stopRetentionSchedule stops the timer", () => {
