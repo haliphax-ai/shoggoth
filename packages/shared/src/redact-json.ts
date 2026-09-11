@@ -86,6 +86,13 @@ export function redactDeep<T>(obj: T, jsonPaths: readonly string[]): T {
   return clone;
 }
 
+function isFullyRedacted(obj: Record<string, unknown>): boolean {
+  for (const v of Object.values(obj)) {
+    if (v !== REDACTED) return false;
+  }
+  return true;
+}
+
 function walk(node: unknown, paths: string[][]): void {
   if (!isPlainObject(node)) {
     if (Array.isArray(node)) {
@@ -101,6 +108,8 @@ function walk(node: unknown, paths: string[][]): void {
     }
   }
   for (const val of Object.values(node)) {
-    if (val !== REDACTED) walk(val, paths);
+    if (val === REDACTED) continue;
+    if (isPlainObject(val) && isFullyRedacted(val as Record<string, unknown>)) continue;
+    walk(val, paths);
   }
 }
