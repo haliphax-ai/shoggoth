@@ -1,5 +1,10 @@
 import { invokeControlRequest, resolveSessionTargetFromCliArg } from "@shoggoth/daemon/lib";
-import { loadLayeredConfig, LAYOUT, resolveEffectiveModelsConfig, VERSION } from "@shoggoth/shared";
+import {
+  loadLayeredConfigAsync,
+  LAYOUT,
+  resolveEffectiveModelsConfig,
+  VERSION,
+} from "@shoggoth/shared";
 import { runSessionCompact } from "./run-session-compact";
 import { formatModelResult } from "./format-model-result";
 
@@ -9,15 +14,15 @@ function controlAuth(): { kind: "operator_token"; token: string } {
   return { kind: "operator_token", token };
 }
 
-function socketPathFromEnv(configPath: string): string {
+async function socketPathFromEnv(configPath: string): Promise<string> {
   const fromEnv = process.env.SHOGGOTH_CONTROL_SOCKET?.trim();
   if (fromEnv) return fromEnv;
-  const config = loadLayeredConfig(configPath);
+  const config = await loadLayeredConfigAsync(configPath);
   return config.socketPath;
 }
 
-function resolveSessionTargetOrExit(configDir: string, raw: string): string | null {
-  const config = loadLayeredConfig(configDir);
+async function resolveSessionTargetOrExit(configDir: string, raw: string): Promise<string | null> {
+  const config = await loadLayeredConfigAsync(configDir);
   try {
     return resolveSessionTargetFromCliArg(raw, config);
   } catch (e) {
@@ -85,7 +90,7 @@ export async function runSessionCli(argv: string[]): Promise<void> {
     return;
   }
   const sub = argv[0];
-  const socketPath = socketPathFromEnv(configDir);
+  const socketPath = await socketPathFromEnv(configDir);
   const auth = controlAuth();
 
   if (sub === "list") {
@@ -136,7 +141,7 @@ export async function runSessionCli(argv: string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    const sessionId = resolveSessionTargetOrExit(configDir, rawTarget);
+    const sessionId = await resolveSessionTargetOrExit(configDir, rawTarget);
     if (!sessionId) return;
     const payload: Record<string, unknown> = { session_id: sessionId, message };
     if (silent) payload.silent = true;
@@ -161,7 +166,7 @@ export async function runSessionCli(argv: string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    const config = loadLayeredConfig(configDir);
+    const config = await loadLayeredConfigAsync(configDir);
     let sessionId: string;
     try {
       sessionId = resolveSessionTargetFromCliArg(rawTarget, config);
@@ -191,7 +196,7 @@ export async function runSessionCli(argv: string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    const config = loadLayeredConfig(configDir);
+    const config = await loadLayeredConfigAsync(configDir);
     let sessionId: string;
     try {
       sessionId = resolveSessionTargetFromCliArg(rawTarget, config);
@@ -211,7 +216,7 @@ export async function runSessionCli(argv: string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    const sessionId = resolveSessionTargetOrExit(configDir, rawTarget);
+    const sessionId = await resolveSessionTargetOrExit(configDir, rawTarget);
     if (!sessionId) return;
     const res = await invokeControlRequest({
       socketPath,
@@ -231,7 +236,7 @@ export async function runSessionCli(argv: string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    const sessionId = resolveSessionTargetOrExit(configDir, rawTarget);
+    const sessionId = await resolveSessionTargetOrExit(configDir, rawTarget);
     if (!sessionId) return;
     const res = await invokeControlRequest({
       socketPath,
@@ -257,7 +262,7 @@ export async function runSessionCli(argv: string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    const sessionId = resolveSessionTargetOrExit(configDir, rawTarget);
+    const sessionId = await resolveSessionTargetOrExit(configDir, rawTarget);
     if (!sessionId) return;
     const payload: Record<string, unknown> = {
       session_id: sessionId,
@@ -282,7 +287,7 @@ export async function runSessionCli(argv: string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    const sessionId = resolveSessionTargetOrExit(configDir, rawTarget);
+    const sessionId = await resolveSessionTargetOrExit(configDir, rawTarget);
     if (!sessionId) return;
     const res = await invokeControlRequest({
       socketPath,
@@ -302,7 +307,7 @@ export async function runSessionCli(argv: string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    const sessionId = resolveSessionTargetOrExit(configDir, rawTarget);
+    const sessionId = await resolveSessionTargetOrExit(configDir, rawTarget);
     if (!sessionId) return;
     const res = await invokeControlRequest({
       socketPath,
@@ -324,7 +329,7 @@ export async function runSessionCli(argv: string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    const sessionId = resolveSessionTargetOrExit(configDir, rawTarget);
+    const sessionId = await resolveSessionTargetOrExit(configDir, rawTarget);
     if (!sessionId) return;
     const payload: Record<string, unknown> = { session_id: sessionId };
     if (argv.includes("--clear")) {
@@ -362,7 +367,7 @@ async function invokeSessionContextControl(
   action: "new" | "reset",
   sessionId: string,
 ): Promise<void> {
-  const socketPath = socketPathFromEnv(configDir);
+  const socketPath = await socketPathFromEnv(configDir);
   const auth = controlAuth();
   const op = action === "new" ? "session_context_new" : "session_context_reset";
   const res = await invokeControlRequest({

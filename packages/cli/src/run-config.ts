@@ -1,5 +1,5 @@
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
-import { loadLayeredConfig, LAYOUT } from "@shoggoth/shared";
+import { loadLayeredConfigAsync, LAYOUT } from "@shoggoth/shared";
 
 export function printConfigHelp(version: string): void {
   console.log(`${version}
@@ -15,16 +15,16 @@ function controlAuth(): { kind: "operator_token"; token: string } {
   return { kind: "operator_token", token };
 }
 
-function socketPathFromEnv(configPath: string): string {
+async function socketPathFromEnv(configPath: string): Promise<string> {
   const fromEnv = process.env.SHOGGOTH_CONTROL_SOCKET?.trim();
   if (fromEnv) return fromEnv;
-  const config = loadLayeredConfig(configPath);
+  const config = await loadLayeredConfigAsync(configPath);
   return config.socketPath;
 }
 
 export async function runConfigShow(opts?: { dynamic?: boolean }): Promise<void> {
   const configDir = process.env.SHOGGOTH_CONFIG_DIR ?? LAYOUT.configDir;
-  const socketPath = socketPathFromEnv(configDir);
+  const socketPath = await socketPathFromEnv(configDir);
   const auth = controlAuth();
   const payload = opts?.dynamic ? { dynamic: true } : {};
   const res = await invokeControlRequest({

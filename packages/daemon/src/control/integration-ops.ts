@@ -14,7 +14,7 @@ import {
   crossAgentSessionSendAllowed,
   deepMerge,
   effectiveSpawnSubagentsEnabled,
-  loadLayeredConfig,
+  loadLayeredConfigAsync,
   parseAgentSessionUrn,
   redactDeep,
   resolveEffectiveModelsConfig,
@@ -1002,13 +1002,15 @@ export async function handleIntegrationControlOp(
             sessionIds,
           );
         }
-        const merged = readAgentToolAutoApproveMap(loadLayeredConfig(hc.configDirectory));
+        const merged = readAgentToolAutoApproveMap(
+          await loadLayeredConfigAsync(hc.configDirectory),
+        );
         const nextMap: Record<string, string[]> =
           agentIdRaw === "all"
             ? Object.fromEntries(Object.keys(merged).map((k) => [k, [] as string[]]))
             : { ...merged, [agentIdRaw]: [] };
         if (hc.dynamicConfigDirectory) {
-          rewriteAgentToolAutoApproveMapAndReload({
+          await rewriteAgentToolAutoApproveMapAndReload({
             configDirectory: hc.configDirectory,
             dynamicConfigDirectory: hc.dynamicConfigDirectory,
             configRef: hc.configRef,
@@ -2313,7 +2315,7 @@ export async function handleIntegrationControlOp(
           /* overwrite if existing file is unreadable */
         }
       }
-      const currentConfig = loadLayeredConfig(ctx.config.configDirectory);
+      const currentConfig = await loadLayeredConfigAsync(ctx.config.configDirectory);
       const merged = deepMerge(currentConfig, wrapped);
       const fullParse = shoggothConfigSchema.safeParse(merged);
       if (!fullParse.success) {

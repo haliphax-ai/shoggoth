@@ -4,19 +4,19 @@ import Database from "better-sqlite3";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_HITL_CONFIG, loadLayeredConfig } from "@shoggoth/shared";
+import { DEFAULT_HITL_CONFIG, loadLayeredConfigAsync } from "@shoggoth/shared";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate.js";
 import { createPersistingHitlAutoApproveGate } from "../../src/hitl/hitl-auto-approve-persisting.js";
 import { createLogger } from "../../src/logging.js";
 import { HITL_AGENT_TOOL_AUTO_APPROVE_FILENAME } from "../../src/hitl/hitl-agent-tool-auto-persist.js";
 
 describe("createPersistingHitlAutoApproveGate", () => {
-  it("persists session tools in SQLite and agent tools in layered JSON", () => {
+  it("persists session tools in SQLite and agent tools in layered JSON", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-hitl-persist-"));
     try {
       const dbPath = join(root, "state.db");
       const cfgDir = join(root, "cfg");
-      const baseCfg = loadLayeredConfig(cfgDir);
+      const baseCfg = await loadLayeredConfigAsync(cfgDir);
       const configRef = { current: baseCfg };
       const hitlRef = { value: { ...DEFAULT_HITL_CONFIG, ...baseCfg.hitl } };
       const log = createLogger({ component: "t", minLevel: "error" });
@@ -54,7 +54,7 @@ describe("createPersistingHitlAutoApproveGate", () => {
         assert.equal(gate.shouldAutoApprove(sessionId, "builtin-write"), true);
         assert.equal(gate.shouldAutoApprove(sessionId, "other.tool"), false);
 
-        gate.enableAgentTool("main", "memory-search");
+        await gate.enableAgentTool("main", "memory-search");
         const zPath = join(cfgDir, HITL_AGENT_TOOL_AUTO_APPROVE_FILENAME);
         const raw = readFileSync(zPath, "utf8");
         assert.ok(raw.includes("memory-search"));
@@ -73,7 +73,7 @@ describe("createPersistingHitlAutoApproveGate", () => {
           hitlRef,
           logger: log,
         });
-        gate.enableAgentTool("main", "builtin-write");
+        await gate.enableAgentTool("main", "builtin-write");
         assert.equal(gate.shouldAutoApprove(sessionId, "builtin-write"), true);
         assert.equal(gate.shouldAutoApprove(sessionId, "write"), false);
         db.close();

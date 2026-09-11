@@ -39,7 +39,7 @@ export function createPersistingHitlAutoApproveGate(input: {
     enableSessionTool(sessionId, toolName) {
       insertSessionToolAutoApprove(input.db, sessionId, toolName);
     },
-    enableAgentTool(agentId, toolName) {
+    async enableAgentTool(agentId, toolName) {
       rememberAgentTool(agentId, toolName);
       if (!input.dynamicConfigDirectory) {
         log.warn("hitl.agent_tool_auto_approve_memory_only", {
@@ -51,7 +51,7 @@ export function createPersistingHitlAutoApproveGate(input: {
         return;
       }
       try {
-        persistAgentToolAutoApproveAndReload({
+        await persistAgentToolAutoApproveAndReload({
           configDirectory: input.configDirectory,
           dynamicConfigDirectory: input.dynamicConfigDirectory,
           configRef: input.configRef,

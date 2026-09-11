@@ -33,7 +33,7 @@ import {
   DEFAULT_HITL_CONFIG,
   DEFAULT_POLICY_CONFIG,
   formatAgentSessionUrn,
-  loadLayeredConfig,
+  loadLayeredConfigAsync,
   SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID,
   type ShoggothConfig,
 } from "@shoggoth/shared";
@@ -807,7 +807,7 @@ describe("control plane (unix socket + JSONL)", () => {
       hitlRef,
       logger: hitlLog,
     });
-    autoGate.enableAgentTool("wipeme", "builtin-read");
+    await autoGate.enableAgentTool("wipeme", "builtin-read");
     assert.ok(autoGate.shouldAutoApprove(sid, "builtin-read"));
 
     await withControlPlaneSession(
@@ -863,7 +863,7 @@ describe("control plane (unix socket + JSONL)", () => {
         assert.equal(sessRows, 0);
 
         assert.equal(autoGate.shouldAutoApprove(sid, "builtin-read"), false);
-        const afterConfig = loadLayeredConfig(cfgDir);
+        const afterConfig = await loadLayeredConfigAsync(cfgDir);
         const after = afterConfig.agents?.list?.["wipeme"]?.hitl?.toolAutoApprove ?? [];
         assert.deepStrictEqual(after, []);
       },
