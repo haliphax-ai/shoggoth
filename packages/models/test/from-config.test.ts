@@ -195,6 +195,46 @@ describe("createFailoverClientFromModelsConfig", () => {
     assert.equal(r.usedProviderId, "env-default");
   });
 
+  it("throws when SHOGGOTH_MODEL is missing in env fallback (anthropic path)", () => {
+    assert.throws(
+      () =>
+        createFailoverClientFromModelsConfig(undefined, {
+          env: {
+            ANTHROPIC_BASE_URL: "http://127.0.0.1:8000",
+            ANTHROPIC_API_KEY: "k",
+          },
+          fetchImpl: async () => new Response(""),
+        }),
+      /SHOGGOTH_MODEL/,
+    );
+  });
+
+  it("throws when SHOGGOTH_MODEL is missing in env fallback (gemini path)", () => {
+    assert.throws(
+      () =>
+        createFailoverClientFromModelsConfig(undefined, {
+          env: {
+            GEMINI_API_KEY: "k",
+          },
+          fetchImpl: async () => new Response(""),
+        }),
+      /SHOGGOTH_MODEL/,
+    );
+  });
+
+  it("throws when SHOGGOTH_MODEL is missing in env fallback (openai path)", () => {
+    assert.throws(
+      () =>
+        createFailoverClientFromModelsConfig(undefined, {
+          env: {
+            OPENAI_API_KEY: "k",
+          },
+          fetchImpl: async () => new Response(""),
+        }),
+      /SHOGGOTH_MODEL/,
+    );
+  });
+
   it("env fallback tool client uses anthropic when ANTHROPIC_BASE_URL is set", async () => {
     let url = "";
     const c = createFailoverToolCallingClientFromModelsConfig(undefined, {
