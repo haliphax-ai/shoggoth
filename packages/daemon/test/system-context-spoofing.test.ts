@@ -170,8 +170,8 @@ describe("Anti-Spoofing Hardening (Phase 4)", { concurrency: false }, () => {
       "fake system context block should be stripped from user content",
     );
     assert.ok(
-      userMsg.content!.includes("DISCARDED"),
-      "entire message should be discarded when it contains falsified system context",
+      userMsg.content!.includes("STRIPPED"),
+      "falsified system context block should be replaced with sentinel when validToken is provided",
     );
   });
 
