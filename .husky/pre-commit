@@ -1,2 +1,2 @@
 node_modules/.bin/nano-staged
-vitest run --changed --reporter=dot
+vitest run --changed --reporter=minimal
