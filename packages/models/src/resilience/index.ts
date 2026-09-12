@@ -1,5 +1,5 @@
 export type { ErrorClassification } from "./classify";
-export { classifyModelError } from "./classify";
+export { classifyModelError, RETRYABLE_STATUSES } from "./classify";
 
 export type { BackoffConfig } from "./backoff";
 export { DEFAULT_BACKOFF_CONFIG, computeBackoffDelay, BackoffState } from "./backoff";

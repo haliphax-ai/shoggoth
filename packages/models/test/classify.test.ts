@@ -18,8 +18,14 @@ describe("isFailoverEligibleError", () => {
     assert.equal(isFailoverEligibleError(new ModelHttpError(500, "boom")), true);
   });
 
-  it("returns true for other transient 5xx (e.g. edge 522)", () => {
-    assert.equal(isFailoverEligibleError(new ModelHttpError(522, "connection timed out")), true);
+  it("returns true for 408 Request Timeout", () => {
+    assert.equal(isFailoverEligibleError(new ModelHttpError(408, "timeout")), true);
+  });
+
+  it("returns false for non-retryable 5xx (501, 507, 522)", () => {
+    assert.equal(isFailoverEligibleError(new ModelHttpError(501, "not implemented")), false);
+    assert.equal(isFailoverEligibleError(new ModelHttpError(507, "insufficient storage")), false);
+    assert.equal(isFailoverEligibleError(new ModelHttpError(522, "connection timed out")), false);
   });
 
   it("returns false for 401 Unauthorized", () => {
