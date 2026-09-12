@@ -1,6 +1,10 @@
 import { EmptyModelResponseError, ModelHttpError } from "./errors";
 import { headersToRecord } from "./headers-to-record";
 import { trimSlash } from "./trim-slash";
+import {
+  STRUCTURED_OUTPUT_TOOL_NAME,
+  isSyntheticToolCall,
+} from "./structured-output-utils";
 import { sanitizeToolName } from "@shoggoth/shared";
 import { openaiImageBlockCodec } from "./image-codec";
 import { getResilienceGate, parseRateLimitHeaders, type ModelResilienceGate } from "./resilience";
@@ -28,7 +32,6 @@ import type {
   ResponseSchema,
 } from "./types";
 
-const STRUCTURED_OUTPUT_TOOL_NAME = "__structured_output__";
 
 function buildSyntheticTool(responseSchema: ResponseSchema): OpenAIToolFunctionDefinition {
   return {
@@ -43,9 +46,6 @@ function buildSyntheticTool(responseSchema: ResponseSchema): OpenAIToolFunctionD
   };
 }
 
-function isSyntheticToolCall(toolCall: ChatToolCall): boolean {
-  return toolCall.name === STRUCTURED_OUTPUT_TOOL_NAME;
-}
 
 /** Extract usage metadata from an OpenAI chat completions response. */
 function extractOpenAIUsage(json: unknown): ModelUsage | undefined {
