@@ -1,6 +1,6 @@
 import { ModelHttpError } from "./errors";
 import { geminiImageBlockCodec } from "./image-codec";
-import { getResilienceGate, parseRateLimitHeaders } from "./resilience";
+import { getResilienceGate, parseRateLimitHeaders, type ModelResilienceGate } from "./resilience";
 import {
   resolveStructuredOutputMode,
   validateResponseSchema,
@@ -46,6 +46,8 @@ export interface GeminiProviderOptions {
   /** API version path segment. Default "v1beta". */
   readonly apiVersion?: string;
   readonly fetchImpl?: FetchLike;
+  /** Optional resilience gate instance; falls back to the global singleton when omitted. */
+  readonly resilienceGate?: ModelResilienceGate;
 }
 
 const DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com";
@@ -541,10 +543,10 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
   const baseUrl = trimSlash(options.baseUrl ?? DEFAULT_BASE_URL);
   const apiVersion = options.apiVersion ?? DEFAULT_API_VERSION;
   const id = options.id;
+  const gate = options.resilienceGate ?? getResilienceGate();
 
   async function resilientFetch(targetUrl: string, init: RequestInit): Promise<Response> {
     try {
-      const gate = getResilienceGate();
       return await gate.executeWithResilience(id, async () => {
         const res = await fetchImpl(targetUrl, init);
         try {

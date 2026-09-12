@@ -1,7 +1,7 @@
 import { EmptyModelResponseError, ModelHttpError } from "./errors";
 import { sanitizeToolName } from "@shoggoth/shared";
 import { openaiImageBlockCodec } from "./image-codec";
-import { getResilienceGate, parseRateLimitHeaders } from "./resilience";
+import { getResilienceGate, parseRateLimitHeaders, type ModelResilienceGate } from "./resilience";
 import {
   resolveStructuredOutputMode,
   validateResponseSchema,
@@ -61,6 +61,8 @@ export interface OpenAICompatibleProviderOptions {
   readonly baseUrl: string;
   readonly apiKey?: string;
   readonly fetchImpl?: FetchLike;
+  /** Optional resilience gate instance; falls back to the global singleton when omitted. */
+  readonly resilienceGate?: ModelResilienceGate;
 }
 
 function trimSlash(u: string): string {
@@ -298,10 +300,10 @@ export function createOpenAICompatibleProvider(
   const fetchImpl = options.fetchImpl ?? (globalThis.fetch as FetchLike);
   const base = trimSlash(options.baseUrl);
   const id = options.id;
+  const gate = options.resilienceGate ?? getResilienceGate();
 
   async function resilientFetch(targetUrl: string, init: RequestInit): Promise<Response> {
     try {
-      const gate = getResilienceGate();
       return await gate.executeWithResilience(id, async () => {
         const res = await fetchImpl(targetUrl, init);
         try {
@@ -331,7 +333,6 @@ export function createOpenAICompatibleProvider(
   }
 
   async function withEmptyResponseRetry<T>(fn: () => Promise<T>): Promise<T> {
-    const gate = getResilienceGate();
     const manager = gate.getOrCreateManager(id);
     const maxRetries = 2;
     let attempt = 0;
