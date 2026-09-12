@@ -2,6 +2,7 @@ import { ModelHttpError } from "./errors";
 import { headersToRecord } from "./headers-to-record";
 import { trimSlash } from "./trim-slash";
 import { geminiImageBlockCodec } from "./image-codec";
+import { getLogger } from "@shoggoth/shared";
 import { getResilienceGate, parseRateLimitHeaders, type ModelResilienceGate } from "./resilience";
 import {
   resolveStructuredOutputMode,
@@ -29,6 +30,8 @@ import type {
 } from "./types";
 
 import type { FetchLike } from "./openai-compatible";
+
+const log = getLogger("models");
 
 /** Extract usage metadata from a Gemini generateContent response. */
 function extractGeminiUsage(json: unknown): ModelUsage | undefined {
@@ -561,7 +564,11 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
       });
     } catch (err: unknown) {
       if (err instanceof ModelHttpError) throw err;
-      return fetchImpl(targetUrl, init);
+      log.warn("resilientFetch non-ModelHttpError, re-throwing", {
+        modelId: id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
     }
   }
 
