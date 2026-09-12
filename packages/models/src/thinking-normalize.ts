@@ -29,8 +29,8 @@ function couldBeTag(buf: string): boolean {
 export class ThinkingStreamNormalizer {
   private state: State = "text";
   private buffer: string = "";
-  private thinkingContent: string = "";
-  private textContent: string = "";
+  private thinkingContent: string[] = [];
+  private textContent: string[] = [];
 
   processChunk(chunk: string): ProcessResult {
     const result: ProcessResult = {};
@@ -45,7 +45,7 @@ export class ThinkingStreamNormalizer {
             this.state = "buffering-tag";
             this.buffer = "<";
           } else {
-            this.textContent += char;
+            this.textContent.push(char);
           }
           i++;
           break;
@@ -59,14 +59,14 @@ export class ThinkingStreamNormalizer {
           } else if (isCloseTag(this.buffer)) {
             this.state = "text";
             this.buffer = "";
-            if (this.thinkingContent) {
-              result.thinking = this.thinkingContent;
-              this.thinkingContent = "";
+            if (this.thinkingContent.length > 0) {
+              result.thinking = this.thinkingContent.join("");
+              this.thinkingContent = [];
             }
           } else if (!couldBeTag(this.buffer) || this.buffer.length >= MAX_TAG_LEN) {
             // Not a prefix of any known tag, or exceeded max length
             if (this.state === "buffering-tag") {
-              this.textContent += this.buffer;
+              this.textContent.push(this.buffer);
               this.state = "text";
             }
             this.buffer = "";
@@ -79,16 +79,16 @@ export class ThinkingStreamNormalizer {
             this.state = "buffering-tag";
             this.buffer = "<";
           } else {
-            this.thinkingContent += char;
+            this.thinkingContent.push(char);
           }
           i++;
           break;
       }
     }
 
-    if (this.textContent) {
-      result.text = this.textContent;
-      this.textContent = "";
+    if (this.textContent.length > 0) {
+      result.text = this.textContent.join("");
+      this.textContent = [];
     }
 
     return result;
@@ -99,21 +99,21 @@ export class ThinkingStreamNormalizer {
 
     if (this.buffer) {
       if (this.state === "in-thinking") {
-        this.thinkingContent += this.buffer;
+        this.thinkingContent.push(this.buffer);
       } else {
-        this.textContent += this.buffer;
+        this.textContent.push(this.buffer);
       }
       this.buffer = "";
     }
 
-    if (this.thinkingContent) {
-      result.thinking = this.thinkingContent;
-      this.thinkingContent = "";
+    if (this.thinkingContent.length > 0) {
+      result.thinking = this.thinkingContent.join("");
+      this.thinkingContent = [];
     }
 
-    if (this.textContent) {
-      result.text = this.textContent;
-      this.textContent = "";
+    if (this.textContent.length > 0) {
+      result.text = this.textContent.join("");
+      this.textContent = [];
     }
 
     this.state = "text";
