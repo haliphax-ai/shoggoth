@@ -3,6 +3,7 @@ import { headersToRecord } from "./headers-to-record";
 import { trimSlash } from "./trim-slash";
 import {
   STRUCTURED_OUTPUT_TOOL_NAME,
+  buildSyntheticTool as buildSyntheticToolRaw,
   isSyntheticToolCall,
 } from "./structured-output-utils";
 import { sanitizeToolName } from "@shoggoth/shared";
@@ -84,13 +85,11 @@ interface AnthropicToolDef {
 }
 
 function buildSyntheticTool(responseSchema: ResponseSchema): AnthropicToolDef {
-  return {
-    name: STRUCTURED_OUTPUT_TOOL_NAME,
-    description:
-      "Use this tool to provide your final structured response. " +
-      "Call it with your answer conforming to the schema.",
-    input_schema: responseSchema.schema,
-  };
+  return buildSyntheticToolRaw(responseSchema, (name, description, input_schema) => ({
+    name,
+    description,
+    input_schema,
+  }));
 }
 
 
