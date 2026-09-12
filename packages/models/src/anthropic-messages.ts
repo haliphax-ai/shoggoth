@@ -1,7 +1,7 @@
 import { ModelHttpError } from "./errors";
 import { sanitizeToolName } from "@shoggoth/shared";
 import { anthropicImageBlockCodec } from "./image-codec";
-import { getResilienceGate, parseRateLimitHeaders } from "./resilience";
+import { getResilienceGate, parseRateLimitHeaders, type ModelResilienceGate } from "./resilience";
 import {
   resolveStructuredOutputMode,
   validateResponseSchema,
@@ -44,6 +44,8 @@ export interface AnthropicMessagesProviderOptions {
   readonly fetchImpl?: FetchLike;
   /** Default `x-api-key`; use `bearer` for gateways that expect `Authorization: Bearer`. */
   readonly auth?: AnthropicMessagesAuthStyle;
+  /** Optional resilience gate instance; falls back to the global singleton when omitted. */
+  readonly resilienceGate?: ModelResilienceGate;
 }
 
 const DEFAULT_ANTHROPIC_VERSION = "2023-06-01";
@@ -760,10 +762,10 @@ export function createAnthropicMessagesProvider(
   const id = options.id;
   const anthropicVersion = options.anthropicVersion ?? DEFAULT_ANTHROPIC_VERSION;
   const auth: AnthropicMessagesAuthStyle = options.auth ?? "x-api-key";
+  const gate = options.resilienceGate ?? getResilienceGate();
 
   async function resilientFetch(targetUrl: string, init: RequestInit): Promise<Response> {
     try {
-      const gate = getResilienceGate();
       return await gate.executeWithResilience(id, async () => {
         const res = await fetchImpl(targetUrl, init);
         try {

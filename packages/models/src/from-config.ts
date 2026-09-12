@@ -10,11 +10,14 @@ import { createOpenAICompatibleProvider, type FetchLike } from "./openai-compati
 import type { CompactionPolicy } from "./compaction";
 import type { ModelProvider } from "./types";
 import { createFailoverToolCallingClient, type FailoverToolCallingClient } from "./tool-failover";
+import type { ModelResilienceGate } from "./resilience";
 
 export interface CreateFailoverFromConfigOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly fetchImpl?: FetchLike;
   readonly hooks?: FailoverHooks;
+  /** Optional resilience gate to inject into providers; falls back to the global singleton. */
+  readonly resilienceGate?: ModelResilienceGate;
 }
 
 function normalizeOpenAIBaseUrl(raw: string): string {
@@ -27,6 +30,7 @@ function modelProvidersById(
   providers: ShoggothModelsConfig["providers"],
   env: NodeJS.ProcessEnv,
   fetchImpl?: FetchLike,
+  resilienceGate?: ModelResilienceGate,
 ): Map<string, ModelProvider> {
   const byId = new Map<string, ModelProvider>();
   for (const p of providers ?? []) {
@@ -39,6 +43,7 @@ function modelProvidersById(
           baseUrl: normalizeOpenAIBaseUrl(p.baseUrl),
           apiKey,
           fetchImpl,
+          resilienceGate,
         }),
       );
     } else if (p.kind === "anthropic-messages") {
@@ -52,6 +57,7 @@ function modelProvidersById(
           anthropicVersion: p.anthropicVersion,
           auth: p.auth,
           fetchImpl,
+          resilienceGate,
         }),
       );
     } else if (p.kind === "gemini") {
@@ -64,6 +70,7 @@ function modelProvidersById(
           apiKey,
           apiVersion: p.apiVersion,
           fetchImpl,
+          resilienceGate,
         }),
       );
     }
@@ -78,6 +85,7 @@ function modelProvidersById(
 function singleHopFromEnv(
   env: NodeJS.ProcessEnv,
   fetchImpl?: FetchLike,
+  resilienceGate?: ModelResilienceGate,
 ): { provider: ModelProvider; model: string } {
   const anthropicOrigin = env.ANTHROPIC_BASE_URL?.trim();
   if (anthropicOrigin) {
@@ -88,6 +96,7 @@ function singleHopFromEnv(
       anthropicVersion: env.ANTHROPIC_VERSION,
       auth: env.ANTHROPIC_AUTH?.trim().toLowerCase() === "bearer" ? "bearer" : undefined,
       fetchImpl,
+      resilienceGate,
     });
     const model = env.SHOGGOTH_MODEL?.trim();
     if (!model) {
@@ -104,6 +113,7 @@ function singleHopFromEnv(
       apiKey: env.GEMINI_API_KEY,
       baseUrl: env.GEMINI_BASE_URL,
       fetchImpl,
+      resilienceGate,
     });
     const model = env.SHOGGOTH_MODEL?.trim();
     if (!model) {
@@ -120,6 +130,7 @@ function singleHopFromEnv(
     baseUrl: normalizeOpenAIBaseUrl(baseRaw),
     apiKey: env.OPENAI_API_KEY,
     fetchImpl,
+    resilienceGate,
   });
   const model = env.SHOGGOTH_MODEL?.trim();
   if (!model) {
@@ -137,8 +148,9 @@ function envBackedFailover(
   env: NodeJS.ProcessEnv,
   fetchImpl?: FetchLike,
   hooks?: FailoverHooks,
+  resilienceGate?: ModelResilienceGate,
 ): FailoverModelClient {
-  const { provider, model } = singleHopFromEnv(env, fetchImpl);
+  const { provider, model } = singleHopFromEnv(env, fetchImpl, resilienceGate);
   return createFailoverModelClient([{ provider, model }], hooks);
 }
 
@@ -151,10 +163,10 @@ export function createFailoverClientFromModelsConfig(
   const providers = models?.providers;
 
   if (!chain?.length) {
-    return envBackedFailover(env, options.fetchImpl, options.hooks);
+    return envBackedFailover(env, options.fetchImpl, options.hooks, options.resilienceGate);
   }
 
-  const byId = modelProvidersById(providers, env, options.fetchImpl);
+  const byId = modelProvidersById(providers, env, options.fetchImpl, options.resilienceGate);
 
   const entries = chain.map((entry) => {
     const slash = entry.indexOf("/");
@@ -190,11 +202,11 @@ export function createFailoverToolCallingClientFromModelsConfig(
   const providers = models?.providers;
 
   if (!chain?.length) {
-    const { provider, model } = singleHopFromEnv(env, options.fetchImpl);
+    const { provider, model } = singleHopFromEnv(env, options.fetchImpl, options.resilienceGate);
     return createFailoverToolCallingClient([{ provider, model }], options.hooks);
   }
 
-  const byId = modelProvidersById(providers, env, options.fetchImpl);
+  const byId = modelProvidersById(providers, env, options.fetchImpl, options.resilienceGate);
 
   const entries = chain.map((entry) => {
     const slash = entry.indexOf("/");
