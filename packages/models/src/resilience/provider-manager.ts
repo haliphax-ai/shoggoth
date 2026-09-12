@@ -116,8 +116,12 @@ export class ProviderResilienceManager {
 
   private pruneTimestamps(): void {
     const cutoff = Date.now() - RATE_WINDOW_MS;
-    while (this.timestamps.length > 0 && this.timestamps[0] < cutoff) {
-      this.timestamps.shift();
+    const idx = this.timestamps.findIndex((t) => t >= cutoff);
+    if (idx > 0) {
+      this.timestamps.splice(0, idx);
+    } else if (idx === -1 && this.timestamps.length > 0) {
+      // All timestamps expired — clear the array in one shot.
+      this.timestamps.length = 0;
     }
   }
 
