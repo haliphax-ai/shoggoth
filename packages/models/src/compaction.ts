@@ -20,7 +20,21 @@ export interface CompactTranscriptResult {
 
 export function estimateTranscriptChars(messages: readonly ChatMessage[]): number {
   let n = 0;
-  for (const m of messages) n += (m.content ?? "").length;
+  for (const m of messages) {
+    const c = m.content;
+    if (c == null) continue;
+    if (typeof c === "string") {
+      n += c.length;
+    } else if (Array.isArray(c)) {
+      for (const part of c) {
+        if ("text" in part) {
+          n += part.text.length;
+        } else if ("base64" in part && part.base64) {
+          n += part.base64.length;
+        }
+      }
+    }
+  }
   return n;
 }
 
