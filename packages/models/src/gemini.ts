@@ -1,4 +1,5 @@
 import { ModelHttpError } from "./errors";
+import { headersToRecord } from "./headers-to-record";
 import { trimSlash } from "./trim-slash";
 import { geminiImageBlockCodec } from "./image-codec";
 import { getResilienceGate, parseRateLimitHeaders, type ModelResilienceGate } from "./resilience";
@@ -529,13 +530,7 @@ export async function consumeGeminiStream(
 // Provider factory
 // ---------------------------------------------------------------------------
 
-function headersToRecord(h: Headers): Record<string, string | undefined> {
-  const rec: Record<string, string | undefined> = {};
-  h.forEach((v, k) => {
-    rec[k.toLowerCase()] = v;
-  });
-  return rec;
-}
+
 
 export function createGeminiProvider(options: GeminiProviderOptions): ModelProvider {
   const fetchImpl = options.fetchImpl ?? (globalThis.fetch as FetchLike);

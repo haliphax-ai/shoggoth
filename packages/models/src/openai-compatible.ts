@@ -1,4 +1,5 @@
 import { EmptyModelResponseError, ModelHttpError } from "./errors";
+import { headersToRecord } from "./headers-to-record";
 import { trimSlash } from "./trim-slash";
 import { sanitizeToolName } from "@shoggoth/shared";
 import { openaiImageBlockCodec } from "./image-codec";
@@ -292,13 +293,7 @@ async function consumeOpenAIChatCompletionStream(
   };
 }
 
-function headersToRecord(h: Headers): Record<string, string | undefined> {
-  const rec: Record<string, string | undefined> = {};
-  h.forEach((v, k) => {
-    rec[k.toLowerCase()] = v;
-  });
-  return rec;
-}
+
 
 export function createOpenAICompatibleProvider(
   options: OpenAICompatibleProviderOptions,
