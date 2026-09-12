@@ -145,6 +145,8 @@ export function createFailoverModelClient(
             thinking: input.thinking,
             reasoningEffort: input.reasoningEffort,
             requestExtras: input.requestExtras,
+            responseSchema: input.responseSchema,
+            structuredOutputMode: input.structuredOutputMode,
             thinkingFormat,
           };
           return entry.provider.complete(req);
