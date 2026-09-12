@@ -88,7 +88,12 @@ export {
 export { extractXmlThinkingBlocks, normalizeThinkingBlocks } from "./thinking-normalize";
 export { headersToRecord } from "./headers-to-record";
 export { trimSlash } from "./trim-slash";
-export { STRUCTURED_OUTPUT_TOOL_NAME, isSyntheticToolCall } from "./structured-output-utils";
+export {
+  STRUCTURED_OUTPUT_TOOL_NAME,
+  SYNTHETIC_TOOL_DESCRIPTION,
+  buildSyntheticTool,
+  isSyntheticToolCall,
+} from "./structured-output-utils";
 export {
   resolveStructuredOutputMode,
   validateResponseSchema,
