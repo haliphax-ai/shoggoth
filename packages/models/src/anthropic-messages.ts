@@ -1,4 +1,5 @@
 import { ModelHttpError } from "./errors";
+import { headersToRecord } from "./headers-to-record";
 import { trimSlash } from "./trim-slash";
 import { sanitizeToolName } from "@shoggoth/shared";
 import { anthropicImageBlockCodec } from "./image-codec";
@@ -744,13 +745,7 @@ export async function consumeAnthropicMessagesStream(
   return { content, toolCalls, usage, reasoningContent };
 }
 
-function headersToRecord(h: Headers): Record<string, string | undefined> {
-  const rec: Record<string, string | undefined> = {};
-  h.forEach((v, k) => {
-    rec[k.toLowerCase()] = v;
-  });
-  return rec;
-}
+
 
 export function createAnthropicMessagesProvider(
   options: AnthropicMessagesProviderOptions,

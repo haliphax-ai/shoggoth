@@ -86,6 +86,7 @@ export {
   wrapCodecWithCapabilities,
 } from "./image-codec";
 export { extractXmlThinkingBlocks, normalizeThinkingBlocks } from "./thinking-normalize";
+export { headersToRecord } from "./headers-to-record";
 export { trimSlash } from "./trim-slash";
 export {
   resolveStructuredOutputMode,
