@@ -1,6 +1,10 @@
 import { ModelHttpError } from "./errors";
 import { headersToRecord } from "./headers-to-record";
 import { trimSlash } from "./trim-slash";
+import {
+  STRUCTURED_OUTPUT_TOOL_NAME,
+  isSyntheticToolCall,
+} from "./structured-output-utils";
 import { sanitizeToolName } from "@shoggoth/shared";
 import { anthropicImageBlockCodec } from "./image-codec";
 import { getResilienceGate, parseRateLimitHeaders, type ModelResilienceGate } from "./resilience";
@@ -72,8 +76,6 @@ function applyAnthropicMessagesRequestExtensions(
     Object.assign(body, x);
   }
 }
-/** Synthetic tool name used for structured output workaround. */
-const STRUCTURED_OUTPUT_TOOL_NAME = "__structured_output__";
 
 interface AnthropicToolDef {
   name: string;
@@ -91,9 +93,6 @@ function buildSyntheticTool(responseSchema: ResponseSchema): AnthropicToolDef {
   };
 }
 
-function isSyntheticToolCall(toolCall: ChatToolCall): boolean {
-  return toolCall.name === STRUCTURED_OUTPUT_TOOL_NAME;
-}
 
 /** Anthropic tool names must match `^[a-zA-Z0-9_-]{1,64}$` (dots/colons from OpenAI/MCP are invalid). */
 const ANTHROPIC_TOOL_NAME_MAX = 64;
