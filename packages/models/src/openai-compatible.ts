@@ -6,7 +6,7 @@ import {
   buildSyntheticTool as buildSyntheticToolRaw,
   isSyntheticToolCall,
 } from "./structured-output-utils";
-import { sanitizeToolName } from "@shoggoth/shared";
+import { getLogger, sanitizeToolName } from "@shoggoth/shared";
 import { openaiImageBlockCodec } from "./image-codec";
 import { getResilienceGate, parseRateLimitHeaders, type ModelResilienceGate } from "./resilience";
 import {
@@ -33,6 +33,7 @@ import type {
   ResponseSchema,
 } from "./types";
 
+const log = getLogger("models");
 
 function buildSyntheticTool(responseSchema: ResponseSchema): OpenAIToolFunctionDefinition {
   return buildSyntheticToolRaw(responseSchema, (name, description, schema) => ({
@@ -324,10 +325,10 @@ export function createOpenAICompatibleProvider(
       });
     } catch (err: unknown) {
       if (err instanceof ModelHttpError) throw err;
-      console.warn(
-        `[resilientFetch] non-ModelHttpError for model ${id}, re-throwing:`,
-        err instanceof Error ? err : String(err),
-      );
+      log.warn("resilientFetch non-ModelHttpError, re-throwing", {
+        modelId: id,
+        error: err instanceof Error ? err.message : String(err),
+      });
       throw err;
     }
   }

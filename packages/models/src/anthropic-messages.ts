@@ -6,7 +6,7 @@ import {
   buildSyntheticTool as buildSyntheticToolRaw,
   isSyntheticToolCall,
 } from "./structured-output-utils";
-import { sanitizeToolName } from "@shoggoth/shared";
+import { getLogger, sanitizeToolName } from "@shoggoth/shared";
 import { anthropicImageBlockCodec } from "./image-codec";
 import { getResilienceGate, parseRateLimitHeaders, type ModelResilienceGate } from "./resilience";
 import {
@@ -30,6 +30,8 @@ import type {
   ResponseSchema,
 } from "./types";
 import type { FetchLike } from "./openai-compatible";
+
+const log = getLogger("models");
 
 export type AnthropicMessagesAuthStyle = "x-api-key" | "bearer";
 
@@ -778,10 +780,10 @@ export function createAnthropicMessagesProvider(
       });
     } catch (err: unknown) {
       if (err instanceof ModelHttpError) throw err;
-      console.warn(
-        `[resilientFetch] non-ModelHttpError for model ${id}, re-throwing:`,
-        err instanceof Error ? err : String(err),
-      );
+      log.warn("resilientFetch non-ModelHttpError, re-throwing", {
+        modelId: id,
+        error: err instanceof Error ? err.message : String(err),
+      });
       throw err;
     }
   }
