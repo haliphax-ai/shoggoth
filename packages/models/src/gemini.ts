@@ -1,4 +1,5 @@
 import { ModelHttpError } from "./errors";
+import { trimSlash } from "./trim-slash";
 import { geminiImageBlockCodec } from "./image-codec";
 import { getResilienceGate, parseRateLimitHeaders, type ModelResilienceGate } from "./resilience";
 import {
@@ -53,9 +54,7 @@ export interface GeminiProviderOptions {
 const DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com";
 const DEFAULT_API_VERSION = "v1beta";
 
-function trimSlash(u: string): string {
-  return u.replace(/\/+$/, "");
-}
+
 
 // ---------------------------------------------------------------------------
 // Message mapping
