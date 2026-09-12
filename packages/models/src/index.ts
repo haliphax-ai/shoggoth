@@ -109,6 +109,7 @@ export {
   setResilienceGate,
   getResilienceGate,
   classifyModelError,
+  RETRYABLE_STATUSES,
   DEFAULT_BACKOFF_CONFIG,
   computeBackoffDelay,
   BackoffState,
