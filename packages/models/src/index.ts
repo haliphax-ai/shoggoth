@@ -25,6 +25,7 @@ export {
 } from "./gemini";
 export {
   createFailoverModelClient,
+  iterateFailoverChain,
   type FailoverChainEntry,
   type FailoverCompleteInput,
   type FailoverCompleteOutput,
