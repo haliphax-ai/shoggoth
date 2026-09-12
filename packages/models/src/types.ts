@@ -109,6 +109,8 @@ export interface ModelInvocationParams {
   readonly reasoningEffort?: string;
   /** Format for extended thinking output from the active provider. */
   readonly thinkingFormat?: "native" | "xml-tags" | "none";
+  /** Maximum bytes to retain for reasoning content before truncating. Defaults to 200 KB (204 800 bytes). */
+  readonly maxReasoningContentBytes?: number;
   /** Shallow-merged into the provider request object after built-in fields (escape hatch). */
   readonly requestExtras?: Record<string, unknown>;
   /** Optional JSON schema constraint for the model's final response. */

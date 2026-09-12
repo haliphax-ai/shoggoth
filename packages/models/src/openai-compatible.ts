@@ -165,6 +165,8 @@ interface ConsumeStreamOptions {
   readonly accumulateTools: boolean;
   readonly thinkingFormat?: "native" | "xml-tags" | "none";
   readonly onTextDelta?: (delta: string, accumulated: string) => void;
+  /** Maximum bytes to retain for reasoning content before truncating. Defaults to 200 KB. */
+  readonly maxReasoningContentBytes?: number;
 }
 
 async function consumeOpenAIChatCompletionStream(
@@ -231,9 +233,14 @@ async function consumeOpenAIChatCompletionStream(
     }
 
     if (typeof d.reasoning_content === "string" && d.reasoning_content.length > 0) {
+      const prevLen = reasoningBuf.length;
       reasoningBuf += d.reasoning_content;
-      if (reasoningBuf.length > 200 * 1024) {
-        reasoningBuf = reasoningBuf.slice(0, 200 * 1024);
+      const maxBytes = options.maxReasoningContentBytes ?? 200 * 1024;
+      if (reasoningBuf.length > maxBytes) {
+        console.debug(
+          `[models] Reasoning content truncated from ${prevLen + d.reasoning_content.length} to ${maxBytes} bytes`,
+        );
+        reasoningBuf = reasoningBuf.slice(0, maxBytes);
       }
     }
 
@@ -411,6 +418,7 @@ export function createOpenAICompatibleProvider(
           } = await consumeOpenAIChatCompletionStream(res.body, {
             accumulateTools: false,
             onTextDelta: input.onTextDelta,
+            maxReasoningContentBytes: input.maxReasoningContentBytes,
           });
           if (toolCalls.length > 0) {
             throw new ModelHttpError(
@@ -563,6 +571,7 @@ export function createOpenAICompatibleProvider(
             accumulateTools: true,
             thinkingFormat,
             onTextDelta: input.onTextDelta,
+            maxReasoningContentBytes: input.maxReasoningContentBytes,
           });
           const content = rawContent;
 
