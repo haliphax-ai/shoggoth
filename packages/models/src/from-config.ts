@@ -2,6 +2,7 @@ import type { ShoggothModelsConfig } from "@shoggoth/shared";
 import { createAnthropicMessagesProvider } from "./anthropic-messages";
 import {
   createFailoverModelClient,
+  type FailoverChainEntry,
   type FailoverModelClient,
   type FailoverHooks,
 } from "./failover";
@@ -154,21 +155,16 @@ function envBackedFailover(
   return createFailoverModelClient([{ provider, model }], hooks);
 }
 
-export function createFailoverClientFromModelsConfig(
-  models: ShoggothModelsConfig | undefined,
-  options: CreateFailoverFromConfigOptions = {},
-): FailoverModelClient {
-  const env = options.env ?? process.env;
-  const chain = models?.failoverChain;
-  const providers = models?.providers;
-
-  if (!chain?.length) {
-    return envBackedFailover(env, options.fetchImpl, options.hooks, options.resilienceGate);
-  }
-
-  const byId = modelProvidersById(providers, env, options.fetchImpl, options.resilienceGate);
-
-  const entries = chain.map((entry) => {
+/**
+ * Parse a `failoverChain` string array into typed `FailoverChainEntry[]`,
+ * looking up each provider by id and resolving per-model config overrides.
+ */
+function buildFailoverChainFromConfig(
+  chain: readonly string[],
+  providers: ShoggothModelsConfig["providers"],
+  byId: Map<string, ModelProvider>,
+): FailoverChainEntry[] {
+  return chain.map((entry) => {
     const slash = entry.indexOf("/");
     if (slash < 1 || slash === entry.length - 1) {
       throw new Error(`Invalid failover chain entry "${entry}" — expected "providerId/model"`);
@@ -188,9 +184,24 @@ export function createFailoverClientFromModelsConfig(
       contextWindowTokens: modelConfig?.contextWindowTokens,
     };
   });
+}
 
-  const client = createFailoverModelClient(entries, options.hooks);
-  return client;
+export function createFailoverClientFromModelsConfig(
+  models: ShoggothModelsConfig | undefined,
+  options: CreateFailoverFromConfigOptions = {},
+): FailoverModelClient {
+  const env = options.env ?? process.env;
+  const chain = models?.failoverChain;
+  const providers = models?.providers;
+
+  if (!chain?.length) {
+    return envBackedFailover(env, options.fetchImpl, options.hooks, options.resilienceGate);
+  }
+
+  const byId = modelProvidersById(providers, env, options.fetchImpl, options.resilienceGate);
+  const entries = buildFailoverChainFromConfig(chain, providers, byId);
+
+  return createFailoverModelClient(entries, options.hooks);
 }
 
 export function createFailoverToolCallingClientFromModelsConfig(
@@ -207,30 +218,9 @@ export function createFailoverToolCallingClientFromModelsConfig(
   }
 
   const byId = modelProvidersById(providers, env, options.fetchImpl, options.resilienceGate);
+  const entries = buildFailoverChainFromConfig(chain, providers, byId);
 
-  const entries = chain.map((entry) => {
-    const slash = entry.indexOf("/");
-    if (slash < 1 || slash === entry.length - 1) {
-      throw new Error(`Invalid failover chain entry "${entry}" — expected "providerId/model"`);
-    }
-    const providerId = entry.slice(0, slash);
-    const modelName = entry.slice(slash + 1);
-    const provider = byId.get(providerId);
-    if (!provider) {
-      throw new Error(`Unknown model provider id "${providerId}" in failoverChain`);
-    }
-    const providerConfig = providers?.find((p) => p.id === providerId);
-    const modelConfig = providerConfig?.models?.find((m) => m.name === modelName);
-    return {
-      provider,
-      model: modelName,
-      thinkingFormat: modelConfig?.thinkingFormat,
-      contextWindowTokens: modelConfig?.contextWindowTokens,
-    };
-  });
-
-  const client = createFailoverToolCallingClient(entries, options.hooks);
-  return client;
+  return createFailoverToolCallingClient(entries, options.hooks);
 }
 
 const DEFAULT_PRESERVE_RECENT = 8;
