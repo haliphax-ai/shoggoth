@@ -127,7 +127,7 @@ export class ProviderResilienceManager {
 
   private waitForCooldown(): Promise<void> {
     if (!this.backoff.isInCooldown()) return Promise.resolve();
-    const remaining = this.backoff.getDelay();
+    const remaining = this.backoff.getRemainingDelay();
     return new Promise((resolve) => setTimeout(resolve, remaining));
   }
 }
