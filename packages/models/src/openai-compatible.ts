@@ -324,7 +324,11 @@ export function createOpenAICompatibleProvider(
       });
     } catch (err: unknown) {
       if (err instanceof ModelHttpError) throw err;
-      return fetchImpl(targetUrl, init);
+      console.warn(
+        `[resilientFetch] non-ModelHttpError for model ${id}, re-throwing:`,
+        err instanceof Error ? err : String(err),
+      );
+      throw err;
     }
   }
 
