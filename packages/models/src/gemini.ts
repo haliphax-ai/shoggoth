@@ -268,15 +268,10 @@ function applyGeminiRequestExtensions(
 // Response parsing (non-streaming)
 // ---------------------------------------------------------------------------
 
+import { parseApiErrorBody } from "./parse-api-error-body";
+
 function parseGeminiErrorBody(text: string): string {
-  try {
-    const j = JSON.parse(text) as { error?: { message?: string; status?: string } };
-    const msg = j.error?.message;
-    if (typeof msg === "string" && msg.length > 0) return msg;
-  } catch {
-    // ignore
-  }
-  return text.slice(0, 500);
+  return parseApiErrorBody(text);
 }
 
 function parseGeminiResponse(

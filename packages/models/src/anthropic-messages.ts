@@ -333,17 +333,10 @@ export function mapChatMessagesToAnthropicPayload(
   return { system, messages: out };
 }
 
+import { parseApiErrorBody } from "./parse-api-error-body";
+
 function parseAnthropicErrorBody(text: string): string {
-  try {
-    const j = JSON.parse(text) as {
-      error?: { message?: string; type?: string };
-    };
-    const msg = j.error?.message;
-    if (typeof msg === "string" && msg.length > 0) return msg;
-  } catch {
-    // ignore
-  }
-  return text.slice(0, 500);
+  return parseApiErrorBody(text);
 }
 
 function contentBlocksToModelOutput(

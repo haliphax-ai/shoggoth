@@ -87,6 +87,7 @@ export {
 } from "./image-codec";
 export { extractXmlThinkingBlocks, normalizeThinkingBlocks } from "./thinking-normalize";
 export { headersToRecord } from "./headers-to-record";
+export { parseApiErrorBody } from "./parse-api-error-body";
 export { trimSlash } from "./trim-slash";
 export {
   STRUCTURED_OUTPUT_TOOL_NAME,
