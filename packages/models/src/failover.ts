@@ -51,75 +51,112 @@ export interface FailoverModelClient {
   complete(input: FailoverCompleteInput): Promise<FailoverCompleteOutput>;
 }
 
-export function createFailoverModelClient(
+/**
+ * Shared failover-chain iterator. Parameterised by the provider call method
+ * and the way the final output is assembled so that both
+ * `createFailoverModelClient` and `createFailoverToolCallingClient` can
+ * reuse the same skip / try / exhaust logic.
+ */
+export async function iterateFailoverChain<
+  TInput extends ModelInvocationParams,
+  TProviderResult,
+  TOutput,
+>(
   chain: readonly FailoverChainEntry[],
-  hooks?: FailoverHooks,
-): FailoverModelClient {
+  hooks: FailoverHooks | undefined,
+  input: TInput,
+  callProvider: (
+    entry: FailoverChainEntry,
+    input: TInput,
+    thinkingFormat: "native" | "xml-tags" | "none" | undefined,
+  ) => Promise<TProviderResult>,
+  buildOutput: (
+    result: TProviderResult,
+    entry: FailoverChainEntry,
+    index: number,
+    thinkingFormat: "native" | "xml-tags" | "none" | undefined,
+  ) => TOutput,
+): Promise<TOutput> {
   if (chain.length === 0) {
     throw new Error("failover chain must not be empty");
   }
 
+  let lastErr: unknown;
+  for (let i = 0; i < chain.length; i++) {
+    const entry = chain[i]!;
+
+    // Skip providers marked as failed
+    if (hooks?.isProviderFailed?.(entry.provider.id)) {
+      continue;
+    }
+
+    const thinkingFormat =
+      input.thinkingFormat ??
+      entry.thinkingFormat ??
+      entry.provider.capabilities?.thinkingFormat;
+
+    try {
+      const result = await callProvider(entry, input, thinkingFormat);
+      hooks?.onProviderSuccess?.(entry.provider.id);
+      return buildOutput(result, entry, i, thinkingFormat);
+    } catch (e) {
+      lastErr = e;
+      const more = i < chain.length - 1;
+      if (more && isFailoverEligibleError(e)) {
+        const next = chain[i + 1]!;
+        hooks?.onProviderExhausted?.(
+          entry.provider.id,
+          e instanceof Error ? e.message : String(e),
+          `${next.provider.id}/${next.model}`,
+        );
+        continue;
+      }
+      // Last in chain or non-eligible error — mark exhausted and throw
+      if (isFailoverEligibleError(e)) {
+        hooks?.onProviderExhausted?.(
+          entry.provider.id,
+          e instanceof Error ? e.message : String(e),
+        );
+      }
+      throw e;
+    }
+  }
+  throw lastErr;
+}
+
+export function createFailoverModelClient(
+  chain: readonly FailoverChainEntry[],
+  hooks?: FailoverHooks,
+): FailoverModelClient {
   return {
     async complete(input) {
-      let lastErr: unknown;
-      for (let i = 0; i < chain.length; i++) {
-        const entry = chain[i]!;
-
-        // Skip providers marked as failed
-        if (hooks?.isProviderFailed?.(entry.provider.id)) {
-          continue;
-        }
-
-        const model = entry.model;
-        const thinkingFormat =
-          input.thinkingFormat ??
-          entry.thinkingFormat ??
-          entry.provider.capabilities?.thinkingFormat;
-        const req: ModelCompleteInput = {
-          model,
-          messages: input.messages,
-          maxOutputTokens: input.maxOutputTokens,
-          temperature: input.temperature,
-          stream: input.stream,
-          onTextDelta: input.onTextDelta,
-          thinking: input.thinking,
-          reasoningEffort: input.reasoningEffort,
-          requestExtras: input.requestExtras,
-          thinkingFormat,
-        };
-        try {
-          const out = await entry.provider.complete(req);
-          hooks?.onProviderSuccess?.(entry.provider.id);
-          return {
-            ...out,
-            usedProviderId: entry.provider.id,
-            usedModel: model,
-            degraded: i > 0,
+      return iterateFailoverChain(
+        chain,
+        hooks,
+        input,
+        async (entry, input, thinkingFormat) => {
+          const req: ModelCompleteInput = {
+            model: entry.model,
+            messages: input.messages,
+            maxOutputTokens: input.maxOutputTokens,
+            temperature: input.temperature,
+            stream: input.stream,
+            onTextDelta: input.onTextDelta,
+            thinking: input.thinking,
+            reasoningEffort: input.reasoningEffort,
+            requestExtras: input.requestExtras,
             thinkingFormat,
           };
-        } catch (e) {
-          lastErr = e;
-          const more = i < chain.length - 1;
-          if (more && isFailoverEligibleError(e)) {
-            const next = chain[i + 1]!;
-            hooks?.onProviderExhausted?.(
-              entry.provider.id,
-              e instanceof Error ? e.message : String(e),
-              `${next.provider.id}/${next.model}`,
-            );
-            continue;
-          }
-          // Last in chain or non-eligible error — mark exhausted and throw
-          if (isFailoverEligibleError(e)) {
-            hooks?.onProviderExhausted?.(
-              entry.provider.id,
-              e instanceof Error ? e.message : String(e),
-            );
-          }
-          throw e;
-        }
-      }
-      throw lastErr;
+          return entry.provider.complete(req);
+        },
+        (result, entry, i, thinkingFormat) => ({
+          ...result,
+          usedProviderId: entry.provider.id,
+          usedModel: entry.model,
+          degraded: i > 0,
+          thinkingFormat,
+        }),
+      );
     },
   };
 }
