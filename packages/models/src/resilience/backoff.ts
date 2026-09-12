@@ -58,6 +58,11 @@ export class BackoffState {
     return this.lastDelay;
   }
 
+  getRemainingDelay(): number {
+    if (this.cooldownUntil === null) return 0;
+    return Math.max(0, this.cooldownUntil - Date.now());
+  }
+
   isInCooldown(): boolean {
     if (this.cooldownUntil === null) {
       return false;
