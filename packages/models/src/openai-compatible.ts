@@ -1,4 +1,5 @@
 import { EmptyModelResponseError, ModelHttpError } from "./errors";
+import { trimSlash } from "./trim-slash";
 import { sanitizeToolName } from "@shoggoth/shared";
 import { openaiImageBlockCodec } from "./image-codec";
 import { getResilienceGate, parseRateLimitHeaders, type ModelResilienceGate } from "./resilience";
@@ -65,9 +66,7 @@ export interface OpenAICompatibleProviderOptions {
   readonly resilienceGate?: ModelResilienceGate;
 }
 
-function trimSlash(u: string): string {
-  return u.replace(/\/+$/, "");
-}
+
 
 function applyOpenAICompatibleRequestExtensions(
   body: Record<string, unknown>,

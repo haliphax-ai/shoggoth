@@ -1,4 +1,5 @@
 import { ModelHttpError } from "./errors";
+import { trimSlash } from "./trim-slash";
 import { sanitizeToolName } from "@shoggoth/shared";
 import { anthropicImageBlockCodec } from "./image-codec";
 import { getResilienceGate, parseRateLimitHeaders, type ModelResilienceGate } from "./resilience";
@@ -96,9 +97,7 @@ function isSyntheticToolCall(toolCall: ChatToolCall): boolean {
 /** Anthropic tool names must match `^[a-zA-Z0-9_-]{1,64}$` (dots/colons from OpenAI/MCP are invalid). */
 const ANTHROPIC_TOOL_NAME_MAX = 64;
 
-function trimSlash(u: string): string {
-  return u.replace(/\/+$/, "");
-}
+
 
 /**
  * OpenAI tool name → Anthropic-safe name for this request. Resolves collisions when two names
