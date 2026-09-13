@@ -290,6 +290,16 @@ export class ManagedProcess extends EventEmitter {
   // -- Internal: spawning ---------------------------------------------------
 
   private _spawn(): void {
+    // Defensive: remove listeners from a previous child if one still exists.
+    // Normally _spawn() is only called after the old child has exited, but
+    // this guard prevents a listener leak if the invariant is ever violated.
+    if (this._child) {
+      this._child.removeAllListeners();
+      this._child.stdout?.removeAllListeners();
+      this._child.stderr?.removeAllListeners();
+      this._child = null;
+    }
+
     const spec = this.spec;
     const stdioCfg = spec.stdio?.capture ?? "pipe";
     const stdinMode = spec.stdio?.stdin ? "pipe" : "ignore";
