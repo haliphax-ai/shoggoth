@@ -5,12 +5,7 @@
 import { EventEmitter } from "node:events";
 import type { ProcessSpec, ProcessOwner } from "./types.js";
 import { ManagedProcess } from "./managed-process.js";
-
-function log(level: string, msg: string, fields: Record<string, unknown> = {}): void {
-  process.stderr.write(
-    JSON.stringify({ level, msg, ...fields, ts: new Date().toISOString() }) + "\n",
-  );
-}
+import { log } from "./log.js";
 
 export class ProcessManager extends EventEmitter {
   private readonly processes = new Map<string, ManagedProcess>();
