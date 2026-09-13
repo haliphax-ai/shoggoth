@@ -5,7 +5,8 @@
 import { spawn, execFile, execFileSync, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import * as net from "node:net";
-import * as http from "node:http";
+
+
 import type { ProcessSpec, ProcessState, HealthCheck, ShutdownConfig } from "./types.js";
 import { RingBuffer } from "./ring-buffer.js";
 import { log } from "./log.js";
@@ -598,17 +599,18 @@ export class ManagedProcess extends EventEmitter {
   }
 
   private _probeHttp(url: string, expectedStatus: number, timeoutMs: number): Promise<boolean> {
-    return new Promise((resolve) => {
-      const req = http.get(url, { timeout: timeoutMs }, (res) => {
-        res.resume(); // drain
-        resolve(res.statusCode === expectedStatus);
-      });
-      req.on("error", () => resolve(false));
-      req.on("timeout", () => {
-        req.destroy();
-        resolve(false);
-      });
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    return fetch(url, {
+      signal: controller.signal,
+      redirect: "follow",
+    })
+      .then((res) => {
+        res.body?.cancel().catch(() => {});
+        return res.status === expectedStatus;
+      })
+      .catch(() => false)
+      .finally(() => clearTimeout(timer));
   }
 
   private _probeExec(command: string, args: string[], timeoutMs: number): Promise<boolean> {
