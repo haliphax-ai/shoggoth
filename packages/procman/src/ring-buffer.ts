@@ -64,7 +64,16 @@ export class RingBuffer {
     return result;
   }
 
-  /** Read all buffered data as a UTF-8 string. */
+  /**
+   * Read all buffered data as a UTF-8 string.
+   *
+   * **Known limitation:** This performs a straightforward `Buffer.toString("utf8")`
+   * on the raw byte stream. If the ring buffer wraps in the middle of a multi-byte
+   * UTF-8 character, the split bytes will produce replacement characters (U+FFFD) in
+   * the output. This is acceptable for captured process output (where occasional
+   * corruption at the boundary of a large buffer is tolerable) but should not be
+   * used when byte-exact fidelity is required.
+   */
   readString(): string {
     return this.read().toString("utf8");
   }
