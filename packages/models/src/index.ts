@@ -96,6 +96,14 @@ export {
   isSyntheticToolCall,
 } from "./structured-output-utils";
 export {
+  buildFollowUpMessages,
+  executeStructuredOutputApiCall,
+  findAndValidateForcedToolCall,
+  structuredOutputFollowUp,
+  FOLLOW_UP_NUDGE,
+  type StructuredOutputFollowUpOptions,
+} from "./structured-output-follow-up";
+export {
   resolveStructuredOutputMode,
   validateResponseSchema,
   StructuredOutputValidationError,

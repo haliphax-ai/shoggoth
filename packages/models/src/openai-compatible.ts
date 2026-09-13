@@ -6,6 +6,10 @@ import {
   buildSyntheticTool as buildSyntheticToolRaw,
   isSyntheticToolCall,
 } from "./structured-output-utils";
+import {
+  structuredOutputFollowUp,
+  executeStructuredOutputApiCall,
+} from "./structured-output-follow-up";
 import { getLogger, sanitizeToolName } from "@shoggoth/shared";
 import { openaiImageBlockCodec } from "./image-codec";
 import { getResilienceGate, parseRateLimitHeaders, type ModelResilienceGate } from "./resilience";
@@ -732,112 +736,67 @@ export function createOpenAICompatibleProvider(
             };
           }
           if (!syntheticCall && toolCalls.length === 0) {
-            const followUpRawTools = [...input.tools, buildSyntheticTool(input.responseSchema!)];
-            const followUpTools = followUpRawTools.map((t) => ({
-              ...t,
-              function: { ...t.function, name: sanitizeToolName(t.function.name) },
-            }));
+            const followUpResult = await structuredOutputFollowUp({
+              messages: input.messages,
+              assistantText: content ?? "",
+              responseSchema: input.responseSchema!,
+              mode,
+              executeFollowUp: async (followUpMessages) => {
+                const followUpRawTools = [...input.tools, buildSyntheticTool(input.responseSchema!)];
+                const followUpTools = followUpRawTools.map((t) => ({
+                  ...t,
+                  function: { ...t.function, name: sanitizeToolName(t.function.name) },
+                }));
 
-            const followUpMessages: ChatMessage[] = [
-              ...input.messages,
-              { role: "assistant" as const, content: content ?? "" },
-              {
-                role: "user" as const,
-                content: "Please provide your response using the __structured_output__ tool.",
-              },
-            ];
+                const followUpBody: Record<string, unknown> = {
+                  model: input.model,
+                  messages: followUpMessages.map((m) => serializeChatMessage(m, input.thinkingFormat)),
+                  tools: followUpTools,
+                  tool_choice: { type: "function", function: { name: STRUCTURED_OUTPUT_TOOL_NAME } },
+                  max_tokens: input.maxOutputTokens,
+                  temperature: input.temperature,
+                };
+                applyOpenAICompatibleRequestExtensions(followUpBody, input);
 
-            const followUpBody: Record<string, unknown> = {
-              model: input.model,
-              messages: followUpMessages.map((m) => serializeChatMessage(m, input.thinkingFormat)),
-              tools: followUpTools,
-              tool_choice: { type: "function", function: { name: STRUCTURED_OUTPUT_TOOL_NAME } },
-              max_tokens: input.maxOutputTokens,
-              temperature: input.temperature,
-            };
-            applyOpenAICompatibleRequestExtensions(followUpBody, input);
-
-            const followUpRes = await resilientFetch(url, {
-              method: "POST",
-              headers,
-              body: JSON.stringify(followUpBody),
-            });
-
-            const followUpRawText = await followUpRes.text();
-            if (!followUpRes.ok) {
-              throw new ModelHttpError(
-                followUpRes.status,
-                followUpRes.statusText || `HTTP ${followUpRes.status}`,
-                followUpRawText.slice(0, 500),
-              );
-            }
-
-            const followUpText =
-              thinkingFormat === "xml-tags"
-                ? stripXmlThinkingTags(followUpRawText)
-                : followUpRawText;
-            let followUpJson: unknown;
-            try {
-              followUpJson = JSON.parse(followUpText);
-            } catch {
-              throw new ModelHttpError(
-                502,
-                "invalid JSON from model endpoint",
-                followUpText.slice(0, 200),
-              );
-            }
-
-            const followUpChoices = (followUpJson as { choices?: unknown }).choices;
-            const followUpFirst = Array.isArray(followUpChoices) ? followUpChoices[0] : undefined;
-            const followUpMsg =
-              followUpFirst &&
-              typeof followUpFirst === "object" &&
-              followUpFirst !== null &&
-              "message" in followUpFirst
-                ? (followUpFirst as { message?: Record<string, unknown> }).message
-                : undefined;
-
-            const followUpToolCallsRaw = followUpMsg?.tool_calls;
-            const followUpForce: { id: string; name: string; arguments: string }[] = [];
-            if (Array.isArray(followUpToolCallsRaw)) {
-              for (const tc of followUpToolCallsRaw) {
-                if (!tc || typeof tc !== "object") continue;
-                const id =
-                  typeof (tc as { id?: unknown }).id === "string" ? (tc as { id: string }).id : "";
-                const fn = (tc as { function?: unknown }).function;
-                if (!fn || typeof fn !== "object") continue;
-                const name =
-                  typeof (fn as { name?: unknown }).name === "string"
-                    ? (fn as { name: string }).name
-                    : "";
-                const rawArgs =
-                  typeof (fn as { arguments?: unknown }).arguments === "string"
-                    ? (fn as { arguments: string }).arguments
-                    : "{}";
-                if (id && name) followUpForce.push({ id, name, arguments: rawArgs });
-              }
-            }
-
-            const forced = followUpForce.find((tc) => isSyntheticToolCall(tc));
-            if (forced) {
-              const structuredContent = forced.arguments;
-              if (mode !== "strict") {
-                const result = validateResponseSchema(
-                  structuredContent,
-                  input.responseSchema!.schema,
+                return executeStructuredOutputApiCall(
+                  resilientFetch,
+                  url,
+                  headers,
+                  followUpBody,
+                  thinkingFormat,
                 );
-                if (!result.valid) {
-                  throw new StructuredOutputValidationError(
-                    result.error,
-                    result.rawContent,
-                    input.responseSchema!.schema,
-                  );
+              },
+              extractToolCalls: (responseJson) => {
+                const choices = (responseJson as { choices?: unknown }).choices;
+                const first = Array.isArray(choices) ? choices[0] : undefined;
+                const msg =
+                  first && typeof first === "object" && first !== null && "message" in first
+                    ? (first as { message?: Record<string, unknown> }).message
+                    : undefined;
+                const rawToolCalls = msg?.tool_calls;
+                const result: ChatToolCall[] = [];
+                if (Array.isArray(rawToolCalls)) {
+                  for (const tc of rawToolCalls) {
+                    if (!tc || typeof tc !== "object") continue;
+                    const id = typeof (tc as { id?: unknown }).id === "string" ? (tc as { id: string }).id : "";
+                    const fn = (tc as { function?: unknown }).function;
+                    if (!fn || typeof fn !== "object") continue;
+                    const name = typeof (fn as { name?: unknown }).name === "string" ? (fn as { name: string }).name : "";
+                    const rawArgs = typeof (fn as { arguments?: unknown }).arguments === "string"
+                      ? (fn as { arguments: string }).arguments
+                      : "{}";
+                    if (id && name) result.push({ id, name, arguments: rawArgs });
+                  }
                 }
-              }
+                return result;
+              },
+              extractUsage: extractOpenAIUsage,
+            });
+            if (followUpResult) {
               return {
-                content: structuredContent,
+                content: followUpResult.content,
                 toolCalls: [],
-                usage: extractOpenAIUsage(followUpJson),
+                usage: followUpResult.usage,
                 reasoningContent,
               };
             }
