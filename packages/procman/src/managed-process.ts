@@ -8,12 +8,7 @@ import * as net from "node:net";
 import * as http from "node:http";
 import type { ProcessSpec, ProcessState, HealthCheck, ShutdownConfig } from "./types.js";
 import { RingBuffer } from "./ring-buffer.js";
-
-function log(level: string, msg: string, fields: Record<string, unknown> = {}): void {
-  process.stderr.write(
-    JSON.stringify({ level, msg, ...fields, ts: new Date().toISOString() }) + "\n",
-  );
-}
+import { log } from "./log.js";
 
 /**
  * Kill a process group (negative PID). When the target process runs under a
