@@ -1,4 +1,4 @@
-import Ajv from "ajv";
+import Ajv, { type ValidateFunction } from "ajv";
 
 /** Mode strength ordering for min() comparison. */
 const MODE_RANK: Record<StructuredOutputMode, number> = {
@@ -40,6 +40,9 @@ export function resolveStructuredOutputMode(
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 
+/** Cache compiled AJV validators keyed on the schema object reference. */
+const validatorCache = new WeakMap<Record<string, unknown>, ValidateFunction>();
+
 /**
  * Validate a model response against a JSON schema.
  * @param content - Raw text content from the model's final response.
@@ -63,7 +66,11 @@ export function validateResponseSchema(
   }
 
   // Step 2: Validate against schema
-  const validate = ajv.compile(schema);
+  let validate = validatorCache.get(schema);
+  if (!validate) {
+    validate = ajv.compile(schema);
+    validatorCache.set(schema, validate);
+  }
   if (validate(parsed)) {
     return { valid: true, data: parsed };
   }
