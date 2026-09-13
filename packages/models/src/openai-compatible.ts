@@ -1,5 +1,4 @@
 import { EmptyModelResponseError, ModelHttpError } from "./errors";
-import { headersToRecord } from "./headers-to-record";
 import { trimSlash } from "./trim-slash";
 import {
   STRUCTURED_OUTPUT_TOOL_NAME,
@@ -10,9 +9,15 @@ import {
   structuredOutputFollowUp,
   executeStructuredOutputApiCall,
 } from "./structured-output-follow-up";
-import { getLogger, sanitizeToolName } from "@shoggoth/shared";
+import { sanitizeToolName } from "@shoggoth/shared";
 import { openaiImageBlockCodec } from "./image-codec";
-import { getResilienceGate, parseRateLimitHeaders, type ModelResilienceGate } from "./resilience";
+import { getResilienceGate, type ModelResilienceGate } from "./resilience";
+import {
+  createResilientFetcher,
+  safeJsonParse,
+  assertResponseOk,
+  assertResponseBody,
+} from "./resilient-fetch";
 import {
   resolveStructuredOutputMode,
   validateResponseSchema,
@@ -37,7 +42,6 @@ import type {
   ResponseSchema,
 } from "./types";
 
-const log = getLogger("models");
 
 function buildSyntheticTool(responseSchema: ResponseSchema): OpenAIToolFunctionDefinition {
   return buildSyntheticToolRaw(responseSchema, (name, description, schema) => ({
@@ -191,12 +195,7 @@ async function consumeOpenAIChatCompletionStream(
 
   const processDataPayload = (data: string) => {
     if (data === "[DONE]") return;
-    let json: unknown;
-    try {
-      json = JSON.parse(data);
-    } catch {
-      throw new ModelHttpError(502, "malformed SSE chunk", data.slice(0, 200));
-    }
+    const json = safeJsonParse(data, "malformed SSE chunk");
 
     const u = (json as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage;
     if (u && typeof u.prompt_tokens === "number" && typeof u.completion_tokens === "number") {
@@ -303,39 +302,12 @@ export function createOpenAICompatibleProvider(
   const id = options.id;
   const gate = options.resilienceGate ?? getResilienceGate();
 
-  async function resilientFetch(targetUrl: string, init: RequestInit): Promise<Response> {
-    try {
-      return await gate.executeWithResilience(id, async () => {
-        const res = await fetchImpl(targetUrl, init);
-        try {
-          const parsed = parseRateLimitHeaders(
-            id,
-            headersToRecord(res.headers),
-            "openai-compatible",
-          );
-          gate.getOrCreateManager(id).updateCapacity(parsed);
-        } catch {
-          /* ignore header parse errors */
-        }
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new ModelHttpError(
-            res.status,
-            res.statusText || `HTTP ${res.status}`,
-            errText.slice(0, 500),
-          );
-        }
-        return res;
-      });
-    } catch (err: unknown) {
-      if (err instanceof ModelHttpError) throw err;
-      log.warn("resilientFetch non-ModelHttpError, re-throwing", {
-        modelId: id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      throw err;
-    }
-  }
+  const resilientFetch = createResilientFetcher({
+    id,
+    gate,
+    fetchImpl,
+    providerType: "openai-compatible",
+  });
 
   async function withEmptyResponseRetry<T>(fn: () => Promise<T>): Promise<T> {
     const manager = gate.getOrCreateManager(id);
@@ -397,23 +369,14 @@ export function createOpenAICompatibleProvider(
         });
 
         if (input.stream === true) {
-          if (!res.ok) {
-            const errText = await res.text();
-            throw new ModelHttpError(
-              res.status,
-              res.statusText || `HTTP ${res.status}`,
-              errText.slice(0, 500),
-            );
-          }
-          if (!res.body) {
-            throw new ModelHttpError(502, "missing response body for stream", undefined);
-          }
+          await assertResponseOk(res);
+          const streamBody = assertResponseBody(res, "stream");
           const {
             content: streamed,
             toolCalls,
             usage,
             reasoningContent,
-          } = await consumeOpenAIChatCompletionStream(res.body, {
+          } = await consumeOpenAIChatCompletionStream(streamBody, {
             accumulateTools: false,
             onTextDelta: input.onTextDelta,
             maxReasoningContentBytes: input.maxReasoningContentBytes,
@@ -434,22 +397,11 @@ export function createOpenAICompatibleProvider(
           return { content, usage, reasoningContent };
         }
 
+        await assertResponseOk(res);
         const rawText = await res.text();
-        if (!res.ok) {
-          throw new ModelHttpError(
-            res.status,
-            res.statusText || `HTTP ${res.status}`,
-            rawText.slice(0, 500),
-          );
-        }
 
         const text = input.thinkingFormat === "xml-tags" ? stripXmlThinkingTags(rawText) : rawText;
-        let json: unknown;
-        try {
-          json = JSON.parse(text);
-        } catch {
-          throw new ModelHttpError(502, "invalid JSON from model endpoint", text.slice(0, 200));
-        }
+        const json = safeJsonParse(text, "invalid JSON from model endpoint");
 
         const choices = (json as { choices?: unknown }).choices;
         const first = Array.isArray(choices) ? choices[0] : undefined;
@@ -549,23 +501,14 @@ export function createOpenAICompatibleProvider(
         const thinkingFormat = input.thinkingFormat ?? "none";
 
         if (input.stream === true) {
-          if (!res.ok) {
-            const errText = await res.text();
-            throw new ModelHttpError(
-              res.status,
-              res.statusText || `HTTP ${res.status}`,
-              errText.slice(0, 500),
-            );
-          }
-          if (!res.body) {
-            throw new ModelHttpError(502, "missing response body for stream", undefined);
-          }
+          await assertResponseOk(res);
+          const streamBody = assertResponseBody(res, "stream");
           const {
             content: rawContent,
             toolCalls,
             usage,
             reasoningContent,
-          } = await consumeOpenAIChatCompletionStream(res.body, {
+          } = await consumeOpenAIChatCompletionStream(streamBody, {
             accumulateTools: true,
             thinkingFormat,
             onTextDelta: input.onTextDelta,
@@ -625,22 +568,11 @@ export function createOpenAICompatibleProvider(
           return { content: finalContent, toolCalls, usage, reasoningContent };
         }
 
+        await assertResponseOk(res);
         const rawText = await res.text();
-        if (!res.ok) {
-          throw new ModelHttpError(
-            res.status,
-            res.statusText || `HTTP ${res.status}`,
-            rawText.slice(0, 500),
-          );
-        }
 
         const text = thinkingFormat === "xml-tags" ? stripXmlThinkingTags(rawText) : rawText;
-        let json: unknown;
-        try {
-          json = JSON.parse(text);
-        } catch {
-          throw new ModelHttpError(502, "invalid JSON from model endpoint", text.slice(0, 200));
-        }
+        const json = safeJsonParse(text, "invalid JSON from model endpoint");
 
         const choices = (json as { choices?: unknown }).choices;
         const first = Array.isArray(choices) ? choices[0] : undefined;

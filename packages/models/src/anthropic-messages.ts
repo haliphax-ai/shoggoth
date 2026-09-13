@@ -1,5 +1,4 @@
 import { ModelHttpError } from "./errors";
-import { headersToRecord } from "./headers-to-record";
 import { trimSlash } from "./trim-slash";
 import {
   STRUCTURED_OUTPUT_TOOL_NAME,
@@ -10,9 +9,16 @@ import {
   structuredOutputFollowUp,
   executeStructuredOutputApiCall,
 } from "./structured-output-follow-up";
-import { getLogger, sanitizeToolName } from "@shoggoth/shared";
+import { sanitizeToolName } from "@shoggoth/shared";
 import { anthropicImageBlockCodec } from "./image-codec";
-import { getResilienceGate, parseRateLimitHeaders, type ModelResilienceGate } from "./resilience";
+import { getResilienceGate, type ModelResilienceGate } from "./resilience";
+import {
+  createResilientFetcher,
+  safeJsonParse,
+  assertResponseOk,
+  assertResponseBody,
+} from "./resilient-fetch";
+import { parseApiErrorBody } from "./parse-api-error-body";
 import {
   resolveStructuredOutputMode,
   validateResponseSchema,
@@ -35,7 +41,6 @@ import type {
 } from "./types";
 import type { FetchLike } from "./openai-compatible";
 
-const log = getLogger("models");
 
 export type AnthropicMessagesAuthStyle = "x-api-key" | "bearer";
 
@@ -337,11 +342,7 @@ export function mapChatMessagesToAnthropicPayload(
   return { system, messages: out };
 }
 
-import { parseApiErrorBody } from "./parse-api-error-body";
 
-function parseAnthropicErrorBody(text: string): string {
-  return parseApiErrorBody(text);
-}
 
 function contentBlocksToModelOutput(
   content: unknown,
@@ -480,12 +481,7 @@ export async function consumeAnthropicMessagesStream(
   };
 
   const handleDataPayload = (raw: string) => {
-    let json: unknown;
-    try {
-      json = JSON.parse(raw);
-    } catch {
-      throw new ModelHttpError(502, "malformed Anthropic SSE data JSON", raw.slice(0, 200));
-    }
+    const json = safeJsonParse(raw, "malformed Anthropic SSE data JSON");
     if (!json || typeof json !== "object") return;
     const o = json as Record<string, unknown>;
     const t = o.type;
@@ -755,35 +751,13 @@ export function createAnthropicMessagesProvider(
   const auth: AnthropicMessagesAuthStyle = options.auth ?? "x-api-key";
   const gate = options.resilienceGate ?? getResilienceGate();
 
-  async function resilientFetch(targetUrl: string, init: RequestInit): Promise<Response> {
-    try {
-      return await gate.executeWithResilience(id, async () => {
-        const res = await fetchImpl(targetUrl, init);
-        try {
-          const parsed = parseRateLimitHeaders(id, headersToRecord(res.headers), "anthropic");
-          gate.getOrCreateManager(id).updateCapacity(parsed);
-        } catch {
-          /* ignore header parse errors */
-        }
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new ModelHttpError(
-            res.status,
-            res.statusText || `HTTP ${res.status}`,
-            parseAnthropicErrorBody(errText),
-          );
-        }
-        return res;
-      });
-    } catch (err: unknown) {
-      if (err instanceof ModelHttpError) throw err;
-      log.warn("resilientFetch non-ModelHttpError, re-throwing", {
-        modelId: id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      throw err;
-    }
-  }
+  const resilientFetch = createResilientFetcher({
+    id,
+    gate,
+    fetchImpl,
+    providerType: "anthropic",
+    formatErrorBody: parseApiErrorBody,
+  });
 
   return {
     id,
@@ -812,23 +786,14 @@ export function createAnthropicMessagesProvider(
       });
 
       if (input.stream === true) {
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new ModelHttpError(
-            res.status,
-            res.statusText || `HTTP ${res.status}`,
-            parseAnthropicErrorBody(errText),
-          );
-        }
-        if (!res.body) {
-          throw new ModelHttpError(502, "missing response body for Anthropic stream", undefined);
-        }
+        await assertResponseOk(res, parseApiErrorBody);
+        const streamBody = assertResponseBody(res, "Anthropic stream");
         const {
           content: streamed,
           toolCalls,
           usage,
           reasoningContent: streamedReasoning,
-        } = await consumeAnthropicMessagesStream(res.body, {
+        } = await consumeAnthropicMessagesStream(streamBody, {
           accumulateTools: false,
           thinkingFormat: input.thinkingFormat,
           onTextDelta: input.onTextDelta,
@@ -846,25 +811,10 @@ export function createAnthropicMessagesProvider(
         return { content: streamed, usage, reasoningContent: streamedReasoning };
       }
 
+      await assertResponseOk(res, parseApiErrorBody);
       const text = await res.text();
-      if (!res.ok) {
-        throw new ModelHttpError(
-          res.status,
-          res.statusText || `HTTP ${res.status}`,
-          parseAnthropicErrorBody(text),
-        );
-      }
 
-      let json: unknown;
-      try {
-        json = JSON.parse(text);
-      } catch {
-        throw new ModelHttpError(
-          502,
-          "invalid JSON from Anthropic Messages endpoint",
-          text.slice(0, 200),
-        );
-      }
+      const json = safeJsonParse(text, "invalid JSON from Anthropic Messages endpoint");
 
       const content = (json as { content?: unknown }).content;
       const {
@@ -933,23 +883,14 @@ export function createAnthropicMessagesProvider(
       });
 
       if (input.stream === true) {
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new ModelHttpError(
-            res.status,
-            res.statusText || `HTTP ${res.status}`,
-            parseAnthropicErrorBody(errText),
-          );
-        }
-        if (!res.body) {
-          throw new ModelHttpError(502, "missing response body for Anthropic stream", undefined);
-        }
+        await assertResponseOk(res, parseApiErrorBody);
+        const streamBody = assertResponseBody(res, "Anthropic stream");
         const {
           content: outText,
           toolCalls,
           usage,
           reasoningContent: streamedReasoning,
-        } = await consumeAnthropicMessagesStream(res.body, {
+        } = await consumeAnthropicMessagesStream(streamBody, {
           accumulateTools: true,
           thinkingFormat: input.thinkingFormat,
           onTextDelta: input.onTextDelta,
@@ -1036,7 +977,7 @@ export function createAnthropicMessagesProvider(
                   followUpBody,
                   input.thinkingFormat,
                   {
-                    formatErrorBody: parseAnthropicErrorBody,
+                    formatErrorBody: parseApiErrorBody,
                     jsonErrorMessage: "invalid JSON from Anthropic Messages endpoint",
                   },
                 );
@@ -1065,26 +1006,11 @@ export function createAnthropicMessagesProvider(
         return { content: outText, toolCalls, usage, reasoningContent: streamedReasoning };
       }
 
+      await assertResponseOk(res, parseApiErrorBody);
       const rawText = await res.text();
-      if (!res.ok) {
-        throw new ModelHttpError(
-          res.status,
-          res.statusText || `HTTP ${res.status}`,
-          parseAnthropicErrorBody(rawText),
-        );
-      }
 
       const text = input.thinkingFormat === "xml-tags" ? stripXmlThinkingTags(rawText) : rawText;
-      let json: unknown;
-      try {
-        json = JSON.parse(text);
-      } catch {
-        throw new ModelHttpError(
-          502,
-          "invalid JSON from Anthropic Messages endpoint",
-          text.slice(0, 200),
-        );
-      }
+      const json = safeJsonParse(text, "invalid JSON from Anthropic Messages endpoint");
 
       const content = (json as { content?: unknown }).content;
       const {
@@ -1178,7 +1104,7 @@ export function createAnthropicMessagesProvider(
                 followUpBody,
                 input.thinkingFormat,
                 {
-                  formatErrorBody: parseAnthropicErrorBody,
+                  formatErrorBody: parseApiErrorBody,
                   jsonErrorMessage: "invalid JSON from Anthropic Messages endpoint",
                 },
               );
