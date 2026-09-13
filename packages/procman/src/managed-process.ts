@@ -279,6 +279,8 @@ export class ManagedProcess extends EventEmitter {
       );
     }
 
+    // Defensive reset: stop() already nulls these via _resolveStop(), but
+    // guard against edge cases where stop() resolved without calling _resolveStop().
     this._stopPromise = null;
     this._stopResolve = null;
     this._state = "starting"; // reset without emitting yet
