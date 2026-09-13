@@ -1,8 +1,5 @@
 import { ModelHttpError } from "./errors";
-import {
-  isSyntheticToolCall,
-  STRUCTURED_OUTPUT_TOOL_NAME,
-} from "./structured-output-utils";
+import { isSyntheticToolCall } from "./structured-output-utils";
 import {
   validateResponseSchema,
   StructuredOutputValidationError,
