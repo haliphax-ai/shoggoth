@@ -1,10 +1,10 @@
-import { ModelHttpError } from "./errors";
 import { isSyntheticToolCall } from "./structured-output-utils";
 import {
   validateResponseSchema,
   StructuredOutputValidationError,
 } from "./response-validation";
 import { stripXmlThinkingTags } from "./thinking-normalize";
+import { assertResponseOk, safeJsonParse } from "./resilient-fetch";
 import type { ChatMessage, ChatToolCall, ModelUsage, ResponseSchema } from "./types";
 
 /** Nudge message appended when forcing the model to use the structured output tool. */
@@ -55,31 +55,13 @@ export async function executeStructuredOutputApiCall(
     body: JSON.stringify(body),
   });
 
+  await assertResponseOk(res, options?.formatErrorBody);
   const rawText = await res.text();
-  if (!res.ok) {
-    throw new ModelHttpError(
-      res.status,
-      res.statusText || `HTTP ${res.status}`,
-      options?.formatErrorBody
-        ? options.formatErrorBody(rawText)
-        : rawText.slice(0, 500),
-    );
-  }
 
   const text =
     thinkingFormat === "xml-tags" ? stripXmlThinkingTags(rawText) : rawText;
 
-  let json: unknown;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    throw new ModelHttpError(
-      502,
-      options?.jsonErrorMessage ?? "invalid JSON from model endpoint",
-      text.slice(0, 200),
-    );
-  }
-  return json;
+  return safeJsonParse(text, options?.jsonErrorMessage ?? "invalid JSON from model endpoint");
 }
 
 /**

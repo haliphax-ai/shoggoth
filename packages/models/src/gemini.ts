@@ -1,9 +1,14 @@
 import { ModelHttpError } from "./errors";
-import { headersToRecord } from "./headers-to-record";
 import { trimSlash } from "./trim-slash";
 import { geminiImageBlockCodec } from "./image-codec";
-import { getLogger } from "@shoggoth/shared";
-import { getResilienceGate, parseRateLimitHeaders, type ModelResilienceGate } from "./resilience";
+import { getResilienceGate, type ModelResilienceGate } from "./resilience";
+import {
+  createResilientFetcher,
+  safeJsonParse,
+  assertResponseOk,
+  assertResponseBody,
+} from "./resilient-fetch";
+import { parseApiErrorBody } from "./parse-api-error-body";
 import {
   resolveStructuredOutputMode,
   validateResponseSchema,
@@ -31,7 +36,6 @@ import type {
 
 import type { FetchLike } from "./openai-compatible";
 
-const log = getLogger("models");
 
 /** Extract usage metadata from a Gemini generateContent response. */
 function extractGeminiUsage(json: unknown): ModelUsage | undefined {
@@ -268,11 +272,7 @@ function applyGeminiRequestExtensions(
 // Response parsing (non-streaming)
 // ---------------------------------------------------------------------------
 
-import { parseApiErrorBody } from "./parse-api-error-body";
 
-function parseGeminiErrorBody(text: string): string {
-  return parseApiErrorBody(text);
-}
 
 function parseGeminiResponse(
   json: unknown,
@@ -397,12 +397,7 @@ export async function consumeGeminiStream(
     options.thinkingFormat === "xml-tags" ? new ThinkingStreamNormalizer() : undefined;
 
   const handleDataPayload = (raw: string) => {
-    let json: unknown;
-    try {
-      json = JSON.parse(raw);
-    } catch {
-      throw new ModelHttpError(502, "malformed Gemini SSE data JSON", raw.slice(0, 200));
-    }
+    const json = safeJsonParse(raw, "malformed Gemini SSE data JSON");
     if (!json || typeof json !== "object") return;
 
     const resp = json as Record<string, unknown>;
@@ -537,35 +532,13 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
   const id = options.id;
   const gate = options.resilienceGate ?? getResilienceGate();
 
-  async function resilientFetch(targetUrl: string, init: RequestInit): Promise<Response> {
-    try {
-      return await gate.executeWithResilience(id, async () => {
-        const res = await fetchImpl(targetUrl, init);
-        try {
-          const parsed = parseRateLimitHeaders(id, headersToRecord(res.headers), "gemini");
-          gate.getOrCreateManager(id).updateCapacity(parsed);
-        } catch {
-          /* ignore header parse errors */
-        }
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new ModelHttpError(
-            res.status,
-            res.statusText || `HTTP ${res.status}`,
-            parseGeminiErrorBody(errText),
-          );
-        }
-        return res;
-      });
-    } catch (err: unknown) {
-      if (err instanceof ModelHttpError) throw err;
-      log.warn("resilientFetch non-ModelHttpError, re-throwing", {
-        modelId: id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      throw err;
-    }
-  }
+  const resilientFetch = createResilientFetcher({
+    id,
+    gate,
+    fetchImpl,
+    providerType: "gemini",
+    formatErrorBody: parseApiErrorBody,
+  });
 
   const providerCapabilities: ModelCapabilities = {
     thinkingFormat: "xml-tags",
@@ -618,18 +591,9 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
       });
 
       if (input.stream === true) {
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new ModelHttpError(
-            res.status,
-            res.statusText || `HTTP ${res.status}`,
-            parseGeminiErrorBody(errText),
-          );
-        }
-        if (!res.body) {
-          throw new ModelHttpError(502, "missing response body for Gemini stream", undefined);
-        }
-        const { content, toolCalls, usage } = await consumeGeminiStream(res.body, {
+        await assertResponseOk(res, parseApiErrorBody);
+        const streamBody = assertResponseBody(res, "Gemini stream");
+        const { content, toolCalls, usage } = await consumeGeminiStream(streamBody, {
           accumulateTools: false,
           thinkingFormat: input.thinkingFormat,
           onTextDelta: input.onTextDelta,
@@ -647,26 +611,11 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
         };
       }
 
+      await assertResponseOk(res, parseApiErrorBody);
       const rawText = await res.text();
-      if (!res.ok) {
-        throw new ModelHttpError(
-          res.status,
-          res.statusText || `HTTP ${res.status}`,
-          parseGeminiErrorBody(rawText),
-        );
-      }
 
       const text = input.thinkingFormat === "xml-tags" ? stripXmlThinkingTags(rawText) : rawText;
-      let json: unknown;
-      try {
-        json = JSON.parse(text);
-      } catch {
-        throw new ModelHttpError(
-          502,
-          "invalid JSON from Gemini generateContent endpoint",
-          text.slice(0, 200),
-        );
-      }
+      const json = safeJsonParse(text, "invalid JSON from Gemini generateContent endpoint");
 
       const { content, toolCalls } = parseGeminiResponse(json, input.thinkingFormat);
       if (toolCalls.length > 0) {
@@ -739,18 +688,9 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
       });
 
       if (input.stream === true) {
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new ModelHttpError(
-            res.status,
-            res.statusText || `HTTP ${res.status}`,
-            parseGeminiErrorBody(errText),
-          );
-        }
-        if (!res.body) {
-          throw new ModelHttpError(502, "missing response body for Gemini stream", undefined);
-        }
-        const { content, toolCalls, usage } = await consumeGeminiStream(res.body, {
+        await assertResponseOk(res, parseApiErrorBody);
+        const streamBody = assertResponseBody(res, "Gemini stream");
+        const { content, toolCalls, usage } = await consumeGeminiStream(streamBody, {
           accumulateTools: true,
           thinkingFormat: input.thinkingFormat,
           onTextDelta: input.onTextDelta,
@@ -770,26 +710,11 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
         };
       }
 
+      await assertResponseOk(res, parseApiErrorBody);
       const rawText = await res.text();
-      if (!res.ok) {
-        throw new ModelHttpError(
-          res.status,
-          res.statusText || `HTTP ${res.status}`,
-          parseGeminiErrorBody(rawText),
-        );
-      }
 
       const text = input.thinkingFormat === "xml-tags" ? stripXmlThinkingTags(rawText) : rawText;
-      let json: unknown;
-      try {
-        json = JSON.parse(text);
-      } catch {
-        throw new ModelHttpError(
-          502,
-          "invalid JSON from Gemini generateContent endpoint",
-          text.slice(0, 200),
-        );
-      }
+      const json = safeJsonParse(text, "invalid JSON from Gemini generateContent endpoint");
 
       const { content, toolCalls } = parseGeminiResponse(json, input.thinkingFormat);
       if (toolCalls.length === 0 && (content === null || content === "")) {
