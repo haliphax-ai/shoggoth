@@ -395,6 +395,52 @@ describe("ManagedProcess", () => {
 
         assert.equal(mp.state, "failed");
       });
+
+      it("follows redirects and succeeds when final endpoint returns expected status", async () => {
+        const finalServer = http.createServer((_req, res) => {
+          res.writeHead(200);
+          res.end("ok");
+        });
+        const finalPort = await new Promise<number>((resolve) => {
+          finalServer.listen(0, "127.0.0.1", () => {
+            const addr = finalServer.address();
+            resolve(typeof addr === "object" && addr ? addr.port : 0);
+          });
+        });
+
+        const redirectServer = http.createServer((_req, res) => {
+          res.writeHead(302, { Location: `http://127.0.0.1:${finalPort}/` });
+          res.end();
+        });
+        const redirectPort = await new Promise<number>((resolve) => {
+          redirectServer.listen(0, "127.0.0.1", () => {
+            const addr = redirectServer.address();
+            resolve(typeof addr === "object" && addr ? addr.port : 0);
+          });
+        });
+
+        try {
+          const mp = new ManagedProcess(
+            makeRunningSpec({
+              id: "http-redirect",
+              health: {
+                kind: "http",
+                url: `http://127.0.0.1:${redirectPort}/`,
+                expectedStatus: 200,
+                retries: 3,
+                intervalMs: 100,
+              },
+            }),
+          );
+
+          await mp.start();
+          assert.equal(mp.state, "running", "should follow redirect and succeed when final endpoint returns 200");
+          await mp.stop();
+        } finally {
+          redirectServer.close();
+          finalServer.close();
+        }
+      });
     });
 
     describe("_probeExec", () => {
