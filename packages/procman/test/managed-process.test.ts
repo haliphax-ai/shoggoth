@@ -488,6 +488,129 @@ describe("ManagedProcess", () => {
   });
 
   // ===========================================================================
+  // NEW TESTS — restart policy signal behavior
+  // ===========================================================================
+
+  describe("restart policy — signal kills", () => {
+    it("does not restart on signal kill with on-failure policy", async () => {
+      const mp = new ManagedProcess(
+        makeRunningSpec({
+          id: "signal-no-restart",
+          restart: {
+            mode: "on-failure",
+            maxRetries: 2,
+            initialDelayMs: 50,
+            backoffMultiplier: 1,
+            maxDelayMs: 100,
+          },
+        }),
+      );
+
+      await mp.start();
+      assert.equal(mp.state, "running");
+
+      // Kill externally with SIGKILL (simulates OOM kill)
+      mp.kill();
+
+      // Wait for process to exit
+      await waitForState(mp, "exited", 5000);
+
+      // Should transition to dead without restarting
+      await waitForState(mp, "dead", 5000);
+
+      assert.equal(mp.state, "dead");
+      assert.equal(mp.restartCount, 0, "should not restart on signal kill");
+      assert.equal(mp.lastSignal, "SIGKILL");
+    });
+
+    it("restarts on signal kill with on-unexpected-exit policy", async () => {
+      const mp = new ManagedProcess(
+        makeRunningSpec({
+          id: "signal-unexpected-restart",
+          restart: {
+            mode: "on-unexpected-exit",
+            maxRetries: 2,
+            initialDelayMs: 50,
+            backoffMultiplier: 1,
+            maxDelayMs: 100,
+          },
+        }),
+      );
+
+      await mp.start();
+      assert.equal(mp.state, "running");
+
+      // Kill externally with SIGKILL
+      mp.kill();
+
+      // Wait for the process to be restarted (restartCount increments)
+      await new Promise<void>((resolve) => {
+        const check = () => {
+          if (mp.restartCount >= 1) return resolve();
+          mp.once("state-change", check);
+        };
+        check();
+      });
+
+      assert.ok(mp.restartCount >= 1, `should have restarted after signal kill, got ${mp.restartCount}`);
+
+      // The restarted process is now running (sleep 60). Stop it cleanly.
+      await mp.stop();
+      assert.equal(mp.state, "dead");
+    });
+
+    it("restarts on non-zero exit code with on-failure policy", async () => {
+      const mp = new ManagedProcess(
+        makeSpec({
+          id: "exit-code-restart",
+          command: "sh",
+          args: ["-c", "exit 1"],
+          restart: {
+            mode: "on-failure",
+            maxRetries: 1,
+            initialDelayMs: 50,
+            backoffMultiplier: 1,
+            maxDelayMs: 100,
+          },
+        }),
+      );
+
+      await mp.start();
+
+      // Wait for it to exhaust retries and go dead
+      await waitForState(mp, "dead", 10000);
+
+      assert.equal(mp.state, "dead");
+      assert.ok(mp.restartCount >= 1, `should have restarted on non-zero exit, got ${mp.restartCount}`);
+    });
+
+    it("restarts on non-zero exit code with on-unexpected-exit policy", async () => {
+      const mp = new ManagedProcess(
+        makeSpec({
+          id: "exit-code-unexpected",
+          command: "sh",
+          args: ["-c", "exit 1"],
+          restart: {
+            mode: "on-unexpected-exit",
+            maxRetries: 1,
+            initialDelayMs: 50,
+            backoffMultiplier: 1,
+            maxDelayMs: 100,
+          },
+        }),
+      );
+
+      await mp.start();
+
+      // Wait for it to exhaust retries and go dead
+      await waitForState(mp, "dead", 10000);
+
+      assert.equal(mp.state, "dead");
+      assert.ok(mp.restartCount >= 1, `should have restarted on non-zero exit, got ${mp.restartCount}`);
+    });
+  });
+
+  // ===========================================================================
   // NEW TESTS — preStop hook execution
   // ===========================================================================
 
