@@ -20,7 +20,8 @@ import { log } from "./log.js";
  * failure.
  */
 function killPg(child: ChildProcess, signal: NodeJS.Signals, uid?: number): boolean {
-  const pid = child.pid!;
+  if (child.pid == null) return false;
+  const pid = child.pid;
   const sigName = signal.replace("SIG", "");
   const needsCrossUid = uid != null && uid !== (process.getuid?.() ?? -1);
 
