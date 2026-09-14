@@ -1,5 +1,6 @@
 import { readHandleOutput, type BackgroundHandle } from "./subprocess";
 import { listExecSessions, getProcessManager } from "./tools";
+import { TERMINAL_STATES } from "./constants";
 import type { ManagedProcess } from "@shoggoth/procman";
 
 // ---------------------------------------------------------------------------
@@ -191,7 +192,7 @@ function estimateRuntimeMs(id: string): number {
  * Check whether a managed process has reached a terminal state.
  */
 function isManagedProcessExited(mp: ManagedProcess): boolean {
-  return mp.state === "dead" || mp.state === "exited" || mp.state === "failed";
+  return TERMINAL_STATES.includes(mp.state as (typeof TERMINAL_STATES)[number]);
 }
 
 // ---------------------------------------------------------------------------

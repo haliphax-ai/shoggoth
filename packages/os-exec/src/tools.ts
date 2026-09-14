@@ -10,6 +10,7 @@ import {
 } from "./subprocess";
 import { resolvePathForRead, resolvePathForWrite } from "./workspace-path";
 import type { ProcessManager, ManagedProcess, ProcessSpec } from "@shoggoth/procman";
+import { TERMINAL_STATES } from "./constants";
 
 export interface AgentCredentials {
   uid: number;
@@ -1115,7 +1116,8 @@ function validateExecOptions(opts: ExecExtendedOptions): void {
     throw new Error("`yieldMs` must be a non-negative number.");
   }
   // File output validation
-  const hasFileOutput = opts.outputFile !== undefined || opts.stdoutFile !== undefined || opts.stderrFile !== undefined;
+  const hasFileOutput =
+    opts.outputFile !== undefined || opts.stdoutFile !== undefined || opts.stderrFile !== undefined;
   if (opts.outputFile && (opts.stdoutFile || opts.stderrFile)) {
     throw new Error("`outputFile` cannot be used together with `stdoutFile` or `stderrFile`.");
   }
@@ -1249,10 +1251,10 @@ export async function toolExecExtended(
       const finished = await Promise.race([
         new Promise<true>((resolve) => {
           mp.on("state-change", (state: string) => {
-            if (state === "dead" || state === "exited") resolve(true);
+            if (TERMINAL_STATES.includes(state as (typeof TERMINAL_STATES)[number])) resolve(true);
           });
           // Already dead?
-          if (mp.state === "dead" || mp.state === "exited") resolve(true);
+          if (TERMINAL_STATES.includes(mp.state as (typeof TERMINAL_STATES)[number])) resolve(true);
         }),
         new Promise<false>((resolve) => setTimeout(() => resolve(false), opts.yieldMs)),
       ]);
