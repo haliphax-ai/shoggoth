@@ -9,6 +9,7 @@ import { log } from "./log.js";
 
 export class ProcessManager extends EventEmitter {
   private readonly processes = new Map<string, ManagedProcess>();
+  private readonly stateChangeHandlers = new Map<string, (newState: string, _oldState: string) => void>();
 
   /** Register and start a managed process. Returns the ManagedProcess handle. */
   async start(spec: ProcessSpec): Promise<ManagedProcess> {
@@ -21,7 +22,7 @@ export class ProcessManager extends EventEmitter {
 
     // Forward lifecycle events
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    mp.on("state-change", (newState: string, _oldState: string) => {
+    const handler = (newState: string, _oldState: string) => {
       if (newState === "running") {
         this.emit("process-started", mp);
       } else if (newState === "dead") {
@@ -29,7 +30,9 @@ export class ProcessManager extends EventEmitter {
       } else if (newState === "failed") {
         this.emit("process-failed", mp, new Error(`Process ${spec.id} failed`));
       }
-    });
+    };
+    mp.on("state-change", handler);
+    this.stateChangeHandlers.set(spec.id, handler);
 
     try {
       await mp.start();
@@ -64,6 +67,7 @@ export class ProcessManager extends EventEmitter {
       );
     }
 
+    this._removeListeners(id);
     this.processes.delete(id);
   }
 
@@ -102,6 +106,7 @@ export class ProcessManager extends EventEmitter {
           pid: mp.pid,
         });
       } else {
+        this._removeListeners(id);
         this.processes.delete(id);
       }
     }
@@ -138,6 +143,7 @@ export class ProcessManager extends EventEmitter {
         try {
           await mp.stop();
           if (!mp.killFailed) {
+            this._removeListeners(mp.spec.id);
             this.processes.delete(mp.spec.id);
           } else {
             log("error", "process kill failed, not deregistering", {
@@ -153,6 +159,17 @@ export class ProcessManager extends EventEmitter {
         }
       }),
     );
+  }
+
+  /** Remove stored event listeners for a process to prevent memory leaks. */
+  /** Remove stored event stateChangeHandlers for a process to prevent memory leaks. */
+  private _removeListeners(id: string): void {
+    const handler = this.stateChangeHandlers.get(id);
+    if (handler) {
+      const mp = this.processes.get(id);
+      mp?.removeListener("state-change", handler);
+      this.stateChangeHandlers.delete(id);
+    }
   }
 
   // -- Internal: dependency ordering ----------------------------------------
