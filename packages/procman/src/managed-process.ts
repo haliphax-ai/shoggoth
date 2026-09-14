@@ -2,7 +2,7 @@
 // Managed Process — wraps a ChildProcess with state machine & lifecycle
 // ---------------------------------------------------------------------------
 
-import { spawn, execFile, execFileSync, type ChildProcess } from "node:child_process";
+import { spawn, execFile, execFileSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
 import * as net from "node:net";
 
@@ -316,8 +316,8 @@ export class ManagedProcess extends EventEmitter {
       detached: true,
     };
 
-    if (spec.uid != null) (opts as Record<string, unknown>).uid = spec.uid;
-    if (spec.gid != null) (opts as Record<string, unknown>).gid = spec.gid;
+    if (spec.uid != null) (opts as SpawnOptions).uid = spec.uid;
+    if (spec.gid != null) (opts as SpawnOptions).gid = spec.gid;
 
     const child = spawn(spec.command, spec.args ?? [], opts);
     this._child = child;
