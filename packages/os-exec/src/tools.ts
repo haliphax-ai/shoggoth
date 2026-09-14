@@ -1115,7 +1115,8 @@ function validateExecOptions(opts: ExecExtendedOptions): void {
     throw new Error("`yieldMs` must be a non-negative number.");
   }
   // File output validation
-  const hasFileOutput = opts.outputFile !== undefined || opts.stdoutFile !== undefined || opts.stderrFile !== undefined;
+  const hasFileOutput =
+    opts.outputFile !== undefined || opts.stdoutFile !== undefined || opts.stderrFile !== undefined;
   if (opts.outputFile && (opts.stdoutFile || opts.stderrFile)) {
     throw new Error("`outputFile` cannot be used together with `stdoutFile` or `stderrFile`.");
   }
@@ -1249,10 +1250,10 @@ export async function toolExecExtended(
       const finished = await Promise.race([
         new Promise<true>((resolve) => {
           mp.on("state-change", (state: string) => {
-            if (state === "dead" || state === "exited") resolve(true);
+            if (state === "dead" || state === "exited" || state === "failed") resolve(true);
           });
           // Already dead?
-          if (mp.state === "dead" || mp.state === "exited") resolve(true);
+          if (mp.state === "dead" || mp.state === "exited" || mp.state === "failed") resolve(true);
         }),
         new Promise<false>((resolve) => setTimeout(() => resolve(false), opts.yieldMs)),
       ]);
