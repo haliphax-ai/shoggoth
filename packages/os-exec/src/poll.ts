@@ -184,7 +184,10 @@ function filterRawOutput(
 function estimateRuntimeMs(id: string): number {
   const parts = id.split("-");
   // parts[0] = "exec", parts[1] = base36 timestamp, parts[2] = counter
-  const startMs = parseInt(parts[1]!, 36);
+  const raw = parts[1];
+  if (raw == null) return 0;
+  const startMs = parseInt(raw, 36);
+  if (Number.isNaN(startMs)) return 0;
   return Date.now() - startMs;
 }
 
