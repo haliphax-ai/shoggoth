@@ -343,7 +343,7 @@ async function pollManagedProcess(
     const waitStart = Date.now();
     await Promise.race([
       new Promise<true>((resolve) => {
-        const check = (state: string) => {
+        const check = (_state: string) => {
           if (isManagedProcessExited(mp)) {
             mp.removeListener("state-change", check);
             resolve(true);
