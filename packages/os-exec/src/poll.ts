@@ -187,6 +187,13 @@ function estimateRuntimeMs(id: string): number {
   return Date.now() - startMs;
 }
 
+/**
+ * Check whether a managed process has reached a terminal state.
+ */
+function isManagedProcessExited(mp: ManagedProcess): boolean {
+  return mp.state === "dead" || mp.state === "exited" || mp.state === "failed";
+}
+
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
@@ -329,7 +336,7 @@ async function pollManagedProcess(
   let waited = false;
   let waitedMs = 0;
 
-  const isExited = mp.state === "dead" || mp.state === "exited" || mp.state === "failed";
+  const isExited = isManagedProcessExited(mp);
 
   // If the process is still running and timeout > 0, wait for it
   if (!isExited && timeoutMs > 0) {
@@ -337,14 +344,14 @@ async function pollManagedProcess(
     await Promise.race([
       new Promise<true>((resolve) => {
         const check = (state: string) => {
-          if (state === "dead" || state === "exited" || state === "failed") {
+          if (isManagedProcessExited(mp)) {
             mp.removeListener("state-change", check);
             resolve(true);
           }
         };
         mp.on("state-change", check);
         // Already exited while we were setting up?
-        if (mp.state === "dead" || mp.state === "exited" || mp.state === "failed") {
+        if (isManagedProcessExited(mp)) {
           mp.removeListener("state-change", check);
           resolve(true);
         }
@@ -356,7 +363,7 @@ async function pollManagedProcess(
   }
 
   const runtimeMs = estimateRuntimeMs(specId);
-  const nowExited = mp.state === "dead" || mp.state === "exited" || mp.state === "failed";
+  const nowExited = isManagedProcessExited(mp);
 
   // Build base result
   const base: PollResultBase = {
