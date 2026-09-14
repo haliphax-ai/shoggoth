@@ -13,7 +13,7 @@ export interface ProcessOwner {
 
 /** Restart policy for a managed process. */
 export interface RestartPolicy {
-  mode: "never" | "on-failure" | "always";
+    mode: "never" | "on-failure" | "on-unexpected-exit" | "always";
   /** Max consecutive restart attempts before giving up. Default 5. */
   maxRetries?: number;
   /** Delay before first restart (ms). Default 1000. */

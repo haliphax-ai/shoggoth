@@ -405,7 +405,24 @@ export class ManagedProcess extends EventEmitter {
 
     // Decide whether to restart
     const policy = this.spec.restart;
-    const shouldRestart = policy.mode === "always" || (policy.mode === "on-failure" && code !== 0);
+
+    /**
+     * Restart policy decision:
+     *
+     * - `"always"`: restart regardless of exit reason.
+     * - `"on-failure"`: restart only on a non-zero exit code (i.e., the process
+     *   crashed or returned an error). Processes killed by an external signal
+     *   (e.g., SIGKILL from OOM or a manual `kill`) are **not** considered
+     *   failures and will not trigger a restart under this policy.
+     * - `"on-unexpected-exit"`: restart on any exit that is not a clean exit
+     *   (code 0), including signal-killed processes.
+     * - `"never"`: never restart.
+     */
+    const isSignalKilled = signal !== null && code === null;
+    const shouldRestart =
+      policy.mode === "always" ||
+      policy.mode === "on-unexpected-exit" ||
+      (policy.mode === "on-failure" && code !== 0 && !isSignalKilled);
 
     const maxRetries = policy.maxRetries ?? 5;
 
