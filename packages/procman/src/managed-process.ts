@@ -86,8 +86,6 @@ export class ManagedProcess extends EventEmitter {
   private _stdoutMatchResolved = false;
   /** Incremental accumulator for stdout-match health checking (avoids O(n²) re-scan). */
   private _stdoutAccumulator = "";
-  /** Last index into _stdoutAccumulator that was scanned for the match pattern. */
-  private _stdoutAccSearchOffset = 0;
 
   constructor(spec: ProcessSpec) {
     super();
@@ -332,7 +330,6 @@ export class ManagedProcess extends EventEmitter {
     this._pid = child.pid;
     this._stdoutMatchResolved = false;
     this._stdoutAccumulator = "";
-    this._stdoutAccSearchOffset = 0;
 
     log("info", "process spawned", { processId: spec.id, pid: child.pid });
 
@@ -350,6 +347,7 @@ export class ManagedProcess extends EventEmitter {
         this._stdoutAccumulator += typeof chunk === "string" ? chunk : chunk.toString("utf8");
         if (this._stdoutAccumulator.includes(this.spec.health.pattern)) {
           this._stdoutMatchResolved = true;
+          this._stdoutAccumulator = "";
           this._onHealthy();
         }
       }
