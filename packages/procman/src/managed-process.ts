@@ -78,11 +78,8 @@ export class ManagedProcess extends EventEmitter {
   private _stdoutBuf: RingBuffer;
   private _stderrBuf: RingBuffer;
 
-  private _healthTimer: ReturnType<typeof setTimeout> | null = null;
+  private _allTimers: ReturnType<typeof setTimeout>[] = [];
   private _healthRetries = 0;
-  private _restartTimer: ReturnType<typeof setTimeout> | null = null;
-  private _runtimeTimer: ReturnType<typeof setTimeout> | null = null;
-  private _resetTimer: ReturnType<typeof setTimeout> | null = null;
   private _stopPromise: Promise<void> | null = null;
   private _stopResolve: (() => void) | null = null;
   private _stdoutMatchResolved = false;
@@ -371,10 +368,10 @@ export class ManagedProcess extends EventEmitter {
 
     // Runtime limit
     if (spec.limits?.maxRuntimeSeconds && spec.limits.maxRuntimeSeconds > 0) {
-      this._runtimeTimer = setTimeout(() => {
+      this._allTimers.push(setTimeout(() => {
         log("warn", "runtime limit exceeded", { processId: spec.id });
         this.stop();
-      }, spec.limits.maxRuntimeSeconds * 1000);
+      }, spec.limits.maxRuntimeSeconds * 1000));
     }
   }
 
@@ -452,7 +449,7 @@ export class ManagedProcess extends EventEmitter {
       delayMs: delay,
     });
 
-    this._restartTimer = setTimeout(async () => {
+    this._allTimers.push(setTimeout(async () => {
       this._restartCount++;
       this._stdoutBuf.clear();
       this._stderrBuf.clear();
@@ -465,17 +462,17 @@ export class ManagedProcess extends EventEmitter {
         });
         this._setState("failed");
       }
-    }, delay);
+    }, delay));
   }
 
   private _scheduleResetTimer(): void {
     const resetAfter = this.spec.restart.resetAfterMs ?? 60000;
     if (resetAfter > 0) {
-      this._resetTimer = setTimeout(() => {
+      this._allTimers.push(setTimeout(() => {
         if (this._state === "running") {
           this._consecutiveFailures = 0;
         }
-      }, resetAfter);
+      }, resetAfter));
     }
   }
 
@@ -552,11 +549,11 @@ export class ManagedProcess extends EventEmitter {
           return;
         }
 
-        this._healthTimer = setTimeout(attempt, intervalMs);
+        this._allTimers.push(setTimeout(attempt, intervalMs));
       };
 
       // First attempt after a short delay to let the process start
-      this._healthTimer = setTimeout(attempt, intervalMs);
+      this._allTimers.push(setTimeout(attempt, intervalMs));
     });
   }
 
@@ -646,21 +643,7 @@ export class ManagedProcess extends EventEmitter {
   // -- Internal: timer cleanup ----------------------------------------------
 
   private _clearTimers(): void {
-    if (this._healthTimer) {
-      clearTimeout(this._healthTimer);
-      this._healthTimer = null;
-    }
-    if (this._restartTimer) {
-      clearTimeout(this._restartTimer);
-      this._restartTimer = null;
-    }
-    if (this._runtimeTimer) {
-      clearTimeout(this._runtimeTimer);
-      this._runtimeTimer = null;
-    }
-    if (this._resetTimer) {
-      clearTimeout(this._resetTimer);
-      this._resetTimer = null;
-    }
+    this._allTimers.forEach(clearTimeout);
+    this._allTimers = [];
   }
 }
