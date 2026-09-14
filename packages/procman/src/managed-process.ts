@@ -168,6 +168,9 @@ export class ManagedProcess extends EventEmitter {
       return this._stopPromise;
     }
 
+    // Capture in a local variable to avoid null race if _finalize() runs mid-method
+    const child = this._child;
+
     const cfg: ShutdownConfig = this.spec.shutdown ?? {};
     const signal = cfg.signal ?? "SIGTERM";
     const graceMs = cfg.graceMs ?? 5000;
@@ -184,7 +187,7 @@ export class ManagedProcess extends EventEmitter {
       }
     }
 
-    const killed = killPg(this._child, signal, this.spec.uid);
+    const killed = killPg(child, signal, this.spec.uid);
 
     if (!killed) {
       // Signal delivery failed (EPERM or similar) — cannot stop this process.
@@ -203,11 +206,11 @@ export class ManagedProcess extends EventEmitter {
 
     // Grace period → SIGKILL
     const graceTimer = setTimeout(() => {
-      if (this._child && this._child.exitCode === null) {
+      if (child && child.exitCode === null) {
         log("warn", "grace period expired, sending SIGKILL", {
           processId: this.spec.id,
         });
-        const sigkilled = killPg(this._child!, "SIGKILL", this.spec.uid);
+        const sigkilled = killPg(child, "SIGKILL", this.spec.uid);
         if (!sigkilled) {
           log("error", "SIGKILL failed, process may be orphaned", {
             processId: this.spec.id,
@@ -222,7 +225,7 @@ export class ManagedProcess extends EventEmitter {
     }, graceMs);
 
     // Wait for exit (with a safety timeout to avoid hanging forever)
-    if (this._child.exitCode === null) {
+    if (child.exitCode === null) {
       const safetyTimeout = graceMs + 5000;
       await new Promise<void>((resolve) => {
         const safety = setTimeout(() => {
@@ -238,7 +241,7 @@ export class ManagedProcess extends EventEmitter {
           resolve();
         }, safetyTimeout);
 
-        this._child!.once("close", () => {
+        child.once("close", () => {
           clearTimeout(graceTimer);
           clearTimeout(safety);
           resolve();
