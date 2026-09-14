@@ -13,7 +13,7 @@
     "cli": "node --import tsx/esm packages/cli/src/cli.ts",
     "daemon": "node --import tsx/esm packages/daemon/src/index.ts",
     "format": "oxfmt --no-error-on-unmatched-pattern .",
-    "lint": "oxlint --fix .",
+    "lint": "oxlint --fix --deny-warnings .",
     "prepare": "husky || true",
     "reinstall": "rm -rf node_modules **/node_modules && npm ci",
     "test": "vitest run --reporter=minimal",
