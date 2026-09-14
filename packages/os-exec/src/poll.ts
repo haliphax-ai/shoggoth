@@ -1,5 +1,5 @@
 import { readHandleOutput, type BackgroundHandle } from "./subprocess";
-import { listExecSessions, getProcessManager } from "./tools";
+import { listExecSessions, getProcessManager, TERMINAL_STATES } from "./tools";
 import type { ManagedProcess } from "@shoggoth/procman";
 
 // ---------------------------------------------------------------------------
@@ -329,7 +329,7 @@ async function pollManagedProcess(
   let waited = false;
   let waitedMs = 0;
 
-  const isExited = mp.state === "dead" || mp.state === "exited" || mp.state === "failed";
+  const isExited = TERMINAL_STATES.includes(mp.state as (typeof TERMINAL_STATES)[number]);
 
   // If the process is still running and timeout > 0, wait for it
   if (!isExited && timeoutMs > 0) {
@@ -337,14 +337,14 @@ async function pollManagedProcess(
     await Promise.race([
       new Promise<true>((resolve) => {
         const check = (state: string) => {
-          if (state === "dead" || state === "exited" || state === "failed") {
+          if (TERMINAL_STATES.includes(state as (typeof TERMINAL_STATES)[number])) {
             mp.removeListener("state-change", check);
             resolve(true);
           }
         };
         mp.on("state-change", check);
         // Already exited while we were setting up?
-        if (mp.state === "dead" || mp.state === "exited" || mp.state === "failed") {
+        if (TERMINAL_STATES.includes(mp.state as (typeof TERMINAL_STATES)[number])) {
           mp.removeListener("state-change", check);
           resolve(true);
         }
@@ -356,7 +356,7 @@ async function pollManagedProcess(
   }
 
   const runtimeMs = estimateRuntimeMs(specId);
-  const nowExited = mp.state === "dead" || mp.state === "exited" || mp.state === "failed";
+  const nowExited = TERMINAL_STATES.includes(mp.state as (typeof TERMINAL_STATES)[number]);
 
   // Build base result
   const base: PollResultBase = {

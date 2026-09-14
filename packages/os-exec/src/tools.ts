@@ -11,6 +11,9 @@ import {
 import { resolvePathForRead, resolvePathForWrite } from "./workspace-path";
 import type { ProcessManager, ManagedProcess, ProcessSpec } from "@shoggoth/procman";
 
+/** Process states that indicate the process is no longer running. */
+export const TERMINAL_STATES = ["dead", "exited", "failed"] as const;
+
 export interface AgentCredentials {
   uid: number;
   gid: number;
@@ -1250,10 +1253,10 @@ export async function toolExecExtended(
       const finished = await Promise.race([
         new Promise<true>((resolve) => {
           mp.on("state-change", (state: string) => {
-            if (state === "dead" || state === "exited" || state === "failed") resolve(true);
+            if (TERMINAL_STATES.includes(state as (typeof TERMINAL_STATES)[number])) resolve(true);
           });
           // Already dead?
-          if (mp.state === "dead" || mp.state === "exited" || mp.state === "failed") resolve(true);
+          if (TERMINAL_STATES.includes(mp.state as (typeof TERMINAL_STATES)[number])) resolve(true);
         }),
         new Promise<false>((resolve) => setTimeout(() => resolve(false), opts.yieldMs)),
       ]);
