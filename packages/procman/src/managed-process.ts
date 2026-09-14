@@ -84,6 +84,8 @@ export class ManagedProcess extends EventEmitter {
   private _stopPromise: Promise<void> | null = null;
   private _stopResolve: (() => void) | null = null;
   private _stdoutMatchResolved = false;
+  /** Incremental accumulator for stdout-match health checking (avoids O(n²) re-scan). */
+  private _stdoutAccumulator = "";
 
   constructor(spec: ProcessSpec) {
     super();
@@ -327,6 +329,7 @@ export class ManagedProcess extends EventEmitter {
     this._child = child;
     this._pid = child.pid;
     this._stdoutMatchResolved = false;
+    this._stdoutAccumulator = "";
 
     log("info", "process spawned", { processId: spec.id, pid: child.pid });
 
@@ -341,9 +344,10 @@ export class ManagedProcess extends EventEmitter {
         !this._stdoutMatchResolved &&
         this._state === "starting"
       ) {
-        const pattern = this.spec.health.pattern;
-        if (this._stdoutBuf.readString().includes(pattern)) {
+        this._stdoutAccumulator += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+        if (this._stdoutAccumulator.includes(this.spec.health.pattern)) {
           this._stdoutMatchResolved = true;
+          this._stdoutAccumulator = "";
           this._onHealthy();
         }
       }
