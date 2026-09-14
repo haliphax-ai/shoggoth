@@ -73,6 +73,7 @@ export class ProcessManager extends EventEmitter {
    */
   async stopAll(): Promise<void> {
     const order = this._reverseDepOrder();
+    const failedToStop: string[] = [];
 
     for (const batch of order) {
       await Promise.all(
@@ -92,7 +93,22 @@ export class ProcessManager extends EventEmitter {
       );
     }
 
-    this.processes.clear();
+    // Remove only processes that stopped successfully; keep failed ones registered
+    for (const [id, mp] of this.processes) {
+      if (mp.killFailed) {
+        failedToStop.push(id);
+        log("warn", "process failed to stop, keeping registered", {
+          processId: id,
+          pid: mp.pid,
+        });
+      } else {
+        this.processes.delete(id);
+      }
+    }
+
+    if (failedToStop.length > 0) {
+      this.emit("stop-failed", failedToStop);
+    }
   }
 
   /** Get a handle by spec ID. */
