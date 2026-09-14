@@ -10,9 +10,7 @@ import {
 } from "./subprocess";
 import { resolvePathForRead, resolvePathForWrite } from "./workspace-path";
 import type { ProcessManager, ManagedProcess, ProcessSpec } from "@shoggoth/procman";
-
-/** Process states that indicate the process is no longer running. */
-export const TERMINAL_STATES = ["dead", "exited", "failed"] as const;
+import { TERMINAL_STATES } from "./constants";
 
 export interface AgentCredentials {
   uid: number;

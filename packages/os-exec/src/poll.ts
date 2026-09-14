@@ -1,5 +1,6 @@
 import { readHandleOutput, type BackgroundHandle } from "./subprocess";
-import { listExecSessions, getProcessManager, TERMINAL_STATES } from "./tools";
+import { listExecSessions, getProcessManager } from "./tools";
+import { TERMINAL_STATES } from "./constants";
 import type { ManagedProcess } from "@shoggoth/procman";
 
 // ---------------------------------------------------------------------------
