@@ -178,7 +178,10 @@ export class ProcessManager extends EventEmitter {
       const batch: string[] = [];
       for (const id of remaining) {
         const deps = dependedOnBy.get(id)!;
-        const hasRemainingDependent = [...deps].some((d) => remaining.has(d));
+        let hasRemainingDependent = false;
+        for (const d of deps) {
+          if (remaining.has(d)) { hasRemainingDependent = true; break; }
+        }
         if (!hasRemainingDependent) {
           batch.push(id);
         }
