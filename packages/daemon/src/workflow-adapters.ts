@@ -5,6 +5,7 @@
  * behind the workflow package's dependency-injection interfaces.
  */
 
+import { realpathSync } from "node:fs";
 import type {
   SpawnAdapter,
   SpawnRequest,
@@ -535,6 +536,7 @@ export function createDaemonToolExecutorFactory(
             config: deps.config,
             env: deps.env,
             workspacePath: deps.workspacePath,
+            workspaceRealPath: realpathSync(deps.workspacePath),
             workingDirectory:
               createSessionStore(deps.db).getById(sessionId)?.workingDirectory ?? undefined,
             creds: deps.creds,

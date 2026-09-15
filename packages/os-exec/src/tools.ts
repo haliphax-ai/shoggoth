@@ -12,6 +12,17 @@ import { resolvePathForRead, resolvePathForWrite, PathEscapeError } from "./work
 import type { ProcessManager, ManagedProcess, ProcessSpec } from "@shoggoth/procman";
 import { isTerminal } from "./util";
 
+// Cache realpathSync results per workspace root to avoid repeated syscalls
+const realpathCache = new Map<string, string>();
+function cachedRealpathSync(workspaceRoot: string): string {
+  let cached = realpathCache.get(workspaceRoot);
+  if (cached === undefined) {
+    cached = realpathSync(workspaceRoot);
+    realpathCache.set(workspaceRoot, cached);
+  }
+  return cached;
+}
+
 export interface AgentCredentials {
   uid: number;
   gid: number;
@@ -138,7 +149,7 @@ export async function toolRead(
   creds: AgentCredentials,
 ): Promise<string> {
   const abs = resolvePathForRead(workspaceRoot, userPath);
-  const cwd = realpathSync(workspaceRoot);
+  const cwd = cachedRealpathSync(workspaceRoot);
   const r = await runAsUser({
     file: process.execPath,
     args: ["-e", nodeReadScript()],
@@ -164,7 +175,7 @@ export async function toolReadBinary(
   creds: AgentCredentials,
 ): Promise<Buffer> {
   const abs = resolvePathForRead(workspaceRoot, userPath);
-  const cwd = realpathSync(workspaceRoot);
+  const cwd = cachedRealpathSync(workspaceRoot);
   const r = await runAsUser({
     file: process.execPath,
     args: [
@@ -379,7 +390,7 @@ export async function toolWrite(
     ? resolvePathForRead(workspaceRoot, opts.path)
     : resolvePathForWrite(workspaceRoot, opts.path);
 
-  const cwd = realpathSync(workspaceRoot);
+  const cwd = cachedRealpathSync(workspaceRoot);
 
   // Determine the write mode for the subprocess
   let mode: string;
@@ -467,7 +478,7 @@ export async function toolExec(
   if (argv.length === 0) {
     throw new Error("toolExec requires a non-empty argv");
   }
-  const home = realpathSync(workspaceRoot);
+  const home = cachedRealpathSync(workspaceRoot);
   const cwd = cwdOverride ? realpathSync(cwdOverride) : home;
   const file = argv[0]!;
   const args = argv.slice(1);
@@ -550,7 +561,7 @@ async function toolStatRaw(
   absPath: string,
   creds: AgentCredentials,
 ): Promise<Record<string, unknown>> {
-  const cwd = realpathSync(workspaceRoot);
+  const cwd = cachedRealpathSync(workspaceRoot);
   const r = await runAsUser({
     file: process.execPath,
     args: ["-e", nodeStatScript()],
@@ -609,7 +620,7 @@ function resolvePathList(
   patterns: string[],
   maxFiles: number,
 ): { relativePaths: string[]; truncated: boolean } {
-  const rootReal = realpathSync(workspaceRoot);
+  const rootReal = cachedRealpathSync(workspaceRoot);
   const seen = new Set<string>();
   const results: string[] = [];
 
@@ -780,7 +791,7 @@ export async function toolReadExtended(
       // Validate security (resolvePathForRead ensures target is inside workspace)
       resolvePathForRead(workspaceRoot, opts.path);
       // Use the logical (pre-realpath) path so lstatSync can detect symlinks
-      const rootReal = realpathSync(workspaceRoot);
+      const rootReal = cachedRealpathSync(workspaceRoot);
       const logicalAbs = join(rootReal, opts.path);
       const raw = await toolStatRaw(workspaceRoot, logicalAbs, creds);
       return { kind: "stat-single", stat: buildFileStat(opts.path, raw) };
@@ -796,7 +807,7 @@ export async function toolReadExtended(
   // --- Multi-path / glob mode ---
   const patterns = opts.paths!;
   const { relativePaths, truncated } = resolvePathList(workspaceRoot, patterns, maxFiles);
-  const rootReal = realpathSync(workspaceRoot);
+  const rootReal = cachedRealpathSync(workspaceRoot);
 
   if (isStat) {
     const stats: FileStat[] = [];
@@ -1199,7 +1210,7 @@ export async function toolExecExtended(
 ): Promise<ExecExtendedResult> {
   validateExecOptions(opts);
 
-  const rootCwd = realpathSync(workspaceRoot);
+  const rootCwd = cachedRealpathSync(workspaceRoot);
 
   // Resolve working directory
   let cwd = rootCwd;

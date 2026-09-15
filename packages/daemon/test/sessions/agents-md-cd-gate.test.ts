@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, realpathSync } from "node:fs";
 import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -32,6 +32,7 @@ function makeCtx(
     config: {} as any,
     env: process.env,
     workspacePath,
+    workspaceRealPath: realpathSync(workspacePath),
     workingDirectory,
     creds: { uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 },
     orchestratorEnv: process.env,
@@ -60,8 +61,8 @@ describe("cd handler AGENTS.md gate", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("gates cd when AGENTS.md exists in cwd", async () => {
     const store = createSessionStore(db);
