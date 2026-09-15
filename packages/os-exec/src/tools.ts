@@ -10,7 +10,7 @@ import {
 } from "./subprocess";
 import { resolvePathForRead, resolvePathForWrite, PathEscapeError } from "./workspace-path";
 import type { ProcessManager, ManagedProcess, ProcessSpec } from "@shoggoth/procman";
-import { TERMINAL_STATES } from "./constants";
+import { isTerminal } from "./util";
 
 export interface AgentCredentials {
   uid: number;
@@ -1052,11 +1052,62 @@ function nextProcmanId(): string {
 }
 
 /**
+ * Create a BackgroundHandle-compatible adapter from a ManagedProcess.
+ * This lets getExecSession return a unified type regardless of storage backend.
+ */
+function adaptManagedProcess(mp: ManagedProcess): BackgroundHandle {
+  const done = new Promise<void>((resolve) => {
+    if (isTerminal(mp.state)) {
+      resolve();
+      return;
+    }
+    const handler = (_state: string) => {
+      if (isTerminal(mp.state)) {
+        mp.off("state-change", handler);
+        resolve();
+      }
+    };
+    mp.on("state-change", handler);
+  });
+
+  return {
+    sessionId: mp.spec.id,
+    pid: mp.pid!,
+    child: {
+      kill: (_signal?: string | number) => {
+        mp.kill();
+      },
+      exited: isTerminal(mp.state),
+      stdin: null,
+      stdout: null,
+      stderr: null,
+    } as unknown as BackgroundHandle["child"],
+    stdoutChunks: [],
+    stderrChunks: [],
+    exitCode: mp.lastExitCode,
+    signal: mp.lastSignal,
+    exited: isTerminal(mp.state),
+    timedOut: false,
+    error: null,
+    done,
+  };
+}
+
+/**
  * Retrieve a background session by ID.
- * When a ProcessManager is set, checks procman first.
- * Falls back to the legacy Map.
+ * Checks procman first (when a ProcessManager is set), then falls back
+ * to the legacy Map. Returns a BackgroundHandle in both cases so callers
+ * don't need to know which storage backend was used.
  */
 export function getExecSession(sessionId: string): BackgroundHandle | undefined {
+  // Check procman first
+  const pm = getProcessManager();
+  if (pm) {
+    const mp = pm.get(sessionId);
+    if (mp) return adaptManagedProcess(mp);
+  }
+
+  // Fall back to legacy Map
   return backgroundSessions.get(sessionId);
 }
 
@@ -1256,10 +1307,10 @@ export async function toolExecExtended(
       const finished = await Promise.race([
         new Promise<true>((resolve) => {
           mp.on("state-change", (state: string) => {
-            if (TERMINAL_STATES.includes(state as (typeof TERMINAL_STATES)[number])) resolve(true);
+            if (isTerminal(state)) resolve(true);
           });
           // Already dead?
-          if (TERMINAL_STATES.includes(mp.state as (typeof TERMINAL_STATES)[number])) resolve(true);
+          if (isTerminal(mp.state)) resolve(true);
         }),
         new Promise<false>((resolve) => setTimeout(() => resolve(false), opts.yieldMs)),
       ]);
