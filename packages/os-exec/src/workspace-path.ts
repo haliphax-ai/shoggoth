@@ -40,15 +40,19 @@ function logicalPathUnderRoot(
 function ensureWriteParentContained(rootReal: string, logicalFile: string): void {
   let dir = dirname(logicalFile);
   const visited = new Set<string>();
-  while (!visited.has(dir)) {
-    visited.add(dir);
+  while (true) {
     try {
       const realDir = realpathSync(dir);
+      if (visited.has(realDir)) {
+        throw new PathEscapeError("path escape: symlink cycle detected");
+      }
+      visited.add(realDir);
       assertInsideRoot(rootReal, realDir);
       return;
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
+        // Directory doesn't exist yet — walk up to check the parent.
         const parent = dirname(dir);
         if (parent === dir) {
           throw new PathEscapeError("invalid path");
