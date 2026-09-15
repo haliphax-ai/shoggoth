@@ -165,6 +165,8 @@ export interface BackgroundHandle {
   exited: boolean;
   /** True if killed by timeout. */
   timedOut: boolean;
+  /** Set when the process emits an error (e.g. spawn failure). */
+  error: Error | null;
   /** Resolves when the process exits. */
   done: Promise<void>;
 }
@@ -195,6 +197,7 @@ export function spawnAsUser(options: RunAsUserOptions): BackgroundHandle {
     signal: null,
     exited: false,
     timedOut: false,
+    error: null,
     done: null as unknown as Promise<void>,
   };
 
@@ -230,11 +233,18 @@ export function spawnAsUser(options: RunAsUserOptions): BackgroundHandle {
       handle.exited = true;
       resolve();
     });
-  });
 
-  // Don't let the done promise rejection crash the process
-  child.on("error", () => {
-    /* handled via done promise */
+    // Handle spawn errors (e.g. binary not found). When the process fails to
+    // start, the "close" event may never fire, which would leave the done
+    // promise hanging forever. Instead, store the error and resolve so callers
+    // aren't blocked.
+    child.on("error", (err) => {
+      clearTimeout(timeoutTimer);
+      clearTimeout(killTimer);
+      handle.error = err;
+      handle.exited = true;
+      resolve();
+    });
   });
 
   return handle;
