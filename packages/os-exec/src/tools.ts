@@ -1,6 +1,6 @@
 import { existsSync, realpathSync, globSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { join, resolve, relative } from "node:path";
+import { join, resolve, relative, sep } from "node:path";
 import {
   runAsUser,
   spawnAsUser,
@@ -8,7 +8,7 @@ import {
   type RunAsUserResult,
   type BackgroundHandle,
 } from "./subprocess";
-import { resolvePathForRead, resolvePathForWrite } from "./workspace-path";
+import { resolvePathForRead, resolvePathForWrite, PathEscapeError } from "./workspace-path";
 import type { ProcessManager, ManagedProcess, ProcessSpec } from "@shoggoth/procman";
 import { TERMINAL_STATES } from "./constants";
 
@@ -1158,6 +1158,11 @@ export async function toolExecExtended(
       throw new Error(`workdir does not exist: ${opts.workdir}`);
     }
     cwd = realpathSync(resolved);
+    // Validate the resolved workdir stays within the workspace root
+    const rel = relative(rootCwd, cwd);
+    if (rel === ".." || rel.startsWith(`..${sep}`)) {
+      throw new PathEscapeError(`workdir escapes workspace: ${opts.workdir}`);
+    }
   }
 
   // Merge env: workspace XDG defaults + user overrides
