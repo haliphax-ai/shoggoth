@@ -1,6 +1,6 @@
 import { readHandleOutput, type BackgroundHandle } from "./subprocess";
 import { listExecSessions, getProcessManager } from "./tools";
-import { TERMINAL_STATES } from "./constants";
+import { isTerminal } from "./util";
 import type { ManagedProcess } from "@shoggoth/procman";
 
 // ---------------------------------------------------------------------------
@@ -191,13 +191,6 @@ function estimateRuntimeMs(id: string): number {
   return Date.now() - startMs;
 }
 
-/**
- * Check whether a managed process has reached a terminal state.
- */
-function isManagedProcessExited(mp: ManagedProcess): boolean {
-  return TERMINAL_STATES.includes(mp.state as (typeof TERMINAL_STATES)[number]);
-}
-
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
@@ -340,7 +333,7 @@ async function pollManagedProcess(
   let waited = false;
   let waitedMs = 0;
 
-  const isExited = isManagedProcessExited(mp);
+  const isExited = isTerminal(mp.state);
 
   // If the process is still running and timeout > 0, wait for it
   if (!isExited && timeoutMs > 0) {
@@ -348,14 +341,14 @@ async function pollManagedProcess(
     await Promise.race([
       new Promise<true>((resolve) => {
         const check = (_state: string) => {
-          if (isManagedProcessExited(mp)) {
+          if (isTerminal(mp.state)) {
             mp.removeListener("state-change", check);
             resolve(true);
           }
         };
         mp.on("state-change", check);
         // Already exited while we were setting up?
-        if (isManagedProcessExited(mp)) {
+        if (isTerminal(mp.state)) {
           mp.removeListener("state-change", check);
           resolve(true);
         }
@@ -367,7 +360,7 @@ async function pollManagedProcess(
   }
 
   const runtimeMs = estimateRuntimeMs(specId);
-  const nowExited = isManagedProcessExited(mp);
+  const nowExited = isTerminal(mp.state);
 
   // Build base result
   const base: PollResultBase = {

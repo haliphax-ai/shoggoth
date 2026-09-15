@@ -10,7 +10,7 @@ import {
 } from "./subprocess";
 import { resolvePathForRead, resolvePathForWrite, PathEscapeError } from "./workspace-path";
 import type { ProcessManager, ManagedProcess, ProcessSpec } from "@shoggoth/procman";
-import { TERMINAL_STATES } from "./constants";
+import { isTerminal } from "./util";
 
 export interface AgentCredentials {
   uid: number;
@@ -1052,24 +1052,17 @@ function nextProcmanId(): string {
 }
 
 /**
- * Check whether a ManagedProcess has reached a terminal state.
- */
-function isManagedProcessTerminal(mp: ManagedProcess): boolean {
-  return TERMINAL_STATES.includes(mp.state as (typeof TERMINAL_STATES)[number]);
-}
-
-/**
  * Create a BackgroundHandle-compatible adapter from a ManagedProcess.
  * This lets getExecSession return a unified type regardless of storage backend.
  */
 function adaptManagedProcess(mp: ManagedProcess): BackgroundHandle {
   const done = new Promise<void>((resolve) => {
-    if (isManagedProcessTerminal(mp)) {
+    if (isTerminal(mp.state)) {
       resolve();
       return;
     }
     const handler = (_state: string) => {
-      if (isManagedProcessTerminal(mp)) {
+      if (isTerminal(mp.state)) {
         mp.off("state-change", handler);
         resolve();
       }
@@ -1084,7 +1077,7 @@ function adaptManagedProcess(mp: ManagedProcess): BackgroundHandle {
       kill: (_signal?: string | number) => {
         mp.kill();
       },
-      pid: mp.pid,
+      exited: isTerminal(mp.state),
       stdin: null,
       stdout: null,
       stderr: null,
@@ -1093,7 +1086,7 @@ function adaptManagedProcess(mp: ManagedProcess): BackgroundHandle {
     stderrChunks: [],
     exitCode: mp.lastExitCode,
     signal: mp.lastSignal,
-    exited: isManagedProcessTerminal(mp),
+    exited: isTerminal(mp.state),
     timedOut: false,
     error: null,
     done,
@@ -1314,10 +1307,10 @@ export async function toolExecExtended(
       const finished = await Promise.race([
         new Promise<true>((resolve) => {
           mp.on("state-change", (state: string) => {
-            if (TERMINAL_STATES.includes(state as (typeof TERMINAL_STATES)[number])) resolve(true);
+            if (isTerminal(state)) resolve(true);
           });
           // Already dead?
-          if (TERMINAL_STATES.includes(mp.state as (typeof TERMINAL_STATES)[number])) resolve(true);
+          if (isTerminal(mp.state)) resolve(true);
         }),
         new Promise<false>((resolve) => setTimeout(() => resolve(false), opts.yieldMs)),
       ]);
