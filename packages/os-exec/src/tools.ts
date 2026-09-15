@@ -1052,9 +1052,17 @@ function nextProcmanId(): string {
 }
 
 /**
- * Retrieve a background session by ID.
- * When a ProcessManager is set, checks procman first.
- * Falls back to the legacy Map.
+ * Retrieve a legacy (non-procman) background session by ID.
+ *
+ * These two accessors are **mutually exclusive** per session:
+ * - When a ProcessManager is set, `toolExecExtended` stores sessions in
+ *   procman and they are **not** in the legacy Map — use
+ *   {@link getManagedExecSession} for those.
+ * - When no ProcessManager is set, sessions live in the legacy Map and
+ *   `getManagedExecSession` will return `undefined`.
+ *
+ * @see getManagedExecSession — for procman-managed sessions
+ * @see listExecSessions — to enumerate all legacy sessions
  */
 export function getExecSession(sessionId: string): BackgroundHandle | undefined {
   return backgroundSessions.get(sessionId);
@@ -1062,7 +1070,14 @@ export function getExecSession(sessionId: string): BackgroundHandle | undefined 
 
 /**
  * Get a procman-managed process by session ID.
- * Returns undefined when no ProcessManager is set or the ID is not found.
+ *
+ * These two accessors are **mutually exclusive** per session — a given
+ * session ID will be found in exactly one of `getExecSession` or
+ * `getManagedExecSession`, never both.
+ *
+ * Returns `undefined` when no ProcessManager is set or the ID is not found.
+ *
+ * @see getExecSession — for legacy (non-procman) sessions
  */
 export function getManagedExecSession(sessionId: string): ManagedProcess | undefined {
   return _processManager?.get(sessionId);
