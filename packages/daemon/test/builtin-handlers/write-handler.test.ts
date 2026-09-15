@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -18,6 +18,7 @@ function stubCtx(workspacePath: string, workingDirectory?: string): BuiltinToolC
     config: {} as any,
     env: {},
     workspacePath,
+    workspaceRealPath: realpathSync(workspacePath),
     workingDirectory,
     creds: { uid: process.getuid!(), gid: process.getgid!() },
     orchestratorEnv: {},

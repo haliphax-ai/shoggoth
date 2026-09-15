@@ -28,6 +28,8 @@ export interface BuiltinToolContext {
   readonly config: ShoggothConfig;
   readonly env: NodeJS.ProcessEnv;
   readonly workspacePath: string;
+  /** Pre-resolved realpath of workspacePath (computed once per session, avoids repeated syscalls). */
+  readonly workspaceRealPath: string;
   /** Resolved working directory for this session (defaults to workspacePath). */
   readonly workingDirectory?: string;
   readonly creds: AgentCredentials;

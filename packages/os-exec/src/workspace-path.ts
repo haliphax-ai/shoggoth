@@ -1,6 +1,17 @@
 import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
+// Cache realpathSync results per workspace root to avoid repeated syscalls
+const realpathCache = new Map<string, string>();
+function cachedRealpathSync(workspaceRoot: string): string {
+  let cached = realpathCache.get(workspaceRoot);
+  if (cached === undefined) {
+    cached = realpathSync(workspaceRoot);
+    realpathCache.set(workspaceRoot, cached);
+  }
+  return cached;
+}
+
 export class PathEscapeError extends Error {
   override readonly name = "PathEscapeError";
   constructor(message = "path escapes workspace") {
@@ -29,7 +40,7 @@ function logicalPathUnderRoot(
   userPath: string,
 ): { rootReal: string; joined: string } {
   validatePath(userPath);
-  const rootReal = realpathSync(workspaceRoot);
+  const rootReal = cachedRealpathSync(workspaceRoot);
 
   // Accept both absolute and relative paths
   const joined = isAbsolute(userPath) ? userPath : resolve(rootReal, userPath);

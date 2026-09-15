@@ -6,6 +6,7 @@
  */
 
 import type Database from "better-sqlite3";
+import { realpathSync } from "node:fs";
 import type { ShoggothConfig, ShoggothMemoryConfig } from "@shoggoth/shared";
 import type { AgentCredentials } from "@shoggoth/os-exec";
 import type { ProcessManager } from "@shoggoth/procman";
@@ -28,6 +29,7 @@ interface WorkflowToolExecutorDeps {
   readonly config: ShoggothConfig;
   readonly env: NodeJS.ProcessEnv;
   readonly workspacePath: string;
+  readonly workspaceRealPath: string;
   readonly workingDirectory?: string;
   readonly creds: AgentCredentials;
   readonly orchestratorEnv: NodeJS.ProcessEnv;
@@ -56,6 +58,7 @@ export function createWorkflowToolExecutor(
     config: deps.config,
     env: deps.env,
     workspacePath: deps.workspacePath,
+    workspaceRealPath: deps.workspaceRealPath ?? realpathSync(deps.workspacePath),
     workingDirectory: deps.workingDirectory,
     creds: deps.creds,
     orchestratorEnv: deps.orchestratorEnv,
