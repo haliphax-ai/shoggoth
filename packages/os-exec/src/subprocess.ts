@@ -34,11 +34,13 @@ function collectStream(stream: NodeJS.ReadableStream | null): Promise<string> {
       resolve("");
       return;
     }
-    const chunks: Buffer[] = [];
+    // Buffer string chunks in an array and join at the end to avoid
+    // O(n²) repeated string concatenation.
+    const chunks: string[] = [];
     stream.on("data", (c: Buffer | string) => {
-      chunks.push(typeof c === "string" ? Buffer.from(c) : c);
+      chunks.push(typeof c === "string" ? c : c.toString("utf8"));
     });
-    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    stream.on("end", () => resolve(chunks.join("")));
     stream.on("error", reject);
   });
 }
