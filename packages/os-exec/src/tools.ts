@@ -1052,32 +1052,75 @@ function nextProcmanId(): string {
 }
 
 /**
- * Retrieve a legacy (non-procman) background session by ID.
- *
- * These two accessors are **mutually exclusive** per session:
- * - When a ProcessManager is set, `toolExecExtended` stores sessions in
- *   procman and they are **not** in the legacy Map — use
- *   {@link getManagedExecSession} for those.
- * - When no ProcessManager is set, sessions live in the legacy Map and
- *   `getManagedExecSession` will return `undefined`.
- *
- * @see getManagedExecSession — for procman-managed sessions
- * @see listExecSessions — to enumerate all legacy sessions
+ * Check whether a ManagedProcess has reached a terminal state.
+ */
+function isManagedProcessTerminal(mp: ManagedProcess): boolean {
+  return TERMINAL_STATES.includes(mp.state as (typeof TERMINAL_STATES)[number]);
+}
+
+/**
+ * Create a BackgroundHandle-compatible adapter from a ManagedProcess.
+ * This lets getExecSession return a unified type regardless of storage backend.
+ */
+function adaptManagedProcess(mp: ManagedProcess): BackgroundHandle {
+  const done = new Promise<void>((resolve) => {
+    if (isManagedProcessTerminal(mp)) {
+      resolve();
+      return;
+    }
+    const handler = (_state: string) => {
+      if (isManagedProcessTerminal(mp)) {
+        mp.off("state-change", handler);
+        resolve();
+      }
+    };
+    mp.on("state-change", handler);
+  });
+
+  return {
+    sessionId: mp.spec.id,
+    pid: mp.pid!,
+    child: {
+      kill: (_signal?: string | number) => {
+        mp.kill();
+      },
+      pid: mp.pid,
+      stdin: null,
+      stdout: null,
+      stderr: null,
+    } as unknown as BackgroundHandle["child"],
+    stdoutChunks: [],
+    stderrChunks: [],
+    exitCode: mp.lastExitCode,
+    signal: mp.lastSignal,
+    exited: isManagedProcessTerminal(mp),
+    timedOut: false,
+    error: null,
+    done,
+  };
+}
+
+/**
+ * Retrieve a background session by ID.
+ * Checks procman first (when a ProcessManager is set), then falls back
+ * to the legacy Map. Returns a BackgroundHandle in both cases so callers
+ * don't need to know which storage backend was used.
  */
 export function getExecSession(sessionId: string): BackgroundHandle | undefined {
+  // Check procman first
+  const pm = getProcessManager();
+  if (pm) {
+    const mp = pm.get(sessionId);
+    if (mp) return adaptManagedProcess(mp);
+  }
+
+  // Fall back to legacy Map
   return backgroundSessions.get(sessionId);
 }
 
 /**
  * Get a procman-managed process by session ID.
- *
- * These two accessors are **mutually exclusive** per session — a given
- * session ID will be found in exactly one of `getExecSession` or
- * `getManagedExecSession`, never both.
- *
- * Returns `undefined` when no ProcessManager is set or the ID is not found.
- *
- * @see getExecSession — for legacy (non-procman) sessions
+ * Returns undefined when no ProcessManager is set or the ID is not found.
  */
 export function getManagedExecSession(sessionId: string): ManagedProcess | undefined {
   return _processManager?.get(sessionId);

@@ -83,11 +83,12 @@ describe("procman integration", () => {
       );
       const bg = r as ExecBackgroundResult;
 
-      // Should NOT be in the legacy Map
-      const legacyHandle = getExecSession(bg.sessionId);
-      assert.strictEqual(legacyHandle, undefined);
+      // Should be retrievable via getExecSession (unified lookup)
+      const handle = getExecSession(bg.sessionId);
+      assert.ok(handle, "getExecSession should find procman-managed processes");
+      assert.equal(handle.pid, bg.pid);
 
-      // Should be in procman
+      // Should also be in procman via getManagedExecSession
       const mp = getManagedExecSession(bg.sessionId);
       assert.ok(mp, "process should be in ProcessManager");
       assert.equal(mp.pid, bg.pid);
