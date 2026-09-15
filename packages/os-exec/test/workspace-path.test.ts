@@ -173,6 +173,31 @@ describe("workspace path allowlist", () => {
     });
   });
 
+  describe("symlink cycle handling", () => {
+    it("handles write through a self-referencing symlink inside workspace", () => {
+      // Create a symlink that points back to its parent directory
+      mkdirSync(join(ws, "a"), { recursive: true });
+      symlinkSync(join(ws, "a"), join(ws, "a/link"));
+      // Writing through the symlink should resolve to a path inside workspace
+      const p = resolvePathForWrite(ws, join(ws, "a/link/new.txt"));
+      assert.ok(p.endsWith("new.txt"));
+    });
+
+    it("rejects write through a symlink that escapes workspace", () => {
+      const outside = mkdtempSync(join(tmpdir(), "shoggoth-out-"));
+      try {
+        writeFileSync(join(outside, "secret"), "nope");
+        symlinkSync(join(outside, "secret"), join(ws, "escape-link"));
+        assert.throws(
+          () => resolvePathForWrite(ws, join(ws, "escape-link/new.txt")),
+          PathEscapeError,
+        );
+      } finally {
+        rmSync(outside, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      }
+    });
+  });
+
   describe("NUL byte rejection", () => {
     it("rejects paths with NUL bytes", () => {
       assert.throws(() => resolvePathForRead(ws, "file\0name"), PathEscapeError);
