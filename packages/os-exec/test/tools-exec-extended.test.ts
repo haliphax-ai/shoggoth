@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { toolExecExtended, getExecSession, removeExecSession } from "../src/tools";
+import { PathEscapeError } from "../src/workspace-path";
 import type { ExecForegroundResult, ExecBackgroundResult } from "../src/tools";
 
 describe("toolExecExtended", () => {
@@ -166,8 +167,28 @@ describe("toolExecExtended", () => {
       assert.ok((r as ExecForegroundResult).output?.trim().endsWith("/subdir"));
     });
 
-    it("accepts absolute paths", async () => {
+    it("rejects absolute paths outside workspace", async () => {
       const absDir = mkdtempSync(join(tmpdir(), "shoggoth-workdir-"));
+      try {
+        await assert.rejects(
+          () =>
+            toolExecExtended(
+              ws,
+              {
+                command: "pwd",
+                workdir: absDir,
+              },
+              creds,
+            ),
+          PathEscapeError,
+        );
+      } finally {
+        rmSync(absDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      }
+    });
+
+    it("accepts absolute paths inside workspace", async () => {
+      const absDir = mkdtempSync(join(ws, "workdir-abs-"));
       try {
         const r = await toolExecExtended(
           ws,
@@ -182,6 +203,21 @@ describe("toolExecExtended", () => {
       } finally {
         rmSync(absDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
       }
+    });
+
+    it("rejects relative paths that escape workspace", async () => {
+      await assert.rejects(
+        () =>
+          toolExecExtended(
+            ws,
+            {
+              command: "echo x",
+              workdir: "../../etc",
+            },
+            creds,
+          ),
+        PathEscapeError,
+      );
     });
 
     it("errors when workdir does not exist", async () => {
