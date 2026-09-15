@@ -3,7 +3,7 @@ import { serviceProvisionSecrets } from "./service-refs";
 import { routeMcpToolInvocation } from "@shoggoth/mcp-integration";
 import { fileURLToPath } from "node:url";
 import { randomBytes, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 
 function readGitHash(): string {
@@ -924,6 +924,9 @@ void (async () => {
               config: configRef.current,
               env: process.env,
               workspacePath: configRef.current.workspacesRoot ?? LAYOUT.workspacesRoot,
+              workspaceRealPath: realpathSync(
+                configRef.current.workspacesRoot ?? LAYOUT.workspacesRoot,
+              ),
               creds: {
                 uid: process.getuid?.() ?? 0,
                 gid: process.getgid?.() ?? 0,
