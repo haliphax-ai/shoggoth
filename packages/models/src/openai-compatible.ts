@@ -42,14 +42,12 @@ import type {
   ResponseSchema,
 } from "./types";
 
-
 function buildSyntheticTool(responseSchema: ResponseSchema): OpenAIToolFunctionDefinition {
   return buildSyntheticToolRaw(responseSchema, (name, description, schema) => ({
     type: "function",
     function: { name, description, parameters: schema },
   }));
 }
-
 
 /** Extract usage metadata from an OpenAI chat completions response. */
 function extractOpenAIUsage(json: unknown): ModelUsage | undefined {
@@ -70,8 +68,6 @@ export interface OpenAICompatibleProviderOptions {
   /** Optional resilience gate instance; falls back to the global singleton when omitted. */
   readonly resilienceGate?: ModelResilienceGate;
 }
-
-
 
 function applyOpenAICompatibleRequestExtensions(
   body: Record<string, unknown>,
@@ -292,8 +288,6 @@ async function consumeOpenAIChatCompletionStream(
   };
 }
 
-
-
 export function createOpenAICompatibleProvider(
   options: OpenAICompatibleProviderOptions,
 ): ModelProvider {
@@ -467,6 +461,12 @@ export function createOpenAICompatibleProvider(
           function: { ...t.function, name: sanitizeToolName(t.function.name) },
         }));
 
+        // Inject synthetic structured-output tool so the model can call it
+        // alongside real tools (avoids response_format preventing tool use)
+        if (hasSchema) {
+          tools.push(buildSyntheticTool(input.responseSchema!));
+        }
+
         const body: Record<string, unknown> = {
           model: input.model,
           messages: input.messages.map((m) => serializeChatMessage(m, input.thinkingFormat)),
@@ -480,17 +480,6 @@ export function createOpenAICompatibleProvider(
           body.stream_options = { include_usage: true };
         }
         applyOpenAICompatibleRequestExtensions(body, input);
-
-        if (input.responseSchema && mode !== "none") {
-          body.response_format = {
-            type: "json_schema",
-            json_schema: {
-              name: "response",
-              schema: input.responseSchema.schema,
-              strict: mode === "strict",
-            },
-          };
-        }
 
         const res = await resilientFetch(url, {
           method: "POST",
@@ -555,6 +544,89 @@ export function createOpenAICompatibleProvider(
             }
             if (toolCalls.length > 0) {
               return { content, toolCalls, usage, reasoningContent };
+            }
+            // No tool calls at all — model returned text only. Trigger follow-up
+            // to force the structured output tool.
+            if (!syntheticCall && toolCalls.length === 0) {
+              const followUpResult = await structuredOutputFollowUp({
+                messages: input.messages,
+                assistantText: content ?? "",
+                responseSchema: input.responseSchema!,
+                mode,
+                executeFollowUp: async (followUpMessages) => {
+                  const followUpRawTools = [
+                    ...input.tools,
+                    buildSyntheticTool(input.responseSchema!),
+                  ];
+                  const followUpTools = followUpRawTools.map((t) => ({
+                    ...t,
+                    function: { ...t.function, name: sanitizeToolName(t.function.name) },
+                  }));
+
+                  const followUpBody: Record<string, unknown> = {
+                    model: input.model,
+                    messages: followUpMessages.map((m) =>
+                      serializeChatMessage(m, input.thinkingFormat),
+                    ),
+                    tools: followUpTools,
+                    tool_choice: {
+                      type: "function",
+                      function: { name: STRUCTURED_OUTPUT_TOOL_NAME },
+                    },
+                    max_tokens: input.maxOutputTokens,
+                    temperature: input.temperature,
+                  };
+                  applyOpenAICompatibleRequestExtensions(followUpBody, input);
+
+                  return executeStructuredOutputApiCall(
+                    resilientFetch,
+                    url,
+                    headers,
+                    followUpBody,
+                    thinkingFormat,
+                  );
+                },
+                extractToolCalls: (responseJson) => {
+                  const choices = (responseJson as { choices?: unknown }).choices;
+                  const first = Array.isArray(choices) ? choices[0] : undefined;
+                  const msg =
+                    first && typeof first === "object" && first !== null && "message" in first
+                      ? (first as { message?: Record<string, unknown> }).message
+                      : undefined;
+                  const rawToolCalls = msg?.tool_calls;
+                  const result: ChatToolCall[] = [];
+                  if (Array.isArray(rawToolCalls)) {
+                    for (const tc of rawToolCalls) {
+                      if (!tc || typeof tc !== "object") continue;
+                      const id =
+                        typeof (tc as { id?: unknown }).id === "string"
+                          ? (tc as { id: string }).id
+                          : "";
+                      const fn = (tc as { function?: unknown }).function;
+                      if (!fn || typeof fn !== "object") continue;
+                      const name =
+                        typeof (fn as { name?: unknown }).name === "string"
+                          ? (fn as { name: string }).name
+                          : "";
+                      const rawArgs =
+                        typeof (fn as { arguments?: unknown }).arguments === "string"
+                          ? (fn as { arguments: string }).arguments
+                          : "{}";
+                      if (id && name) result.push({ id, name, arguments: rawArgs });
+                    }
+                  }
+                  return result;
+                },
+                extractUsage: extractOpenAIUsage,
+              });
+              if (followUpResult) {
+                return {
+                  content: followUpResult.content,
+                  toolCalls: [],
+                  usage: followUpResult.usage,
+                  reasoningContent,
+                };
+              }
             }
           }
 
@@ -674,7 +746,10 @@ export function createOpenAICompatibleProvider(
               responseSchema: input.responseSchema!,
               mode,
               executeFollowUp: async (followUpMessages) => {
-                const followUpRawTools = [...input.tools, buildSyntheticTool(input.responseSchema!)];
+                const followUpRawTools = [
+                  ...input.tools,
+                  buildSyntheticTool(input.responseSchema!),
+                ];
                 const followUpTools = followUpRawTools.map((t) => ({
                   ...t,
                   function: { ...t.function, name: sanitizeToolName(t.function.name) },
@@ -682,9 +757,14 @@ export function createOpenAICompatibleProvider(
 
                 const followUpBody: Record<string, unknown> = {
                   model: input.model,
-                  messages: followUpMessages.map((m) => serializeChatMessage(m, input.thinkingFormat)),
+                  messages: followUpMessages.map((m) =>
+                    serializeChatMessage(m, input.thinkingFormat),
+                  ),
                   tools: followUpTools,
-                  tool_choice: { type: "function", function: { name: STRUCTURED_OUTPUT_TOOL_NAME } },
+                  tool_choice: {
+                    type: "function",
+                    function: { name: STRUCTURED_OUTPUT_TOOL_NAME },
+                  },
                   max_tokens: input.maxOutputTokens,
                   temperature: input.temperature,
                 };
@@ -710,13 +790,20 @@ export function createOpenAICompatibleProvider(
                 if (Array.isArray(rawToolCalls)) {
                   for (const tc of rawToolCalls) {
                     if (!tc || typeof tc !== "object") continue;
-                    const id = typeof (tc as { id?: unknown }).id === "string" ? (tc as { id: string }).id : "";
+                    const id =
+                      typeof (tc as { id?: unknown }).id === "string"
+                        ? (tc as { id: string }).id
+                        : "";
                     const fn = (tc as { function?: unknown }).function;
                     if (!fn || typeof fn !== "object") continue;
-                    const name = typeof (fn as { name?: unknown }).name === "string" ? (fn as { name: string }).name : "";
-                    const rawArgs = typeof (fn as { arguments?: unknown }).arguments === "string"
-                      ? (fn as { arguments: string }).arguments
-                      : "{}";
+                    const name =
+                      typeof (fn as { name?: unknown }).name === "string"
+                        ? (fn as { name: string }).name
+                        : "";
+                    const rawArgs =
+                      typeof (fn as { arguments?: unknown }).arguments === "string"
+                        ? (fn as { arguments: string }).arguments
+                        : "{}";
                     if (id && name) result.push({ id, name, arguments: rawArgs });
                   }
                 }
