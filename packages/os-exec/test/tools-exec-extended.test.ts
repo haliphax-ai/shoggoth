@@ -1016,5 +1016,67 @@ describe("toolExecExtended", () => {
         /path escapes workspace/i,
       );
     });
+
+    it("file truncation: truncates file output exceeding MAX_FILE_OUTPUT_BYTES", async () => {
+      // Generate ~60 MB of output (exceeds the 50 MB cap)
+      const r = await toolExecExtended(
+        ws,
+        {
+          // dd creates ~60 MB of data (60 * 1024 * 1024 bytes)
+          command: "dd if=/dev/zero bs=1024 count=61440 2>/dev/null",
+          stdoutFile: "big.txt",
+        },
+        creds,
+      );
+      assert.equal(r.kind, "foreground");
+      const fg = r as ExecForegroundResult;
+      assert.equal(fg.stdoutFile, "big.txt");
+      // File should be truncated to ~50 MB
+      const content = readFileSync(join(ws, "big.txt"));
+      assert.ok(
+        content.length <= 50 * 1024 * 1024 + 1024,
+        `File should be capped at ~50MB, got ${content.length}`,
+      );
+    });
+
+    it("file truncation: sets fileOutputTruncated flag when file output is truncated", async () => {
+      // Generate ~60 MB of output via outputFile
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "dd if=/dev/zero bs=1024 count=61440 2>/dev/null",
+          outputFile: "combined.txt",
+        },
+        creds,
+      );
+      assert.equal(r.kind, "foreground");
+      const fg = r as ExecForegroundResult;
+      assert.equal(fg.outputFile, "combined.txt");
+      // @ts-expect-error - fileOutputTruncated field
+      assert.equal(fg.fileOutputTruncated, true, "fileOutputTruncated should be set");
+    });
+
+    it("file truncation: does NOT truncate file output within the limit", async () => {
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "echo small-output",
+          stdoutFile: "small.txt",
+        },
+        creds,
+      );
+      assert.equal(r.kind, "foreground");
+      const fg = r as ExecForegroundResult;
+      assert.equal(fg.stdoutFile, "small.txt");
+      // @ts-expect-error - fileOutputTruncated field
+      assert.equal(
+        fg.fileOutputTruncated,
+        undefined,
+        "fileOutputTruncated should not be set for small output",
+      );
+
+      const content = readFileSync(join(ws, "small.txt"), "utf8");
+      assert.ok(content.includes("small-output"));
+    });
   });
 });

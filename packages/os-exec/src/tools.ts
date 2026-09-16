@@ -935,11 +935,11 @@ export interface ExecExtendedOptions {
    * Mutually exclusive with `background: true` (background wins).
    */
   yieldMs?: number;
-  /** File path to write stdout to (workspace-relative). */
+  /** File path to write stdout to (workspace-relative). Bypasses inline truncation; subject to MAX_FILE_OUTPUT_BYTES safety cap. */
   stdoutFile?: string;
-  /** File path to write stderr to (workspace-relative). */
+  /** File path to write stderr to (workspace-relative). Bypasses inline truncation; subject to MAX_FILE_OUTPUT_BYTES safety cap. */
   stderrFile?: string;
-  /** File path to write combined stdout+stderr to (workspace-relative). Mutually exclusive with stdoutFile/stderrFile. */
+  /** File path to write combined stdout+stderr to (workspace-relative). Mutually exclusive with stdoutFile/stderrFile. Bypasses inline truncation; subject to MAX_FILE_OUTPUT_BYTES safety cap. */
   outputFile?: string;
 }
 
@@ -968,6 +968,8 @@ export interface ExecForegroundResult {
   stderrFile?: string;
   /** Path where combined output was written (when outputFile was specified). */
   outputFile?: string;
+  /** True when file output was truncated to fit within MAX_FILE_OUTPUT_BYTES. */
+  fileOutputTruncated?: boolean;
 }
 
 /** Result when the process was sent to the background. */
@@ -993,6 +995,15 @@ const MAX_OUTPUT_SYSTEM_CAP = 1_024_000; // ~1 MB
 
 /** Default max output characters when no maxOutput is specified. */
 const MAX_OUTPUT_DEFAULT = 200_000; // 200 KB
+
+/**
+ * Safety cap for file output mode (stdoutFile/stderrFile/outputFile).
+ * File output bypasses inline truncation by design (meant for large data),
+ * but this cap prevents runaway processes from filling the disk.
+ * Set generously at 50 MB to avoid limiting normal use cases.
+ * @see MAX_OUTPUT_SYSTEM_CAP for inline output limits.
+ */
+const MAX_FILE_OUTPUT_BYTES = 50 * 1024 * 1024; // 50 MB
 
 /**
  * Truncate a string according to the specified mode.
@@ -1404,12 +1415,26 @@ export async function toolExecExtended(
 
     if (opts.outputFile) {
       const absPath = resolvePathForWrite(workspaceRoot, opts.outputFile);
-      await writeFile(absPath, result.stdout + result.stderr);
+      const combined = result.stdout + result.stderr;
+      if (Buffer.byteLength(combined, "utf8") > MAX_FILE_OUTPUT_BYTES) {
+        // Truncate to MAX_FILE_OUTPUT_BYTES by slicing bytes
+        const buf = Buffer.from(combined, "utf8");
+        await writeFile(absPath, buf.subarray(0, MAX_FILE_OUTPUT_BYTES));
+        fgResult.fileOutputTruncated = true;
+      } else {
+        await writeFile(absPath, combined);
+      }
       fgResult.outputFile = opts.outputFile;
     } else {
       if (opts.stdoutFile) {
         const absPath = resolvePathForWrite(workspaceRoot, opts.stdoutFile);
-        await writeFile(absPath, result.stdout);
+        if (Buffer.byteLength(result.stdout, "utf8") > MAX_FILE_OUTPUT_BYTES) {
+          const buf = Buffer.from(result.stdout, "utf8");
+          await writeFile(absPath, buf.subarray(0, MAX_FILE_OUTPUT_BYTES));
+          fgResult.fileOutputTruncated = true;
+        } else {
+          await writeFile(absPath, result.stdout);
+        }
         fgResult.stdoutFile = opts.stdoutFile;
       } else {
         // stdout not redirected — return inline with truncation
@@ -1419,7 +1444,13 @@ export async function toolExecExtended(
       }
       if (opts.stderrFile) {
         const absPath = resolvePathForWrite(workspaceRoot, opts.stderrFile);
-        await writeFile(absPath, result.stderr);
+        if (Buffer.byteLength(result.stderr, "utf8") > MAX_FILE_OUTPUT_BYTES) {
+          const buf = Buffer.from(result.stderr, "utf8");
+          await writeFile(absPath, buf.subarray(0, MAX_FILE_OUTPUT_BYTES));
+          fgResult.fileOutputTruncated = true;
+        } else {
+          await writeFile(absPath, result.stderr);
+        }
         fgResult.stderrFile = opts.stderrFile;
       } else {
         // stderr not redirected — return inline with truncation

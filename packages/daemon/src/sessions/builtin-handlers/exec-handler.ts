@@ -112,6 +112,7 @@ async function execHandlerInner(
         resultJson: JSON.stringify({
           exitCode: r.exitCode,
           outputFile: r.outputFile,
+          ...(r.fileOutputTruncated ? { fileOutputTruncated: true } : {}),
         }),
       };
     }
@@ -123,6 +124,7 @@ async function execHandlerInner(
       else if (r.stderr !== undefined) result.stderr = truncateToolOutput(r.stderr);
       if (r.stdoutTruncated) result.stdoutTruncated = true;
       if (r.stderrTruncated) result.stderrTruncated = true;
+      if (r.fileOutputTruncated) result.fileOutputTruncated = true;
       return { resultJson: JSON.stringify(result) };
     }
     // Normal foreground completion — check if split streams were used
