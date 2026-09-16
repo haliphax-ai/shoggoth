@@ -110,25 +110,18 @@ describe("OpenAI structured output — strict mode", () => {
 
     const body = JSON.parse(capturedBody ?? "{}") as Record<string, unknown>;
 
-    // response_format should be set with strict: true (native enforcement + synthetic tool fallback)
-    const rf = body.response_format as {
-      type: string;
-      json_schema: { name: string; schema: unknown; strict: boolean };
-    };
-    assert.ok(rf, "response_format should be present in request body");
-    assert.equal(rf.type, "json_schema");
-    assert.equal(rf.json_schema.strict, true);
+    // response_format should NOT be set (would prevent tool calling)
+    assert.equal(
+      body.response_format,
+      undefined,
+      "response_format should NOT be present in request body",
+    );
 
-    // Synthetic __structured_output__ tool should NOT be in the tools array
-    // when response_format is handling enforcement (redundant + causes stream decoder issues)
+    // Synthetic __structured_output__ tool SHOULD be in the tools array
     const tools = body.tools as Array<{ type: string; function: { name: string } }>;
     assert.ok(tools, "tools should be present");
     const syntheticTool = tools.find((t) => t.function.name === "__structured_output__");
-    assert.equal(
-      syntheticTool,
-      undefined,
-      "__structured_output__ synthetic tool should NOT be in tools when response_format is set",
-    );
+    assert.ok(syntheticTool, "__structured_output__ synthetic tool should be in tools");
   });
 
   it("complete includes response_format with strict: true when responseSchema is set (default mode)", async () => {
@@ -235,22 +228,16 @@ describe("OpenAI structured output — best-effort mode", () => {
     });
 
     const body = JSON.parse(capturedBody ?? "{}") as Record<string, unknown>;
-    // response_format should be set with strict: false (best-effort mode)
-    const rf = body.response_format as {
-      type: string;
-      json_schema: { name: string; schema: unknown; strict: boolean };
-    };
-    assert.ok(rf, "response_format should be present in request body");
-    assert.equal(rf.type, "json_schema");
-    assert.equal(rf.json_schema.strict, false);
-    const tools = body.tools as Array<{ type: string; function: { name: string } }>;
-    // Synthetic tool should NOT be in tools when response_format handles enforcement
-    const syntheticTool = tools.find((t) => t.function.name === "__structured_output__");
+    // response_format should NOT be set (would prevent tool calling)
     assert.equal(
-      syntheticTool,
+      body.response_format,
       undefined,
-      "__structured_output__ synthetic tool should NOT be in tools when response_format is set",
+      "response_format should NOT be present in request body",
     );
+    const tools = body.tools as Array<{ type: string; function: { name: string } }>;
+    // Synthetic tool SHOULD be in tools
+    const syntheticTool = tools.find((t) => t.function.name === "__structured_output__");
+    assert.ok(syntheticTool, "__structured_output__ synthetic tool should be in tools");
   });
 
   it("best-effort mode throws StructuredOutputValidationError on non-conformant synthetic response", async () => {

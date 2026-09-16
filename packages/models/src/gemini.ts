@@ -1,5 +1,14 @@
 import { ModelHttpError } from "./errors";
 import { trimSlash } from "./trim-slash";
+import {
+  STRUCTURED_OUTPUT_TOOL_NAME,
+  buildSyntheticTool as buildSyntheticToolRaw,
+  isSyntheticToolCall,
+} from "./structured-output-utils";
+import {
+  structuredOutputFollowUp,
+  executeStructuredOutputApiCall,
+} from "./structured-output-follow-up";
 import { geminiImageBlockCodec } from "./image-codec";
 import { getResilienceGate, type ModelResilienceGate } from "./resilience";
 import {
@@ -32,10 +41,10 @@ import type {
   ModelToolCompleteOutput,
   ModelUsage,
   OpenAIToolFunctionDefinition,
+  ResponseSchema,
 } from "./types";
 
 import type { FetchLike } from "./openai-compatible";
-
 
 /** Extract usage metadata from a Gemini generateContent response. */
 function extractGeminiUsage(json: unknown): ModelUsage | undefined {
@@ -61,8 +70,6 @@ export interface GeminiProviderOptions {
 
 const DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com";
 const DEFAULT_API_VERSION = "v1beta";
-
-
 
 // ---------------------------------------------------------------------------
 // Message mapping
@@ -245,6 +252,15 @@ function mapOpenAIToolsToGemini(
   ];
 }
 
+/** Build a Gemini-compatible synthetic __structured_output__ function declaration. */
+function buildGeminiSyntheticTool(responseSchema: ResponseSchema): unknown {
+  return buildSyntheticToolRaw(responseSchema, (name, description, schema) => ({
+    name,
+    description,
+    parameters: sanitizeSchemaForGemini(schema),
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Generation config mapping
 // ---------------------------------------------------------------------------
@@ -271,8 +287,6 @@ function applyGeminiRequestExtensions(
 // ---------------------------------------------------------------------------
 // Response parsing (non-streaming)
 // ---------------------------------------------------------------------------
-
-
 
 function parseGeminiResponse(
   json: unknown,
@@ -523,8 +537,6 @@ export async function consumeGeminiStream(
 // Provider factory
 // ---------------------------------------------------------------------------
 
-
-
 export function createGeminiProvider(options: GeminiProviderOptions): ModelProvider {
   const fetchImpl = options.fetchImpl ?? (globalThis.fetch as FetchLike);
   const baseUrl = trimSlash(options.baseUrl ?? DEFAULT_BASE_URL);
@@ -661,20 +673,38 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
         throw new Error("Gemini completeWithTools requires input.model");
       }
 
+      // Capture narrowed model for use in closures
+      const modelId = input.model;
+
+      // Structured output: inject synthetic tool instead of responseMimeType
+      // (responseMimeType/responseSchema prevent tool calling)
+      const mode = resolveStructuredOutputMode(input.structuredOutputMode, "best-effort");
+      const hasSchema = input.responseSchema && mode !== "none";
+
       const geminiTools = mapOpenAIToolsToGemini(input.tools);
 
       const body: Record<string, unknown> = { contents };
       if (systemInstruction !== undefined) body.systemInstruction = systemInstruction;
-      if (geminiTools) body.tools = geminiTools;
+
+      // Inject synthetic structured-output tool
+      if (hasSchema) {
+        const syntheticDecl = buildGeminiSyntheticTool(input.responseSchema!);
+        const fnDecls = geminiTools
+          ? (geminiTools[0] as { functionDeclarations: unknown[] }).functionDeclarations
+          : [];
+        fnDecls.push(syntheticDecl);
+        body.tools = [{ functionDeclarations: fnDecls }];
+      } else if (geminiTools) {
+        body.tools = geminiTools;
+      }
+
       const genConfig = buildGenerationConfig(input) ?? {};
       body.generationConfig = genConfig;
       applyGeminiRequestExtensions(body, input);
 
-      // Structured output: add responseSchema to generationConfig
-      const mode = resolveStructuredOutputMode(input.structuredOutputMode, "best-effort");
-      if (input.responseSchema && mode !== "none") {
-        genConfig.responseMimeType = "application/json";
-        genConfig.responseSchema = sanitizeSchemaForGemini(input.responseSchema.schema);
+      // Structured output: add toolConfig for auto function calling
+      if (hasSchema) {
+        genConfig.functionCallingConfig = { mode: "AUTO" };
       }
 
       // Remove empty generationConfig to keep request clean
@@ -698,6 +728,120 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
         if (toolCalls.length === 0 && (content === null || content === "")) {
           throw new ModelHttpError(502, "missing assistant content and functionCall parts", "");
         }
+
+        if (hasSchema) {
+          const realCalls = toolCalls.filter((tc) => !isSyntheticToolCall(tc));
+          const syntheticCall = toolCalls.find((tc) => isSyntheticToolCall(tc));
+
+          if (syntheticCall && realCalls.length === 0) {
+            // Terminal: model is done, extract structured content
+            let structuredContent: string;
+            try {
+              structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
+            } catch (parseErr) {
+              throw new StructuredOutputValidationError(
+                `Response is not valid JSON: ${(parseErr as Error).message}`,
+                syntheticCall.arguments,
+                input.responseSchema!.schema,
+              );
+            }
+            if (mode !== "strict") {
+              const result = validateResponseSchema(
+                structuredContent,
+                input.responseSchema!.schema,
+              );
+              if (!result.valid) {
+                throw new StructuredOutputValidationError(
+                  result.error,
+                  result.rawContent,
+                  input.responseSchema!.schema,
+                );
+              }
+            }
+            return { content: structuredContent, toolCalls: [], usage };
+          }
+          if (syntheticCall && realCalls.length > 0) {
+            // Mixed: strip synthetic, return only real tool calls
+            return {
+              content:
+                typeof content === "string"
+                  ? content
+                  : content === null
+                    ? null
+                    : JSON.stringify(content),
+              toolCalls: realCalls,
+              usage,
+            };
+          }
+          if (!syntheticCall && toolCalls.length === 0) {
+            // Model returned text only — trigger follow-up
+            const textContent =
+              typeof content === "string"
+                ? content
+                : content === null
+                  ? ""
+                  : JSON.stringify(content);
+            const followUpResult = await structuredOutputFollowUp({
+              messages: input.messages,
+              assistantText: textContent,
+              responseSchema: input.responseSchema!,
+              mode,
+              executeFollowUp: async (followUpMessages) => {
+                const { systemInstruction: followUpSystem, contents: followUpContents } =
+                  mapChatMessagesToGeminiPayload(followUpMessages);
+
+                const followUpGeminiTools = mapOpenAIToolsToGemini(input.tools);
+                const syntheticDecl = buildGeminiSyntheticTool(input.responseSchema!);
+                let toolsForFollowUp: unknown[];
+                if (followUpGeminiTools) {
+                  const fnDecls = (followUpGeminiTools[0] as { functionDeclarations: unknown[] })
+                    .functionDeclarations;
+                  fnDecls.push(syntheticDecl);
+                  toolsForFollowUp = [{ functionDeclarations: fnDecls }];
+                } else {
+                  toolsForFollowUp = [{ functionDeclarations: [syntheticDecl] }];
+                }
+
+                const followUpBody: Record<string, unknown> = { contents: followUpContents };
+                if (followUpSystem !== undefined) followUpBody.systemInstruction = followUpSystem;
+                followUpBody.tools = toolsForFollowUp;
+                followUpBody.generationConfig = {
+                  ...buildGenerationConfig(input),
+                  functionCallingConfig: {
+                    mode: "ANY",
+                    allowedFunctionNames: [STRUCTURED_OUTPUT_TOOL_NAME],
+                  },
+                };
+
+                const followUpUrl = endpointUrl(modelId, false);
+                return executeStructuredOutputApiCall(
+                  resilientFetch,
+                  followUpUrl,
+                  headers,
+                  followUpBody,
+                  input.thinkingFormat,
+                  { formatErrorBody: parseApiErrorBody },
+                );
+              },
+              extractToolCalls: (responseJson) => {
+                const { toolCalls: parsedToolCalls } = parseGeminiResponse(
+                  responseJson,
+                  input.thinkingFormat,
+                );
+                return parsedToolCalls;
+              },
+              extractUsage: extractGeminiUsage,
+            });
+            if (followUpResult) {
+              return {
+                content: followUpResult.content,
+                toolCalls: [],
+                usage: followUpResult.usage,
+              };
+            }
+          }
+        }
+
         return {
           content:
             typeof content === "string"
@@ -727,21 +871,99 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
       const finalContent =
         typeof content === "string" ? content : content === null ? null : JSON.stringify(content);
 
-      // Structured output: post-validate when mode is "best-effort"
-      if (
-        input.responseSchema &&
-        mode !== "strict" &&
-        mode !== "none" &&
-        finalContent !== null &&
-        toolCalls.length === 0
-      ) {
-        const result = validateResponseSchema(finalContent, input.responseSchema.schema);
-        if (!result.valid) {
-          throw new StructuredOutputValidationError(
-            result.error,
-            result.rawContent,
-            input.responseSchema.schema,
-          );
+      // Structured output: classify tool calls and handle synthetic tool
+      if (hasSchema) {
+        const realCalls = toolCalls.filter((tc) => !isSyntheticToolCall(tc));
+        const syntheticCall = toolCalls.find((tc) => isSyntheticToolCall(tc));
+
+        if (syntheticCall && realCalls.length === 0) {
+          // Terminal: model is done, extract structured content
+          let structuredContent: string;
+          try {
+            structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
+          } catch (parseErr) {
+            throw new StructuredOutputValidationError(
+              `Response is not valid JSON: ${(parseErr as Error).message}`,
+              syntheticCall.arguments,
+              input.responseSchema!.schema,
+            );
+          }
+          if (mode !== "strict") {
+            const result = validateResponseSchema(structuredContent, input.responseSchema!.schema);
+            if (!result.valid) {
+              throw new StructuredOutputValidationError(
+                result.error,
+                result.rawContent,
+                input.responseSchema!.schema,
+              );
+            }
+          }
+          return { content: structuredContent, toolCalls: [], usage: extractGeminiUsage(json) };
+        }
+        if (syntheticCall && realCalls.length > 0) {
+          // Mixed: strip synthetic, return only real tool calls
+          return {
+            content: finalContent,
+            toolCalls: realCalls,
+            usage: extractGeminiUsage(json),
+          };
+        }
+        if (!syntheticCall && toolCalls.length === 0) {
+          // Model returned text only — trigger follow-up
+          const followUpResult = await structuredOutputFollowUp({
+            messages: input.messages,
+            assistantText: finalContent ?? "",
+            responseSchema: input.responseSchema!,
+            mode,
+            executeFollowUp: async (followUpMessages) => {
+              const { systemInstruction: followUpSystem, contents: followUpContents } =
+                mapChatMessagesToGeminiPayload(followUpMessages);
+
+              const followUpGeminiTools = mapOpenAIToolsToGemini(input.tools);
+              const syntheticDecl = buildGeminiSyntheticTool(input.responseSchema!);
+              let toolsForFollowUp: unknown[];
+              if (followUpGeminiTools) {
+                const fnDecls = (followUpGeminiTools[0] as { functionDeclarations: unknown[] })
+                  .functionDeclarations;
+                fnDecls.push(syntheticDecl);
+                toolsForFollowUp = [{ functionDeclarations: fnDecls }];
+              } else {
+                toolsForFollowUp = [{ functionDeclarations: [syntheticDecl] }];
+              }
+
+              const followUpBody: Record<string, unknown> = { contents: followUpContents };
+              if (followUpSystem !== undefined) followUpBody.systemInstruction = followUpSystem;
+              followUpBody.tools = toolsForFollowUp;
+              followUpBody.generationConfig = {
+                ...buildGenerationConfig(input),
+                functionCallingConfig: {
+                  mode: "ANY",
+                  allowedFunctionNames: [STRUCTURED_OUTPUT_TOOL_NAME],
+                },
+              };
+
+              const followUpUrl = endpointUrl(modelId, false);
+              return executeStructuredOutputApiCall(
+                resilientFetch,
+                followUpUrl,
+                headers,
+                followUpBody,
+                input.thinkingFormat,
+                { formatErrorBody: parseApiErrorBody },
+              );
+            },
+            extractToolCalls: (responseJson) => {
+              const { toolCalls: parsedToolCalls } = parseGeminiResponse(
+                responseJson,
+                input.thinkingFormat,
+              );
+              return parsedToolCalls;
+            },
+            extractUsage: extractGeminiUsage,
+          });
+          if (followUpResult) {
+            return { content: followUpResult.content, toolCalls: [], usage: followUpResult.usage };
+          }
         }
       }
 
