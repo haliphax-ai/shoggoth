@@ -351,22 +351,27 @@ async function pollManagedProcess(
   // If the process is still running and timeout > 0, wait for it
   if (!isExited && timeoutMs > 0) {
     const waitStart = Date.now();
+    const check = (_state: string) => {
+      if (isTerminal(mp.state)) {
+        mp.removeListener("state-change", check);
+      }
+    };
+
     await Promise.race([
-      new Promise<true>((resolve) => {
-        const check = (_state: string) => {
-          if (isTerminal(mp.state)) {
-            mp.removeListener("state-change", check);
-            resolve(true);
-          }
-        };
+      new Promise<void>((resolve) => {
         mp.on("state-change", check);
         // Already exited while we were setting up?
         if (isTerminal(mp.state)) {
           mp.removeListener("state-change", check);
-          resolve(true);
+          resolve();
         }
       }),
-      new Promise<false>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+      new Promise<void>((resolve) =>
+        setTimeout(() => {
+          mp.removeListener("state-change", check);
+          resolve();
+        }, timeoutMs),
+      ),
     ]);
     waitedMs = Date.now() - waitStart;
     waited = true;
