@@ -52,16 +52,24 @@ function collectStream(stream: NodeJS.ReadableStream | null): Promise<string> {
  * are also terminated.
  */
 function killProcessGroup(child: ChildProcess, signal: NodeJS.Signals): void {
-  try {
-    // Kill the entire process group (negative PID)
-    process.kill(-child.pid!, signal);
-  } catch {
-    // Fallback: kill just the child (group may already be dead)
+  const pid = child.pid;
+
+  // Can't kill the process group without a PID; fall back to the child directly.
+  if (pid !== undefined) {
     try {
-      child.kill(signal);
+      // Kill the entire process group (negative PID)
+      process.kill(-pid, signal);
+      return;
     } catch {
-      /* already dead */
+      // Group may already be dead — fall through to the direct child kill.
     }
+  }
+
+  // Fallback: kill just the child (group kill failed, or no PID available).
+  try {
+    child.kill(signal);
+  } catch {
+    /* already dead */
   }
 }
 
