@@ -1,5 +1,4 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
 
 export interface RunAsUserResult {
   stdout: string;
@@ -68,7 +67,7 @@ function killProcessGroup(child: ChildProcess, signal: NodeJS.Signals): void {
 
 /**
  * Low-level spawn that returns the raw ChildProcess.
- * Used by both `runAsUser` (foreground) and `spawnAsUser` (background).
+ * Used by `runAsUser` (foreground) for one-shot tool exec.
  *
  * Spawns with `detached: true` so the child gets its own process group,
  * enabling clean group-kill on timeout.
@@ -142,120 +141,4 @@ export function runAsUser(options: RunAsUserOptions): Promise<RunAsUserResult> {
         .catch(reject);
     });
   });
-}
-
-// ---------------------------------------------------------------------------
-// Background / yield-based spawning
-// ---------------------------------------------------------------------------
-
-/** Handle returned when a process is spawned in the background. */
-export interface BackgroundHandle {
-  /** Unique session identifier. */
-  sessionId: string;
-  /** Timestamp when this handle was created (ms since epoch). */
-  createdAt: number;
-  /** OS process ID. */
-  pid: number;
-  /** The underlying ChildProcess (for polling / killing). */
-  child: ChildProcess;
-  /** Accumulated stdout chunks. */
-  stdoutChunks: Buffer[];
-  /** Accumulated stderr chunks. */
-  stderrChunks: Buffer[];
-  /** Set when the process exits. */
-  exitCode: number | null;
-  /** Set when the process exits via signal. */
-  signal: NodeJS.Signals | null;
-  /** True once the process has exited. */
-  exited: boolean;
-  /** True if killed by timeout. */
-  timedOut: boolean;
-  /** Set when the process emits an error (e.g. spawn failure). */
-  error: Error | null;
-  /** Resolves when the process exits. */
-  done: Promise<void>;
-}
-
-/** Generate a short, unique session ID. */
-function nextSessionId(): string {
-  return `exec-${randomUUID()}`;
-}
-
-/**
- * Spawn a process in the background and return a handle immediately.
- * The caller can poll the handle's `exited` flag, read accumulated output,
- * or await `handle.done`.
- *
- * If `timeout` is set on the options, the process is killed after that many seconds.
- */
-export function spawnAsUser(options: RunAsUserOptions): BackgroundHandle {
-  const child = spawnChild(options);
-  const handle: BackgroundHandle = {
-    sessionId: nextSessionId(),
-    createdAt: Date.now(),
-    pid: child.pid!,
-    child,
-    stdoutChunks: [],
-    stderrChunks: [],
-    exitCode: null,
-    signal: null,
-    exited: false,
-    timedOut: false,
-    error: null,
-    done: null as unknown as Promise<void>,
-  };
-
-  // Accumulate output
-  child.stdout?.on("data", (c: Buffer | string) => {
-    handle.stdoutChunks.push(typeof c === "string" ? Buffer.from(c) : c);
-  });
-  child.stderr?.on("data", (c: Buffer | string) => {
-    handle.stderrChunks.push(typeof c === "string" ? Buffer.from(c) : c);
-  });
-
-  // Timeout handling
-  let killTimer: ReturnType<typeof setTimeout> | undefined;
-  let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
-
-  if (options.timeout != null && options.timeout > 0) {
-    timeoutTimer = setTimeout(() => {
-      handle.timedOut = true;
-      killProcessGroup(child, "SIGTERM");
-      killTimer = setTimeout(() => {
-        killProcessGroup(child, "SIGKILL");
-      }, TIMEOUT_GRACE_MS);
-    }, options.timeout * 1_000);
-  }
-
-  // Completion promise
-  handle.done = new Promise<void>((resolve) => {
-    child.on("close", (exitCode, signal) => {
-      clearTimeout(timeoutTimer);
-      clearTimeout(killTimer);
-      handle.exitCode = exitCode;
-      handle.signal = signal;
-      handle.exited = true;
-      resolve();
-    });
-
-    // Handle spawn errors (e.g. binary not found). When the process fails to
-    // start, the "close" event may never fire, which would leave the done
-    // promise hanging forever. Instead, store the error and resolve so callers
-    // aren't blocked.
-    child.on("error", (err) => {
-      clearTimeout(timeoutTimer);
-      clearTimeout(killTimer);
-      handle.error = err;
-      handle.exited = true;
-      resolve();
-    });
-  });
-
-  return handle;
-}
-
-/** Read all accumulated output from a BackgroundHandle as a string. */
-export function readHandleOutput(handle: BackgroundHandle, stream: "stdout" | "stderr"): string {
-  const chunks = stream === "stdout" ? handle.stdoutChunks : handle.stderrChunks;
-  return Buffer.concat(chunks).toString("utf8");
 }

@@ -3,20 +3,31 @@ import assert from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { toolExecExtended, getExecSession, removeExecSession } from "../src/tools";
+import { ProcessManager } from "@shoggoth/procman";
+import {
+  toolExecExtended,
+  getExecSession,
+  removeExecSession,
+  setProcessManager,
+} from "../src/tools";
 import { toolPoll } from "../src/poll";
 import type { PollCombinedResult, PollSplitResult, PollError } from "../src/poll";
 import type { ExecBackgroundResult } from "../src/tools";
 
 describe("toolPoll", () => {
   let ws: string;
+  let pm: ProcessManager;
   const creds = { uid: process.getuid!(), gid: process.getgid!() };
 
   beforeEach(() => {
     ws = mkdtempSync(join(tmpdir(), "shoggoth-poll-"));
+    pm = new ProcessManager();
+    setProcessManager(pm);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await pm.stopAll();
+    setProcessManager(undefined);
     rmSync(ws, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
@@ -39,18 +50,21 @@ describe("toolPoll", () => {
     return { pid: bg.pid, sessionId: bg.sessionId };
   }
 
-  /** Helper: kill a background process group and clean up the session. */
+  /** Helper: wait for a process to exit, then clean up. */
   async function cleanup(sessionId: string): Promise<void> {
-    const session = getExecSession(sessionId);
-    if (session) {
-      if (!session.exited) {
-        // Kill the entire process group (detached processes need -pid)
-        try {
-          process.kill(-session.pid, "SIGKILL");
-        } catch {
-          /* already dead */
-        }
-        await session.done;
+    const mp = getExecSession(sessionId);
+    if (mp) {
+      if (!["exited", "dead", "failed"].includes(mp.state)) {
+        mp.kill();
+        await new Promise<void>((resolve) => {
+          if (["exited", "dead", "failed"].includes(mp.state)) {
+            resolve();
+            return;
+          }
+          mp.on("state-change", (s: string) => {
+            if (["exited", "dead", "failed"].includes(s)) resolve();
+          });
+        });
       }
       removeExecSession(sessionId);
     }
@@ -129,8 +143,16 @@ describe("toolPoll", () => {
 
     it("returns exited status with exit code for a completed process", async () => {
       const { pid, sessionId } = await spawnBg("echo done");
-      const session = getExecSession(sessionId)!;
-      await session.done;
+      const mp = getExecSession(sessionId)!;
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
 
       try {
         const r = await toolPoll({ pid });
@@ -148,8 +170,16 @@ describe("toolPoll", () => {
 
     it("captures non-zero exit code", async () => {
       const { pid, sessionId } = await spawnBg("exit 42");
-      const session = getExecSession(sessionId)!;
-      await session.done;
+      const mp = getExecSession(sessionId)!;
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
 
       try {
         const r = await toolPoll({ pid });
@@ -217,8 +247,16 @@ describe("toolPoll", () => {
 
     it("returns immediately for already-exited process regardless of timeout", async () => {
       const { pid, sessionId } = await spawnBg("echo already-done");
-      const session = getExecSession(sessionId)!;
-      await session.done;
+      const mp = getExecSession(sessionId)!;
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
 
       try {
         const start = Date.now();
@@ -242,8 +280,16 @@ describe("toolPoll", () => {
   describe("streams", () => {
     it("returns combined output by default", async () => {
       const { pid, sessionId } = await spawnBg("echo out; echo err >&2");
-      const session = getExecSession(sessionId)!;
-      await session.done;
+      const mp = getExecSession(sessionId)!;
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
 
       try {
         const r = await toolPoll({ pid });
@@ -260,8 +306,16 @@ describe("toolPoll", () => {
 
     it("returns split stdout/stderr when streams is true", async () => {
       const { pid, sessionId } = await spawnBg("echo out-data; echo err-data >&2");
-      const session = getExecSession(sessionId)!;
-      await session.done;
+      const mp = getExecSession(sessionId)!;
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
 
       try {
         const r = await toolPoll({ pid, streams: true });
@@ -285,8 +339,16 @@ describe("toolPoll", () => {
   describe("tail", () => {
     it("returns only the last N lines of output", async () => {
       const { pid, sessionId } = await spawnBg("seq 1 100");
-      const session = getExecSession(sessionId)!;
-      await session.done;
+      const mp = getExecSession(sessionId)!;
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
 
       try {
         const r = await toolPoll({ pid, tail: 3 });
@@ -304,8 +366,16 @@ describe("toolPoll", () => {
 
     it("returns all output when tail exceeds line count", async () => {
       const { pid, sessionId } = await spawnBg("echo one; echo two");
-      const session = getExecSession(sessionId)!;
-      await session.done;
+      const mp = getExecSession(sessionId)!;
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
 
       try {
         const r = await toolPoll({ pid, tail: 1000 });
@@ -321,8 +391,16 @@ describe("toolPoll", () => {
 
     it("works with streams: true", async () => {
       const { pid, sessionId } = await spawnBg("seq 1 50; seq 51 100 >&2");
-      const session = getExecSession(sessionId)!;
-      await session.done;
+      const mp = getExecSession(sessionId)!;
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
 
       try {
         const r = await toolPoll({ pid, streams: true, tail: 2 });
@@ -345,8 +423,16 @@ describe("toolPoll", () => {
   describe("since", () => {
     it("returns output after the byte offset", async () => {
       const { pid, sessionId } = await spawnBg("printf 'AAABBBCCC'");
-      const session = getExecSession(sessionId)!;
-      await session.done;
+      const mp = getExecSession(sessionId)!;
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
 
       try {
         const r = await toolPoll({ pid, since: 3 });
@@ -362,8 +448,16 @@ describe("toolPoll", () => {
 
     it("returns empty output when since exceeds current byte count", async () => {
       const { pid, sessionId } = await spawnBg("echo short");
-      const session = getExecSession(sessionId)!;
-      await session.done;
+      const mp = getExecSession(sessionId)!;
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
 
       try {
         const r = await toolPoll({ pid, since: 99999 });
@@ -379,8 +473,16 @@ describe("toolPoll", () => {
 
     it("returns all output when since is 0", async () => {
       const { pid, sessionId } = await spawnBg("echo all-data");
-      const session = getExecSession(sessionId)!;
-      await session.done;
+      const mp = getExecSession(sessionId)!;
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
 
       try {
         const r = await toolPoll({ pid, since: 0 });
@@ -395,8 +497,16 @@ describe("toolPoll", () => {
 
     it("works with streams: true", async () => {
       const { pid, sessionId } = await spawnBg("printf 'STDOUT'; printf 'STDERR' >&2");
-      const session = getExecSession(sessionId)!;
-      await session.done;
+      const mp = getExecSession(sessionId)!;
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
 
       try {
         const r = await toolPoll({ pid, streams: true, since: 2 });
@@ -417,8 +527,16 @@ describe("toolPoll", () => {
   describe("tail + since interaction", () => {
     it("tail takes precedence over since", async () => {
       const { pid, sessionId } = await spawnBg("seq 1 10");
-      const session = getExecSession(sessionId)!;
-      await session.done;
+      const mp = getExecSession(sessionId)!;
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
 
       try {
         // When both are set, tail wins
