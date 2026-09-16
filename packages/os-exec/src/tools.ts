@@ -204,6 +204,13 @@ const ENV_WRITE_AFTER = "SHOGGOTH_TOOL_WRITE_AFTER";
 const ENV_WRITE_MKDIRP = "SHOGGOTH_TOOL_WRITE_MKDIRP";
 
 /**
+ * NUL byte marker used to detect binary files in the nodeWriteExtendedScript
+ * subprocess script.  In the generated JS this becomes `"\0"` which the
+ * runtime interprets as the null character (U+0000).
+ */
+const BINARY_NULL_MARKER = "\\0";
+
+/**
  * Subprocess script for the extended write tool.
  *
  * Reads content from stdin, then performs the operation indicated by env vars:
@@ -258,7 +265,7 @@ function nodeWriteExtendedScript(): string {
     `    }`,
     `    const existing = fs.readFileSync(filePath, "utf8");`,
     // Binary check: NUL in first 8KB
-    `    if (existing.slice(0, 8192).includes("\\0")) {`,
+    `    if (existing.slice(0, 8192).includes("${BINARY_NULL_MARKER}")) {`,
     `      process.stderr.write("cannot perform line-range operation on binary file");`,
     `      process.exit(1);`,
     `    }`,
@@ -289,7 +296,7 @@ function nodeWriteExtendedScript(): string {
     `    }`,
     `    const existing = fs.readFileSync(filePath, "utf8");`,
     // Binary check
-    `    if (existing.slice(0, 8192).includes("\\0")) {`,
+    `    if (existing.slice(0, 8192).includes("${BINARY_NULL_MARKER}")) {`,
     `      process.stderr.write("cannot perform line-range operation on binary file");`,
     `      process.exit(1);`,
     `    }`,
