@@ -1,7 +1,10 @@
 import { existsSync, realpathSync, globSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
-import { join, resolve, relative, sep } from "node:path";
+// readFileSync removed — scripts are loaded as files via tsx
+import { join, resolve, relative, sep, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { runAsUser, type RunAsUserResult } from "./subprocess";
 import { resolvePathForRead, resolvePathForWrite, PathEscapeError } from "./workspace-path";
 import type { ProcessManager, ManagedProcess, ProcessSpec } from "@shoggoth/procman";
@@ -131,8 +134,32 @@ export interface WriteResult {
 const ENV_READ = "SHOGGOTH_TOOL_READ_PATH";
 const ENV_WRITE = "SHOGGOTH_TOOL_WRITE_PATH";
 
-function nodeReadScript(): string {
-  return `require("fs").writeFileSync(1, require("fs").readFileSync(process.env.${ENV_READ}, "utf8"));`;
+/**
+ * Directory containing the subprocess helper scripts (this source file's
+ * directory + `/scripts`). Resolved relative to the source file via
+ * `import.meta.url`; the package runs from source (tsx), so the scripts are
+ * always colocated with `tools.ts` in both dev and the Docker image.
+ */
+const SUBPROCESS_SCRIPTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "scripts");
+
+/** Resolve a subprocess script filename to its absolute path on disk. */
+function subprocessScriptPath(name: string): string {
+  return join(SUBPROCESS_SCRIPTS_DIR, name);
+}
+
+/**
+ * Absolute path to the tsx ESM loader, resolved once at module load time.
+ * Subprocesses may run in temp directories without node_modules, so we
+ * must reference the loader by absolute path rather than bare specifier.
+ */
+const TSX_ESM_PATH = createRequire(import.meta.url).resolve("tsx/esm");
+
+/**
+ * Build the args array to execute a `.ts` script via tsx.
+ * Pattern: `node --import /absolute/path/to/tsx/esm <script.ts>`
+ */
+function tsxScriptArgs(name: string): string[] {
+  return ["--import", TSX_ESM_PATH, subprocessScriptPath(name)];
 }
 
 /**
@@ -147,7 +174,7 @@ export async function toolRead(
   const cwd = cachedRealpathSync(workspaceRoot);
   const r = await runAsUser({
     file: process.execPath,
-    args: ["-e", nodeReadScript()],
+    args: tsxScriptArgs("read.ts"),
     cwd,
     uid: creds.uid,
     gid: creds.gid,
@@ -173,10 +200,7 @@ export async function toolReadBinary(
   const cwd = cachedRealpathSync(workspaceRoot);
   const r = await runAsUser({
     file: process.execPath,
-    args: [
-      "-e",
-      `process.stdout.write(require("fs").readFileSync(process.env.${ENV_READ}).toString("base64"));`,
-    ],
+    args: tsxScriptArgs("read-binary.ts"),
     cwd,
     uid: creds.uid,
     gid: creds.gid,
@@ -199,14 +223,10 @@ const ENV_WRITE_AFTER = "SHOGGOTH_TOOL_WRITE_AFTER";
 const ENV_WRITE_MKDIRP = "SHOGGOTH_TOOL_WRITE_MKDIRP";
 
 /**
- * NUL byte marker used to detect binary files in the nodeWriteExtendedScript
- * subprocess script.  In the generated JS this becomes `"\0"` which the
- * runtime interprets as the null character (U+0000).
- */
-const BINARY_NULL_MARKER = "\\0";
-
-/**
  * Subprocess script for the extended write tool.
+ *
+ * The script itself lives in `src/scripts/write-extended.cjs` (read at
+ * runtime) — see that file for the full documentation of the supported modes.
  *
  * Reads content from stdin, then performs the operation indicated by env vars:
  *   MODE=overwrite  — write stdin to file (with optional mkdirp)
@@ -216,109 +236,7 @@ const BINARY_NULL_MARKER = "\\0";
  *
  * Outputs JSON to stdout: { bytesWritten, dirCreated }
  */
-function nodeWriteExtendedScript(): string {
-  return [
-    `const fs = require("fs");`,
-    `const path = require("path");`,
-    `const filePath = process.env.${ENV_WRITE};`,
-    `const mode = process.env.${ENV_WRITE_MODE} || "overwrite";`,
-    `const mkdirp = process.env.${ENV_WRITE_MKDIRP} !== "0";`,
-    `const content = fs.readFileSync(0, "utf8");`,
-    `let bytesWritten = 0;`,
-    `let dirCreated = false;`,
-
-    // Helper: ensure parent directories exist
-    `function ensureDir(fp) {`,
-    `  const dir = path.dirname(fp);`,
-    `  if (!fs.existsSync(dir)) {`,
-    `    fs.mkdirSync(dir, { recursive: true });`,
-    `    dirCreated = true;`,
-    `  }`,
-    `}`,
-
-    `try {`,
-
-    // --- Overwrite mode ---
-    `  if (mode === "overwrite") {`,
-    `    if (mkdirp) ensureDir(filePath);`,
-    `    fs.writeFileSync(filePath, content);`,
-    `    bytesWritten = Buffer.byteLength(content, "utf8");`,
-
-    // --- Append mode ---
-    `  } else if (mode === "append") {`,
-    `    if (mkdirp) ensureDir(filePath);`,
-    `    fs.appendFileSync(filePath, content);`,
-    `    bytesWritten = Buffer.byteLength(content, "utf8");`,
-
-    // --- Line-range replace mode ---
-    `  } else if (mode === "replace") {`,
-    `    const startLine = parseInt(process.env.${ENV_WRITE_START}, 10);`,
-    `    const endLine = parseInt(process.env.${ENV_WRITE_END}, 10);`,
-    `    if (!fs.existsSync(filePath)) {`,
-    `      process.stderr.write("file does not exist: " + filePath);`,
-    `      process.exit(1);`,
-    `    }`,
-    `    const existing = fs.readFileSync(filePath, "utf8");`,
-    // Binary check: NUL in first 8KB
-    `    if (existing.slice(0, 8192).includes("${BINARY_NULL_MARKER}")) {`,
-    `      process.stderr.write("cannot perform line-range operation on binary file");`,
-    `      process.exit(1);`,
-    `    }`,
-    `    const lines = existing.split("\\n");`,
-    `    const totalLines = lines.length;`,
-    `    if (startLine < 1 || startLine > totalLines) {`,
-    `      process.stderr.write("startLine " + startLine + " is out of range (file has " + totalLines + " lines)");`,
-    `      process.exit(1);`,
-    `    }`,
-    `    if (endLine < startLine || endLine > totalLines) {`,
-    `      process.stderr.write("endLine " + endLine + " is out of range (file has " + totalLines + " lines, startLine is " + startLine + ")");`,
-    `      process.exit(1);`,
-    `    }`,
-    // Replace lines[startLine-1..endLine-1] with content lines.
-    // If content is empty, this deletes the range.
-    `    const newLines = content.length === 0 ? [] : content.split("\\n");`,
-    `    lines.splice(startLine - 1, endLine - startLine + 1, ...newLines);`,
-    `    const result = lines.join("\\n");`,
-    `    fs.writeFileSync(filePath, result);`,
-    `    bytesWritten = Buffer.byteLength(result, "utf8");`,
-
-    // --- Insert-after mode ---
-    `  } else if (mode === "insert") {`,
-    `    const afterLine = parseInt(process.env.${ENV_WRITE_AFTER}, 10);`,
-    `    if (!fs.existsSync(filePath)) {`,
-    `      process.stderr.write("file does not exist: " + filePath);`,
-    `      process.exit(1);`,
-    `    }`,
-    `    const existing = fs.readFileSync(filePath, "utf8");`,
-    // Binary check
-    `    if (existing.slice(0, 8192).includes("${BINARY_NULL_MARKER}")) {`,
-    `      process.stderr.write("cannot perform line-range operation on binary file");`,
-    `      process.exit(1);`,
-    `    }`,
-    `    const lines = existing.split("\\n");`,
-    `    const totalLines = lines.length;`,
-    `    if (afterLine < 0 || afterLine > totalLines) {`,
-    `      process.stderr.write("insertAfter " + afterLine + " is out of range (file has " + totalLines + " lines)");`,
-    `      process.exit(1);`,
-    `    }`,
-    `    const newLines = content.split("\\n");`,
-    `    lines.splice(afterLine, 0, ...newLines);`,
-    `    const result = lines.join("\\n");`,
-    `    fs.writeFileSync(filePath, result);`,
-    `    bytesWritten = Buffer.byteLength(result, "utf8");`,
-
-    `  } else {`,
-    `    process.stderr.write("unknown write mode: " + mode);`,
-    `    process.exit(1);`,
-    `  }`,
-
-    `  process.stdout.write(JSON.stringify({ bytesWritten, dirCreated }));`,
-    `} catch (e) {`,
-    `  process.stderr.write(e.message);`,
-    `  process.exit(1);`,
-    `}`,
-  ].join(" ");
-}
+// nodeWriteExtendedScript removed — scripts are now executed via tsxScriptArgs()
 
 /**
  * Validate WriteOptions, throwing on invalid combinations.
@@ -424,7 +342,7 @@ export async function toolWrite(
 
   const r = await runAsUser({
     file: process.execPath,
-    args: ["-e", nodeWriteExtendedScript()],
+    args: tsxScriptArgs("write-extended.ts"),
     cwd,
     uid: creds.uid,
     gid: creds.gid,
@@ -530,29 +448,7 @@ function formatPermissions(mode: number): string {
  * Subprocess script that outputs JSON stat info for the path in SHOGGOTH_TOOL_STAT_PATH.
  * Runs as the agent UID/GID so kernel DAC applies.
  */
-function nodeStatScript(): string {
-  return [
-    `const fs = require("fs");`,
-    `const p = process.env.SHOGGOTH_TOOL_STAT_PATH;`,
-    `try {`,
-    `  const lst = fs.lstatSync(p);`,
-    `  const isSymlink = lst.isSymbolicLink();`,
-    `  const st = isSymlink ? fs.statSync(p) : lst;`,
-    `  let type = "other";`,
-    `  if (st.isFile()) type = "file";`,
-    `  else if (st.isDirectory()) type = "directory";`,
-    `  const out = { size: st.size, mtime: st.mtime.toISOString(), mode: st.mode, type, isSymlink };`,
-    `  if (isSymlink) out.target = fs.readlinkSync(p);`,
-    // Count lines for small regular files
-    `  if (type === "file" && st.size <= ${STAT_LINE_COUNT_LIMIT}) {`,
-    `    try { out.lines = fs.readFileSync(p, "utf8").split("\\n").length - 1; } catch {}`,
-    `  }`,
-    `  process.stdout.write(JSON.stringify(out));`,
-    `} catch (e) {`,
-    `  process.stdout.write(JSON.stringify({ error: e.message }));`,
-    `}`,
-  ].join(" ");
-}
+// nodeStatScript removed — scripts are now executed via tsxScriptArgs()
 
 /**
  * Stat a single workspace-relative path as the agent UID/GID.
@@ -566,11 +462,14 @@ async function toolStatRaw(
   const cwd = cachedRealpathSync(workspaceRoot);
   const r = await runAsUser({
     file: process.execPath,
-    args: ["-e", nodeStatScript()],
+    args: tsxScriptArgs("stat.ts"),
     cwd,
     uid: creds.uid,
     gid: creds.gid,
-    env: { SHOGGOTH_TOOL_STAT_PATH: absPath },
+    env: {
+      SHOGGOTH_TOOL_STAT_PATH: absPath,
+      SHOGGOTH_TOOL_STAT_LINE_LIMIT: String(STAT_LINE_COUNT_LIMIT),
+    },
   });
   if (r.exitCode !== 0) {
     return { error: r.stderr.trim() || `exit ${r.exitCode}` };
