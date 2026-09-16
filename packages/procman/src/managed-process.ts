@@ -2,10 +2,15 @@
 // Managed Process — wraps a ChildProcess with state machine & lifecycle
 // ---------------------------------------------------------------------------
 
-import { spawn, execFile, execFileSync, type ChildProcess, type SpawnOptions } from "node:child_process";
+import {
+  spawn,
+  execFile,
+  execFileSync,
+  type ChildProcess,
+  type SpawnOptions,
+} from "node:child_process";
 import { EventEmitter } from "node:events";
 import * as net from "node:net";
-
 
 import type { ProcessSpec, ProcessState, HealthCheck, ShutdownConfig } from "./types.js";
 import { RingBuffer } from "./ring-buffer.js";
@@ -291,8 +296,6 @@ export class ManagedProcess extends EventEmitter {
     await this.start();
   }
 
-  // -- Internal: spawning ---------------------------------------------------
-
   private _spawn(): void {
     // Defensive: remove listeners from a previous child if one still exists.
     // Normally _spawn() is only called after the old child has exited, but
@@ -326,13 +329,15 @@ export class ManagedProcess extends EventEmitter {
     if (spec.gid != null) (opts as SpawnOptions).gid = spec.gid;
 
     const child = spawn(spec.command, spec.args ?? [], opts);
+    // Detach from the Node.js event loop so the child doesn't keep the
+    // process alive.  libuv still tracks the child internally and reaps
+    // it via SIGCHLD — this only prevents the ChildProcess handle from
+    // being counted as an active libuv handle.
+    child.unref();
     this._child = child;
     this._pid = child.pid;
     this._stdoutMatchResolved = false;
     this._stdoutAccumulator = "";
-
-    log("info", "process spawned", { processId: spec.id, pid: child.pid });
-
     // Pipe stdout/stderr into ring buffers
     child.stdout?.on("data", (chunk: Buffer) => {
       this._stdoutBuf.write(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
@@ -376,10 +381,12 @@ export class ManagedProcess extends EventEmitter {
 
     // Runtime limit
     if (spec.limits?.maxRuntimeSeconds && spec.limits.maxRuntimeSeconds > 0) {
-      this._allTimers.push(setTimeout(() => {
-        log("warn", "runtime limit exceeded", { processId: spec.id });
-        this.stop();
-      }, spec.limits.maxRuntimeSeconds * 1000));
+      this._allTimers.push(
+        setTimeout(() => {
+          log("warn", "runtime limit exceeded", { processId: spec.id });
+          this.stop();
+        }, spec.limits.maxRuntimeSeconds * 1000),
+      );
     }
   }
 
@@ -437,8 +444,7 @@ export class ManagedProcess extends EventEmitter {
     if (shouldRestart && this._consecutiveFailures < maxRetries) {
       this._scheduleRestart();
     } else {
-      this._setState("dead");
-      this._resolveStop();
+      this._finalize();
     }
   }
 
@@ -474,30 +480,34 @@ export class ManagedProcess extends EventEmitter {
       delayMs: delay,
     });
 
-    this._allTimers.push(setTimeout(async () => {
-      this._restartCount++;
-      this._stdoutBuf.clear();
-      this._stderrBuf.clear();
-      try {
-        await this.start();
-      } catch (err) {
-        log("error", "restart failed", {
-          processId: this.spec.id,
-          error: String(err),
-        });
-        this._setState("failed");
-      }
-    }, delay));
+    this._allTimers.push(
+      setTimeout(async () => {
+        this._restartCount++;
+        this._stdoutBuf.clear();
+        this._stderrBuf.clear();
+        try {
+          await this.start();
+        } catch (err) {
+          log("error", "restart failed", {
+            processId: this.spec.id,
+            error: String(err),
+          });
+          this._setState("failed");
+        }
+      }, delay),
+    );
   }
 
   private _scheduleResetTimer(): void {
     const resetAfter = this.spec.restart.resetAfterMs ?? 60000;
     if (resetAfter > 0) {
-      this._allTimers.push(setTimeout(() => {
-        if (this._state === "running") {
-          this._consecutiveFailures = 0;
-        }
-      }, resetAfter));
+      this._allTimers.push(
+        setTimeout(() => {
+          if (this._state === "running") {
+            this._consecutiveFailures = 0;
+          }
+        }, resetAfter),
+      );
     }
   }
 
