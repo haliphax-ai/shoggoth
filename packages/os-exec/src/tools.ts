@@ -436,19 +436,28 @@ export async function toolWrite(
     throw new Error(`toolWrite failed: ${r.stderr.trim() || `exit ${r.exitCode}`}`);
   }
 
-  // Parse result metadata from subprocess stdout
+  // Parse and validate result metadata from subprocess stdout. On success the
+  // subprocess always writes `{ bytesWritten, dirCreated }`. If the output is
+  // malformed JSON, or does not match the expected shape, fall back to an
+  // estimate of `bytesWritten` rather than failing — the write itself already
+  // succeeded.
   try {
-    const result = JSON.parse(r.stdout) as {
-      bytesWritten: number;
-      dirCreated: boolean;
-    };
+    const parsed: unknown = JSON.parse(r.stdout);
+    const result = parsed as { bytesWritten?: unknown; dirCreated?: unknown };
+    if (typeof result.bytesWritten !== "number" || typeof result.dirCreated !== "boolean") {
+      throw new Error("malformed toolWrite result metadata");
+    }
     return {
       path: abs,
       bytesWritten: result.bytesWritten,
       dirCreated: result.dirCreated || undefined,
     };
   } catch {
-    // Fallback if JSON parsing fails — operation still succeeded
+    // Fallback if JSON parsing/validation fails — operation still succeeded.
+    // bytesWritten reflects only the bytes contributed by this call: for
+    // append it is the appended bytes (content byte length), for overwrite the
+    // full content size, and for line-range replace/insert a best-effort
+    // estimate of the written size.
     return { path: abs, bytesWritten: Buffer.byteLength(opts.content, "utf8") };
   }
 }
