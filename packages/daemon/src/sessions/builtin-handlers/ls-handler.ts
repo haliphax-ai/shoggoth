@@ -2,7 +2,6 @@
 // builtin-ls — structured directory listing
 // -----------------------------------------------------------------------------
 
-// realpathSync removed — use ctx.workspaceRealPath from BuiltinToolContext
 import { runAsUser, resolvePathForRead } from "@shoggoth/os-exec";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
 import { resolveUserPath } from "../builtin-tool-registry";

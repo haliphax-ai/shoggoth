@@ -2,7 +2,6 @@
 // builtin-fs — file operations: move, copy, delete, stat, chmod, mkdir
 // ---------------------------------------------------------------------------
 
-// realpathSync removed — use ctx.workspaceRealPath from BuiltinToolContext
 import { relative } from "node:path";
 import { resolvePathForRead, resolvePathForWrite, runAsUser } from "@shoggoth/os-exec";
 import type {
