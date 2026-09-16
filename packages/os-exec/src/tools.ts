@@ -1,4 +1,5 @@
 import { existsSync, realpathSync, globSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join, resolve, relative, sep } from "node:path";
 import {
@@ -1081,12 +1082,9 @@ export function getProcessManager(): ProcessManager | undefined {
 /** Registry of background exec sessions, keyed by sessionId (legacy fallback). */
 const backgroundSessions = new Map<string, BackgroundHandle>();
 
-/** Counter for generating unique procman spec IDs. */
-let _procmanCounter = 0;
-
 /** Generate a unique procman-compatible spec ID for exec sessions. */
 function nextProcmanId(): string {
-  return `exec-${Date.now().toString(36)}-${(++_procmanCounter).toString(36)}`;
+  return `exec-${randomUUID()}`;
 }
 
 /**

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 
 export interface RunAsUserResult {
   stdout: string;
@@ -173,11 +174,9 @@ export interface BackgroundHandle {
   done: Promise<void>;
 }
 
-let sessionCounter = 0;
-
 /** Generate a short, unique session ID. */
 function nextSessionId(): string {
-  return `exec-${Date.now().toString(36)}-${(++sessionCounter).toString(36)}`;
+  return `exec-${randomUUID()}`;
 }
 
 /**
