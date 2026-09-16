@@ -2,7 +2,6 @@
 // builtin-ls — structured directory listing
 // -----------------------------------------------------------------------------
 
-import { realpathSync } from "node:fs";
 import { runAsUser, resolvePathForRead } from "@shoggoth/os-exec";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
 import { resolveUserPath } from "../builtin-tool-registry";
@@ -149,7 +148,7 @@ async function lsHandler(
       }),
     };
   }
-  const rootReal = realpathSync(ctx.workspacePath);
+  const rootReal = ctx.workspaceRealPath;
 
   const cwd = rootReal;
   const r = await runAsUser({

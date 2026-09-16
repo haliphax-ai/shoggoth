@@ -2,7 +2,6 @@
 // builtin-fs — file operations: move, copy, delete, stat, chmod, mkdir
 // ---------------------------------------------------------------------------
 
-import { realpathSync } from "node:fs";
 import { relative } from "node:path";
 import { resolvePathForRead, resolvePathForWrite, runAsUser } from "@shoggoth/os-exec";
 import type {
@@ -37,7 +36,7 @@ async function runScript(
   script: string,
   env: Record<string, string> = {},
 ): Promise<string> {
-  const cwd = realpathSync(ctx.workspacePath);
+  const cwd = ctx.workspaceRealPath;
   const r = await runAsUser({
     file: process.execPath,
     args: ["-e", script],
@@ -64,7 +63,7 @@ function resolveDst(ctx: BuiltinToolContext, userPath: string): string {
 
 /** Return a workspace-relative path for display. */
 function relPath(ctx: BuiltinToolContext, abs: string): string {
-  const root = realpathSync(ctx.workspacePath);
+  const root = ctx.workspaceRealPath;
   return relative(root, abs);
 }
 

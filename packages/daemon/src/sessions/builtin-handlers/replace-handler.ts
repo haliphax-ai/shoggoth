@@ -1,4 +1,4 @@
-import { realpathSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { runAsUser, resolvePathForWrite } from "@shoggoth/os-exec";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
 import { resolveUserPath } from "../builtin-tool-registry";
@@ -229,7 +229,7 @@ async function replaceHandler(
       }
     }
 
-    const cwd = realpathSync(ctx.workspacePath);
+    const cwd = ctx.workspaceRealPath;
     const uid = ctx.creds.uid;
     const gid = ctx.creds.gid;
 
@@ -406,7 +406,7 @@ async function replaceHandler(
     }
   }
 
-  const cwd = realpathSync(ctx.workspacePath);
+  const cwd = ctx.workspaceRealPath;
   const uid = ctx.creds.uid;
   const gid = ctx.creds.gid;
 

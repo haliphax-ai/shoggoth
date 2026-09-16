@@ -32,7 +32,7 @@ async function cdHandler(
     };
   }
 
-  const rootReal = realpathSync(ctx.workspacePath);
+  const rootReal = ctx.workspaceRealPath;
   const base = ctx.workingDirectory ?? rootReal;
 
   // Resolve: absolute paths as-is, relative from current working directory

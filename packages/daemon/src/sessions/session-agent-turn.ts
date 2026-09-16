@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import type Database from "better-sqlite3";
 import { parseAgentSessionUrn } from "@shoggoth/shared";
 import { buildSessionSystemContext } from "./session-system-prompt";
@@ -458,6 +459,7 @@ export async function executeSessionAgentTurn(
           config: input.config,
           env: input.env,
           workspacePath: input.session.workspacePath,
+          workspaceRealPath: realpathSync(input.session.workspacePath),
           workingDirectory: (() => {
             // Read workingDirectory fresh from DB on each tool call so that
             // `cd` updates within the same turn are visible to subsequent tools.
