@@ -469,8 +469,7 @@ describe("toolPoll", () => {
         assert.ok(!("error" in r));
         const result = r as PollCombinedResult;
         assert.ok(result.runtimeMs >= 50); // at least ~50ms
-        // Upper-bound removed: the lower bound (>= 50) is the meaningful assertion;
-        // the old < 30000 cap was flaky on slow CI runners.
+        assert.ok(result.runtimeMs < 30000); // sanity upper bound
       } finally {
         await cleanup(sessionId);
       }
