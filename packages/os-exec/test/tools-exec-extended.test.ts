@@ -772,11 +772,9 @@ describe("toolExecExtended", () => {
   // -----------------------------------------------------------------------
 
   describe("file output", () => {
-    // @ts-expect-error - new fields not yet added to interface
     it("validation: rejects outputFile with stdoutFile", async () => {
       await assert.rejects(
         () =>
-          // @ts-expect-error - new fields not yet added to interface
           toolExecExtended(
             ws,
             {
@@ -789,12 +787,9 @@ describe("toolExecExtended", () => {
         /outputFile.*cannot be used together/i,
       );
     });
-
-    // @ts-expect-error - new fields not yet added to interface
     it("validation: rejects outputFile with stderrFile", async () => {
       await assert.rejects(
         () =>
-          // @ts-expect-error - new fields not yet added to interface
           toolExecExtended(
             ws,
             {
@@ -807,12 +802,9 @@ describe("toolExecExtended", () => {
         /outputFile.*cannot be used together/i,
       );
     });
-
-    // @ts-expect-error - new fields not yet added to interface
     it("validation: rejects file output with background: true", async () => {
       await assert.rejects(
         () =>
-          // @ts-expect-error - new fields not yet added to interface
           toolExecExtended(
             ws,
             {
@@ -825,12 +817,9 @@ describe("toolExecExtended", () => {
         /File output cannot be used with.*background/i,
       );
     });
-
-    // @ts-expect-error - new fields not yet added to interface
     it("validation: rejects file output with yieldMs", async () => {
       await assert.rejects(
         () =>
-          // @ts-expect-error - new fields not yet added to interface
           toolExecExtended(
             ws,
             {
@@ -843,10 +832,7 @@ describe("toolExecExtended", () => {
         /File output cannot be used with.*yieldMs/i,
       );
     });
-
-    // @ts-expect-error - new fields not yet added to interface
     it("file writing: writes combined output to outputFile", async () => {
-      // @ts-expect-error - new fields not yet added to interface
       const r = await toolExecExtended(
         ws,
         {
@@ -857,9 +843,7 @@ describe("toolExecExtended", () => {
       );
       assert.equal(r.kind, "foreground");
       const fg = r as ExecForegroundResult;
-      // @ts-expect-error - new fields not yet added to interface
       assert.ok(fg.outputFile);
-      // @ts-expect-error - new fields not yet added to interface
       assert.equal(fg.outputFile, "combined.txt");
       assert.equal(fg.output, undefined);
       assert.equal(fg.stdout, undefined);
@@ -869,10 +853,7 @@ describe("toolExecExtended", () => {
       assert.ok(content.includes("out"));
       assert.ok(content.includes("err"));
     });
-
-    // @ts-expect-error - new fields not yet added to interface
     it("file writing: writes stdout to stdoutFile and stderr to stderrFile", async () => {
-      // @ts-expect-error - new fields not yet added to interface
       const r = await toolExecExtended(
         ws,
         {
@@ -884,13 +865,9 @@ describe("toolExecExtended", () => {
       );
       assert.equal(r.kind, "foreground");
       const fg = r as ExecForegroundResult;
-      // @ts-expect-error - new fields not yet added to interface
       assert.ok(fg.stdoutFile);
-      // @ts-expect-error - new fields not yet added to interface
       assert.ok(fg.stderrFile);
-      // @ts-expect-error - new fields not yet added to interface
       assert.equal(fg.stdoutFile, "stdout.txt");
-      // @ts-expect-error - new fields not yet added to interface
       assert.equal(fg.stderrFile, "stderr.txt");
       assert.equal(fg.output, undefined);
       assert.equal(fg.stdout, undefined);
@@ -901,10 +878,7 @@ describe("toolExecExtended", () => {
       assert.ok(stdoutContent.includes("out"));
       assert.ok(stderrContent.includes("err"));
     });
-
-    // @ts-expect-error - new fields not yet added to interface
     it("file writing: only stderrFile set — stdout returned inline", async () => {
-      // @ts-expect-error - new fields not yet added to interface
       const r = await toolExecExtended(
         ws,
         {
@@ -915,21 +889,16 @@ describe("toolExecExtended", () => {
       );
       assert.equal(r.kind, "foreground");
       const fg = r as ExecForegroundResult;
-      // @ts-expect-error - new fields not yet added to interface
       assert.equal(fg.stderrFile, "stderr.txt");
       assert.ok(fg.stdout?.includes("out"), "stdout should be returned inline");
       assert.equal(fg.output, undefined);
       // stderr should NOT be returned inline since stderrFile was set
-      // @ts-expect-error - new fields not yet added to interface
       assert.equal(fg.stderr, undefined);
 
       const stderrContent = readFileSync(join(ws, "stderr.txt"), "utf8");
       assert.ok(stderrContent.includes("err"));
     });
-
-    // @ts-expect-error - new fields not yet added to interface
     it("file writing: only stdoutFile set — stderr returned inline", async () => {
-      // @ts-expect-error - new fields not yet added to interface
       const r = await toolExecExtended(
         ws,
         {
@@ -940,21 +909,16 @@ describe("toolExecExtended", () => {
       );
       assert.equal(r.kind, "foreground");
       const fg = r as ExecForegroundResult;
-      // @ts-expect-error - new fields not yet added to interface
       assert.equal(fg.stdoutFile, "stdout.txt");
       assert.ok(fg.stderr?.includes("err"), "stderr should be returned inline");
       assert.equal(fg.output, undefined);
       // stdout should NOT be returned inline since stdoutFile was set
-      // @ts-expect-error - new fields not yet added to interface
       assert.equal(fg.stdout, undefined);
 
       const stdoutContent = readFileSync(join(ws, "stdout.txt"), "utf8");
       assert.ok(stdoutContent.includes("out"));
     });
-
-    // @ts-expect-error - new fields not yet added to interface
     it("file writing: non-zero exit code still writes files", async () => {
-      // @ts-expect-error - new fields not yet added to interface
       const r = await toolExecExtended(
         ws,
         {
@@ -967,9 +931,7 @@ describe("toolExecExtended", () => {
       assert.equal(r.kind, "foreground");
       const fg = r as ExecForegroundResult;
       assert.equal(fg.exitCode, 42);
-      // @ts-expect-error - new fields not yet added to interface
       assert.equal(fg.stdoutFile, "stdout.txt");
-      // @ts-expect-error - new fields not yet added to interface
       assert.equal(fg.stderrFile, "stderr.txt");
 
       const stdoutContent = readFileSync(join(ws, "stdout.txt"), "utf8");
@@ -977,10 +939,7 @@ describe("toolExecExtended", () => {
       assert.ok(stdoutContent.includes("out"));
       assert.ok(stderrContent.includes("err"));
     });
-
-    // @ts-expect-error - new fields not yet added to interface
     it("file writing: empty output creates zero-byte file", async () => {
-      // @ts-expect-error - new fields not yet added to interface
       const r = await toolExecExtended(
         ws,
         {
@@ -991,7 +950,6 @@ describe("toolExecExtended", () => {
       );
       assert.equal(r.kind, "foreground");
       const fg = r as ExecForegroundResult;
-      // @ts-expect-error - new fields not yet added to interface
       assert.equal(fg.stdoutFile, "empty.txt");
 
       const stats = existsSync(join(ws, "empty.txt"));
@@ -999,12 +957,9 @@ describe("toolExecExtended", () => {
       const content = readFileSync(join(ws, "empty.txt"));
       assert.equal(content.length, 0);
     });
-
-    // @ts-expect-error - new fields not yet added to interface
     it("path validation: rejects path traversal (e.g. `../escape.txt`)", async () => {
       await assert.rejects(
         () =>
-          // @ts-expect-error - new fields not yet added to interface
           toolExecExtended(
             ws,
             {
@@ -1052,7 +1007,6 @@ describe("toolExecExtended", () => {
       assert.equal(r.kind, "foreground");
       const fg = r as ExecForegroundResult;
       assert.equal(fg.outputFile, "combined.txt");
-      // @ts-expect-error - fileOutputTruncated field
       assert.equal(fg.fileOutputTruncated, true, "fileOutputTruncated should be set");
     });
 
@@ -1068,7 +1022,6 @@ describe("toolExecExtended", () => {
       assert.equal(r.kind, "foreground");
       const fg = r as ExecForegroundResult;
       assert.equal(fg.stdoutFile, "small.txt");
-      // @ts-expect-error - fileOutputTruncated field
       assert.equal(
         fg.fileOutputTruncated,
         undefined,
