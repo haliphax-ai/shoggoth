@@ -716,9 +716,14 @@ function truncateContent(content: string): {
 
   if (Buffer.byteLength(content, "utf8") > PER_FILE_MAX_BYTES) {
     truncated = true;
-    // Trim to byte limit by slicing (rough but safe)
+    // Trim to byte limit, then back up to a valid UTF-8 character boundary so we
+    // never split a multi-byte character (continuation bytes are 0x80–0xBF).
     const buf = Buffer.from(content, "utf8");
-    content = buf.subarray(0, PER_FILE_MAX_BYTES).toString("utf8");
+    let cut = PER_FILE_MAX_BYTES;
+    while (cut > 0 && (buf[cut - 1] & 0xc0) === 0x80) {
+      cut--;
+    }
+    content = buf.subarray(0, cut).toString("utf8");
   }
 
   return { content, truncated };
