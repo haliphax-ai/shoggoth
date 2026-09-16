@@ -152,6 +152,8 @@ export function runAsUser(options: RunAsUserOptions): Promise<RunAsUserResult> {
 export interface BackgroundHandle {
   /** Unique session identifier. */
   sessionId: string;
+  /** Timestamp when this handle was created (ms since epoch). */
+  createdAt: number;
   /** OS process ID. */
   pid: number;
   /** The underlying ChildProcess (for polling / killing). */
@@ -190,6 +192,7 @@ export function spawnAsUser(options: RunAsUserOptions): BackgroundHandle {
   const child = spawnChild(options);
   const handle: BackgroundHandle = {
     sessionId: nextSessionId(),
+    createdAt: Date.now(),
     pid: child.pid!,
     child,
     stdoutChunks: [],

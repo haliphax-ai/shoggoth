@@ -76,7 +76,7 @@ export type PollResponse = PollResult | PollError;
 /** A resolved process — either a legacy BackgroundHandle or a procman ManagedProcess. */
 type ResolvedProcess =
   | { kind: "legacy"; handle: BackgroundHandle }
-  | { kind: "managed"; mp: ManagedProcess; specId: string };
+  | { kind: "managed"; mp: ManagedProcess };
 
 /**
  * Find the most recent process matching a given PID.
@@ -98,7 +98,7 @@ function findProcessByPid(pid: number): ResolvedProcess | undefined {
       }
     }
     if (bestMp) {
-      return { kind: "managed", mp: bestMp, specId: bestMp.spec.id };
+      return { kind: "managed", mp: bestMp };
     }
   }
 
@@ -190,19 +190,9 @@ function filterRawOutput(
   return { text: raw, totalBytes, truncated: false };
 }
 
-/**
- * Estimate process runtime in milliseconds from the sessionId/specId timestamp.
- * ID format: "exec-<base36 timestamp>-<counter>"
- */
-function estimateRuntimeMs(id: string): number {
-  const parts = id.split("-");
-  // parts[0] = "exec", parts[1] = base36 timestamp, parts[2] = counter
-  const raw = parts[1];
-  if (raw == null) return 0;
-  const startMs = parseInt(raw, 36);
-  if (Number.isNaN(startMs)) return 0;
-  return Date.now() - startMs;
-}
+// Runtime is now derived from stored timestamps:
+// - Legacy path: Date.now() - handle.createdAt
+// - Procman path: mp.uptimeMs
 
 // ---------------------------------------------------------------------------
 // Validation
@@ -255,7 +245,7 @@ export async function toolPoll(opts: PollOptions): Promise<PollResponse> {
   }
 
   if (resolved.kind === "managed") {
-    return pollManagedProcess(resolved.mp, resolved.specId, opts);
+    return pollManagedProcess(resolved.mp, opts);
   }
 
   return pollLegacyHandle(resolved.handle, opts);
@@ -282,7 +272,7 @@ async function pollLegacyHandle(handle: BackgroundHandle, opts: PollOptions): Pr
     void finished;
   }
 
-  const runtimeMs = estimateRuntimeMs(handle.sessionId);
+  const runtimeMs = Date.now() - handle.createdAt;
 
   // Build base result
   const base: PollResultBase = {
@@ -337,11 +327,7 @@ async function pollLegacyHandle(handle: BackgroundHandle, opts: PollOptions): Pr
 // Procman ManagedProcess polling
 // ---------------------------------------------------------------------------
 
-async function pollManagedProcess(
-  mp: ManagedProcess,
-  specId: string,
-  opts: PollOptions,
-): Promise<PollResult> {
+async function pollManagedProcess(mp: ManagedProcess, opts: PollOptions): Promise<PollResult> {
   const timeoutMs = opts.timeout ?? 0;
   let waited = false;
   let waitedMs = 0;
@@ -377,7 +363,7 @@ async function pollManagedProcess(
     waited = true;
   }
 
-  const runtimeMs = estimateRuntimeMs(specId);
+  const runtimeMs = mp.uptimeMs;
   const nowExited = isTerminal(mp.state);
 
   // Build base result

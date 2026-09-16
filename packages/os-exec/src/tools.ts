@@ -1108,6 +1108,7 @@ function adaptManagedProcess(mp: ManagedProcess): BackgroundHandle {
 
   return {
     sessionId: mp.spec.id,
+    createdAt: Date.now() - mp.uptimeMs,
     pid: mp.pid!,
     child: {
       kill: (_signal?: string | number) => {
