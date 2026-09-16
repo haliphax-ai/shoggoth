@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 
 export interface RunAsUserResult {
   stdout: string;
@@ -151,6 +152,8 @@ export function runAsUser(options: RunAsUserOptions): Promise<RunAsUserResult> {
 export interface BackgroundHandle {
   /** Unique session identifier. */
   sessionId: string;
+  /** Timestamp when this handle was created (ms since epoch). */
+  createdAt: number;
   /** OS process ID. */
   pid: number;
   /** The underlying ChildProcess (for polling / killing). */
@@ -173,11 +176,9 @@ export interface BackgroundHandle {
   done: Promise<void>;
 }
 
-let sessionCounter = 0;
-
 /** Generate a short, unique session ID. */
 function nextSessionId(): string {
-  return `exec-${Date.now().toString(36)}-${(++sessionCounter).toString(36)}`;
+  return `exec-${randomUUID()}`;
 }
 
 /**
@@ -191,6 +192,7 @@ export function spawnAsUser(options: RunAsUserOptions): BackgroundHandle {
   const child = spawnChild(options);
   const handle: BackgroundHandle = {
     sessionId: nextSessionId(),
+    createdAt: Date.now(),
     pid: child.pid!,
     child,
     stdoutChunks: [],
