@@ -1,5 +1,4 @@
-import { readHandleOutput, type BackgroundHandle } from "./subprocess";
-import { listExecSessions, getProcessManager } from "./tools";
+import { getProcessManager } from "./tools";
 import { isTerminal } from "./util";
 import type { ManagedProcess } from "@shoggoth/procman";
 
@@ -73,74 +72,24 @@ export type PollResponse = PollResult | PollError;
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** A resolved process — either a legacy BackgroundHandle or a procman ManagedProcess. */
-type ResolvedProcess =
-  | { kind: "legacy"; handle: BackgroundHandle }
-  | { kind: "managed"; mp: ManagedProcess };
-
 /**
- * Find the most recent process matching a given PID.
- * Checks procman first (when available), then falls back to the legacy Map.
+ * Find the most recent process matching a given PID via procman.
  * Handles PID reuse by preferring the most recently created session.
  */
-function findProcessByPid(pid: number): ResolvedProcess | undefined {
-  // Check procman first
+function findProcessByPid(pid: number): ManagedProcess | undefined {
   const pm = getProcessManager();
-  if (pm) {
-    const managed = pm.listByOwner({ kind: "agent-tool", scopeId: "exec" });
-    let bestMp: ManagedProcess | undefined;
-    for (const mp of managed) {
-      if (mp.pid === pid) {
-        // spec.id format is "exec-<timestamp36>-<counter36>"
-        if (!bestMp || mp.spec.id > bestMp.spec.id) {
-          bestMp = mp;
-        }
-      }
-    }
-    if (bestMp) {
-      return { kind: "managed", mp: bestMp };
-    }
-  }
+  if (!pm) return undefined;
 
-  // Fall back to legacy Map
-  const sessions = listExecSessions();
-  let best: BackgroundHandle | undefined;
-  for (const handle of sessions.values()) {
-    if (handle.pid === pid) {
-      if (!best || handle.sessionId > best.sessionId) {
-        best = handle;
+  const managed = pm.listByOwner({ kind: "agent-tool", scopeId: "exec" });
+  let bestMp: ManagedProcess | undefined;
+  for (const mp of managed) {
+    if (mp.pid === pid) {
+      if (!bestMp || mp.spec.id > bestMp.spec.id) {
+        bestMp = mp;
       }
     }
   }
-  return best ? { kind: "legacy", handle: best } : undefined;
-}
-
-/**
- * Get the full output string from a legacy handle for a given stream, applying
- * `since` (byte offset) and `tail` (last N lines) filters.
- */
-function getFilteredOutput(
-  handle: BackgroundHandle,
-  stream: "stdout" | "stderr",
-  since: number | undefined,
-  tail: number | undefined,
-): { text: string; totalBytes: number; truncated: boolean } {
-  const raw = readHandleOutput(handle, stream);
-  return filterRawOutput(raw, since, tail);
-}
-
-/**
- * Get the full output string from a procman ManagedProcess for a given stream,
- * applying `since` (byte offset) and `tail` (last N lines) filters.
- */
-function getFilteredManagedOutput(
-  mp: ManagedProcess,
-  stream: "stdout" | "stderr",
-  since: number | undefined,
-  tail: number | undefined,
-): { text: string; totalBytes: number; truncated: boolean } {
-  const raw = mp.readOutput(stream);
-  return filterRawOutput(raw, since, tail);
+  return bestMp;
 }
 
 /**
@@ -190,9 +139,18 @@ function filterRawOutput(
   return { text: raw, totalBytes, truncated: false };
 }
 
-// Runtime is now derived from stored timestamps:
-// - Legacy path: Date.now() - handle.createdAt
-// - Procman path: mp.uptimeMs
+/**
+ * Get filtered output from a procman ManagedProcess.
+ */
+function getFilteredManagedOutput(
+  mp: ManagedProcess,
+  stream: "stdout" | "stderr",
+  since: number | undefined,
+  tail: number | undefined,
+): { text: string; totalBytes: number; truncated: boolean } {
+  const raw = mp.readOutput(stream);
+  return filterRawOutput(raw, since, tail);
+}
 
 // ---------------------------------------------------------------------------
 // Validation
@@ -229,98 +187,17 @@ function validatePollOptions(opts: PollOptions): void {
 /**
  * Poll a background process by PID — check its status and retrieve output.
  *
- * This is a convenience tool that wraps the background session registry.
- * It only tracks processes started via `toolExecExtended` with background
- * or yield-based execution.
- *
- * When a ProcessManager is available, queries procman for the process.
- * Falls back to the legacy BackgroundHandle registry.
+ * Queries procman for the process. Returns an error if the PID is not tracked.
  */
 export async function toolPoll(opts: PollOptions): Promise<PollResponse> {
   validatePollOptions(opts);
 
-  const resolved = findProcessByPid(opts.pid);
-  if (!resolved) {
+  const mp = findProcessByPid(opts.pid);
+  if (!mp) {
     return { error: `no tracked process with pid ${opts.pid}` };
   }
 
-  if (resolved.kind === "managed") {
-    return pollManagedProcess(resolved.mp, opts);
-  }
-
-  return pollLegacyHandle(resolved.handle, opts);
-}
-
-// ---------------------------------------------------------------------------
-// Legacy BackgroundHandle polling
-// ---------------------------------------------------------------------------
-
-async function pollLegacyHandle(handle: BackgroundHandle, opts: PollOptions): Promise<PollResult> {
-  const timeoutMs = opts.timeout ?? 0;
-  let waited = false;
-  let waitedMs = 0;
-
-  // If the process is still running and timeout > 0, wait for it
-  if (!handle.exited && timeoutMs > 0) {
-    const waitStart = Date.now();
-    const finished = await Promise.race([
-      handle.done.then(() => true),
-      new Promise<false>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
-    ]);
-    waitedMs = Date.now() - waitStart;
-    waited = true;
-    void finished;
-  }
-
-  const runtimeMs = Date.now() - handle.createdAt;
-
-  // Build base result
-  const base: PollResultBase = {
-    pid: opts.pid,
-    status: handle.exited ? "exited" : "running",
-    runtimeMs,
-  };
-
-  if (handle.exited) {
-    base.exitCode = handle.exitCode ?? undefined;
-    if (handle.signal) {
-      base.signal = handle.signal;
-    }
-  }
-
-  if (waited) {
-    base.waited = true;
-    base.waitedMs = waitedMs;
-  }
-
-  // Build output fields
-  if (opts.streams) {
-    const out = getFilteredOutput(handle, "stdout", opts.since, opts.tail);
-    const err = getFilteredOutput(handle, "stderr", opts.since, opts.tail);
-    return {
-      ...base,
-      stdout: out.text,
-      stderr: err.text,
-      stdoutBytes: out.totalBytes,
-      stderrBytes: err.totalBytes,
-      stdoutTruncated: out.truncated,
-      stderrTruncated: err.truncated,
-    } as PollSplitResult;
-  }
-
-  // Combined output
-  const outData = getFilteredOutput(handle, "stdout", opts.since, opts.tail);
-  const errData = getFilteredOutput(handle, "stderr", opts.since, opts.tail);
-  const combinedText = outData.text + errData.text;
-  const combinedBytes = outData.totalBytes + errData.totalBytes;
-  const combinedTruncated = outData.truncated || errData.truncated;
-
-  return {
-    ...base,
-    output: combinedText,
-    outputBytes: combinedBytes,
-    truncated: combinedTruncated,
-  } as PollCombinedResult;
+  return pollManagedProcess(mp, opts);
 }
 
 // ---------------------------------------------------------------------------

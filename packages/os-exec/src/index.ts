@@ -4,14 +4,7 @@ export {
   resolvePathForWrite,
   DEFAULT_ADDITIONAL_READ_ROOTS,
 } from "./workspace-path";
-export {
-  runAsUser,
-  spawnAsUser,
-  readHandleOutput,
-  type RunAsUserOptions,
-  type RunAsUserResult,
-  type BackgroundHandle,
-} from "./subprocess";
+export { runAsUser, type RunAsUserOptions, type RunAsUserResult } from "./subprocess";
 export {
   toolRead,
   toolReadBinary,
@@ -23,7 +16,6 @@ export {
   toolExecExtended,
   getExecSession,
   getManagedExecSession,
-  listExecSessions,
   removeExecSession,
   setProcessManager,
   getProcessManager,

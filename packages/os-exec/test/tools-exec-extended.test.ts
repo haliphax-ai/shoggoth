@@ -472,9 +472,17 @@ describe("toolExecExtended", () => {
       assert.equal(bg.yielded, undefined);
 
       // Clean up: wait for process to finish
-      const session = getExecSession(bg.sessionId);
-      assert.ok(session);
-      await session.done;
+      const mp = getManagedExecSession(bg.sessionId);
+      assert.ok(mp);
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
       removeExecSession(bg.sessionId);
     });
 
@@ -488,11 +496,19 @@ describe("toolExecExtended", () => {
         creds,
       );
       const bg = r as ExecBackgroundResult;
-      const session = getExecSession(bg.sessionId);
-      assert.ok(session);
-      assert.equal(session.pid, bg.pid);
+      const mp = getExecSession(bg.sessionId);
+      assert.ok(mp);
+      assert.equal(mp.pid, bg.pid);
 
-      await session.done;
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
       removeExecSession(bg.sessionId);
     });
 
@@ -623,10 +639,18 @@ describe("toolExecExtended", () => {
       assert.equal(bg.status, "running");
 
       // Clean up: kill the process
-      const session = getExecSession(bg.sessionId);
-      assert.ok(session);
-      session.child.kill("SIGTERM");
-      await session.done;
+      const mp = getExecSession(bg.sessionId);
+      assert.ok(mp);
+      mp.kill();
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
       removeExecSession(bg.sessionId);
     });
 
@@ -643,9 +667,17 @@ describe("toolExecExtended", () => {
       const bg = r as ExecBackgroundResult;
       assert.ok(bg.sessionId);
 
-      const session = getExecSession(bg.sessionId);
-      assert.ok(session);
-      await session.done;
+      const mp = getExecSession(bg.sessionId);
+      assert.ok(mp);
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
       removeExecSession(bg.sessionId);
     });
 
@@ -665,9 +697,17 @@ describe("toolExecExtended", () => {
       // yielded should NOT be set — this was immediate background, not yield
       assert.equal(bg.yielded, undefined);
 
-      const session = getExecSession(bg.sessionId);
-      assert.ok(session);
-      await session.done;
+      const mp = getExecSession(bg.sessionId);
+      assert.ok(mp);
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
       removeExecSession(bg.sessionId);
     });
 
@@ -697,10 +737,18 @@ describe("toolExecExtended", () => {
         assert.ok(bg.partialOutput.includes("partial-data"));
       }
 
-      const session = getExecSession(bg.sessionId);
-      assert.ok(session);
-      session.child.kill("SIGTERM");
-      await session.done;
+      const mp = getExecSession(bg.sessionId);
+      assert.ok(mp);
+      mp.kill();
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
       removeExecSession(bg.sessionId);
     });
   });
