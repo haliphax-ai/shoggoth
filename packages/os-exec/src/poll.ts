@@ -159,10 +159,23 @@ function filterRawOutput(
 
   // `tail` takes precedence over `since` (per proposal)
   if (tail !== undefined) {
-    const lines = raw.split("\n");
-    const sliced = lines.length <= tail ? lines : lines.slice(-tail);
-    const text = sliced.join("\n");
-    return { text, totalBytes, truncated: lines.length > tail };
+    // Walk backward counting newlines to find where the last `tail` lines begin,
+    // avoiding the O(n) split+slice+join on large outputs.
+    let pos = raw.length;
+    let newlinesFound = 0;
+    while (pos > 0) {
+      pos--;
+      if (raw[pos] === "\n") {
+        newlinesFound++;
+        if (newlinesFound === tail) break;
+      }
+    }
+    if (newlinesFound < tail) {
+      // Fewer lines than requested — return entire output.
+      return { text: raw, totalBytes, truncated: false };
+    }
+    const text = raw.slice(pos + 1);
+    return { text, totalBytes, truncated: true };
   }
 
   if (since !== undefined) {
