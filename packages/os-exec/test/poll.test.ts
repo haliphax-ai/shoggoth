@@ -3,20 +3,31 @@ import assert from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { toolExecExtended, getExecSession, removeExecSession } from "../src/tools";
+import { ProcessManager } from "@shoggoth/procman";
+import {
+  toolExecExtended,
+  getExecSession,
+  removeExecSession,
+  setProcessManager,
+} from "../src/tools";
 import { toolPoll } from "../src/poll";
 import type { PollCombinedResult, PollSplitResult, PollError } from "../src/poll";
 import type { ExecBackgroundResult } from "../src/tools";
 
 describe("toolPoll", () => {
   let ws: string;
+  let pm: ProcessManager;
   const creds = { uid: process.getuid!(), gid: process.getgid!() };
 
   beforeEach(() => {
     ws = mkdtempSync(join(tmpdir(), "shoggoth-poll-"));
+    pm = new ProcessManager();
+    setProcessManager(pm);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await pm.stopAll();
+    setProcessManager(undefined);
     rmSync(ws, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 

@@ -462,32 +462,22 @@ describe("procman integration", () => {
   // Fallback when ProcessManager is cleared
   // -----------------------------------------------------------------------
 
-  describe("fallback without ProcessManager", () => {
-    it("falls back to legacy Map when ProcessManager is cleared", async () => {
+  describe("throws without ProcessManager", () => {
+    it("throws when ProcessManager is not available for background mode", async () => {
       setProcessManager(undefined);
 
-      const r = await toolExecExtended(
-        ws,
-        {
-          command: "sleep 0.2",
-          background: true,
-        },
-        creds,
+      await assert.rejects(
+        () =>
+          toolExecExtended(
+            ws,
+            {
+              command: "sleep 0.2",
+              background: true,
+            },
+            creds,
+          ),
+        /ProcessManager not available/,
       );
-      assert.equal(r.kind, "background");
-      const bg = r as ExecBackgroundResult;
-
-      // Should be in legacy Map
-      const handle = getExecSession(bg.sessionId);
-      assert.ok(handle);
-      assert.equal(handle.pid, bg.pid);
-
-      // Should NOT be in procman
-      const mp = getManagedExecSession(bg.sessionId);
-      assert.strictEqual(mp, undefined);
-
-      await handle.done;
-      removeExecSession(bg.sessionId);
 
       // Restore for afterEach
       setProcessManager(pm);

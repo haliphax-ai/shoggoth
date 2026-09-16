@@ -2,13 +2,7 @@ import { existsSync, realpathSync, globSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join, resolve, relative, sep } from "node:path";
-import {
-  runAsUser,
-  spawnAsUser,
-  readHandleOutput,
-  type RunAsUserResult,
-  type BackgroundHandle,
-} from "./subprocess";
+import { runAsUser, type RunAsUserResult } from "./subprocess";
 import { resolvePathForRead, resolvePathForWrite, PathEscapeError } from "./workspace-path";
 import type { ProcessManager, ManagedProcess, ProcessSpec } from "@shoggoth/procman";
 import { isTerminal } from "./util";
@@ -1304,20 +1298,7 @@ export async function toolExecExtended(
       };
     }
 
-    const handle = spawnAsUser(spawnOpts);
-    backgroundSessions.set(handle.sessionId, handle);
-
-    // Clean up session when process exits
-    handle.done.then(() => {
-      // Keep in registry for polling — caller removes via removeExecSession
-    });
-
-    return {
-      kind: "background",
-      sessionId: handle.sessionId,
-      pid: handle.pid,
-      status: "running",
-    };
+    throw new Error("ProcessManager not available — background exec requires process manager");
   }
 
   // --- Yield-based backgrounding ---
@@ -1385,34 +1366,7 @@ export async function toolExecExtended(
       };
     }
 
-    const handle = spawnAsUser(spawnOpts);
-
-    // Wait up to yieldMs for the process to finish
-    const finished = await Promise.race([
-      handle.done.then(() => true),
-      new Promise<false>((resolve) => setTimeout(() => resolve(false), opts.yieldMs)),
-    ]);
-
-    if (finished) {
-      // Process completed within the yield window — return full result
-      return buildForegroundResult(handle, splitStreams, maxOutput, truncationMode);
-    }
-
-    // Still running — register and return background handle
-    backgroundSessions.set(handle.sessionId, handle);
-
-    const partialStdout = readHandleOutput(handle, "stdout");
-    const partialStderr = readHandleOutput(handle, "stderr");
-    const partialOutput = (partialStdout + partialStderr).slice(0, maxOutput) || undefined;
-
-    return {
-      kind: "background",
-      sessionId: handle.sessionId,
-      pid: handle.pid,
-      status: "running",
-      yielded: true,
-      partialOutput,
-    };
+    throw new Error("ProcessManager not available — yield exec requires process manager");
   }
 
   // --- Foreground (default) ---
@@ -1479,30 +1433,6 @@ export async function toolExecExtended(
   }
 
   return buildForegroundResultFromRaw(result, splitStreams, maxOutput, truncationMode);
-}
-
-/**
- * Build a foreground result from a completed BackgroundHandle.
- */
-function buildForegroundResult(
-  handle: BackgroundHandle,
-  splitStreams: boolean,
-  maxOutput: number,
-  truncationMode: TruncationMode,
-): ExecForegroundResult {
-  const stdout = readHandleOutput(handle, "stdout");
-  const stderr = readHandleOutput(handle, "stderr");
-
-  return buildForegroundResultFromParts(
-    stdout,
-    stderr,
-    handle.exitCode,
-    handle.signal,
-    handle.timedOut,
-    splitStreams,
-    maxOutput,
-    truncationMode,
-  );
 }
 
 /**
