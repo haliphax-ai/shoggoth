@@ -647,7 +647,11 @@ function resolvePathList(
             results.push(relative(rootReal, abs));
           }
         } catch {
-          // Skip paths that fail validation (escapes, broken symlinks, etc.)
+          // Match explicit-path behavior: add the path so the error surfaces per-file
+          if (!seen.has(match)) {
+            seen.add(match);
+            results.push(match);
+          }
         }
       }
     } else {
