@@ -494,7 +494,7 @@ describe("ServiceToolDispatcher", () => {
       });
       vi.stubGlobal("fetch", fetchMock);
 
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
       // Do NOT generate an identity for this service — no stored recipient
       serviceRegistry.register({
@@ -533,10 +533,12 @@ describe("ServiceToolDispatcher", () => {
       // Should fall back to placeholder
       expect(authHeader).toBe("Bearer shoggoth-placeholder");
 
-      // Should have logged a warning
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("no-key-service"));
+      // Should have logged a warning via the structured logger
+      const stderrOutput = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
+      expect(stderrOutput).toContain("no-key-service");
+      expect(stderrOutput).toContain('"level":"warn"');
 
-      warnSpy.mockRestore();
+      stderrSpy.mockRestore();
     });
 
     it("should set Authorization header to 'Bearer <base64url-encoded token>'", async () => {
