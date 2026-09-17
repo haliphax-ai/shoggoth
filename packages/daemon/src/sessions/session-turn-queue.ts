@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { getLogger } from "../logging";
 
 export type TurnPriority = "system" | "user";
 
@@ -44,6 +45,8 @@ interface SessionQueue {
   running: boolean;
   consecutiveHighTurns: number;
 }
+
+const log = getLogger("turn-queue");
 
 export class TieredTurnQueue {
   private readonly sessions = new Map<string, SessionQueue>();
@@ -91,11 +94,15 @@ export class TieredTurnQueue {
       } else {
         sq.normal.push(entry);
       }
-      this.log(
-        "turn_queue.enqueued",
+      log.debug("turn_queue.enqueued", {
         sessionId,
-        `priority=${priority} label=${label} id=${entry.id} running=${sq.running} high=${sq.high.length} normal=${sq.normal.length}`,
-      );
+        priority,
+        label,
+        id: entry.id,
+        running: sq.running,
+        high: sq.high.length,
+        normal: sq.normal.length,
+      });
       this.pump(sessionId);
     });
   }
@@ -197,11 +204,11 @@ export class TieredTurnQueue {
     const sq = this.sessions.get(sessionId);
     if (!sq || sq.running) {
       if (sq?.running) {
-        this.log(
-          "turn_queue.pump_blocked",
+        log.debug("turn_queue.pump_blocked", {
           sessionId,
-          `already running, high=${sq.high.length} normal=${sq.normal.length}`,
-        );
+          high: sq.high.length,
+          normal: sq.normal.length,
+        });
       }
       return;
     }
@@ -211,21 +218,23 @@ export class TieredTurnQueue {
       return;
     }
     sq.running = true;
-    this.log(
-      "turn_queue.turn_start",
+    log.debug("turn_queue.turn_start", {
       sessionId,
-      `priority=${next.priority} label=${next.label} id=${next.id}`,
-    );
+      priority: next.priority,
+      label: next.label,
+      id: next.id,
+    });
     next
       .execute()
       .then(() => next.resolve())
       .catch((err) => next.reject(err))
       .finally(() => {
-        this.log(
-          "turn_queue.turn_end",
+        log.debug("turn_queue.turn_end", {
           sessionId,
-          `priority=${next.priority} label=${next.label} id=${next.id}`,
-        );
+          priority: next.priority,
+          label: next.label,
+          id: next.id,
+        });
         // *** IMPLEMENTATION 2: Call the hook upon turn completion ***
         this.onTurnEnd?.(sessionId);
         // ***********************************************************
@@ -272,19 +281,5 @@ export class TieredTurnQueue {
     if (!sq.running && sq.high.length === 0 && sq.normal.length === 0) {
       this.sessions.delete(sessionId);
     }
-  }
-
-  private log(msg: string, sessionId: string, detail: string): void {
-    const ts = new Date().toISOString();
-    console.log(
-      JSON.stringify({
-        ts,
-        level: "debug",
-        msg,
-        component: "turn-queue",
-        sessionId,
-        detail,
-      }),
-    );
   }
 }
