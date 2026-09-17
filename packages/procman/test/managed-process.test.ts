@@ -28,11 +28,7 @@ function makeRunningSpec(overrides: Partial<ProcessSpec> = {}): ProcessSpec {
   });
 }
 
-function waitForState(
-  mp: ManagedProcess,
-  target: string,
-  timeoutMs = 10000,
-): Promise<void> {
+function waitForState(mp: ManagedProcess, target: string, timeoutMs = 10000): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     if (mp.state === target) return resolve();
     const timer = setTimeout(
@@ -292,10 +288,7 @@ describe("ManagedProcess", () => {
           }),
         );
 
-        await assert.rejects(
-          () => mp.start(),
-          /health check failed for tcp-fail/,
-        );
+        await assert.rejects(() => mp.start(), /health check failed for tcp-fail/);
 
         // Process should be in failed state
         assert.equal(mp.state, "failed");
@@ -330,7 +323,11 @@ describe("ManagedProcess", () => {
           );
 
           await mp.start();
-          assert.equal(mp.state, "running", "should transition to running when HTTP probe succeeds");
+          assert.equal(
+            mp.state,
+            "running",
+            "should transition to running when HTTP probe succeeds",
+          );
           await mp.stop();
         } finally {
           server.close();
@@ -363,10 +360,7 @@ describe("ManagedProcess", () => {
             }),
           );
 
-          await assert.rejects(
-            () => mp.start(),
-            /health check failed for http-wrong-status/,
-          );
+          await assert.rejects(() => mp.start(), /health check failed for http-wrong-status/);
 
           assert.equal(mp.state, "failed");
         } finally {
@@ -388,10 +382,7 @@ describe("ManagedProcess", () => {
           }),
         );
 
-        await assert.rejects(
-          () => mp.start(),
-          /health check failed for http-unreachable/,
-        );
+        await assert.rejects(() => mp.start(), /health check failed for http-unreachable/);
 
         assert.equal(mp.state, "failed");
       });
@@ -434,7 +425,11 @@ describe("ManagedProcess", () => {
           );
 
           await mp.start();
-          assert.equal(mp.state, "running", "should follow redirect and succeed when final endpoint returns 200");
+          assert.equal(
+            mp.state,
+            "running",
+            "should follow redirect and succeed when final endpoint returns 200",
+          );
           await mp.stop();
         } finally {
           redirectServer.close();
@@ -477,10 +472,7 @@ describe("ManagedProcess", () => {
           }),
         );
 
-        await assert.rejects(
-          () => mp.start(),
-          /health check failed for exec-fail/,
-        );
+        await assert.rejects(() => mp.start(), /health check failed for exec-fail/);
 
         assert.equal(mp.state, "failed");
       });
@@ -552,7 +544,10 @@ describe("ManagedProcess", () => {
         check();
       });
 
-      assert.ok(mp.restartCount >= 1, `should have restarted after signal kill, got ${mp.restartCount}`);
+      assert.ok(
+        mp.restartCount >= 1,
+        `should have restarted after signal kill, got ${mp.restartCount}`,
+      );
 
       // The restarted process is now running (sleep 60). Stop it cleanly.
       await mp.stop();
@@ -581,7 +576,10 @@ describe("ManagedProcess", () => {
       await waitForState(mp, "dead", 10000);
 
       assert.equal(mp.state, "dead");
-      assert.ok(mp.restartCount >= 1, `should have restarted on non-zero exit, got ${mp.restartCount}`);
+      assert.ok(
+        mp.restartCount >= 1,
+        `should have restarted on non-zero exit, got ${mp.restartCount}`,
+      );
     });
 
     it("restarts on non-zero exit code with on-unexpected-exit policy", async () => {
@@ -606,7 +604,10 @@ describe("ManagedProcess", () => {
       await waitForState(mp, "dead", 10000);
 
       assert.equal(mp.state, "dead");
-      assert.ok(mp.restartCount >= 1, `should have restarted on non-zero exit, got ${mp.restartCount}`);
+      assert.ok(
+        mp.restartCount >= 1,
+        `should have restarted on non-zero exit, got ${mp.restartCount}`,
+      );
     });
   });
 
@@ -749,6 +750,68 @@ describe("ManagedProcess", () => {
       // stop on dead process should resolve without error
       await mp.stop();
       assert.equal(mp.state, "dead");
+    });
+  });
+
+  // ===========================================================================
+  // NEW TESTS — zombie process cleanup (issue #213)
+  // ===========================================================================
+
+  describe("zombie process cleanup", () => {
+    it("releases child handle when process exits naturally without restart", async () => {
+      const mp = new ManagedProcess(makeSpec({ id: "zombie-test" }));
+
+      await mp.start();
+      // echo exits immediately — wait for it to finish naturally
+      await waitForState(mp, "dead", 5000);
+
+      assert.equal(mp.state, "dead");
+      // Child process handle should be released to prevent zombie accumulation
+      assert.equal((mp as any)._child, null, "child should be null after natural exit");
+      // PID should be preserved so poll tools can still look up the process
+      assert.ok(mp.pid !== undefined && mp.pid !== null, "pid should be retained after exit");
+    });
+
+    it("releases child handle when process exits with non-zero code and never policy", async () => {
+      const mp = new ManagedProcess(
+        makeSpec({
+          id: "zombie-exit1",
+          command: "sh",
+          args: ["-c", "exit 1"],
+          restart: { mode: "never" },
+        }),
+      );
+
+      await mp.start();
+      await waitForState(mp, "dead", 5000);
+
+      assert.equal(mp.state, "dead");
+      assert.equal((mp as any)._child, null, "child should be null after non-zero exit");
+      assert.ok(mp.pid !== undefined && mp.pid !== null, "pid should be retained");
+    });
+
+    it("releases child handle when on-failure process exhausts retries", async () => {
+      const mp = new ManagedProcess(
+        makeSpec({
+          id: "zombie-exhaust",
+          command: "sh",
+          args: ["-c", "exit 1"],
+          restart: {
+            mode: "on-failure",
+            maxRetries: 1,
+            initialDelayMs: 50,
+            backoffMultiplier: 1,
+            maxDelayMs: 100,
+          },
+        }),
+      );
+
+      await mp.start();
+      await waitForState(mp, "dead", 10000);
+
+      assert.equal(mp.state, "dead");
+      assert.equal((mp as any)._child, null, "child should be null after exhausting retries");
+      assert.ok(mp.pid !== undefined && mp.pid !== null, "pid should be retained");
     });
   });
 });

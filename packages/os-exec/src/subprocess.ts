@@ -89,6 +89,9 @@ function spawnChild(options: RunAsUserOptions): ChildProcess {
     env: { ...process.env, ...options.env },
     detached: true,
   });
+  // Detach from the Node.js event loop so the child doesn't keep the
+  // process alive.  libuv still tracks and reaps the child via SIGCHLD.
+  child.unref();
 
   if (child.stdin && options.stdin !== undefined) {
     child.stdin.write(options.stdin, "utf8");
