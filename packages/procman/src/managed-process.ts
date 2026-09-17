@@ -444,7 +444,12 @@ export class ManagedProcess extends EventEmitter {
     if (shouldRestart && this._consecutiveFailures < maxRetries) {
       this._scheduleRestart();
     } else {
-      this._finalize();
+      // Release the child process handle to prevent zombie accumulation,
+      // but keep _pid so that poll tools can still look up this process.
+      this._clearTimers();
+      this._setState("dead");
+      this._child = null;
+      this._resolveStop();
     }
   }
 

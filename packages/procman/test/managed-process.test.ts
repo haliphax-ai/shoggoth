@@ -758,7 +758,7 @@ describe("ManagedProcess", () => {
   // ===========================================================================
 
   describe("zombie process cleanup", () => {
-    it("cleans up child reference when process exits naturally without restart", async () => {
+    it("releases child handle when process exits naturally without restart", async () => {
       const mp = new ManagedProcess(makeSpec({ id: "zombie-test" }));
 
       await mp.start();
@@ -766,11 +766,13 @@ describe("ManagedProcess", () => {
       await waitForState(mp, "dead", 5000);
 
       assert.equal(mp.state, "dead");
-      // _finalize() should have nulled the pid, confirming child cleanup
-      assert.equal(mp.pid, undefined, "pid should be undefined after natural exit without restart");
+      // Child process handle should be released to prevent zombie accumulation
+      assert.equal((mp as any)._child, null, "child should be null after natural exit");
+      // PID should be preserved so poll tools can still look up the process
+      assert.ok(mp.pid !== undefined && mp.pid !== null, "pid should be retained after exit");
     });
 
-    it("cleans up child reference when process exits with non-zero code and never policy", async () => {
+    it("releases child handle when process exits with non-zero code and never policy", async () => {
       const mp = new ManagedProcess(
         makeSpec({
           id: "zombie-exit1",
@@ -784,14 +786,11 @@ describe("ManagedProcess", () => {
       await waitForState(mp, "dead", 5000);
 
       assert.equal(mp.state, "dead");
-      assert.equal(
-        mp.pid,
-        undefined,
-        "pid should be undefined after non-zero exit with never policy",
-      );
+      assert.equal((mp as any)._child, null, "child should be null after non-zero exit");
+      assert.ok(mp.pid !== undefined && mp.pid !== null, "pid should be retained");
     });
 
-    it("cleans up child reference when on-failure process exhausts retries", async () => {
+    it("releases child handle when on-failure process exhausts retries", async () => {
       const mp = new ManagedProcess(
         makeSpec({
           id: "zombie-exhaust",
@@ -811,7 +810,8 @@ describe("ManagedProcess", () => {
       await waitForState(mp, "dead", 10000);
 
       assert.equal(mp.state, "dead");
-      assert.equal(mp.pid, undefined, "pid should be undefined after exhausting retries");
+      assert.equal((mp as any)._child, null, "child should be null after exhausting retries");
+      assert.ok(mp.pid !== undefined && mp.pid !== null, "pid should be retained");
     });
   });
 });
