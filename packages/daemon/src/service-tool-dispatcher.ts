@@ -7,6 +7,10 @@
 
 import type { ServiceRegistry, ServiceToolDeclaration } from "./service-registry";
 import type { TokenMinter } from "./service-auth.js";
+import { getLogger } from "./logging";
+
+/** Module-level logger. */
+const log = getLogger("service-tool-dispatcher");
 
 /**
  * Context for tool invocation.
@@ -100,7 +104,7 @@ export class ServiceToolDispatcher {
       try {
         token = await this.tokenMinter.mint(ctx.agentId, serviceId, ctx.sessionUrn);
       } catch {
-        console.warn(
+        log.warn(
           `TokenMinter: failed to mint token for service ${serviceId}, falling back to placeholder`,
         );
       }
