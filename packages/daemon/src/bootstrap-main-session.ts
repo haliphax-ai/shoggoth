@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import { resolveAgentPlatformConfig, resolveAgentWorkspacePath } from "@shoggoth/shared";
 import { createSessionStore } from "./sessions/session-store";
@@ -72,12 +72,31 @@ async function bootstrapAgent(
   // Resolve agent UID/GID for the session row (must happen before workspace creation)
   let runtimeUid: number;
   let runtimeGid: number;
-  try {
-    runtimeUid = Number(execSync("id -u agent", { encoding: "utf8" }).trim());
-    runtimeGid = Number(execSync("id -g agent", { encoding: "utf8" }).trim());
-  } catch {
-    runtimeUid = 900;
-    runtimeGid = 900;
+
+  const processUid = process.getuid?.();
+  const processGid = process.getgid?.();
+
+  if (processUid !== undefined && processGid !== undefined && processUid !== 0) {
+    // Running as the agent user directly — use process credentials
+    runtimeUid = processUid;
+    runtimeGid = processGid;
+  } else {
+    // Running as root or in an environment without getuid/getgid — resolve from /etc/passwd
+    try {
+      const passwd = readFileSync("/etc/passwd", "utf8");
+      const agentLine = passwd.split("\n").find((line) => line.startsWith("agent:"));
+      if (agentLine) {
+        const fields = agentLine.split(":");
+        runtimeUid = Number(fields[2]);
+        runtimeGid = Number(fields[3]);
+      } else {
+        runtimeUid = 900;
+        runtimeGid = 900;
+      }
+    } catch {
+      runtimeUid = 900;
+      runtimeGid = 900;
+    }
   }
 
   // Create workspace layout (dirs + template files) as the agent user
