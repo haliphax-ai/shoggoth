@@ -86,6 +86,7 @@ export class HttpHealthChecker {
 
 export class ExternalServiceHealthPoller extends EventEmitter {
   private services = new Map<string, ServiceState>();
+  private healthCheckGenerations = new Map<string, number>();
   private tcpHealthChecker: TcpHealthChecker;
   private httpHealthChecker: HttpHealthChecker;
 
@@ -114,6 +115,12 @@ export class ExternalServiceHealthPoller extends EventEmitter {
 
     this.services.set(declaration.id, state);
 
+    // Increment generation to invalidate any in-flight health checks from a prior add/remove
+    this.healthCheckGenerations.set(
+      declaration.id,
+      (this.healthCheckGenerations.get(declaration.id) ?? 0) + 1,
+    );
+
     // Run the first health check immediately (don't wait for the first interval tick)
     this.runHealthCheck(declaration.id).catch((err) => {
       this.logger.warn(`Initial health check failed for ${declaration.id}`, { err: String(err) });
@@ -136,6 +143,11 @@ export class ExternalServiceHealthPoller extends EventEmitter {
         clearInterval(state.intervalTimer);
         state.intervalTimer = null;
       }
+      // Increment generation to invalidate any in-flight health checks
+      this.healthCheckGenerations.set(
+        serviceId,
+        (this.healthCheckGenerations.get(serviceId) ?? 0) + 1,
+      );
       this.services.delete(serviceId);
       this.logger.debug(`Removed health poller for service ${serviceId}`);
     }
@@ -167,6 +179,9 @@ export class ExternalServiceHealthPoller extends EventEmitter {
     const state = this.services.get(serviceId);
     if (!state) return;
 
+    // Capture the generation before the async health check so stale results are ignored
+    const generation = this.healthCheckGenerations.get(serviceId);
+
     const { declaration } = state;
     let isHealthy = false;
     let error: Error | undefined;
@@ -192,16 +207,23 @@ export class ExternalServiceHealthPoller extends EventEmitter {
       error = err instanceof Error ? err : new Error(String(err));
     }
 
-    await this.handleHealthResult(serviceId, isHealthy, error);
+    await this.handleHealthResult(serviceId, isHealthy, error, generation);
   }
 
   private async handleHealthResult(
     serviceId: string,
     isHealthy: boolean,
     error?: Error,
+    generation?: number,
   ): Promise<void> {
     const state = this.services.get(serviceId);
     if (!state) return;
+
+    // Ignore stale health check results from a prior add/remove cycle
+    if (generation !== undefined && this.healthCheckGenerations.get(serviceId) !== generation) {
+      this.logger.debug(`Ignoring stale health check result for ${serviceId}`);
+      return;
+    }
 
     const { declaration } = state;
     const unhealthyThreshold = declaration.unhealthyThreshold ?? DEFAULT_UNHEALTHY_THRESHOLD;
