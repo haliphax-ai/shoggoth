@@ -46,6 +46,34 @@ export async function createVaultService(
     activeKeyPath = identityPath;
   }
 
+  // Rotation guard: concurrent get/put/delete/resolve wait while rotateKey is in progress
+  let isRotating = false;
+  let rotationDone: Promise<void> | null = null;
+  let rotationResolve: (() => void) | null = null;
+
+  /** Await this at the start of any read/write operation during rotation. */
+  async function awaitRotation(): Promise<void> {
+    if (isRotating && rotationDone) {
+      await rotationDone;
+    }
+  }
+
+  function beginRotation(): void {
+    isRotating = true;
+    rotationDone = new Promise<void>((resolve) => {
+      rotationResolve = resolve;
+    });
+  }
+
+  function endRotation(): void {
+    isRotating = false;
+    if (rotationResolve) {
+      rotationResolve();
+      rotationResolve = null;
+    }
+    rotationDone = null;
+  }
+
   // Create the vault service instance
   const vault: VaultService = {
     async put(
@@ -54,6 +82,7 @@ export async function createVaultService(
       plaintext: string,
       metadata?: VaultEntryMetadata,
     ): Promise<void> {
+      await awaitRotation();
       validateScope(scope);
 
       const ciphertext = await ageEncrypt(plaintext, identity.recipient);
@@ -66,6 +95,7 @@ export async function createVaultService(
     },
 
     async get(scope: string, name: string): Promise<string | null> {
+      await awaitRotation();
       validateScope(scope);
 
       const row = db
@@ -94,6 +124,7 @@ export async function createVaultService(
     },
 
     async delete(scope: string, name: string): Promise<boolean> {
+      await awaitRotation();
       validateScope(scope);
 
       const result = db
@@ -143,41 +174,46 @@ export async function createVaultService(
     },
 
     async rotateKey(newIdentity: AgeIdentity): Promise<void> {
-      // Get all current entries
-      const rows = db
-        .prepare(`
-        SELECT scope, name, ciphertext, metadata FROM vault_secrets
-      `)
-        .all() as Array<{
-        scope: string;
-        name: string;
-        ciphertext: string;
-        metadata: string | null;
-      }>;
+      beginRotation();
+      try {
+        // Get all current entries
+        const rows = db
+          .prepare(`
+          SELECT scope, name, ciphertext, metadata FROM vault_secrets
+        `)
+          .all() as Array<{
+          scope: string;
+          name: string;
+          ciphertext: string;
+          metadata: string | null;
+        }>;
 
-      // Decrypt all entries with old identity and re-encrypt with new identity
-      // Do this outside the transaction since it's async
-      const reEncrypted: Array<{ scope: string; name: string; ciphertext: string }> = [];
+        // Decrypt all entries with old identity and re-encrypt with new identity
+        // Do this outside the transaction since it's async
+        const reEncrypted: Array<{ scope: string; name: string; ciphertext: string }> = [];
 
-      for (const row of rows) {
-        const plaintext = await ageDecrypt(row.ciphertext, identity);
-        const newCiphertext = await ageEncrypt(plaintext, newIdentity.recipient);
-        reEncrypted.push({ scope: row.scope, name: row.name, ciphertext: newCiphertext });
-      }
-
-      // Now do the DB updates in a synchronous transaction
-      db.transaction(() => {
-        for (const entry of reEncrypted) {
-          db.prepare(`
-            UPDATE vault_secrets SET ciphertext = ?, updated_at = datetime('now')
-            WHERE scope = ? AND name = ?
-          `).run(entry.ciphertext, entry.scope, entry.name);
+        for (const row of rows) {
+          const plaintext = await ageDecrypt(row.ciphertext, identity);
+          const newCiphertext = await ageEncrypt(plaintext, newIdentity.recipient);
+          reEncrypted.push({ scope: row.scope, name: row.name, ciphertext: newCiphertext });
         }
-      })();
 
-      // Update the identity for future operations and persist to disk
-      identity = newIdentity;
-      await writeFile(activeKeyPath, newIdentity.identityString, "utf8");
+        // Now do the DB updates in a synchronous transaction
+        db.transaction(() => {
+          for (const entry of reEncrypted) {
+            db.prepare(`
+              UPDATE vault_secrets SET ciphertext = ?, updated_at = datetime('now')
+              WHERE scope = ? AND name = ?
+            `).run(entry.ciphertext, entry.scope, entry.name);
+          }
+        })();
+
+        // Update the identity for future operations and persist to disk
+        identity = newIdentity;
+        await writeFile(activeKeyPath, newIdentity.identityString, "utf8");
+      } finally {
+        endRotation();
+      }
     },
 
     get publicKey(): string {
