@@ -144,6 +144,8 @@ import {
 } from "./sessions/service-tool-registry-ref";
 import { ServiceKeyStore } from "./service-key-store";
 import { TokenMinter } from "./service-auth";
+import { createVaultService } from "./vault/vault-service-impl";
+import { vaultServiceRef } from "./vault/vault-ref";
 
 // ============================================================
 // Import convention
@@ -153,10 +155,8 @@ import { TokenMinter } from "./service-auth";
 // during daemon startup — logging, config, types, database, session
 // management, policy, health probes, etc.
 //
-// Dynamic imports (await import()): optional or conditionally-loaded
-// features that are loaded on-demand for startup performance or to
-// allow graceful degradation:
-//   - Vault service (may be unavailable in some deployments)
+// Dynamic imports (await import()): conditionally-loaded features
+// that depend on runtime config:
 //   - HTTP gateway (only when config.gateway.enabled is true)
 //
 // Module-level setup
@@ -275,8 +275,6 @@ async function initStateDatabase() {
 
     // Initialize vault service
     try {
-      const { createVaultService } = await import("./vault/vault-service-impl");
-      const { vaultServiceRef } = await import("./vault/vault-ref");
       const vault = await createVaultService(
         db,
         "/var/lib/shoggoth/daemon/vault.key",
