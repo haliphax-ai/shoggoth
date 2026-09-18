@@ -2,7 +2,8 @@
  * Vault Service Implementation - Secure credential storage using age encryption.
  */
 
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import type { AgeIdentity } from "./age-crypto";
@@ -41,7 +42,7 @@ export async function createVaultService(
   } else {
     // Auto-generate new identity
     identity = await ageGenerateIdentity();
-    writeFileSync(identityPath, identity.identityString, "utf8");
+    await writeFile(identityPath, identity.identityString, "utf8");
     activeKeyPath = identityPath;
   }
 
@@ -176,7 +177,7 @@ export async function createVaultService(
 
       // Update the identity for future operations and persist to disk
       identity = newIdentity;
-      writeFileSync(activeKeyPath, newIdentity.identityString, "utf8");
+      await writeFile(activeKeyPath, newIdentity.identityString, "utf8");
     },
 
     get publicKey(): string {
