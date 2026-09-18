@@ -42,13 +42,10 @@ type StartConfigHotReloadOptions = {
 
 /**
  * Watch `configDirectory` for changes, reload layered JSON, and apply policy + HITL when
- * no restart-required keys changed. Disable with `SHOGGOTH_CONFIG_HOT_RELOAD=0`.
+ * no restart-required keys changed.
  */
 export function startConfigHotReload(options: StartConfigHotReloadOptions): () => void {
   if (options.enabled === false) {
-    return () => {};
-  }
-  if (process.env.SHOGGOTH_CONFIG_HOT_RELOAD === "0") {
     return () => {};
   }
   const dir = options.configDirectory;
