@@ -65,25 +65,36 @@ export class HealthRegistry {
 
   async snapshot(options?: { strict?: boolean }): Promise<HealthSnapshot> {
     const strict = options?.strict ?? false;
-    const checks: DependencyCheck[] = [];
-    for (const p of this.probes) {
-      const started = performance.now();
-      try {
-        const c = await p.check();
-        checks.push({
-          ...c,
-          latencyMs: c.latencyMs ?? Math.round(performance.now() - started),
-        });
-      } catch (e) {
-        const err = e instanceof Error ? e.message : String(e);
-        checks.push({
-          name: p.name,
-          status: "fail",
-          detail: err,
-          latencyMs: Math.round(performance.now() - started),
-        });
-      }
-    }
+
+    const settled = await Promise.allSettled(
+      this.probes.map(async (p) => {
+        const started = performance.now();
+        try {
+          const c = await p.check();
+          return {
+            ...c,
+            latencyMs: c.latencyMs ?? Math.round(performance.now() - started),
+          };
+        } catch (e) {
+          const err = e instanceof Error ? e.message : String(e);
+          return {
+            name: p.name,
+            status: "fail" as HealthStatus,
+            detail: err,
+            latencyMs: Math.round(performance.now() - started),
+          };
+        }
+      }),
+    );
+
+    const checks: DependencyCheck[] = settled.map((r, i) => {
+      if (r.status === "fulfilled") return r.value;
+      return {
+        name: this.probes[i].name,
+        status: "fail" as HealthStatus,
+        detail: r.reason instanceof Error ? r.reason.message : String(r.reason),
+      };
+    });
 
     const badForReady = (c: DependencyCheck) =>
       c.status === "fail" || (strict && c.status === "warn");
