@@ -121,6 +121,14 @@ export class ServiceGateway {
     const parsedUrl = new URL(url, `http://${this.options.host}:${this.options.port}`);
     const pathname = parsedUrl.pathname;
 
+    // Validate Origin header against CORS configuration
+    const origin = req.headers.origin;
+    if (!this.isOriginAllowed(origin)) {
+      log.warn("websocket upgrade rejected: origin not allowed", { origin: origin ?? "(none)" });
+      this.destroySocketWithResponse(socket, 403, "Forbidden");
+      return;
+    }
+
     // Parse /{prefix}/{serviceId}/{...rest}
     const prefix = this.options.prefix;
     if (!pathname.startsWith(prefix + "/")) {
@@ -364,6 +372,17 @@ export class ServiceGateway {
   }
 
   /**
+   * Check whether the given origin is allowed by CORS configuration.
+   * Returns true if no CORS config exists or if the origin matches.
+   */
+  private isOriginAllowed(origin: string | undefined): boolean {
+    const cors = this.options.cors;
+    if (!cors) return true;
+    if (!origin) return true;
+    return cors.origins.includes("*") || cors.origins.includes(origin);
+  }
+
+  /**
    * Set CORS headers on response if configured.
    */
   private setCorsHeaders(req: http.IncomingMessage, res: http.ServerResponse): void {
@@ -374,7 +393,7 @@ export class ServiceGateway {
     if (!origin) return;
 
     // Check if origin is allowed
-    if (cors.origins.includes("*") || cors.origins.includes(origin)) {
+    if (this.isOriginAllowed(origin)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       if (cors.credentials) {
         res.setHeader("Access-Control-Allow-Credentials", "true");

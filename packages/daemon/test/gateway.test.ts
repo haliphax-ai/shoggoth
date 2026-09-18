@@ -214,18 +214,24 @@ function buildFrame(payload: Buffer, opcode: number): Buffer {
 function sendUpgradeRequest(
   port: number,
   path: string,
+  extraHeaders?: Record<string, string>,
 ): Promise<{ statusCode: number; headers: string; socket: net.Socket; rawResponse: string }> {
   return new Promise((resolve, reject) => {
     const key = crypto.randomBytes(16).toString("base64");
     const socket = net.createConnection({ host: "127.0.0.1", port }, () => {
-      const request =
+      let request =
         `GET ${path} HTTP/1.1\r\n` +
         `Host: 127.0.0.1:${port}\r\n` +
         `Upgrade: websocket\r\n` +
         `Connection: Upgrade\r\n` +
         `Sec-WebSocket-Key: ${key}\r\n` +
-        `Sec-WebSocket-Version: 13\r\n` +
-        `\r\n`;
+        `Sec-WebSocket-Version: 13\r\n`;
+      if (extraHeaders) {
+        for (const [k, v] of Object.entries(extraHeaders)) {
+          request += `${k}: ${v}\r\n`;
+        }
+      }
+      request += `\r\n`;
       socket.write(request);
     });
 
@@ -497,6 +503,136 @@ describe("ServiceGateway", () => {
       );
 
       expect(statusCode).toBe(503);
+      socket.destroy();
+    });
+
+    it("should reject upgrade with 403 when Origin header is not in CORS origins", async () => {
+      const corsOptions: GatewayOptions = {
+        port: testPort + 5,
+        host: "127.0.0.1",
+        prefix: "/svc",
+        cors: {
+          origins: ["http://allowed.example.com"],
+        },
+      };
+      const corsGateway = new ServiceGateway(registry, corsOptions);
+
+      const entry = createMockEntry({
+        id: "ws-cors-service",
+        url: `http://127.0.0.1:${wsBackendPort}`,
+        wsUrl: `ws://127.0.0.1:${wsBackendPort}`,
+        healthy: true,
+        expose: "gateway",
+      });
+      registry.register(entry);
+
+      await corsGateway.start();
+
+      try {
+        const { statusCode, socket } = await sendUpgradeRequest(
+          testPort + 5,
+          "/svc/ws-cors-service/echo",
+          { Origin: "http://evil.example.com" },
+        );
+
+        expect(statusCode).toBe(403);
+        socket.destroy();
+      } finally {
+        await corsGateway.stop();
+      }
+    });
+
+    it("should allow upgrade with 101 when Origin header matches CORS origins", async () => {
+      const corsOptions: GatewayOptions = {
+        port: testPort + 6,
+        host: "127.0.0.1",
+        prefix: "/svc",
+        cors: {
+          origins: ["http://allowed.example.com"],
+        },
+      };
+      const corsGateway = new ServiceGateway(registry, corsOptions);
+
+      const entry = createMockEntry({
+        id: "ws-cors-ok-service",
+        url: `http://127.0.0.1:${wsBackendPort}`,
+        wsUrl: `ws://127.0.0.1:${wsBackendPort}`,
+        healthy: true,
+        expose: "gateway",
+      });
+      registry.register(entry);
+
+      await corsGateway.start();
+
+      try {
+        const { statusCode, socket } = await sendUpgradeRequest(
+          testPort + 6,
+          "/svc/ws-cors-ok-service/echo",
+          { Origin: "http://allowed.example.com" },
+        );
+
+        expect(statusCode).toBe(101);
+        socket.destroy();
+      } finally {
+        await corsGateway.stop();
+      }
+    });
+
+    it("should allow upgrade with wildcard CORS origins", async () => {
+      const corsOptions: GatewayOptions = {
+        port: testPort + 7,
+        host: "127.0.0.1",
+        prefix: "/svc",
+        cors: {
+          origins: ["*"],
+        },
+      };
+      const corsGateway = new ServiceGateway(registry, corsOptions);
+
+      const entry = createMockEntry({
+        id: "ws-cors-wildcard-service",
+        url: `http://127.0.0.1:${wsBackendPort}`,
+        wsUrl: `ws://127.0.0.1:${wsBackendPort}`,
+        healthy: true,
+        expose: "gateway",
+      });
+      registry.register(entry);
+
+      await corsGateway.start();
+
+      try {
+        const { statusCode, socket } = await sendUpgradeRequest(
+          testPort + 7,
+          "/svc/ws-cors-wildcard-service/echo",
+          { Origin: "http://any-origin.example.com" },
+        );
+
+        expect(statusCode).toBe(101);
+        socket.destroy();
+      } finally {
+        await corsGateway.stop();
+      }
+    });
+
+    it("should allow upgrade when no CORS config is set", async () => {
+      const entry = createMockEntry({
+        id: "ws-nocors-service",
+        url: `http://127.0.0.1:${wsBackendPort}`,
+        wsUrl: `ws://127.0.0.1:${wsBackendPort}`,
+        healthy: true,
+        expose: "gateway",
+      });
+      registry.register(entry);
+
+      await gateway.start();
+
+      const { statusCode, socket } = await sendUpgradeRequest(
+        testPort,
+        "/svc/ws-nocors-service/echo",
+        { Origin: "http://any-origin.example.com" },
+      );
+
+      expect(statusCode).toBe(101);
       socket.destroy();
     });
   });
