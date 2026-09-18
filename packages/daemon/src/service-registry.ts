@@ -78,10 +78,48 @@ export interface ServiceEntry {
 }
 
 /**
+ * Event map for ServiceRegistry.
+ * Maps each event name to its typed argument list (tuple).
+ */
+export interface ServiceRegistryEvents {
+  /** Emitted when a new service is registered. */
+  registered: [entry: ServiceEntry];
+  /** Emitted when a service is deregistered (payload is the service id). */
+  deregistered: [id: string];
+  /** Emitted when a service's health status changes. */
+  "health-changed": [data: { id: string; healthy: boolean }];
+  /** Emitted when a service's approval status changes. */
+  "approval-changed": [data: { id: string; status: ApprovalStatus }];
+}
+
+/**
  * Service registry for managing plugin service declarations.
  * Tracks service health, capabilities, and registered tools.
  */
 export class ServiceRegistry extends EventEmitter {
+  // ---------------------------------------------------------------------------
+  // Type-safe event emitter overrides
+  // ---------------------------------------------------------------------------
+
+  declare on: <K extends keyof ServiceRegistryEvents & string>(
+    event: K,
+    listener: (...args: ServiceRegistryEvents[K]) => void,
+  ) => this;
+
+  declare once: <K extends keyof ServiceRegistryEvents & string>(
+    event: K,
+    listener: (...args: ServiceRegistryEvents[K]) => void,
+  ) => this;
+
+  declare off: <K extends keyof ServiceRegistryEvents & string>(
+    event: K,
+    listener: (...args: ServiceRegistryEvents[K]) => void,
+  ) => this;
+
+  declare emit: <K extends keyof ServiceRegistryEvents & string>(
+    event: K,
+    ...args: ServiceRegistryEvents[K]
+  ) => boolean;
   private services = new Map<string, ServiceEntry>();
 
   /**
