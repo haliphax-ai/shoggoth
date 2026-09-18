@@ -8,6 +8,8 @@ export type HitlAutoApproveGate = {
   enableSessionTool(sessionId: string, toolName: string): void;
   enableAgentTool(agentId: string, toolName: string): Promise<void>;
   shouldAutoApprove(sessionId: string, toolName: string): boolean;
+  /** Remove all auto-approve entries for a terminated session to prevent unbounded Map growth. */
+  clearSession(sessionId: string): void;
   /**
    * Daemon persisting gate only: drop in-process ♾️ entries (optional).
    * Used by `hitl_clear` so auto-approve state matches disk after a wipe.
@@ -44,6 +46,9 @@ export function createHitlAutoApproveGate(): HitlAutoApproveGate {
       if (mainSid && sessionTools.get(mainSid)?.has(t)) return true;
       const p = parseAgentSessionUrn(sid);
       return p ? (agentTools.get(p.agentId)?.has(t) ?? false) : false;
+    },
+    clearSession(sessionId) {
+      sessionTools.delete(sessionId.trim());
     },
   };
 }
