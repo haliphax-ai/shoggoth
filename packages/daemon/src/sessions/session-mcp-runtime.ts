@@ -256,6 +256,26 @@ export async function createSessionMcpRuntime(
   const perSessionMcpCtx = new Map<string, SessionMcpToolContext>();
   const perSessionMcpConnect = new Map<string, Promise<SessionMcpToolContext>>();
 
+  // ── Per-session cache size limit ─────────────────────────────────
+  const MAX_SESSION_MCP_CACHE_SIZE = 50;
+  const perSessionCacheOrder: string[] = [];
+
+  /** Track a per-session cache entry and evict the oldest when over limit. */
+  function trackSessionCacheEntry(sessionId: string): void {
+    // Avoid duplicates in the order array.
+    const existingIdx = perSessionCacheOrder.indexOf(sessionId);
+    if (existingIdx !== -1) {
+      perSessionCacheOrder.splice(existingIdx, 1);
+    }
+    perSessionCacheOrder.push(sessionId);
+
+    // Evict oldest entries when over the limit.
+    while (perSessionCacheOrder.length > MAX_SESSION_MCP_CACHE_SIZE) {
+      const oldest = perSessionCacheOrder.shift()!;
+      evictPool(oldest, "per_session");
+    }
+  }
+
   // ── Per-agent pool state ─────────────────────────────────────────
   const perAgentMcpClose = new Map<string, () => Promise<void>>();
   const perAgentMcpCtx = new Map<
@@ -352,6 +372,8 @@ export async function createSessionMcpRuntime(
         // Optimistically clear state.
         perSessionMcpClose.delete(key);
         perSessionMcpCtx.delete(key);
+        const cacheIdx = perSessionCacheOrder.indexOf(key);
+        if (cacheIdx !== -1) perSessionCacheOrder.splice(cacheIdx, 1);
         void close().catch((err) => {
           log.error("session.mcp_pool.eviction_close_failed", {
             key,
@@ -565,6 +587,7 @@ export async function createSessionMcpRuntime(
             );
           }
           perSessionMcpCtx.set(sessionId, ctx);
+          trackSessionCacheEntry(sessionId);
           return ctx;
         } catch (e) {
           log.error("session.mcp_pool.connect_failed", {
@@ -593,6 +616,7 @@ export async function createSessionMcpRuntime(
             );
           }
           perSessionMcpCtx.set(sessionId, fallback);
+          trackSessionCacheEntry(sessionId);
           return fallback;
         }
       })();
@@ -665,6 +689,7 @@ export async function createSessionMcpRuntime(
       perSessionMcpClose.clear();
       perSessionMcpCtx.clear();
       perSessionMcpConnect.clear();
+      perSessionCacheOrder.length = 0;
       contextFinalizers.length = 0;
     },
   };
