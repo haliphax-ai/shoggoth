@@ -40,6 +40,27 @@ function backoffSecondsAfterFailure(attemptsAfterIncrement: number): number {
   return Math.min(cap, base ** Math.min(attemptsAfterIncrement, 20));
 }
 
+// ---------------------------------------------------------------------------
+// Prepared-statement cache: avoids re-parsing SQL on every call.
+// better-sqlite3 has an internal WeakMap cache, but explicit caching makes the
+// intent clear and avoids repeated hash lookups in hot loops.
+// ---------------------------------------------------------------------------
+const stmtCache = new WeakMap<Database.Database, Map<string, Database.Statement>>();
+
+function getStmt(db: Database.Database, sql: string): Database.Statement {
+  let cache = stmtCache.get(db);
+  if (!cache) {
+    cache = new Map();
+    stmtCache.set(db, cache);
+  }
+  let stmt = cache.get(sql);
+  if (!stmt) {
+    stmt = db.prepare(sql);
+    cache.set(sql, stmt);
+  }
+  return stmt;
+}
+
 /**
  * Durable emit (global or session-scoped `scope` string).
  */
@@ -56,9 +77,9 @@ export function emitEvent(
   const payloadJson = JSON.stringify(input.payload);
   const maxAttempts = input.maxAttempts ?? 8;
   try {
-    const r = db
-      .prepare(
-        `
+    const r = getStmt(
+      db,
+      `
       INSERT INTO events (
         scope, event_type, payload_json, idempotency_key, status, attempts,
         max_attempts, next_attempt_at, created_at, updated_at
@@ -67,20 +88,19 @@ export function emitEvent(
         @max_attempts, datetime('now'), datetime('now'), datetime('now')
       )
     `,
-      )
-      .run({
-        scope: input.scope,
-        event_type: input.eventType,
-        payload_json: payloadJson,
-        idempotency_key: input.idempotencyKey ?? null,
-        max_attempts: maxAttempts,
-      });
+    ).run({
+      scope: input.scope,
+      event_type: input.eventType,
+      payload_json: payloadJson,
+      idempotency_key: input.idempotencyKey ?? null,
+      max_attempts: maxAttempts,
+    });
     return { ok: true, id: Number(r.lastInsertRowid) };
   } catch (e) {
     if (isSqliteConstraint(e) && input.idempotencyKey) {
-      const row = db
-        .prepare("SELECT id FROM events WHERE idempotency_key = @k")
-        .get({ k: input.idempotencyKey }) as { id: number } | undefined;
+      const row = getStmt(db, "SELECT id FROM events WHERE idempotency_key = @k").get({
+        k: input.idempotencyKey,
+      }) as { id: number } | undefined;
       if (row) return { ok: false, duplicate: true, existingId: row.id };
     }
     throw e;
@@ -127,20 +147,20 @@ export function claimPendingEvents(
   options: { limit: number },
 ): EventQueueRow[] {
   const tx = db.transaction(() => {
-    const ids = db
-      .prepare(
-        `
+    const ids = getStmt(
+      db,
+      `
       SELECT id FROM events
       WHERE status = 'pending'
         AND (next_attempt_at IS NULL OR next_attempt_at <= datetime('now'))
       ORDER BY id ASC
       LIMIT @limit
     `,
-      )
-      .all({ limit: options.limit }) as { id: number }[];
+    ).all({ limit: options.limit }) as { id: number }[];
 
     for (const { id } of ids) {
-      db.prepare(
+      getStmt(
+        db,
         `
         UPDATE events SET
           status = 'processing',
@@ -173,20 +193,22 @@ export function claimPendingEvents(
 
 /** True if this event id was already finished (at-least-once consumer idempotency). */
 export function hasEventProcessingRecord(db: Database.Database, eventId: number): boolean {
-  const r = db
-    .prepare("SELECT 1 AS x FROM event_processing_done WHERE event_id = @id")
-    .get({ id: eventId }) as { x: number } | undefined;
+  const r = getStmt(db, "SELECT 1 AS x FROM event_processing_done WHERE event_id = @id").get({
+    id: eventId,
+  }) as { x: number } | undefined;
   return r !== undefined;
 }
 
 export function markEventCompleted(db: Database.Database, eventId: number): void {
-  db.prepare(
+  getStmt(
+    db,
     `
     INSERT OR IGNORE INTO event_processing_done (event_id, finished_at)
     VALUES (@id, datetime('now'))
   `,
   ).run({ id: eventId });
-  db.prepare(
+  getStmt(
+    db,
     `
     UPDATE events SET status = 'completed', updated_at = datetime('now'), claimed_at = NULL
     WHERE id = @id
@@ -199,18 +221,18 @@ export function markEventFailed(
   eventId: number,
   errorMessage: string,
 ): void {
-  const row = db
-    .prepare(
-      `
+  const row = getStmt(
+    db,
+    `
     SELECT attempts, max_attempts FROM events WHERE id = @id
   `,
-    )
-    .get({ id: eventId }) as { attempts: number; max_attempts: number } | undefined;
+  ).get({ id: eventId }) as { attempts: number; max_attempts: number } | undefined;
   if (!row) return;
 
   const nextAttempts = row.attempts + 1;
   if (nextAttempts >= row.max_attempts) {
-    db.prepare(
+    getStmt(
+      db,
       `
       UPDATE events SET
         status = 'dead',
@@ -226,7 +248,8 @@ export function markEventFailed(
   }
 
   const delaySec = backoffSecondsAfterFailure(nextAttempts);
-  db.prepare(
+  getStmt(
+    db,
     `
     UPDATE events SET
       status = 'pending',
@@ -253,9 +276,9 @@ export function reconcileStaleProcessing(
   options: { staleMs: number },
 ): number {
   const sec = Math.max(1, Math.floor(options.staleMs / 1000));
-  const r = db
-    .prepare(
-      `
+  const r = getStmt(
+    db,
+    `
     UPDATE events SET
       status = 'pending',
       claimed_at = NULL,
@@ -264,7 +287,6 @@ export function reconcileStaleProcessing(
       AND claimed_at IS NOT NULL
       AND datetime(claimed_at) < datetime('now', printf('-%d seconds', @sec))
   `,
-    )
-    .run({ sec });
+  ).run({ sec });
   return r.changes;
 }
