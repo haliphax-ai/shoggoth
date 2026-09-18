@@ -109,7 +109,11 @@ import { createSqliteAgentTokenStore } from "./auth/sqlite-agent-tokens";
 import { resolveShoggothAgentId } from "./config/effective-runtime";
 import { TimerScheduler } from "./timers/timer-scheduler";
 import { setTimerScheduler } from "./sessions/builtin-handlers/timer-handler";
-import { ShoggothPluginSystem, type PlatformDeps } from "@shoggoth/plugins";
+import {
+  ShoggothPluginSystem,
+  type PlatformDeps,
+  type PlatformDeliveryRegistry,
+} from "@shoggoth/plugins";
 import { fireDaemonHooks } from "./plugins/daemon-hooks";
 import {
   createServiceRegistry,
@@ -124,6 +128,10 @@ import {
 import { ManifestFetcher } from "./manifest-fetcher";
 import { ServiceApprovalStore } from "./service-approval-store";
 import { appendAuditRow } from "./audit/append-audit";
+
+// ============================================================
+// Module-level setup
+// ============================================================
 
 process.umask(0o007);
 loadDaemonPrompts();
@@ -207,19 +215,33 @@ const rt = createDaemonRuntime({
   },
 });
 
-void (async () => {
+// ============================================================
+// init*() functions — extracted from the bootstrap IIFE for
+// readability, testability, and clear dependency boundaries.
+//
+// Each function encapsulates one logical subsystem. Functions
+// that need IIFE-local state accept it as a parameter; module-
+// level references (config, configRef, hitlRef, rt, etc.) are
+// accessed directly. Disposable resources are returned so the
+// IIFE can wire them into the shutdown path.
+// ============================================================
+
+/**
+ * Open the state database, run migrations, bootstrap the main
+ * session, create the HITL pending stack, and initialise the vault.
+ *
+ * Returns a result bag the IIFE destructures into local variables.
+ */
+async function initStateDatabase() {
   let stateDb: ReturnType<typeof openStateDb> | undefined;
   let hitlStack: HitlPendingStack | undefined;
+
   try {
     const db = openStateDb(config.stateDbPath);
     migrate(db, defaultMigrationsDir());
     stateDb = db;
 
-    await bootstrapMainSession({
-      db,
-      config,
-    });
-
+    await bootstrapMainSession({ db, config });
     hitlStack = createHitlPendingResolutionStack(db);
 
     // Initialize vault service
@@ -241,9 +263,7 @@ void (async () => {
   } catch (e) {
     getLogger("daemon").warn(
       "state database unavailable; control plane uses ephemeral agent tokens",
-      {
-        err: String(e),
-      },
+      { err: String(e) },
     );
   }
 
@@ -258,6 +278,499 @@ void (async () => {
     });
   }
 
+  return { db: stateDb, hitlStack, hitlAutoApproveGate };
+}
+
+/**
+ * Initialise core singletons: process manager, turn queue, and
+ * model resilience gate. These are needed early because plugin
+ * hooks and MCP stdio spawns depend on them.
+ */
+function initCoreSingletons() {
+  const procman = initProcessManager();
+  setProcessManager(procman);
+
+  const starvationThreshold = config.runtime?.turnQueue?.starvationThreshold ?? 2;
+  const maxQueueDepth = config.runtime?.turnQueue?.maxDepth ?? 6;
+  setTurnQueue(new TieredTurnQueue(starvationThreshold, maxQueueDepth));
+
+  {
+    const rc = config.runtime?.modelResilience;
+    const gate = new ModelResilienceGate(
+      {
+        maxRetries: rc?.maxRetries,
+        baseDelayMs: rc?.baseDelayMs,
+        maxDelayMs: rc?.maxDelayMs,
+        jitterMs: rc?.jitterMs,
+        defaultConcurrency: rc?.defaultConcurrency,
+      },
+      rc?.providers,
+    );
+    setResilienceGate(gate);
+  }
+
+  return { procman };
+}
+
+/**
+ * Create the plugin system and load all configured plugins via
+ * standard discovery. Returns the loaded plugin system for use by
+ * daemon hooks.
+ */
+async function loadPlugins(db: ReturnType<typeof openStateDb>) {
+  const pluginSystem = new ShoggothPluginSystem();
+  const resolveFromFile = fileURLToPath(import.meta.url);
+
+  const { loadAllPluginsFromConfig } = await import("@shoggoth/plugins");
+  const loaded = await loadAllPluginsFromConfig({
+    config,
+    system: pluginSystem,
+    resolveFromFile,
+    audit: (e) => {
+      appendAuditRow(db, pluginAuditToRow(e));
+      if (e.outcome === "failure") {
+        getLogger("daemon").error("plugin load failed", {
+          plugin: e.resource,
+          detail: e.detail,
+        });
+      }
+    },
+  });
+
+  if (loaded.length > 0) {
+    getLogger("daemon").info("plugins loaded", {
+      count: loaded.length,
+      plugins: loaded.map((p) => p.manifestName),
+    });
+  }
+
+  return { pluginSystem };
+}
+
+/**
+ * Initialise the timer scheduler, restore pending timers from the
+ * DB, wire the turn-end flush, and return a disposer function.
+ */
+async function initTimerScheduler(db: ReturnType<typeof openStateDb>) {
+  const timerScheduler = new TimerScheduler(async (sessionId, message) => {
+    const ext = subagentRuntimeExtensionRef.current;
+    if (!ext) {
+      getLogger("timer-scheduler").warn("timer delivery skipped: subagent runtime not available", {
+        sessionId,
+      });
+      return;
+    }
+    const turn = await ext.runSessionModelTurn({
+      sessionId,
+      userContent: message,
+      userMetadata: { timer_fire: true },
+      delivery: { kind: "internal" },
+      systemContext: {
+        kind: "timer.fire",
+        summary: "This turn was triggered by a deferred timer.",
+        guidance: OOB_NO_SENDER_GUIDANCE,
+      },
+      modelInvocationOverride: {
+        responseSchema: { schema: OOB_SCHEMA_NO_SENDER },
+        structuredOutputMode: "best-effort",
+      },
+    });
+    if (turn?.latestAssistantText) {
+      await deliverOobStructuredResponse({
+        structuredResponse: turn.latestAssistantText,
+        respondTo: sessionId,
+        ext,
+        subLog: getLogger("timer"),
+        hasSender: false,
+      });
+    }
+  });
+
+  setTimerScheduler(timerScheduler);
+  getTurnQueue().setOnTurnEnd((sessionId) => {
+    timerScheduler.flushSession(sessionId);
+  });
+
+  try {
+    await timerScheduler.restore(db);
+  } catch (e) {
+    getLogger("daemon").warn("timer restore failed", { err: String(e) });
+  }
+
+  return () => {
+    timerScheduler.shutdown();
+  };
+}
+
+/**
+ * Convert a ProcessDeclaration (from config) to a ProcessSpec
+ * (for the process manager). Also injects provision secrets for
+ * service processes.
+ */
+function processDeclarationToSpec(decl: ProcessDeclaration): ProcessSpec {
+  let env = decl.env;
+  if (decl.service) {
+    const secret = randomBytes(32).toString("hex");
+    serviceProvisionSecrets.set(decl.id, secret);
+    env = { ...env, SHOGGOTH_PROVISION_SECRET: secret };
+  }
+
+  return {
+    id: decl.id,
+    label: decl.label,
+    owner: { kind: "plugin", scopeId: decl.id },
+    command: decl.command,
+    args: decl.args,
+    cwd: decl.cwd,
+    env,
+    restart: {
+      mode: decl.restartMode ?? "on-failure",
+      maxRetries: decl.maxRetries ?? 5,
+    },
+    health: decl.health
+      ? decl.health.kind === "tcp"
+        ? {
+            kind: "tcp",
+            port: Number(decl.health.target),
+            timeoutMs: decl.health.timeoutMs,
+          }
+        : decl.health.kind === "http"
+          ? {
+              kind: "http",
+              url: decl.health.target,
+              timeoutMs: decl.health.timeoutMs,
+            }
+          : {
+              kind: "stdout-match",
+              pattern: decl.health.target,
+              timeoutMs: decl.health.timeoutMs,
+            }
+      : undefined,
+  };
+}
+
+/**
+ * Start event-loop timers (heartbeat, cron, retention) and return
+ * a stop function that clears them all.
+ */
+function startEventLoops(db: ReturnType<typeof openStateDb>) {
+  const heartbeatMs = resolveHeartbeatIntervalMs(configRef.current);
+  const cronMs = resolveCronTickIntervalMs(configRef.current);
+  const batchLimit = resolveHeartbeatBatchSize(configRef.current);
+  const concurrency = resolveHeartbeatConcurrency(configRef.current);
+  const handlers = createDefaultHeartbeatHandlers();
+
+  const hbTimer = setInterval(() => {
+    void runHeartbeatBatch(db, {
+      batchLimit,
+      concurrency,
+      handlers,
+    }).catch((e) => {
+      getLogger("events").error("heartbeat batch failed", { err: String(e) });
+    });
+  }, heartbeatMs);
+
+  const cronTimer = setInterval(() => {
+    try {
+      const n = runCronTick(db);
+      if (n > 0) getLogger("events").debug("cron tick fired", { count: n });
+    } catch (e) {
+      getLogger("events").error("cron tick failed", { err: String(e) });
+    }
+  }, cronMs);
+
+  const retentionMs = retentionScheduleIntervalMs(configRef.current);
+  const retentionTimer =
+    retentionMs > 0
+      ? setInterval(() => {
+          void runRetentionJobs(db, config, {
+            correlationId: `retention-${Date.now()}`,
+          })
+            .then((summary) => {
+              if (summary.inboundMediaDeletedFiles > 0 || summary.transcriptMessagesDeleted > 0) {
+                getLogger("events").info("retention tick", { ...summary });
+              }
+            })
+            .catch((e) => {
+              getLogger("events").error("retention tick failed", {
+                err: String(e),
+              });
+            });
+        }, retentionMs)
+      : undefined;
+
+  return () => {
+    clearInterval(hbTimer);
+    clearInterval(cronTimer);
+    if (retentionTimer) clearInterval(retentionTimer);
+  };
+}
+
+/**
+ * Initialise the workflow server, resume incomplete workflows,
+ * and return a disposer that stops the workflow server.
+ */
+async function initWorkflowServer(
+  db: ReturnType<typeof openStateDb>,
+  deliveryRegistry: PlatformDeliveryRegistry,
+  procman: ReturnType<typeof initProcessManager>,
+) {
+  const workflowStateDir = resolve(config.stateDbPath, "..", "workflow-state");
+
+  const workflowSessions = createSessionStore(db);
+  const workflowSessionManager = createSessionManager({
+    db,
+    sessions: workflowSessions,
+    agentTokens: createSqliteAgentTokenStore(db),
+    workspacesRoot: config.workspacesRoot,
+    agentId: resolveShoggothAgentId(config),
+    agentsConfig: config.agents,
+  });
+
+  // Resolve configured subagentModel (per-agent override > global default).
+  const workflowAgentId = resolveShoggothAgentId(config);
+  const workflowPerAgentModel = workflowAgentId
+    ? config.agents?.list?.[workflowAgentId]?.subagentModel
+    : undefined;
+  const workflowSubagentModel = workflowPerAgentModel ?? config.agents?.subagentModel;
+
+  const spawner = createDaemonSpawnAdapter({
+    sessionManager: workflowSessionManager,
+    sessions: workflowSessions,
+    requestTurnAbort: (id) => requestSessionTurnAbort(id),
+    subagentModel: workflowSubagentModel,
+    runSessionModelTurn: (input) => {
+      const ext = subagentRuntimeExtensionRef.current;
+      if (!ext) throw new Error("subagent runtime not available (platform not started)");
+      return ext.runSessionModelTurn({
+        ...input,
+        delivery: { kind: "internal" },
+      });
+    },
+  });
+
+  const poller = createDaemonPollAdapter({
+    sessions: workflowSessions,
+    completionMap: spawner.completionMap,
+  });
+
+  const killer = createDaemonKillAdapter({
+    sessionManager: workflowSessionManager,
+    requestTurnAbort: (id) => requestSessionTurnAbort(id),
+  });
+
+  const workflow = initWorkflow({
+    stateDir: workflowStateDir,
+    spawner,
+    poller,
+    notifier: {
+      async notify(workflowId, success, context) {
+        getLogger("daemon").info("workflow completed", {
+          workflowId,
+          success,
+          replyTo: context?.replyTo ?? null,
+        });
+        try {
+          const sessionId = context?.replyTo;
+          if (!sessionId) {
+            getLogger("daemon").warn("workflow notify: no replyTo in context");
+            return;
+          }
+
+          const ext = subagentRuntimeExtensionRef.current;
+          if (!ext) {
+            getLogger("daemon").warn("workflow notify: subagent runtime not available");
+            return;
+          }
+
+          const status = success ? "✅ completed successfully" : "❌ completed with failures";
+          const message = `**Workflow ${status}:** \`${workflowId}\``;
+
+          getLogger("daemon").debug("workflow notify: delivering to session", { sessionId });
+          const delivery = deliveryRegistry.resolveOperatorDelivery(
+            sessionId,
+            configRef.current,
+          ) ?? {
+            kind: "internal" as const,
+          };
+          getLogger("daemon").debug("workflow notify: resolved delivery", {
+            sessionId,
+            deliveryKind: delivery.kind,
+          });
+          await ext.runSessionModelTurn({
+            sessionId,
+            userContent: message,
+            userMetadata: {
+              workflow_notify: true,
+              workflow_id: workflowId,
+              success,
+            },
+            systemContext: {
+              kind: "workflow.complete",
+              summary: `Workflow completed ${success ? "successfully" : "with failures"}.`,
+              guidance:
+                "The user can already see task statuses, durations, total duration, and workflow completion in the automated status post. Surface any meaningful information beyond that, or simply acknowledge completion in your own voice.",
+              data: { workflow_id: workflowId, success },
+            },
+            delivery,
+          });
+          getLogger("daemon").debug("workflow notify: delivered");
+        } catch (e) {
+          getLogger("daemon").warn("workflow completion notification failed", {
+            workflowId,
+            err: String(e),
+          });
+        }
+      },
+    },
+    killer,
+    createMessageAdapter: (sessionId: string) =>
+      createDaemonMessageAdapter({
+        getMessageContext: () => messageToolContextRef.current ?? undefined,
+        resolveChannelId: () => {
+          // This will be resolved after platform starts - the platform adapter handles this
+          return undefined;
+        },
+        sessionId,
+      }),
+    createMessagePoster: (_sessionId: string) =>
+      createDaemonMessagePoster({
+        sendBody: async (target: string, body: string) => {
+          const adapter = platformAdapterRef.current;
+          if (!adapter) throw new Error("platform adapter not available");
+          await adapter.sendBody(target, body);
+        },
+        logger: getLogger("workflow-message-poster"),
+      }),
+
+    createToolExecutor: (sessionId: string) => ({
+      async execute({ name, argsJson, toolCallId }) {
+        const runtime = getSessionMcpRuntimeRef();
+        if (!runtime) throw new Error("MCP runtime not available");
+        const ctx = await runtime.resolveContext(sessionId);
+        if (!ctx) throw new Error("no MCP context for session " + sessionId);
+        const routed = routeMcpToolInvocation(ctx.aggregated, name);
+        if ("error" in routed) throw new Error(routed.error);
+        if (routed.tool.sourceId === "builtin") {
+          const registry = getBuiltinToolRegistry();
+          const toolCtx = {
+            sessionId,
+            db,
+            config: configRef.current,
+            env: process.env,
+            workspacePath: configRef.current.workspacesRoot ?? LAYOUT.workspacesRoot,
+            workspaceRealPath: realpathSync(
+              configRef.current.workspacesRoot ?? LAYOUT.workspacesRoot,
+            ),
+            creds: {
+              uid: process.getuid?.() ?? 0,
+              gid: process.getgid?.() ?? 0,
+            },
+            orchestratorEnv: process.env,
+            getAgentIntegrationInvoker: () => undefined,
+            getProcessManager: () => procman,
+            messageToolCtx: messageToolContextRef.current ?? undefined,
+            memoryConfig: configRef.current.memory ?? {},
+            runtimeOpenaiBaseUrl: configRef.current.runtime?.openaiBaseUrl,
+            isSubagentSession: true,
+          };
+          const result = await registry.execute(
+            routed.tool.originalName,
+            JSON.parse(argsJson),
+            toolCtx,
+          );
+          return { resultJson: result.resultJson };
+        }
+        if (!ctx.external) throw new Error("no external MCP transport for session " + sessionId);
+        return ctx.external({
+          sourceId: routed.tool.sourceId,
+          originalName: routed.tool.originalName,
+          argsJson,
+          toolCallId,
+        });
+      },
+    }),
+    createNotificationAdapter: (_replyToSessionId: string) => ({
+      async sendNotification(target: string, message: string): Promise<void> {
+        const ext = subagentRuntimeExtensionRef.current;
+        if (!ext) {
+          getLogger("daemon").warn("workflow task notification: subagent runtime not available");
+          return;
+        }
+        const delivery = deliveryRegistry.resolveOperatorDelivery(target, configRef.current) ?? {
+          kind: "internal" as const,
+        };
+        try {
+          await ext.runSessionModelTurn({
+            sessionId: target,
+            userContent: message,
+            userMetadata: { workflow_task_failed: true },
+            systemContext: {
+              kind: "workflow.task_failed",
+              summary: message,
+              guidance:
+                "A task in a running workflow has failed. Assess whether this requires intervention, a retry, or can be ignored. The user can see the failure in the status post — only surface this if you have actionable context to add.",
+            },
+            delivery,
+          });
+        } catch (e) {
+          getLogger("daemon").warn("workflow task failure notification failed", {
+            target,
+            err: String(e),
+          });
+        }
+      },
+    }),
+  });
+
+  const resumed = await workflow.server.resume();
+  if (resumed.length > 0) {
+    getLogger("daemon").info("workflow resumed incomplete workflows", {
+      count: resumed.length,
+      ids: resumed,
+    });
+  }
+
+  return async () => {
+    await workflow.server.stopAll();
+  };
+}
+
+/**
+ * Register health probes (SQLite, model endpoints, embeddings)
+ * with the daemon runtime.
+ */
+function registerHealthProbes() {
+  rt.health.register(createSqliteProbe({ getPath: () => config.stateDbPath }));
+  // Note: Platform health probes are registered by plugins via health.register hook
+  rt.health.register(
+    createModelEndpointProbe({
+      getBaseUrl: () => resolveModelHealthProbeBaseUrl(configRef.current),
+      getApiKey: () => resolveModelHealthProbeApiKey(configRef.current),
+      getProviderKind: () => configRef.current.models?.providers?.[0]?.kind,
+    }),
+  );
+
+  // Embeddings endpoint probe
+  rt.health.register(
+    createModelEndpointProbe({
+      name: "embeddings",
+      getBaseUrl: () => resolveEmbeddingsHealthProbeBaseUrl(configRef.current),
+      getApiKey: () => resolveEmbeddingsHealthProbeApiKey(configRef.current),
+    }),
+  );
+}
+
+// ============================================================
+// Bootstrap IIFE — orchestrates init*() calls in sequence and
+// wires disposers into the shutdown path.
+// ============================================================
+
+void (async () => {
+  // --- State Database, HITL stack, vault ---
+  const { db, hitlStack, hitlAutoApproveGate } = await initStateDatabase();
+
+  // --- Control Plane ---
   try {
     await startControlPlane({
       config,
@@ -265,10 +778,10 @@ void (async () => {
       shutdown: rt.shutdown,
       getHealth: () => rt.getHealth(),
       version: VERSION,
-      stateDb,
+      stateDb: db,
       hitlPending: hitlStack?.pending,
       hitlClear:
-        hitlStack && stateDb && hitlAutoApproveGate
+        hitlStack && db && hitlAutoApproveGate
           ? {
               configDirectory: configRef.current.configDirectory,
               dynamicConfigDirectory: configRef.current.dynamicConfigDirectory,
@@ -298,12 +811,12 @@ void (async () => {
     stopEventLoops();
   });
 
-  if (!stateDb) {
+  if (!db) {
     getLogger("daemon").warn("plugins and event loops skipped (no state database)");
     return;
   }
 
-  const db = stateDb;
+  // --- Boot Reconciliation ---
   const boot = runBootReconciliation(db, {
     staleClaimMs: resolveBootStaleClaimMs(configRef.current),
     orphanedToolRunReason: "restart_reconciliation",
@@ -315,62 +828,22 @@ void (async () => {
     });
   }
 
-  // --- Process Manager: init singleton early so MCP stdio spawns go through procman ---
-  const procman = initProcessManager();
-  setProcessManager(procman);
+  // --- Core Singletons: process manager, turn queue, model resilience gate ---
+  const { procman } = initCoreSingletons();
 
-  // --- Turn Queue: init singleton early (needed during hook-triggered turns) ---
-  const starvationThreshold = config.runtime?.turnQueue?.starvationThreshold ?? 2;
-  const maxQueueDepth = config.runtime?.turnQueue?.maxDepth ?? 6;
-  setTurnQueue(new TieredTurnQueue(starvationThreshold, maxQueueDepth));
+  // --- Plugin System ---
+  const { pluginSystem } = await loadPlugins(db);
 
-  // --- Model Resilience Gate: init singleton early ---
-  {
-    const rc = config.runtime?.modelResilience;
-    const gate = new ModelResilienceGate(
-      {
-        maxRetries: rc?.maxRetries,
-        baseDelayMs: rc?.baseDelayMs,
-        maxDelayMs: rc?.maxDelayMs,
-        jitterMs: rc?.jitterMs,
-        defaultConcurrency: rc?.defaultConcurrency,
-      },
-      rc?.providers,
-    );
-    setResilienceGate(gate);
-  }
-
-  // Create plugin system and load plugins via standard discovery
-  const pluginSystem = new ShoggothPluginSystem();
-  const resolveFromFile = fileURLToPath(import.meta.url);
-  {
-    const { loadAllPluginsFromConfig } = await import("@shoggoth/plugins");
-    const loaded = await loadAllPluginsFromConfig({
-      config,
-      system: pluginSystem,
-      resolveFromFile,
-      audit: (e) => {
-        appendAuditRow(db, pluginAuditToRow(e));
-        if (e.outcome === "failure") {
-          getLogger("daemon").error("plugin load failed", {
-            plugin: e.resource,
-            detail: e.detail,
-          });
-        }
-      },
-    });
-    if (loaded.length > 0) {
-      getLogger("daemon").info("plugins loaded", {
-        count: loaded.length,
-        plugins: loaded.map((p) => p.manifestName),
-      });
-    }
-  }
-
-  // Build PlatformDeps - platform-agnostic callbacks the plugins need
+  // --- Build PlatformDeps — platform-agnostic callbacks the plugins need ---
   const platformsMap = new Map<string, any>();
   const { PlatformDeliveryRegistry } = await import("@shoggoth/plugins");
   const deliveryRegistry = new PlatformDeliveryRegistry();
+
+  // --- Service Registries for plugin service support ---
+  const serviceRegistry = createServiceRegistry();
+  const { ServiceToolDispatcher } = await import("./service-tool-dispatcher");
+  const serviceToolDispatcher = new ServiceToolDispatcher(serviceRegistry);
+  const serviceToolRegistry = createServiceToolRegistry(serviceRegistry, serviceToolDispatcher);
 
   const platformDeps: PlatformDeps = {
     hitlStack,
@@ -383,11 +856,11 @@ void (async () => {
       return requestSessionTurnAbort(sessionId ?? "");
     },
     invokeControlOp: async (op, payload) => {
-      if (!stateDb) return { ok: false, error: "state database unavailable" };
-      const sessions = createSessionStore(stateDb);
+      if (!db) return { ok: false, error: "state database unavailable" };
+      const sessions = createSessionStore(db);
       const ctx: IntegrationOpsContext = {
         config: configRef.current,
-        stateDb,
+        stateDb: db,
         acpxStore: undefined,
         sessions,
         sessionManager: undefined,
@@ -425,19 +898,13 @@ void (async () => {
     noticeResolver: daemonNotice as (key: string, params?: Record<string, unknown>) => string,
   };
 
-  // Create service registries for plugin service support
-  const serviceRegistry = createServiceRegistry();
-  const { ServiceToolDispatcher } = await import("./service-tool-dispatcher");
-  const serviceToolDispatcher = new ServiceToolDispatcher(serviceRegistry);
-  const serviceToolRegistry = createServiceToolRegistry(serviceRegistry, serviceToolDispatcher);
-
   // Expose service tool registry to session context finalizers and tool executor
   const { serviceToolRegistryRef, serviceRegistryRef: sessionSvcRegRef } =
     await import("./sessions/service-tool-registry-ref");
   serviceToolRegistryRef.current = serviceToolRegistry;
   sessionSvcRegRef.current = serviceRegistry;
 
-  // Fire daemon hooks — plugins handle platform.start, health.register, etc.
+  // --- Daemon Hooks — plugins handle platform.start, health.register, etc. ---
   const hookResult = await fireDaemonHooks(pluginSystem, {
     config,
     db,
@@ -563,100 +1030,11 @@ void (async () => {
     }
   }
 
-  // --- Timer Scheduler: init, restore, register shutdown ---
-  const timerScheduler = new TimerScheduler(async (sessionId, message) => {
-    const ext = subagentRuntimeExtensionRef.current;
-    if (!ext) {
-      getLogger("timer-scheduler").warn("timer delivery skipped: subagent runtime not available", {
-        sessionId,
-      });
-      return;
-    }
-    const turn = await ext.runSessionModelTurn({
-      sessionId,
-      userContent: message,
-      userMetadata: { timer_fire: true },
-      delivery: { kind: "internal" },
-      systemContext: {
-        kind: "timer.fire",
-        summary: "This turn was triggered by a deferred timer.",
-        guidance: OOB_NO_SENDER_GUIDANCE,
-      },
-      modelInvocationOverride: {
-        responseSchema: { schema: OOB_SCHEMA_NO_SENDER },
-        structuredOutputMode: "best-effort",
-      },
-    });
-    if (turn?.latestAssistantText) {
-      await deliverOobStructuredResponse({
-        structuredResponse: turn.latestAssistantText,
-        respondTo: sessionId,
-        ext,
-        subLog: getLogger("timer"),
-        hasSender: false,
-      });
-    }
-  });
-  setTimerScheduler(timerScheduler);
-  getTurnQueue().setOnTurnEnd((sessionId) => {
-    timerScheduler.flushSession(sessionId);
-  });
-  try {
-    await timerScheduler.restore(db);
-  } catch (e) {
-    getLogger("daemon").warn("timer restore failed", { err: String(e) });
-  }
-  rt.shutdown.registerDrain("timer-scheduler", () => {
-    timerScheduler.shutdown();
-  });
-  // --- Process Manager: start boot-time processes, register shutdown ---
+  // --- Timer Scheduler ---
+  const disposeTimer = await initTimerScheduler(db);
+  rt.shutdown.registerDrain("timer-scheduler", disposeTimer);
 
-  // (TurnQueue and ModelResilienceGate initialized earlier, before fireDaemonHooks)
-
-  function processDeclarationToSpec(decl: ProcessDeclaration): ProcessSpec {
-    // For service processes, generate and inject a provision secret
-    let env = decl.env;
-    if (decl.service) {
-      const secret = randomBytes(32).toString("hex");
-      serviceProvisionSecrets.set(decl.id, secret);
-      env = { ...env, SHOGGOTH_PROVISION_SECRET: secret };
-    }
-
-    return {
-      id: decl.id,
-      label: decl.label,
-      owner: { kind: "plugin", scopeId: decl.id },
-      command: decl.command,
-      args: decl.args,
-      cwd: decl.cwd,
-      env,
-      restart: {
-        mode: decl.restartMode ?? "on-failure",
-        maxRetries: decl.maxRetries ?? 5,
-      },
-      health: decl.health
-        ? decl.health.kind === "tcp"
-          ? {
-              kind: "tcp",
-              port: Number(decl.health.target),
-              timeoutMs: decl.health.timeoutMs,
-            }
-          : decl.health.kind === "http"
-            ? {
-                kind: "http",
-                url: decl.health.target,
-                timeoutMs: decl.health.timeoutMs,
-              }
-            : {
-                kind: "stdout-match",
-                pattern: decl.health.target,
-                timeoutMs: decl.health.timeoutMs,
-              }
-        : undefined,
-    };
-  }
-
-  // --- Service Lifecycle Manager: wire manifest fetch + tool registration ---
+  // --- Service Lifecycle Manager ---
   const serviceApprovalStore = new ServiceApprovalStore(db);
   const { ServiceKeyStore } = await import("./service-key-store");
   const serviceKeyStore = new ServiceKeyStore(db);
@@ -728,6 +1106,7 @@ void (async () => {
     }
   });
 
+  // --- Boot Processes ---
   const bootProcesses = (config.processes ?? []).filter((d) => d.startPolicy === "boot");
   for (const decl of bootProcesses) {
     try {
@@ -745,7 +1124,6 @@ void (async () => {
   });
 
   // --- External Service Health Poller ---
-  // Wire external service health monitoring into the service lifecycle manager
   const externalServiceHealthPoller = new ExternalServiceHealthPoller(
     getLogger("external-service-health"),
   );
@@ -779,302 +1157,25 @@ void (async () => {
     externalServiceHealthPoller.stopAll();
   });
 
-  // --- Workflow tool: init server, resume incomplete workflows, register shutdown ---
-  // Adapters use lazy refs because the platform plugin (and thus sessionManager,
-  // runSessionModelTurn, messageToolContextRef) are initialized later in this file.
-  const workflowStateDir = resolve(config.stateDbPath, "..", "workflow-state");
+  // --- Workflow ---
   try {
-    const workflowSessions = createSessionStore(db);
-    const workflowSessionManager = createSessionManager({
-      db,
-      sessions: workflowSessions,
-      agentTokens: createSqliteAgentTokenStore(db),
-      workspacesRoot: config.workspacesRoot,
-      agentId: resolveShoggothAgentId(config),
-      agentsConfig: config.agents,
-    });
-
-    // Resolve configured subagentModel (per-agent override > global default).
-    const workflowAgentId = resolveShoggothAgentId(config);
-    const workflowPerAgentModel = workflowAgentId
-      ? config.agents?.list?.[workflowAgentId]?.subagentModel
-      : undefined;
-    const workflowSubagentModel = workflowPerAgentModel ?? config.agents?.subagentModel;
-
-    const spawner = createDaemonSpawnAdapter({
-      sessionManager: workflowSessionManager,
-      sessions: workflowSessions,
-      requestTurnAbort: (id) => requestSessionTurnAbort(id),
-      subagentModel: workflowSubagentModel,
-      runSessionModelTurn: (input) => {
-        const ext = subagentRuntimeExtensionRef.current;
-        if (!ext) throw new Error("subagent runtime not available (platform not started)");
-        return ext.runSessionModelTurn({
-          ...input,
-          delivery: { kind: "internal" },
-        });
-      },
-    });
-
-    const poller = createDaemonPollAdapter({
-      sessions: workflowSessions,
-      completionMap: spawner.completionMap,
-    });
-
-    const killer = createDaemonKillAdapter({
-      sessionManager: workflowSessionManager,
-      requestTurnAbort: (id) => requestSessionTurnAbort(id),
-    });
-
-    const workflow = initWorkflow({
-      stateDir: workflowStateDir,
-      spawner,
-      poller,
-      notifier: {
-        async notify(workflowId, success, context) {
-          getLogger("daemon").info("workflow completed", {
-            workflowId,
-            success,
-            replyTo: context?.replyTo ?? null,
-          });
-          try {
-            const sessionId = context?.replyTo;
-            if (!sessionId) {
-              getLogger("daemon").warn("workflow notify: no replyTo in context");
-              return;
-            }
-
-            const ext = subagentRuntimeExtensionRef.current;
-            if (!ext) {
-              getLogger("daemon").warn("workflow notify: subagent runtime not available");
-              return;
-            }
-
-            const status = success ? "✅ completed successfully" : "❌ completed with failures";
-            const message = `**Workflow ${status}:** \`${workflowId}\``;
-
-            getLogger("daemon").debug("workflow notify: delivering to session", { sessionId });
-            const delivery = deliveryRegistry.resolveOperatorDelivery(
-              sessionId,
-              configRef.current,
-            ) ?? { kind: "internal" as const };
-            getLogger("daemon").debug("workflow notify: resolved delivery", {
-              sessionId,
-              deliveryKind: delivery.kind,
-            });
-            await ext.runSessionModelTurn({
-              sessionId,
-              userContent: message,
-              userMetadata: {
-                workflow_notify: true,
-                workflow_id: workflowId,
-                success,
-              },
-              systemContext: {
-                kind: "workflow.complete",
-                summary: `Workflow completed ${success ? "successfully" : "with failures"}.`,
-                guidance:
-                  "The user can already see task statuses, durations, total duration, and workflow completion in the automated status post. Surface any meaningful information beyond that, or simply acknowledge completion in your own voice.",
-                data: { workflow_id: workflowId, success },
-              },
-              delivery,
-            });
-            getLogger("daemon").debug("workflow notify: delivered");
-          } catch (e) {
-            getLogger("daemon").warn("workflow completion notification failed", {
-              workflowId,
-              err: String(e),
-            });
-          }
-        },
-      },
-      killer,
-      createMessageAdapter: (sessionId: string) =>
-        createDaemonMessageAdapter({
-          getMessageContext: () => messageToolContextRef.current ?? undefined,
-          resolveChannelId: () => {
-            // This will be resolved after platform starts - the platform adapter handles this
-            return undefined;
-          },
-          sessionId,
-        }),
-      createMessagePoster: (_sessionId: string) =>
-        createDaemonMessagePoster({
-          sendBody: async (target: string, body: string) => {
-            const adapter = platformAdapterRef.current;
-            if (!adapter) throw new Error("platform adapter not available");
-            await adapter.sendBody(target, body);
-          },
-          logger: getLogger("workflow-message-poster"),
-        }),
-
-      createToolExecutor: (sessionId: string) => ({
-        async execute({ name, argsJson, toolCallId }) {
-          const runtime = getSessionMcpRuntimeRef();
-          if (!runtime) throw new Error("MCP runtime not available");
-          const ctx = await runtime.resolveContext(sessionId);
-          if (!ctx) throw new Error("no MCP context for session " + sessionId);
-          const routed = routeMcpToolInvocation(ctx.aggregated, name);
-          if ("error" in routed) throw new Error(routed.error);
-          if (routed.tool.sourceId === "builtin") {
-            const registry = getBuiltinToolRegistry();
-            const toolCtx = {
-              sessionId,
-              db,
-              config: configRef.current,
-              env: process.env,
-              workspacePath: configRef.current.workspacesRoot ?? LAYOUT.workspacesRoot,
-              workspaceRealPath: realpathSync(
-                configRef.current.workspacesRoot ?? LAYOUT.workspacesRoot,
-              ),
-              creds: {
-                uid: process.getuid?.() ?? 0,
-                gid: process.getgid?.() ?? 0,
-              },
-              orchestratorEnv: process.env,
-              getAgentIntegrationInvoker: () => undefined,
-              getProcessManager: () => procman,
-              messageToolCtx: messageToolContextRef.current ?? undefined,
-              memoryConfig: configRef.current.memory ?? {},
-              runtimeOpenaiBaseUrl: configRef.current.runtime?.openaiBaseUrl,
-              isSubagentSession: true,
-            };
-            const result = await registry.execute(
-              routed.tool.originalName,
-              JSON.parse(argsJson),
-              toolCtx,
-            );
-            return { resultJson: result.resultJson };
-          }
-          if (!ctx.external) throw new Error("no external MCP transport for session " + sessionId);
-          return ctx.external({
-            sourceId: routed.tool.sourceId,
-            originalName: routed.tool.originalName,
-            argsJson,
-            toolCallId,
-          });
-        },
-      }),
-      createNotificationAdapter: (_replyToSessionId: string) => ({
-        async sendNotification(target: string, message: string): Promise<void> {
-          const ext = subagentRuntimeExtensionRef.current;
-          if (!ext) {
-            getLogger("daemon").warn("workflow task notification: subagent runtime not available");
-            return;
-          }
-          const delivery = deliveryRegistry.resolveOperatorDelivery(target, configRef.current) ?? {
-            kind: "internal" as const,
-          };
-          try {
-            await ext.runSessionModelTurn({
-              sessionId: target,
-              userContent: message,
-              userMetadata: { workflow_task_failed: true },
-              systemContext: {
-                kind: "workflow.task_failed",
-                summary: message,
-                guidance:
-                  "A task in a running workflow has failed. Assess whether this requires intervention, a retry, or can be ignored. The user can see the failure in the status post — only surface this if you have actionable context to add.",
-              },
-              delivery,
-            });
-          } catch (e) {
-            getLogger("daemon").warn("workflow task failure notification failed", {
-              target,
-              err: String(e),
-            });
-          }
-        },
-      }),
-    });
-
-    const resumed = await workflow.server.resume();
-    if (resumed.length > 0) {
-      getLogger("daemon").info("workflow resumed incomplete workflows", {
-        count: resumed.length,
-        ids: resumed,
-      });
-    }
-
-    rt.shutdown.registerDrain("workflow", async () => {
-      await workflow.server.stopAll();
-    });
+    const disposeWorkflow = await initWorkflowServer(db, deliveryRegistry, procman);
+    rt.shutdown.registerDrain("workflow", disposeWorkflow);
   } catch (e) {
     getLogger("daemon").warn("workflow server failed to initialize", {
       err: String(e),
     });
   }
 
-  const heartbeatMs = resolveHeartbeatIntervalMs(configRef.current);
-  const cronMs = resolveCronTickIntervalMs(configRef.current);
-  const batchLimit = resolveHeartbeatBatchSize(configRef.current);
-  const concurrency = resolveHeartbeatConcurrency(configRef.current);
-  const handlers = createDefaultHeartbeatHandlers();
-
-  const hbTimer = setInterval(() => {
-    void runHeartbeatBatch(db, {
-      batchLimit,
-      concurrency,
-      handlers,
-    }).catch((e) => {
-      getLogger("events").error("heartbeat batch failed", { err: String(e) });
-    });
-  }, heartbeatMs);
-
-  const cronTimer = setInterval(() => {
-    try {
-      const n = runCronTick(db);
-      if (n > 0) getLogger("events").debug("cron tick fired", { count: n });
-    } catch (e) {
-      getLogger("events").error("cron tick failed", { err: String(e) });
-    }
-  }, cronMs);
-
-  const retentionMs = retentionScheduleIntervalMs(configRef.current);
-  const retentionTimer =
-    retentionMs > 0
-      ? setInterval(() => {
-          void runRetentionJobs(db, config, {
-            correlationId: `retention-${Date.now()}`,
-          })
-            .then((summary) => {
-              if (summary.inboundMediaDeletedFiles > 0 || summary.transcriptMessagesDeleted > 0) {
-                getLogger("events").info("retention tick", { ...summary });
-              }
-            })
-            .catch((e) => {
-              getLogger("events").error("retention tick failed", {
-                err: String(e),
-              });
-            });
-        }, retentionMs)
-      : undefined;
-
-  stopEventLoops = () => {
-    clearInterval(hbTimer);
-    clearInterval(cronTimer);
-    if (retentionTimer) clearInterval(retentionTimer);
-  };
+  // --- Event Loops: heartbeat, cron, retention ---
+  stopEventLoops = startEventLoops(db);
 })();
 
-rt.health.register(createSqliteProbe({ getPath: () => config.stateDbPath }));
-// Note: Platform health probes are registered by plugins via health.register hook
-rt.health.register(
-  createModelEndpointProbe({
-    getBaseUrl: () => resolveModelHealthProbeBaseUrl(configRef.current),
-    getApiKey: () => resolveModelHealthProbeApiKey(configRef.current),
-    getProviderKind: () => configRef.current.models?.providers?.[0]?.kind,
-  }),
-);
+// ============================================================
+// Post-bootstrap: health probes, startup log, health check.
+// ============================================================
 
-// Embeddings endpoint probe
-rt.health.register(
-  createModelEndpointProbe({
-    name: "embeddings",
-    getBaseUrl: () => resolveEmbeddingsHealthProbeBaseUrl(configRef.current),
-    getApiKey: () => resolveEmbeddingsHealthProbeApiKey(configRef.current),
-  }),
-);
+registerHealthProbes();
 
 getLogger("daemon").info("daemon starting", {
   version: VERSION,
