@@ -776,7 +776,12 @@ export async function handleIntegrationControlOp(
         killSubagents: ctx.sessionManager
           ? (childIds) => {
               for (const cid of childIds) {
-                terminatePersistentSubagentSession(ctx.sessionManager!, cid, "killed");
+                terminatePersistentSubagentSession(
+                  ctx.sessionManager!,
+                  cid,
+                  "killed",
+                  ctx.hitlClear?.autoApproveGate,
+                );
               }
             }
           : undefined,
@@ -1232,7 +1237,12 @@ export async function handleIntegrationControlOp(
               });
             })
             .finally(() => {
-              terminatePersistentSubagentSession(sessionManager, childId);
+              terminatePersistentSubagentSession(
+                sessionManager,
+                childId,
+                undefined,
+                ctx.hitlClear?.autoApproveGate,
+              );
             });
           ctx.recordIntegrationAudit({
             action: "subagent.spawn_one_shot",
@@ -1279,7 +1289,12 @@ export async function handleIntegrationControlOp(
             replyLen: turn.latestAssistantText?.length ?? 0,
           });
         } finally {
-          terminatePersistentSubagentSession(sessionManager, childId);
+          terminatePersistentSubagentSession(
+            sessionManager,
+            childId,
+            undefined,
+            ctx.hitlClear?.autoApproveGate,
+          );
         }
         ctx.recordIntegrationAudit({
           action: "subagent.spawn_one_shot",
@@ -1381,7 +1396,12 @@ export async function handleIntegrationControlOp(
       };
       ttlTimer = setTimeout(() => {
         ttlTimer = undefined;
-        terminatePersistentSubagentSession(sessionManager, childId, "ttl_expired");
+        terminatePersistentSubagentSession(
+          sessionManager,
+          childId,
+          "ttl_expired",
+          ctx.hitlClear?.autoApproveGate,
+        );
       }, lifetimeMs);
       rememberSubagentHandles(childId, {
         unregisterThread,
@@ -2127,6 +2147,7 @@ export async function handleIntegrationControlOp(
         sessionManager,
         sessionId,
         shouldAnnounceKilled ? "killed" : undefined,
+        ctx.hitlClear?.autoApproveGate,
       );
       ctx.recordIntegrationAudit({
         action: "session.kill",

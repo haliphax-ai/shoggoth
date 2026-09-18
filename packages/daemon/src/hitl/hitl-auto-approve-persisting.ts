@@ -9,6 +9,7 @@ const log = getLogger("hitl-auto-approve");
 import {
   insertSessionToolAutoApprove,
   sessionHasToolAutoApproveFlexible,
+  clearSessionToolAutoApproveForSession,
 } from "./hitl-session-tool-auto-store";
 import type { HitlAutoApproveGate } from "./hitl-auto-approve";
 import { hitlAutoApproveToolNamesMatch } from "./hitl-tool-name-match";
@@ -88,6 +89,9 @@ export function createPersistingHitlAutoApproveGate(input: {
         if (hitlAutoApproveToolNamesMatch(t, a)) return true;
       }
       return false;
+    },
+    clearSession(sessionId) {
+      clearSessionToolAutoApproveForSession(input.db, sessionId);
     },
     clearAutoApproveMemory(input) {
       if (input.agents === "all") {
