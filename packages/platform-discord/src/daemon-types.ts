@@ -54,6 +54,7 @@ export type HitlAutoApproveGate = {
   enableSessionTool(sessionId: string, toolName: string): void;
   enableAgentTool(agentId: string, toolName: string): Promise<void>;
   shouldAutoApprove(sessionId: string, toolName: string): boolean;
+  clearSession(sessionId: string): void;
   clearAutoApproveMemory?(input: { readonly agents: "all" | readonly string[] }): void;
 };
 
