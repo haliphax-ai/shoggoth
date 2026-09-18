@@ -33,6 +33,23 @@ function makeTask(id: number, prompt = `do task ${id}`): TaskDef {
   };
 }
 
+/**
+ * Poll until a workflow is deleted or the deadline is reached.
+ * Resilient to CI timer delays — the old approach used a fixed setTimeout
+ * which was too tight for CI environments.
+ */
+async function waitForDeletion(
+  baseDir: string,
+  workflowId: string,
+  deadlineMs = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + deadlineMs;
+  while ((await loadWorkflow(baseDir, workflowId)) !== undefined) {
+    if (Date.now() >= deadline) break;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 function makeWorkflow(id: string, overrides?: Partial<TaskList>): TaskList {
   return {
     id,
@@ -383,8 +400,8 @@ describe("retention schedule", () => {
 
     startRetentionSchedule(baseDir, 50);
 
-    // Wait for at least one interval
-    await new Promise((r) => setTimeout(r, 120));
+    // Poll for deletion — CI may delay timer ticks beyond a fixed timeout
+    await waitForDeletion(baseDir, "wf-scheduled");
 
     assert.equal(await loadWorkflow(baseDir, "wf-scheduled"), undefined);
   });
@@ -455,7 +472,8 @@ describe("RetentionScheduler", () => {
     scheduler.start(baseDir, 50);
     scheduler.start(baseDir, 50); // replace — should not leak timer
 
-    await new Promise((r) => setTimeout(r, 120));
+    // Poll for deletion — CI may delay timer ticks beyond a fixed timeout
+    await waitForDeletion(baseDir, "wf-scheduler-1");
     assert.equal(await loadWorkflow(baseDir, "wf-scheduler-1"), undefined);
     scheduler.stop();
   });
