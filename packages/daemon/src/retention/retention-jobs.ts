@@ -137,17 +137,22 @@ async function purgeInboundMedia(
   let files = await listInboundFileEntries(root);
 
   if (maxAgeDays != null) {
+    const stillAlive: typeof files = [];
     for (const f of files) {
-      if (f.mtimeMs >= cutoffMs) continue;
+      if (f.mtimeMs >= cutoffMs) {
+        stillAlive.push(f);
+        continue;
+      }
       try {
         await unlink(f.absPath);
         deletedFiles += 1;
         freedBytes += f.size;
       } catch {
-        /* ignore */
+        /* unlink failed — file is still on disk */
+        stillAlive.push(f);
       }
     }
-    files = await listInboundFileEntries(root);
+    files = stillAlive;
   }
 
   if (maxTotal != null && files.length > 0) {
