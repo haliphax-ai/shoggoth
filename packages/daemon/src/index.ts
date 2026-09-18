@@ -1,5 +1,13 @@
 import { DEFAULT_HITL_CONFIG, loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
-import { serviceProvisionSecrets } from "./service-refs";
+import {
+  serviceProvisionSecrets,
+  serviceRegistryRef as svcRegRef,
+  serviceToolRegistryRef as svcToolRegRef,
+  serviceApprovalStoreRef as svcApprovalRef,
+  serviceLifecycleManagerRef as svcLifecycleRef,
+  serviceKeyStoreRef as svcKeyStoreRef,
+  tokenMinterRef as svcTokenMinterRef,
+} from "./service-refs";
 import { routeMcpToolInvocation } from "@shoggoth/mcp-integration";
 import { fileURLToPath } from "node:url";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -111,8 +119,9 @@ import { TimerScheduler } from "./timers/timer-scheduler";
 import { setTimerScheduler } from "./sessions/builtin-handlers/timer-handler";
 import {
   ShoggothPluginSystem,
+  loadAllPluginsFromConfig,
+  PlatformDeliveryRegistry,
   type PlatformDeps,
-  type PlatformDeliveryRegistry,
 } from "@shoggoth/plugins";
 import { fireDaemonHooks } from "./plugins/daemon-hooks";
 import {
@@ -128,8 +137,28 @@ import {
 import { ManifestFetcher } from "./manifest-fetcher";
 import { ServiceApprovalStore } from "./service-approval-store";
 import { appendAuditRow } from "./audit/append-audit";
+import { ServiceToolDispatcher } from "./service-tool-dispatcher";
+import {
+  serviceToolRegistryRef,
+  serviceRegistryRef as sessionSvcRegRef,
+} from "./sessions/service-tool-registry-ref";
+import { ServiceKeyStore } from "./service-key-store";
+import { TokenMinter } from "./service-auth";
+import { createVaultService } from "./vault/vault-service-impl";
+import { vaultServiceRef } from "./vault/vault-ref";
 
 // ============================================================
+// Import convention
+// ============================================================
+//
+// Static imports (top-level): core modules that are always needed
+// during daemon startup — logging, config, types, database, session
+// management, policy, health probes, etc.
+//
+// Dynamic imports (await import()): conditionally-loaded features
+// that depend on runtime config:
+//   - HTTP gateway (only when config.gateway.enabled is true)
+//
 // Module-level setup
 // ============================================================
 
@@ -246,8 +275,6 @@ async function initStateDatabase() {
 
     // Initialize vault service
     try {
-      const { createVaultService } = await import("./vault/vault-service-impl");
-      const { vaultServiceRef } = await import("./vault/vault-ref");
       const vault = await createVaultService(
         db,
         "/var/lib/shoggoth/daemon/vault.key",
@@ -321,7 +348,6 @@ async function loadPlugins(db: ReturnType<typeof openStateDb>) {
   const pluginSystem = new ShoggothPluginSystem();
   const resolveFromFile = fileURLToPath(import.meta.url);
 
-  const { loadAllPluginsFromConfig } = await import("@shoggoth/plugins");
   const loaded = await loadAllPluginsFromConfig({
     config,
     system: pluginSystem,
@@ -836,12 +862,12 @@ void (async () => {
 
   // --- Build PlatformDeps — platform-agnostic callbacks the plugins need ---
   const platformsMap = new Map<string, any>();
-  const { PlatformDeliveryRegistry } = await import("@shoggoth/plugins");
+
   const deliveryRegistry = new PlatformDeliveryRegistry();
 
   // --- Service Registries for plugin service support ---
   const serviceRegistry = createServiceRegistry();
-  const { ServiceToolDispatcher } = await import("./service-tool-dispatcher");
+
   const serviceToolDispatcher = new ServiceToolDispatcher(serviceRegistry);
   const serviceToolRegistry = createServiceToolRegistry(serviceRegistry, serviceToolDispatcher);
 
@@ -899,8 +925,7 @@ void (async () => {
   };
 
   // Expose service tool registry to session context finalizers and tool executor
-  const { serviceToolRegistryRef, serviceRegistryRef: sessionSvcRegRef } =
-    await import("./sessions/service-tool-registry-ref");
+
   serviceToolRegistryRef.current = serviceToolRegistry;
   sessionSvcRegRef.current = serviceRegistry;
 
@@ -1036,23 +1061,16 @@ void (async () => {
 
   // --- Service Lifecycle Manager ---
   const serviceApprovalStore = new ServiceApprovalStore(db);
-  const { ServiceKeyStore } = await import("./service-key-store");
+
   const serviceKeyStore = new ServiceKeyStore(db);
 
   // Wire TokenMinter into the dispatcher now that the key store exists
-  const { TokenMinter } = await import("./service-auth");
+
   const tokenMinter = new TokenMinter(serviceKeyStore);
   serviceToolDispatcher.setTokenMinter(tokenMinter);
 
   // Populate service refs so the control plane can access them
-  const {
-    serviceRegistryRef: svcRegRef,
-    serviceToolRegistryRef: svcToolRegRef,
-    serviceApprovalStoreRef: svcApprovalRef,
-    serviceLifecycleManagerRef: svcLifecycleRef,
-    serviceKeyStoreRef: svcKeyStoreRef,
-    tokenMinterRef: svcTokenMinterRef,
-  } = await import("./service-refs");
+
   svcRegRef.current = serviceRegistry;
   svcToolRegRef.current = serviceToolRegistry;
   svcApprovalRef.current = serviceApprovalStore;
