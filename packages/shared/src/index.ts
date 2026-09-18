@@ -109,6 +109,8 @@ export {
   attachmentHandlingModes,
   type AttachmentHandlingMode,
   type AttachmentHandlingConfig,
+  vaultConfigSchema,
+  type ShoggothVaultConfig,
   shoggothMediaGenerationConfigSchema,
   type ShoggothMediaGenerationConfig,
 } from "./schema";

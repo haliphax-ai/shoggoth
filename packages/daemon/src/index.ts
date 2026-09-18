@@ -277,8 +277,8 @@ async function initStateDatabase() {
     try {
       const vault = await createVaultService(
         db,
-        "/var/lib/shoggoth/daemon/vault.key",
-        "/run/secrets",
+        config.vault?.identityPath ?? "/var/lib/shoggoth/daemon/vault.key",
+        config.vault?.secretsDirectory ?? config.secretsDirectory,
       );
       vaultServiceRef.current = vault;
       getLogger("daemon").info("vault service initialized", {
