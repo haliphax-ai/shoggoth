@@ -1161,6 +1161,7 @@ export async function handleIntegrationControlOp(
       try {
         ({ sessionId: childId } = await sessionManager.spawn({
           parentSessionId,
+          parentWorkingDirectory: parent.workingDirectory,
           ...(modelSelection !== undefined ? { modelSelection } : {}),
         }));
       } catch (e) {

@@ -54,6 +54,8 @@ export interface SpawnSessionInput {
   readonly resourceType?: string;
   /** When set, mints `agent:…:<parent-leaf-uuid>:<new uuid>` under the parent's agent + platform. */
   readonly parentSessionId?: string;
+  /** Parent's working directory, passed in to avoid a redundant DB read inside the spawn transaction. */
+  readonly parentWorkingDirectory?: string;
   readonly modelSelection?: unknown;
   readonly lightContext?: boolean;
   /** Override the context level for this session. When omitted, resolved from config. */
@@ -144,13 +146,10 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
           contextLevel: resolvedContextLevel,
         });
         // Inherit parent's working directory when spawning a child session.
-        if (input.parentSessionId) {
-          const parent = options.sessions.getById(input.parentSessionId);
-          if (parent?.workingDirectory) {
-            options.sessions.update(id, {
-              workingDirectory: parent.workingDirectory,
-            });
-          }
+        if (input.parentWorkingDirectory) {
+          options.sessions.update(id, {
+            workingDirectory: input.parentWorkingDirectory,
+          });
         }
         options.agentTokens.register(id, agentToken);
       });
