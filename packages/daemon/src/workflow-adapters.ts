@@ -66,7 +66,7 @@ export type CompletionMap = Map<string, CompletionEntry>;
 
 export interface DaemonSpawnAdapterDeps {
   readonly sessionManager: Pick<SessionManager, "spawn" | "kill">;
-  readonly sessions: Pick<SessionStore, "update">;
+  readonly sessions: Pick<SessionStore, "update" | "getById">;
   /**
    * Fixed parent session ID. When omitted, `req.replyTo` is used as the parent
    * (the orchestrator sets replyTo to the calling session).
@@ -111,9 +111,13 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
     },
     async spawn(req: SpawnRequest): Promise<string> {
       const parentSessionId = deps.parentSessionId ?? req.replyTo;
+      const parentWorkingDirectory = parentSessionId
+        ? deps.sessions.getById(parentSessionId)?.workingDirectory
+        : undefined;
 
       const { sessionId: childId } = await deps.sessionManager.spawn({
         parentSessionId,
+        parentWorkingDirectory,
         contextLevel: deps.contextLevel ?? "minimal",
       });
 

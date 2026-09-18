@@ -478,6 +478,7 @@ describe("systemContext adoption: workflow task spawning", () => {
     const captured = capturingRunSessionModelTurn();
     const sessions = {
       update: () => {},
+      getById: () => undefined,
     };
     const sessionManager = {
       spawn: async () => ({
