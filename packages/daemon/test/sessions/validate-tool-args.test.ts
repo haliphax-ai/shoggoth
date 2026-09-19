@@ -150,4 +150,79 @@ describe("validateToolArgs", () => {
     expect(errors).toHaveLength(1);
     expect(errors[0].field).toBe("(root)");
   });
+
+  it("rejects unknown arguments not in schema properties", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        limit: { type: "number" },
+      },
+    };
+    const errors = validateToolArgs({ path: "/foo", mystery: 42 }, schema);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].field).toBe("mystery");
+    expect(errors[0].message).toContain("unknown argument");
+  });
+
+  it("rejects multiple unknown arguments", () => {
+    const schema = {
+      type: "object",
+      properties: { path: { type: "string" } },
+    };
+    const errors = validateToolArgs(
+      { path: "/foo", extra1: "a", extra2: "b" },
+      schema,
+    );
+    expect(errors).toHaveLength(2);
+    expect(errors.map((e) => e.field)).toContain("extra1");
+    expect(errors.map((e) => e.field)).toContain("extra2");
+  });
+
+  it("allows extra arguments when additionalProperties is true", () => {
+    const schema = {
+      type: "object",
+      properties: { path: { type: "string" } },
+      additionalProperties: true,
+    };
+    const errors = validateToolArgs({ path: "/foo", mystery: 42 }, schema);
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects unknown arguments when additionalProperties is false", () => {
+    const schema = {
+      type: "object",
+      properties: { path: { type: "string" } },
+      additionalProperties: false,
+    };
+    const errors = validateToolArgs({ path: "/foo", extra: "bad" }, schema);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].field).toBe("extra");
+  });
+
+  it("reports both unknown and other validation errors together", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        limit: { type: "number" },
+      },
+      required: ["path"],
+    };
+    const errors = validateToolArgs(
+      { limit: "not-a-number", mystery: true },
+      schema,
+    );
+    expect(errors).toHaveLength(3);
+    const fields = errors.map((e) => e.field);
+    expect(fields).toContain("path");
+    expect(fields).toContain("limit");
+    expect(fields).toContain("mystery");
+  });
+
+  it("allows args with no properties defined in schema (open schema)", () => {
+    const schema = { type: "object" };
+    const errors = validateToolArgs({ anything: "goes" }, schema);
+    expect(errors).toEqual([]);
+  });
 });
