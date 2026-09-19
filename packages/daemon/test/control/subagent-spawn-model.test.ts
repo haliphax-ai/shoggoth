@@ -10,9 +10,10 @@
 
 import { describe, it, beforeAll, afterAll, vi } from "vitest";
 
+let sharedDir = "";
 vi.mock("../../src/workspaces/agent-workspace-layout", () => ({
   ensureAgentWorkspaceLayout: async () => {},
-  resolveAgentTemplateDir: () => "/tmp/templates",
+  resolveAgentTemplateDir: () => join(sharedDir, "templates"),
 }));
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
@@ -36,9 +37,10 @@ import { HealthRegistry } from "../../src/health";
 import { ShutdownCoordinator } from "../../src/shutdown";
 
 let prevOperatorToken: string | undefined;
-beforeAll(() => {
+beforeAll(async () => {
   prevOperatorToken = process.env.SHOGGOTH_OPERATOR_TOKEN;
   process.env.SHOGGOTH_OPERATOR_TOKEN = "test-op-token";
+  sharedDir = await mkdtemp(join(tmpdir(), "shoggoth-sm-shared-"));
 });
 afterAll(() => {
   if (prevOperatorToken === undefined) delete process.env.SHOGGOTH_OPERATOR_TOKEN;
@@ -47,15 +49,16 @@ afterAll(() => {
 
 const TEST_OPERATOR_TOKEN = "test-op-token";
 
-function minimalConfig(socketPath: string): ShoggothConfig {
+function minimalConfig(dir: string): ShoggothConfig {
+  const socketPath = join(dir, "c.sock");
   return {
     logLevel: "info",
-    stateDbPath: join(socketPath, "..", "state.db"),
+    stateDbPath: join(dir, "state.db"),
     socketPath,
-    workspacesRoot: join(socketPath, "..", "workspaces"),
-    secretsDirectory: "/tmp",
-    inboundMediaRoot: "/tmp",
-    configDirectory: "/tmp",
+    workspacesRoot: join(dir, "workspaces"),
+    secretsDirectory: join(dir, "secrets"),
+    inboundMediaRoot: join(dir, "media"),
+    configDirectory: join(dir, "config"),
     hitl: {
       defaultApprovalTimeoutMs: 300_000,
       toolRisk: { read: "safe", write: "caution", exec: "critical" },
@@ -84,8 +87,7 @@ async function withControlPlaneSession(
   fn: (send: (body: Record<string, unknown>) => Promise<string>) => Promise<void>,
 ): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "shoggoth-sm-"));
-  const sock = join(dir, "c.sock");
-  const config = options.config ?? minimalConfig(sock);
+  const config = options.config ?? minimalConfig(dir);
   const socketPath = config.socketPath;
 
   const logger = createLogger({ component: "test", minLevel: "error" });
@@ -181,7 +183,6 @@ describe("subagentModel config resolution", () => {
     if (process.platform !== "linux") return;
 
     const dir = await mkdtemp(join(tmpdir(), "shoggoth-sm-inherit-"));
-    const sock = join(dir, "c.sock");
     const db = new Database(join(dir, "state.db"));
     migrate(db, defaultMigrationsDir());
     const parentId = formatAgentSessionUrn(
@@ -192,12 +193,12 @@ describe("subagentModel config resolution", () => {
     );
     createSessionStore(db).create({
       id: parentId,
-      workspacePath: "/tmp/w",
+      workspacePath: join(dir, "workspace"),
       status: "active",
       modelSelection: { model: "parent/original-model" },
     });
 
-    const sel = await spawnAndGetModelSelection(minimalConfig(sock), db, parentId, {});
+    const sel = await spawnAndGetModelSelection(minimalConfig(dir), db, parentId, {});
 
     assert.ok(sel && typeof sel === "object");
     assert.equal((sel as Record<string, unknown>).model, "parent/original-model");
@@ -208,7 +209,6 @@ describe("subagentModel config resolution", () => {
     if (process.platform !== "linux") return;
 
     const dir = await mkdtemp(join(tmpdir(), "shoggoth-sm-global-"));
-    const sock = join(dir, "c.sock");
     const db = new Database(join(dir, "state.db"));
     migrate(db, defaultMigrationsDir());
     const parentId = formatAgentSessionUrn(
@@ -219,13 +219,13 @@ describe("subagentModel config resolution", () => {
     );
     createSessionStore(db).create({
       id: parentId,
-      workspacePath: "/tmp/w",
+      workspacePath: join(dir, "workspace"),
       status: "active",
       modelSelection: { model: "parent/original" },
     });
 
     const config: ShoggothConfig = {
-      ...minimalConfig(sock),
+      ...minimalConfig(dir),
       agents: {
         subagentModel: "provider-a/small-model",
       },
@@ -242,7 +242,6 @@ describe("subagentModel config resolution", () => {
     if (process.platform !== "linux") return;
 
     const dir = await mkdtemp(join(tmpdir(), "shoggoth-sm-peragent-"));
-    const sock = join(dir, "c.sock");
     const db = new Database(join(dir, "state.db"));
     migrate(db, defaultMigrationsDir());
     const parentId = formatAgentSessionUrn(
@@ -253,13 +252,13 @@ describe("subagentModel config resolution", () => {
     );
     createSessionStore(db).create({
       id: parentId,
-      workspacePath: "/tmp/w",
+      workspacePath: join(dir, "workspace"),
       status: "active",
       modelSelection: { model: "parent/original" },
     });
 
     const config: ShoggothConfig = {
-      ...minimalConfig(sock),
+      ...minimalConfig(dir),
       agents: {
         subagentModel: "provider-a/global-model",
         list: {
@@ -281,7 +280,6 @@ describe("subagentModel config resolution", () => {
     if (process.platform !== "linux") return;
 
     const dir = await mkdtemp(join(tmpdir(), "shoggoth-sm-spawn-"));
-    const sock = join(dir, "c.sock");
     const db = new Database(join(dir, "state.db"));
     migrate(db, defaultMigrationsDir());
     const parentId = formatAgentSessionUrn(
@@ -292,13 +290,13 @@ describe("subagentModel config resolution", () => {
     );
     createSessionStore(db).create({
       id: parentId,
-      workspacePath: "/tmp/w",
+      workspacePath: join(dir, "workspace"),
       status: "active",
       modelSelection: { model: "parent/original" },
     });
 
     const config: ShoggothConfig = {
-      ...minimalConfig(sock),
+      ...minimalConfig(dir),
       agents: {
         subagentModel: "provider-a/global-model",
         list: {
@@ -322,7 +320,6 @@ describe("subagentModel config resolution", () => {
     if (process.platform !== "linux") return;
 
     const dir = await mkdtemp(join(tmpdir(), "shoggoth-sm-noagent-"));
-    const sock = join(dir, "c.sock");
     const db = new Database(join(dir, "state.db"));
     migrate(db, defaultMigrationsDir());
     const parentId = formatAgentSessionUrn(
@@ -333,12 +330,12 @@ describe("subagentModel config resolution", () => {
     );
     createSessionStore(db).create({
       id: parentId,
-      workspacePath: "/tmp/w",
+      workspacePath: join(dir, "workspace"),
       status: "active",
     });
 
     const config: ShoggothConfig = {
-      ...minimalConfig(sock),
+      ...minimalConfig(dir),
       agents: {
         subagentModel: "provider-x/fallback-model",
         list: {
@@ -360,7 +357,6 @@ describe("subagentModel config resolution", () => {
     if (process.platform !== "linux") return;
 
     const dir = await mkdtemp(join(tmpdir(), "shoggoth-sm-none-"));
-    const sock = join(dir, "c.sock");
     const db = new Database(join(dir, "state.db"));
     migrate(db, defaultMigrationsDir());
     const parentId = formatAgentSessionUrn(
@@ -371,13 +367,329 @@ describe("subagentModel config resolution", () => {
     );
     createSessionStore(db).create({
       id: parentId,
-      workspacePath: "/tmp/w",
+      workspacePath: join(dir, "workspace"),
       status: "active",
     });
 
-    const sel = await spawnAndGetModelSelection(minimalConfig(sock), db, parentId, {});
+    const sel = await spawnAndGetModelSelection(minimalConfig(dir), db, parentId, {});
 
     assert.equal(sel, undefined);
+    db.close();
+  });
+
+  it("rejects unknown model ref in model_options.model", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-sm-reject-unknown-"));
+    const db = new Database(join(dir, "state.db"));
+    migrate(db, defaultMigrationsDir());
+    const parentId = formatAgentSessionUrn(
+      "par",
+      "discord",
+      "channel",
+      SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID,
+    );
+    createSessionStore(db).create({
+      id: parentId,
+      workspacePath: join(dir, "workspace"),
+      status: "active",
+    });
+
+    const config: ShoggothConfig = {
+      ...minimalConfig(dir),
+      models: {
+        providers: [
+          {
+            id: "openai",
+            kind: "openai-compatible" as const,
+            baseUrl: "https://api.openai.com/v1",
+            apiKey: "test",
+            models: [{ name: "gpt-4o" }],
+          },
+        ],
+        failoverChain: ["openai/gpt-4o"],
+      },
+    };
+
+    let spawnFailed = false;
+    let errorMessage = "";
+
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: async () => {
+        throw new Error("should not be called");
+      },
+      subscribeSubagentSession: () => () => {},
+      registerPlatformThreadBinding: () => () => {},
+    });
+
+    try {
+      await withControlPlaneSession({ stateDb: db, config }, async (send) => {
+        const line = await send({
+          v: WIRE_VERSION,
+          id: "sm-1",
+          op: "subagent_spawn",
+          auth: { kind: "operator_token", token: TEST_OPERATOR_TOKEN },
+          payload: {
+            parent_session_id: parentId,
+            prompt: "test task",
+            mode: "one_shot",
+            model_options: { model: "nonexistent/model" },
+          },
+        });
+        const res = parseResponseLine(line);
+        if (!res.ok) {
+          spawnFailed = true;
+          errorMessage =
+            typeof res.error === "object" && res.error !== null
+              ? String((res.error as Record<string, unknown>).message ?? res.error)
+              : String(res.error ?? "");
+        }
+      });
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
+
+    assert.ok(spawnFailed, "spawn should have failed with unknown model");
+    assert.ok(
+      errorMessage.includes("nonexistent/model"),
+      `error should mention the model ref, got: ${errorMessage}`,
+    );
+    assert.ok(
+      errorMessage.includes("not found"),
+      `error should say 'not found', got: ${errorMessage}`,
+    );
+    db.close();
+  });
+
+  it("rejects invalid model ref format (no slash)", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-sm-reject-noslash-"));
+    const db = new Database(join(dir, "state.db"));
+    migrate(db, defaultMigrationsDir());
+    const parentId = formatAgentSessionUrn(
+      "par",
+      "discord",
+      "channel",
+      SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID,
+    );
+    createSessionStore(db).create({
+      id: parentId,
+      workspacePath: join(dir, "workspace"),
+      status: "active",
+    });
+
+    const config: ShoggothConfig = {
+      ...minimalConfig(dir),
+      models: {
+        providers: [
+          {
+            id: "openai",
+            kind: "openai-compatible" as const,
+            baseUrl: "https://api.openai.com/v1",
+            apiKey: "test",
+            models: [{ name: "gpt-4o" }],
+          },
+        ],
+        failoverChain: ["openai/gpt-4o"],
+      },
+    };
+
+    let spawnFailed = false;
+    let errorMessage = "";
+
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: async () => {
+        throw new Error("should not be called");
+      },
+      subscribeSubagentSession: () => () => {},
+      registerPlatformThreadBinding: () => () => {},
+    });
+
+    try {
+      await withControlPlaneSession({ stateDb: db, config }, async (send) => {
+        const line = await send({
+          v: WIRE_VERSION,
+          id: "sm-1",
+          op: "subagent_spawn",
+          auth: { kind: "operator_token", token: TEST_OPERATOR_TOKEN },
+          payload: {
+            parent_session_id: parentId,
+            prompt: "test task",
+            mode: "one_shot",
+            model_options: { model: "invalid-model-no-slash" },
+          },
+        });
+        const res = parseResponseLine(line);
+        if (!res.ok) {
+          spawnFailed = true;
+          errorMessage =
+            typeof res.error === "object" && res.error !== null
+              ? String((res.error as Record<string, unknown>).message ?? res.error)
+              : String(res.error ?? "");
+        }
+      });
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
+
+    assert.ok(spawnFailed, "spawn should have failed with invalid format");
+    assert.ok(
+      errorMessage.includes("providerId/model format"),
+      `error should mention format, got: ${errorMessage}`,
+    );
+    db.close();
+  });
+
+  it("rejects subagentModel config with unknown provider", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-sm-reject-cfgprov-"));
+    const db = new Database(join(dir, "state.db"));
+    migrate(db, defaultMigrationsDir());
+    const parentId = formatAgentSessionUrn(
+      "par",
+      "discord",
+      "channel",
+      SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID,
+    );
+    createSessionStore(db).create({
+      id: parentId,
+      workspacePath: join(dir, "workspace"),
+      status: "active",
+    });
+
+    const config: ShoggothConfig = {
+      ...minimalConfig(dir),
+      models: {
+        providers: [
+          {
+            id: "openai",
+            kind: "openai-compatible" as const,
+            baseUrl: "https://api.openai.com/v1",
+            apiKey: "test",
+            models: [{ name: "gpt-4o" }],
+          },
+        ],
+        failoverChain: ["openai/gpt-4o"],
+      },
+      agents: {
+        subagentModel: "nonexistent-provider/some-model",
+      },
+    };
+
+    let spawnFailed = false;
+    let errorMessage = "";
+
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: async () => {
+        throw new Error("should not be called");
+      },
+      subscribeSubagentSession: () => () => {},
+      registerPlatformThreadBinding: () => () => {},
+    });
+
+    try {
+      await withControlPlaneSession({ stateDb: db, config }, async (send) => {
+        const line = await send({
+          v: WIRE_VERSION,
+          id: "sm-1",
+          op: "subagent_spawn",
+          auth: { kind: "operator_token", token: TEST_OPERATOR_TOKEN },
+          payload: {
+            parent_session_id: parentId,
+            prompt: "test task",
+            mode: "one_shot",
+          },
+        });
+        const res = parseResponseLine(line);
+        if (!res.ok) {
+          spawnFailed = true;
+          errorMessage =
+            typeof res.error === "object" && res.error !== null
+              ? String((res.error as Record<string, unknown>).message ?? res.error)
+              : String(res.error ?? "");
+        }
+      });
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
+
+    assert.ok(spawnFailed, "spawn should have failed with unknown provider");
+    assert.ok(
+      errorMessage.includes("not found"),
+      `error should mention provider not found, got: ${errorMessage}`,
+    );
+    db.close();
+  });
+
+  it("allows valid model ref that exists in providers", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-sm-allow-valid-"));
+    const db = new Database(join(dir, "state.db"));
+    migrate(db, defaultMigrationsDir());
+    const parentId = formatAgentSessionUrn(
+      "par",
+      "discord",
+      "channel",
+      SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID,
+    );
+    createSessionStore(db).create({
+      id: parentId,
+      workspacePath: join(dir, "workspace"),
+      status: "active",
+    });
+
+    const config: ShoggothConfig = {
+      ...minimalConfig(dir),
+      models: {
+        providers: [
+          {
+            id: "openai",
+            kind: "openai-compatible" as const,
+            baseUrl: "https://api.openai.com/v1",
+            apiKey: "test",
+            models: [{ name: "gpt-4o" }],
+          },
+        ],
+        failoverChain: ["openai/gpt-4o"],
+      },
+    };
+
+    let spawnedSessionId: string | undefined;
+
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: async (input: CapturedSpawn) => {
+        spawnedSessionId = input.sessionId;
+        return { latestAssistantText: "REPLY", failoverMeta: undefined };
+      },
+      subscribeSubagentSession: () => () => {},
+      registerPlatformThreadBinding: () => () => {},
+    });
+
+    try {
+      await withControlPlaneSession({ stateDb: db, config }, async (send) => {
+        const line = await send({
+          v: WIRE_VERSION,
+          id: "sm-1",
+          op: "subagent_spawn",
+          auth: { kind: "operator_token", token: TEST_OPERATOR_TOKEN },
+          payload: {
+            parent_session_id: parentId,
+            prompt: "test task",
+            mode: "one_shot",
+            model_options: { model: "openai/gpt-4o" },
+          },
+        });
+        const res = parseResponseLine(line);
+        assert.equal(res.ok, true, `spawn failed: ${JSON.stringify(res.error)}`);
+      });
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
+
+    assert.ok(spawnedSessionId, "subagent should have been spawned");
     db.close();
   });
 
@@ -385,7 +697,6 @@ describe("subagentModel config resolution", () => {
     if (process.platform !== "linux") return;
 
     const dir = await mkdtemp(join(tmpdir(), "shoggoth-sm-merge-"));
-    const sock = join(dir, "c.sock");
     const db = new Database(join(dir, "state.db"));
     migrate(db, defaultMigrationsDir());
     const parentId = formatAgentSessionUrn(
@@ -396,13 +707,13 @@ describe("subagentModel config resolution", () => {
     );
     createSessionStore(db).create({
       id: parentId,
-      workspacePath: "/tmp/w",
+      workspacePath: join(dir, "workspace"),
       status: "active",
       modelSelection: { model: "parent/old", temperature: 0.5 },
     });
 
     const config: ShoggothConfig = {
-      ...minimalConfig(sock),
+      ...minimalConfig(dir),
       agents: {
         subagentModel: "provider-z/new-model",
       },

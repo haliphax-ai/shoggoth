@@ -64,6 +64,7 @@ import {
 import { dispatchMcpHttpCancelRequest } from "../mcp/mcp-http-cancel-registry";
 import { SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS } from "../subagent/subagent-constants";
 import { requestSessionTurnAbort } from "../sessions/session-turn-abort";
+import { validateModelRefExists } from "../sessions/model-resolution";
 import { rememberSubagentHandles } from "../subagent/subagent-disposables";
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
 import { terminatePersistentSubagentSession } from "../subagent/subagent-kill";
@@ -1144,6 +1145,19 @@ export async function handleIntegrationControlOp(
       const explicitModelRef = hasSpawnModel
         ? String(modelOptions!.model).trim()
         : (configSubagentModel ?? undefined);
+
+      // Validate the explicit model ref against configured providers/models.
+      if (explicitModelRef) {
+        const effectiveModels =
+          resolveEffectiveModelsConfig(ctx.config, parentSessionId) ?? ctx.config.models;
+        const result = validateModelRefExists(effectiveModels, explicitModelRef);
+        if (!result.ok) {
+          const code = result.error.includes("must be in providerId/model format")
+            ? "ERR_INVALID_MODEL"
+            : "ERR_MODEL_NOT_FOUND";
+          throw new IntegrationOpError(code, result.error);
+        }
+      }
 
       const modelSelection = mergeSubagentSpawnModelSelection(
         effectiveBase,

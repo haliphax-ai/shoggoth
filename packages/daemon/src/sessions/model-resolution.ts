@@ -78,6 +78,46 @@ function findModelDef(
   return provider.models?.find((m) => m.name === modelName);
 }
 
+/**
+ * Validate that a model ref (providerId/modelName) exists in the given models config.
+ * Pure config-only validation — no DB failure checks, no failover chain walking.
+ */
+export function validateModelRefExists(
+  modelsConfig: ShoggothModelsConfig | undefined,
+  ref: string,
+): { ok: true } | { ok: false; error: string } {
+  const parsed = parseRef(ref);
+  if (!parsed) {
+    return {
+      ok: false,
+      error: `Invalid model reference "${ref}": must be in providerId/model format (e.g. "openai/gpt-4o")`,
+    };
+  }
+
+  const providers = modelsConfig?.providers;
+  if (!providers?.length) {
+    // No providers configured — skip validation (nothing to check against).
+    return { ok: true };
+  }
+
+  const provider = findProvider(providers, parsed.providerId);
+  if (!provider) {
+    return {
+      ok: false,
+      error: `Model provider "${parsed.providerId}" not found for model "${ref}". Available providers: ${providers.map((p) => p.id).join(", ")}`,
+    };
+  }
+  const modelDef = findModelDef(provider, parsed.modelName);
+  if (!modelDef) {
+    return {
+      ok: false,
+      error: `Model "${parsed.modelName}" not found in provider "${parsed.providerId}" for model "${ref}". Available models: ${provider.models?.map((m) => m.name).join(", ") || "(none)"}`,
+    };
+  }
+
+  return { ok: true };
+}
+
 /** Get the markFailedDurationMs for a provider, falling back to global retry config then default. */
 function getMarkFailedDuration(
   provider: ProviderConfig,
@@ -91,7 +131,7 @@ function getMarkFailedDuration(
 }
 
 /**
- * Try to resolve a single ref to a ResolvedModel, checking provider failure state.
+ * Try to resolve a single ref to a ResolvedModel
  * Returns the resolved model if the provider is available, or null if failed/missing.
  */
 function tryResolveRef(
