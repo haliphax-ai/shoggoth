@@ -14,6 +14,7 @@ interface SchemaLike {
   readonly enum?: readonly unknown[];
   readonly minimum?: number;
   readonly maximum?: number;
+  readonly additionalProperties?: boolean;
 }
 
 interface ToolArgValidationError {
@@ -65,6 +66,19 @@ export function validateToolArgs(
       if (!(key in args) || args[key] === undefined) continue; // optional and absent
       const value = args[key];
       validateProperty(key, value, propSchema, errors);
+    }
+
+    // Reject unknown arguments (unless additionalProperties is explicitly true)
+    if (schema.additionalProperties !== true) {
+      const known = new Set(Object.keys(schema.properties));
+      for (const key of Object.keys(args)) {
+        if (!known.has(key)) {
+          errors.push({
+            field: key,
+            message: `unknown argument not defined in tool schema`,
+          });
+        }
+      }
     }
   }
 
