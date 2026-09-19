@@ -47,17 +47,11 @@ export type SessionMcpContextFinalizer = (
   sessionId: string,
 ) => SessionMcpToolContext;
 
-const contextFinalizers: SessionMcpContextFinalizer[] = [];
+/** Pre-registration buffer for finalizers registered before a runtime is created. */
+const pendingFinalizers: SessionMcpContextFinalizer[] = [];
 
 export function registerContextFinalizer(fn: SessionMcpContextFinalizer): void {
-  contextFinalizers.push(fn);
-}
-
-function runContextFinalizers(
-  ctx: SessionMcpToolContext,
-  sessionId: string,
-): SessionMcpToolContext {
-  return contextFinalizers.reduce((c, fn) => fn(c, sessionId), ctx);
+  pendingFinalizers.push(fn);
 }
 
 export interface CreateSessionMcpRuntimeOptions {
@@ -135,20 +129,31 @@ function resolveAgentMcpContext(
 export async function createSessionMcpRuntime(
   opts: CreateSessionMcpRuntimeOptions,
 ): Promise<SessionMcpRuntime> {
+  // Snapshot and drain pending finalizers so each runtime gets its own copy.
+  const finalizers: SessionMcpContextFinalizer[] = [...pendingFinalizers];
+  pendingFinalizers.length = 0;
+
+  function runContextFinalizers(
+    ctx: SessionMcpToolContext,
+    sessionId: string,
+  ): SessionMcpToolContext {
+    return finalizers.reduce((c, fn) => fn(c, sessionId), ctx);
+  }
+
   // Register MCP server rules finalizer.
-  registerContextFinalizer(createMcpServerRulesFinalizer(opts.config));
+  finalizers.push(createMcpServerRulesFinalizer(opts.config));
   // Register context-level tool filtering finalizer (config-aware).
-  registerContextFinalizer(createContextLevelToolFinalizer(opts.config));
+  finalizers.push(createContextLevelToolFinalizer(opts.config));
   // Register web-search tool finalizer (adds builtin-web-search when SearXNG is configured).
-  registerContextFinalizer(createWebSearchToolFinalizer(opts.config));
+  finalizers.push(createWebSearchToolFinalizer(opts.config));
   // Register media-generate tool finalizer (adds builtin-media-generate when a gemini provider exists).
-  registerContextFinalizer(createMediaGenerateToolFinalizer(opts.config));
+  finalizers.push(createMediaGenerateToolFinalizer(opts.config));
   // Register vault tool finalizer (adds builtin-vault when vault service is initialized).
-  registerContextFinalizer(createVaultToolFinalizer());
+  finalizers.push(createVaultToolFinalizer());
   // Register elevation tool finalizer (conditionally injects builtin-elevate when grant is active).
-  registerContextFinalizer(createElevationToolFinalizer(opts.db));
+  finalizers.push(createElevationToolFinalizer(opts.db));
   // Register skills enum finalizer (enriches builtin-skills id field with available skill IDs).
-  registerContextFinalizer((ctx, sessionId) => {
+  finalizers.push((ctx, sessionId) => {
     const skillsTool = ctx.aggregated.tools.find((t) => t.namespacedName === "builtin-skills");
     if (!skillsTool) return ctx;
 
@@ -184,10 +189,10 @@ export async function createSessionMcpRuntime(
   });
 
   // Register service tool finalizer (injects tools from plugin services).
-  registerContextFinalizer(createServiceToolFinalizer());
+  finalizers.push(createServiceToolFinalizer());
 
   // Register tool discovery finalizer (must be last — sees the full catalog including web-search).
-  registerContextFinalizer(createToolDiscoveryFinalizer(opts.config, opts.db));
+  finalizers.push(createToolDiscoveryFinalizer(opts.config, opts.db));
 
   const mcpServers = opts.config.mcp?.servers ?? [];
   const mcpPoolScope = opts.config.mcp?.poolScope ?? "global";
@@ -690,7 +695,7 @@ export async function createSessionMcpRuntime(
       perSessionMcpCtx.clear();
       perSessionMcpConnect.clear();
       perSessionCacheOrder.length = 0;
-      contextFinalizers.length = 0;
+      finalizers.length = 0;
     },
   };
   _runtimeRef = _runtime;
