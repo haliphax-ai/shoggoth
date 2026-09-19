@@ -169,9 +169,9 @@ function stripThinkingBlocksFromContent(content: string): string {
  */
 export function stripImageBlocksForCompaction(messages: readonly ChatMessage[]): ChatMessage[] {
   return messages.map((m) => {
-    if (typeof m.content !== "string" || !m.content) return { ...m };
+    if (typeof m.content !== "string" || !m.content) return m;
     const stripped = stripImageBlocksFromContent(m.content);
-    if (stripped === m.content) return { ...m };
+    if (stripped === m.content) return m;
     return { ...m, content: stripped };
   });
 }
@@ -182,9 +182,9 @@ export function stripImageBlocksForCompaction(messages: readonly ChatMessage[]):
  */
 function stripThinkingBlocksForCompaction(messages: readonly ChatMessage[]): ChatMessage[] {
   return messages.map((m) => {
-    if (typeof m.content !== "string" || !m.content) return { ...m };
+    if (typeof m.content !== "string" || !m.content) return m;
     const stripped = stripThinkingBlocksFromContent(m.content);
-    if (stripped === m.content) return { ...m };
+    if (stripped === m.content) return m;
     return { ...m, content: stripped };
   });
 }
