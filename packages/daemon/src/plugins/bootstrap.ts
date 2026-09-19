@@ -68,25 +68,37 @@ export async function bootstrapPlugins(options: {
     db: options.db,
     config: options.config,
     configRef: { current: options.config },
-    registerDrain: (name: string, fn: () => void | Promise<void>) => {
-      options.rt.shutdown.registerDrain(name, fn);
+    registerDrain: (
+      name: string,
+      fn: () => void | Promise<void>,
+      drainOptions?: { group: number },
+    ) => {
+      options.rt.shutdown.registerDrain(name, fn, drainOptions);
     },
   });
 
-  options.rt.shutdown.registerDrain("plugin-daemon-shutdown-hooks", async () => {
-    await system.lifecycle["daemon.shutdown"].emit({ reason: "shutdown" });
-  });
-  options.rt.shutdown.registerDrain("plugin-unload-audit", async () => {
-    for (const p of loaded) {
-      appendAuditRow(options.db, {
-        source: "system",
-        principalKind: "system",
-        principalId: "plugin-loader",
-        action: "plugin.unload",
-        resource: p.resource,
-        outcome: "success",
-        argsRedactedJson: JSON.stringify({ manifestName: p.manifestName }),
-      });
-    }
-  });
+  options.rt.shutdown.registerDrain(
+    "plugin-daemon-shutdown-hooks",
+    async () => {
+      await system.lifecycle["daemon.shutdown"].emit({ reason: "shutdown" });
+    },
+    { group: 2 },
+  );
+  options.rt.shutdown.registerDrain(
+    "plugin-unload-audit",
+    async () => {
+      for (const p of loaded) {
+        appendAuditRow(options.db, {
+          source: "system",
+          principalKind: "system",
+          principalId: "plugin-loader",
+          action: "plugin.unload",
+          resource: p.resource,
+          outcome: "success",
+          argsRedactedJson: JSON.stringify({ manifestName: p.manifestName }),
+        });
+      }
+    },
+    { group: 2 },
+  );
 }

@@ -26,7 +26,11 @@ interface DaemonHooksContext {
   env: NodeJS.ProcessEnv;
   platforms: Map<string, PlatformRuntime>;
   deliveryRegistry: PlatformDeliveryRegistry;
-  registerDrain: (name: string, fn: () => void | Promise<void>) => void;
+  registerDrain: (
+    name: string,
+    fn: () => void | Promise<void>,
+    options?: { group: number },
+  ) => void;
   registerPlatform: (reg: PlatformRegistration) => void;
   setPlatformRuntime: (platformId: string, runtime: PlatformRuntime) => void;
   registerProbe: (probe: HealthProbe) => void;
