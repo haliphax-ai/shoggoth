@@ -355,9 +355,13 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
     acpxSupervisor = createAcpxProcessSupervisor({
       spawn: acpxSpawn,
     });
-    shutdown.registerDrain("acpx-processes", () => {
-      acpxSupervisor?.killAll();
-    });
+    shutdown.registerDrain(
+      "acpx-processes",
+      () => {
+        acpxSupervisor?.killAll();
+      },
+      { group: 1 },
+    );
   }
 
   const integrationBundle: Pick<
@@ -480,7 +484,7 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
     });
 
   if (registerShutdownDrain) {
-    shutdown.registerDrain("control-plane", close);
+    shutdown.registerDrain("control-plane", close, { group: 2 });
   }
 
   return { socketPath, close };

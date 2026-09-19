@@ -824,18 +824,26 @@ void (async () => {
       hitlRef,
       enabled: isConfigHotReloadEnabled(config),
     });
-    rt.shutdown.registerDrain("config-hot-reload", () => {
-      stopConfigHotReload();
-    });
+    rt.shutdown.registerDrain(
+      "config-hot-reload",
+      () => {
+        stopConfigHotReload();
+      },
+      { group: 0 },
+    );
   } catch (e) {
     getLogger("daemon").error("control plane failed to start", {
       err: String(e),
     });
   }
 
-  rt.shutdown.registerDrain("stop-event-loops", () => {
-    stopEventLoops();
-  });
+  rt.shutdown.registerDrain(
+    "stop-event-loops",
+    () => {
+      stopEventLoops();
+    },
+    { group: 0 },
+  );
 
   if (!db) {
     getLogger("daemon").warn("plugins and event loops skipped (no state database)");
@@ -1025,8 +1033,10 @@ void (async () => {
       return { ok: true, result };
     },
   });
-  rt.shutdown.registerDrain("plugin-platform-stop", hookResult.drains.platformStop);
-  rt.shutdown.registerDrain("plugin-daemon-shutdown", hookResult.drains.daemonShutdown);
+  rt.shutdown.registerDrain("plugin-platform-stop", hookResult.drains.platformStop, { group: 2 });
+  rt.shutdown.registerDrain("plugin-daemon-shutdown", hookResult.drains.daemonShutdown, {
+    group: 2,
+  });
   stateShutdown.db = db;
   stateShutdown.toolRuns = createToolRunStore(db);
 
@@ -1047,9 +1057,13 @@ void (async () => {
         host: config.gateway.host,
         prefix: config.gateway.prefix,
       });
-      rt.shutdown.registerDrain("gateway", async () => {
-        await gateway.stop();
-      });
+      rt.shutdown.registerDrain(
+        "gateway",
+        async () => {
+          await gateway.stop();
+        },
+        { group: 1 },
+      );
     } catch (e) {
       getLogger("daemon").error("gateway failed to start", { err: String(e) });
     }
@@ -1057,7 +1071,7 @@ void (async () => {
 
   // --- Timer Scheduler ---
   const disposeTimer = await initTimerScheduler(db);
-  rt.shutdown.registerDrain("timer-scheduler", disposeTimer);
+  rt.shutdown.registerDrain("timer-scheduler", disposeTimer, { group: 1 });
 
   // --- Service Lifecycle Manager ---
   const serviceApprovalStore = new ServiceApprovalStore(db);
@@ -1137,9 +1151,13 @@ void (async () => {
       });
     }
   }
-  rt.shutdown.registerDrain("procman", async () => {
-    await procman.stopAll();
-  });
+  rt.shutdown.registerDrain(
+    "procman",
+    async () => {
+      await procman.stopAll();
+    },
+    { group: 1 },
+  );
 
   // --- External Service Health Poller ---
   const externalServiceHealthPoller = new ExternalServiceHealthPoller(
@@ -1171,14 +1189,18 @@ void (async () => {
   }
 
   // Register shutdown handler to stop all health pollers
-  rt.shutdown.registerDrain("external-service-health", async () => {
-    externalServiceHealthPoller.stopAll();
-  });
+  rt.shutdown.registerDrain(
+    "external-service-health",
+    async () => {
+      externalServiceHealthPoller.stopAll();
+    },
+    { group: 1 },
+  );
 
   // --- Workflow ---
   try {
     const disposeWorkflow = await initWorkflowServer(db, deliveryRegistry, procman);
-    rt.shutdown.registerDrain("workflow", disposeWorkflow);
+    rt.shutdown.registerDrain("workflow", disposeWorkflow, { group: 1 });
   } catch (e) {
     getLogger("daemon").warn("workflow server failed to initialize", {
       err: String(e),

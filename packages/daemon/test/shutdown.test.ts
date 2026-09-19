@@ -29,6 +29,53 @@ describe("ShutdownCoordinator", () => {
     await s.finished;
   });
 
+  it("runs drains in the same group in parallel", async () => {
+    const order: string[] = [];
+    const log = createLogger({ component: "t", minLevel: "error" });
+    const s = new ShutdownCoordinator({
+      logger: log,
+      drainTimeoutMs: 5000,
+    });
+
+    // Group 1: two drains that take time — should run in parallel
+    s.registerDrain(
+      "fast",
+      async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        order.push("fast");
+      },
+      { group: 1 },
+    );
+    s.registerDrain(
+      "slow",
+      async () => {
+        await new Promise((r) => setTimeout(r, 50));
+        order.push("slow");
+      },
+      { group: 1 },
+    );
+
+    // Group 2: runs after group 1
+    s.registerDrain(
+      "last",
+      async () => {
+        order.push("last");
+      },
+      { group: 2 },
+    );
+
+    const start = Date.now();
+    await s.requestShutdown("test");
+    const elapsed = Date.now() - start;
+
+    // fast and slow ran in parallel, so total time should be ~50ms, not ~70ms
+    assert.ok(elapsed < 100, `expected parallel execution, took ${elapsed}ms`);
+    // Both group-1 drains completed before group-2
+    assert.ok(order.indexOf("fast") < order.indexOf("last"));
+    assert.ok(order.indexOf("slow") < order.indexOf("last"));
+    await s.finished;
+  });
+
   it("invokes markInterruptedRunsFailed on timeout", async () => {
     const log = createLogger({ component: "t", minLevel: "error" });
     const mark = vi.fn(async () => {});
