@@ -1,4 +1,4 @@
-interface ModelMetadataEntry {
+export interface ModelMetadataEntry {
   /** Context window size in tokens. */
   contextWindowTokens: number;
   /** Where this value came from. */
@@ -12,7 +12,19 @@ function makeKey(providerId: string, model: string): ModelKey {
   return `${providerId}:${model}`;
 }
 
-const store = new Map<ModelKey, ModelMetadataEntry>();
+/** A store instance mapping model keys to their metadata entries. */
+export type ModelMetadataStore = Map<ModelKey, ModelMetadataEntry>;
+
+/**
+ * Create a fresh, empty model metadata store.
+ * Use this in tests for isolated instances.
+ */
+export function createModelMetadataStore(): ModelMetadataStore {
+  return new Map<ModelKey, ModelMetadataEntry>();
+}
+
+/** Default module-level store used when no explicit store is passed. */
+const defaultStore: ModelMetadataStore = createModelMetadataStore();
 
 /**
  * Initialize the store from the failover chain config.
@@ -24,6 +36,7 @@ export function initModelMetadataFromConfig(
     id: string;
     models?: ReadonlyArray<{ name: string; contextWindowTokens?: number }>;
   }>,
+  store: ModelMetadataStore = defaultStore,
 ): void {
   for (const entry of failoverChain) {
     const slash = entry.indexOf("/");
@@ -51,6 +64,7 @@ export function setModelMetadataFromProvider(
   providerId: string,
   model: string,
   contextWindowTokens: number,
+  store: ModelMetadataStore = defaultStore,
 ): string | undefined {
   const key = makeKey(providerId, model);
   const existing = store.get(key);
@@ -76,6 +90,7 @@ function setModelMetadataDefault(
   providerId: string,
   model: string,
   contextWindowTokens: number,
+  store: ModelMetadataStore = defaultStore,
 ): void {
   const key = makeKey(providerId, model);
   if (!store.has(key)) {
@@ -87,7 +102,11 @@ function setModelMetadataDefault(
  * Get the context window tokens for a model.
  * Returns undefined if no metadata is available.
  */
-export function getModelContextWindowTokens(providerId: string, model: string): number | undefined {
+export function getModelContextWindowTokens(
+  providerId: string,
+  model: string,
+  store: ModelMetadataStore = defaultStore,
+): number | undefined {
   return store.get(makeKey(providerId, model))?.contextWindowTokens;
 }
 
@@ -97,6 +116,7 @@ export function getModelContextWindowTokens(providerId: string, model: string): 
  */
 export function registerAnthropicDefaultsForProviders(
   providers: ReadonlyArray<{ id: string; kind: string }>,
+  store: ModelMetadataStore = defaultStore,
 ): void {
   const anthropicIds = providers.filter((p) => p.kind === "anthropic-messages").map((p) => p.id);
 
@@ -116,7 +136,7 @@ export function registerAnthropicDefaultsForProviders(
 
   for (const providerId of anthropicIds) {
     for (const model of models200k) {
-      setModelMetadataDefault(providerId, model, 200_000);
+      setModelMetadataDefault(providerId, model, 200_000, store);
     }
   }
 }
@@ -181,6 +201,7 @@ export function getOpenAIKnownContextWindow(model: string): number | undefined {
 export function registerOpenAIDefaultsForProviders(
   providers: ReadonlyArray<{ id: string; kind: string }>,
   failoverChain: ReadonlyArray<string>,
+  store: ModelMetadataStore = defaultStore,
 ): void {
   const openaiIds = new Set(
     providers.filter((p) => p.kind === "openai-compatible").map((p) => p.id),
@@ -194,7 +215,7 @@ export function registerOpenAIDefaultsForProviders(
     if (!openaiIds.has(providerId)) continue;
     const ctx = OPENAI_KNOWN_CONTEXT_WINDOWS[model];
     if (ctx != null) {
-      setModelMetadataDefault(providerId, model, ctx);
+      setModelMetadataDefault(providerId, model, ctx, store);
     }
   }
 }
