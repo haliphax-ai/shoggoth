@@ -73,6 +73,9 @@ import { pushSystemContext } from "../sessions/system-context-buffer";
 import { pushSteer } from "../sessions/steer-channel";
 import { getTurnQueue } from "../sessions/session-turn-queue-singleton";
 import {
+  OOB_NUDGE_NO_SENDER,
+  OOB_NUDGE_WITH_SENDER,
+  OOB_SCHEMA_NO_SENDER,
   OOB_SCHEMA_WITH_SENDER,
   OOB_WITH_SENDER_GUIDANCE,
 } from "../messaging/oob-response-schemas";
@@ -367,10 +370,67 @@ export async function deliverOobStructuredResponse(opts: {
   try {
     parsed = JSON.parse(structuredResponse);
   } catch {
-    subLog.warn("oob structured response parse failed", {
+    subLog.warn("oob structured response parse failed, sending nudge", {
       structuredResponse: structuredResponse.slice(0, 200),
     });
-    return;
+
+    // Nudge: give the model one chance to correct its response format
+    const nudgeSchema = hasSender ? OOB_SCHEMA_WITH_SENDER : OOB_SCHEMA_NO_SENDER;
+    const nudgeGuidance = hasSender ? OOB_NUDGE_WITH_SENDER : OOB_NUDGE_NO_SENDER;
+
+    try {
+      const nudgeResult = await ext.runSessionModelTurn({
+        sessionId: respondTo,
+        userContent: nudgeGuidance,
+        delivery: { kind: "internal" },
+        modelInvocationOverride: {
+          responseSchema: { schema: nudgeSchema },
+          structuredOutputMode: "best-effort",
+        },
+      });
+
+      if (nudgeResult?.latestAssistantText) {
+        try {
+          parsed = JSON.parse(nudgeResult.latestAssistantText);
+        } catch {
+          // Nudge also produced invalid output — surface error to operator
+          subLog.error("oob structured response parse failed after nudge", {
+            respondTo,
+            structuredResponse: nudgeResult.latestAssistantText.slice(0, 200),
+          });
+          await ext.postToOperator?.({
+            sessionId: respondTo,
+            userContent:
+              "⚠️ **Error**: An out-of-band message could not be processed. " +
+              "The model did not respond with valid structured output after a follow-up attempt. " +
+              "Please check the session logs for details.",
+          });
+          return;
+        }
+      } else {
+        // Nudge produced no response
+        subLog.error("oob nudge produced no response", { respondTo });
+        await ext.postToOperator?.({
+          sessionId: respondTo,
+          userContent:
+            "⚠️ **Error**: An out-of-band message could not be processed. " +
+            "The model did not respond with valid structured output and the follow-up attempt produced no response. " +
+            "Please check the session logs for details.",
+        });
+        return;
+      }
+    } catch (nudgeErr) {
+      // Nudge turn itself failed
+      subLog.error("oob nudge turn failed", { respondTo, error: String(nudgeErr) });
+      await ext.postToOperator?.({
+        sessionId: respondTo,
+        userContent:
+          "⚠️ **Error**: An out-of-band message could not be processed. " +
+          "The model did not respond with valid structured output and the follow-up attempt also failed. " +
+          "Please check the session logs for details.",
+      });
+      return;
+    }
   }
 
   // Deliver to operator

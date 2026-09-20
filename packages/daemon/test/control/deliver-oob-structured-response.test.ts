@@ -52,7 +52,7 @@ describe("deliverOobStructuredResponse", () => {
     childSessionId: "child-oob",
     respondTo: "parent-oob",
     maxChars: 8000,
-    subLog: { info: vi.fn(), warn: vi.fn() },
+    subLog: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     ext: ext(),
     ...overrides,
   });
@@ -143,19 +143,145 @@ describe("deliverOobStructuredResponse", () => {
     expect(drainSteers("parent-oob")).toHaveLength(0);
   });
 
-  it("logs a warning and delivers nothing for invalid JSON", async () => {
+  it("sends a nudge turn when JSON is invalid, and surfaces error when nudge produces no response", async () => {
     const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
 
     const warn = vi.fn();
+    const error = vi.fn();
+    const runTurn = vi.fn().mockResolvedValue(undefined);
+
     await deliverOobStructuredResponse({
-      ...opts({ subLog: { info: vi.fn(), warn } }),
+      ...opts({
+        subLog: { info: vi.fn(), warn, error },
+        ext: { postToOperator: mockPostToOperator, runSessionModelTurn: runTurn } as never,
+      }),
       structuredResponse: "not valid json",
       hasSender: true,
     });
 
     expect(warn).toHaveBeenCalled();
-    expect(mockPostToOperator).not.toHaveBeenCalled();
+    // Nudge turn was called with structured output schema
+    expect(runTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "parent-oob",
+        modelInvocationOverride: expect.objectContaining({
+          responseSchema: expect.objectContaining({ schema: expect.any(Object) }),
+          structuredOutputMode: "best-effort",
+        }),
+      }),
+    );
+    // Error surfaced to operator
+    expect(mockPostToOperator).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "parent-oob",
+        userContent: expect.stringContaining("Error"),
+      }),
+    );
     expect(drainSteers("parent-oob")).toHaveLength(0);
+  });
+
+  it("recovers when nudge turn produces valid structured output (hasSender=true)", async () => {
+    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+
+    const nudgeResponse = JSON.stringify({
+      to_operator: "recovered!",
+      to_sender: "back to sender",
+    });
+    const runTurn = vi.fn().mockResolvedValue({ latestAssistantText: nudgeResponse });
+    const handle = registerSteerChannel("parent-oob");
+
+    await deliverOobStructuredResponse({
+      ...opts({
+        ext: { postToOperator: mockPostToOperator, runSessionModelTurn: runTurn } as never,
+      }),
+      structuredResponse: "not valid json",
+      hasSender: true,
+    });
+
+    // Nudge turn was called
+    expect(runTurn).toHaveBeenCalled();
+    // Recovery succeeded — operator and sender both delivered
+    expect(mockPostToOperator).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userContent: expect.stringContaining("recovered!"),
+      }),
+    );
+    const steers = drainSteers("parent-oob");
+    expect(steers).toHaveLength(1);
+    expect(steers[0]).toContain("back to sender");
+    handle.unregister();
+  });
+
+  it("recovers when nudge turn produces valid structured output (hasSender=false, timer case)", async () => {
+    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+
+    const nudgeResponse = JSON.stringify({ to_operator: "timer result" });
+    const runTurn = vi.fn().mockResolvedValue({ latestAssistantText: nudgeResponse });
+
+    await deliverOobStructuredResponse({
+      ...opts({
+        ext: { postToOperator: mockPostToOperator, runSessionModelTurn: runTurn } as never,
+      }),
+      structuredResponse: "not valid json",
+      hasSender: false,
+    });
+
+    expect(runTurn).toHaveBeenCalled();
+    expect(mockPostToOperator).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userContent: expect.stringContaining("timer result"),
+      }),
+    );
+  });
+
+  it("surfaces error to operator when nudge also produces invalid JSON", async () => {
+    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+
+    const error = vi.fn();
+    const runTurn = vi.fn().mockResolvedValue({ latestAssistantText: "still not json" });
+
+    await deliverOobStructuredResponse({
+      ...opts({
+        subLog: { info: vi.fn(), warn: vi.fn(), error },
+        ext: { postToOperator: mockPostToOperator, runSessionModelTurn: runTurn } as never,
+      }),
+      structuredResponse: "not valid json",
+      hasSender: true,
+    });
+
+    expect(runTurn).toHaveBeenCalled();
+    expect(error).toHaveBeenCalled();
+    expect(mockPostToOperator).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "parent-oob",
+        userContent: expect.stringContaining("Error"),
+      }),
+    );
+  });
+
+  it("surfaces error to operator when nudge turn itself throws", async () => {
+    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+
+    const error = vi.fn();
+    const runTurn = vi.fn().mockRejectedValue(new Error("model unavailable"));
+
+    await deliverOobStructuredResponse({
+      ...opts({
+        subLog: { info: vi.fn(), warn: vi.fn(), error },
+        ext: { postToOperator: mockPostToOperator, runSessionModelTurn: runTurn } as never,
+      }),
+      structuredResponse: "not valid json",
+      hasSender: false,
+    });
+
+    expect(runTurn).toHaveBeenCalled();
+    expect(error).toHaveBeenCalled();
+    expect(mockPostToOperator).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "parent-oob",
+        userContent: expect.stringContaining("Error"),
+      }),
+    );
   });
 
   it("truncates long messages to maxChars", async () => {

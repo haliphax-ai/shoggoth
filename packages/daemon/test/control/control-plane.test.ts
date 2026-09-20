@@ -1546,7 +1546,10 @@ describe("control plane (unix socket + JSONL)", () => {
             userContent: input.userContent,
             userMetadata: input.userMetadata as Record<string, unknown>,
           });
-          return { latestAssistantText: "ACK", failoverMeta: undefined };
+          return {
+            latestAssistantText: JSON.stringify({ to_operator: "ACK", to_sender: null }),
+            failoverMeta: undefined,
+          };
         }
         // This is the child's model turn.
         childTurnCount++;
@@ -1643,7 +1646,10 @@ describe("control plane (unix socket + JSONL)", () => {
             userContent: input.userContent,
             userMetadata: input.userMetadata as Record<string, unknown>,
           });
-          return { latestAssistantText: "ACK", failoverMeta: undefined };
+          return {
+            latestAssistantText: JSON.stringify({ to_operator: "ACK", to_sender: null }),
+            failoverMeta: undefined,
+          };
         }
         return {
           latestAssistantText: "PERSISTENT_RESULT",
@@ -1724,7 +1730,10 @@ describe("control plane (unix socket + JSONL)", () => {
       runSessionModelTurn: async (input) => {
         if (input.userMetadata?.subagent_result) {
           deliveryCalls.push(input.userMetadata as Record<string, unknown>);
-          return { latestAssistantText: "ACK", failoverMeta: undefined };
+          return {
+            latestAssistantText: JSON.stringify({ to_operator: "ACK", to_sender: null }),
+            failoverMeta: undefined,
+          };
         }
         return {
           latestAssistantText: "THREAD_RESULT",
