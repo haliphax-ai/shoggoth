@@ -506,6 +506,29 @@ describe("ServiceGateway", () => {
       socket.destroy();
     });
 
+    it("should return 502 when backend connection fails", async () => {
+      // Register a service pointing to a port where nothing is listening
+      const entry = createMockEntry({
+        id: "dead-backend-service",
+        url: "http://127.0.0.1:19999",
+        wsUrl: "ws://127.0.0.1:19999",
+        healthy: true,
+        expose: "gateway",
+      });
+      registry.register(entry);
+
+      await gateway.start();
+
+      const { statusCode, rawResponse, socket } = await sendUpgradeRequest(
+        testPort,
+        "/svc/dead-backend-service/ws",
+      );
+
+      expect(statusCode).toBe(502);
+      expect(rawResponse).toContain("Bad Gateway");
+      socket.destroy();
+    });
+
     it("should reject upgrade with 403 when Origin header is not in CORS origins", async () => {
       const corsOptions: GatewayOptions = {
         port: testPort + 5,
