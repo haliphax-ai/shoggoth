@@ -118,8 +118,9 @@ export class ServiceGateway {
    */
   private handleUpgrade(req: http.IncomingMessage, socket: net.Socket, head: Buffer): void {
     const url = req.url ?? "/";
-    const parsedUrl = new URL(url, `http://${this.options.host}:${this.options.port}`);
-    const pathname = parsedUrl.pathname;
+    const queryIndex = url.indexOf("?");
+    const pathname = queryIndex >= 0 ? url.slice(0, queryIndex) : url;
+    const search = queryIndex >= 0 ? url.slice(queryIndex) : "";
 
     // Validate Origin header against CORS configuration
     const origin = req.headers.origin;
@@ -170,7 +171,7 @@ export class ServiceGateway {
 
     // Build the path for the backend (strip prefix and serviceId)
     const restPath = "/" + pathParts.slice(1).join("/");
-    const targetPath = restPath + (parsedUrl.search || "");
+    const targetPath = restPath + search;
 
     // Create TCP connection to the backend
     const backendSocket = net.createConnection({ host: targetHost, port: targetPort }, () => {
@@ -256,8 +257,8 @@ export class ServiceGateway {
    */
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = req.url ?? "/";
-    const parsedUrl = new URL(url, `http://${this.options.host}:${this.options.port}`);
-    const pathname = parsedUrl.pathname;
+    const queryIndex = url.indexOf("?");
+    const pathname = queryIndex >= 0 ? url.slice(0, queryIndex) : url;
 
     // Handle /health endpoint
     if (pathname === "/health") {
