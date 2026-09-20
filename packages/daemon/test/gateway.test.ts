@@ -725,5 +725,96 @@ describe("ServiceGateway", () => {
 
       await corsGateway.stop();
     });
+
+    it("should respond with 204 for OPTIONS preflight requests with CORS headers", async () => {
+      const corsOptions: GatewayOptions = {
+        port: testPort + 2,
+        host: "127.0.0.1",
+        prefix: "/svc",
+        cors: {
+          origins: ["http://example.com", "http://localhost:3000"],
+          credentials: true,
+        },
+      };
+      const corsGateway = new ServiceGateway(registry, corsOptions);
+
+      // Register a service
+      const entry = createMockEntry({
+        id: "cors-preflight-service",
+        url: "http://127.0.0.1:13004",
+        healthy: true,
+        expose: "gateway",
+      });
+      registry.register(entry);
+
+      await corsGateway.start();
+
+      try {
+        const response = await httpRequest({
+          hostname: "127.0.0.1",
+          port: testPort + 2,
+          path: "/svc/cors-preflight-service/api/test",
+          method: "OPTIONS",
+          headers: {
+            Origin: "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Content-Type, Authorization",
+          },
+        });
+
+        expect(response.statusCode).toBe(204);
+        expect(response.headers["access-control-allow-origin"]).toBe("http://localhost:3000");
+        expect(response.headers["access-control-allow-methods"]).toBe(
+          "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+        );
+        expect(response.headers["access-control-allow-headers"]).toBe(
+          "Content-Type, Authorization, X-Requested-With, Accept, Origin",
+        );
+        expect(response.headers["access-control-allow-credentials"]).toBe("true");
+        expect(response.body).toBe("");
+      } finally {
+        await corsGateway.stop();
+      }
+    });
+
+    it("should not respond with 204 for OPTIONS without CORS config", async () => {
+      // No CORS configured - OPTIONS should be proxied normally
+      const mockServiceServer = http.createServer((req, res) => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ method: req.method }));
+      });
+
+      await new Promise<void>((resolve) => {
+        mockServiceServer.listen(13005, "127.0.0.1", () => resolve());
+      });
+
+      try {
+        const entry = createMockEntry({
+          id: "nocors-service",
+          url: "http://127.0.0.1:13005",
+          healthy: true,
+          expose: "gateway",
+        });
+        registry.register(entry);
+
+        await gateway.start();
+
+        const response = await httpRequest({
+          hostname: "127.0.0.1",
+          port: testPort,
+          path: "/svc/nocors-service/api/test",
+          method: "OPTIONS",
+          headers: {
+            Origin: "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+          },
+        });
+
+        // Without CORS config, OPTIONS should be proxied to backend
+        expect(response.statusCode).toBe(200);
+      } finally {
+        mockServiceServer.close();
+      }
+    });
   });
 });
