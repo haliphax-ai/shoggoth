@@ -312,6 +312,13 @@ export class ServiceGateway {
     // Set CORS headers early (before proxying)
     this.setCorsHeaders(req, res);
 
+    // Handle CORS preflight: respond with 204 and headers, no proxy
+    if (req.method === "OPTIONS" && this.options.cors) {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     // Proxy request using http.request
     const proxyReq = http.request(
       {
@@ -395,6 +402,11 @@ export class ServiceGateway {
     // Check if origin is allowed
     if (this.isOriginAllowed(origin)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
+      res.setHeader(
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization, X-Requested-With, Accept, Origin",
+      );
       if (cors.credentials) {
         res.setHeader("Access-Control-Allow-Credentials", "true");
       }
