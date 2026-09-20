@@ -203,7 +203,7 @@ export class ServiceGateway {
     // Handle errors on the backend socket
     backendSocket.on("error", (err) => {
       log.error("websocket proxy backend error", { err: String(err) });
-      socket.destroy();
+      this.destroySocketWithResponse(socket, 502, "Bad Gateway");
     });
 
     // Handle errors on the client socket
