@@ -447,6 +447,10 @@ export async function executeSessionAgentTurn(
   const creds = sessionCreds(input.session.runtimeUid, input.session.runtimeGid);
   const orchestratorEnv = mergeOrchestratorEnv(input.config, input.env);
 
+  // Cache the prepared statement for reading working directory from DB.
+  // Reused on every tool call within this turn so the statement isn't re-prepared each time.
+  const getWorkingDirStmt = input.db.prepare(`SELECT working_directory FROM sessions WHERE id = ?`);
+
   const executor = createMcpRoutingToolExecutor({
     aggregated: mcpCtx.fullAggregated ?? mcpCtx.aggregated,
     ...(mcpCtx.external ? { external: mcpCtx.external } : {}),
@@ -463,9 +467,9 @@ export async function executeSessionAgentTurn(
           workingDirectory: (() => {
             // Read workingDirectory fresh from DB on each tool call so that
             // `cd` updates within the same turn are visible to subsequent tools.
-            const wd = input.db
-              .prepare(`SELECT working_directory FROM sessions WHERE id = ?`)
-              .get(input.sessionId) as { working_directory: string | null } | undefined;
+            const wd = getWorkingDirStmt.get(input.sessionId) as
+              | { working_directory: string | null }
+              | undefined;
             return wd?.working_directory?.trim() || undefined;
           })(),
           creds,
