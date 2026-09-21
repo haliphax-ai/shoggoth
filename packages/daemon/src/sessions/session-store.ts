@@ -392,25 +392,6 @@ export function createSessionStore(db: Database.Database): SessionStore {
       const sortCol = sortByMap[filter?.sortBy ?? "created"] ?? "created_at";
       const sortDir = filter?.sortOrder === "asc" ? "ASC" : "DESC";
 
-      // --- parentSessionId is a special-case filter (used by subagent inspect) ---
-      if (filter?.parentSessionId !== undefined) {
-        const clauses: string[] = ["parent_session_id = @parent"];
-        const params: Record<string, unknown> = {
-          parent: filter.parentSessionId,
-        };
-        if (filter.activeSince) {
-          clauses.push("updated_at >= @activeSince");
-          params.activeSince = filter.activeSince;
-        }
-        let sql = `SELECT ${cols} FROM sessions WHERE ${clauses.join(" AND ")} ORDER BY ${sortCol} ${sortDir}`;
-        if (filter.limit !== undefined) {
-          sql += " LIMIT @limit";
-          params.limit = filter.limit;
-        }
-        const rows = db.prepare(sql).all(params) as R[];
-        return rows.map(rowToSession);
-      }
-
       // --- Build WHERE clauses ---
       const clauses: string[] = [];
       const params: Record<string, unknown> = {};
@@ -431,6 +412,11 @@ export function createSessionStore(db: Database.Database): SessionStore {
         assertValidAgentId(agentId);
         clauses.push("id LIKE @agentIdPrefix");
         params.agentIdPrefix = `agent:${agentId}:%`;
+      }
+
+      if (filter?.parentSessionId !== undefined) {
+        clauses.push("parent_session_id = @parentSessionId");
+        params.parentSessionId = filter.parentSessionId;
       }
 
       const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
