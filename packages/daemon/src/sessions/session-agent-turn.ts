@@ -336,7 +336,7 @@ export async function executeSessionAgentTurn(
   const modelLabel =
     effectiveModel && modelSlashIdx !== undefined && modelSlashIdx > 0
       ? `${effectiveModel.slice(modelSlashIdx + 1)} (provider: ${effectiveModel.slice(0, modelSlashIdx)})`
-      : "gemini-flash-latest (provider: google)";
+      : "default";
 
   const assembledSystemPrompt = buildSessionSystemContext({
     workspacePath: input.session.workspacePath,
