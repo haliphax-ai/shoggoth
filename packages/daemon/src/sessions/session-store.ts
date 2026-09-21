@@ -3,7 +3,6 @@ import type Database from "better-sqlite3";
 import {
   assertValidAgentId,
   generateSystemContextToken,
-  parseAgentSessionUrn,
   type ContextLevel,
 } from "@shoggoth/shared";
 
@@ -425,30 +424,25 @@ export function createSessionStore(db: Database.Database): SessionStore {
         params.activeSince = filter.activeSince;
       }
 
+      // agentId filtering at the SQL level (session IDs use the URN format
+      // "agent:<agentId>:..." so a LIKE prefix match is exact and efficient)
+      const agentId = filter?.agentId?.trim();
+      if (agentId) {
+        assertValidAgentId(agentId);
+        clauses.push("id LIKE @agentIdPrefix");
+        params.agentIdPrefix = `agent:${agentId}:%`;
+      }
+
       const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
       let sql = `SELECT ${cols} FROM sessions ${where} ORDER BY ${sortCol} ${sortDir}`;
 
-      // When agentId is set, limit must be applied after JS-side URN filtering (below),
-      // so only add SQL LIMIT when there is no agentId filter.
-      const agentId = filter?.agentId?.trim();
-      if (filter?.limit !== undefined && !agentId) {
+      if (filter?.limit !== undefined) {
         sql += " LIMIT @limit";
         params.limit = filter.limit;
       }
 
       const rows = db.prepare(sql).all(params) as R[];
-      let results = rows.map(rowToSession);
-
-      // --- agentId filtering is done in JS (URN parsing, same as before) ---
-      if (agentId) {
-        assertValidAgentId(agentId);
-        results = results.filter((r) => parseAgentSessionUrn(r.id)?.agentId === agentId);
-        if (filter?.limit !== undefined) {
-          results = results.slice(0, filter.limit);
-        }
-      }
-
-      return results;
+      return rows.map(rowToSession);
     },
   };
 }
