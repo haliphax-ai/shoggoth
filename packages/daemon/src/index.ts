@@ -162,10 +162,6 @@ import { vaultServiceRef } from "./vault/vault-ref";
 // Module-level setup
 // ============================================================
 
-process.umask(0o007);
-loadDaemonPrompts();
-loadDaemonNotices();
-setPresentationNoticeResolver(daemonNotice);
 registerContextFinalizer(messageToolFinalizer);
 registerContextFinalizer(subagentToolStripFinalizer);
 
@@ -795,6 +791,12 @@ function registerHealthProbes() {
 void (async () => {
   // --- State Database, HITL stack, vault ---
   const { db, hitlStack, hitlAutoApproveGate } = await initStateDatabase();
+
+  // --- Module-level side effects (moved from top-level for testability) ---
+  process.umask(0o007);
+  loadDaemonPrompts();
+  loadDaemonNotices();
+  setPresentationNoticeResolver(daemonNotice);
 
   // --- Control Plane ---
   try {
