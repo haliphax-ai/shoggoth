@@ -1280,5 +1280,3 @@ void rt.shutdown.finished.then(() => {
   getLogger("daemon").info("shutdown complete");
   process.exit(0);
 });
-
-setInterval(() => {}, 86_400_000);
