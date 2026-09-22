@@ -568,6 +568,7 @@ describe("ControlPlane", () => {
     afterEach(() => {
       for (const orch of activeOrchestrators) orch.stopPolling();
       activeOrchestrators.length = 0;
+      vi.useRealTimers();
     });
 
     it("resets a failed task to pending and spawns it on next tick", async () => {
@@ -736,7 +737,8 @@ describe("ControlPlane", () => {
     });
 
     it("throws when retrying a non-failed task", async () => {
-      const { cp, wfId } = await setupWorkflow(baseDir, [makeTask(1)], "1");
+      const { cp, orch, wfId } = await setupWorkflow(baseDir, [makeTask(1)], "1");
+      activeOrchestrators.push(orch);
 
       // Task 1 is in_progress — not retriable
       await assert.rejects(() => cp.retry(wfId, 1), /not retriable/i);
@@ -818,14 +820,16 @@ describe("ControlPlane", () => {
     });
 
     it("rejects retry for in_progress tasks", async () => {
-      const { cp, wfId } = await setupWorkflow(baseDir, [makeTask(1)], "1");
+      const { cp, orch, wfId } = await setupWorkflow(baseDir, [makeTask(1)], "1");
+      activeOrchestrators.push(orch);
 
       // Task 1 is in_progress
       await assert.rejects(() => cp.retry(wfId, 1), /not retriable/i);
     });
 
     it("rejects retry for pending tasks", async () => {
-      const { cp, wfId } = await setupWorkflow(baseDir, [makeTask(1), makeTask(2)], "1>2");
+      const { cp, orch, wfId } = await setupWorkflow(baseDir, [makeTask(1), makeTask(2)], "1>2");
+      activeOrchestrators.push(orch);
 
       // Task 2 is pending (blocked by task 1)
       await assert.rejects(() => cp.retry(wfId, 2), /not retriable/i);
