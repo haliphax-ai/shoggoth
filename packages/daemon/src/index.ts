@@ -536,18 +536,12 @@ async function initWorkflowServer(
   db: ReturnType<typeof openStateDb>,
   deliveryRegistry: PlatformDeliveryRegistry,
   procman: ReturnType<typeof initProcessManager>,
+  sessions: ReturnType<typeof createSessionStore>,
+  sessionManager: ReturnType<typeof createSessionManager>,
 ) {
   const workflowStateDir = resolve(config.stateDbPath, "..", "workflow-state");
 
-  const workflowSessions = createSessionStore(db);
-  const workflowSessionManager = createSessionManager({
-    db,
-    sessions: workflowSessions,
-    agentTokens: createSqliteAgentTokenStore(db),
-    workspacesRoot: config.workspacesRoot,
-    agentId: resolveShoggothAgentId(config),
-    agentsConfig: config.agents,
-  });
+  // (sessions and sessionManager passed as parameters)
 
   // Resolve configured subagentModel (per-agent override > global default).
   const workflowAgentId = resolveShoggothAgentId(config);
@@ -557,8 +551,8 @@ async function initWorkflowServer(
   const workflowSubagentModel = workflowPerAgentModel ?? config.agents?.subagentModel;
 
   const spawner = createDaemonSpawnAdapter({
-    sessionManager: workflowSessionManager,
-    sessions: workflowSessions,
+    sessionManager,
+    sessions,
     requestTurnAbort: (id) => requestSessionTurnAbort(id),
     subagentModel: workflowSubagentModel,
     runSessionModelTurn: (input) => {
@@ -572,12 +566,12 @@ async function initWorkflowServer(
   });
 
   const poller = createDaemonPollAdapter({
-    sessions: workflowSessions,
+    sessions,
     completionMap: spawner.completionMap,
   });
 
   const killer = createDaemonKillAdapter({
-    sessionManager: workflowSessionManager,
+    sessionManager,
     requestTurnAbort: (id) => requestSessionTurnAbort(id),
   });
 
@@ -798,6 +792,30 @@ void (async () => {
   loadDaemonNotices();
   setPresentationNoticeResolver(daemonNotice);
 
+  rt.shutdown.registerDrain(
+    "stop-event-loops",
+    () => {
+      stopEventLoops();
+    },
+    { group: 0 },
+  );
+
+  if (!db) {
+    getLogger("daemon").warn("plugins and event loops skipped (no state database)");
+    return;
+  }
+
+  // --- Shared SessionManager singleton ---
+  const sessions = createSessionStore(db);
+  const sessionManager = createSessionManager({
+    db,
+    sessions,
+    agentTokens: createSqliteAgentTokenStore(db),
+    workspacesRoot: config.workspacesRoot,
+    agentId: resolveShoggothAgentId(config),
+    agentsConfig: config.agents,
+  });
+
   // --- Control Plane ---
   try {
     await startControlPlane({
@@ -807,6 +825,8 @@ void (async () => {
       getHealth: () => rt.getHealth(),
       version: VERSION,
       stateDb: db,
+      sessions,
+      sessionManager,
       hitlPending: hitlStack?.pending,
       hitlClear:
         hitlStack && db && hitlAutoApproveGate
@@ -837,19 +857,6 @@ void (async () => {
     getLogger("daemon").error("control plane failed to start", {
       err: String(e),
     });
-  }
-
-  rt.shutdown.registerDrain(
-    "stop-event-loops",
-    () => {
-      stopEventLoops();
-    },
-    { group: 0 },
-  );
-
-  if (!db) {
-    getLogger("daemon").warn("plugins and event loops skipped (no state database)");
-    return;
   }
 
   // --- Boot Reconciliation ---
@@ -893,13 +900,12 @@ void (async () => {
     },
     invokeControlOp: async (op, payload) => {
       if (!db) return { ok: false, error: "state database unavailable" };
-      const sessions = createSessionStore(db);
       const ctx: IntegrationOpsContext = {
         config: configRef.current,
         stateDb: db,
         acpxStore: undefined,
         sessions,
-        sessionManager: undefined,
+        sessionManager,
         acpxSupervisor: undefined,
         hitlPending: hitlStack?.pending,
         recordIntegrationAudit: () => {},
@@ -929,8 +935,12 @@ void (async () => {
       platformsMap.set(platformId, handle);
     },
     stopAllPlatforms,
-    reconcilePersistentSubagents:
-      reconcilePersistentSubagents as PlatformDeps["reconcilePersistentSubagents"],
+    reconcilePersistentSubagents: ((input: any) =>
+      reconcilePersistentSubagents({
+        ...input,
+        sessionManager,
+        sessions,
+      })) as PlatformDeps["reconcilePersistentSubagents"],
     noticeResolver: daemonNotice as (key: string, params?: Record<string, unknown>) => string,
   };
 
@@ -967,21 +977,12 @@ void (async () => {
     serviceRegistry,
     serviceToolRegistry,
     spawnSession: async (opts) => {
-      const sessions = createSessionStore(db);
-      const serviceSessionManager = createSessionManager({
-        db,
-        sessions,
-        agentTokens: createSqliteAgentTokenStore(db),
-        workspacesRoot: config.workspacesRoot,
-        agentId: resolveShoggothAgentId(config),
-        agentsConfig: config.agents,
-      });
       const ctx: IntegrationOpsContext = {
         config: configRef.current,
         stateDb: db,
         acpxStore: undefined,
         sessions,
-        sessionManager: serviceSessionManager,
+        sessionManager,
         acpxSupervisor: undefined,
         hitlPending: hitlStack?.pending,
         recordIntegrationAudit: () => {},
@@ -1201,7 +1202,13 @@ void (async () => {
 
   // --- Workflow ---
   try {
-    const disposeWorkflow = await initWorkflowServer(db, deliveryRegistry, procman);
+    const disposeWorkflow = await initWorkflowServer(
+      db,
+      deliveryRegistry,
+      procman,
+      sessions,
+      sessionManager,
+    );
     rt.shutdown.registerDrain("workflow", disposeWorkflow, { group: 1 });
   } catch (e) {
     getLogger("daemon").warn("workflow server failed to initialize", {

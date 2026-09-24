@@ -8,9 +8,9 @@ import Database from "better-sqlite3";
 import { defaultConfig } from "@shoggoth/shared";
 import { migrate, defaultMigrationsDir } from "../../src/db/migrate";
 import { createSessionStore } from "../../src/sessions/session-store";
+import type { SessionManager } from "../../src/sessions/session-manager";
 import { reconcilePersistentSubagents } from "../../src/subagent/reconcile-persistent-subagents";
 import { disposeSubagentRuntime } from "../../src/subagent/subagent-disposables";
-import { createLogger } from "../../src/logging";
 
 describe("reconcilePersistentSubagents", () => {
   let dir: string;
@@ -25,8 +25,8 @@ describe("reconcilePersistentSubagents", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, dir);
-});
+    await closeTestDb(db, dir);
+  });
 
   it("restores active persistent rows and registers thread + bus hooks", () => {
     const sessions = createSessionStore(db);
@@ -45,11 +45,14 @@ describe("reconcilePersistentSubagents", () => {
 
     const registered: string[] = [];
     const subscribed: string[] = [];
-    const log = createLogger({ component: "t", minLevel: "error" });
+    const mockSessionManager = {
+      kill: (sid: string) => sessions.update(sid, { status: "terminated" }),
+    } as unknown as SessionManager;
     const r = reconcilePersistentSubagents({
       db,
       config: defaultConfig(dir),
-      logger: log,
+      sessions,
+      sessionManager: mockSessionManager,
       ext: {
         runSessionModelTurn: async () => ({
           latestAssistantText: "",
@@ -87,11 +90,14 @@ describe("reconcilePersistentSubagents", () => {
       subagentExpiresAtMs: Date.now() - 1000,
     });
 
-    const log = createLogger({ component: "t", minLevel: "error" });
+    const mockSessionManager = {
+      kill: (sid: string) => sessions.update(sid, { status: "terminated" }),
+    } as unknown as SessionManager;
     const r = reconcilePersistentSubagents({
       db,
       config: defaultConfig(dir),
-      logger: log,
+      sessions,
+      sessionManager: mockSessionManager,
       ext: {
         runSessionModelTurn: async () => ({
           latestAssistantText: "",
@@ -125,11 +131,14 @@ describe("reconcilePersistentSubagents", () => {
 
     const registered: string[] = [];
     const subscribed: string[] = [];
-    const log = createLogger({ component: "t", minLevel: "error" });
+    const mockSessionManager = {
+      kill: (sid: string) => sessions.update(sid, { status: "terminated" }),
+    } as unknown as SessionManager;
     const r = reconcilePersistentSubagents({
       db,
       config: defaultConfig(dir),
-      logger: log,
+      sessions,
+      sessionManager: mockSessionManager,
       ext: {
         runSessionModelTurn: async () => ({
           latestAssistantText: "",

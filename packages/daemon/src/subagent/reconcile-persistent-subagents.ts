@@ -1,10 +1,8 @@
 import type Database from "better-sqlite3";
 import type { ShoggothConfig } from "@shoggoth/shared";
-import { createSqliteAgentTokenStore } from "../auth/sqlite-agent-tokens";
-import { resolveShoggothAgentId } from "../config/effective-runtime";
 import { getLogger } from "../logging";
-import { createSessionManager } from "../sessions/session-manager";
-import { createSessionStore } from "../sessions/session-store";
+import type { SessionManager } from "../sessions/session-manager";
+import type { SessionStore } from "../sessions/session-store";
 
 const log = getLogger("subagent-reconcile");
 import { SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS } from "./subagent-constants";
@@ -25,16 +23,10 @@ export function reconcilePersistentSubagents(input: {
   readonly db: Database.Database;
   readonly config: ShoggothConfig;
   readonly ext: SubagentRuntimeExtension;
+  readonly sessions: SessionStore;
+  readonly sessionManager: SessionManager;
 }): ReconcilePersistentSubagentsResult {
-  const sessions = createSessionStore(input.db);
-  const sessionManager = createSessionManager({
-    db: input.db,
-    sessions,
-    agentTokens: createSqliteAgentTokenStore(input.db),
-    workspacesRoot: input.config.workspacesRoot,
-    agentId: resolveShoggothAgentId(input.config),
-    agentsConfig: input.config.agents,
-  });
+  const { sessions, sessionManager } = input;
 
   const candidates = sessions
     .list()
