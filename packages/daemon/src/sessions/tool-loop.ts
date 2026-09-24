@@ -142,8 +142,8 @@ export interface ToolLoopStatsUpdate {
 }
 
 // ---------------------------------------------------------------------------
-// Dispatch result – returned by `processSingleToolCall` to avoid `continue`
-// from inside a helper function back into the caller's `for` loop.
+// Dispatch result – returned by `processSingleToolCall` so the caller can
+// decide whether to skip or proceed with the next tool call.
 // ---------------------------------------------------------------------------
 
 /** Discriminant for the per-tool-call dispatch result. */
@@ -183,7 +183,7 @@ interface ToolLoopContext {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 1 helpers – private, file-scoped
+// Utility helpers – private, file-scoped
 // ---------------------------------------------------------------------------
 
 const allowedNames = (tools: ReadonlyArray<{ name: string }>) => new Set(tools.map((t) => t.name));
@@ -224,7 +224,7 @@ function abortPromise(signal: AbortSignal | undefined): Promise<never> {
 }
 
 // ---------------------------------------------------------------------------
-// HITL approval gate  (Phase 3b – extracted from the per-tool-call loop)
+// HITL approval gate
 // ---------------------------------------------------------------------------
 
 /**
@@ -352,7 +352,7 @@ async function hitlApprovalGate(
 }
 
 // ---------------------------------------------------------------------------
-// Phase 3 – per-tool-call dispatch (extracted from the inner for-loop)
+// Per-tool-call dispatch
 // ---------------------------------------------------------------------------
 
 /**
@@ -363,7 +363,7 @@ async function hitlApprovalGate(
  * pushed back to the model via `pushToolMessage` and appended to the
  * transcript inside this function.
  *
- * The function is intentionally broken into distinct stages:
+ * The function is organized into distinct stages:
  *   1. Name / thinking-leak / unknown-tool validation
  *   2. Args validation
  *   3. Policy check
@@ -814,7 +814,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
     for (;;) {
       assertNotAborted(options.turnAbortSignal);
 
-      // ---- Phase 1: model call ----
+      // ---- Model call ----
       let turn: {
         content: string | null;
         toolCalls: readonly ToolCall[];
@@ -871,7 +871,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         throw e;
       }
 
-      // ---- Phase 2: terminal response (no tool calls) ----
+      // ---- Terminal response (no tool calls) ----
       if (turn.toolCalls.length === 0) {
         if (options.transcript && turn.content) {
           appendTx({
@@ -888,7 +888,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         break;
       }
 
-      // ---- Phase 3: per-tool-call dispatch ----
+      // ---- Per-tool-call dispatch ----
 
       // Sanitize malformed argsJson before transcript storage.
       const badArgIds = new Set<string>();
@@ -934,7 +934,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
           options.runId,
         );
 
-        // --- Phase 4: mid-loop tool refresh (tool discovery) ---
+        // --- Mid-loop tool refresh (tool discovery) ---
         if (toolRefreshNeeded.get(options.sessionId) && options.refreshTools) {
           toolRefreshNeeded.delete(options.sessionId);
           const refreshed = options.refreshTools();
