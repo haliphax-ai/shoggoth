@@ -27,5 +27,50 @@ export default defineConfig({
     setupFiles: ["./test/setup.ts"],
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      reportsDirectory: "coverage",
+      include: ["packages/*/src/**/*.ts"],
+      exclude: [
+        "packages/*/test/**",
+        "packages/*/src/**/*.test.ts",
+        "packages/*/src/**/*.d.ts",
+        "packages/*/src/**/index.ts",
+        "packages/*/packages/**",
+      ],
+      thresholds: {
+        // Global minimums — prevent regressions across the codebase
+        statements: 65,
+        branches: 55,
+        functions: 60,
+        lines: 65,
+        // Per-package thresholds for critical infrastructure
+        "packages/messaging": {
+          statements: 80,
+          branches: 70,
+          functions: 80,
+          lines: 80,
+        },
+        "packages/mcp-integration": {
+          statements: 75,
+          branches: 65,
+          functions: 75,
+          lines: 75,
+        },
+        "packages/os-exec": {
+          statements: 75,
+          branches: 65,
+          functions: 75,
+          lines: 75,
+        },
+        "packages/shared": {
+          statements: 75,
+          branches: 65,
+          functions: 75,
+          lines: 75,
+        },
+      },
+    },
   },
 });
