@@ -141,6 +141,51 @@ export interface ToolLoopStatsUpdate {
   readonly transcriptMessageCount?: number;
 }
 
+// ---------------------------------------------------------------------------
+// Dispatch result – returned by `processSingleToolCall` so the caller can
+// decide whether to skip or proceed with the next tool call.
+// ---------------------------------------------------------------------------
+
+/** Discriminant for the per-tool-call dispatch result. */
+export type ToolCallDispatchResultKind =
+  | "skip_invalid_name"
+  | "skip_thinking_leak"
+  | "skip_unknown_tool"
+  | "skip_bad_args"
+  | "skip_validation_error"
+  | "skip_policy_denied"
+  | "skip_review_unavailable"
+  | "skip_hitl_denied"
+  | "proceed";
+
+export interface ToolCallDispatchResult {
+  readonly kind: ToolCallDispatchResultKind;
+  /** Present when kind === "proceed" – the resolved compound resource name. */
+  readonly compoundResource?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Shared loop context – bundles the recurring dependencies so helper
+// function signatures stay concise.
+// ---------------------------------------------------------------------------
+
+interface ToolLoopContext {
+  readonly options: RunToolLoopOptions;
+  readonly appendTx: (row: {
+    role: string;
+    content?: string | null;
+    toolCallId?: string | null;
+    toolCalls?: readonly { id: string; name: string; argsJson: string }[];
+    metadata?: unknown;
+  }) => void;
+  readonly emitStats: RunToolLoopOptions["onStatsUpdate"];
+  readonly getTranscriptCount: () => number;
+}
+
+// ---------------------------------------------------------------------------
+// Utility helpers – private, file-scoped
+// ---------------------------------------------------------------------------
+
 const allowedNames = (tools: ReadonlyArray<{ name: string }>) => new Set(tools.map((t) => t.name));
 
 const buildSchemaMap = (
@@ -177,6 +222,545 @@ function abortPromise(signal: AbortSignal | undefined): Promise<never> {
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// HITL approval gate
+// ---------------------------------------------------------------------------
+
+/**
+ * Manages the full HITL approval lifecycle for a single tool call:
+ * classifies risk, enqueues a pending action, waits for resolution,
+ * and handles auto-approve / deny / timeout.
+ *
+ * @returns `true` when the tool call is approved (or no approval needed).
+ *          `false` when the call was denied – the caller should `continue`.
+ */
+async function hitlApprovalGate(
+  ctx: ToolLoopContext,
+  compoundResource: string,
+  tc: { id: string; name: string; argsJson: string },
+  requiresReview: boolean,
+  turnAbortSignal: AbortSignal | undefined,
+  runId: string,
+): Promise<boolean> {
+  const { options, appendTx } = ctx;
+  const h = options.hitl!;
+
+  h.pending.expireDue(new Date(h.clock.nowMs()).toISOString());
+  const tier = classifyToolRisk(compoundResource, h.config.toolRisk);
+  const bypass = h.bypassUpTo;
+  const needsApproval = requiresHumanApproval(tier, bypass);
+  const autoApproved =
+    needsApproval &&
+    tier !== "never" &&
+    h.autoApprove?.shouldAutoApprove(options.sessionId, compoundResource);
+  if (autoApproved) {
+    log.info("hitl auto-approve fired", {
+      toolName: compoundResource,
+      sessionId: options.sessionId,
+    });
+  }
+  if (!(requiresReview || (needsApproval && (tier === "never" || !autoApproved)))) {
+    return true; // No approval needed
+  }
+
+  const pendingId = h.newPendingId();
+  const expiresAtIso = new Date(h.clock.nowMs() + h.config.defaultApprovalTimeoutMs).toISOString();
+  h.pending.enqueue({
+    id: pendingId,
+    sessionId: options.sessionId,
+    toolName: compoundResource,
+    payload: { argsJson: tc.argsJson, toolCallId: tc.id },
+    riskTier: tier,
+    expiresAtIso,
+    correlationId: runId,
+  });
+  options.audit.record({
+    phase: "hitl_queued",
+    tool: compoundResource,
+    toolCallId: tc.id,
+    pendingId,
+    riskTier: tier,
+  });
+  log.info("hitl approval requested", {
+    toolName: compoundResource,
+    sessionId: options.sessionId,
+    pendingId,
+    riskTier: tier,
+  });
+
+  const queuedRow = h.pending.getById(pendingId);
+  if (queuedRow) {
+    h.hitlNotifier?.onQueued(queuedRow);
+    void Promise.resolve(h.afterHitlQueued?.(queuedRow)).catch(() => {});
+  }
+
+  const expireTimer = setInterval(() => {
+    h.pending.expireDue(new Date(h.clock.nowMs()).toISOString());
+  }, HITL_EXPIRE_POLL_MS);
+  try {
+    h.pending.expireDue(new Date(h.clock.nowMs()).toISOString());
+    const outcome = await Promise.race([
+      h.waitForHitlResolution(pendingId),
+      abortPromise(turnAbortSignal),
+    ]);
+    if (outcome === "denied") {
+      const row = h.pending.getById(pendingId);
+      const reason = row?.denialReason === "timeout" ? "timeout" : "operator";
+      const errBody = JSON.stringify({
+        error: "hitl_denied",
+        pendingId,
+        reason,
+      });
+      options.audit.record({
+        phase: "hitl_denied",
+        tool: compoundResource,
+        toolCallId: tc.id,
+        pendingId,
+        denialReason: reason,
+      });
+      log.info("hitl approval denied", {
+        pendingId,
+        toolName: compoundResource,
+        reason,
+      });
+      // Without pushToolMessage, the next model.complete() must not re-emit the same tool
+      // call or the outer for (;;) will spin (HITL re-queue + wait forever).
+      options.model.pushToolMessage?.({
+        toolCallId: tc.id,
+        content: errBody,
+      });
+      if (options.transcript) {
+        appendTx({
+          role: "tool",
+          content: errBody,
+          toolCallId: tc.id,
+          metadata: { tool: tc.name },
+        });
+      }
+      return false;
+    }
+  } finally {
+    clearInterval(expireTimer);
+  }
+  log.info("hitl approval granted", {
+    pendingId,
+    toolName: compoundResource,
+    sessionId: options.sessionId,
+  });
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Per-tool-call dispatch
+// ---------------------------------------------------------------------------
+
+/**
+ * Validates, gates (policy + HITL), and executes a single tool call.
+ *
+ * Returns a {@link ToolCallDispatchResult} so the caller knows whether to
+ * `continue` (skip) or proceed with execution.  Errors and denials are
+ * pushed back to the model via `pushToolMessage` and appended to the
+ * transcript inside this function.
+ *
+ * The function is organized into distinct stages:
+ *   1. Name / thinking-leak / unknown-tool validation
+ *   2. Args validation
+ *   3. Policy check
+ *   4. HITL approval gate
+ *   5. Execution with timeout
+ *   6. Result feedback to model + transcript
+ */
+async function processSingleToolCall(
+  ctx: ToolLoopContext,
+  tc: { id: string; name: string; argsJson: string; thoughtSignature?: string },
+  names: Set<string>,
+  schemas: Map<string, Record<string, unknown>>,
+  badArgIds: Set<string>,
+  turnAbortSignal: AbortSignal | undefined,
+  runId: string,
+): Promise<ToolCallDispatchResult> {
+  const { options, appendTx } = ctx;
+
+  log.debug("tool call received", {
+    toolName: tc.name,
+    toolCallId: tc.id,
+    sessionId: options.sessionId,
+    args: truncate(tc.argsJson, 1000),
+  });
+
+  // Estimate argsJson tokens (becomes part of next model input context)
+  ctx.emitStats?.({ estimatedInputTokens: estimateTokens(tc.argsJson) });
+  assertNotAborted(turnAbortSignal);
+
+  // ---- Stage 1: name / thinking-leak / unknown-tool validation ----
+
+  const VALID_TOOL_NAME = /^[a-zA-Z0-9_\-:.]{1,128}$/;
+  if (!VALID_TOOL_NAME.test(tc.name)) {
+    log.warn("invalid tool name", {
+      toolName: tc.name.slice(0, 80),
+      toolCallId: tc.id,
+      sessionId: options.sessionId,
+    });
+    const errBody = JSON.stringify({
+      error: "invalid_tool_name",
+      message: "Tool name contains invalid characters or exceeds 128 chars.",
+    });
+    options.audit.record({ phase: "invalid_tool_name", toolCallId: tc.id });
+    options.model.pushToolMessage?.({ toolCallId: tc.id, content: errBody });
+    if (options.transcript) {
+      appendTx({
+        role: "tool",
+        content: errBody,
+        toolCallId: tc.id,
+        metadata: { tool: "_invalid_" },
+      });
+    }
+    return { kind: "skip_invalid_name" };
+  }
+
+  // Detect thinking content leaked into tool call names.
+  const THINKING_LEAK_RE = /^(?:thinking|think)[_\s]/i;
+  if (THINKING_LEAK_RE.test(tc.name)) {
+    log.warn("thinking content leaked into tool name", {
+      toolName: tc.name.slice(0, 80),
+      toolCallId: tc.id,
+      sessionId: options.sessionId,
+    });
+    options.audit.record({ phase: "thinking_leak", toolCallId: tc.id });
+    options.model.pushToolMessage?.({
+      toolCallId: tc.id,
+      content: JSON.stringify({ ok: true, note: "acknowledged" }),
+    });
+    return { kind: "skip_thinking_leak" };
+  }
+
+  if (!names.has(tc.name)) {
+    log.warn("unknown tool called", {
+      toolName: tc.name,
+      toolCallId: tc.id,
+      sessionId: options.sessionId,
+    });
+    const errBody = JSON.stringify({
+      error: "unknown_tool",
+      tool: tc.name,
+      message: `Unknown tool: ${tc.name}. It may not be available in this session.`,
+    });
+    options.audit.record({
+      phase: "unknown_tool",
+      tool: tc.name,
+      toolCallId: tc.id,
+    });
+    options.model.pushToolMessage?.({ toolCallId: tc.id, content: errBody });
+    if (options.transcript) {
+      appendTx({
+        role: "tool",
+        content: errBody,
+        toolCallId: tc.id,
+        metadata: { tool: tc.name },
+      });
+    }
+    return { kind: "skip_unknown_tool" };
+  }
+
+  if (badArgIds.has(tc.id)) {
+    const errBody = JSON.stringify({
+      error: "invalid_arguments",
+      tool: tc.name,
+      message: "Tool call arguments were not valid JSON.",
+    });
+    options.audit.record({
+      phase: "args_parse_error",
+      tool: tc.name,
+      toolCallId: tc.id,
+    });
+    options.model.pushToolMessage?.({ toolCallId: tc.id, content: errBody });
+    if (options.transcript) {
+      appendTx({
+        role: "tool",
+        content: errBody,
+        toolCallId: tc.id,
+        metadata: { tool: tc.name },
+      });
+    }
+    return { kind: "skip_bad_args" };
+  }
+
+  // ---- Stage 2: args validation ----
+
+  const toolArgs = JSON.parse(tc.argsJson) as Record<string, unknown>;
+  const toolSchema = schemas.get(tc.name);
+  if (toolSchema) {
+    const validationErrors = validateToolArgs(toolArgs, toolSchema);
+    if (validationErrors.length > 0) {
+      const detail = validationErrors.map((e) => `${e.field}: ${e.message}`).join("; ");
+      log.warn("tool call args validation failed", {
+        toolName: tc.name,
+        toolCallId: tc.id,
+        sessionId: options.sessionId,
+        detail,
+      });
+      const errBody = JSON.stringify({
+        error: "invalid_arguments",
+        tool: tc.name,
+        message: `Argument validation failed: ${detail}`,
+      });
+      options.audit.record({
+        phase: "args_validation_error",
+        tool: tc.name,
+        toolCallId: tc.id,
+        detail,
+      });
+      options.model.pushToolMessage?.({ toolCallId: tc.id, content: errBody });
+      if (options.transcript) {
+        appendTx({
+          role: "tool",
+          content: errBody,
+          toolCallId: tc.id,
+          metadata: { tool: tc.name },
+        });
+      }
+      return { kind: "skip_validation_error" };
+    }
+  }
+
+  const compoundResource = options.subResourceRegistry
+    ? resolveCompoundResource(tc.name, toolArgs, options.subResourceRegistry)
+    : tc.name;
+
+  // ---- Stage 3: policy check ----
+
+  const decision = options.policy.check({
+    toolName: compoundResource,
+    sessionId: options.sessionId,
+    principalId: options.principalId,
+    argsJson: tc.argsJson,
+  });
+
+  options.audit.record({
+    phase: "policy",
+    tool: compoundResource,
+    toolCallId: tc.id,
+    argsJson: tc.argsJson,
+    decision,
+  });
+
+  const requiresReview = !decision.allow && decision.reason === "requires_review";
+
+  if (!decision.allow && !requiresReview) {
+    log.warn("tool call policy denied", {
+      toolName: compoundResource,
+      toolCallId: tc.id,
+      sessionId: options.sessionId,
+      reason: decision.reason,
+    });
+    const errBody = JSON.stringify({
+      error: "policy_denied",
+      tool: compoundResource,
+      message: `Tool call denied by policy: ${decision.reason}`,
+    });
+    options.audit.record({
+      phase: "policy_denied",
+      tool: compoundResource,
+      toolCallId: tc.id,
+      reason: decision.reason,
+    });
+    options.model.pushToolMessage?.({ toolCallId: tc.id, content: errBody });
+    if (options.transcript) {
+      appendTx({
+        role: "tool",
+        content: errBody,
+        toolCallId: tc.id,
+        metadata: { tool: tc.name },
+      });
+    }
+    return { kind: "skip_policy_denied" };
+  }
+
+  if (requiresReview && !options.hitl) {
+    log.warn("tool call requires review but no HITL configured", {
+      toolName: compoundResource,
+      toolCallId: tc.id,
+      sessionId: options.sessionId,
+    });
+    const errBody = JSON.stringify({
+      error: "review_required",
+      tool: compoundResource,
+      message: `Tool call requires human approval but no review system is configured.`,
+    });
+    options.audit.record({
+      phase: "review_unavailable",
+      tool: compoundResource,
+      toolCallId: tc.id,
+    });
+    options.model.pushToolMessage?.({ toolCallId: tc.id, content: errBody });
+    if (options.transcript) {
+      appendTx({
+        role: "tool",
+        content: errBody,
+        toolCallId: tc.id,
+        metadata: { tool: tc.name },
+      });
+    }
+    return { kind: "skip_review_unavailable" };
+  }
+
+  // ---- Stage 4: HITL approval gate ----
+
+  if (options.hitl) {
+    const approved = await hitlApprovalGate(
+      ctx,
+      compoundResource,
+      tc,
+      requiresReview,
+      turnAbortSignal,
+      runId,
+    );
+    if (!approved) {
+      return { kind: "skip_hitl_denied" };
+    }
+  }
+
+  // ---- Stage 5: execute with timeout ----
+
+  options.audit.record({
+    phase: "execute_start",
+    tool: compoundResource,
+    toolCallId: tc.id,
+    argsJson: tc.argsJson,
+  });
+
+  assertNotAborted(turnAbortSignal);
+  const t0 = Date.now();
+  log.debug("tool call started", {
+    toolName: compoundResource,
+    toolCallId: tc.id,
+    sessionId: options.sessionId,
+  });
+
+  const execPromise = options.executor.execute({
+    name: tc.name,
+    argsJson: tc.argsJson,
+    toolCallId: tc.id,
+  });
+
+  let out: { resultJson: string; contentParts?: ChatContentPart[] };
+  const timeoutMs = options.toolCallTimeoutMs;
+  try {
+    if (timeoutMs != null && timeoutMs > 0) {
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new ToolCallTimeoutError(compoundResource, timeoutMs)), timeoutMs);
+      });
+      out = await Promise.race([execPromise, timeoutPromise, abortPromise(turnAbortSignal)]);
+    } else {
+      out = await Promise.race([execPromise, abortPromise(turnAbortSignal)]);
+    }
+  } catch (e) {
+    if (e instanceof TurnAbortedError) throw e;
+    if (e instanceof ToolCallTimeoutError) {
+      log.warn("tool call timed out", {
+        toolName: compoundResource,
+        toolCallId: tc.id,
+        sessionId: options.sessionId,
+        timeoutMs,
+      });
+      const errBody = JSON.stringify({
+        error: "tool_call_timeout",
+        tool: compoundResource,
+        timeoutMs,
+      });
+      options.audit.record({
+        phase: "execute_timeout",
+        tool: compoundResource,
+        toolCallId: tc.id,
+        timeoutMs,
+      });
+      options.model.pushToolMessage?.({ toolCallId: tc.id, content: errBody });
+      if (options.transcript) {
+        appendTx({
+          role: "tool",
+          content: errBody,
+          toolCallId: tc.id,
+          metadata: { tool: tc.name },
+        });
+      }
+      return { kind: "skip_hitl_denied" }; // reuse skip kind – caller continues
+    }
+    // General tool execution error — inject back to model so it can react.
+    const errMsg = e instanceof Error ? e.message : String(e);
+    log.warn("tool call failed", {
+      toolName: compoundResource,
+      toolCallId: tc.id,
+      sessionId: options.sessionId,
+      error: errMsg,
+    });
+    const errBody = JSON.stringify({
+      error: "tool_call_error",
+      tool: compoundResource,
+      message: errMsg,
+    });
+    options.audit.record({
+      phase: "execute_error",
+      tool: compoundResource,
+      toolCallId: tc.id,
+      error: errMsg,
+    });
+    options.model.pushToolMessage?.({ toolCallId: tc.id, content: errBody });
+    if (options.transcript) {
+      appendTx({
+        role: "tool",
+        content: errBody,
+        toolCallId: tc.id,
+        metadata: { tool: tc.name },
+      });
+    }
+    return { kind: "skip_hitl_denied" }; // reuse skip kind – caller continues
+  }
+
+  log.debug("tool call completed", {
+    toolName: compoundResource,
+    toolCallId: tc.id,
+    sessionId: options.sessionId,
+    durationMs: Date.now() - t0,
+    success: true,
+  });
+
+  // ---- Stage 6: result feedback to model + transcript ----
+
+  const toolMessageContent = out.contentParts ? JSON.stringify(out.contentParts) : out.resultJson;
+
+  options.audit.record({
+    phase: "execute_done",
+    tool: compoundResource,
+    toolCallId: tc.id,
+    resultJson: out.resultJson,
+  });
+
+  options.model.pushToolMessage?.({
+    toolCallId: tc.id,
+    content: toolMessageContent,
+  });
+
+  ctx.emitStats?.({
+    estimatedInputTokens: estimateTokens(toolMessageContent),
+  });
+
+  if (options.transcript) {
+    appendTx({
+      role: "tool",
+      content: toolMessageContent,
+      toolCallId: tc.id,
+      metadata: { tool: tc.name },
+    });
+    ctx.emitStats?.({ transcriptMessageCount: ctx.getTranscriptCount() });
+  }
+
+  return { kind: "proceed", compoundResource };
+}
+
+// ---------------------------------------------------------------------------
+// Main entry point
+// ---------------------------------------------------------------------------
 
 export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
   void options.db;
@@ -222,11 +806,15 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         .get({ sessionId: options.sessionId, ctxSeg }) as { cnt: number }
     ).cnt;
 
+  // Shared context passed to helper functions
+  const ctx: ToolLoopContext = { options, appendTx, emitStats, getTranscriptCount };
+
   try {
     let structuredOutputAttempt = 0;
     for (;;) {
       assertNotAborted(options.turnAbortSignal);
 
+      // ---- Model call ----
       let turn: {
         content: string | null;
         toolCalls: readonly ToolCall[];
@@ -283,6 +871,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         throw e;
       }
 
+      // ---- Terminal response (no tool calls) ----
       if (turn.toolCalls.length === 0) {
         if (options.transcript && turn.content) {
           appendTx({
@@ -299,14 +888,11 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         break;
       }
 
+      // ---- Per-tool-call dispatch ----
+
       // Sanitize malformed argsJson before transcript storage.
-      // Models (especially local ones like Gemma) sometimes produce invalid JSON
-      // in tool call arguments, which poisons the transcript and causes subsequent
-      // API calls to fail. Track which tool calls had bad args so we can skip
-      // execution but still store valid JSON in the transcript.
       const badArgIds = new Set<string>();
       const sanitizedToolCalls = turn.toolCalls.map((tc) => {
-        // Fix invalid JSON escape sequences (e.g. \{ \( \. from regex patterns)
         const fixedArgs = sanitizeJsonEscapes(tc.argsJson);
         try {
           JSON.parse(fixedArgs);
@@ -338,501 +924,15 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
       }
 
       for (const tc of sanitizedToolCalls) {
-        log.debug("tool call received", {
-          toolName: tc.name,
-          toolCallId: tc.id,
-          sessionId: options.sessionId,
-          args: truncate(tc.argsJson, 1000),
-        });
-        // Estimate argsJson tokens (becomes part of next model input context)
-        emitStats?.({ estimatedInputTokens: estimateTokens(tc.argsJson) });
-        assertNotAborted(options.turnAbortSignal);
-        // Validate tool name before anything else — malformed model output
-        // (e.g. thinking content leaking into tool call XML) produces garbage
-        // names that would poison the transcript if stored.
-        const VALID_TOOL_NAME = /^[a-zA-Z0-9_\-:.]{1,128}$/;
-        if (!VALID_TOOL_NAME.test(tc.name)) {
-          log.warn("invalid tool name", {
-            toolName: tc.name.slice(0, 80),
-            toolCallId: tc.id,
-            sessionId: options.sessionId,
-          });
-          const errBody = JSON.stringify({
-            error: "invalid_tool_name",
-            message: "Tool name contains invalid characters or exceeds 128 chars.",
-          });
-          options.audit.record({
-            phase: "invalid_tool_name",
-            toolCallId: tc.id,
-          });
-          options.model.pushToolMessage?.({
-            toolCallId: tc.id,
-            content: errBody,
-          });
-          if (options.transcript) {
-            appendTx({
-              role: "tool",
-              content: errBody,
-              toolCallId: tc.id,
-              metadata: { tool: "_invalid_" },
-            });
-          }
-          continue;
-        }
-
-        // Detect thinking content leaked into tool call names.
-        // Models sometimes emit thinking text as a function name (e.g. "thinking_Let_me_continue...").
-        // Send a neutral ack instead of an error to avoid retry loops.
-        const THINKING_LEAK_RE = /^(?:thinking|think)[_\s]/i;
-        if (THINKING_LEAK_RE.test(tc.name)) {
-          log.warn("thinking content leaked into tool name", {
-            toolName: tc.name.slice(0, 80),
-            toolCallId: tc.id,
-            sessionId: options.sessionId,
-          });
-          options.audit.record({ phase: "thinking_leak", toolCallId: tc.id });
-          options.model.pushToolMessage?.({
-            toolCallId: tc.id,
-            content: JSON.stringify({ ok: true, note: "acknowledged" }),
-          });
-          continue;
-        }
-
-        if (!names.has(tc.name)) {
-          log.warn("unknown tool called", {
-            toolName: tc.name,
-            toolCallId: tc.id,
-            sessionId: options.sessionId,
-          });
-          const errBody = JSON.stringify({
-            error: "unknown_tool",
-            tool: tc.name,
-            message: `Unknown tool: ${tc.name}. It may not be available in this session.`,
-          });
-          options.audit.record({
-            phase: "unknown_tool",
-            tool: tc.name,
-            toolCallId: tc.id,
-          });
-          options.model.pushToolMessage?.({
-            toolCallId: tc.id,
-            content: errBody,
-          });
-          if (options.transcript) {
-            appendTx({
-              role: "tool",
-              content: errBody,
-              toolCallId: tc.id,
-              metadata: { tool: tc.name },
-            });
-          }
-          continue;
-        }
-
-        // Skip execution for tool calls with originally malformed argsJson.
-        // The transcript already has sanitized JSON; notify the model so it can retry.
-        if (badArgIds.has(tc.id)) {
-          const errBody = JSON.stringify({
-            error: "invalid_arguments",
-            tool: tc.name,
-            message: "Tool call arguments were not valid JSON.",
-          });
-          options.audit.record({
-            phase: "args_parse_error",
-            tool: tc.name,
-            toolCallId: tc.id,
-          });
-          options.model.pushToolMessage?.({
-            toolCallId: tc.id,
-            content: errBody,
-          });
-          if (options.transcript) {
-            appendTx({
-              role: "tool",
-              content: errBody,
-              toolCallId: tc.id,
-              metadata: { tool: tc.name },
-            });
-          }
-          continue;
-        }
-
-        // Parse and validate tool call arguments (argsJson is pre-sanitized above).
-        const toolArgs = JSON.parse(tc.argsJson) as Record<string, unknown>;
-        const toolSchema = schemas.get(tc.name);
-        if (toolSchema) {
-          const validationErrors = validateToolArgs(toolArgs, toolSchema);
-          if (validationErrors.length > 0) {
-            const detail = validationErrors.map((e) => `${e.field}: ${e.message}`).join("; ");
-            log.warn("tool call args validation failed", {
-              toolName: tc.name,
-              toolCallId: tc.id,
-              sessionId: options.sessionId,
-              detail,
-            });
-            const errBody = JSON.stringify({
-              error: "invalid_arguments",
-              tool: tc.name,
-              message: `Argument validation failed: ${detail}`,
-            });
-            options.audit.record({
-              phase: "args_validation_error",
-              tool: tc.name,
-              toolCallId: tc.id,
-              detail,
-            });
-            options.model.pushToolMessage?.({
-              toolCallId: tc.id,
-              content: errBody,
-            });
-            if (options.transcript) {
-              appendTx({
-                role: "tool",
-                content: errBody,
-                toolCallId: tc.id,
-                metadata: { tool: tc.name },
-              });
-            }
-            continue;
-          }
-        }
-        const compoundResource = options.subResourceRegistry
-          ? resolveCompoundResource(tc.name, toolArgs, options.subResourceRegistry)
-          : tc.name;
-
-        const decision = options.policy.check({
-          toolName: compoundResource,
-          sessionId: options.sessionId,
-          principalId: options.principalId,
-          argsJson: tc.argsJson,
-        });
-
-        options.audit.record({
-          phase: "policy",
-          tool: compoundResource,
-          toolCallId: tc.id,
-          argsJson: tc.argsJson,
-          decision,
-        });
-
-        const requiresReview = !decision.allow && decision.reason === "requires_review";
-
-        if (!decision.allow && !requiresReview) {
-          log.warn("tool call policy denied", {
-            toolName: compoundResource,
-            toolCallId: tc.id,
-            sessionId: options.sessionId,
-            reason: decision.reason,
-          });
-          const errBody = JSON.stringify({
-            error: "policy_denied",
-            tool: compoundResource,
-            message: `Tool call denied by policy: ${decision.reason}`,
-          });
-          options.audit.record({
-            phase: "policy_denied",
-            tool: compoundResource,
-            toolCallId: tc.id,
-            reason: decision.reason,
-          });
-          options.model.pushToolMessage?.({
-            toolCallId: tc.id,
-            content: errBody,
-          });
-          if (options.transcript) {
-            appendTx({
-              role: "tool",
-              content: errBody,
-              toolCallId: tc.id,
-              metadata: { tool: tc.name },
-            });
-          }
-          continue;
-        }
-
-        if (requiresReview && !options.hitl) {
-          // No HITL configured — treat requires_review as a block
-          log.warn("tool call requires review but no HITL configured", {
-            toolName: compoundResource,
-            toolCallId: tc.id,
-            sessionId: options.sessionId,
-          });
-          const errBody = JSON.stringify({
-            error: "review_required",
-            tool: compoundResource,
-            message: `Tool call requires human approval but no review system is configured.`,
-          });
-          options.audit.record({
-            phase: "review_unavailable",
-            tool: compoundResource,
-            toolCallId: tc.id,
-          });
-          options.model.pushToolMessage?.({
-            toolCallId: tc.id,
-            content: errBody,
-          });
-          if (options.transcript) {
-            appendTx({
-              role: "tool",
-              content: errBody,
-              toolCallId: tc.id,
-              metadata: { tool: tc.name },
-            });
-          }
-          continue;
-        }
-
-        if (options.hitl) {
-          const h = options.hitl;
-          h.pending.expireDue(new Date(h.clock.nowMs()).toISOString());
-          const tier = classifyToolRisk(compoundResource, h.config.toolRisk);
-          const bypass = h.bypassUpTo;
-          const needsApproval = requiresHumanApproval(tier, bypass);
-          const autoApproved =
-            needsApproval &&
-            tier !== "never" &&
-            h.autoApprove?.shouldAutoApprove(options.sessionId, compoundResource);
-          if (autoApproved) {
-            log.info("hitl auto-approve fired", {
-              toolName: compoundResource,
-              sessionId: options.sessionId,
-            });
-          }
-          if (requiresReview || (needsApproval && (tier === "never" || !autoApproved))) {
-            const pendingId = h.newPendingId();
-            const expiresAtIso = new Date(
-              h.clock.nowMs() + h.config.defaultApprovalTimeoutMs,
-            ).toISOString();
-            h.pending.enqueue({
-              id: pendingId,
-              sessionId: options.sessionId,
-              toolName: compoundResource,
-              payload: { argsJson: tc.argsJson, toolCallId: tc.id },
-              riskTier: tier,
-              expiresAtIso,
-              correlationId: options.runId,
-            });
-            options.audit.record({
-              phase: "hitl_queued",
-              tool: compoundResource,
-              toolCallId: tc.id,
-              pendingId,
-              riskTier: tier,
-            });
-            log.info("hitl approval requested", {
-              toolName: compoundResource,
-              sessionId: options.sessionId,
-              pendingId,
-              riskTier: tier,
-            });
-
-            const queuedRow = h.pending.getById(pendingId);
-            if (queuedRow) {
-              h.hitlNotifier?.onQueued(queuedRow);
-              void Promise.resolve(h.afterHitlQueued?.(queuedRow)).catch(() => {});
-            }
-
-            const expireTimer = setInterval(() => {
-              h.pending.expireDue(new Date(h.clock.nowMs()).toISOString());
-            }, HITL_EXPIRE_POLL_MS);
-            try {
-              h.pending.expireDue(new Date(h.clock.nowMs()).toISOString());
-              const outcome = await Promise.race([
-                h.waitForHitlResolution(pendingId),
-                abortPromise(options.turnAbortSignal),
-              ]);
-              if (outcome === "denied") {
-                const row = h.pending.getById(pendingId);
-                const reason = row?.denialReason === "timeout" ? "timeout" : "operator";
-                const errBody = JSON.stringify({
-                  error: "hitl_denied",
-                  pendingId,
-                  reason,
-                });
-                options.audit.record({
-                  phase: "hitl_denied",
-                  tool: compoundResource,
-                  toolCallId: tc.id,
-                  pendingId,
-                  denialReason: reason,
-                });
-                log.info("hitl approval denied", {
-                  pendingId,
-                  toolName: compoundResource,
-                  reason,
-                });
-                // Without pushToolMessage, the next model.complete() must not re-emit the same tool
-                // call or the outer for (;;) will spin (HITL re-queue + wait forever).
-                options.model.pushToolMessage?.({
-                  toolCallId: tc.id,
-                  content: errBody,
-                });
-                if (options.transcript) {
-                  appendTx({
-                    role: "tool",
-                    content: errBody,
-                    toolCallId: tc.id,
-                    metadata: { tool: tc.name },
-                  });
-                }
-                continue;
-              }
-            } finally {
-              clearInterval(expireTimer);
-            }
-            log.info("hitl approval granted", {
-              pendingId,
-              toolName: compoundResource,
-              sessionId: options.sessionId,
-            });
-          }
-        }
-
-        options.audit.record({
-          phase: "execute_start",
-          tool: compoundResource,
-          toolCallId: tc.id,
-          argsJson: tc.argsJson,
-        });
-
-        assertNotAborted(options.turnAbortSignal);
-        const t0 = Date.now();
-        log.debug("tool call started", {
-          toolName: compoundResource,
-          toolCallId: tc.id,
-          sessionId: options.sessionId,
-        });
-
-        const execPromise = options.executor.execute({
-          name: tc.name,
-          argsJson: tc.argsJson,
-          toolCallId: tc.id,
-        });
-
-        let out: { resultJson: string; contentParts?: ChatContentPart[] };
-        const timeoutMs = options.toolCallTimeoutMs;
-        try {
-          if (timeoutMs != null && timeoutMs > 0) {
-            const timeoutPromise = new Promise<never>((_, reject) => {
-              setTimeout(
-                () => reject(new ToolCallTimeoutError(compoundResource, timeoutMs)),
-                timeoutMs,
-              );
-            });
-            out = await Promise.race([
-              execPromise,
-              timeoutPromise,
-              abortPromise(options.turnAbortSignal),
-            ]);
-          } else {
-            out = await Promise.race([execPromise, abortPromise(options.turnAbortSignal)]);
-          }
-        } catch (e) {
-          if (e instanceof TurnAbortedError) throw e;
-          if (e instanceof ToolCallTimeoutError) {
-            log.warn("tool call timed out", {
-              toolName: compoundResource,
-              toolCallId: tc.id,
-              sessionId: options.sessionId,
-              timeoutMs,
-            });
-            const errBody = JSON.stringify({
-              error: "tool_call_timeout",
-              tool: compoundResource,
-              timeoutMs,
-            });
-            options.audit.record({
-              phase: "execute_timeout",
-              tool: compoundResource,
-              toolCallId: tc.id,
-              timeoutMs,
-            });
-            options.model.pushToolMessage?.({
-              toolCallId: tc.id,
-              content: errBody,
-            });
-            if (options.transcript) {
-              appendTx({
-                role: "tool",
-                content: errBody,
-                toolCallId: tc.id,
-                metadata: { tool: tc.name },
-              });
-            }
-            continue;
-          }
-          // General tool execution error — inject back to model so it can react.
-          const errMsg = e instanceof Error ? e.message : String(e);
-          log.warn("tool call failed", {
-            toolName: compoundResource,
-            toolCallId: tc.id,
-            sessionId: options.sessionId,
-            error: errMsg,
-          });
-          const errBody = JSON.stringify({
-            error: "tool_call_error",
-            tool: compoundResource,
-            message: errMsg,
-          });
-          options.audit.record({
-            phase: "execute_error",
-            tool: compoundResource,
-            toolCallId: tc.id,
-            error: errMsg,
-          });
-          options.model.pushToolMessage?.({
-            toolCallId: tc.id,
-            content: errBody,
-          });
-          if (options.transcript) {
-            appendTx({
-              role: "tool",
-              content: errBody,
-              toolCallId: tc.id,
-              metadata: { tool: tc.name },
-            });
-          }
-          continue;
-        }
-        log.debug("tool call completed", {
-          toolName: compoundResource,
-          toolCallId: tc.id,
-          sessionId: options.sessionId,
-          durationMs: Date.now() - t0,
-          success: true,
-        });
-
-        // When contentParts is present, serialize as JSON for transcript storage and model feedback.
-        const toolMessageContent = out.contentParts
-          ? JSON.stringify(out.contentParts)
-          : out.resultJson;
-
-        options.audit.record({
-          phase: "execute_done",
-          tool: compoundResource,
-          toolCallId: tc.id,
-          resultJson: out.resultJson,
-        });
-
-        options.model.pushToolMessage?.({
-          toolCallId: tc.id,
-          content: toolMessageContent,
-        });
-
-        // Estimate resultJson tokens (becomes part of next model input context)
-        emitStats?.({
-          estimatedInputTokens: estimateTokens(toolMessageContent),
-        });
-
-        if (options.transcript) {
-          appendTx({
-            role: "tool",
-            content: toolMessageContent,
-            toolCallId: tc.id,
-            metadata: { tool: tc.name },
-          });
-          emitStats?.({ transcriptMessageCount: getTranscriptCount() });
-        }
+        await processSingleToolCall(
+          ctx,
+          tc,
+          names,
+          schemas,
+          badArgIds,
+          options.turnAbortSignal,
+          options.runId,
+        );
 
         // --- Mid-loop tool refresh (tool discovery) ---
         if (toolRefreshNeeded.get(options.sessionId) && options.refreshTools) {
