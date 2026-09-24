@@ -72,7 +72,6 @@ export default defineComponent({
       }
     };
     return { displayLabel, variantClass, onClick, sentFlash };
-    return { displayLabel, variantClass, onClick, sentFlash };
   },
 });
 </script>
