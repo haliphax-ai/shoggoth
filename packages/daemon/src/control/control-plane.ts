@@ -67,6 +67,9 @@ type ControlPlaneOptions = {
   hitlClear?: IntegrationOpsContext["hitlClear"];
   /** Test hook: override `mcp_http_cancel_request` routing (default: platform cancel registry). */
   cancelMcpHttpRequest?: IntegrationOpsContext["cancelMcpHttpRequest"];
+  /** When set, use these shared instances instead of creating local session store/manager. */
+  readonly sessions?: ReturnType<typeof createSessionStore>;
+  readonly sessionManager?: ReturnType<typeof createSessionManager>;
 };
 
 type ControlPlaneHandle = {
@@ -329,6 +332,8 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
     hitlPending: hitlPendingOpt,
     hitlClear: hitlClearOpt,
     cancelMcpHttpRequest: cancelMcpHttpRequestOpt,
+    sessions: sessionsOpt,
+    sessionManager: sessionManagerOpt,
   } = opts;
 
   const logger = getLogger("control-plane");
@@ -343,15 +348,17 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
   let sessionManager: ReturnType<typeof createSessionManager> | undefined;
   let acpxSupervisor: ReturnType<typeof createAcpxProcessSupervisor> | undefined;
   if (stateDb) {
-    sessions = createSessionStore(stateDb);
-    sessionManager = createSessionManager({
-      db: stateDb,
-      sessions,
-      agentTokens: agentStore,
-      workspacesRoot: config.workspacesRoot,
-      agentId: resolveShoggothAgentId(config),
-      agentsConfig: config.agents,
-    });
+    sessions = sessionsOpt ?? createSessionStore(stateDb);
+    sessionManager =
+      sessionManagerOpt ??
+      createSessionManager({
+        db: stateDb,
+        sessions,
+        agentTokens: agentStore,
+        workspacesRoot: config.workspacesRoot,
+        agentId: resolveShoggothAgentId(config),
+        agentsConfig: config.agents,
+      });
     acpxSupervisor = createAcpxProcessSupervisor({
       spawn: acpxSpawn,
     });
