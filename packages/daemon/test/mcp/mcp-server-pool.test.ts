@@ -1,4 +1,5 @@
 import type { AuthenticatedPrincipal } from "@shoggoth/authn";
+import { MCP_PROTOCOL_VERSION_STREAMABLE } from "@shoggoth/mcp-integration";
 import { DEFAULT_POLICY_CONFIG, type ShoggothMcpServerEntry } from "@shoggoth/shared";
 import assert from "node:assert";
 import Database from "better-sqlite3";
@@ -199,7 +200,7 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
             jsonrpc: "2.0",
             id,
             result: {
-              protocolVersion: "2025-11-25",
+              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
               capabilities: {},
               serverInfo: { name: "http-pool-mock", version: "1" },
             },
@@ -373,7 +374,7 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
             jsonrpc: "2.0",
             id,
             result: {
-              protocolVersion: "2025-11-25",
+              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
               capabilities: {},
               serverInfo: { name: "http-sse-msg", version: "1" },
             },
@@ -474,7 +475,7 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
             jsonrpc: "2.0",
             id,
             result: {
-              protocolVersion: "2025-11-25",
+              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
               capabilities: {},
               serverInfo: { name: "http-cancel", version: "1" },
             },

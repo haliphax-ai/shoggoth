@@ -1,3 +1,7 @@
+export {
+  MCP_PROTOCOL_VERSION_STDIO,
+  MCP_PROTOCOL_VERSION_STREAMABLE,
+} from "./mcp-protocol-versions";
 export type { JsonSchemaLike } from "./json-schema";
 export type { McpToolDescriptor } from "./mcp-tool";
 export {
