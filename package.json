@@ -16,7 +16,7 @@
     "lint": "oxlint --fix --deny-warnings .",
     "prepare": "husky || true",
     "reinstall": "rm -rf node_modules **/node_modules && npm ci",
-    "test": "vitest run --reporter=minimal",
+    "test": "vitest run --reporter=minimal --coverage",
     "test:ci-agent-isolation": "SHOGGOTH_CI_STRICT_AGENT_TESTS=1 vitest run packages/os-exec --reporter=minimal",
     "typecheck": "lerna run typecheck --parallel --stream"
   },
@@ -26,6 +26,7 @@
   "devDependencies": {
     "@commitlint/config-conventional": "^20.5.0",
     "@types/node": "~22",
+    "@vitest/coverage-v8": "^4.1.6",
     "commitlint": "^20.5.0",
     "globals": "^17.5.0",
     "husky": "^9.1.7",
