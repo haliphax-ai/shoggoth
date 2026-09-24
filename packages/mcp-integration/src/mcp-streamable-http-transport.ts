@@ -1,5 +1,6 @@
 import type { McpJsonRpcSession } from "./mcp-jsonrpc-transport";
 import { mcpInitializeSession } from "./mcp-jsonrpc-transport";
+import { MCP_PROTOCOL_VERSION_STREAMABLE } from "./mcp-protocol-versions";
 
 /** One SSE event's parsed JSON payload and optional `id:` field (for `Last-Event-ID` resumption). */
 export interface McpSseJsonEvent {
@@ -228,7 +229,8 @@ export function connectMcpStreamableHttpSession(
   const baseHeaders = opts.headers ?? {};
   const serverMessageHandler = opts.onServerMessage;
   let mcpSessionId: string | undefined;
-  let mcpProtocolVersionHeader = opts.initialMcpProtocolVersionHeader ?? "2025-11-25";
+  let mcpProtocolVersionHeader =
+    opts.initialMcpProtocolVersionHeader ?? MCP_PROTOCOL_VERSION_STREAMABLE;
   let closed = false;
   const pending = new Map<number, Pending>();
   let nextId = 1;
@@ -583,7 +585,7 @@ export async function openMcpStreamableHttpClient(
 ): Promise<McpStreamableHttpSession> {
   const session = connectMcpStreamableHttpSession(opts);
   await mcpInitializeSession(session, {
-    protocolVersion: opts.protocolVersion ?? "2025-11-25",
+    protocolVersion: opts.protocolVersion ?? MCP_PROTOCOL_VERSION_STREAMABLE,
   });
   return session;
 }

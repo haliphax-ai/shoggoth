@@ -8,6 +8,7 @@ import {
   openMcpStdioClient,
   openMcpTcpClient,
 } from "../src/mcp-jsonrpc-transport";
+import { MCP_PROTOCOL_VERSION_STDIO } from "../src/mcp-protocol-versions";
 
 const mockServerPath = fileURLToPath(new URL("fixtures/mock-mcp-server.mjs", import.meta.url));
 
@@ -59,7 +60,7 @@ describe("mcp-jsonrpc-transport (tcp)", () => {
                 jsonrpc: "2.0",
                 id,
                 result: {
-                  protocolVersion: "2024-11-05",
+                  protocolVersion: MCP_PROTOCOL_VERSION_STDIO,
                   capabilities: {},
                   serverInfo: { name: "tcp-mock", version: "1" },
                 },

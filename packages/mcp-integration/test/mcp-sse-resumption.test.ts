@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { connectMcpStreamableHttpSession } from "../src/mcp-streamable-http-transport";
+import { MCP_PROTOCOL_VERSION_STREAMABLE } from "../src/mcp-protocol-versions";
 
 /**
  * Helpers to build fake SSE ReadableStream bodies and fake Response objects
@@ -107,7 +108,7 @@ describe("standing GET SSE Last-Event-ID resumption", () => {
               jsonrpc: "2.0",
               id: body.id,
               result: {
-                protocolVersion: "2025-11-25",
+                protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
                 capabilities: {},
                 serverInfo: { name: "mock", version: "1" },
               },
@@ -165,7 +166,7 @@ describe("standing GET SSE Last-Event-ID resumption", () => {
 
     // Initialize
     await session.request("initialize", {
-      protocolVersion: "2025-11-25",
+      protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
       capabilities: {},
       clientInfo: { name: "test", version: "1" },
     });
@@ -219,7 +220,7 @@ describe("standing GET SSE Last-Event-ID resumption", () => {
               jsonrpc: "2.0",
               id: body.id,
               result: {
-                protocolVersion: "2025-11-25",
+                protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
                 capabilities: {},
                 serverInfo: { name: "mock-noid", version: "1" },
               },
@@ -271,7 +272,7 @@ describe("standing GET SSE Last-Event-ID resumption", () => {
     });
 
     await session.request("initialize", {
-      protocolVersion: "2025-11-25",
+      protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
       capabilities: {},
       clientInfo: { name: "test", version: "1" },
     });

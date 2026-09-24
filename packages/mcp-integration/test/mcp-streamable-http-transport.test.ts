@@ -10,6 +10,7 @@ import {
   type McpStreamableHttpServerMessage,
 } from "../src/mcp-streamable-http-transport";
 import { mcpInitializeSession } from "../src/mcp-jsonrpc-transport";
+import { MCP_PROTOCOL_VERSION_STREAMABLE } from "../src/mcp-protocol-versions";
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
@@ -44,7 +45,7 @@ describe("mcp-streamable-http-transport", () => {
             jsonrpc: "2.0",
             id,
             result: {
-              protocolVersion: "2025-11-25",
+              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
               capabilities: {},
               serverInfo: { name: "http-mock", version: "1" },
             },
@@ -134,7 +135,7 @@ describe("mcp-streamable-http-transport", () => {
             jsonrpc: "2.0",
             id,
             result: {
-              protocolVersion: "2025-11-25",
+              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
               capabilities: {},
               serverInfo: { name: "sse-mock", version: "1" },
             },
@@ -238,7 +239,7 @@ describe("mcp-streamable-http-transport", () => {
             jsonrpc: "2.0",
             id,
             result: {
-              protocolVersion: "2025-11-25",
+              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
               capabilities: {},
               serverInfo: { name: "sse-retry", version: "1" },
             },
@@ -344,7 +345,7 @@ describe("mcp-streamable-http-transport", () => {
             jsonrpc: "2.0",
             id,
             result: {
-              protocolVersion: "2025-11-25",
+              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
               capabilities: {},
               serverInfo: { name: "standing-get", version: "1" },
             },
@@ -420,7 +421,7 @@ describe("mcp-streamable-http-transport", () => {
             jsonrpc: "2.0",
             id,
             result: {
-              protocolVersion: "2025-11-25",
+              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
               capabilities: {},
               serverInfo: { name: "sse-net", version: "1" },
             },
@@ -521,7 +522,7 @@ describe("mcp-streamable-http-transport", () => {
             jsonrpc: "2.0",
             id,
             result: {
-              protocolVersion: "2025-11-25",
+              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
               capabilities: {},
               serverInfo: { name: "cancel-get", version: "1" },
             },
@@ -602,7 +603,7 @@ describe("mcp-streamable-http-transport", () => {
             jsonrpc: "2.0",
             id,
             result: {
-              protocolVersion: "2025-11-25",
+              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
               capabilities: {},
               serverInfo: { name: "cancel-sse-post", version: "1" },
             },
@@ -699,7 +700,7 @@ describe("mcp-streamable-http-transport", () => {
             jsonrpc: "2.0",
             id,
             result: {
-              protocolVersion: "2025-11-25",
+              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
               capabilities: {},
               serverInfo: { name: "onmsg", version: "1" },
             },
@@ -829,7 +830,7 @@ describe("mcp-streamable-http-transport", () => {
             jsonrpc: "2.0",
             id,
             result: {
-              protocolVersion: "2025-11-25",
+              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
               capabilities: {},
               serverInfo: { name: "get-resume", version: "1" },
             },
@@ -951,7 +952,7 @@ describe("mcp-streamable-http-transport", () => {
             jsonrpc: "2.0",
             id,
             result: {
-              protocolVersion: "2025-11-25",
+              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
               capabilities: {},
               serverInfo: { name: "get-noid", version: "1" },
             },
@@ -1084,7 +1085,7 @@ describe("mcp-streamable-http-transport", () => {
             jsonrpc: "2.0",
             id,
             result: {
-              protocolVersion: "2025-11-25",
+              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
               capabilities: {},
               serverInfo: { name: "get-multi", version: "1" },
             },
@@ -1179,7 +1180,7 @@ describe("mcp-streamable-http-transport", () => {
             jsonrpc: "2.0",
             id,
             result: {
-              protocolVersion: "2025-11-25",
+              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
               capabilities: {},
               serverInfo: { name: "cancel-req", version: "1" },
             },
@@ -1207,7 +1208,7 @@ describe("mcp-streamable-http-transport", () => {
 
     const session = connectMcpStreamableHttpSession({ url: baseUrl });
     try {
-      await mcpInitializeSession(session, { protocolVersion: "2025-11-25" });
+      await mcpInitializeSession(session, { protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE });
       session.cancelRequest(42);
       await new Promise((r) => setTimeout(r, 30));
       const n = lastNotification as {

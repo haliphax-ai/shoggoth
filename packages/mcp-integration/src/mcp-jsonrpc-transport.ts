@@ -5,6 +5,7 @@ import type { ProcessManager, ManagedProcess, ProcessSpec } from "@shoggoth/proc
 import type { JsonSchemaLike } from "./json-schema";
 import type { McpSourceCatalog } from "./aggregate";
 import type { McpToolDescriptor } from "./mcp-tool";
+import { MCP_PROTOCOL_VERSION_STDIO } from "./mcp-protocol-versions";
 
 /** MCP JSON-RPC session over newline-delimited JSON (stdio or TCP with same framing). */
 export interface McpJsonRpcSession {
@@ -50,7 +51,7 @@ export async function mcpInitializeSession(
   options?: { readonly protocolVersion?: string },
 ): Promise<void> {
   await session.request("initialize", {
-    protocolVersion: options?.protocolVersion ?? "2024-11-05",
+    protocolVersion: options?.protocolVersion ?? MCP_PROTOCOL_VERSION_STDIO,
     capabilities: {},
     clientInfo: { name: "shoggoth", version: "0.1.0" },
   });
