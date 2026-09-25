@@ -1,5 +1,5 @@
 import type { McpJsonRpcSession } from "./mcp-jsonrpc-transport";
-import { mcpInitializeSession } from "./mcp-jsonrpc-transport";
+import { mcpInitializeSession, DEFAULT_REQUEST_TIMEOUT_MS } from "./mcp-jsonrpc-transport";
 import { MCP_PROTOCOL_VERSION_STREAMABLE } from "./mcp-protocol-versions";
 import { asRecord, jsonRpcErrorToError } from "./json-rpc-helpers";
 
@@ -35,6 +35,12 @@ export interface McpStreamableHttpConnectOptions {
    * rejected). Malformed SSE payloads stay silent unless you parse streams yourself.
    */
   readonly onServerMessage?: (msg: McpStreamableHttpServerMessage) => void;
+  /**
+   * Timeout in milliseconds for pending JSON-RPC requests. If a response is not
+   * received within this time, the pending promise is rejected with a timeout error.
+   * Set to `null` to disable timeouts. Defaults to 60 seconds.
+   */
+  readonly requestTimeout?: number | null;
 }
 
 type Pending = {
@@ -137,6 +143,7 @@ function normalizeJsonRpcNumericId(idRaw: unknown): number | null {
 function tryRejectPendingFromCancelledNotification(
   m: Record<string, unknown>,
   pending: Map<number, Pending>,
+  timers: Map<number, NodeJS.Timeout>,
 ): boolean {
   if (m.method !== "notifications/cancelled") return false;
   const params = asRecord(m.params);
@@ -146,6 +153,11 @@ function tryRejectPendingFromCancelledNotification(
   const p = pending.get(rid);
   if (!p) return false;
   pending.delete(rid);
+  const t = timers.get(rid);
+  if (t !== undefined) {
+    clearTimeout(t);
+    timers.delete(rid);
+  }
   const reason =
     typeof params.reason === "string" && params.reason.length > 0 ? params.reason : undefined;
   p.reject(
@@ -161,18 +173,19 @@ function tryRejectPendingFromCancelledNotification(
 function dispatchIncomingMessage(
   msg: unknown,
   pending: Map<number, Pending>,
+  timers: Map<number, NodeJS.Timeout>,
   onServerMessage?: (m: Record<string, unknown>) => void,
 ): void {
   if (Array.isArray(msg)) {
     for (const item of msg) {
-      dispatchIncomingMessage(item, pending, onServerMessage);
+      dispatchIncomingMessage(item, pending, timers, onServerMessage);
     }
     return;
   }
   const m = asRecord(msg);
   if (!m) return;
 
-  if (tryRejectPendingFromCancelledNotification(m, pending)) {
+  if (tryRejectPendingFromCancelledNotification(m, pending, timers)) {
     onServerMessage?.(m);
     return;
   }
@@ -193,6 +206,11 @@ function dispatchIncomingMessage(
     return;
   }
   pending.delete(id);
+  const t = timers.get(id);
+  if (t !== undefined) {
+    clearTimeout(t);
+    timers.delete(id);
+  }
   if (m.error !== undefined) {
     p.reject(jsonRpcErrorToError(m.error));
   } else {
@@ -217,6 +235,7 @@ export function connectMcpStreamableHttpSession(
     opts.initialMcpProtocolVersionHeader ?? MCP_PROTOCOL_VERSION_STREAMABLE;
   let closed = false;
   const pending = new Map<number, Pending>();
+  const timers = new Map<number, NodeJS.Timeout>();
   let nextId = 1;
   const abortGlobal = new AbortController();
   let lastSseEventId: string | undefined;
@@ -293,7 +312,7 @@ export function connectMcpStreamableHttpSession(
           if (ev.eventId !== undefined && ev.eventId !== "") {
             lastSseEventId = ev.eventId;
           }
-          dispatchIncomingMessage(ev.json, pending, serverMessageHandler);
+          dispatchIncomingMessage(ev.json, pending, timers, serverMessageHandler);
         }
       } catch (e) {
         if (closed || abortGlobal.signal.aborted) return;
@@ -354,7 +373,7 @@ export function connectMcpStreamableHttpSession(
             lastEventIdThisAttempt = ev.eventId;
             lastSseEventId = ev.eventId;
           }
-          dispatchIncomingMessage(ev.json, pending, serverMessageHandler);
+          dispatchIncomingMessage(ev.json, pending, timers, serverMessageHandler);
           if (!pending.has(rid)) {
             return;
           }
@@ -363,9 +382,15 @@ export function connectMcpStreamableHttpSession(
           resumeLastEventId = lastEventIdThisAttempt;
           continue;
         }
+
         const p = pending.get(rid);
         if (p) {
           pending.delete(rid);
+          const t = timers.get(rid);
+          if (t !== undefined) {
+            clearTimeout(t);
+            timers.delete(rid);
+          }
           p.reject(new Error("MCP SSE stream ended before JSON-RPC response"));
         }
         return;
@@ -379,6 +404,11 @@ export function connectMcpStreamableHttpSession(
           continue;
         }
         pending.delete(rid);
+        const t = timers.get(rid);
+        if (t !== undefined) {
+          clearTimeout(t);
+          timers.delete(rid);
+        }
         p.reject(e instanceof Error ? e : new Error(String(e)));
         return;
       }
@@ -386,6 +416,11 @@ export function connectMcpStreamableHttpSession(
     const p = pending.get(rid);
     if (p) {
       pending.delete(rid);
+      const t = timers.get(rid);
+      if (t !== undefined) {
+        clearTimeout(t);
+        timers.delete(rid);
+      }
       p.reject(new Error("MCP SSE resumption exhausted"));
     }
   }
@@ -427,6 +462,17 @@ export function connectMcpStreamableHttpSession(
     }
     return new Promise<unknown>((resolve, reject) => {
       pending.set(rid, { resolve, reject });
+      // Start a timeout timer if requestTimeout is configured
+      const timeoutMs = opts.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT_MS;
+      if (timeoutMs !== null && timeoutMs > 0) {
+        const timer = setTimeout(() => {
+          if (pending.delete(rid)) {
+            timers.delete(rid);
+            reject(new Error(`MCP HTTP request timed out after ${timeoutMs}ms (id=${rid})`));
+          }
+        }, timeoutMs);
+        timers.set(rid, timer);
+      }
       void (async () => {
         try {
           const res = await fetch(endpoint, {
@@ -444,6 +490,11 @@ export function connectMcpStreamableHttpSession(
             }
             if (standingGetDisabled && pending.has(rid)) {
               pending.delete(rid);
+              const t = timers.get(rid);
+              if (t !== undefined) {
+                clearTimeout(t);
+                timers.delete(rid);
+              }
               reject(
                 new Error(
                   "MCP HTTP 202 response requires GET SSE, but GET is not supported (server returned 405/404)",
@@ -453,10 +504,15 @@ export function connectMcpStreamableHttpSession(
             return;
           }
           if (!res.ok) {
-            const t = await res.text().catch(() => "");
+            const httpText = await res.text().catch(() => "");
             if (pending.has(rid)) {
               pending.delete(rid);
-              reject(new Error(`MCP HTTP request failed: ${res.status} ${t}`));
+              const t = timers.get(rid);
+              if (t !== undefined) {
+                clearTimeout(t);
+                timers.delete(rid);
+              }
+              reject(new Error(`MCP HTTP request failed: ${res.status} ${httpText}`));
             }
             return;
           }
@@ -469,13 +525,23 @@ export function connectMcpStreamableHttpSession(
             } catch (e) {
               if (pending.has(rid)) {
                 pending.delete(rid);
+                const t = timers.get(rid);
+                if (t !== undefined) {
+                  clearTimeout(t);
+                  timers.delete(rid);
+                }
                 reject(new Error(`MCP HTTP response is not JSON: ${String(e)}`));
               }
               return;
             }
-            dispatchIncomingMessage(msg, pending, serverMessageHandler);
+            dispatchIncomingMessage(msg, pending, timers, serverMessageHandler);
             if (pending.has(rid)) {
               pending.delete(rid);
+              const t = timers.get(rid);
+              if (t !== undefined) {
+                clearTimeout(t);
+                timers.delete(rid);
+              }
               reject(new Error("MCP HTTP JSON response missing matching JSON-RPC id"));
             }
             return;
@@ -486,11 +552,21 @@ export function connectMcpStreamableHttpSession(
           }
           if (pending.has(rid)) {
             pending.delete(rid);
+            const t = timers.get(rid);
+            if (t !== undefined) {
+              clearTimeout(t);
+              timers.delete(rid);
+            }
             reject(new Error(`Unsupported MCP HTTP Content-Type: ${ct || "(empty)"}`));
           }
         } catch (e) {
           if (pending.has(rid)) {
             pending.delete(rid);
+            const t = timers.get(rid);
+            if (t !== undefined) {
+              clearTimeout(t);
+              timers.delete(rid);
+            }
             reject(e instanceof Error ? e : new Error(String(e)));
           }
         }
@@ -538,11 +614,16 @@ export function connectMcpStreamableHttpSession(
     if (closed) return;
     closed = true;
     abortGlobal.abort();
-    const snapshot = [...pending.values()];
-    pending.clear();
-    for (const p of snapshot) {
+    for (const [id, p] of pending) {
+      const t = timers.get(id);
+      if (t !== undefined) {
+        clearTimeout(t);
+      }
       p.reject(new Error("MCP session closed"));
     }
+    pending.clear();
+    timers.clear();
+
     if (mcpSessionId !== undefined) {
       try {
         await fetch(endpoint, {
