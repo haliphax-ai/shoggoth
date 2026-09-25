@@ -43,9 +43,12 @@ export interface McpStreamableHttpConnectOptions {
   /** First `MCP-Protocol-Version` request header before negotiation (default `2025-11-25`). */
   readonly initialMcpProtocolVersionHeader?: string;
   /**
-   * Called for inbound JSON-RPC **notifications** (no `id`), responses whose `id` is not in the local
-   * pending map (server push), and after a matching **`notifications/cancelled`** is applied (promise
-   * rejected). Malformed SSE payloads are reported through `onParseError` and otherwise skipped.
+   * Called for inbound JSON-RPC **notifications** (no `id`) and responses whose `id` is not in the
+   * local pending map — in other words, messages the transport did not consume itself. A
+   * `notifications/cancelled` matching a pending request is consumed (the request's promise is
+   * rejected) and is NOT forwarded here; an unmatched `notifications/cancelled` is forwarded,
+   * because the rejection path never fired and this callback is its only report.
+   * Malformed SSE payloads are reported through `onParseError` and otherwise skipped.
    */
   readonly onServerMessage?: (msg: McpStreamableHttpServerMessage) => void;
   /**
@@ -211,8 +214,13 @@ function dispatchIncomingMessage(
   const m = asRecord(msg);
   if (!m) return;
 
+  // A cancelled notification that matched a pending request is fully consumed here: the
+  // awaiting caller already learns about it through the rejection, so also forwarding it
+  // would report the same event twice. Matched responses/errors are likewise never
+  // forwarded, so handled cancellations follow the same rule — onServerMessage only sees
+  // messages the transport did not act on. Cancellations with no matching pending request
+  // fall through below and are still reported, since no rejection covers them.
   if (tryRejectPendingFromCancelledNotification(m, pending, timers)) {
-    onServerMessage?.(m);
     return;
   }
 
