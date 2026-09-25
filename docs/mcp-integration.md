@@ -116,10 +116,11 @@ const session = await openMcpTcpClient({
 
 #### Options (`McpTcpConnectOptions`)
 
-| Field  | Type     | Description             |
-| ------ | -------- | ----------------------- |
-| `host` | `string` | TCP host to connect to. |
-| `port` | `number` | TCP port.               |
+| Field            | Type     | Description                                                                                                                    |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `host`           | `string` | TCP host to connect to.                                                                                                        |
+| `port`           | `number` | TCP port.                                                                                                                      |
+| `connectTimeout` | `number` | Optional. Milliseconds to wait for the TCP handshake; on expiry the attempt fails with `ETIMEDOUT`. Omit to wait indefinitely. |
 
 ### Streamable HTTP (MCP 2025-11-25)
 

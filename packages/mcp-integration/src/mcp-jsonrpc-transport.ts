@@ -390,6 +390,13 @@ export interface McpStdioConnectOptions {
 export interface McpTcpConnectOptions {
   readonly host: string;
   readonly port: number;
+  /**
+   * Optional deadline, in milliseconds, for the TCP handshake to complete.
+   * When set, the connection attempt fails with `ETIMEDOUT` if the remote
+   * host does not accept the connection in time. Omitted (or `0`) means wait
+   * indefinitely, matching Node's default behavior.
+   */
+  readonly connectTimeout?: number;
 }
 
 /** Spawn a subprocess and return an MCP session on its stdio (JSON-RPC lines). */
@@ -504,8 +511,24 @@ async function connectMcpStdioSessionViaProcman(
 /** TCP client: same newline-delimited JSON-RPC as MCP stdio transports. */
 export async function connectMcpTcpSession(opts: McpTcpConnectOptions): Promise<McpJsonRpcSession> {
   const socket: Socket = await new Promise((resolve, reject) => {
-    const s = createConnection({ host: opts.host, port: opts.port }, () => resolve(s));
+    const s = createConnection({ host: opts.host, port: opts.port }, () => {
+      // The deadline only guards the connect phase: clear it once the
+      // handshake completes so an established session is never torn down
+      // for idling.
+      if (opts.connectTimeout !== undefined) s.setTimeout(0);
+      resolve(s);
+    });
     s.once("error", reject);
+    const connectTimeout = opts.connectTimeout;
+    if (connectTimeout !== undefined) {
+      s.setTimeout(connectTimeout, () => {
+        const err: NodeJS.ErrnoException = new Error(
+          `MCP TCP connect timed out after ${connectTimeout}ms (${opts.host}:${opts.port})`,
+        );
+        err.code = "ETIMEDOUT";
+        s.destroy(err);
+      });
+    }
   });
   const session = createMcpJsonRpcSession(socket, socket);
   const baseClose = session.close.bind(session);
