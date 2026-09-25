@@ -6,6 +6,7 @@ export type { JsonSchemaLike } from "./json-schema";
 export type { McpToolDescriptor } from "./mcp-tool";
 export {
   aggregateMcpCatalogs,
+  createAggregateMcpCatalogResult,
   routeMcpToolInvocation,
   type AggregateMcpCatalogResult,
   type AggregatedTool,

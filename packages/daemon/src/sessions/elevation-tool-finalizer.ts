@@ -3,7 +3,11 @@
 // ---------------------------------------------------------------------------
 
 import type Database from "better-sqlite3";
-import type { AggregateMcpCatalogResult, AggregatedTool } from "@shoggoth/mcp-integration";
+import {
+  createAggregateMcpCatalogResult,
+  type AggregateMcpCatalogResult,
+  type AggregatedTool,
+} from "@shoggoth/mcp-integration";
 import { createElevationStore } from "../elevation/elevation-store";
 import { openAiToolsFromCatalog, type SessionMcpToolContext } from "./session-mcp-tool-context";
 import { mcpToolsForToolLoop } from "../mcp/tool-loop-mcp";
@@ -51,7 +55,7 @@ export function createElevationToolFinalizer(db: Database.Database): SessionMcpC
       // Remove builtin-elevate if somehow present
       const tools = ctx.aggregated.tools.filter((t) => t.namespacedName !== "builtin-elevate");
       if (tools.length === ctx.aggregated.tools.length) return ctx;
-      const aggregated: AggregateMcpCatalogResult = { tools };
+      const aggregated = createAggregateMcpCatalogResult(tools);
       return {
         aggregated,
         toolsOpenAi: openAiToolsFromCatalog(aggregated),
@@ -63,12 +67,13 @@ export function createElevationToolFinalizer(db: Database.Database): SessionMcpC
 
     // Elevation is active — inject the tool if not already present
     if (ctx.aggregated.tools.some((t) => t.namespacedName === "builtin-elevate")) return ctx;
-    const aggregated: AggregateMcpCatalogResult = {
-      tools: [...ctx.aggregated.tools, ELEVATE_TOOL_DESCRIPTOR],
-    };
+    const aggregated = createAggregateMcpCatalogResult([
+      ...ctx.aggregated.tools,
+      ELEVATE_TOOL_DESCRIPTOR,
+    ]);
     // Also add to fullAggregated so the executor can route to it
     const fullAggregated: AggregateMcpCatalogResult | undefined = ctx.fullAggregated
-      ? { tools: [...ctx.fullAggregated.tools, ELEVATE_TOOL_DESCRIPTOR] }
+      ? createAggregateMcpCatalogResult([...ctx.fullAggregated.tools, ELEVATE_TOOL_DESCRIPTOR])
       : undefined;
     return {
       aggregated,

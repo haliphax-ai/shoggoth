@@ -5,7 +5,10 @@ import type {
   McpSourceCatalog,
   MessageToolPlatformSlice,
 } from "@shoggoth/mcp-integration";
-import { buildMessageToolDescriptor } from "@shoggoth/mcp-integration";
+import {
+  buildMessageToolDescriptor,
+  createAggregateMcpCatalogResult,
+} from "@shoggoth/mcp-integration";
 import {
   evaluateMcpServerRules,
   isSubagentSessionUrn,
@@ -68,9 +71,7 @@ function augmentSessionMcpToolContextWithMessageTool(
     sourceId: "builtin",
     originalName: "message",
   };
-  const aggregated: AggregateMcpCatalogResult = {
-    tools: [...base.aggregated.tools, extra],
-  };
+  const aggregated = createAggregateMcpCatalogResult([...base.aggregated.tools, extra]);
   return {
     aggregated,
     toolsOpenAi: openAiToolsFromCatalog(aggregated),
@@ -200,7 +201,7 @@ export function omitBuiltinSubagentToolForSubagentSession(
     (t) => !(t.sourceId === "builtin" && t.originalName === "subagent"),
   );
   if (tools.length === ctx.aggregated.tools.length) return ctx;
-  const aggregated: AggregateMcpCatalogResult = { tools };
+  const aggregated = createAggregateMcpCatalogResult(tools);
   return {
     aggregated,
     toolsOpenAi: openAiToolsFromCatalog(aggregated),
@@ -303,7 +304,7 @@ function applyContextLevelToolFilter(
 ): SessionMcpToolContext {
   const filtered = filterToolsByContextLevel(ctx.aggregated.tools, level, config);
   if (filtered.length === ctx.aggregated.tools.length) return ctx;
-  const aggregated: AggregateMcpCatalogResult = { tools: filtered };
+  const aggregated = createAggregateMcpCatalogResult(filtered);
   return {
     aggregated,
     toolsOpenAi: openAiToolsFromCatalog(aggregated),
@@ -365,7 +366,7 @@ export function createMcpServerRulesFinalizer(
     const filteredTools = ctx.aggregated.tools.filter(
       (t) => t.sourceId === "builtin" || !deniedSources.has(t.sourceId),
     );
-    const aggregated: AggregateMcpCatalogResult = { tools: filteredTools };
+    const aggregated = createAggregateMcpCatalogResult(filteredTools);
 
     // Wrap external invoke to reject denied sourceIds
     const origExternal = ctx.external;
@@ -511,9 +512,10 @@ export function createWebSearchToolFinalizer(
     if (!enabled) return ctx;
     // Avoid duplicate if already present
     if (ctx.aggregated.tools.some((t) => t.namespacedName === "builtin-web-search")) return ctx;
-    const aggregated: AggregateMcpCatalogResult = {
-      tools: [...ctx.aggregated.tools, WEB_SEARCH_TOOL_DESCRIPTOR],
-    };
+    const aggregated = createAggregateMcpCatalogResult([
+      ...ctx.aggregated.tools,
+      WEB_SEARCH_TOOL_DESCRIPTOR,
+    ]);
     return {
       aggregated,
       toolsOpenAi: openAiToolsFromCatalog(aggregated),
@@ -537,9 +539,10 @@ export function createMediaGenerateToolFinalizer(
   return (ctx, _sessionId) => {
     if (!hasMediaConfig) return ctx;
     if (ctx.aggregated.tools.some((t) => t.namespacedName === "builtin-media-generate")) return ctx;
-    const aggregated: AggregateMcpCatalogResult = {
-      tools: [...ctx.aggregated.tools, MEDIA_GENERATE_TOOL_DESCRIPTOR],
-    };
+    const aggregated = createAggregateMcpCatalogResult([
+      ...ctx.aggregated.tools,
+      MEDIA_GENERATE_TOOL_DESCRIPTOR,
+    ]);
     return {
       aggregated,
       toolsOpenAi: openAiToolsFromCatalog(aggregated),
@@ -596,9 +599,10 @@ export function createVaultToolFinalizer(): (
   return (ctx, _sessionId) => {
     if (!vaultServiceRef.current) return ctx;
     if (ctx.aggregated.tools.some((t) => t.namespacedName === "builtin-vault")) return ctx;
-    const aggregated: AggregateMcpCatalogResult = {
-      tools: [...ctx.aggregated.tools, VAULT_TOOL_DESCRIPTOR],
-    };
+    const aggregated = createAggregateMcpCatalogResult([
+      ...ctx.aggregated.tools,
+      VAULT_TOOL_DESCRIPTOR,
+    ]);
     return {
       aggregated,
       toolsOpenAi: openAiToolsFromCatalog(aggregated),

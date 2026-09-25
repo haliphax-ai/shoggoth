@@ -4,7 +4,7 @@ import { mcpToolsForToolLoop } from "../mcp/tool-loop-mcp";
 import { serviceToolRegistryRef, serviceRegistryRef } from "./service-tool-registry-ref";
 import type { ServiceToolRegistry } from "../service-tool-registry";
 import type { ServiceRegistry } from "../service-registry";
-import type { AggregateMcpCatalogResult, AggregatedTool } from "@shoggoth/mcp-integration";
+import { createAggregateMcpCatalogResult, type AggregatedTool } from "@shoggoth/mcp-integration";
 
 /**
  * Get approved service tools - filters tools from the registry to only include
@@ -90,9 +90,7 @@ export function createServiceToolFinalizer(): (
 
     if (extraTools.length === 0) return ctx;
 
-    const aggregated: AggregateMcpCatalogResult = {
-      tools: [...ctx.aggregated.tools, ...extraTools],
-    };
+    const aggregated = createAggregateMcpCatalogResult([...ctx.aggregated.tools, ...extraTools]);
 
     return {
       aggregated,
