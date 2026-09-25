@@ -6,6 +6,7 @@ import type { JsonSchemaLike } from "./json-schema";
 import type { McpSourceCatalog } from "./aggregate";
 import type { McpToolDescriptor } from "./mcp-tool";
 import { MCP_PROTOCOL_VERSION_STDIO } from "./mcp-protocol-versions";
+import { asRecord, jsonRpcErrorToError } from "./json-rpc-helpers";
 
 /** MCP JSON-RPC session over newline-delimited JSON (stdio or TCP with same framing). */
 export interface McpJsonRpcSession {
@@ -19,12 +20,6 @@ export interface McpToolListEntry {
   readonly name: string;
   readonly description?: string;
   readonly inputSchema?: unknown;
-}
-
-function asRecord(v: unknown): Record<string, unknown> | null {
-  return v !== null && typeof v === "object" && !Array.isArray(v)
-    ? (v as Record<string, unknown>)
-    : null;
 }
 
 /**
@@ -120,17 +115,6 @@ type Pending = {
   readonly resolve: (v: unknown) => void;
   readonly reject: (e: Error) => void;
 };
-
-function jsonRpcErrorToError(err: unknown): Error {
-  const o = asRecord(err);
-  if (!o) {
-    return new Error(typeof err === "string" ? err : JSON.stringify(err));
-  }
-  const msg = typeof o.message === "string" ? o.message : JSON.stringify(err);
-  const code = o.code;
-  const suffix = code !== undefined ? ` (code ${String(code)})` : "";
-  return new Error(`${msg}${suffix}`);
-}
 
 /**
  * Low-level: newline-delimited JSON-RPC 2.0 over separate readable/writable streams.

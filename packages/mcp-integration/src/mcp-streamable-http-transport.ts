@@ -1,6 +1,7 @@
 import type { McpJsonRpcSession } from "./mcp-jsonrpc-transport";
 import { mcpInitializeSession } from "./mcp-jsonrpc-transport";
 import { MCP_PROTOCOL_VERSION_STREAMABLE } from "./mcp-protocol-versions";
+import { asRecord, jsonRpcErrorToError } from "./json-rpc-helpers";
 
 /** One SSE event's parsed JSON payload and optional `id:` field (for `Last-Event-ID` resumption). */
 export interface McpSseJsonEvent {
@@ -17,23 +18,6 @@ export type McpStreamableHttpSession = McpJsonRpcSession & {
    */
   readonly cancelRequest: (rpcId: number) => void;
 };
-
-function asRecord(v: unknown): Record<string, unknown> | null {
-  return v !== null && typeof v === "object" && !Array.isArray(v)
-    ? (v as Record<string, unknown>)
-    : null;
-}
-
-function jsonRpcErrorToError(err: unknown): Error {
-  const o = asRecord(err);
-  if (!o) {
-    return new Error(typeof err === "string" ? err : JSON.stringify(err));
-  }
-  const msg = typeof o.message === "string" ? o.message : JSON.stringify(err);
-  const code = o.code;
-  const suffix = code !== undefined ? ` (code ${String(code)})` : "";
-  return new Error(`${msg}${suffix}`);
-}
 
 /** Inbound JSON-RPC object from standing GET SSE, POST-response SSE, or other server push (notifications, orphan responses). */
 export type McpStreamableHttpServerMessage = Readonly<Record<string, unknown>>;
