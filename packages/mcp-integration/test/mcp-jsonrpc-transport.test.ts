@@ -117,3 +117,32 @@ describe("mcp-jsonrpc-transport (tcp)", () => {
     }
   });
 });
+
+describe("mcpFetchToolsList skipped tool entries", () => {
+  it("reports entries with unexpected shape via onSkippedToolEntry", async () => {
+    const skipped: unknown[] = [];
+    const tools = await mcpFetchToolsList(
+      {
+        request: async () => ({
+          tools: [{ name: "good" }, "not-an-object", { description: "nameless" }, 42],
+        }),
+        notify: () => {},
+        close: async () => {},
+      },
+      { onSkippedToolEntry: (entry) => skipped.push(entry) },
+    );
+    assert.equal(tools.length, 1);
+    assert.equal(tools[0]!.name, "good");
+    assert.deepEqual(skipped, ["not-an-object", { description: "nameless" }, 42]);
+  });
+
+  it("does not require the callback (backward compatible)", async () => {
+    const tools = await mcpFetchToolsList({
+      request: async () => ({ tools: [{ name: "only" }] }),
+      notify: () => {},
+      close: async () => {},
+    });
+    assert.equal(tools.length, 1);
+    assert.equal(tools[0]!.name, "only");
+  });
+});

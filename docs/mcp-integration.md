@@ -209,7 +209,7 @@ const tools = await mcpFetchToolsList(session);
 const descriptors = tools.map(mcpToolListEntryToDescriptor);
 ```
 
-### `mcpFetchToolsList(session)`
+### `mcpFetchToolsList(session, options?)`
 
 Calls `tools/list` with automatic cursor-based pagination. Returns an array of `McpToolListEntry`:
 
@@ -219,6 +219,15 @@ interface McpToolListEntry {
   description?: string;
   inputSchema?: unknown;
 }
+```
+
+Entries that do not match the expected shape (an object with a string `name`) are skipped. Pass
+`options.onSkippedToolEntry` to be notified of each skipped entry:
+
+```typescript
+const tools = await mcpFetchToolsList(session, {
+  onSkippedToolEntry: (entry) => console.warn("skipped malformed tool entry", entry),
+});
 ```
 
 ### `mcpToolListEntryToDescriptor(entry)`

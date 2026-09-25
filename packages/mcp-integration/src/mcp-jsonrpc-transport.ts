@@ -55,8 +55,18 @@ export async function mcpInitializeSession(
 
 /**
  * Collects all pages from `tools/list`.
+ *
+ * Tool entries that do not match the expected shape (an object with a string
+ * `name`) are skipped; pass `options.onSkippedToolEntry` to be notified of each
+ * skipped entry so server-side bugs are not silently masked.
  */
-export async function mcpFetchToolsList(session: McpJsonRpcSession): Promise<McpToolListEntry[]> {
+export async function mcpFetchToolsList(
+  session: McpJsonRpcSession,
+  options?: {
+    /** Called once per `tools/list` entry that does not match the expected shape. */
+    readonly onSkippedToolEntry?: (entry: unknown) => void;
+  },
+): Promise<McpToolListEntry[]> {
   const out: McpToolListEntry[] = [];
   let cursor: string | undefined;
   for (;;) {
@@ -76,6 +86,8 @@ export async function mcpFetchToolsList(session: McpJsonRpcSession): Promise<Mcp
             description: typeof tr.description === "string" ? tr.description : undefined,
             inputSchema: tr.inputSchema,
           });
+        } else {
+          options?.onSkippedToolEntry?.(t);
         }
       }
     }
