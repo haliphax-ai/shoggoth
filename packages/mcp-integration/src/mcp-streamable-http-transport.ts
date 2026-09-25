@@ -12,6 +12,16 @@ export interface McpSseJsonEvent {
   readonly json: unknown;
 }
 
+/** Details of an SSE event whose `data:` payload was not valid JSON (passed to `onParseError`). */
+export interface McpSseParseError {
+  /** The event's `id:` field, when present. */
+  readonly eventId?: string;
+  /** The raw `data:` payload that failed to parse. */
+  readonly data: string;
+  /** The underlying `JSON.parse` error. */
+  readonly error: unknown;
+}
+
 /** Streamable HTTP session plus optional SSE resumption introspection. */
 export type McpStreamableHttpSession = McpJsonRpcSession & {
   readonly getLastSseEventId: () => string | undefined;
@@ -35,9 +45,14 @@ export interface McpStreamableHttpConnectOptions {
   /**
    * Called for inbound JSON-RPC **notifications** (no `id`), responses whose `id` is not in the local
    * pending map (server push), and after a matching **`notifications/cancelled`** is applied (promise
-   * rejected). Malformed SSE payloads stay silent unless you parse streams yourself.
+   * rejected). Malformed SSE payloads are reported through `onParseError` and otherwise skipped.
    */
   readonly onServerMessage?: (msg: McpStreamableHttpServerMessage) => void;
+  /**
+   * Called once per SSE event whose `data:` payload is not valid JSON; the event is skipped
+   * either way. Without this callback, malformed events stay silent (as before).
+   */
+  readonly onParseError?: (info: McpSseParseError) => void;
   /**
    * Timeout in milliseconds for pending JSON-RPC requests. If a response is not
    * received within this time, the pending promise is rejected with a timeout error.
@@ -96,9 +111,15 @@ function parseSseEventBlock(raw: string): {
 
 /**
  * Parses `text/event-stream` bodies: events separated by a blank line, `data:` joined per spec, optional `id:` per event.
+ * Events whose `data:` payload is not valid JSON are skipped; pass `options.onParseError` to be
+ * notified of each one so server-side bugs are not silently masked.
  */
 export async function* iterateSseDataJson(
   body: ReadableStream<Uint8Array> | null,
+  options?: {
+    /** Called once per SSE event whose `data:` payload is not valid JSON (the event is skipped). */
+    readonly onParseError?: (info: McpSseParseError) => void;
+  },
 ): AsyncGenerator<McpSseJsonEvent> {
   if (!body) return;
   const decoder = new TextDecoderStream();
@@ -117,8 +138,8 @@ export async function* iterateSseDataJson(
       if (!dataPayload) continue;
       try {
         yield { eventId, json: JSON.parse(dataPayload) as unknown };
-      } catch {
-        /* ignore malformed event */
+      } catch (error) {
+        options?.onParseError?.({ eventId, data: dataPayload, error });
       }
     }
   }
@@ -127,8 +148,8 @@ export async function* iterateSseDataJson(
     if (dataPayload) {
       try {
         yield { eventId, json: JSON.parse(dataPayload) as unknown };
-      } catch {
-        /* ignore */
+      } catch (error) {
+        options?.onParseError?.({ eventId, data: dataPayload, error });
       }
     }
   }
@@ -337,7 +358,9 @@ export function connectMcpStreamableHttpSession(
           await new Promise((r) => setTimeout(r, 250));
           continue;
         }
-        for await (const ev of iterateSseDataJson(res.body)) {
+        for await (const ev of iterateSseDataJson(res.body, {
+          onParseError: opts.onParseError,
+        })) {
           if (closed) return;
           if (ev.eventId !== undefined && ev.eventId !== "") {
             lastSseEventId = ev.eventId;
@@ -398,7 +421,9 @@ export function connectMcpStreamableHttpSession(
       }
       let lastEventIdThisAttempt: string | undefined;
       try {
-        for await (const ev of iterateSseDataJson(sseRes.body)) {
+        for await (const ev of iterateSseDataJson(sseRes.body, {
+          onParseError: opts.onParseError,
+        })) {
           if (ev.eventId !== undefined && ev.eventId !== "") {
             lastEventIdThisAttempt = ev.eventId;
             lastSseEventId = ev.eventId;

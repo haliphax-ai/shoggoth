@@ -46,6 +46,7 @@ export {
   iterateSseDataJson,
   openMcpStreamableHttpClient,
   type McpSseJsonEvent,
+  type McpSseParseError,
   type McpStreamableHttpConnectOptions,
   type McpStreamableHttpServerMessage,
   type McpStreamableHttpSession,
