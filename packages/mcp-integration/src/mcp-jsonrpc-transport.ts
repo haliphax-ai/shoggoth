@@ -111,6 +111,9 @@ export async function mcpInvokeTool(
   return session.request("tools/call", { name, arguments: arguments_ });
 }
 
+/** Default request timeout for pending JSON-RPC requests (60 seconds). */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+
 type Pending = {
   readonly resolve: (v: unknown) => void;
   readonly reject: (e: Error) => void;
@@ -126,16 +129,28 @@ export function createMcpJsonRpcSession(
   options?: {
     readonly onReaderError?: (err: unknown) => void;
     readonly onProtocolError?: (err: unknown) => void;
+    /**
+     * Timeout in milliseconds for pending JSON-RPC requests. If a response is not
+     * received within this time, the pending promise is rejected with a timeout error.
+     * Set to `null` to disable timeouts. Defaults to 60 seconds.
+     */
+    readonly requestTimeout?: number | null;
   },
 ): McpJsonRpcSession {
   let nextId = 1;
   const pending = new Map<number, Pending>();
+  const timers = new Map<number, NodeJS.Timeout>();
   let buffer = "";
   let closed = false;
   let inputEnded = false;
 
   function failAll(err: Error): void {
-    for (const [, p] of pending) {
+    for (const [id, p] of pending) {
+      const t = timers.get(id);
+      if (t !== undefined) {
+        clearTimeout(t);
+        timers.delete(id);
+      }
       p.reject(err);
     }
     pending.clear();
@@ -172,6 +187,11 @@ export function createMcpJsonRpcSession(
         continue;
       }
       pending.delete(id);
+      const t = timers.get(id);
+      if (t !== undefined) {
+        clearTimeout(t);
+        timers.delete(id);
+      }
       if (m.error !== undefined) {
         p.reject(jsonRpcErrorToError(m.error));
       } else {
@@ -255,9 +275,30 @@ export function createMcpJsonRpcSession(
     });
     return new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject });
+      // Start a timeout timer if requestTimeout is configured
+      const timeoutMs = options?.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT_MS;
+      if (timeoutMs !== null && timeoutMs > 0) {
+        const timer = setTimeout(() => {
+          if (pending.delete(id)) {
+            timers.delete(id);
+            reject(
+              new Error(
+                `MCP JSON-RPC request timed out after ${timeoutMs}ms (id=${id}, method=${method})`,
+              ),
+            );
+          }
+        }, timeoutMs);
+        timers.set(id, timer);
+      }
       void writeLine(body).catch((err) => {
-        pending.delete(id);
-        reject(err instanceof Error ? err : new Error(String(err)));
+        if (pending.delete(id)) {
+          const t = timers.get(id);
+          if (t !== undefined) {
+            clearTimeout(t);
+            timers.delete(id);
+          }
+          reject(err instanceof Error ? err : new Error(String(err)));
+        }
       });
     });
   }
