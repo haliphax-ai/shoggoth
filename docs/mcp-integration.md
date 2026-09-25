@@ -284,6 +284,18 @@ const result = aggregateMcpCatalogs([
   externalCatalog, // sourceId: "my-server"
 ]);
 // result.tools → AggregatedTool[] with namespacedName like "builtin-read", "my-server-search"
+// result.toolIndex → Map keyed by namespacedName for O(1) routing
+```
+
+Results assembled by hand (e.g. from a filtered tool list) must go through the
+`createAggregateMcpCatalogResult(tools)` factory so the index stays in sync:
+
+```typescript
+import { createAggregateMcpCatalogResult } from "@shoggoth/mcp-integration";
+
+const filtered = createAggregateMcpCatalogResult(
+  result.tools.filter((t) => t.sourceId === "builtin"),
+);
 ```
 
 #### Namespacing
@@ -311,6 +323,8 @@ interface AggregatedTool extends McpToolDescriptor {
 
 interface AggregateMcpCatalogResult {
   tools: AggregatedTool[];
+  /** `namespacedName` → tool index for O(1) lookup; always present — build results with `createAggregateMcpCatalogResult()`. */
+  toolIndex: ReadonlyMap<string, AggregatedTool>;
 }
 ```
 

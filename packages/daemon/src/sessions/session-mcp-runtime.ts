@@ -1,4 +1,4 @@
-import type { McpSourceCatalog } from "@shoggoth/mcp-integration";
+import { createAggregateMcpCatalogResult, type McpSourceCatalog } from "@shoggoth/mcp-integration";
 import type Database from "better-sqlite3";
 import {
   SHOGGOTH_DEFAULT_MCP_INSTANCE_IDLE_MS,
@@ -173,7 +173,7 @@ export async function createSessionMcpRuntime(
       t.namespacedName === "builtin-skills" ? { ...t, inputSchema } : t,
     );
 
-    const aggregated = { ...ctx.aggregated, tools: updatedTools };
+    const aggregated = createAggregateMcpCatalogResult(updatedTools);
     return {
       ...ctx,
       aggregated,

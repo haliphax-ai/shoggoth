@@ -11,6 +11,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSessionMcpRuntime } from "../../src/sessions/session-mcp-runtime";
+import { createAggregateMcpCatalogResult } from "@shoggoth/mcp-integration";
 import { runInboundSessionTurn } from "../../src/messaging/inbound-session-turn";
 import type { McpServerPool } from "../../src/mcp/mcp-server-pool";
 import type { ShoggothConfig, ShoggothMcpServerEntry } from "@shoggoth/shared";
@@ -200,8 +201,8 @@ describe("unified MCP idle eviction — turn lifecycle wiring", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("runInboundSessionTurn calls mcpLifecycle.onTurnBegin at start and onTurnEnd at end (success path)", async () => {
     const onTurnBegin = vi.fn();
@@ -256,7 +257,7 @@ describe("unified MCP idle eviction — turn lifecycle wiring", () => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
           }) as any,
         resolveMcpContext: async () => ({
-          aggregated: { tools: [] },
+          aggregated: createAggregateMcpCatalogResult([]),
           toolsOpenAi: [],
           toolsLoop: { tools: [], externalInvoke: undefined },
         }),

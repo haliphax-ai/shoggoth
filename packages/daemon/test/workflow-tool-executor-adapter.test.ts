@@ -1,5 +1,6 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
+import { createAggregateMcpCatalogResult } from "@shoggoth/mcp-integration";
 import { createWorkflowToolExecutorAdapter } from "../src/workflow-adapters.js";
 import type { SessionMcpToolContext } from "../src/sessions/session-mcp-tool-context.js";
 
@@ -49,7 +50,7 @@ function fakeToolContext(
   }) => Promise<{ resultJson: string }>,
 ): SessionMcpToolContext {
   return {
-    aggregated: { tools: toolNames.map((n) => aggTool(n)) },
+    aggregated: createAggregateMcpCatalogResult(toolNames.map((n) => aggTool(n))),
     toolsOpenAi: [],
     toolsLoop: { tools: [], nameMap: new Map() },
     external: externalFn ?? (async () => ({ resultJson: "{}" })),

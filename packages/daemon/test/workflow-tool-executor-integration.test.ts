@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createAggregateMcpCatalogResult } from "@shoggoth/mcp-integration";
 import { createDaemonToolExecutor } from "../src/workflow-adapters.js";
 
 /** Build an aggregated entry so routeMcpToolInvocation can find it by namespacedName. */
@@ -18,7 +19,7 @@ function mockContext(
   externalFn?: (...args: any[]) => Promise<{ resultJson: string }>,
 ) {
   return {
-    aggregated: { tools: toolNames.map((n) => aggTool(n)) },
+    aggregated: createAggregateMcpCatalogResult(toolNames.map((n) => aggTool(n))),
     toolsOpenAi: [],
     toolsLoop: { tools: [], nameMap: new Map() },
     external: externalFn ?? vi.fn().mockResolvedValue({ resultJson: "{}" }),

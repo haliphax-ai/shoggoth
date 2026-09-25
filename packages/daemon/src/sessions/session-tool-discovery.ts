@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import type Database from "better-sqlite3";
-import type { AggregatedTool, AggregateMcpCatalogResult } from "@shoggoth/mcp-integration";
+import { createAggregateMcpCatalogResult, type AggregatedTool } from "@shoggoth/mcp-integration";
 import { parseAgentSessionUrn, type ShoggothConfig } from "@shoggoth/shared";
 import { openAiToolsFromCatalog, type SessionMcpToolContext } from "./session-mcp-tool-context";
 import { mcpToolsForToolLoop } from "../mcp/tool-loop-mcp";
@@ -186,9 +186,7 @@ export function createToolDiscoveryFinalizer(
     const hasDiscover = enabledTools.some((t) => t.namespacedName === "builtin-discover");
     const advertisedTools = hasDiscover ? enabledTools : [...enabledTools, discoverTool];
 
-    const advertisedAggregated: AggregateMcpCatalogResult = {
-      tools: advertisedTools,
-    };
+    const advertisedAggregated = createAggregateMcpCatalogResult(advertisedTools);
 
     return {
       // aggregated contains only the advertised (enabled) tools — what the model sees

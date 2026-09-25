@@ -7,7 +7,7 @@ import {
 } from "../../src/sessions/session-mcp-tool-context";
 import type { SessionMcpContextFinalizer } from "../../src/sessions/session-mcp-runtime";
 import { mcpToolsForToolLoop } from "../../src/mcp/tool-loop-mcp";
-import type { AggregateMcpCatalogResult, AggregatedTool } from "@shoggoth/mcp-integration";
+import { createAggregateMcpCatalogResult, type AggregatedTool } from "@shoggoth/mcp-integration";
 
 /**
  * Minimal pipeline runner extracted from the runtime module's `runContextFinalizers`.
@@ -32,7 +32,7 @@ function makeDummyTool(name: string): AggregatedTool {
 }
 
 function ctxWithTools(tools: AggregatedTool[]): SessionMcpToolContext {
-  const aggregated: AggregateMcpCatalogResult = { tools };
+  const aggregated = createAggregateMcpCatalogResult(tools);
   return {
     aggregated,
     toolsOpenAi: openAiToolsFromCatalog(aggregated),
@@ -121,7 +121,7 @@ describe("context-finalizer-pipeline", () => {
         ...t,
         description: "modified",
       }));
-      const aggregated: AggregateMcpCatalogResult = { tools };
+      const aggregated = createAggregateMcpCatalogResult(tools);
       return {
         aggregated,
         toolsOpenAi: openAiToolsFromCatalog(aggregated),
