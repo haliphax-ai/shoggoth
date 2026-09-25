@@ -7,6 +7,7 @@ import {
   iterateSseDataJson,
   openMcpStreamableHttpClient,
   type McpSseJsonEvent,
+  type McpSseParseError,
   type McpStreamableHttpServerMessage,
 } from "../src/mcp-streamable-http-transport";
 import { mcpInitializeSession } from "../src/mcp-jsonrpc-transport";
@@ -171,6 +172,8 @@ describe("mcp-streamable-http-transport", () => {
           "Cache-Control": "no-cache",
         });
         res.write(`event: message\n`);
+        // Malformed event: must be skipped but reported via onParseError.
+        res.write(`data: {broken json}\n\n`);
         res.write(
           `data: ${JSON.stringify({ jsonrpc: "2.0", id, result: { ok: true, via: "sse" } })}\n\n`,
         );
@@ -190,12 +193,19 @@ describe("mcp-streamable-http-transport", () => {
       server.on("error", reject);
     });
 
-    const session = await openMcpStreamableHttpClient({ url: baseUrl });
+    const parseErrors: McpSseParseError[] = [];
+    const session = await openMcpStreamableHttpClient({
+      url: baseUrl,
+      onParseError: (e) => parseErrors.push(e),
+    });
     try {
       const tools = await mcpFetchToolsList(session);
       assert.equal(tools[0]!.name, "ping");
       const r = await mcpInvokeTool(session, "ping", {});
       assert.deepEqual(r, { ok: true, via: "sse" });
+      assert.equal(parseErrors.length, 1);
+      assert.equal(parseErrors[0]!.data, "{broken json}");
+      assert.ok(parseErrors[0]!.error instanceof Error);
     } finally {
       await session.close();
       server.close();
@@ -221,6 +231,31 @@ describe("mcp-streamable-http-transport", () => {
     assert.deepEqual(out[0]!.json, { x: 1 });
     assert.equal(out[1]!.eventId, "beta");
     assert.deepEqual(out[1]!.json, { y: 2 });
+  });
+
+  it("iterateSseDataJson reports malformed JSON events via onParseError", async () => {
+    const enc = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(enc.encode('id: bad\ndata: {oops}\n\nid: good\ndata: {"ok":true}\n\n'));
+        controller.close();
+      },
+    });
+    const errors: McpSseParseError[] = [];
+    const out: McpSseJsonEvent[] = [];
+    for await (const ev of iterateSseDataJson(stream, {
+      onParseError: (e) => errors.push(e),
+    })) {
+      out.push(ev);
+    }
+    // Malformed event skipped; valid event still yielded.
+    assert.equal(out.length, 1);
+    assert.equal(out[0]!.eventId, "good");
+    assert.deepEqual(out[0]!.json, { ok: true });
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0]!.eventId, "bad");
+    assert.equal(errors[0]!.data, "{oops}");
+    assert.ok(errors[0]!.error instanceof Error);
   });
 
   it("automatic SSE retry sends Last-Event-ID after partial stream", async () => {

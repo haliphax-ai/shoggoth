@@ -136,13 +136,14 @@ const session = await openMcpStreamableHttpClient({
 
 #### Options (`McpStreamableHttpConnectOptions`)
 
-| Field                             | Type                     | Description                                                                     |
-| --------------------------------- | ------------------------ | ------------------------------------------------------------------------------- |
-| `url`                             | `string`                 | MCP server HTTP endpoint URL.                                                   |
-| `headers`                         | `Record<string, string>` | Extra request headers (e.g., auth).                                             |
-| `protocolVersion`                 | `string`                 | Protocol version for `initialize` (default: `2025-11-25`).                      |
-| `initialMcpProtocolVersionHeader` | `string`                 | First `MCP-Protocol-Version` header before negotiation (default: `2025-11-25`). |
-| `onServerMessage`                 | `(msg) => void`          | Callback for inbound notifications, orphan responses, and cancellation events.  |
+| Field                             | Type                     | Description                                                                      |
+| --------------------------------- | ------------------------ | -------------------------------------------------------------------------------- |
+| `url`                             | `string`                 | MCP server HTTP endpoint URL.                                                    |
+| `headers`                         | `Record<string, string>` | Extra request headers (e.g., auth).                                              |
+| `protocolVersion`                 | `string`                 | Protocol version for `initialize` (default: `2025-11-25`).                       |
+| `initialMcpProtocolVersionHeader` | `string`                 | First `MCP-Protocol-Version` header before negotiation (default: `2025-11-25`).  |
+| `onServerMessage`                 | `(msg) => void`          | Callback for inbound notifications, orphan responses, and cancellation events.   |
+| `onParseError`                    | `(info) => void`         | Callback for SSE events whose `data:` payload is not valid JSON (event skipped). |
 
 #### Key Behaviors
 
@@ -169,6 +170,18 @@ import { iterateSseDataJson } from "@shoggoth/mcp-integration";
 
 // Parse a text/event-stream body into typed JSON events
 for await (const event of iterateSseDataJson(response.body)) {
+  console.log(event.eventId, event.json);
+}
+```
+
+Events whose `data:` payload is not valid JSON are skipped. Pass `options.onParseError` to be
+notified of each skipped event so server-side bugs are not silently masked:
+
+```typescript
+for await (const event of iterateSseDataJson(response.body, {
+  onParseError: ({ eventId, data, error }) =>
+    console.warn("malformed SSE event", eventId, data, error),
+})) {
   console.log(event.eventId, event.json);
 }
 ```
