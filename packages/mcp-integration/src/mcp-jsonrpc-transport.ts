@@ -229,7 +229,28 @@ export function createMcpJsonRpcSession(
             if (ok) {
               res();
             } else {
-              output.once("drain", res);
+              // Guard against silent hang: if the stream emits error or closes
+              // before the drain event, the promise must still settle.
+              const cleanup = () => {
+                output.removeListener("drain", onDrain);
+                output.removeListener("error", onError);
+                output.removeListener("close", onClose);
+              };
+              const onDrain = () => {
+                cleanup();
+                res();
+              };
+              const onError = (streamErr: Error) => {
+                cleanup();
+                rej(streamErr);
+              };
+              const onClose = () => {
+                cleanup();
+                rej(new Error("Stream closed before drain"));
+              };
+              output.once("drain", onDrain);
+              output.once("error", onError);
+              output.once("close", onClose);
             }
           });
         }),
