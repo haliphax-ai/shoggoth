@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { describe, it } from "vitest";
 import { mcpFetchToolsList, mcpInvokeTool } from "../src/mcp-jsonrpc-transport";
 import {
@@ -23,86 +23,160 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(raw) as unknown;
 }
 
-describe("mcp-streamable-http-transport", () => {
-  it("initializes with JSON responses, lists tools, calls tool", async () => {
-    const server = createServer(async (req, res: ServerResponse) => {
-      if (req.method !== "POST") {
+type JsonRpcMessage = {
+  method?: string;
+  id?: number;
+  params?: Record<string, unknown>;
+};
+
+interface MockToolCallContext {
+  req: IncomingMessage;
+  res: ServerResponse;
+  id?: number;
+  params?: Record<string, unknown>;
+  /** Standing GET SSE response when `get: "pending"` is active. */
+  standingGet: ServerResponse | null;
+}
+
+interface MockMcpHttpServerOptions {
+  /** serverInfo.name reported during initialize. */
+  serverName?: string;
+  /** MCP-Session-Id header returned on initialize. */
+  sessionId?: string;
+  /** Tools exposed by tools/list (defaults to a single echo tool). */
+  toolDefs?: { name: string; inputSchema: unknown }[];
+  /** Custom tools/call behavior; defaults to echoing the text argument. */
+  onToolCall?(ctx: MockToolCallContext): void | Promise<void>;
+  /** "pending" opens a standing GET SSE; "none" (default) replies 405. */
+  get?: "none" | "pending";
+  /** Invoked for each GET request when `get: "pending"`. */
+  onGet?(req: IncomingMessage, res: ServerResponse): void | Promise<void>;
+  /** Invoked for every notification POST; default replies with a plain 202. */
+  onNotification?(msg: JsonRpcMessage): void;
+  /** Hook fired right after a tools/list response is sent. */
+  afterToolsList?(getStandingGet: () => ServerResponse | null): void;
+}
+
+const SSE_HEADERS = {
+  "Content-Type": "text/event-stream; charset=utf-8",
+  "Cache-Control": "no-cache",
+} as const;
+
+function startSse(res: ServerResponse): void {
+  res.writeHead(200, SSE_HEADERS);
+}
+
+function writeJsonRpcResult(res: ServerResponse, id: number | undefined, result: unknown): void {
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ jsonrpc: "2.0", id, result }));
+}
+
+/**
+ * Shared mock MCP streamable HTTP server: implements the initialize /
+ * notifications / tools/list / tools/call plumbing once so each test only
+ * supplies the behavior it actually exercises.
+ */
+function createMockMcpHttpServer(options: MockMcpHttpServerOptions = {}): Server {
+  const {
+    serverName = "mock",
+    sessionId,
+    toolDefs = [{ name: "echo", inputSchema: { type: "object", properties: {} } }],
+    onToolCall,
+    get = "none",
+    onGet,
+    onNotification,
+    afterToolsList,
+  } = options;
+
+  let standingGet: ServerResponse | null = null;
+
+  return createServer(async (req, res: ServerResponse) => {
+    if (req.method === "GET") {
+      if (get === "none") {
         res.writeHead(405).end();
         return;
       }
-      const msg = (await readJsonBody(req)) as {
-        method?: string;
-        id?: number;
-        params?: { arguments?: { text?: string } };
-      };
-      const { method, id } = msg;
-      if (method === "initialize") {
-        res.writeHead(200, {
-          "Content-Type": "application/json",
-          "MCP-Session-Id": "sess-json-1",
-        });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
-              capabilities: {},
-              serverInfo: { name: "http-mock", version: "1" },
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "notifications/initialized") {
-        res.writeHead(202).end();
-        return;
-      }
-      if (method === "tools/list") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              tools: [
-                {
-                  name: "echo",
-                  inputSchema: {
-                    type: "object",
-                    properties: { text: { type: "string" } },
-                  },
-                },
-              ],
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "tools/call") {
-        const text = msg.params?.arguments?.text ?? "";
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: { content: [{ type: "text", text: String(text) }] },
-          }),
-        );
-        return;
-      }
-      res.writeHead(400).end();
-    });
-
-    const baseUrl: string = await new Promise((resolve, reject) => {
-      server.listen(0, "127.0.0.1", () => {
-        const a = server.address();
-        if (a && typeof a === "object") {
-          resolve(`http://127.0.0.1:${a.port}/mcp`);
-        } else reject(new Error("addr"));
+      startSse(res);
+      standingGet = res;
+      req.on("close", () => {
+        if (standingGet === res) standingGet = null;
       });
-      server.on("error", reject);
+      await onGet?.(req, res);
+      return;
+    }
+    if (req.method !== "POST") {
+      res.writeHead(405).end();
+      return;
+    }
+    const msg = (await readJsonBody(req)) as JsonRpcMessage | undefined;
+    const { method, id } = msg ?? {};
+    if (method === "initialize") {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (sessionId !== undefined) headers["MCP-Session-Id"] = sessionId;
+      res.writeHead(200, headers);
+      res.end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id,
+          result: {
+            protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
+            capabilities: {},
+            serverInfo: { name: serverName, version: "1" },
+          },
+        }),
+      );
+      return;
+    }
+    if (method?.startsWith("notifications/")) {
+      onNotification?.(msg!);
+      res.writeHead(202).end();
+      return;
+    }
+    if (method === "tools/list") {
+      writeJsonRpcResult(res, id, { tools: toolDefs });
+      afterToolsList?.(() => standingGet);
+      return;
+    }
+    if (method === "tools/call") {
+      if (onToolCall) {
+        await onToolCall({ req, res, id, params: msg!.params, standingGet });
+        return;
+      }
+      const args = (msg!.params as { arguments?: { text?: string } } | undefined)?.arguments;
+      writeJsonRpcResult(res, id, {
+        content: [{ type: "text", text: String(args?.text ?? "") }],
+      });
+      return;
+    }
+    res.writeHead(400).end();
+  });
+}
+
+async function startMockMcpHttpServer(server: Server): Promise<string> {
+  return new Promise((resolve, reject) => {
+    server.listen(0, "127.0.0.1", () => {
+      const a = server.address();
+      if (a && typeof a === "object") {
+        resolve(`http://127.0.0.1:${a.port}/mcp`);
+      } else reject(new Error("addr"));
     });
+    server.on("error", reject);
+  });
+}
+
+describe("mcp-streamable-http-transport", () => {
+  it("initializes with JSON responses, lists tools, calls tool", async () => {
+    const server = createMockMcpHttpServer({
+      serverName: "http-mock",
+      sessionId: "sess-json-1",
+      toolDefs: [
+        {
+          name: "echo",
+          inputSchema: { type: "object", properties: { text: { type: "string" } } },
+        },
+      ],
+    });
+    const baseUrl = await startMockMcpHttpServer(server);
 
     const session = await openMcpStreamableHttpClient({
       url: baseUrl,
@@ -122,55 +196,11 @@ describe("mcp-streamable-http-transport", () => {
   });
 
   it("accepts JSON-RPC result over SSE", async () => {
-    const server = createServer(async (req, res: ServerResponse) => {
-      if (req.method !== "POST") {
-        res.writeHead(405).end();
-        return;
-      }
-      const msg = (await readJsonBody(req)) as { method?: string; id?: number };
-      const { method, id } = msg;
-      if (method === "initialize") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
-              capabilities: {},
-              serverInfo: { name: "sse-mock", version: "1" },
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "notifications/initialized") {
-        res.writeHead(202).end();
-        return;
-      }
-      if (method === "tools/list") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              tools: [
-                {
-                  name: "ping",
-                  inputSchema: { type: "object", properties: {} },
-                },
-              ],
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "tools/call") {
-        res.writeHead(200, {
-          "Content-Type": "text/event-stream; charset=utf-8",
-          "Cache-Control": "no-cache",
-        });
+    const server = createMockMcpHttpServer({
+      serverName: "sse-mock",
+      toolDefs: [{ name: "ping", inputSchema: { type: "object", properties: {} } }],
+      onToolCall({ res, id }) {
+        startSse(res);
         res.write(`event: message\n`);
         // Malformed event: must be skipped but reported via onParseError.
         res.write(`data: {broken json}\n\n`);
@@ -178,20 +208,9 @@ describe("mcp-streamable-http-transport", () => {
           `data: ${JSON.stringify({ jsonrpc: "2.0", id, result: { ok: true, via: "sse" } })}\n\n`,
         );
         res.end();
-        return;
-      }
-      res.writeHead(400).end();
+      },
     });
-
-    const baseUrl: string = await new Promise((resolve, reject) => {
-      server.listen(0, "127.0.0.1", () => {
-        const a = server.address();
-        if (a && typeof a === "object") {
-          resolve(`http://127.0.0.1:${a.port}/mcp`);
-        } else reject(new Error("addr"));
-      });
-      server.on("error", reject);
-    });
+    const baseUrl = await startMockMcpHttpServer(server);
 
     const parseErrors: McpSseParseError[] = [];
     const session = await openMcpStreamableHttpClient({
@@ -260,52 +279,13 @@ describe("mcp-streamable-http-transport", () => {
 
   it("automatic SSE retry sends Last-Event-ID after partial stream", async () => {
     let toolCallPosts = 0;
-    const server = createServer(async (req, res: ServerResponse) => {
-      if (req.method !== "POST") {
-        res.writeHead(405).end();
-        return;
-      }
-      const msg = (await readJsonBody(req)) as { method?: string; id?: number };
-      const { method, id } = msg;
-      if (method === "initialize") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
-              capabilities: {},
-              serverInfo: { name: "sse-retry", version: "1" },
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "notifications/initialized") {
-        res.writeHead(202).end();
-        return;
-      }
-      if (method === "tools/list") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              tools: [{ name: "t", inputSchema: { type: "object", properties: {} } }],
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "tools/call") {
+    const server = createMockMcpHttpServer({
+      serverName: "sse-retry",
+      toolDefs: [{ name: "t", inputSchema: { type: "object", properties: {} } }],
+      onToolCall({ req, res, id }) {
         toolCallPosts++;
         if (toolCallPosts === 1) {
-          res.writeHead(200, {
-            "Content-Type": "text/event-stream; charset=utf-8",
-            "Cache-Control": "no-cache",
-          });
+          startSse(res);
           res.write("id: partial-1\n");
           res.write(
             `data: ${JSON.stringify({ jsonrpc: "2.0", method: "$/progress", params: {} })}\n\n`,
@@ -314,29 +294,15 @@ describe("mcp-streamable-http-transport", () => {
           return;
         }
         assert.equal(req.headers["last-event-id"], "partial-1");
-        res.writeHead(200, {
-          "Content-Type": "text/event-stream; charset=utf-8",
-          "Cache-Control": "no-cache",
-        });
+        startSse(res);
         res.write("id: final-2\n");
         res.write(
           `data: ${JSON.stringify({ jsonrpc: "2.0", id, result: { recovered: true } })}\n\n`,
         );
         res.end();
-        return;
-      }
-      res.writeHead(400).end();
+      },
     });
-
-    const baseUrl: string = await new Promise((resolve, reject) => {
-      server.listen(0, "127.0.0.1", () => {
-        const a = server.address();
-        if (a && typeof a === "object") {
-          resolve(`http://127.0.0.1:${a.port}/mcp`);
-        } else reject(new Error("addr"));
-      });
-      server.on("error", reject);
-    });
+    const baseUrl = await startMockMcpHttpServer(server);
 
     const session = await openMcpStreamableHttpClient({ url: baseUrl });
     try {
@@ -351,82 +317,21 @@ describe("mcp-streamable-http-transport", () => {
   });
 
   it("JSON-RPC result over standing GET when POST returns 202", async () => {
-    let getRes: ServerResponse | null = null;
-    const server = createServer(async (req, res: ServerResponse) => {
-      if (req.method === "GET") {
-        res.writeHead(200, {
-          "Content-Type": "text/event-stream; charset=utf-8",
-          "Cache-Control": "no-cache",
-        });
-        getRes = res;
-        req.on("close", () => {
-          getRes = null;
-        });
-        return;
-      }
-      if (req.method !== "POST") {
-        res.writeHead(405).end();
-        return;
-      }
-      const msg = (await readJsonBody(req)) as { method?: string; id?: number };
-      const { method, id } = msg;
-      if (method === "initialize") {
-        res.writeHead(200, {
-          "Content-Type": "application/json",
-          "MCP-Session-Id": "sess-standing-get",
-        });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
-              capabilities: {},
-              serverInfo: { name: "standing-get", version: "1" },
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "notifications/initialized") {
+    const server = createMockMcpHttpServer({
+      serverName: "standing-get",
+      sessionId: "sess-standing-get",
+      toolDefs: [{ name: "g", inputSchema: { type: "object", properties: {} } }],
+      get: "pending",
+      onToolCall({ res, id, standingGet: sink }) {
         res.writeHead(202).end();
-        return;
-      }
-      if (method === "tools/list") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              tools: [{ name: "g", inputSchema: { type: "object", properties: {} } }],
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "tools/call") {
-        res.writeHead(202).end();
-        const sink = getRes;
         if (sink && !sink.writableEnded) {
           sink.write(
             `data: ${JSON.stringify({ jsonrpc: "2.0", id, result: { via: "standing-get" } })}\n\n`,
           );
         }
-        return;
-      }
-      res.writeHead(400).end();
+      },
     });
-
-    const baseUrl: string = await new Promise((resolve, reject) => {
-      server.listen(0, "127.0.0.1", () => {
-        const a = server.address();
-        if (a && typeof a === "object") {
-          resolve(`http://127.0.0.1:${a.port}/mcp`);
-        } else reject(new Error("addr"));
-      });
-      server.on("error", reject);
-    });
+    const baseUrl = await startMockMcpHttpServer(server);
 
     const session = await openMcpStreamableHttpClient({ url: baseUrl });
     try {
@@ -442,52 +347,13 @@ describe("mcp-streamable-http-transport", () => {
 
   it("automatic SSE retry after read error when id was present", async () => {
     let toolCallPosts = 0;
-    const server = createServer(async (req, res: ServerResponse) => {
-      if (req.method !== "POST") {
-        res.writeHead(405).end();
-        return;
-      }
-      const msg = (await readJsonBody(req)) as { method?: string; id?: number };
-      const { method, id } = msg;
-      if (method === "initialize") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
-              capabilities: {},
-              serverInfo: { name: "sse-net", version: "1" },
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "notifications/initialized") {
-        res.writeHead(202).end();
-        return;
-      }
-      if (method === "tools/list") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              tools: [{ name: "u", inputSchema: { type: "object", properties: {} } }],
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "tools/call") {
+    const server = createMockMcpHttpServer({
+      serverName: "sse-net",
+      toolDefs: [{ name: "u", inputSchema: { type: "object", properties: {} } }],
+      onToolCall({ req, res, id }) {
         toolCallPosts++;
         if (toolCallPosts === 1) {
-          res.writeHead(200, {
-            "Content-Type": "text/event-stream; charset=utf-8",
-            "Cache-Control": "no-cache",
-          });
+          startSse(res);
           res.write("id: net-drop\n");
           res.write(`data: ${JSON.stringify({ note: "not-json-rpc" })}\n\n`);
           // Defer so the kernel delivers the SSE block before RST (avoids flaky undici errors).
@@ -495,26 +361,12 @@ describe("mcp-streamable-http-transport", () => {
           return;
         }
         assert.equal(req.headers["last-event-id"], "net-drop");
-        res.writeHead(200, {
-          "Content-Type": "text/event-stream; charset=utf-8",
-          "Cache-Control": "no-cache",
-        });
+        startSse(res);
         res.write(`data: ${JSON.stringify({ jsonrpc: "2.0", id, result: { via: "retry" } })}\n\n`);
         res.end();
-        return;
-      }
-      res.writeHead(400).end();
+      },
     });
-
-    const baseUrl: string = await new Promise((resolve, reject) => {
-      server.listen(0, "127.0.0.1", () => {
-        const a = server.address();
-        if (a && typeof a === "object") {
-          resolve(`http://127.0.0.1:${a.port}/mcp`);
-        } else reject(new Error("addr"));
-      });
-      server.on("error", reject);
-    });
+    const baseUrl = await startMockMcpHttpServer(server);
 
     const session = await openMcpStreamableHttpClient({ url: baseUrl });
     try {
@@ -528,87 +380,25 @@ describe("mcp-streamable-http-transport", () => {
   });
 
   it("rejects pending request when server sends notifications/cancelled over standing GET SSE (202 flow)", async () => {
-    let getRes: ServerResponse | null = null;
-    const server = createServer(async (req, res: ServerResponse) => {
-      if (req.method === "GET") {
-        res.writeHead(200, {
-          "Content-Type": "text/event-stream; charset=utf-8",
-          "Cache-Control": "no-cache",
-        });
-        getRes = res;
-        req.on("close", () => {
-          getRes = null;
-        });
-        return;
-      }
-      if (req.method !== "POST") {
-        res.writeHead(405).end();
-        return;
-      }
-      const msg = (await readJsonBody(req)) as { method?: string; id?: number };
-      const { method, id } = msg;
-      if (method === "initialize") {
-        res.writeHead(200, {
-          "Content-Type": "application/json",
-          "MCP-Session-Id": "sess-cancel-get",
-        });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
-              capabilities: {},
-              serverInfo: { name: "cancel-get", version: "1" },
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "notifications/initialized") {
+    const server = createMockMcpHttpServer({
+      serverName: "cancel-get",
+      sessionId: "sess-cancel-get",
+      toolDefs: [{ name: "c", inputSchema: { type: "object", properties: {} } }],
+      get: "pending",
+      onToolCall({ res, id, standingGet: sink }) {
         res.writeHead(202).end();
-        return;
-      }
-      if (method === "tools/list") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              tools: [{ name: "c", inputSchema: { type: "object", properties: {} } }],
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "tools/call") {
-        res.writeHead(202).end();
-        const sink = getRes;
-        const rid = id;
-        if (sink && !sink.writableEnded && rid !== undefined) {
+        if (sink && !sink.writableEnded && id !== undefined) {
           sink.write(
             `data: ${JSON.stringify({
               jsonrpc: "2.0",
               method: "notifications/cancelled",
-              params: { requestId: rid, reason: "mock cancel" },
+              params: { requestId: id, reason: "mock cancel" },
             })}\n\n`,
           );
         }
-        return;
-      }
-      res.writeHead(400).end();
+      },
     });
-
-    const baseUrl: string = await new Promise((resolve, reject) => {
-      server.listen(0, "127.0.0.1", () => {
-        const a = server.address();
-        if (a && typeof a === "object") {
-          resolve(`http://127.0.0.1:${a.port}/mcp`);
-        } else reject(new Error("addr"));
-      });
-      server.on("error", reject);
-    });
+    const baseUrl = await startMockMcpHttpServer(server);
 
     const session = await openMcpStreamableHttpClient({ url: baseUrl });
     try {
@@ -624,50 +414,11 @@ describe("mcp-streamable-http-transport", () => {
   });
 
   it("rejects pending request when server sends notifications/cancelled on POST response SSE", async () => {
-    const server = createServer(async (req, res: ServerResponse) => {
-      if (req.method !== "POST") {
-        res.writeHead(405).end();
-        return;
-      }
-      const msg = (await readJsonBody(req)) as { method?: string; id?: number };
-      const { method, id } = msg;
-      if (method === "initialize") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
-              capabilities: {},
-              serverInfo: { name: "cancel-sse-post", version: "1" },
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "notifications/initialized") {
-        res.writeHead(202).end();
-        return;
-      }
-      if (method === "tools/list") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              tools: [{ name: "x", inputSchema: { type: "object", properties: {} } }],
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "tools/call") {
-        res.writeHead(200, {
-          "Content-Type": "text/event-stream; charset=utf-8",
-          "Cache-Control": "no-cache",
-        });
+    const server = createMockMcpHttpServer({
+      serverName: "cancel-sse-post",
+      toolDefs: [{ name: "x", inputSchema: { type: "object", properties: {} } }],
+      onToolCall({ res, id }) {
+        startSse(res);
         res.write(
           `data: ${JSON.stringify({
             jsonrpc: "2.0",
@@ -676,20 +427,9 @@ describe("mcp-streamable-http-transport", () => {
           })}\n\n`,
         );
         res.end();
-        return;
-      }
-      res.writeHead(400).end();
+      },
     });
-
-    const baseUrl: string = await new Promise((resolve, reject) => {
-      server.listen(0, "127.0.0.1", () => {
-        const a = server.address();
-        if (a && typeof a === "object") {
-          resolve(`http://127.0.0.1:${a.port}/mcp`);
-        } else reject(new Error("addr"));
-      });
-      server.on("error", reject);
-    });
+    const baseUrl = await startMockMcpHttpServer(server);
 
     const session = await openMcpStreamableHttpClient({ url: baseUrl });
     try {
@@ -705,61 +445,15 @@ describe("mcp-streamable-http-transport", () => {
   });
 
   it("onServerMessage receives JSON-RPC notification pushed on standing GET SSE", async () => {
-    let getRes: ServerResponse | null = null;
     const inbound: McpStreamableHttpServerMessage[] = [];
-    const server = createServer(async (req, res: ServerResponse) => {
-      if (req.method === "GET") {
-        res.writeHead(200, {
-          "Content-Type": "text/event-stream; charset=utf-8",
-          "Cache-Control": "no-cache",
-        });
-        getRes = res;
-        req.on("close", () => {
-          getRes = null;
-        });
-        return;
-      }
-      if (req.method !== "POST") {
-        res.writeHead(405).end();
-        return;
-      }
-      const msg = (await readJsonBody(req)) as { method?: string; id?: number };
-      const { method, id } = msg;
-      if (method === "initialize") {
-        res.writeHead(200, {
-          "Content-Type": "application/json",
-          "MCP-Session-Id": "sess-onmsg",
-        });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
-              capabilities: {},
-              serverInfo: { name: "onmsg", version: "1" },
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "notifications/initialized") {
-        res.writeHead(202).end();
-        return;
-      }
-      if (method === "tools/list") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              tools: [{ name: "t", inputSchema: { type: "object", properties: {} } }],
-            },
-          }),
-        );
+    const server = createMockMcpHttpServer({
+      serverName: "onmsg",
+      sessionId: "sess-onmsg",
+      toolDefs: [{ name: "t", inputSchema: { type: "object", properties: {} } }],
+      get: "pending",
+      afterToolsList(getStandingGet) {
         setImmediate(() => {
-          const sink = getRes;
+          const sink = getStandingGet();
           if (sink && !sink.writableEnded) {
             sink.write(
               `data: ${JSON.stringify({
@@ -770,20 +464,9 @@ describe("mcp-streamable-http-transport", () => {
             );
           }
         });
-        return;
-      }
-      res.writeHead(400).end();
+      },
     });
-
-    const baseUrl: string = await new Promise((resolve, reject) => {
-      server.listen(0, "127.0.0.1", () => {
-        const a = server.address();
-        if (a && typeof a === "object") {
-          resolve(`http://127.0.0.1:${a.port}/mcp`);
-        } else reject(new Error("addr"));
-      });
-      server.on("error", reject);
-    });
+    const baseUrl = await startMockMcpHttpServer(server);
 
     const session = await openMcpStreamableHttpClient({
       url: baseUrl,
@@ -810,14 +493,14 @@ describe("mcp-streamable-http-transport", () => {
     const toolCallIdPromise1 = new Promise<number>((r) => {
       resolveToolCallId1 = r;
     });
-    const server = createServer(async (req, res: ServerResponse) => {
-      if (req.method === "GET") {
+    const server = createMockMcpHttpServer({
+      serverName: "get-resume",
+      sessionId: "sess-get-resume",
+      toolDefs: [{ name: "r", inputSchema: { type: "object", properties: {} } }],
+      get: "pending",
+      async onGet(req, res) {
         getCount++;
         getRequestHeaders.push({ ...req.headers });
-        res.writeHead(200, {
-          "Content-Type": "text/event-stream; charset=utf-8",
-          "Cache-Control": "no-cache",
-        });
         if (getCount === 1) {
           // First GET: send an event with id, then close (simulate disconnect)
           res.write(
@@ -837,77 +520,20 @@ describe("mcp-streamable-http-transport", () => {
           res.write(
             `id: evt-300\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: toolCallId, result: { reconnected: true } })}\n\n`,
           );
-          // Keep open briefly then end
-          req.on("close", () => {
-            /* noop */
-          });
           return;
         }
         // Further reconnects: just stay open
         req.on("close", () => {
           /* noop */
         });
-        return;
-      }
-      if (req.method !== "POST") {
-        res.writeHead(405).end();
-        return;
-      }
-      const msg = (await readJsonBody(req)) as { method?: string; id?: number };
-      const { method, id } = msg;
-      if (method === "initialize") {
-        res.writeHead(200, {
-          "Content-Type": "application/json",
-          "MCP-Session-Id": "sess-get-resume",
-        });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
-              capabilities: {},
-              serverInfo: { name: "get-resume", version: "1" },
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "notifications/initialized") {
-        res.writeHead(202).end();
-        return;
-      }
-      if (method === "tools/list") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              tools: [{ name: "r", inputSchema: { type: "object", properties: {} } }],
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "tools/call") {
+      },
+      onToolCall({ res, id }) {
         resolveToolCallId1?.(id!);
         // Return 202 so the result must come via standing GET
         res.writeHead(202).end();
-        return;
-      }
-      res.writeHead(400).end();
+      },
     });
-
-    const baseUrl: string = await new Promise((resolve, reject) => {
-      server.listen(0, "127.0.0.1", () => {
-        const a = server.address();
-        if (a && typeof a === "object") {
-          resolve(`http://127.0.0.1:${a.port}/mcp`);
-        } else reject(new Error("addr"));
-      });
-      server.on("error", reject);
-    });
+    const baseUrl = await startMockMcpHttpServer(server);
 
     const session = await openMcpStreamableHttpClient({ url: baseUrl });
     try {
@@ -939,14 +565,14 @@ describe("mcp-streamable-http-transport", () => {
     const toolCallIdPromise2 = new Promise<number>((r) => {
       resolveToolCallId2 = r;
     });
-    const server = createServer(async (req, res: ServerResponse) => {
-      if (req.method === "GET") {
+    const server = createMockMcpHttpServer({
+      serverName: "get-noid",
+      sessionId: "sess-get-noid",
+      toolDefs: [{ name: "n", inputSchema: { type: "object", properties: {} } }],
+      get: "pending",
+      async onGet(req, res) {
         getCount++;
         getRequestHeaders.push({ ...req.headers });
-        res.writeHead(200, {
-          "Content-Type": "text/event-stream; charset=utf-8",
-          "Cache-Control": "no-cache",
-        });
         if (getCount === 1) {
           // First GET: send events WITHOUT id: fields, then close
           res.write(
@@ -961,74 +587,18 @@ describe("mcp-streamable-http-transport", () => {
           res.write(
             `data: ${JSON.stringify({ jsonrpc: "2.0", id: toolCallId, result: { noId: true } })}\n\n`,
           );
-          req.on("close", () => {
-            /* noop */
-          });
           return;
         }
         req.on("close", () => {
           /* noop */
         });
-        return;
-      }
-      if (req.method !== "POST") {
-        res.writeHead(405).end();
-        return;
-      }
-      const msg = (await readJsonBody(req)) as { method?: string; id?: number };
-      const { method, id } = msg;
-      if (method === "initialize") {
-        res.writeHead(200, {
-          "Content-Type": "application/json",
-          "MCP-Session-Id": "sess-get-noid",
-        });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
-              capabilities: {},
-              serverInfo: { name: "get-noid", version: "1" },
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "notifications/initialized") {
-        res.writeHead(202).end();
-        return;
-      }
-      if (method === "tools/list") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              tools: [{ name: "n", inputSchema: { type: "object", properties: {} } }],
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "tools/call") {
+      },
+      onToolCall({ res, id }) {
         resolveToolCallId2?.(id!);
         res.writeHead(202).end();
-        return;
-      }
-      res.writeHead(400).end();
+      },
     });
-
-    const baseUrl: string = await new Promise((resolve, reject) => {
-      server.listen(0, "127.0.0.1", () => {
-        const a = server.address();
-        if (a && typeof a === "object") {
-          resolve(`http://127.0.0.1:${a.port}/mcp`);
-        } else reject(new Error("addr"));
-      });
-      server.on("error", reject);
-    });
+    const baseUrl = await startMockMcpHttpServer(server);
 
     const session = await openMcpStreamableHttpClient({ url: baseUrl });
     try {
@@ -1064,14 +634,14 @@ describe("mcp-streamable-http-transport", () => {
     const toolCallIdPromise3 = new Promise<number>((r) => {
       resolveToolCallId3 = r;
     });
-    const server = createServer(async (req, res: ServerResponse) => {
-      if (req.method === "GET") {
+    const server = createMockMcpHttpServer({
+      serverName: "get-multi",
+      sessionId: "sess-get-multi",
+      toolDefs: [{ name: "m", inputSchema: { type: "object", properties: {} } }],
+      get: "pending",
+      async onGet(req, res) {
         getCount++;
         getRequestHeaders.push({ ...req.headers });
-        res.writeHead(200, {
-          "Content-Type": "text/event-stream; charset=utf-8",
-          "Cache-Control": "no-cache",
-        });
         if (getCount === 1) {
           // First GET: send event with id, then disconnect
           res.write(
@@ -1094,74 +664,18 @@ describe("mcp-streamable-http-transport", () => {
           res.write(
             `id: third-batch\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: toolCallId, result: { multi: true } })}\n\n`,
           );
-          req.on("close", () => {
-            /* noop */
-          });
           return;
         }
         req.on("close", () => {
           /* noop */
         });
-        return;
-      }
-      if (req.method !== "POST") {
-        res.writeHead(405).end();
-        return;
-      }
-      const msg = (await readJsonBody(req)) as { method?: string; id?: number };
-      const { method, id } = msg;
-      if (method === "initialize") {
-        res.writeHead(200, {
-          "Content-Type": "application/json",
-          "MCP-Session-Id": "sess-get-multi",
-        });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
-              capabilities: {},
-              serverInfo: { name: "get-multi", version: "1" },
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "notifications/initialized") {
-        res.writeHead(202).end();
-        return;
-      }
-      if (method === "tools/list") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              tools: [{ name: "m", inputSchema: { type: "object", properties: {} } }],
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "tools/call") {
+      },
+      onToolCall({ res, id }) {
         resolveToolCallId3?.(id!);
         res.writeHead(202).end();
-        return;
-      }
-      res.writeHead(400).end();
+      },
     });
-
-    const baseUrl: string = await new Promise((resolve, reject) => {
-      server.listen(0, "127.0.0.1", () => {
-        const a = server.address();
-        if (a && typeof a === "object") {
-          resolve(`http://127.0.0.1:${a.port}/mcp`);
-        } else reject(new Error("addr"));
-      });
-      server.on("error", reject);
-    });
+    const baseUrl = await startMockMcpHttpServer(server);
 
     const session = await openMcpStreamableHttpClient({ url: baseUrl });
     try {
@@ -1197,49 +711,13 @@ describe("mcp-streamable-http-transport", () => {
 
   it("cancelRequest sends notifications/cancelled with requestId", async () => {
     let lastNotification: unknown;
-    const server = createServer(async (req, res: ServerResponse) => {
-      if (req.method !== "POST") {
-        res.writeHead(405).end();
-        return;
-      }
-      const msg = (await readJsonBody(req)) as {
-        method?: string;
-        id?: number;
-        params?: unknown;
-      };
-      const { method, id } = msg;
-      if (method === "initialize") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
-              capabilities: {},
-              serverInfo: { name: "cancel-req", version: "1" },
-            },
-          }),
-        );
-        return;
-      }
-      if (method === "notifications/initialized" || method === "notifications/cancelled") {
+    const server = createMockMcpHttpServer({
+      serverName: "cancel-req",
+      onNotification(msg) {
         lastNotification = msg;
-        res.writeHead(202).end();
-        return;
-      }
-      res.writeHead(400).end();
+      },
     });
-
-    const baseUrl: string = await new Promise((resolve, reject) => {
-      server.listen(0, "127.0.0.1", () => {
-        const a = server.address();
-        if (a && typeof a === "object") {
-          resolve(`http://127.0.0.1:${a.port}/mcp`);
-        } else reject(new Error("addr"));
-      });
-      server.on("error", reject);
-    });
+    const baseUrl = await startMockMcpHttpServer(server);
 
     const session = connectMcpStreamableHttpSession({ url: baseUrl });
     try {
