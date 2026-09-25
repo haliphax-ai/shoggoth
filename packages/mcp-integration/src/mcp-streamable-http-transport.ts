@@ -1,5 +1,8 @@
-import type { McpJsonRpcSession } from "./mcp-jsonrpc-transport";
-import { mcpInitializeSession, DEFAULT_REQUEST_TIMEOUT_MS } from "./mcp-jsonrpc-transport";
+import {
+  type McpJsonRpcSession,
+  mcpInitializeSession,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+} from "./mcp-jsonrpc-transport";
 import { MCP_PROTOCOL_VERSION_STREAMABLE } from "./mcp-protocol-versions";
 import { asRecord, jsonRpcErrorToError } from "./json-rpc-helpers";
 
