@@ -34,6 +34,7 @@ describe("mcp-jsonrpc-transport (stdio)", () => {
 
 describe("mcp-jsonrpc-transport (tcp)", () => {
   it("speaks line-delimited JSON-RPC over a socket", async () => {
+    const malformedJson: string[] = [];
     const server = createServer((socket) => {
       let buffer = "";
       socket.on("data", (chunk) => {
@@ -51,7 +52,11 @@ describe("mcp-jsonrpc-transport (tcp)", () => {
           };
           try {
             msg = JSON.parse(line) as typeof msg;
-          } catch {
+          } catch (err) {
+            // Record malformed input instead of silently swallowing it; the
+            // test asserts this stays empty so it fails if the client ever
+            // sends unparseable JSON (finding #15).
+            malformedJson.push(`${err instanceof Error ? err.message : String(err)}: ${line}`);
             continue;
           }
           const { method, id } = msg;
@@ -117,6 +122,11 @@ describe("mcp-jsonrpc-transport (tcp)", () => {
       await new Promise((resolve) => setTimeout(resolve, 700));
       const again = await mcpInvokeTool(session, "ping", {});
       assert.deepEqual(again, { ok: true });
+      assert.equal(
+        malformedJson.length,
+        0,
+        `mock server received malformed JSON: ${malformedJson.join(" | ")}`,
+      );
     } finally {
       await session.close();
       server.close();
