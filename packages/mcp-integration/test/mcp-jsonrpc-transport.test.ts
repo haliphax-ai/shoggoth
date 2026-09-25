@@ -55,7 +55,7 @@ describe("mcp-jsonrpc-transport (tcp)", () => {
           } catch (err) {
             // Record malformed input instead of silently swallowing it; the
             // test asserts this stays empty so it fails if the client ever
-            // sends unparseable JSON (finding #15).
+            // sends unparseable JSON.
             malformedJson.push(`${err instanceof Error ? err.message : String(err)}: ${line}`);
             continue;
           }
