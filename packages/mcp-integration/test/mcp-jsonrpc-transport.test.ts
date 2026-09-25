@@ -3,6 +3,7 @@ import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "vitest";
 import {
+  connectMcpTcpSession,
   mcpFetchToolsList,
   mcpInvokeTool,
   openMcpStdioClient,
@@ -105,16 +106,43 @@ describe("mcp-jsonrpc-transport (tcp)", () => {
       server.on("error", reject);
     });
 
-    const session = await openMcpTcpClient({ host: "127.0.0.1", port });
+    const session = await openMcpTcpClient({ host: "127.0.0.1", port, connectTimeout: 500 });
     try {
       const tools = await mcpFetchToolsList(session);
       assert.equal(tools[0]!.name, "ping");
       const r = await mcpInvokeTool(session, "ping", {});
       assert.deepEqual(r, { ok: true });
+      // The connect deadline must be cleared once the handshake completes:
+      // an idle session survives past connectTimeout.
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      const again = await mcpInvokeTool(session, "ping", {});
+      assert.deepEqual(again, { ok: true });
     } finally {
       await session.close();
       server.close();
     }
+  });
+
+  it("rejects with ETIMEDOUT when connectTimeout elapses before the handshake completes", async () => {
+    // 192.0.2.1 is TEST-NET-1: it blackholes SYNs, so without a deadline the
+    // connect attempt would hang indefinitely.
+    const start = Date.now();
+    await assert.rejects(
+      connectMcpTcpSession({ host: "192.0.2.1", port: 8123, connectTimeout: 400 }),
+      (err: unknown) => {
+        if (!(err instanceof Error)) return false;
+        const code = (err as NodeJS.ErrnoException).code;
+        // The connect deadline reports ETIMEDOUT; sandboxes that reject the
+        // unroutable route immediately are also a prompt failure.
+        return (
+          code === "ETIMEDOUT" ||
+          code === "EHOSTUNREACH" ||
+          code === "ENETUNREACH" ||
+          code === "ECONNREFUSED"
+        );
+      },
+    );
+    assert.ok(Date.now() - start < 10_000, "expected a prompt rejection, not an indefinite hang");
   });
 });
 
