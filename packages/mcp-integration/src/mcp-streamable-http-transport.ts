@@ -46,6 +46,8 @@ export interface McpStreamableHttpConnectOptions {
 type Pending = {
   readonly resolve: (v: unknown) => void;
   readonly reject: (e: Error) => void;
+  /** Timestamp (ms) when this entry was added to the pending map. */
+  readonly createdAt: number;
 };
 
 function normalizeBaseUrl(url: string): string {
@@ -243,6 +245,31 @@ export function connectMcpStreamableHttpSession(
   let standingGetDisabled = false;
   let standingGetStarted = false;
   let getFetchAbort = new AbortController();
+
+  // Periodic stale-entry cleanup (belt-and-suspenders with per-request timers).
+  // Runs every 30 s and rejects any pending entry older than requestTimeout.
+  const STALE_CLEANUP_INTERVAL_MS = 30_000;
+  const staleCleanupTimer = setInterval(() => {
+    if (closed) return;
+    const timeoutMs = opts.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    if (timeoutMs === null || timeoutMs <= 0) return;
+    const now = Date.now();
+    for (const [id, p] of pending) {
+      if (now - p.createdAt > timeoutMs) {
+        pending.delete(id);
+        const t = timers.get(id);
+        if (t !== undefined) {
+          clearTimeout(t);
+          timers.delete(id);
+        }
+        p.reject(
+          new Error(
+            `MCP HTTP stale pending entry cleaned up after ${Math.round((now - p.createdAt) / 1000)}s (id=${id})`,
+          ),
+        );
+      }
+    }
+  }, STALE_CLEANUP_INTERVAL_MS);
 
   function restartGetFetch(): void {
     getFetchAbort.abort();
@@ -461,7 +488,7 @@ export function connectMcpStreamableHttpSession(
       throw new Error("internal: request without rpc id");
     }
     return new Promise<unknown>((resolve, reject) => {
-      pending.set(rid, { resolve, reject });
+      pending.set(rid, { resolve, reject, createdAt: Date.now() });
       // Start a timeout timer if requestTimeout is configured
       const timeoutMs = opts.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT_MS;
       if (timeoutMs !== null && timeoutMs > 0) {
@@ -613,6 +640,7 @@ export function connectMcpStreamableHttpSession(
   async function close(): Promise<void> {
     if (closed) return;
     closed = true;
+    clearInterval(staleCleanupTimer);
     abortGlobal.abort();
     for (const [id, p] of pending) {
       const t = timers.get(id);

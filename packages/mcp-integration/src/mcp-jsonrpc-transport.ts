@@ -117,6 +117,10 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 type Pending = {
   readonly resolve: (v: unknown) => void;
   readonly reject: (e: Error) => void;
+  /** Timestamp (ms) when this entry was added to the pending map. */
+  readonly createdAt: number;
+  /** The JSON-RPC method name, used in stale-entry error messages. */
+  readonly method: string;
 };
 
 /**
@@ -143,6 +147,31 @@ export function createMcpJsonRpcSession(
   let buffer = "";
   let closed = false;
   let inputEnded = false;
+
+  // Periodic stale-entry cleanup (belt-and-suspenders with per-request timers).
+  // Runs every 30 s and rejects any pending entry older than requestTimeout.
+  const STALE_CLEANUP_INTERVAL_MS = 30_000;
+  const staleCleanupTimer = setInterval(() => {
+    if (closed) return;
+    const timeoutMs = options?.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    if (timeoutMs === null || timeoutMs <= 0) return;
+    const now = Date.now();
+    for (const [id, p] of pending) {
+      if (now - p.createdAt > timeoutMs) {
+        pending.delete(id);
+        const t = timers.get(id);
+        if (t !== undefined) {
+          clearTimeout(t);
+          timers.delete(id);
+        }
+        p.reject(
+          new Error(
+            `MCP JSON-RPC stale pending entry cleaned up after ${Math.round((now - p.createdAt) / 1000)}s (method=${p.method}, id=${id})`,
+          ),
+        );
+      }
+    }
+  }, STALE_CLEANUP_INTERVAL_MS);
 
   function failAll(err: Error): void {
     for (const [id, p] of pending) {
@@ -274,7 +303,7 @@ export function createMcpJsonRpcSession(
       params: params === undefined ? {} : params,
     });
     return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
+      pending.set(id, { resolve, reject, createdAt: Date.now(), method });
       // Start a timeout timer if requestTimeout is configured
       const timeoutMs = options?.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT_MS;
       if (timeoutMs !== null && timeoutMs > 0) {
@@ -316,6 +345,7 @@ export function createMcpJsonRpcSession(
   async function close(): Promise<void> {
     if (closed) return;
     closed = true;
+    clearInterval(staleCleanupTimer);
     input.off("data", onChunk);
     input.off("end", onEnd);
     input.off("error", onErr);
