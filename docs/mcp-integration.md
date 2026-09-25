@@ -311,6 +311,8 @@ interface AggregatedTool extends McpToolDescriptor {
 
 interface AggregateMcpCatalogResult {
   tools: AggregatedTool[];
+  /** `namespacedName` → tool index for O(1) lookup (built by `aggregateMcpCatalogs`). */
+  toolIndex?: ReadonlyMap<string, AggregatedTool>;
 }
 ```
 

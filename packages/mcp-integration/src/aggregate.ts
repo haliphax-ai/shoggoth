@@ -14,6 +14,13 @@ export interface AggregatedTool extends McpToolDescriptor {
 
 export interface AggregateMcpCatalogResult {
   readonly tools: readonly AggregatedTool[];
+  /**
+   * `namespacedName` → tool index for O(1) routing lookups, populated by
+   * {@link aggregateMcpCatalogs}. Optional because results may also be assembled
+   * by hand from a filtered `tools` list; {@link routeMcpToolInvocation} falls
+   * back to a linear scan when the index is absent.
+   */
+  readonly toolIndex?: ReadonlyMap<string, AggregatedTool>;
 }
 
 function assertValidSourceId(sourceId: string): void {
@@ -24,6 +31,15 @@ function assertValidSourceId(sourceId: string): void {
 
 function namespaced(sourceId: string, toolName: string): string {
   return `${sourceId}-${toolName}`;
+}
+
+/** Build the `namespacedName` → tool lookup index for a tool list. */
+function buildToolIndex(tools: readonly AggregatedTool[]): ReadonlyMap<string, AggregatedTool> {
+  const index = new Map<string, AggregatedTool>();
+  for (const tool of tools) {
+    index.set(tool.namespacedName, tool);
+  }
+  return index;
 }
 
 /**
@@ -54,15 +70,21 @@ export function aggregateMcpCatalogs(
     }
   }
 
-  return { tools: out };
+  return { tools: out, toolIndex: buildToolIndex(out) };
 }
 
-/** Resolve an aggregated name back to a backend invocation target. */
+/**
+ * Resolve an aggregated name back to a backend invocation target.
+ * O(1) through the prebuilt `toolIndex`; falls back to a linear scan for
+ * hand-built results that only carry `tools`.
+ */
 export function routeMcpToolInvocation(
   aggregated: AggregateMcpCatalogResult,
   namespacedName: string,
 ): { tool: AggregatedTool } | { error: string } {
-  const hit = aggregated.tools.find((t) => t.namespacedName === namespacedName);
+  const hit =
+    aggregated.toolIndex?.get(namespacedName) ??
+    aggregated.tools.find((t) => t.namespacedName === namespacedName);
   if (!hit) {
     return { error: `unknown MCP tool: ${namespacedName}` };
   }
