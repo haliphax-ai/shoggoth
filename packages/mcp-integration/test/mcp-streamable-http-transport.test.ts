@@ -444,6 +444,63 @@ describe("mcp-streamable-http-transport", () => {
     }
   });
 
+  it("onServerMessage skips a cancellation that rejected a pending request but reports an unmatched one", async () => {
+    const inbound: McpStreamableHttpServerMessage[] = [];
+    let matchedId: number | undefined;
+    const server = createMockMcpHttpServer({
+      serverName: "cancel-onmsg",
+      sessionId: "sess-cancel-onmsg",
+      toolDefs: [{ name: "c", inputSchema: { type: "object", properties: {} } }],
+      get: "pending",
+      onToolCall({ res, id, standingGet: sink }) {
+        res.writeHead(202).end();
+        if (sink && !sink.writableEnded && id !== undefined) {
+          matchedId = id;
+          // Matched: transport rejects the pending request promise itself.
+          sink.write(
+            `data: ${JSON.stringify({
+              jsonrpc: "2.0",
+              method: "notifications/cancelled",
+              params: { requestId: id },
+            })}\n\n`,
+          );
+          // Unmatched: no pending request, so nothing else would report it.
+          sink.write(
+            `data: ${JSON.stringify({
+              jsonrpc: "2.0",
+              method: "notifications/cancelled",
+              params: { requestId: id + 100000 },
+            })}\n\n`,
+          );
+        }
+      },
+    });
+    const baseUrl = await startMockMcpHttpServer(server);
+
+    const session = await openMcpStreamableHttpClient({
+      url: baseUrl,
+      onServerMessage: (m) => {
+        inbound.push(m);
+      },
+    });
+    try {
+      await assert.rejects(mcpInvokeTool(session, "c", {}), (e: unknown) => {
+        assert.ok(e instanceof Error);
+        assert.match(e.message, /MCP request cancelled/);
+        return true;
+      });
+      await new Promise((r) => setTimeout(r, 80));
+      assert.equal(typeof matchedId, "number", "expected server to cancel a pending request");
+      const cancels = inbound.filter((m) => m.method === "notifications/cancelled");
+      assert.equal(cancels.length, 1, "only the unmatched cancellation reaches onServerMessage");
+      const params = cancels[0].params as { requestId: number };
+      assert.equal(params.requestId, (matchedId as number) + 100000);
+    } finally {
+      await session.close();
+      server.close();
+    }
+  });
+
   it("onServerMessage receives JSON-RPC notification pushed on standing GET SSE", async () => {
     const inbound: McpStreamableHttpServerMessage[] = [];
     const server = createMockMcpHttpServer({

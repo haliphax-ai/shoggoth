@@ -137,21 +137,21 @@ const session = await openMcpStreamableHttpClient({
 
 #### Options (`McpStreamableHttpConnectOptions`)
 
-| Field                             | Type                     | Description                                                                      |
-| --------------------------------- | ------------------------ | -------------------------------------------------------------------------------- |
-| `url`                             | `string`                 | MCP server HTTP endpoint URL.                                                    |
-| `headers`                         | `Record<string, string>` | Extra request headers (e.g., auth).                                              |
-| `protocolVersion`                 | `string`                 | Protocol version for `initialize` (default: `2025-11-25`).                       |
-| `initialMcpProtocolVersionHeader` | `string`                 | First `MCP-Protocol-Version` header before negotiation (default: `2025-11-25`).  |
-| `onServerMessage`                 | `(msg) => void`          | Callback for inbound notifications, orphan responses, and cancellation events.   |
-| `onParseError`                    | `(info) => void`         | Callback for SSE events whose `data:` payload is not valid JSON (event skipped). |
+| Field                             | Type                     | Description                                                                                                                                                           |
+| --------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`                             | `string`                 | MCP server HTTP endpoint URL.                                                                                                                                         |
+| `headers`                         | `Record<string, string>` | Extra request headers (e.g., auth).                                                                                                                                   |
+| `protocolVersion`                 | `string`                 | Protocol version for `initialize` (default: `2025-11-25`).                                                                                                            |
+| `initialMcpProtocolVersionHeader` | `string`                 | First `MCP-Protocol-Version` header before negotiation (default: `2025-11-25`).                                                                                       |
+| `onServerMessage`                 | `(msg) => void`          | Callback for messages the transport does not consume itself: inbound notifications, orphan responses, and `notifications/cancelled` with no matching pending request. |
+| `onParseError`                    | `(info) => void`         | Callback for SSE events whose `data:` payload is not valid JSON (event skipped).                                                                                      |
 
 #### Key Behaviors
 
 - **Session ID tracking**: Automatically captures and sends `MCP-Session-Id` headers.
 - **Standing GET SSE**: Opens a long-lived `GET` request for server-push messages. Automatically disabled if the server returns 405/404 (POST-only mode).
 - **SSE resumption**: Tracks `id:` fields from SSE events and sends `Last-Event-ID` on reconnect for resumable streams. POST-body SSE also supports one retry with `Last-Event-ID`.
-- **Cancellation**: Supports MCP 2025-11-25 cancellation via `notifications/cancelled` with `params.requestId`. Both client-initiated (`cancelRequest(rpcId)`) and server-initiated cancellation are handled.
+- **Cancellation**: Supports MCP 2025-11-25 cancellation via `notifications/cancelled` with `params.requestId`. Both client-initiated (`cancelRequest(rpcId)`) and server-initiated cancellation are handled. A server-initiated cancellation that matches a pending request rejects that request's promise and is _not_ re-reported through `onServerMessage`; a cancellation with no matching pending request is reported only via `onServerMessage`, since no promise rejects for it.
 - **Batch interop**: If a single SSE `data:` line parses to a JSON array, each element is dispatched individually.
 - **Session teardown**: Sends HTTP `DELETE` to the endpoint on close if a session ID was established.
 
