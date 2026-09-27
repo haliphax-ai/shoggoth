@@ -164,7 +164,7 @@ describe("mcpFetchToolsList skipped tool entries", () => {
         request: async () => ({
           tools: [{ name: "good" }, "not-an-object", { description: "nameless" }, 42],
         }),
-        notify: () => {},
+        notify: async () => {},
         close: async () => {},
       },
       { onSkippedToolEntry: (entry) => skipped.push(entry) },
@@ -177,7 +177,7 @@ describe("mcpFetchToolsList skipped tool entries", () => {
   it("does not require the callback (backward compatible)", async () => {
     const tools = await mcpFetchToolsList({
       request: async () => ({ tools: [{ name: "only" }] }),
-      notify: () => {},
+      notify: async () => {},
       close: async () => {},
     });
     assert.equal(tools.length, 1);

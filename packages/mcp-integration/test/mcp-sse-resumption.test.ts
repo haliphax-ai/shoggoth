@@ -42,34 +42,31 @@ function acceptedResponse(): Response {
  * Returns a list of headers objects for each GET request made.
  */
 function capturedGetHeaders(mockFn: ReturnType<typeof vi.fn>): Record<string, string>[] {
-  return (
-    mockFn.mock.calls
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      .filter(([_url, init]: [string, RequestInit]) => init?.method === "GET")
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      .map(([_url, init]: [string, RequestInit]) => {
-        const h = init?.headers;
-        if (!h) return {};
-        if (h instanceof Headers) {
-          const out: Record<string, string> = {};
-          h.forEach((v, k) => {
-            out[k] = v;
-          });
-          return out;
-        }
-        if (Array.isArray(h)) {
-          const out: Record<string, string> = {};
-          for (const [k, v] of h) out[k] = v;
-          return out;
-        }
-        // Plain object — lowercase keys for consistency
+  return mockFn.mock.calls
+    .filter((call) => (call as [string, RequestInit])[1]?.method === "GET")
+    .filter((call) => (call as [string, RequestInit])[1]?.method === "GET")
+    .map((call) => {
+      const [_url, init] = call as [string, RequestInit];
+      const h = init?.headers;
+      if (h instanceof Headers) {
         const out: Record<string, string> = {};
-        for (const [k, v] of Object.entries(h as Record<string, string>)) {
-          out[k.toLowerCase()] = v;
-        }
+        h.forEach((v, k) => {
+          out[k] = v;
+        });
         return out;
-      })
-  );
+      }
+      if (Array.isArray(h)) {
+        const out: Record<string, string> = {};
+        for (const [k, v] of h) out[k] = v;
+        return out;
+      }
+      // Plain object — lowercase keys for consistency
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(h as Record<string, string>)) {
+        out[k.toLowerCase()] = v;
+      }
+      return out;
+    });
 }
 
 describe("standing GET SSE Last-Event-ID resumption", () => {
@@ -78,7 +75,7 @@ describe("standing GET SSE Last-Event-ID resumption", () => {
 
   beforeEach(() => {
     mockFetch = vi.fn();
-    globalThis.fetch = mockFetch;
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
   });
 
   afterEach(() => {

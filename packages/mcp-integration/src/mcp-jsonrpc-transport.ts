@@ -11,8 +11,8 @@ import { asRecord, jsonRpcErrorToError } from "./json-rpc-helpers";
 /** MCP JSON-RPC session over newline-delimited JSON (stdio or TCP with same framing). */
 export interface McpJsonRpcSession {
   readonly request: (method: string, params?: unknown) => Promise<unknown>;
-  /** Streamable HTTP may return a Promise so `notifications/initialized` can await 202. */
-  readonly notify: (method: string, params?: unknown) => void | Promise<void>;
+  /** Always a Promise so `notifications/initialized` can await 202 on every transport. */
+  readonly notify: (method: string, params?: unknown) => Promise<void>;
   readonly close: () => Promise<void>;
 }
 
@@ -50,7 +50,7 @@ export async function mcpInitializeSession(
     capabilities: {},
     clientInfo: { name: "shoggoth", version: "0.1.0" },
   });
-  await Promise.resolve(session.notify("notifications/initialized", {}));
+  await session.notify("notifications/initialized", {});
 }
 
 /**
@@ -344,14 +344,14 @@ export function createMcpJsonRpcSession(
     });
   }
 
-  function notify(method: string, params?: unknown): void {
+  async function notify(method: string, params?: unknown): Promise<void> {
     if (closed) return;
     const body = JSON.stringify({
       jsonrpc: "2.0",
       method,
       params: params === undefined ? {} : params,
     });
-    void writeLine(body);
+    await writeLine(body);
   }
 
   async function close(): Promise<void> {
