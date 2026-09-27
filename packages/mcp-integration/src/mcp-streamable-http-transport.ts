@@ -548,11 +548,6 @@ export function connectMcpStreamableHttpSession(
           ensureStandingGet();
           if (res.status === 202) {
             await res.arrayBuffer().catch(() => undefined);
-            // 202 means the JSON-RPC reply will arrive on the standing GET SSE stream, not
-            // on this POST, so there is nothing here to poll for: the reply resolves `pending`
-            // asynchronously via the stream, bounded by the per-request timeout. This single
-            // grace sleep (replacing a 20 x 5ms busy-wait) only gives the standing GET time to
-            // connect, or to report 405/404, before we decide the reply cannot be delivered.
             await new Promise((r) => setTimeout(r, 150));
             if (standingGetDisabled && pending.has(rid)) {
               pending.delete(rid);
