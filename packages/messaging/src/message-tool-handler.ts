@@ -595,8 +595,6 @@ export async function executeMessageToolAction(
       let finalPath = destPath ?? safeName;
       if (finalPath && !finalPath.startsWith("/")) {
         const workspace = deps.getSessionWorkspace?.(sid);
-        // path.join normalizes separators, so a root ("/") or trailing-slash
-        // workspace cannot produce a double slash in the resolved path.
         if (workspace) finalPath = path.join(workspace, finalPath);
       }
 
