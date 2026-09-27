@@ -196,16 +196,16 @@ All transports produce a session with this interface:
 ```typescript
 interface McpJsonRpcSession {
   request(method: string, params?: unknown): Promise<unknown>;
-  notify(method: string, params?: unknown): void | Promise<void>;
+  notify(method: string, params?: unknown): Promise<void>;
   close(): Promise<void>;
 }
 ```
 
-| Method    | Description                                                                                                           |
-| --------- | --------------------------------------------------------------------------------------------------------------------- |
-| `request` | Send a JSON-RPC request and await the response. Concurrent requests are supported (each gets a unique numeric `id`).  |
-| `notify`  | Send a JSON-RPC notification (no `id`, no response expected). Returns `void` for stdio/TCP, `Promise<void>` for HTTP. |
-| `close`   | Tear down the session. Rejects all pending requests. Kills/disconnects the underlying transport.                      |
+| Method    | Description                                                                                                          |
+| --------- | -------------------------------------------------------------------------------------------------------------------- |
+| `request` | Send a JSON-RPC request and await the response. Concurrent requests are supported (each gets a unique numeric `id`). |
+| `notify`  | Send a JSON-RPC notification (no `id`, no response expected). Always returns `Promise<void>`.                        |
+| `close`   | Tear down the session. Rejects all pending requests. Kills/disconnects the underlying transport.                     |
 
 ---
 
