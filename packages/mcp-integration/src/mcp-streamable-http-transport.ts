@@ -548,9 +548,7 @@ export function connectMcpStreamableHttpSession(
           ensureStandingGet();
           if (res.status === 202) {
             await res.arrayBuffer().catch(() => undefined);
-            for (let i = 0; i < 20 && !standingGetDisabled; i++) {
-              await new Promise((r) => setTimeout(r, 5));
-            }
+            await new Promise((r) => setTimeout(r, 150));
             if (standingGetDisabled && pending.has(rid)) {
               pending.delete(rid);
               const t = timers.get(rid);
