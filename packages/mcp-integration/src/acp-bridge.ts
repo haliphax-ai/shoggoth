@@ -25,8 +25,3 @@ export function findBindingForAcpxWorkspace(
 ): AcpxWorkspaceBinding | undefined {
   return bindings.find((b) => b.acpWorkspaceRoot === acpWorkspaceRoot);
 }
-
-/** Mint a binding record (callers validate uniqueness). */
-export function createAcpxBinding(input: AcpxWorkspaceBinding): AcpxWorkspaceBinding {
-  return { ...input };
-}
