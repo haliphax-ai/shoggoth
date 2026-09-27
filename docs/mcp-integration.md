@@ -460,18 +460,14 @@ Maps external agent workspaces (ACP / acpx) to Shoggoth sessions and principals.
 ### Binding Management
 
 ```typescript
-import {
-  createAcpxBinding,
-  findBindingForAcpxWorkspace,
-  type AcpxWorkspaceBinding,
-} from "@shoggoth/mcp-integration";
+import { findBindingForAcpxWorkspace, type AcpxWorkspaceBinding } from "@shoggoth/mcp-integration";
 
-// Create a binding record
-const binding = createAcpxBinding({
+// Bindings are plain objects — construct them directly
+const binding: AcpxWorkspaceBinding = {
   acpWorkspaceRoot: "/workspaces/agent-1",
   shoggothSessionId: "agent:main:discord:...",
   agentPrincipalId: "agent-1",
-});
+};
 
 // Look up a binding by workspace root
 const found = findBindingForAcpxWorkspace(bindings, "/workspaces/agent-1");

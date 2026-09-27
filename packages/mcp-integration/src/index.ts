@@ -14,7 +14,6 @@ export {
 } from "./aggregate";
 export { toMcpToolsListPayload, type McpToolsListPayload } from "./advertise";
 export {
-  createAcpxBinding,
   findBindingForAcpxWorkspace,
   SHOGGOTH_ACPX_WORKSPACE_ROOT_ENV,
   SHOGGOTH_CONTROL_SOCKET_ENV,

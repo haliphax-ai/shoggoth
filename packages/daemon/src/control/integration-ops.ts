@@ -22,7 +22,6 @@ import {
   shoggothConfigSchema,
 } from "@shoggoth/shared";
 import {
-  createAcpxBinding,
   SHOGGOTH_ACPX_WORKSPACE_ROOT_ENV,
   SHOGGOTH_CONTROL_SOCKET_ENV,
   SHOGGOTH_SESSION_ID_ENV,
@@ -657,12 +656,11 @@ export async function handleIntegrationControlOp(
       const acpWorkspaceRoot = requireString(pl, "acp_workspace_root");
       const shoggothSessionId = requireString(pl, "shoggoth_session_id");
       const agentPrincipalId = requireString(pl, "agent_principal_id");
-      const binding = createAcpxBinding({
+      ctx.acpxStore.upsert({
         acpWorkspaceRoot,
         shoggothSessionId,
         agentPrincipalId,
       });
-      ctx.acpxStore.upsert(binding);
       return { ok: true };
     }
 
