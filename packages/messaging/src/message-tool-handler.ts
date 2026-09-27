@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { MessagingAdapterCapabilities } from "./capabilities";
 import type {
   MessageToolTransport,
@@ -594,7 +595,9 @@ export async function executeMessageToolAction(
       let finalPath = destPath ?? safeName;
       if (finalPath && !finalPath.startsWith("/")) {
         const workspace = deps.getSessionWorkspace?.(sid);
-        if (workspace) finalPath = `${workspace.replace(/\/+$/, "")}/${finalPath}`;
+        // path.join normalizes separators, so a root ("/") or trailing-slash
+        // workspace cannot produce a double slash in the resolved path.
+        if (workspace) finalPath = path.join(workspace, finalPath);
       }
 
       const bytesWritten = await deps.downloadFile(url, finalPath);
