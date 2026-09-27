@@ -154,7 +154,6 @@ export function createMcpJsonRpcSession(
   },
 ): McpJsonRpcSession {
   const pending = new Map<number, Pending>();
-  // Overflow-safe id allocator: wraps at MAX_SAFE_INTEGER, skipping pending ids.
   const isPendingId = (candidate: number): boolean => pending.has(candidate);
   const nextRequestId = createRequestIdAllocator();
   const timers = new Map<number, NodeJS.Timeout>();

@@ -270,7 +270,6 @@ export function connectMcpStreamableHttpSession(
   let closed = false;
   const pending = new Map<number, Pending>();
   const timers = new Map<number, NodeJS.Timeout>();
-  // Overflow-safe id allocator: wraps at MAX_SAFE_INTEGER, skipping pending ids.
   const isPendingId = (candidate: number): boolean => pending.has(candidate);
   const nextRequestId = createRequestIdAllocator();
   const abortGlobal = new AbortController();
