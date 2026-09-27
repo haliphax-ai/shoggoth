@@ -1,5 +1,4 @@
 import type { McpSourceCatalog } from "./aggregate";
-import type { McpToolDescriptor } from "./mcp-tool";
 import { buildWorkflowToolDescriptor } from "@shoggoth/workflow";
 
 /**
@@ -953,7 +952,7 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
           },
         },
       },
-      buildWorkflowToolDescriptor() as McpToolDescriptor,
+      buildWorkflowToolDescriptor(),
     ],
   };
 }
