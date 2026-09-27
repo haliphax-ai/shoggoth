@@ -524,6 +524,75 @@ describe("control plane (unix socket + JSONL)", () => {
     db.close();
   });
 
+  it("round-trips an acpx binding through bind_set / bind_get / bind_delete", async () => {
+    const db = new Database(":memory:");
+    migrate(db, defaultMigrationsDir());
+    createSessionStore(db).create({
+      id: "sess-rt",
+      workspacePath: "/tmp/w",
+      status: "active",
+    });
+
+    await withControlPlaneSession({ stateDb: db }, async (send) => {
+      const opAuth = {
+        kind: "operator_token",
+        token: "test-op-token",
+      } as const;
+
+      const setLine = await send({
+        v: WIRE_VERSION,
+        id: "bind-rt-1",
+        op: "acpx_bind_set",
+        auth: opAuth,
+        payload: {
+          acp_workspace_root: "/acp/rt/ws",
+          shoggoth_session_id: "sess-rt",
+          agent_principal_id: "principal-rt",
+        },
+      });
+      assert.equal(parseResponseLine(setLine).ok, true);
+
+      const getLine = await send({
+        v: WIRE_VERSION,
+        id: "bind-rt-2",
+        op: "acpx_bind_get",
+        auth: opAuth,
+        payload: { acp_workspace_root: "/acp/rt/ws" },
+      });
+      const getRes = parseResponseLine(getLine);
+      assert.equal(getRes.ok, true);
+      assert.deepStrictEqual(getRes.result, {
+        binding: {
+          acpWorkspaceRoot: "/acp/rt/ws",
+          shoggothSessionId: "sess-rt",
+          agentPrincipalId: "principal-rt",
+        },
+      });
+
+      const delLine = await send({
+        v: WIRE_VERSION,
+        id: "bind-rt-3",
+        op: "acpx_bind_delete",
+        auth: opAuth,
+        payload: { acp_workspace_root: "/acp/rt/ws" },
+      });
+      const delRes = parseResponseLine(delLine);
+      assert.equal(delRes.ok, true);
+      assert.deepStrictEqual(delRes.result, { deleted: true });
+
+      const get2Line = await send({
+        v: WIRE_VERSION,
+        id: "bind-rt-4",
+        op: "acpx_bind_get",
+        auth: opAuth,
+        payload: { acp_workspace_root: "/acp/rt/ws" },
+      });
+      assert.deepStrictEqual(parseResponseLine(get2Line).result, { binding: null });
+    });
+
+    db.close();
+  });
+
   it("hitl_pending_list / approve / get over control socket", async () => {
     if (process.platform !== "linux") return;
 
