@@ -6,7 +6,7 @@ import type { JsonSchemaLike } from "./json-schema";
 import type { McpSourceCatalog } from "./aggregate";
 import type { McpToolDescriptor } from "./mcp-tool";
 import { MCP_PROTOCOL_VERSION_STDIO } from "./mcp-protocol-versions";
-import { asRecord, jsonRpcErrorToError } from "./json-rpc-helpers";
+import { asRecord, createRequestIdAllocator, jsonRpcErrorToError } from "./json-rpc-helpers";
 
 /** MCP JSON-RPC session over newline-delimited JSON (stdio or TCP with same framing). */
 export interface McpJsonRpcSession {
@@ -153,8 +153,10 @@ export function createMcpJsonRpcSession(
     readonly requestTimeout?: number | null;
   },
 ): McpJsonRpcSession {
-  let nextId = 1;
   const pending = new Map<number, Pending>();
+  // Overflow-safe id allocator: wraps at MAX_SAFE_INTEGER, skipping pending ids.
+  const isPendingId = (candidate: number): boolean => pending.has(candidate);
+  const nextRequestId = createRequestIdAllocator();
   const timers = new Map<number, NodeJS.Timeout>();
   let buffer = "";
   let closed = false;
@@ -307,7 +309,7 @@ export function createMcpJsonRpcSession(
     if (closed || inputEnded) {
       throw new Error("MCP session is closed");
     }
-    const id = nextId++;
+    const id = nextRequestId(isPendingId);
     const body = JSON.stringify({
       jsonrpc: "2.0",
       id,

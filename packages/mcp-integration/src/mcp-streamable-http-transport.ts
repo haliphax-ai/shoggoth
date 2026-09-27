@@ -4,7 +4,7 @@ import {
   DEFAULT_REQUEST_TIMEOUT_MS,
 } from "./mcp-jsonrpc-transport";
 import { MCP_PROTOCOL_VERSION_STREAMABLE } from "./mcp-protocol-versions";
-import { asRecord, jsonRpcErrorToError } from "./json-rpc-helpers";
+import { asRecord, createRequestIdAllocator, jsonRpcErrorToError } from "./json-rpc-helpers";
 
 /** One SSE event's parsed JSON payload and optional `id:` field (for `Last-Event-ID` resumption). */
 export interface McpSseJsonEvent {
@@ -270,7 +270,9 @@ export function connectMcpStreamableHttpSession(
   let closed = false;
   const pending = new Map<number, Pending>();
   const timers = new Map<number, NodeJS.Timeout>();
-  let nextId = 1;
+  // Overflow-safe id allocator: wraps at MAX_SAFE_INTEGER, skipping pending ids.
+  const isPendingId = (candidate: number): boolean => pending.has(candidate);
+  const nextRequestId = createRequestIdAllocator();
   const abortGlobal = new AbortController();
   let lastSseEventId: string | undefined;
   /** When true, server rejected GET (e.g. POST-only mock); rely on POST responses only. */
@@ -636,7 +638,7 @@ export function connectMcpStreamableHttpSession(
   }
 
   async function request(method: string, params?: unknown): Promise<unknown> {
-    const id = nextId++;
+    const id = nextRequestId(isPendingId);
     const body: Record<string, unknown> = {
       jsonrpc: "2.0",
       id,
