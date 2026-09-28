@@ -143,7 +143,9 @@ export async function executeMessageToolAction(
 
     if (!boundChannel) return { ok: false, error: "no_channel_for_session", sessionId: sid };
 
-    const handler = CHANNEL_ACTION_HANDLERS[a];
+    const handler = Object.hasOwn(CHANNEL_ACTION_HANDLERS, a)
+      ? CHANNEL_ACTION_HANDLERS[a]
+      : undefined;
     if (!handler) return { ok: false, error: `unknown action: ${a}` };
     return await handler({ deps, sid, channelId: boundChannel }, args);
   } catch (e) {

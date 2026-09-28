@@ -3,6 +3,7 @@
 .env
 .env.shoggoth.local
 .ssh/
+coverage/
 dist/
 docker-compose.override.yml
 node_modules
