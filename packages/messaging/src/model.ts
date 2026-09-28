@@ -52,10 +52,13 @@ export interface CreateInboundMessageInput {
   readonly extensions?: MessageExtensions;
 }
 
-export function createInboundMessage(input: CreateInboundMessageInput): InternalMessage {
+function createMessage(
+  input: CreateInboundMessageInput | CreateOutboundMessageInput,
+  direction: MessageDirection,
+): InternalMessage {
   return {
     id: input.id,
-    direction: "inbound",
+    direction,
     sessionId: input.sessionId,
     agentId: input.agentId,
     userId: input.userId,
@@ -63,6 +66,10 @@ export function createInboundMessage(input: CreateInboundMessageInput): Internal
     body: input.body,
     extensions: input.extensions ?? {},
   };
+}
+
+export function createInboundMessage(input: CreateInboundMessageInput): InternalMessage {
+  return createMessage(input, "inbound");
 }
 
 export interface CreateOutboundMessageInput {
@@ -76,14 +83,5 @@ export interface CreateOutboundMessageInput {
 }
 
 export function createOutboundMessage(input: CreateOutboundMessageInput): InternalMessage {
-  return {
-    id: input.id,
-    direction: "outbound",
-    sessionId: input.sessionId,
-    agentId: input.agentId,
-    userId: input.userId,
-    createdAt: input.createdAt,
-    body: input.body,
-    extensions: input.extensions ?? {},
-  };
+  return createMessage(input, "outbound");
 }
