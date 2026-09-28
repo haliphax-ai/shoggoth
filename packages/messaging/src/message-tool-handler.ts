@@ -397,18 +397,28 @@ export async function executeMessageToolAction(
         "\n",
       );
       const { id } = await t.createMessage(channelId, { content: body });
+      const failedReactions: string[] = [];
       for (const c of choices) {
         try {
           await t.createMessageReaction(channelId, id, c.emoji);
         } catch {
-          /* best-effort */
+          failedReactions.push(c.emoji);
         }
       }
+      const reactionsAdded = choices.length - failedReactions.length;
       return {
         ok: true,
         message_id: id,
         channel_id: channelId,
         choices: choices.length,
+        reactions_added: reactionsAdded,
+        reactions_failed: failedReactions.length,
+        ...(failedReactions.length > 0
+          ? {
+              failed_reactions: failedReactions,
+              warning: `failed to add reactions for: ${failedReactions.join(", ")}`,
+            }
+          : {}),
       };
     }
 
