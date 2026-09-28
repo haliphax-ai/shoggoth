@@ -448,6 +448,111 @@ describe("executeMessageToolAction", () => {
     assert.equal((r as { ok: boolean }).ok, false);
   });
 
+  // --- choice ---
+  it("choice: posts the legend and reports reaction counts", async () => {
+    const reacted: string[] = [];
+    const transport = mockTransport({
+      async createMessage(ch, body) {
+        assert.equal(ch, "ch1");
+        assert.equal(body.content, "Pick one:\n\nReact to choose:\n👍 Approve\n👎 Reject");
+        return { id: "m1" };
+      },
+      async createMessageReaction(ch, mid, emoji) {
+        assert.equal(ch, "ch1");
+        assert.equal(mid, "m1");
+        reacted.push(emoji);
+      },
+    });
+    const r = await executeMessageToolAction(
+      { capabilities: caps, transport, sessionToChannel: () => "ch1" },
+      "sess",
+      {
+        action: "choice",
+        content: "Pick one:",
+        choices: [
+          { emoji: "👍", label: "Approve" },
+          { emoji: "👎", label: "Reject" },
+        ],
+      },
+    );
+    assert.deepEqual(r, {
+      ok: true,
+      message_id: "m1",
+      channel_id: "ch1",
+      choices: 2,
+      reactions_added: 2,
+      reactions_failed: 0,
+    });
+    assert.deepEqual(reacted, ["👍", "👎"]);
+  });
+
+  it("choice: reports failed reactions instead of swallowing them", async () => {
+    const attempted: string[] = [];
+    const transport = mockTransport({
+      async createMessage() {
+        return { id: "m1" };
+      },
+      async createMessageReaction(ch, mid, emoji) {
+        attempted.push(`${ch}/${mid}/${emoji}`);
+        if (emoji === "👎") throw new Error("Missing Permissions");
+      },
+    });
+    const r = await executeMessageToolAction(
+      { capabilities: caps, transport, sessionToChannel: () => "ch1" },
+      "sess",
+      {
+        action: "choice",
+        choices: [
+          { emoji: "👍", label: "Approve" },
+          { emoji: "👎", label: "Reject" },
+        ],
+      },
+    );
+    assert.deepEqual(r, {
+      ok: true,
+      message_id: "m1",
+      channel_id: "ch1",
+      choices: 2,
+      reactions_added: 1,
+      reactions_failed: 1,
+      failed_reactions: ["👎"],
+      warning: "failed to add reactions for: 👎",
+    });
+    assert.equal(attempted.length, 2);
+  });
+
+  it("choice: degraded prompt when every reaction fails", async () => {
+    const transport = mockTransport({
+      async createMessage() {
+        return { id: "m1" };
+      },
+      async createMessageReaction() {
+        throw new Error("Missing Permissions");
+      },
+    });
+    const r = await executeMessageToolAction(
+      { capabilities: caps, transport, sessionToChannel: () => "ch1" },
+      "sess",
+      {
+        action: "choice",
+        choices: [
+          { emoji: "✅", label: "Yes" },
+          { emoji: "❌", label: "No" },
+        ],
+      },
+    );
+    assert.deepEqual(r, {
+      ok: true,
+      message_id: "m1",
+      channel_id: "ch1",
+      choices: 2,
+      reactions_added: 0,
+      reactions_failed: 2,
+      failed_reactions: ["✅", "❌"],
+      warning: "failed to add reactions for: ✅, ❌",
+    });
+  });
+
   // --- reactions ---
   it("reactions: returns users for a specific emoji", async () => {
     const transport = mockTransport({
