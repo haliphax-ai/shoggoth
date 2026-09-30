@@ -1,4 +1,5 @@
 import path from "node:path";
+import { DEFAULT_MAX_ATTACHMENT_BYTES } from "@shoggoth/shared";
 import type { MessagingAdapterCapabilities } from "./capabilities";
 import type {
   MessageToolTransport,
@@ -23,6 +24,12 @@ export interface MessageToolDeps {
   readonly downloadFile?: (url: string, destPath: string) => Promise<number>;
   readonly getSessionWorkspace?: (sessionId: string) => string | undefined;
   readonly readWorkspaceFile?: (sessionId: string, relativePath: string) => Promise<Buffer>;
+  /**
+   * Maximum attachment size in bytes, enforced for outbound uploads
+   * (`content_base64` / `content_path`) and inbound `attachment-download`.
+   * Defaults to `DEFAULT_MAX_ATTACHMENT_BYTES` (25 MB).
+   */
+  readonly maxAttachmentBytes?: number;
 }
 
 function str(v: unknown, field: string): string {
@@ -117,7 +124,7 @@ function sanitizeFilename(raw: string): string {
   );
 }
 
-function decodeBase64File(raw: string, filename: string): MessageUploadFile {
+function decodeBase64File(raw: string, filename: string, maxBytes: number): MessageUploadFile {
   let b: Buffer;
   try {
     b = Buffer.from(raw, "base64");
@@ -126,16 +133,14 @@ function decodeBase64File(raw: string, filename: string): MessageUploadFile {
   }
   if (b.length === 0)
     throw new Error(`attachments[].content_base64 for ${filename} decoded to empty buffer`);
-  const max = 24 * 1024 * 1024;
-  if (b.length > max) throw new Error(`attachment ${filename} exceeds size limit`);
+  if (b.length > maxBytes) throw new Error(`attachment ${filename} exceeds size limit`);
   return { filename, data: new Uint8Array(b) };
 }
 
-function decodePathFile(buf: Buffer, filename: string): MessageUploadFile {
+function decodePathFile(buf: Buffer, filename: string, maxBytes: number): MessageUploadFile {
   if (buf.length === 0)
     throw new Error(`attachments[].content_path for ${filename} read empty file`);
-  const max = 24 * 1024 * 1024;
-  if (buf.length > max) throw new Error(`attachment ${filename} exceeds size limit`);
+  if (buf.length > maxBytes) throw new Error(`attachment ${filename} exceeds size limit`);
   return { filename, data: new Uint8Array(buf) };
 }
 
@@ -272,6 +277,7 @@ async function handlePostAction(
       error: "reply_to_message_id not supported on this platform",
     };
 
+  const maxAttachmentBytes = deps.maxAttachmentBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES;
   const attRaw = args.attachments;
   const files: MessageUploadFile[] = [];
   if (attRaw !== undefined) {
@@ -312,10 +318,10 @@ async function handlePostAction(
           };
         }
         const buf = await deps.readWorkspaceFile(sid, path);
-        files.push(decodePathFile(buf, filename));
+        files.push(decodePathFile(buf, filename, maxAttachmentBytes));
       } else {
         // Use base64
-        files.push(decodeBase64File(b64!, filename));
+        files.push(decodeBase64File(b64!, filename, maxAttachmentBytes));
       }
     }
   }
@@ -701,7 +707,7 @@ async function handleAttachmentDownloadAction(
     typeof attachment!.content_type === "string" ? attachment!.content_type : undefined;
   const sizeBytes = typeof attachment!.size === "number" ? attachment!.size : undefined;
 
-  const maxSize = 25 * 1024 * 1024;
+  const maxSize = deps.maxAttachmentBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES;
   if (sizeBytes !== undefined && sizeBytes > maxSize) {
     return {
       ok: false,

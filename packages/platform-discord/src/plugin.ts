@@ -407,6 +407,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
                 sessionToChannel: (sid) =>
                   discordMessaging.resolveOutboundChannelIdForSession?.(sid),
                 sessionToGuild: (sid) => discordMessaging.resolveGuildIdForSession?.(sid),
+                maxAttachmentBytes: configRef.current?.maxAttachmentBytes,
                 getSessionWorkspace: (sid) => {
                   try {
                     const row = (db as any)

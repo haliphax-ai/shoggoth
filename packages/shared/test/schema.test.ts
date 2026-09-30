@@ -503,6 +503,45 @@ describe("attachmentHandling — full shoggothConfigSchema end-to-end", () => {
 });
 
 // ---------------------------------------------------------------------------
+// maxAttachmentBytes — message-tool attachment size limit
+// ---------------------------------------------------------------------------
+describe("maxAttachmentBytes config", () => {
+  function fullConfigWith(overrides: Record<string, unknown>) {
+    return { ...defaultConfig("/etc/shoggoth/config.d"), ...overrides };
+  }
+
+  it("defaults to 25 MB in defaultConfig", () => {
+    const cfg = defaultConfig("/etc/shoggoth/config.d");
+    assert.equal(cfg.maxAttachmentBytes, 25 * 1024 * 1024);
+  });
+
+  it("accepts maxAttachmentBytes in a config fragment", () => {
+    const r = shoggothConfigFragmentSchema.safeParse({ maxAttachmentBytes: 10 * 1024 * 1024 });
+    assert.ok(r.success);
+    assert.equal((r.data as any).maxAttachmentBytes, 10 * 1024 * 1024);
+  });
+
+  it("accepts maxAttachmentBytes through the full config schema", () => {
+    const r = shoggothConfigSchema.safeParse(fullConfigWith({ maxAttachmentBytes: 1024 }));
+    assert.ok(r.success, JSON.stringify((r as any).error?.issues));
+    assert.equal((r.data as any).maxAttachmentBytes, 1024);
+  });
+
+  it("rejects zero or negative maxAttachmentBytes", () => {
+    assert.ok(!shoggothConfigFragmentSchema.safeParse({ maxAttachmentBytes: 0 }).success);
+    assert.ok(!shoggothConfigFragmentSchema.safeParse({ maxAttachmentBytes: -1 }).success);
+  });
+
+  it("rejects non-integer maxAttachmentBytes", () => {
+    assert.ok(!shoggothConfigFragmentSchema.safeParse({ maxAttachmentBytes: 1.5 }).success);
+  });
+
+  it("rejects non-numeric maxAttachmentBytes", () => {
+    assert.ok(!shoggothConfigFragmentSchema.safeParse({ maxAttachmentBytes: "25MB" }).success);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // fetch config — SSRF protection settings
 // ---------------------------------------------------------------------------
 describe("fetch config", () => {

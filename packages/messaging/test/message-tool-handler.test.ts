@@ -157,7 +157,7 @@ describe("executeMessageToolAction", () => {
     assert.equal(capturedPath, "file content from docs/readme.txt");
   });
 
-  it("post: content_path enforces 24MB size limit", async () => {
+  it("post: content_path enforces default 25MB size limit", async () => {
     const transport = mockTransport({
       async createMessageWithFiles() {
         throw new Error("should not be called");
@@ -169,14 +169,83 @@ describe("executeMessageToolAction", () => {
         transport,
         sessionToChannel: () => "chan-c",
         readWorkspaceFile: async () => {
-          // Create a buffer larger than 24MB
-          return Buffer.alloc(25 * 1024 * 1024);
+          // Create a buffer larger than the 25MB default limit
+          return Buffer.alloc(25 * 1024 * 1024 + 1);
         },
       },
       "sess",
       {
         action: "post",
         attachments: [{ filename: "big.bin", content_path: "big.bin" }],
+      },
+    );
+    assert.equal((r as { ok: boolean }).ok, false);
+    assert.ok((r as { error: string }).error.includes("exceeds size limit"));
+  });
+
+  it("post: content_path honors maxAttachmentBytes override", async () => {
+    let called = false;
+    const transport = mockTransport({
+      async createMessageWithFiles() {
+        called = true;
+        return { id: "m5" };
+      },
+    });
+    // 9 bytes exceeds the configured 8-byte limit
+    const r = await executeMessageToolAction(
+      {
+        capabilities: caps,
+        transport,
+        sessionToChannel: () => "chan-c",
+        maxAttachmentBytes: 8,
+        readWorkspaceFile: async () => Buffer.alloc(9),
+      },
+      "sess",
+      {
+        action: "post",
+        attachments: [{ filename: "big.bin", content_path: "big.bin" }],
+      },
+    );
+    assert.equal((r as { ok: boolean }).ok, false);
+    assert.ok((r as { error: string }).error.includes("exceeds size limit"));
+    assert.equal(called, false);
+
+    // Exactly at the limit is accepted
+    const ok = await executeMessageToolAction(
+      {
+        capabilities: caps,
+        transport,
+        sessionToChannel: () => "chan-c",
+        maxAttachmentBytes: 8,
+        readWorkspaceFile: async () => Buffer.alloc(8),
+      },
+      "sess",
+      {
+        action: "post",
+        attachments: [{ filename: "small.bin", content_path: "small.bin" }],
+      },
+    );
+    assert.equal((ok as { ok: boolean }).ok, true);
+  });
+
+  it("post: content_base64 honors maxAttachmentBytes override", async () => {
+    const transport = mockTransport({
+      async createMessageWithFiles() {
+        throw new Error("should not be called");
+      },
+    });
+    const r = await executeMessageToolAction(
+      {
+        capabilities: caps,
+        transport,
+        sessionToChannel: () => "chan-c",
+        maxAttachmentBytes: 8,
+      },
+      "sess",
+      {
+        action: "post",
+        // 9 zero bytes, base64-encoded
+        attachments: [{ filename: "b.bin", content_base64: Buffer.alloc(9).toString("base64") }],
       },
     );
     assert.equal((r as { ok: boolean }).ok, false);
@@ -904,6 +973,66 @@ describe("executeMessageToolAction", () => {
     );
     assert.equal((r as { ok: boolean }).ok, false);
     assert.ok((r as { error: string }).error.includes("too large"));
+  });
+
+  it("attachment-download: honors maxAttachmentBytes override", async () => {
+    let downloaded = false;
+    const transport = mockTransport({
+      async getMessage() {
+        return {
+          id: "m1",
+          channel_id: "ch1",
+          content: "",
+          timestamp: "t",
+          author: {},
+          attachments: [
+            {
+              id: "a1",
+              filename: "f.bin",
+              url: "https://cdn/f.bin",
+              size: 100,
+            },
+          ],
+        };
+      },
+    });
+    // 100 bytes exceeds the configured 50-byte limit
+    const r = await executeMessageToolAction(
+      {
+        capabilities: caps,
+        transport,
+        sessionToChannel: () => "ch1",
+        maxAttachmentBytes: 50,
+        downloadFile: async () => {
+          downloaded = true;
+          return 100;
+        },
+      },
+      "sess",
+      { action: "attachment-download", message_id: "m1" },
+    );
+    assert.equal((r as { ok: boolean }).ok, false);
+    assert.ok((r as { error: string }).error.includes("too large"));
+    assert.ok((r as { error: string }).error.includes("max 50"));
+    assert.equal(downloaded, false);
+
+    // Same attachment is accepted when the configured limit allows it
+    const ok = await executeMessageToolAction(
+      {
+        capabilities: caps,
+        transport,
+        sessionToChannel: () => "ch1",
+        maxAttachmentBytes: 1000,
+        downloadFile: async () => {
+          downloaded = true;
+          return 100;
+        },
+      },
+      "sess",
+      { action: "attachment-download", message_id: "m1" },
+    );
+    assert.equal((ok as { ok: boolean }).ok, true);
+    assert.equal(downloaded, true);
   });
 
   it("attachment-download: rejected when capability off", async () => {
