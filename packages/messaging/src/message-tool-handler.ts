@@ -36,42 +36,57 @@ function optStr(v: unknown): string | undefined {
   return t || undefined;
 }
 
+/**
+ * Minimal structural view of a raw API message as returned by platform
+ * transports. Payloads are loosely typed JSON, so every field is `unknown`
+ * and extraction narrows them individually.
+ */
+export interface ApiMessage {
+  readonly id?: unknown;
+  readonly channel_id?: unknown;
+  readonly content?: unknown;
+  readonly timestamp?: unknown;
+  readonly author?: unknown;
+  readonly attachments?: unknown;
+}
+
+function asObject(v: unknown): Record<string, unknown> | undefined {
+  if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;
+  return undefined;
+}
+
+function strOrUndef(v: unknown): string | undefined {
+  return typeof v === "string" ? v : undefined;
+}
+
 export function summarizeApiMessage(raw: Record<string, unknown>): Record<string, unknown> {
-  const author = raw.author;
-  let authorId: string | undefined;
-  let authorUsername: string | undefined;
-  let bot: boolean | undefined;
-  if (author && typeof author === "object" && !Array.isArray(author)) {
-    const a = author as Record<string, unknown>;
-    if (typeof a.id === "string") authorId = a.id;
-    if (typeof a.username === "string") authorUsername = a.username;
-    if (typeof a.bot === "boolean") bot = a.bot;
-  }
-  const att = raw.attachments;
-  const attachmentsRaw = Array.isArray(att) ? att : [];
+  const msg: ApiMessage = raw;
+  const author = asObject(msg.author);
+  const authorId = strOrUndef(author?.id);
+  const authorUsername = strOrUndef(author?.username);
+  const bot = typeof author?.bot === "boolean" ? author.bot : undefined;
+  const attachmentsRaw = Array.isArray(msg.attachments) ? msg.attachments : [];
   const filenames: string[] = [];
   const attachmentSummaries: Record<string, unknown>[] = [];
   for (const x of attachmentsRaw) {
-    if (x && typeof x === "object" && !Array.isArray(x)) {
-      const obj = x as Record<string, unknown>;
-      if (typeof obj.filename === "string") {
-        filenames.push(obj.filename);
-        const summary: Record<string, unknown> = {
-          id: obj.id,
-          filename: obj.filename,
-          url: typeof obj.url === "string" ? obj.url : undefined,
-          content_type: typeof obj.content_type === "string" ? obj.content_type : undefined,
-          size: typeof obj.size === "number" ? obj.size : undefined,
-        };
-        attachmentSummaries.push(summary);
-      }
-    }
+    const obj = asObject(x);
+    if (!obj) continue;
+    const filename = strOrUndef(obj.filename);
+    if (filename === undefined) continue;
+    filenames.push(filename);
+    attachmentSummaries.push({
+      id: obj.id,
+      filename,
+      url: strOrUndef(obj.url),
+      content_type: strOrUndef(obj.content_type),
+      size: typeof obj.size === "number" ? obj.size : undefined,
+    });
   }
   return {
-    id: raw.id,
-    channel_id: raw.channel_id,
-    content: typeof raw.content === "string" ? raw.content : "",
-    timestamp: raw.timestamp,
+    id: msg.id,
+    channel_id: msg.channel_id,
+    content: strOrUndef(msg.content) ?? "",
+    timestamp: msg.timestamp,
     author_id: authorId,
     author_username: authorUsername,
     bot,
