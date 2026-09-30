@@ -11,6 +11,7 @@ export { deepMerge } from "./merge";
 export { LAYOUT, OPERATOR_GLOBAL_INSTRUCTIONS_BASENAME } from "./paths";
 export {
   DEFAULT_HITL_CONFIG,
+  DEFAULT_MAX_ATTACHMENT_BYTES,
   DEFAULT_MEMORY_CONFIG,
   DEFAULT_POLICY_CONFIG,
   contextLevelSchema,

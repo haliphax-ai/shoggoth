@@ -57,6 +57,9 @@ export const attachmentHandlingSchema = z
 export type AttachmentHandlingMode = (typeof attachmentHandlingModes)[number];
 export type AttachmentHandlingConfig = z.infer<typeof attachmentHandlingSchema>;
 
+/** Default maximum attachment size in bytes for message-tool uploads and downloads (25 MB). */
+export const DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
 export const vaultConfigSchema = z
   .object({
     identityPath: z.string().min(1).optional(),
@@ -72,6 +75,7 @@ const sharedConfigFields = {
   controlSocketGid: z.number().int().nonnegative().optional(),
   operatorTokenPath: z.string().min(1).optional(),
   globalInstructionsPath: z.string().min(1).optional(),
+  maxAttachmentBytes: z.number().int().positive().optional(),
   models: shoggothModelsConfigSchema.optional(),
   platforms: z
     .object({ attachmentHandling: attachmentHandlingSchema })
@@ -179,6 +183,7 @@ export function defaultConfig(configDirectory: string): ShoggothConfig {
     operatorDirectory: LAYOUT.operatorDir,
     configDirectory,
     dynamicConfigDirectory: "/etc/shoggoth/config.d/dynamic",
+    maxAttachmentBytes: DEFAULT_MAX_ATTACHMENT_BYTES,
     hitl: DEFAULT_HITL_CONFIG,
     memory: DEFAULT_MEMORY_CONFIG,
     skills: DEFAULT_SKILLS_CONFIG,
