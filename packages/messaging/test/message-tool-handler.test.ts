@@ -1111,4 +1111,133 @@ describe("executeMessageToolAction", () => {
       auto_archive_duration: 1440,
     });
   });
+
+  // --- edit ---
+  it("edit: calls editMessage with channel and content", async () => {
+    let edited: { ch: string; mid: string; content: string } | undefined;
+    const transport = mockTransport({
+      async editMessage(ch, mid, body) {
+        edited = { ch, mid, content: body.content };
+      },
+    });
+    const r = await executeMessageToolAction(
+      { capabilities: caps, transport, sessionToChannel: () => "ch1" },
+      "sess",
+      { action: "edit", message_id: "m1", content: "updated text" },
+    );
+    assert.deepEqual(r, { ok: true, message_id: "m1", channel_id: "ch1" });
+    assert.deepEqual(edited, { ch: "ch1", mid: "m1", content: "updated text" });
+  });
+
+  it("edit: rejected when capability off", async () => {
+    const transport = mockTransport();
+    const noEdit = {
+      ...caps,
+      extensions: { ...caps.extensions, messageEdit: false },
+    };
+    const r = await executeMessageToolAction(
+      { capabilities: noEdit, transport, sessionToChannel: () => "c" },
+      "sess",
+      { action: "edit", message_id: "m1", content: "x" },
+    );
+    assert.equal((r as { ok: boolean }).ok, false);
+    assert.ok((r as { error: string }).error.includes("not supported"));
+  });
+
+  it("edit: requires message_id", async () => {
+    const transport = mockTransport();
+    const r = await executeMessageToolAction(
+      { capabilities: caps, transport, sessionToChannel: () => "c" },
+      "sess",
+      { action: "edit", content: "x" },
+    );
+    assert.equal((r as { ok: boolean }).ok, false);
+    assert.ok((r as { error: string }).error.includes("message_id"));
+  });
+
+  // --- delete ---
+  it("delete: calls deleteMessage with channel and message", async () => {
+    let deleted: { ch: string; mid: string } | undefined;
+    const transport = mockTransport({
+      async deleteMessage(ch, mid) {
+        deleted = { ch, mid };
+      },
+    });
+    const r = await executeMessageToolAction(
+      { capabilities: caps, transport, sessionToChannel: () => "ch1" },
+      "sess",
+      { action: "delete", message_id: "m9" },
+    );
+    assert.deepEqual(r, { ok: true, message_id: "m9", channel_id: "ch1" });
+    assert.deepEqual(deleted, { ch: "ch1", mid: "m9" });
+  });
+
+  it("delete: rejected when capability off", async () => {
+    const transport = mockTransport();
+    const noDelete = {
+      ...caps,
+      extensions: { ...caps.extensions, messageDelete: false },
+    };
+    const r = await executeMessageToolAction(
+      { capabilities: noDelete, transport, sessionToChannel: () => "c" },
+      "sess",
+      { action: "delete", message_id: "m1" },
+    );
+    assert.equal((r as { ok: boolean }).ok, false);
+    assert.ok((r as { error: string }).error.includes("not supported"));
+  });
+
+  it("delete: requires message_id", async () => {
+    const transport = mockTransport();
+    const r = await executeMessageToolAction(
+      { capabilities: caps, transport, sessionToChannel: () => "c" },
+      "sess",
+      { action: "delete" },
+    );
+    assert.equal((r as { ok: boolean }).ok, false);
+    assert.ok((r as { error: string }).error.includes("message_id"));
+  });
+
+  // --- delete_thread ---
+  it("delete_thread: deletes the thread channel", async () => {
+    let deletedChannel: string | undefined;
+    const transport = mockTransport({
+      async deleteChannel(id) {
+        deletedChannel = id;
+      },
+    });
+    const r = await executeMessageToolAction(
+      { capabilities: caps, transport, sessionToChannel: () => "ch1" },
+      "sess",
+      { action: "delete_thread", thread_id: "t42" },
+    );
+    assert.deepEqual(r, { ok: true, thread_id: "t42" });
+    assert.equal(deletedChannel, "t42");
+  });
+
+  it("delete_thread: rejected when capability off", async () => {
+    const transport = mockTransport();
+    const noThreadDelete = {
+      ...caps,
+      extensions: { ...caps.extensions, threadDelete: false },
+    };
+    const r = await executeMessageToolAction(
+      { capabilities: noThreadDelete, transport, sessionToChannel: () => "c" },
+      "sess",
+      { action: "delete_thread", thread_id: "t1" },
+    );
+    assert.equal((r as { ok: boolean }).ok, false);
+    assert.ok((r as { error: string }).error.includes("not supported"));
+  });
+
+  it("delete_thread: requires thread_id", async () => {
+    const transport = mockTransport();
+    const r = await executeMessageToolAction(
+      { capabilities: caps, transport, sessionToChannel: () => "c" },
+      "sess",
+      { action: "delete_thread" },
+    );
+    assert.equal((r as { ok: boolean }).ok, false);
+    assert.ok((r as { error: string }).error.includes("thread_id"));
+  });
 });
