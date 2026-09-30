@@ -1,10 +1,20 @@
+import { getLogger } from "@shoggoth/shared";
 import type { InternalMessage } from "./model";
+
+const log = getLogger("messaging");
 
 export type AgentToAgentHandler = (message: InternalMessage) => void;
 
 export interface AgentToAgentBus {
   subscribe(targetSessionId: string, handler: AgentToAgentHandler): () => void;
-  deliver(targetSessionId: string, message: InternalMessage): void;
+  /**
+   * Dispatch a message to every subscriber of `targetSessionId`.
+   *
+   * @returns `true` when at least one subscriber received the message,
+   * `false` when the message was dropped because no subscriber is registered
+   * for the target (a debug-level log record is emitted on drop).
+   */
+  deliver(targetSessionId: string, message: InternalMessage): boolean;
 }
 
 export function createAgentToAgentBus(): AgentToAgentBus {
@@ -24,12 +34,19 @@ export function createAgentToAgentBus(): AgentToAgentBus {
       };
     },
 
-    deliver(targetSessionId: string, message: InternalMessage): void {
+    deliver(targetSessionId: string, message: InternalMessage): boolean {
       const set = byTarget.get(targetSessionId);
-      if (!set) return;
+      if (!set || set.size === 0) {
+        log.debug("a2a.deliver.no_subscribers", {
+          targetSessionId,
+          messageId: message.id,
+        });
+        return false;
+      }
       for (const handler of set) {
         handler(message);
       }
+      return true;
     },
   };
 }
