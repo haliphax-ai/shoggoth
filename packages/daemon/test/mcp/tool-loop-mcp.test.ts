@@ -12,6 +12,7 @@ import { createToolRunStore } from "../../src/sessions/tool-run-store";
 import {
   buildAggregatedMcpCatalog,
   createMcpRoutingToolExecutor,
+  isLapsedMcpSessionResult,
   mcpToolsForToolLoop,
 } from "../../src/mcp/tool-loop-mcp";
 
@@ -120,5 +121,163 @@ describe("tool-loop MCP bridge", () => {
     };
     assert.equal(body.error, "mcp_external_transport_unavailable");
     assert.equal(body.sourceId, "other");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Mid-turn MCP session lapse recovery (idle eviction closing a pooled session
+// while the turn holds the captured `external` — see research
+// mcp-session-lifecycle.md, recommendation #1)
+// ---------------------------------------------------------------------------
+describe("MCP session lapse mid-turn — reconnect and retry once", () => {
+  const lapsedResult = () =>
+    JSON.stringify({
+      error: "mcp_tools_call_failed",
+      message: "Error: MCP session is closed",
+    });
+
+  function catalog() {
+    return buildAggregatedMcpCatalog([
+      {
+        sourceId: "demo_ext",
+        tools: [{ name: "noop", inputSchema: { type: "object" } }],
+      },
+    ]);
+  }
+
+  it("matches the closed-session signatures produced by the transports and pool", () => {
+    // Throw from request()/postOnce(): `Error: MCP session is closed`, wrapped
+    // by mcp-server-pool as { error, message: String(e) }.
+    assert.equal(
+      isLapsedMcpSessionResult(
+        JSON.stringify({
+          error: "mcp_tools_call_failed",
+          message: "Error: MCP session is closed",
+        }),
+      ),
+      true,
+    );
+    // Pending requests failed by close(): `MCP session closed`.
+    assert.equal(
+      isLapsedMcpSessionResult(
+        JSON.stringify({
+          error: "mcp_tools_call_failed",
+          message: "Error: MCP session closed",
+        }),
+      ),
+      true,
+    );
+    // Other failures must not trigger a reconnect.
+    assert.equal(
+      isLapsedMcpSessionResult(
+        JSON.stringify({
+          error: "mcp_tools_call_failed",
+          message: "Error: request timed out",
+        }),
+      ),
+      false,
+    );
+    assert.equal(
+      isLapsedMcpSessionResult(
+        JSON.stringify({ error: "mcp_source_not_connected", message: "nope" }),
+      ),
+      false,
+    );
+    assert.equal(isLapsedMcpSessionResult("not json"), false);
+  });
+
+  it("reconnects and retries exactly once when the session is closed mid-turn", async () => {
+    let staleCalls = 0;
+    let freshCalls = 0;
+    let reconnectCalls = 0;
+    const ex = createMcpRoutingToolExecutor({
+      aggregated: catalog(),
+      builtin: async () => ({ resultJson: "{}" }),
+      external: async () => {
+        staleCalls++;
+        return { resultJson: lapsedResult() };
+      },
+      reconnectExternal: async () => {
+        reconnectCalls++;
+        return async () => {
+          freshCalls++;
+          return { resultJson: JSON.stringify({ ok: true }) };
+        };
+      },
+    });
+
+    const out = await ex.execute({ name: "demo_ext-noop", argsJson: "{}", toolCallId: "t1" });
+
+    assert.equal(staleCalls, 1, "stale transport used for the failing first attempt");
+    assert.equal(reconnectCalls, 1, "exactly one reconnect");
+    assert.equal(freshCalls, 1, "exactly one retry against the refreshed transport");
+    assert.deepEqual(JSON.parse(out.resultJson), { ok: true });
+  });
+
+  it("surfaces a second closed-session failure without retrying again", async () => {
+    let reconnectCalls = 0;
+    let freshCalls = 0;
+    const ex = createMcpRoutingToolExecutor({
+      aggregated: catalog(),
+      builtin: async () => ({ resultJson: "{}" }),
+      external: async () => ({ resultJson: lapsedResult() }),
+      reconnectExternal: async () => {
+        reconnectCalls++;
+        return async () => {
+          freshCalls++;
+          return { resultJson: lapsedResult() };
+        };
+      },
+    });
+
+    const out = await ex.execute({ name: "demo_ext-noop", argsJson: "{}", toolCallId: "t2" });
+
+    assert.equal(reconnectCalls, 1, "reconnect happens at most once");
+    assert.equal(freshCalls, 1, "the retry happens, but is not retried a second time");
+    const body = JSON.parse(out.resultJson) as { error?: string; message?: string };
+    assert.equal(body.error, "mcp_tools_call_failed");
+    assert.match(body.message ?? "", /MCP session is closed/);
+  });
+
+  it("does not reconnect for non-lapse failures", async () => {
+    let reconnectCalls = 0;
+    const ex = createMcpRoutingToolExecutor({
+      aggregated: catalog(),
+      builtin: async () => ({ resultJson: "{}" }),
+      external: async () => ({
+        resultJson: JSON.stringify({
+          error: "mcp_tools_call_failed",
+          message: "Error: request timed out",
+        }),
+      }),
+      reconnectExternal: async () => {
+        reconnectCalls++;
+        return async () => ({ resultJson: JSON.stringify({ ok: true }) });
+      },
+    });
+
+    const out = await ex.execute({ name: "demo_ext-noop", argsJson: "{}", toolCallId: "t3" });
+
+    assert.equal(reconnectCalls, 0, "timeouts must not trigger a reconnect");
+    const body = JSON.parse(out.resultJson) as { error?: string; message?: string };
+    assert.equal(body.error, "mcp_tools_call_failed");
+    assert.match(body.message ?? "", /timed out/);
+  });
+
+  it("surfaces the closed-session error as-is when no reconnect is configured", async () => {
+    let calls = 0;
+    const ex = createMcpRoutingToolExecutor({
+      aggregated: catalog(),
+      builtin: async () => ({ resultJson: "{}" }),
+      external: async () => {
+        calls++;
+        return { resultJson: lapsedResult() };
+      },
+    });
+
+    const out = await ex.execute({ name: "demo_ext-noop", argsJson: "{}", toolCallId: "t4" });
+
+    assert.equal(calls, 1, "no retry without a reconnect callback");
+    assert.equal((JSON.parse(out.resultJson) as { error?: string }).error, "mcp_tools_call_failed");
   });
 });

@@ -17,7 +17,10 @@ import { migrate, defaultMigrationsDir } from "../../src/db/migrate";
 import { createHitlPendingResolutionStack } from "../../src/hitl/hitl-pending-stack";
 import { createPolicyEngine } from "../../src/policy/engine";
 import { executeSessionAgentTurn } from "../../src/sessions/session-agent-turn";
-import { buildBuiltinOnlySessionMcpToolContext } from "../../src/sessions/session-mcp-tool-context";
+import {
+  buildBuiltinOnlySessionMcpToolContext,
+  buildSessionMcpToolContext,
+} from "../../src/sessions/session-mcp-tool-context";
 
 import * as SystemPromptModule from "../../src/sessions/session-system-prompt";
 import { createSessionStore } from "../../src/sessions/session-store";
@@ -749,3 +752,190 @@ describe(
     });
   },
 );
+
+// ---------------------------------------------------------------------------
+// Mid-turn MCP session lapse recovery — the turn captured `external` at start,
+// then the pool was idle-evicted mid-turn (see research/mcp-session-lifecycle.md,
+// recommendation #1). The executor must re-resolve the MCP context once and
+// retry the call; a persistent lapse must NOT loop.
+// ---------------------------------------------------------------------------
+describe("executeSessionAgentTurn — mid-turn MCP session lapse", { concurrency: false }, () => {
+  let db: Database.Database;
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "shoggoth-turn-lapse-"));
+    const dbPath = join(tmp, "s.db");
+    db = new Database(dbPath);
+    db.pragma("foreign_keys = ON");
+    migrate(db, defaultMigrationsDir());
+    createSessionStore(db).create({
+      id: "sess-lapse",
+      workspacePath: tmp,
+      systemContextToken: "test-token",
+    });
+  });
+
+  afterEach(async () => {
+    await closeTestDb(db, tmp);
+  });
+
+  function externalSources() {
+    return [
+      {
+        sourceId: "demo_ext",
+        tools: [{ name: "noop", inputSchema: { type: "object" } }],
+      },
+    ];
+  }
+
+  function lapsedResultJson() {
+    return JSON.stringify({
+      error: "mcp_tools_call_failed",
+      message: "Error: MCP session is closed",
+    });
+  }
+
+  function makeCtx(
+    external: (input: {
+      sourceId: string;
+      originalName: string;
+      argsJson: string;
+      toolCallId: string;
+    }) => Promise<{ resultJson: string }>,
+  ) {
+    return buildSessionMcpToolContext(externalSources(), external);
+  }
+
+  function buildInput(overrides: {
+    resolveMcpContext: (sessionId: string) => Promise<ReturnType<typeof makeCtx>>;
+    model: () => { content: string | null; toolCalls?: unknown[] };
+  }) {
+    const config = defaultConfig(tmp);
+    const sessions = createSessionStore(db);
+    const session = sessions.getById("sess-lapse");
+    assert.ok(session);
+    const hitlStack = createHitlPendingResolutionStack(db);
+    return {
+      db,
+      sessionId: "sess-lapse",
+      session: session!,
+      transcript: createTranscriptStore(db),
+      toolRuns: createToolRunStore(db),
+      userContent: "call the external tool",
+      userMetadata: undefined,
+      env: process.env,
+      config,
+      policyEngine: createPolicyEngine(config.policy),
+      getHitlConfig: () => ({ ...DEFAULT_HITL_CONFIG, ...config.hitl }),
+      hitl: {
+        // Unknown external tools classify as "caution" — bypass so the loop
+        // never queues for HITL approval in these tests.
+        bypassUpTo: "critical" as const,
+        pending: hitlStack.pending,
+        clock: { nowMs: () => Date.now() },
+        newPendingId: () => randomUUID(),
+        waitForHitlResolution: hitlStack.waitForHitlResolution,
+      },
+      loopImpl: runToolLoop,
+      createToolCallingClient: () => ({
+        async completeWithTools() {
+          const out = overrides.model();
+          return {
+            content: out.content,
+            toolCalls: out.toolCalls ?? [],
+            usedModel: "stub",
+            usedProviderId: "stub",
+            degraded: false,
+          };
+        },
+      }),
+      resolveMcpContext: overrides.resolveMcpContext,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+  }
+
+  it("re-resolves the MCP context once and retries when the session lapses mid-turn", async () => {
+    const lapsed = lapsedResultJson();
+    let resolveCalls = 0;
+    let staleCalls = 0;
+    let freshCalls = 0;
+    let modelRound = 0;
+
+    const input = buildInput({
+      resolveMcpContext: async () => {
+        resolveCalls++;
+        if (resolveCalls === 1) {
+          // Turn start: context captured with the (soon to be) closed session.
+          return makeCtx(async () => {
+            staleCalls++;
+            return { resultJson: lapsed };
+          });
+        }
+        // Mid-turn re-resolve: freshly reconnected pool.
+        return makeCtx(async () => {
+          freshCalls++;
+          return { resultJson: JSON.stringify({ ok: true, via: "reconnected" }) };
+        });
+      },
+      model: () => {
+        if (modelRound++ === 0) {
+          return {
+            content: null,
+            toolCalls: [{ id: "t1", name: "demo_ext-noop", arguments: "{}" }],
+          };
+        }
+        return { content: "LAPSE_RECOVERED" };
+      },
+    });
+
+    const result = await executeSessionAgentTurn(input);
+
+    assert.equal(result.latestAssistantText, "LAPSE_RECOVERED");
+    assert.equal(resolveCalls, 2, "MCP context re-resolved exactly once mid-turn");
+    assert.equal(staleCalls, 1, "stale transport used for the failing first attempt");
+    assert.equal(freshCalls, 1, "exactly one retry against the reconnected transport");
+  });
+
+  it("surfaces a persistent closed-session failure after a single retry (no retry loop)", async () => {
+    const lapsed = lapsedResultJson();
+    let resolveCalls = 0;
+    let staleCalls = 0;
+    let freshCalls = 0;
+    let modelRound = 0;
+
+    const input = buildInput({
+      resolveMcpContext: async () => {
+        resolveCalls++;
+        if (resolveCalls === 1) {
+          return makeCtx(async () => {
+            staleCalls++;
+            return { resultJson: lapsed };
+          });
+        }
+        // Reconnect "succeeds" but the pool lapses again immediately.
+        return makeCtx(async () => {
+          freshCalls++;
+          return { resultJson: lapsed };
+        });
+      },
+      model: () => {
+        if (modelRound++ === 0) {
+          return {
+            content: null,
+            toolCalls: [{ id: "t1", name: "demo_ext-noop", arguments: "{}" }],
+          };
+        }
+        return { content: "LAPSE_PERSISTS" };
+      },
+    });
+
+    const result = await executeSessionAgentTurn(input);
+
+    // The turn still completes; the lapsed error was surfaced to the model.
+    assert.equal(result.latestAssistantText, "LAPSE_PERSISTS");
+    assert.equal(resolveCalls, 2, "reconnect attempted exactly once");
+    assert.equal(staleCalls, 1, "first attempt used the stale transport");
+    assert.equal(freshCalls, 1, "single retry, then the failure surfaces as-is");
+  });
+});

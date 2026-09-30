@@ -521,6 +521,13 @@ export function createDaemonToolExecutorFactory(
       return resolvedContext;
     };
 
+    // Mid-turn lapse recovery: re-resolve (replacing the cached context) so a
+    // closed-session failure retries against a freshly reconnected pool.
+    const reconnectMcpContext = async () => {
+      resolvedContext = await deps.sessionMcpRuntime.resolveContext(sessionId);
+      return resolvedContext;
+    };
+
     return {
       async execute({ name, argsJson, toolCallId }) {
         logger.debug("workflow tool task executing", {
@@ -554,6 +561,7 @@ export function createDaemonToolExecutorFactory(
             imageBlockCodec: deps.imageBlockCodec,
             builtinRegistry: deps.builtinRegistry,
             sessionMcpContext: mcp,
+            reconnectMcpContext,
           });
 
           const result = await executor.execute({ name, argsJson, toolCallId });
