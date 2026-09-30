@@ -42,6 +42,12 @@ interface WorkflowToolExecutorDeps {
   readonly imageBlockCodec?: ImageBlockCodec;
   readonly builtinRegistry: BuiltinToolRegistry;
   readonly sessionMcpContext: SessionMcpToolContext;
+  /**
+   * Optional mid-turn lapse recovery: re-resolves the session MCP context (which
+   * lazily reconnects an idle-evicted pool) so a closed-session failure can be
+   * retried once against a refreshed transport (see `createMcpRoutingToolExecutor`).
+   */
+  readonly reconnectMcpContext?: () => Promise<SessionMcpToolContext>;
 }
 
 /**
@@ -70,6 +76,8 @@ export function createWorkflowToolExecutor(
     isSubagentSession: deps.isSubagentSession,
     imageBlockCodec: deps.imageBlockCodec,
   };
+
+  const reconnectMcpContext = deps.reconnectMcpContext;
 
   return createMcpRoutingToolExecutor({
     aggregated: deps.sessionMcpContext.aggregated,
@@ -109,5 +117,8 @@ export function createWorkflowToolExecutor(
       }
     },
     external: deps.sessionMcpContext.external,
+    reconnectExternal: reconnectMcpContext
+      ? async () => (await reconnectMcpContext()).external
+      : undefined,
   });
 }

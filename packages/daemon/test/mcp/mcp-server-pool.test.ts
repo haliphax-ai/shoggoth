@@ -15,6 +15,7 @@ import { createToolRunStore } from "../../src/sessions/tool-run-store";
 import {
   buildAggregatedMcpCatalog,
   createMcpRoutingToolExecutor,
+  isLapsedMcpSessionResult,
   mcpToolsForToolLoop,
 } from "../../src/mcp/tool-loop-mcp";
 import {
@@ -538,6 +539,109 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
     } finally {
       await pool.close().catch(() => {});
       server.close();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Mid-turn MCP session lapse — end-to-end against a REAL pooled stdio session
+// that was closed under the turn-captured `external` (the incident signature:
+// 30-minute idle eviction vs. a turn that resolved its MCP context at start).
+// ---------------------------------------------------------------------------
+describe("MCP session lapse mid-turn — real pool close (stdio)", () => {
+  const serverEntry: ShoggothMcpServerEntry = {
+    id: "mocksrv",
+    transport: "stdio",
+    command: process.execPath,
+    args: [mockServerPath],
+  };
+
+  it("reconnects and retries exactly once after the pooled session was closed", async () => {
+    const first = await connectShoggothMcpServers([serverEntry]);
+    let second: Awaited<ReturnType<typeof connectShoggothMcpServers>> | undefined;
+    try {
+      // Simulate idle eviction: close the pool under the turn-captured external.
+      await first.pool.close();
+
+      // Pin the real closed-session signature produced by transport + pool.
+      const probe = await first.external({
+        sourceId: "mocksrv",
+        originalName: "echo",
+        argsJson: '{"text":"probe"}',
+        toolCallId: "probe",
+      });
+      const probeBody = JSON.parse(probe.resultJson) as { error?: string; message?: string };
+      assert.equal(probeBody.error, "mcp_tools_call_failed");
+      assert.match(probeBody.message ?? "", /MCP session is closed/);
+      assert.equal(isLapsedMcpSessionResult(probe.resultJson), true);
+
+      let reconnects = 0;
+      let retryCalls = 0;
+      const ex = createMcpRoutingToolExecutor({
+        aggregated: buildAggregatedMcpCatalog(first.pool.externalSources),
+        external: first.external,
+        reconnectExternal: async () => {
+          reconnects++;
+          second = await connectShoggothMcpServers([serverEntry]);
+          const inner = second.external;
+          return (input) => {
+            retryCalls++;
+            return inner(input);
+          };
+        },
+      });
+
+      const out = await ex.execute({
+        name: "mocksrv-echo",
+        argsJson: '{"text":"recovered"}',
+        toolCallId: "c1",
+      });
+
+      assert.equal(reconnects, 1, "exactly one reconnect");
+      assert.equal(retryCalls, 1, "exactly one retry against the reconnected pool");
+      assert.match(out.resultJson, /recovered/, "retry succeeded against the fresh pool");
+    } finally {
+      await second?.pool.close().catch(() => {});
+    }
+  });
+
+  it("surfaces the closed-session error after one retry when the fresh pool is also closed", async () => {
+    const first = await connectShoggothMcpServers([serverEntry]);
+    let second: Awaited<ReturnType<typeof connectShoggothMcpServers>> | undefined;
+    try {
+      await first.pool.close();
+
+      let reconnects = 0;
+      let retryCalls = 0;
+      const ex = createMcpRoutingToolExecutor({
+        aggregated: buildAggregatedMcpCatalog(first.pool.externalSources),
+        external: first.external,
+        reconnectExternal: async () => {
+          reconnects++;
+          second = await connectShoggothMcpServers([serverEntry]);
+          const inner = second.external;
+          // The freshly connected pool lapses immediately too.
+          await second.pool.close();
+          return (input) => {
+            retryCalls++;
+            return inner(input);
+          };
+        },
+      });
+
+      const out = await ex.execute({
+        name: "mocksrv-echo",
+        argsJson: '{"text":"recovered"}',
+        toolCallId: "c1",
+      });
+
+      assert.equal(reconnects, 1, "reconnect attempted at most once");
+      assert.equal(retryCalls, 1, "single retry, then the failure surfaces as-is");
+      const body = JSON.parse(out.resultJson) as { error?: string; message?: string };
+      assert.equal(body.error, "mcp_tools_call_failed");
+      assert.match(body.message ?? "", /MCP session is closed/);
+    } finally {
+      await second?.pool.close().catch(() => {});
     }
   });
 });

@@ -454,6 +454,15 @@ export async function executeSessionAgentTurn(
   const executor = createMcpRoutingToolExecutor({
     aggregated: mcpCtx.fullAggregated ?? mcpCtx.aggregated,
     ...(mcpCtx.external ? { external: mcpCtx.external } : {}),
+    // Mid-turn lapse recovery: if the pooled MCP session was closed under this
+    // turn (e.g. 30-minute idle eviction — see tool-loop-mcp), re-resolve the
+    // context so `external` dispatches against a freshly reconnected pool, then
+    // retry the call once. Reassigning `mcpCtx` keeps refreshTools (below) and
+    // the executor's retry reading from the same refreshed context.
+    reconnectExternal: async () => {
+      mcpCtx = await input.resolveMcpContext(input.sessionId);
+      return mcpCtx.external;
+    },
     builtin: async ({ originalName, argsJson }) => {
       try {
         const args = JSON.parse(argsJson) as Record<string, unknown>;
