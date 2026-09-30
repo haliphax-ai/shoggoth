@@ -15,6 +15,14 @@ export interface JsonSchemaLike {
 
 export interface ExtensionFlags {
   readonly attachments: boolean;
+  /**
+   * Adapter can deliver messages into threads (outbound `extensions.threadId`).
+   * Consumed outside this package: platform outbound guards read it — e.g.
+   * `platform-discord/src/outbound.ts` `assertExtensionsAllowed` rejects a
+   * thread-addressed message when the adapter does not support threads.
+   * Not read by the agent `message` tool handler; `threadCreate`/`threadDelete`
+   * gate those actions instead.
+   */
   readonly threads: boolean;
   readonly replies: boolean;
   readonly reactionsInbound: boolean;
