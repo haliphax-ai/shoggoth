@@ -26,12 +26,10 @@ function normalizeId(id: string): string {
 /**
  * Mutable store for messaging platform registrations.
  *
- * The process-wide singleton below is kept intentionally (kanban card
- * `1873675178089645849`), but all of its state lives inside an instance of
- * this class so the backing `Map` is never reachable from module scope.
- * Registration and de-registration go through validated methods, and tests
- * that need isolation can construct their own instances instead of sharing
- * the singleton's state.
+ * All state lives inside an instance of this class, so the backing `Map` is
+ * never reachable from module scope. Registration and de-registration go
+ * through validated methods, and tests that need isolation can construct
+ * their own instances instead of sharing the process-wide singleton.
  */
 export class PlatformRegistry {
   private readonly registrations = new Map<string, PlatformRegistration>();
