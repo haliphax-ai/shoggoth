@@ -32,6 +32,10 @@ export interface MessageToolDeps {
   readonly maxAttachmentBytes?: number;
 }
 
+function resolveMaxAttachmentBytes(deps: MessageToolDeps): number {
+  return deps.maxAttachmentBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES;
+}
+
 function str(v: unknown, field: string): string {
   if (typeof v !== "string" || !v.trim()) throw new Error(`${field} must be a non-empty string`);
   return v.trim();
@@ -277,7 +281,7 @@ async function handlePostAction(
       error: "reply_to_message_id not supported on this platform",
     };
 
-  const maxAttachmentBytes = deps.maxAttachmentBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES;
+  const maxAttachmentBytes = resolveMaxAttachmentBytes(deps);
   const attRaw = args.attachments;
   const files: MessageUploadFile[] = [];
   if (attRaw !== undefined) {
@@ -707,7 +711,7 @@ async function handleAttachmentDownloadAction(
     typeof attachment!.content_type === "string" ? attachment!.content_type : undefined;
   const sizeBytes = typeof attachment!.size === "number" ? attachment!.size : undefined;
 
-  const maxSize = deps.maxAttachmentBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES;
+  const maxSize = resolveMaxAttachmentBytes(deps);
   if (sizeBytes !== undefined && sizeBytes > maxSize) {
     return {
       ok: false,
