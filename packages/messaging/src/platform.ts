@@ -140,6 +140,11 @@ export interface PlatformRuntime {
   /**
    * Resolve the platform-native channel/conversation id used for outbound
    * delivery for a session. Returns `undefined` when no mapping exists.
+   *
+   * Required so callers never have to null-check it. Platforms without a
+   * channel mapping may omit it when registering their runtime
+   * (`setPlatformRuntime`); the registration path defaults it to a function
+   * that returns `undefined`.
    */
-  resolveOutboundChannelIdForSession?(sessionId: string): string | undefined;
+  resolveOutboundChannelIdForSession(sessionId: string): string | undefined;
 }

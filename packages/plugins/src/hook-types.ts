@@ -46,10 +46,18 @@ export interface DaemonShutdownCtx {
 // Platform Lifecycle
 // -------------------------------------------------------------------------------
 
+/**
+ * Platform runtime accepted by {@link PlatformRegisterCtx.setPlatformRuntime}.
+ * Members that have a default — currently `resolveOutboundChannelIdForSession` —
+ * may be omitted; the daemon fills the default in before storing the runtime.
+ */
+export type PlatformRuntimeInput = Omit<PlatformRuntime, "resolveOutboundChannelIdForSession"> &
+  Partial<Pick<PlatformRuntime, "resolveOutboundChannelIdForSession">>;
+
 export interface PlatformRegisterCtx {
   readonly config: Readonly<ShoggothConfig>;
   readonly registerPlatform: (reg: PlatformRegistration) => void;
-  readonly setPlatformRuntime: (platformId: string, runtime: PlatformRuntime) => void;
+  readonly setPlatformRuntime: (platformId: string, runtime: PlatformRuntimeInput) => void;
 }
 
 /**
