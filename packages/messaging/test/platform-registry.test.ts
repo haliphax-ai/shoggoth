@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   registerPlatform,
   getPlatformRegistration,
+  unregisterPlatform,
   clearPlatformRegistry,
+  PlatformRegistry,
   type PlatformRegistration,
 } from "../src/platform-registry";
 
@@ -103,5 +105,39 @@ describe("Platform Registry", () => {
     const stored = getPlatformRegistration("test-platform")!;
     expect(stored.validateConfig).toBe(validateConfig);
     expect(stored.validateUrn).toBe(validateUrn);
+  });
+
+  // ---- unregisterPlatform ----
+
+  it("removes a registration via unregisterPlatform", () => {
+    registerPlatform(makeReg());
+    expect(unregisterPlatform("test-platform")).toBe(true);
+    expect(getPlatformRegistration("test-platform")).toBeUndefined();
+  });
+
+  it("unregisterPlatform is case-insensitive and false for unknown ids", () => {
+    registerPlatform(makeReg());
+    expect(unregisterPlatform("  TEST-PLATFORM  ")).toBe(true);
+    expect(unregisterPlatform("test-platform")).toBe(false);
+  });
+});
+
+describe("PlatformRegistry instances", () => {
+  it("instances are isolated from the process-wide registry", () => {
+    const a = new PlatformRegistry();
+    const b = new PlatformRegistry();
+    a.register(makeReg());
+    expect(a.get("test-platform")).toBeDefined();
+    expect(b.get("test-platform")).toBeUndefined();
+    expect(getPlatformRegistration("test-platform")).toBeUndefined();
+  });
+
+  it("supports register/unregister/clear on an isolated instance", () => {
+    const reg = new PlatformRegistry();
+    reg.register(makeReg());
+    expect(reg.unregister("test-platform")).toBe(true);
+    reg.register(makeReg());
+    reg.clear();
+    expect(reg.get("test-platform")).toBeUndefined();
   });
 });
