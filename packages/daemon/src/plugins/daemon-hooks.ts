@@ -32,7 +32,11 @@ interface DaemonHooksContext {
     options?: { group: number },
   ) => void;
   registerPlatform: (reg: PlatformRegistration) => void;
-  setPlatformRuntime: (platformId: string, runtime: PlatformRuntime) => void;
+  setPlatformRuntime: (
+    platformId: string,
+    runtime: Omit<PlatformRuntime, "resolveOutboundChannelIdForSession"> &
+      Partial<Pick<PlatformRuntime, "resolveOutboundChannelIdForSession">>,
+  ) => void;
   registerProbe: (probe: HealthProbe) => void;
   deps: PlatformDeps;
   setSubagentRuntimeExtension: (ext: SubagentRuntimeExtension | undefined) => void;

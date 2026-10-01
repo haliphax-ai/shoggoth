@@ -959,7 +959,13 @@ void (async () => {
     deliveryRegistry,
     registerDrain: (name, fn) => rt.shutdown.registerDrain(name, fn),
     registerPlatform: (reg) => registerMessagingPlatform(reg),
-    setPlatformRuntime: (platformId, runtime) => platformsMap.set(platformId, runtime),
+    setPlatformRuntime: (platformId, runtime) =>
+      platformsMap.set(platformId, {
+        ...runtime,
+        // Default when a platform has no channel mapping: always `undefined`.
+        resolveOutboundChannelIdForSession:
+          runtime.resolveOutboundChannelIdForSession ?? (() => undefined),
+      }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerProbe: (probe) => rt.health.register(probe as any),
     deps: platformDeps,
