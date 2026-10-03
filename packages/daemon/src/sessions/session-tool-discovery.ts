@@ -5,6 +5,7 @@
 import type Database from "better-sqlite3";
 import { createAggregateMcpCatalogResult, type AggregatedTool } from "@shoggoth/mcp-integration";
 import { parseAgentSessionUrn, type ShoggothConfig } from "@shoggoth/shared";
+import { isGlobPattern, toolIdGlobMatches } from "./tool-id-glob";
 import { openAiToolsFromCatalog, type SessionMcpToolContext } from "./session-mcp-tool-context";
 import { mcpToolsForToolLoop } from "../mcp/tool-loop-mcp";
 import type { SessionMcpContextFinalizer } from "./session-mcp-runtime";
@@ -56,6 +57,73 @@ export function setSessionToolState(
      VALUES (?, ?, ?, datetime('now'))
      ON CONFLICT(session_id, tool_id) DO UPDATE SET enabled = excluded.enabled, updated_at = excluded.updated_at`,
   ).run(sessionId, toolId, enabled ? 1 : 0);
+}
+
+// ---------------------------------------------------------------------------
+// Spawn-time tool enables
+// ---------------------------------------------------------------------------
+
+/** `alwaysOn` entries that contain wildcards. */
+function alwaysOnGlobsOf(alwaysOn: ReadonlySet<string>): string[] {
+  const out: string[] = [];
+  for (const id of alwaysOn) if (isGlobPattern(id)) out.push(id);
+  return out;
+}
+
+/** Whether a tool is always-on: exact set membership or a matching glob entry. */
+export function isAlwaysOnTool(
+  toolId: string,
+  alwaysOn: ReadonlySet<string>,
+  globs?: readonly string[],
+): boolean {
+  if (alwaysOn.has(toolId)) return true;
+  const patterns = globs ?? alwaysOnGlobsOf(alwaysOn);
+  for (const pattern of patterns) if (toolIdGlobMatches(pattern, toolId)) return true;
+  return false;
+}
+
+/** Enabled session tool state entries whose IDs contain wildcards. */
+function globPatternsOf(toolState: ReadonlyMap<string, boolean>): string[] {
+  const out: string[] = [];
+  for (const [id, enabled] of toolState) {
+    if (enabled && isGlobPattern(id)) out.push(id);
+  }
+  return out;
+}
+
+/**
+ * Whether a tool ID is enabled by session tool state: either an exact enabled
+ * entry or an enabled glob pattern that matches the ID.
+ */
+export function isToolEnabledByState(
+  toolId: string,
+  toolState: ReadonlyMap<string, boolean>,
+  globPatterns?: readonly string[],
+): boolean {
+  const exact = toolState.get(toolId);
+  if (exact !== undefined) return exact;
+  const patterns = globPatterns ?? globPatternsOf(toolState);
+  for (const pattern of patterns) {
+    if (toolIdGlobMatches(pattern, toolId)) return true;
+  }
+  return false;
+}
+
+/**
+ * Record spawn-time tool enables for a session. Entries may be exact tool IDs
+ * or glob patterns; they are merged with (not a replacement for) the
+ * configured `alwaysOn` defaults when the session's tools are advertised.
+ */
+export function enableToolsForSession(
+  db: Database.Database,
+  sessionId: string,
+  patterns: readonly string[],
+): void {
+  for (const pattern of patterns) {
+    const trimmed = pattern.trim();
+    if (!trimmed) continue;
+    setSessionToolState(db, sessionId, trimmed, true);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +223,7 @@ export function createToolDiscoveryFinalizer(
   return (ctx: SessionMcpToolContext, sessionId: string): SessionMcpToolContext => {
     const resolved = resolveToolDiscoveryConfig(config, sessionId);
     if (!resolved.enabled) return ctx;
+    const alwaysOnGlobs = alwaysOnGlobsOf(resolved.alwaysOn);
 
     // Cache tool descriptions from the full catalog for the discover handler's `list` action.
     const descMap = new Map<string, string>();
@@ -164,15 +233,16 @@ export function createToolDiscoveryFinalizer(
     toolCatalogCache.set(sessionId, descMap);
 
     const toolState = getSessionToolState(db, sessionId);
+    const globPatterns = globPatternsOf(toolState);
 
     const enabledTools: AggregatedTool[] = [];
     const collapsedTools: AggregatedTool[] = [];
 
     for (const tool of ctx.aggregated.tools) {
       const id = tool.namespacedName;
-      if (resolved.alwaysOn.has(id)) {
+      if (isAlwaysOnTool(id, resolved.alwaysOn, alwaysOnGlobs)) {
         enabledTools.push(tool);
-      } else if (toolState.get(id) === true) {
+      } else if (isToolEnabledByState(id, toolState, globPatterns)) {
         enabledTools.push(tool);
       } else {
         collapsedTools.push(tool);

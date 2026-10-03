@@ -401,6 +401,16 @@ async function subagentHandler(
     payload.model_options = mo;
   }
 
+  // enable_tools for spawn actions: tool IDs or glob patterns for the child session
+  const enableToolsArg = args.enable_tools;
+  if (
+    spawnAction &&
+    Array.isArray(enableToolsArg) &&
+    enableToolsArg.every((x) => typeof x === "string" && x.trim())
+  ) {
+    payload.enable_tools = (enableToolsArg as string[]).map((x) => x.trim());
+  }
+
   log.info("subagent invoked", { action, sessionId: ctx.sessionId });
   if (spawnAction) {
     log.info("subagent spawned", {

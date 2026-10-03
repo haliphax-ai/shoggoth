@@ -45,6 +45,11 @@ export interface AgentTaskDef extends TaskDefBase {
   };
   /** Optional per-task model override. Highest priority in the model selection chain. */
   modelOptions?: { model?: string };
+  /**
+   * Tool IDs or glob patterns (e.g. `kanban-*`) to enable for the spawned
+   * session. Added to the configured defaults.
+   */
+  enableTools?: string[];
 }
 
 /** Tool task — invokes an MCP tool directly (Phase 2). */
