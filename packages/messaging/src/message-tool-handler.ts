@@ -703,13 +703,15 @@ async function handleAttachmentDownloadAction(
     attachment = rawAttachments[idx] as Record<string, unknown>;
   }
 
-  const url = typeof attachment!.url === "string" ? attachment!.url : undefined;
+  if (!attachment) return { ok: false, error: "attachment not found" };
+
+  const url = typeof attachment.url === "string" ? attachment.url : undefined;
   if (!url) return { ok: false, error: "attachment has no URL" };
 
-  const filename = typeof attachment!.filename === "string" ? attachment!.filename : "attachment";
+  const filename = typeof attachment.filename === "string" ? attachment.filename : "attachment";
   const contentType =
-    typeof attachment!.content_type === "string" ? attachment!.content_type : undefined;
-  const sizeBytes = typeof attachment!.size === "number" ? attachment!.size : undefined;
+    typeof attachment.content_type === "string" ? attachment.content_type : undefined;
+  const sizeBytes = typeof attachment.size === "number" ? attachment.size : undefined;
 
   const maxSize = resolveMaxAttachmentBytes(deps);
   if (sizeBytes !== undefined && sizeBytes > maxSize) {
