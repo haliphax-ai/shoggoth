@@ -222,6 +222,12 @@ export const subagentToolArgs = {
       description:
         "spawn_one_shot, spawn_persistent: how to deliver subagent results to the parent. inline (default): inject via steer channel. queue: queue a new turn. drop: discard results.",
     },
+    enable_tools: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "spawn_one_shot, spawn_persistent: tool IDs or glob patterns (e.g. 'kanban-*') to enable for the subagent session. Added to the configured defaults, not a replacement.",
+    },
   },
   required: ["action"],
 } as const;

@@ -122,6 +122,12 @@ const workflowToolArgs = {
               model: { type: "string", description: "Model identifier to use for this task." },
             },
           },
+          enable_tools: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Optional: tool IDs or glob patterns (e.g. 'kanban-*') to enable for the agent task's subagent session. Added to the configured defaults.",
+          },
         },
         required: ["id"],
       },

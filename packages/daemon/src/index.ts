@@ -555,6 +555,7 @@ async function initWorkflowServer(
     sessions,
     requestTurnAbort: (id) => requestSessionTurnAbort(id),
     subagentModel: workflowSubagentModel,
+    stateDb: db,
     runSessionModelTurn: (input) => {
       const ext = subagentRuntimeExtensionRef.current;
       if (!ext) throw new Error("subagent runtime not available (platform not started)");

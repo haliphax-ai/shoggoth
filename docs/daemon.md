@@ -158,8 +158,11 @@ When `toolDiscovery.enabled` is true, the daemon maintains a collapsible tool ca
 
 - Tools not in the `alwaysOn` set start collapsed (hidden from the model).
 - The `builtin-discover` tool is always available and lists/enables/disables tools.
+- Session enable entries may be exact tool IDs or glob patterns (`kanban-*`); an exact entry for a tool always wins over a glob match.
+- Glob patterns are also allowed in `toolDiscovery.alwaysOn` (global config) and per-agent `toolDiscovery.alwaysOn` (subagent defaults); every catalog tool matching a glob is advertised as always-on.
 - Trigger phrases in user messages can auto-enable tools.
 - Mid-loop refresh updates the tool set without restarting the turn.
+- Subagent spawns accept `enable_tools` (tool IDs/globs) which are added to the session's enabled set alongside the configured defaults.
 
 ### Builtin Tool Registry
 

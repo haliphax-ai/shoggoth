@@ -25,22 +25,23 @@ Orchestrate multi-task workflows with dependency graphs. Supports agent, tool, g
 
 ## Task Object
 
-| Param                  | Type          | Required  | Notes                                                               |
-| ---------------------- | ------------- | --------- | ------------------------------------------------------------------- |
-| `id`                   | number        | yes       | Unique task id (referenced in graph)                                |
-| `kind`                 | string        | no        | `"agent"` (default), `"tool"`, `"gate"`, `"transform"`, `"message"` |
-| `title`                | string        | no        | Display title (max 60 chars)                                        |
-| `prompt`               | string        | agent     | Required for agent tasks                                            |
-| `tool`                 | string        | tool      | Required for tool tasks                                             |
-| `args`                 | object        | tool      | Required for tool tasks                                             |
-| `condition`            | string        | gate      | Required for gate tasks                                             |
-| `template`             | string        | transform | Required for transform tasks                                        |
-| `message`              | string        | message   | Required for message tasks                                          |
-| `channel`              | string        | no        | Channel for message tasks                                           |
-| `output_template`      | string        | no        | Template applied to task output                                     |
-| `failure_behavior`     | string        | no        | `"abort"`, `"pause"`, or `"continue"` (default: `"continue"`)       |
-| `failure_notification` | string/object | no        | Same as top-level                                                   |
-| `runtime_limit_ms`     | number        | no        | Per-task timeout                                                    |
+| Param                  | Type          | Required  | Notes                                                                                      |
+| ---------------------- | ------------- | --------- | ------------------------------------------------------------------------------------------ |
+| `id`                   | number        | yes       | Unique task id (referenced in graph)                                                       |
+| `kind`                 | string        | no        | `"agent"` (default), `"tool"`, `"gate"`, `"transform"`, `"message"`                        |
+| `title`                | string        | no        | Display title (max 60 chars)                                                               |
+| `prompt`               | string        | agent     | Required for agent tasks                                                                   |
+| `enable_tools`         | string[]      | no        | Tool IDs/globs (e.g. `kanban-*`) enabled for the agent task's subagent (added to defaults) |
+| `tool`                 | string        | tool      | Required for tool tasks                                                                    |
+| `args`                 | object        | tool      | Required for tool tasks                                                                    |
+| `condition`            | string        | gate      | Required for gate tasks                                                                    |
+| `template`             | string        | transform | Required for transform tasks                                                               |
+| `message`              | string        | message   | Required for message tasks                                                                 |
+| `channel`              | string        | no        | Channel for message tasks                                                                  |
+| `output_template`      | string        | no        | Template applied to task output                                                            |
+| `failure_behavior`     | string        | no        | `"abort"`, `"pause"`, or `"continue"` (default: `"continue"`)                              |
+| `failure_notification` | string/object | no        | Same as top-level                                                                          |
+| `runtime_limit_ms`     | number        | no        | Per-task timeout                                                                           |
 
 ## Examples
 

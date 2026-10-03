@@ -62,6 +62,7 @@ import {
 } from "../sessions/session-stats-store";
 import { dispatchMcpHttpCancelRequest } from "../mcp/mcp-http-cancel-registry";
 import { SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS } from "../subagent/subagent-constants";
+import { enableToolsForSession } from "../sessions/session-tool-discovery";
 import { requestSessionTurnAbort } from "../sessions/session-turn-abort";
 import { validateModelRefExists } from "../sessions/model-resolution";
 import { rememberSubagentHandles } from "../subagent/subagent-disposables";
@@ -1234,6 +1235,10 @@ export async function handleIntegrationControlOp(
       const deliveryMode: "inline" | "queue" | "drop" =
         deliveryModeRaw === "queue" || deliveryModeRaw === "drop" ? deliveryModeRaw : "inline";
 
+      // Spawn-time tool enables: exact tool IDs or glob patterns (e.g. "kanban-*"),
+      // merged into the child session's tool state alongside configured defaults.
+      const enableTools = optionalStringArray(pl, "enable_tools");
+
       let childId: string;
       try {
         ({ sessionId: childId } = await sessionManager.spawn({
@@ -1246,6 +1251,9 @@ export async function handleIntegrationControlOp(
           throw new IntegrationOpError(e.code, e.message);
         }
         throw e;
+      }
+      if (enableTools && enableTools.length > 0 && ctx.stateDb) {
+        enableToolsForSession(ctx.stateDb, childId, enableTools);
       }
       const now = Date.now();
       if (modeRaw === "one_shot") {
