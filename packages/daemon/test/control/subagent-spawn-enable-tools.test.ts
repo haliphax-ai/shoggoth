@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
+import { describe, it, beforeEach, afterEach, beforeAll, afterAll, vi } from "vitest";
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 import { mkdtemp } from "node:fs/promises";
@@ -20,6 +20,13 @@ import { startControlPlane } from "../../src/control/control-plane";
 import { createLogger } from "../../src/logging";
 import { HealthRegistry } from "../../src/health";
 import { ShutdownCoordinator } from "../../src/shutdown";
+
+// ensureAgentWorkspaceLayout spawns node with the agent uid/gid (900) — EPERM on the
+// non-root CI runner. Mock it like the other spawn tests (control-plane.test.ts et al.).
+vi.mock("../../src/workspaces/agent-workspace-layout", () => ({
+  ensureAgentWorkspaceLayout: async () => {},
+  resolveAgentTemplateDir: () => "/tmp/templates",
+}));
 
 let prevOperatorToken: string | undefined;
 beforeAll(() => {
