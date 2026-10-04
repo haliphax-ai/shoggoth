@@ -36,21 +36,19 @@ function resolveMaxAttachmentBytes(deps: MessageToolDeps): number {
   return deps.maxAttachmentBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES;
 }
 
+/**
+ * Coerce an unknown value to a trimmed, non-empty string.
+ *
+ * Throws an `Error` naming the offending `field` when the value is missing or
+ * blank. The throw is intentional: it is expected to propagate to the outer
+ * `try`/`catch` in `executeMessageToolAction`, which folds it into the
+ * `{ ok: false, error: "..." }` result shape used by the other action
+ * handlers.
+ */
 function str(v: unknown, field: string): string {
   if (typeof v !== "string" || !v.trim()) throw new Error(`${field} must be a non-empty string`);
   return v.trim();
 }
-
-/**
- * Coerce a value to a trimmed, non-empty string.
- *
- * Unlike `optStr`, any missing or blank input produces an error string describing
- * the offending field. The error is intentionally thrown and is expected to be
- * caught by the outer `try`/`catch` in `executeMessageToolAction`, which will
- * fold it into an `{ ok: false, error: "..." }` shape — so the rest of the
- * function can stay in the early-return style established by the individual
- * action handlers. Callers treat the return value as a trusted string.
- */
 
 function optStr(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
