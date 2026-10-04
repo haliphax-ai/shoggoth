@@ -41,6 +41,17 @@ function str(v: unknown, field: string): string {
   return v.trim();
 }
 
+/**
+ * Coerce a value to a trimmed, non-empty string.
+ *
+ * Unlike `optStr`, any missing or blank input produces an error string describing
+ * the offending field. The error is intentionally thrown and is expected to be
+ * caught by the outer `try`/`catch` in `executeMessageToolAction`, which will
+ * fold it into an `{ ok: false, error: "..." }` shape — so the rest of the
+ * function can stay in the early-return style established by the individual
+ * action handlers. Callers treat the return value as a trusted string.
+ */
+
 function optStr(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
   const t = v.trim();
