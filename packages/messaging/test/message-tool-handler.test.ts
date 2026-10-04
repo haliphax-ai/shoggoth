@@ -1,6 +1,7 @@
 import { describe, it } from "vitest";
 import assert from "node:assert";
 import {
+  createActionToolDispatcher,
   executeMessageToolAction,
   type MessageToolTransport,
   summarizeApiMessage,
@@ -1368,5 +1369,51 @@ describe("executeMessageToolAction", () => {
     );
     assert.equal((r as { ok: boolean }).ok, false);
     assert.ok((r as { error: string }).error.includes("thread_id"));
+  });
+
+  // --- createActionToolDispatcher (construction-time dep validation) ---
+  it("dispatcher: throws when search is enabled but sessionToGuild is not wired", () => {
+    const transport = mockTransport();
+    assert.throws(
+      () =>
+        createActionToolDispatcher({
+          capabilities: caps,
+          transport,
+          sessionToChannel: () => "c",
+        }),
+      /sessionToGuild/,
+    );
+  });
+
+  it("dispatcher: throws when attachmentDownload is enabled but downloadFile is not wired", () => {
+    const transport = mockTransport();
+    const noSearch = { ...caps, extensions: { ...caps.extensions, search: false } };
+    assert.throws(
+      () =>
+        createActionToolDispatcher({
+          capabilities: noSearch,
+          transport,
+          sessionToChannel: () => "c",
+          sessionToGuild: () => "g1",
+        }),
+      /downloadFile/,
+    );
+  });
+
+  it("dispatcher: dispatches once all required dep groups are wired", async () => {
+    const transport = mockTransport({
+      async createMessage() {
+        return { id: "m1" };
+      },
+    });
+    const dispatch = createActionToolDispatcher({
+      capabilities: caps,
+      transport,
+      sessionToChannel: () => "chan-a",
+      sessionToGuild: () => "guild1",
+      downloadFile: async () => 0,
+    });
+    const r = await dispatch("sess", { action: "post", content: "hi" });
+    assert.deepEqual(r, { ok: true, message_id: "m1", channel_id: "chan-a" });
   });
 });
