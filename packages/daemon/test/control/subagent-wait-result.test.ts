@@ -1,7 +1,14 @@
 /**
  * Tests for subagent_wait and subagent_result control ops.
  */
-import { describe, it, beforeEach, afterEach } from "vitest";
+import { describe, it, beforeEach, afterEach, vi } from "vitest";
+
+// Compartmentalize: any spawn through the real session manager would run the
+// workspace-layout script as the agent uid/gid — keep this suite hermetic.
+vi.mock("../../src/workspaces/agent-workspace-layout", () => ({
+  ensureAgentWorkspaceLayout: async () => {},
+  resolveAgentTemplateDir: () => "/tmp/templates",
+}));
 import assert from "node:assert";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync } from "node:fs";
@@ -97,8 +104,8 @@ describe("subagent_wait and subagent_result control ops", { concurrency: false }
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   // --- subagent_result tests ---
 
