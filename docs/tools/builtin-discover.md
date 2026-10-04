@@ -6,7 +6,7 @@ Enable, disable, list, or reset available tools for the current session. Require
 
 | Param     | Type     | Required | Notes                                                |
 | --------- | -------- | -------- | ---------------------------------------------------- |
-| `enable`  | string[] | no       | Tool IDs to enable                                   |
+| `enable`  | string[] | no       | Tool IDs (or globs like `kanban-*`) to enable        |
 | `disable` | string[] | no       | Tool IDs to disable (`alwaysOn` tools are rejected)  |
 | `reset`   | boolean  | no       | Clear all session tool state before applying changes |
 | `list`    | boolean  | no       | Return the full tool catalog in the response         |

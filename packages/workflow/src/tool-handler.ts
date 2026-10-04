@@ -30,6 +30,7 @@ interface TaskInput {
     schema: Record<string, unknown>;
   };
   model_options?: { model?: string };
+  enable_tools?: string[];
 }
 
 export interface WorkflowToolArgs {
@@ -124,12 +125,23 @@ function toTaskDefs(inputs: TaskInput[]): TaskDef[] {
     switch (kind) {
       case "agent": {
         const prompt = requireField(t.prompt, `tasks[${t.id}].prompt (required for agent task)`);
+        let enableTools: string[] | undefined;
+        if (t.enable_tools !== undefined) {
+          if (
+            !Array.isArray(t.enable_tools) ||
+            !t.enable_tools.every((x): x is string => typeof x === "string" && x.trim().length > 0)
+          ) {
+            throw new Error(`tasks[${t.id}].enable_tools must be an array of non-empty strings`);
+          }
+          enableTools = t.enable_tools.map((x) => x.trim());
+        }
         return {
           ...base,
           kind: "agent" as const,
           prompt,
           ...(t.response_schema ? { responseSchema: t.response_schema } : {}),
           ...(t.model_options ? { modelOptions: t.model_options } : {}),
+          ...(enableTools ? { enableTools } : {}),
         };
       }
       case "tool": {

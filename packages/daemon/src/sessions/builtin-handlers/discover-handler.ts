@@ -8,9 +8,12 @@ import {
   setSessionToolState,
   clearSessionToolState,
   resolveToolDiscoveryConfig,
+  isAlwaysOnTool,
+  isToolEnabledByState,
   toolRefreshNeeded,
   toolCatalogCache,
 } from "../session-tool-discovery";
+import { isGlobPattern } from "../tool-id-glob";
 
 export function register(registry: BuiltinToolRegistry): void {
   registry.register("discover", discoverHandler);
@@ -65,7 +68,7 @@ async function discoverHandler(
       applied.rejected.push({ id: String(id), reason: "invalid_id" });
       continue;
     }
-    if (resolved.alwaysOn.has(id)) {
+    if (isAlwaysOnTool(id, resolved.alwaysOn)) {
       applied.rejected.push({ id, reason: "always_on" });
       continue;
     }
@@ -93,19 +96,22 @@ async function discoverHandler(
     }> = [];
     // Tools known from the aggregated catalog (via cached descriptions)
     if (descriptions) {
+      const stateGlobs = [...updatedState.entries()]
+        .filter(([id, enabled]) => enabled && isGlobPattern(id))
+        .map(([id]) => id);
       for (const [toolId, description] of descriptions) {
-        const isAlwaysOn = resolved.alwaysOn.has(toolId);
-        const dbEnabled = updatedState.get(toolId);
+        const isAlwaysOn = isAlwaysOnTool(toolId, resolved.alwaysOn);
         catalog.push({
           id: toolId,
           description,
-          enabled: isAlwaysOn || dbEnabled === true,
+          enabled: isAlwaysOn || isToolEnabledByState(toolId, updatedState, stateGlobs),
           alwaysOn: isAlwaysOn,
         });
       }
     } else {
       // Fallback: DB state only (no descriptions available)
       for (const [toolId, enabled] of updatedState) {
+        if (isGlobPattern(toolId)) continue;
         catalog.push({
           id: toolId,
           description: toolId,
@@ -113,8 +119,9 @@ async function discoverHandler(
           alwaysOn: resolved.alwaysOn.has(toolId),
         });
       }
-      // Add always-on tools not in DB
+      // Add always-on tools not in DB (globs match concrete tools only, not catalog rows)
       for (const id of resolved.alwaysOn) {
+        if (isGlobPattern(id)) continue;
         if (!updatedState.has(id)) {
           catalog.push({ id, description: id, enabled: true, alwaysOn: true });
         }

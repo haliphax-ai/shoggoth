@@ -52,9 +52,10 @@ Every task has a `kind` discriminator. All kinds share these base fields:
 
 Spawns a subagent session with a prompt. This is the default kind.
 
-| Field    | Type     | Description                                                                                            |
-| -------- | -------- | ------------------------------------------------------------------------------------------------------ |
-| `prompt` | `string` | The prompt sent to the subagent. May contain `{{task:N:output}}` or `{{task:N:success}}` template refs |
+| Field         | Type        | Description                                                                                                   |
+| ------------- | ----------- | ------------------------------------------------------------------------------------------------------------- |
+| `prompt`      | `string`    | The prompt sent to the subagent. May contain `{{task:N:output}}` or `{{task:N:success}}` template refs        |
+| `enableTools` | `string[]?` | Tool IDs or glob patterns (e.g. `kanban-*`) enabled for the spawned session; added to the configured defaults |
 
 Agent tasks are the only asynchronous task type — they are spawned as [subagent sessions](daemon.md#subagents) and polled until completion. The orchestrator checks for the `ERROR:TASK_FAILED` marker in agent output to detect self-reported failures.
 

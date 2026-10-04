@@ -22,6 +22,8 @@ export interface SpawnRequest {
   responseSchema?: { schema: Record<string, unknown> };
   /** Optional per-task model override, forwarded to the spawn adapter. */
   modelOptions?: { model?: string };
+  /** Tool IDs or glob patterns to enable for the spawned session, forwarded to the spawn adapter. */
+  enableTools?: string[];
 }
 
 export interface PollResult {
@@ -931,6 +933,7 @@ export class Orchestrator {
           workflowId: this.workflow?.id,
           ...(task.taskDef.responseSchema ? { responseSchema: task.taskDef.responseSchema } : {}),
           ...(task.taskDef.modelOptions ? { modelOptions: task.taskDef.modelOptions } : {}),
+          ...(task.taskDef.enableTools ? { enableTools: task.taskDef.enableTools } : {}),
         });
 
         task.status = "in_progress";

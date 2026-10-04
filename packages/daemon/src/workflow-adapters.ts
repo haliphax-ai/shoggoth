@@ -26,6 +26,8 @@ import { createSessionStore } from "./sessions/session-store.js";
 import type { SessionMcpRuntime } from "./sessions/session-mcp-runtime.js";
 import type { BuiltinToolRegistry } from "./sessions/builtin-tool-registry.js";
 import { pushSystemContext } from "./sessions/system-context-buffer";
+import { enableToolsForSession } from "./sessions/session-tool-discovery";
+import type Database from "better-sqlite3";
 import { getLogger } from "./logging";
 import { randomUUID } from "node:crypto";
 
@@ -96,6 +98,8 @@ export interface DaemonSpawnAdapterDeps {
   readonly contextLevel?: ContextLevel;
   /** Resolved subagent model ref from config (agents.list.<id>.subagentModel or agents.subagentModel). */
   readonly subagentModel?: string;
+  /** State DB for recording spawn-time enableTools entries (exact IDs or glob patterns). */
+  readonly stateDb?: Database.Database;
 }
 
 export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAdapter & {
@@ -139,6 +143,11 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
         subagentMode: "one_shot",
         ...(Object.keys(modelSelection).length > 0 ? { modelSelection } : {}),
       });
+
+      // Record spawn-time tool enables (exact IDs or globs) for the task session.
+      if (req.enableTools?.length && deps.stateDb) {
+        enableToolsForSession(deps.stateDb, childId, req.enableTools);
+      }
 
       // Fire off the model turn without awaiting — poll adapter tracks completion.
       pushSystemContext(childId, "Workflow task execution.");
