@@ -7,6 +7,7 @@ import { createDiscordStreamingOutbound } from "./streaming";
 import {
   createDiscordAdapter,
   UnboundThreadError,
+  resolveSessionIdForRoutes,
   type DiscordInboundEvent,
   type DiscordReactionAddEvent,
   type DiscordSessionRoute,
@@ -377,13 +378,7 @@ export async function startDiscordMessagingIfConfigured(
       const dynamicSession = discordDynamicSessionByChannel.get(channelId.trim());
       if (dynamicSession) return dynamicSession;
       // Then check static routes from config
-      for (const r of routes) {
-        if (r.channelId !== channelId) continue;
-        if (r.guildId !== undefined && r.guildId !== guildId) continue;
-        if (r.guildId === undefined && guildId !== undefined) continue;
-        return r.sessionId;
-      }
-      return undefined;
+      return resolveSessionIdForRoutes(routes, channelId, guildId);
     },
   };
 }
