@@ -53,6 +53,8 @@ type DiscordRestOperation =
   | "deleteChannel"
   | "openDmChannel"
   | "createMessageReaction"
+  | "getMessageReactions"
+  | "searchMessages"
   | "triggerTypingIndicator";
 
 async function discordFetchWithRateLimitRetry(
@@ -324,7 +326,7 @@ export function createDiscordRestTransport(
             `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/reactions/${enc}`,
             { method: "GET" },
           ),
-        "getMessage",
+        "getMessageReactions",
       );
       const j = (await res.json()) as unknown;
       if (!Array.isArray(j)) {
@@ -352,7 +354,7 @@ export function createDiscordRestTransport(
       const path = `/guilds/${encodeURIComponent(guildId)}/messages/search${q ? `?${q}` : ""}`;
       const res = await discordFetchWithRateLimitRetry(
         () => discordFetch(path, { method: "GET" }),
-        "getMessage",
+        "searchMessages",
       );
       const j = (await res.json()) as {
         messages?: unknown[][];
