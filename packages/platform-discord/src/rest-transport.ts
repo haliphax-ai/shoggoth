@@ -192,8 +192,8 @@ export function createDiscordRestTransport(
           ),
         "deleteMessage",
       );
+      const bodyText = await res.text();
       if (!res.ok && res.status !== 204) {
-        const bodyText = await res.text();
         throw new Error(`Discord REST deleteMessage ${res.status}: ${bodyText}`);
       }
     },
@@ -237,8 +237,8 @@ export function createDiscordRestTransport(
           }),
         "deleteChannel",
       );
+      const bodyText = await res.text();
       if (!res.ok && res.status !== 204) {
-        const bodyText = await res.text();
         throw new Error(`Discord REST deleteChannel ${res.status}: ${bodyText}`);
       }
     },
@@ -296,8 +296,8 @@ export function createDiscordRestTransport(
           ),
         "createMessageReaction",
       );
+      const bodyText = await res.text();
       if (!res.ok && res.status !== 204) {
-        const bodyText = await res.text();
         throw new Error(`Discord REST createMessageReaction ${res.status}: ${bodyText}`);
       }
     },
@@ -312,8 +312,8 @@ export function createDiscordRestTransport(
           ),
         "createMessageReaction",
       );
+      const bodyText = await res.text();
       if (!res.ok && res.status !== 204) {
-        const bodyText = await res.text();
         throw new Error(`Discord REST deleteMessageReaction ${res.status}: ${bodyText}`);
       }
     },
