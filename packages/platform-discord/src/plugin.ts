@@ -11,16 +11,12 @@ import {
 } from "@shoggoth/plugins";
 import { discordPlatformRegistration } from "./platform-registration";
 import { createDiscordProbe } from "./probe";
-import type { DiscordMessagingRuntime } from "./bootstrap";
+import { startDaemonDiscordMessaging, type DiscordMessagingRuntime } from "./bootstrap";
 import { createHitlDiscordNoticeRegistry } from "./hitl/notice-registry";
-import type { DiscordPlatformHandle } from "./platform";
-import {
-  startDaemonDiscordMessaging,
-  startDiscordPlatform,
-  createDiscordInteractionHandler,
-  handleDiscordHitlReactionAdd,
-  resolveDiscordOwnerUserId,
-} from "@shoggoth/platform-discord";
+import { startDiscordPlatform, type DiscordPlatformHandle } from "./platform";
+import { createDiscordInteractionHandler } from "./slash-commands";
+import { handleDiscordHitlReactionAdd } from "./hitl/reaction-handler";
+import { resolveDiscordOwnerUserId } from "./config";
 import {
   createActionToolDispatcher,
   type MessageToolDeps,
