@@ -1,40 +1,36 @@
-// Step 2: Discord-specific files from packages/messaging/src/discord/
-export * from "./adapter";
-export * from "./bot-user";
-export * from "./bridge";
-export * from "./gateway-client";
-export * from "./gateway-payload";
-export * from "./message-tool";
-export * from "./messaging-urn-policy";
-export * from "./rest-transport";
-export * from "./transport";
+// Public API surface of @shoggoth/platform-discord.
+//
+// This barrel is intentionally narrow: it re-exports only modules that are
+// actually consumed outside this package (monorepo-wide consumption audit).
+// Known external consumers of "@shoggoth/platform-discord", as of this audit:
+//
+//   - src/plugin.ts (this package's plugin entrypoint, imported via the
+//     package name): startDaemonDiscordMessaging, startDiscordPlatform,
+//     createDiscordInteractionHandler, handleDiscordHitlReactionAdd,
+//     resolveDiscordOwnerUserId
+//   - packages/daemon/test/control/resolve-session-cli-target.test.ts:
+//     discordPlatformRegistration
+//   - packages/daemon/test/sessions/session-system-prompt.test.ts:
+//     discordCapabilityDescriptor
+//   - packages/daemon/test/health.test.ts: createDiscordProbe
+//
+// Everything else under src/ (gateway-payload, transport, outbound, streaming,
+// adapter, interaction, model-select, ...) is internal implementation detail.
+// It is deliberately NOT re-exported here: import it via relative paths from
+// within this package. It is not part of the stable API and may be refactored
+// or removed without notice.
 
-// Step 3: Discord-specific code from packages/messaging/src/
-export * from "./outbound";
-export * from "./streaming";
-export * from "./capabilities";
-export * from "./platform-registration";
-
-// Step 4: Discord-specific daemon code
-export * from "./platform";
-export * from "./errors";
+// Discord daemon integration (re-exported for src/plugin.ts)
 export * from "./bootstrap";
-export * from "./hitl/notifier";
-export * from "./hitl/reaction-handler";
-export * from "./hitl/reaction-wiring";
-export * from "./hitl/notice-registry";
-export * from "./interaction";
-export * from "./model-select";
+export * from "./platform";
 export * from "./slash-commands";
-
-// Step 5: Discord config resolution
+export * from "./hitl/reaction-handler";
 export * from "./config";
 
-// Step 6: Discord health probe
+// Platform integration points consumed by @shoggoth/daemon (tests)
+export * from "./platform-registration";
+export * from "./capabilities";
 export * from "./probe";
 
-// Step 8: Discord plugin (MessagingPlatformPlugin)
+// Discord plugin factory (MessagingPlatformPlugin entrypoint)
 export { default as createDiscordPlugin } from "./plugin";
-
-// Step 7: Discord platform adapter (presentation layer integration)
-export * from "./discord-platform-adapter";
