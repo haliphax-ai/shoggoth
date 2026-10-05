@@ -26,16 +26,14 @@ const noticeKey = (channelId: string, messageId: string) => `${channelId}:${mess
 
 export function createHitlDiscordNoticeRegistry(maxEntries = 2000): HitlDiscordNoticeRegistry {
   const map = new Map<string, { pendingId: string; sessionId: string; toolName: string }>();
-  const order: string[] = [];
 
   return {
     register(channelId, messageId, pendingId, sessionId, toolName) {
       const k = noticeKey(channelId, messageId);
-      if (!map.has(k)) order.push(k);
       map.set(k, { pendingId, sessionId, toolName: toolName.trim() });
-      while (order.length > maxEntries) {
-        const rm = order.shift();
-        if (rm) map.delete(rm);
+      while (map.size > maxEntries) {
+        const oldest = map.keys().next();
+        if (!oldest.done) map.delete(oldest.value);
       }
     },
     lookup(channelId, messageId) {
