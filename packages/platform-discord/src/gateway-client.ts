@@ -1,3 +1,4 @@
+import type { Logger } from "@shoggoth/shared";
 import type { DiscordInboundEvent, DiscordReactionAddEvent } from "./adapter";
 import type { DiscordInteractionEvent } from "./interaction";
 import {
@@ -8,16 +9,8 @@ import {
   DISCORD_GATEWAY_INTENTS_DEFAULT,
 } from "./gateway-payload";
 
-/** Minimal logger surface for the gateway client (daemon `Logger` is structurally compatible). */
-export interface DiscordGatewayLogger {
-  readonly debug: (msg: string, fields?: Record<string, unknown>) => void;
-  readonly info: (msg: string, fields?: Record<string, unknown>) => void;
-  readonly warn: (msg: string, fields?: Record<string, unknown>) => void;
-  readonly error: (msg: string, fields?: Record<string, unknown>) => void;
-}
-
 export interface DiscordGatewayConnectOptions {
-  readonly logger: DiscordGatewayLogger;
+  readonly logger: Logger;
   readonly botToken: string;
   readonly intents?: number;
   readonly onMessageCreate: (ev: DiscordInboundEvent) => void;

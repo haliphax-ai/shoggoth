@@ -1,6 +1,15 @@
 import { describe, it } from "vitest";
 import assert from "node:assert";
+import type { Logger } from "@shoggoth/shared";
 import { connectDiscordGateway } from "../src/gateway-client";
+
+const noopLogger: Logger = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  child: () => noopLogger,
+};
 
 describe("connectDiscordGateway", () => {
   it("completes HELLO, sends IDENTIFY, and forwards MESSAGE_CREATE", async () => {
@@ -88,7 +97,7 @@ describe("connectDiscordGateway", () => {
 
     const inbound: string[] = [];
     const sessionP = connectDiscordGateway({
-      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+      logger: noopLogger,
       botToken: "test-token",
       intents: 37377,
       fetchFn,

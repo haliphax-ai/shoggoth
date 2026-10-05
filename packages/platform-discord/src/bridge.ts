@@ -1,4 +1,4 @@
-import { isValidAgentSessionUrn, parseAgentSessionUrn } from "@shoggoth/shared";
+import { isValidAgentSessionUrn, parseAgentSessionUrn, type Logger } from "@shoggoth/shared";
 import type { InternalMessage } from "@shoggoth/messaging";
 import { createAgentToAgentBus, type AgentToAgentBus } from "@shoggoth/messaging";
 import { discordCapabilityDescriptor, type MessagingAdapterCapabilities } from "./capabilities";
@@ -293,8 +293,15 @@ export async function startDiscordMessagingIfConfigured(
     }
   };
 
+  // The bridge logger surface is a subset of the shared Logger; adapt at the gateway
+  // boundary (gateway client requires the full `Logger`, including `child`).
+  const gatewayLogger: Logger = {
+    ...opts.logger,
+    child: () => gatewayLogger,
+  };
+
   const gateway = await connect({
-    logger: opts.logger,
+    logger: gatewayLogger,
     botToken: token,
     intents: opts.intents ?? DISCORD_GATEWAY_INTENTS_DEFAULT,
     allowBotMessages: opts.allowBotMessages,
