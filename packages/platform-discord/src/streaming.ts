@@ -116,11 +116,17 @@ export function createDiscordStreamingOutbound(
           if (formattedText.length <= maxContentLength) {
             // Simple case: update original message only
             await transport.editMessage(channelId, messageId, { content: formattedText });
-            // Delete all overflow messages
-            for (const [_index, overflow] of overflowMessages) {
-              await transport.deleteMessage(channelId, overflow.messageId);
+            // Delete all overflow messages. A failed deletion must not abort
+            // cleanup of the remaining ones; keep failed entries tracked so
+            // they can be retried (or edited in place) on a later update.
+            for (const [index, overflow] of overflowMessages) {
+              try {
+                await transport.deleteMessage(channelId, overflow.messageId);
+                overflowMessages.delete(index);
+              } catch {
+                // Transient transport failure; entry stays in the map for retry.
+              }
             }
-            overflowMessages.clear();
           } else {
             const chunks = splitDiscordMessage(formattedText, maxContentLength);
             await reconcileOverflow(chunks);

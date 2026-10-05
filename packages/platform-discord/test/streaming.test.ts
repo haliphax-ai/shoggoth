@@ -201,6 +201,52 @@ describe("DiscordStreamingOutbound", () => {
     expect(deleteCalls[0][0]).toBe("ch-1");
   });
 
+  it("pushUpdate continues deleting overflow messages after a deletion failure", async () => {
+    const transport = createMockTransport();
+    const caps = discordCapabilityDescriptor();
+    const maxLen = 100;
+
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: caps,
+      channelId: "ch-1",
+      maxContentLength: maxLen,
+    });
+
+    const handle = await streaming.start();
+    // Clear the initial createMessage call
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (transport.createMessage as any).mockClear();
+
+    // First, send content that requires 3 chunks (2 overflow messages)
+    const longText = "a".repeat(80) + "\n" + "b".repeat(80) + "\n" + "c".repeat(80);
+    await handle.pushUpdate(longText);
+
+    // Reset mocks to track the next call
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (transport.editMessage as any).mockClear();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (transport.deleteMessage as any).mockClear();
+    // First deletion fails, second succeeds
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (transport.deleteMessage as any).mockRejectedValueOnce(new Error("boom"));
+
+    // Now send content that fits in one message
+    await expect(handle.pushUpdate("short message")).resolves.toBeUndefined();
+
+    // Both deletions were attempted despite the first failure
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const deleteCalls = (transport.deleteMessage as any).mock.calls;
+    expect(deleteCalls.length).toBe(2);
+
+    // The failed entry is still tracked, so a later cleanup retries it
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (transport.deleteMessage as any).mockClear();
+    await handle.pushUpdate("short again");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((transport.deleteMessage as any).mock.calls.length).toBe(1);
+  });
+
   it("pushUpdate edits existing overflow messages instead of creating new ones", async () => {
     const transport = createMockTransport();
     const caps = discordCapabilityDescriptor();
