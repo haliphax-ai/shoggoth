@@ -184,13 +184,23 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           botToken: state.getToken(),
           noticeResolver: noticeResolver as any,
           onInteractionCreate: createDiscordInteractionHandler({
-            transport: new Proxy({} as DiscordMessagingRuntime["discordRestTransport"], {
-              get(_t, prop, receiver) {
-                if (!interactionTransportRef.current)
-                  throw new Error("discord transport not ready");
-                return Reflect.get(interactionTransportRef.current, prop, receiver);
+            transport: {
+              interactionCallback: (interactionId, interactionToken, body) => {
+                const transport = interactionTransportRef.current;
+                if (!transport) throw new Error("discord transport not ready: interactionCallback");
+                return transport.interactionCallback(interactionId, interactionToken, body);
               },
-            }),
+              editOriginalInteractionResponse: (applicationId, interactionToken, body) => {
+                const transport = interactionTransportRef.current;
+                if (!transport)
+                  throw new Error("discord transport not ready: editOriginalInteractionResponse");
+                return transport.editOriginalInteractionResponse(
+                  applicationId,
+                  interactionToken,
+                  body,
+                );
+              },
+            },
             get applicationId() {
               return state.reactionBotUserIdRef.current ?? "";
             },

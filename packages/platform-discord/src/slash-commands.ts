@@ -203,7 +203,10 @@ const TEXT_INPUT = 4;
 const TEXT_INPUT_SHORT = 1;
 
 export interface DiscordInteractionHandlerDeps {
-  readonly transport: DiscordRestTransport;
+  readonly transport: Pick<
+    DiscordRestTransport,
+    "interactionCallback" | "editOriginalInteractionResponse"
+  >;
   readonly applicationId: string;
   readonly logger: {
     readonly info: (msg: string, fields?: Record<string, unknown>) => void;
