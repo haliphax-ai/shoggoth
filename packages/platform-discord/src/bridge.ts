@@ -253,6 +253,7 @@ export async function startDiscordMessagingIfConfigured(
       transport,
       capabilities,
       channelId,
+      logger: opts.logger,
     });
   };
 
