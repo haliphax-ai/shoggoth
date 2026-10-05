@@ -8,6 +8,7 @@ describe("connectDiscordGateway", () => {
     let sock:
       | {
           deliverHello(): void;
+          deliverReady(): void;
           deliverMessageCreate(): void;
           close(): void;
         }
@@ -87,6 +88,7 @@ describe("connectDiscordGateway", () => {
 
     const inbound: string[] = [];
     const sessionP = connectDiscordGateway({
+      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
       botToken: "test-token",
       intents: 37377,
       fetchFn,

@@ -1,6 +1,5 @@
 import type { DiscordInboundEvent, DiscordReactionAddEvent } from "./adapter";
 import type { DiscordInteractionEvent } from "./interaction";
-import { getLogger } from "@shoggoth/shared";
 import {
   discordMessageCreateToInboundEvent,
   discordMessageReactionAddToEvent,
@@ -9,7 +8,16 @@ import {
   DISCORD_GATEWAY_INTENTS_DEFAULT,
 } from "./gateway-payload";
 
+/** Minimal logger surface for the gateway client (daemon `Logger` is structurally compatible). */
+export interface DiscordGatewayLogger {
+  readonly debug: (msg: string, fields?: Record<string, unknown>) => void;
+  readonly info: (msg: string, fields?: Record<string, unknown>) => void;
+  readonly warn: (msg: string, fields?: Record<string, unknown>) => void;
+  readonly error: (msg: string, fields?: Record<string, unknown>) => void;
+}
+
 export interface DiscordGatewayConnectOptions {
+  readonly logger: DiscordGatewayLogger;
   readonly botToken: string;
   readonly intents?: number;
   readonly onMessageCreate: (ev: DiscordInboundEvent) => void;
@@ -37,8 +45,6 @@ interface GatewayPayload {
   readonly s?: number | null;
 }
 
-const log = getLogger("discord-gw");
-
 const MAX_RECONNECT_ATTEMPTS = 10;
 const BACKOFF_BASE_MS = 1_000;
 const BACKOFF_MAX_MS = 30_000;
@@ -54,6 +60,7 @@ function backoffMs(attempt: number): number {
 export async function connectDiscordGateway(
   options: DiscordGatewayConnectOptions,
 ): Promise<DiscordGatewaySession> {
+  const log = options.logger;
   const fetchFn = options.fetchFn ?? globalThis.fetch.bind(globalThis);
   const intents = options.intents ?? DISCORD_GATEWAY_INTENTS_DEFAULT;
   const allowBot = options.allowBotMessages ?? false;

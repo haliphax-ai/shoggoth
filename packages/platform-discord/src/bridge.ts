@@ -294,6 +294,7 @@ export async function startDiscordMessagingIfConfigured(
   };
 
   const gateway = await connect({
+    logger: opts.logger,
     botToken: token,
     intents: opts.intents ?? DISCORD_GATEWAY_INTENTS_DEFAULT,
     allowBotMessages: opts.allowBotMessages,

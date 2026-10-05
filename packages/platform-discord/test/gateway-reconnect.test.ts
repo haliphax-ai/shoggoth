@@ -132,6 +132,7 @@ function baseOpts(
   },
 ): DiscordGatewayConnectOptions {
   return {
+    logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
     botToken: "test-token",
     fetchFn: baseFetch(),
     onMessageCreate: () => {},
