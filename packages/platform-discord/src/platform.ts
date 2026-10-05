@@ -367,6 +367,13 @@ export async function startDiscordPlatform(
           }
         }
 
+        // Resolve the model once per inbound turn; both image options below
+        // are derived from it.
+        const turnCfg = opts.configRef?.current ?? opts.config;
+        const turnModel = resolveModel(opts.db, turnCfg, {
+          sessionId: msg.sessionId,
+        });
+
         await adapter.withTypingIndicator(msg.sessionId, async () => {
           await orchestrator.orchestrateInboundTurn({
             sessionId: msg.sessionId,
@@ -387,30 +394,18 @@ export async function startDiscordPlatform(
             },
             attachments,
             imageBlockCodec: (() => {
-              const cfg = opts.configRef?.current ?? opts.config;
-              const resolved = resolveModel(opts.db, cfg, {
-                sessionId: msg.sessionId,
-              });
-              if (resolved) {
-                const kind = resolved.provider?.kind;
-                if (
-                  kind === "openai-compatible" ||
-                  kind === "anthropic-messages" ||
-                  kind === "gemini"
-                ) {
-                  return getImageBlockCodec(kind);
-                }
+              const kind = turnModel?.provider?.kind;
+              if (
+                kind === "openai-compatible" ||
+                kind === "anthropic-messages" ||
+                kind === "gemini"
+              ) {
+                return getImageBlockCodec(kind);
               }
               return undefined;
             })(),
-            imageUrlPassthrough: (() => {
-              const cfg = opts.configRef?.current ?? opts.config;
-              const resolved = resolveModel(opts.db, cfg, {
-                sessionId: msg.sessionId,
-              });
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              return (resolved?.provider as any)?.imageUrlPassthrough === true;
-            })(),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            imageUrlPassthrough: (turnModel?.provider as any)?.imageUrlPassthrough === true,
             formatAttachmentMetadata,
             workspacePath: session.workspacePath,
             messageId: msg.id,
