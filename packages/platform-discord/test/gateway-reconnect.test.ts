@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { Logger } from "@shoggoth/shared";
 import { connectDiscordGateway, type DiscordGatewayConnectOptions } from "../src/gateway-client";
+
+const noopLogger: Logger = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  child: () => noopLogger,
+};
 
 /* ------------------------------------------------------------------ */
 /*  Mock WebSocket that gives tests full control over the connection   */
@@ -132,6 +141,7 @@ function baseOpts(
   },
 ): DiscordGatewayConnectOptions {
   return {
+    logger: noopLogger,
     botToken: "test-token",
     fetchFn: baseFetch(),
     onMessageCreate: () => {},
