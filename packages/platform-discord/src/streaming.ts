@@ -1,10 +1,15 @@
 import type { MessagingAdapterCapabilities } from "@shoggoth/messaging";
+import type { DiscordBridgeLogger } from "./bridge";
 import type { DiscordRestTransport } from "./transport";
 import { splitDiscordMessage } from "./split-message";
 import { mdTableToAscii } from "./table-formatter.js";
 import { formatMessageWithThinking, type ThinkingDisplayMode } from "./thinking-formatter";
 
 const DEFAULT_DISCORD_MAX_CONTENT = 2000;
+/** Total attempts (first try + retries) for deleting a single overflow message. */
+const DELETE_MAX_ATTEMPTS = 3;
+/** Exponential backoff base between delete attempts (250ms, 500ms; total added delay ≤ 750ms). */
+const DELETE_RETRY_BASE_DELAY_MS = 250;
 
 export interface DiscordStreamingOutboundConfig {
   readonly transport: DiscordRestTransport;
@@ -12,6 +17,8 @@ export interface DiscordStreamingOutboundConfig {
   readonly channelId: string;
   readonly maxContentLength?: number;
   readonly thinkingDisplay?: ThinkingDisplayMode;
+  /** Optional logger; used to report overflow deletions abandoned after exhausting retries. */
+  readonly logger?: DiscordBridgeLogger;
 }
 
 interface OverflowMessage {
@@ -38,6 +45,7 @@ export function createDiscordStreamingOutbound(
     channelId,
     maxContentLength = DEFAULT_DISCORD_MAX_CONTENT,
     thinkingDisplay,
+    logger,
   } = config;
 
   if (!capabilities.extensions.streamingOutbound) {
@@ -94,6 +102,34 @@ export function createDiscordStreamingOutbound(
         }
       };
 
+      /**
+       * Deletes a single overflow message, retrying transient failures with
+       * exponential backoff up to a finite limit. Never throws: after
+       * exhausting retries the message is abandoned (logged at warn).
+       * Returns true when the deletion succeeded.
+       */
+      const deleteOverflowWithRetry = async (messageId: string): Promise<boolean> => {
+        for (let attempt = 1; attempt <= DELETE_MAX_ATTEMPTS; attempt++) {
+          try {
+            await transport.deleteMessage(channelId, messageId);
+            return true;
+          } catch (err) {
+            if (attempt < DELETE_MAX_ATTEMPTS) {
+              await new Promise((resolve) =>
+                setTimeout(resolve, DELETE_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1)),
+              );
+            } else {
+              logger?.warn("discord.streaming.overflow_delete_failed", {
+                messageId,
+                attempts: DELETE_MAX_ATTEMPTS,
+                err: String(err),
+              });
+            }
+          }
+        }
+        return false;
+      };
+
       return {
         messageId,
         async setFullContent(text: string): Promise<void> {
@@ -116,11 +152,16 @@ export function createDiscordStreamingOutbound(
           if (formattedText.length <= maxContentLength) {
             // Simple case: update original message only
             await transport.editMessage(channelId, messageId, { content: formattedText });
-            // Delete all overflow messages
-            for (const [_index, overflow] of overflowMessages) {
-              await transport.deleteMessage(channelId, overflow.messageId);
+            // Delete all overflow messages. Each deletion is retried with
+            // backoff a finite number of times; a failure on one message must
+            // never abort cleanup of the remaining ones. Entries that still
+            // fail after the final attempt are dropped (already logged).
+            for (const [index, overflow] of overflowMessages) {
+              // Success removes the message; give-up (already logged inside
+              // the helper) drops the entry so it is not retried forever.
+              await deleteOverflowWithRetry(overflow.messageId);
+              overflowMessages.delete(index);
             }
-            overflowMessages.clear();
           } else {
             const chunks = splitDiscordMessage(formattedText, maxContentLength);
             await reconcileOverflow(chunks);
