@@ -21,7 +21,13 @@ import {
   handleDiscordHitlReactionAdd,
   resolveDiscordOwnerUserId,
 } from "@shoggoth/platform-discord";
-import { executeMessageToolAction } from "@shoggoth/messaging";
+import {
+  createActionToolDispatcher,
+  type MessageToolDeps,
+  type SearchActionDeps,
+  type PostActionDeps,
+  type AttachmentDownloadActionDeps,
+} from "@shoggoth/messaging";
 import { resolvePlatformConfig } from "@shoggoth/shared";
 import { toolReadBinary } from "@shoggoth/os-exec";
 import { mdTableToAscii } from "./table-formatter.js";
@@ -377,77 +383,76 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
         };
         setSubagentRuntimeExtension(subagentExt as any);
 
-        // Build message tool context from capabilities
+        // Build message tool deps, confirming every action-specific dep group the
+        // enabled capability extensions imply is wired — at construction time,
+        // not at action execution time.
+        const messageToolDeps: MessageToolDeps &
+          SearchActionDeps &
+          PostActionDeps &
+          AttachmentDownloadActionDeps = {
+          capabilities: discordMessaging.capabilities,
+          transport: {
+            // Wrapped transport that applies Markdown table formatting
+            ...discordMessaging.discordRestTransport,
+            createMessage: async (channelId, body) =>
+              discordMessaging.discordRestTransport.createMessage(channelId, {
+                ...body,
+                content: mdTableToAscii(body.content),
+              }),
+            createMessageWithFiles: async (channelId, body, files) =>
+              discordMessaging.discordRestTransport.createMessageWithFiles(
+                channelId,
+                { ...body, content: mdTableToAscii(body.content) },
+                files,
+              ),
+            editMessage: async (channelId, messageId, body) =>
+              discordMessaging.discordRestTransport.editMessage(channelId, messageId, {
+                ...body,
+                content: mdTableToAscii(body.content),
+              }),
+          },
+          sessionToChannel: (sid) => discordMessaging.resolveOutboundChannelIdForSession?.(sid),
+          sessionToGuild: (sid) => discordMessaging.resolveGuildIdForSession?.(sid),
+          maxAttachmentBytes: configRef.current?.maxAttachmentBytes,
+          getSessionWorkspace: (sid) => {
+            try {
+              const row = (db as any)
+                .prepare("SELECT workspace_path FROM sessions WHERE id = ?")
+                .get(sid) as { workspace_path: string } | undefined;
+              return row?.workspace_path;
+            } catch {
+              return undefined;
+            }
+          },
+          readWorkspaceFile: async (sid, relativePath) => {
+            const row = (db as any)
+              .prepare("SELECT workspace_path, runtime_uid, runtime_gid FROM sessions WHERE id = ?")
+              .get(sid) as
+              | { workspace_path: string; runtime_uid: number; runtime_gid: number }
+              | undefined;
+            if (!row) {
+              throw new Error(`session not found: ${sid}`);
+            }
+            return toolReadBinary(row.workspace_path, relativePath, {
+              uid: row.runtime_uid,
+              gid: row.runtime_gid,
+            });
+          },
+          downloadFile: async (url, destPath) => {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
+            const buf = Buffer.from(await res.arrayBuffer());
+            const { writeFile, mkdir } = await import("node:fs/promises");
+            const { dirname } = await import("node:path");
+            await mkdir(dirname(destPath), { recursive: true });
+            await writeFile(destPath, buf);
+            return buf.byteLength;
+          },
+        };
+        const dispatchMessageTool = createActionToolDispatcher(messageToolDeps);
         const msgCtx = {
           slice: discordMessaging.capabilities.extensions as unknown as Record<string, boolean>,
-          execute: (sessionId: string, args: any) =>
-            executeMessageToolAction(
-              {
-                capabilities: discordMessaging.capabilities,
-                transport: {
-                  // Wrapped transport that applies Markdown table formatting
-                  ...discordMessaging.discordRestTransport,
-                  createMessage: async (channelId, body) =>
-                    discordMessaging.discordRestTransport.createMessage(channelId, {
-                      ...body,
-                      content: mdTableToAscii(body.content),
-                    }),
-                  createMessageWithFiles: async (channelId, body, files) =>
-                    discordMessaging.discordRestTransport.createMessageWithFiles(
-                      channelId,
-                      { ...body, content: mdTableToAscii(body.content) },
-                      files,
-                    ),
-                  editMessage: async (channelId, messageId, body) =>
-                    discordMessaging.discordRestTransport.editMessage(channelId, messageId, {
-                      ...body,
-                      content: mdTableToAscii(body.content),
-                    }),
-                },
-                sessionToChannel: (sid) =>
-                  discordMessaging.resolveOutboundChannelIdForSession?.(sid),
-                sessionToGuild: (sid) => discordMessaging.resolveGuildIdForSession?.(sid),
-                maxAttachmentBytes: configRef.current?.maxAttachmentBytes,
-                getSessionWorkspace: (sid) => {
-                  try {
-                    const row = (db as any)
-                      .prepare("SELECT workspace_path FROM sessions WHERE id = ?")
-                      .get(sid) as { workspace_path: string } | undefined;
-                    return row?.workspace_path;
-                  } catch {
-                    return undefined;
-                  }
-                },
-                readWorkspaceFile: async (sid, relativePath) => {
-                  const row = (db as any)
-                    .prepare(
-                      "SELECT workspace_path, runtime_uid, runtime_gid FROM sessions WHERE id = ?",
-                    )
-                    .get(sid) as
-                    | { workspace_path: string; runtime_uid: number; runtime_gid: number }
-                    | undefined;
-                  if (!row) {
-                    throw new Error(`session not found: ${sid}`);
-                  }
-                  return toolReadBinary(row.workspace_path, relativePath, {
-                    uid: row.runtime_uid,
-                    gid: row.runtime_gid,
-                  });
-                },
-                downloadFile: async (url, destPath) => {
-                  const res = await fetch(url);
-                  if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
-                  const buf = Buffer.from(await res.arrayBuffer());
-                  const { writeFile, mkdir } = await import("node:fs/promises");
-                  const { dirname } = await import("node:path");
-                  await mkdir(dirname(destPath), { recursive: true });
-                  await writeFile(destPath, buf);
-                  return buf.byteLength;
-                },
-              },
-              sessionId,
-              args,
-            ),
+          execute: (sessionId: string, args: any) => dispatchMessageTool(sessionId, args),
         };
         setMessageToolContext(msgCtx);
 

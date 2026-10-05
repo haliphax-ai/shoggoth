@@ -16,13 +16,37 @@ export interface AttachmentDownloadResult {
   readonly totalAttachments: number;
 }
 
-export interface MessageToolDeps {
+/**
+ * Core deps shared by every action group: platform capabilities, the
+ * transport, and the session's bound channel resolver.
+ */
+export interface MessageToolCoreDeps {
   readonly capabilities: MessagingAdapterCapabilities;
   readonly transport: MessageToolTransport;
   readonly sessionToChannel: (sessionId: string) => string | undefined;
+}
+
+/**
+ * Deps accepted by {@link executeMessageToolAction}: the core plus whichever
+ * action-specific groups this wiring provides.
+ *
+ * Rather than leaving callers to remember which optionals each action needs,
+ * the per-action groups ({@link SearchActionDeps}, {@link PostActionDeps},
+ * {@link AttachmentDownloadActionDeps}) spell out what fully supporting an
+ * action requires. Construction sites declare the groups they support with
+ * those interfaces (e.g.
+ * `satisfies SearchActionDeps & AttachmentDownloadActionDeps`) and confirm
+ * them up front via {@link createActionToolDispatcher}, instead of
+ * discovering a missing dep as a runtime null-check inside a handler.
+ */
+export interface MessageToolDeps extends MessageToolCoreDeps {
+  /** "search": resolves a session's guild scope. */
   readonly sessionToGuild?: (sessionId: string) => string | undefined;
+  /** "attachment-download": writes the downloaded bytes to disk. */
   readonly downloadFile?: (url: string, destPath: string) => Promise<number>;
+  /** "attachment-download": workspace used to resolve relative destination paths. */
   readonly getSessionWorkspace?: (sessionId: string) => string | undefined;
+  /** "post": reads `attachments[].content_path` from the session workspace. */
   readonly readWorkspaceFile?: (sessionId: string, relativePath: string) => Promise<Buffer>;
   /**
    * Maximum attachment size in bytes, enforced for outbound uploads
@@ -30,6 +54,51 @@ export interface MessageToolDeps {
    * Defaults to `DEFAULT_MAX_ATTACHMENT_BYTES` (25 MB).
    */
   readonly maxAttachmentBytes?: number;
+}
+
+/** Deps that fully support the "search" action: guild scope is always required. */
+export interface SearchActionDeps extends MessageToolCoreDeps {
+  readonly sessionToGuild: (sessionId: string) => string | undefined;
+}
+
+/** Deps that fully support workspace-file uploads (`content_path`) for "post". */
+export interface PostActionDeps extends MessageToolCoreDeps {
+  readonly readWorkspaceFile: (sessionId: string, relativePath: string) => Promise<Buffer>;
+}
+
+/** Deps that fully support the "attachment-download" action. */
+export interface AttachmentDownloadActionDeps extends MessageToolCoreDeps {
+  readonly downloadFile: (url: string, destPath: string) => Promise<number>;
+  /** Optional: relative destination paths fall back to the raw path when absent. */
+  readonly getSessionWorkspace?: (sessionId: string) => string | undefined;
+}
+
+/**
+ * Build the action dispatcher, confirming once — at construction time, not
+ * at action execution time — that every dep group required by the enabled
+ * capability extensions is wired:
+ *
+ * - `search` ⇒ `sessionToGuild` (without it, search can never succeed)
+ * - `attachmentDownload` ⇒ `downloadFile` (without it, downloads can never succeed)
+ *
+ * `post`'s `readWorkspaceFile` and `attachment-download`'s
+ * `getSessionWorkspace` stay request-scoped: only `content_path` uploads and
+ * relative download paths need them, so the handlers negotiate those per
+ * request with an explicit error.
+ *
+ * Throws an `Error` naming the missing dep when a required group is absent.
+ * The returned function has the same contract as
+ * {@link executeMessageToolAction}.
+ */
+export function createActionToolDispatcher(
+  deps: MessageToolDeps,
+): (sessionId: string, args: Record<string, unknown>) => Promise<Record<string, unknown>> {
+  const exts = deps.capabilities.extensions;
+  if (exts.search && !deps.sessionToGuild)
+    throw new Error("search capability is enabled but deps.sessionToGuild is not wired");
+  if (exts.attachmentDownload && !deps.downloadFile)
+    throw new Error("attachmentDownload capability is enabled but deps.downloadFile is not wired");
+  return (sessionId, args) => executeMessageToolAction(deps, sessionId, args);
 }
 
 function resolveMaxAttachmentBytes(deps: MessageToolDeps): number {
