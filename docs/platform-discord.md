@@ -27,7 +27,8 @@ Discord config is resolved from `platforms.discord` in the Shoggoth config (or t
 
 | Field                  | Type       | Description                                                                                                                                                                   |
 | ---------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `token`                | `string?`  | Bot token. Env `DISCORD_BOT_TOKEN` wins.                                                                                                                                      |
+| `token`                | `string?`  | Bot token. The env var named by `tokenEnv` wins when set; `DISCORD_BOT_TOKEN` is the default when `tokenEnv` is absent.                                                       |
+| `tokenEnv`             | `string?`  | Name of the env var holding the bot token (the `*Env` convention used elsewhere in the configuration). Default: `DISCORD_BOT_TOKEN`.                                          |
 | `ownerUserId`          | `string?`  | Discord snowflake of the operator. Env `SHOGGOTH_DISCORD_OWNER_USER_ID` wins. When set, only this user's messages are processed on non-subagent sessions.                     |
 | `intents`              | `number?`  | Gateway intents bitmask. Env `SHOGGOTH_DISCORD_INTENTS` wins. Default: guilds + guild messages + guild message reactions + DMs + DM reactions + message content (privileged). |
 | `allowBotMessages`     | `boolean?` | Process messages from other bots. Env `SHOGGOTH_DISCORD_ALLOW_BOT` (`1`/`0`). Default `false`.                                                                                |

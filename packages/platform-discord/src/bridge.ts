@@ -171,7 +171,8 @@ export interface DiscordMessagingRuntime {
 }
 
 /**
- * When a bot token (`DISCORD_BOT_TOKEN` env, or layered `discord.token` — env wins) and
+ * When a bot token (`tokenEnv` env var — `DISCORD_BOT_TOKEN` by default — or layered
+ * `discord.token`, env wins) and
  * pre-parsed routes are provided, connects the Gateway, maps inbound messages to sessions,
  * delivers on the agent-to-agent bus, and wires REST outbound + streaming helpers.
  */

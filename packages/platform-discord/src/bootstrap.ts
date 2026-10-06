@@ -22,7 +22,10 @@ export type { DiscordMessagingRuntime };
 export interface StartDaemonDiscordMessagingOptions {
   readonly logger: DiscordBridgeLogger;
   readonly config: ShoggothConfig;
-  /** Resolved token (`DISCORD_BOT_TOKEN` env wins over layered `discord.token`). */
+  /**
+   * Resolved token (`tokenEnv` env var — `DISCORD_BOT_TOKEN` by default — wins
+   * over layered `discord.token`).
+   */
   readonly botToken: string | undefined;
   readonly onMessageReactionAdd?: (ev: DiscordReactionAddEvent) => void;
   readonly onInteractionCreate?: (ev: DiscordInteractionEvent) => void;
