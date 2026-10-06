@@ -1,4 +1,4 @@
-import { describe, it } from "vitest";
+import { afterEach, beforeEach, describe, it, vi } from "vitest";
 import assert from "node:assert";
 import {
   createDiscordInteractionHandler,
@@ -44,6 +44,14 @@ function stubLogger() {
 }
 
 describe("createDiscordInteractionHandler", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("handles abort command and responds with success", async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
     const transport = stubTransport(calls);
@@ -66,7 +74,7 @@ describe("createDiscordInteractionHandler", () => {
     };
 
     handler(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     assert.strictEqual(calls.length, 1);
     assert.strictEqual(calls[0]!.method, "interactionCallback");
@@ -102,7 +110,7 @@ describe("createDiscordInteractionHandler", () => {
     };
 
     handler(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     assert.strictEqual(calls.length, 1);
     const [, , body] = calls[0]!.args as [
@@ -147,7 +155,7 @@ describe("createDiscordInteractionHandler", () => {
     };
 
     handler(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     assert.deepStrictEqual(abortCalls, ["agent:main:discord:channel:abc"]);
   });
@@ -193,7 +201,7 @@ describe("createDiscordInteractionHandler", () => {
     };
 
     handler(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     // Should have invoked session_context_status with the resolved thread session
     assert.strictEqual(invokeOps.length, 1);
@@ -231,7 +239,7 @@ describe("createDiscordInteractionHandler", () => {
     };
 
     handler(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     assert.strictEqual(calls.length, 0);
   });
@@ -259,7 +267,7 @@ describe("createDiscordInteractionHandler", () => {
     };
 
     handler(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     assert.strictEqual(calls.length, 1);
     const [, , body] = calls[0]!.args as [
@@ -293,7 +301,7 @@ describe("createDiscordInteractionHandler", () => {
     };
 
     handler(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     assert.strictEqual(calls.length, 1);
     const [, , body] = calls[0]!.args as [
@@ -340,7 +348,7 @@ describe("createDiscordInteractionHandler", () => {
     };
 
     handler(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     assert.strictEqual(calls.length, 1);
     const [, , body] = calls[0]!.args as [
@@ -411,7 +419,7 @@ describe("createDiscordInteractionHandler", () => {
     };
 
     handler(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     assert.strictEqual(getModelsConfigCalls.length, 1, "getModelsConfig should be called once");
 
@@ -470,7 +478,7 @@ describe("createDiscordInteractionHandler", () => {
     };
 
     handler(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     assert.strictEqual(calls.length, 1);
     const [, , body] = calls[0]!.args as [
@@ -512,7 +520,7 @@ describe("createDiscordInteractionHandler", () => {
     };
 
     handler(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     assert.strictEqual(calls.length, 1);
     const [, , body] = calls[0]!.args as [
@@ -557,7 +565,7 @@ describe("createDiscordInteractionHandler", () => {
     };
 
     handler(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     // Dispatched session_steer against the channel's resolved session
     assert.strictEqual(invokeOps.length, 1);
@@ -618,7 +626,7 @@ describe("createDiscordInteractionHandler", () => {
     };
 
     handler(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     assert.strictEqual(resolveCalls, 0, "Should not resolve from channel when session_id given");
     assert.strictEqual(invokeOps.length, 1);
@@ -659,7 +667,7 @@ describe("createDiscordInteractionHandler", () => {
     };
 
     handler(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     assert.strictEqual(invokeOps.length, 0, "Should not invoke the control op");
     assert.strictEqual(calls.length, 1);
@@ -698,7 +706,7 @@ describe("createDiscordInteractionHandler", () => {
     };
 
     handler(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     // Acked deferred (single POST), then the failure surfaced via the @original edit.
     assert.strictEqual(calls.length, 2);
@@ -754,7 +762,7 @@ describe("createDiscordInteractionHandler", () => {
     };
 
     handler(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     // Ordering: the interaction is acked (deferred) BEFORE the slow control op runs, and
     // the outcome arrives afterwards via the @original edit — never a second POST callback.
@@ -821,7 +829,7 @@ describe("createDiscordInteractionHandler", () => {
     };
 
     handler(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     assert.strictEqual(invoked, true, "steer must still run when the reply cannot be delivered");
     assert.ok(
@@ -881,7 +889,7 @@ describe("createDiscordInteractionHandler", () => {
     };
 
     handler(ev);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     assert.strictEqual(invoked, true, "steer must run even when the defer ack fails");
     const callbacks = calls.filter((c) => c.method === "interactionCallback");
