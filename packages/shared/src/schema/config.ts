@@ -136,6 +136,8 @@ export const shoggothConfigFragmentSchema = z
       .object({
         allowPrivateIps: z.boolean().optional(),
         privateIpAllowlist: z.array(z.string()).optional(),
+        // Path to a PEM certificate bundle file (cf. operatorTokenPath)
+        caBundle: z.string().min(1).optional(),
       })
       .strict()
       .optional(),
@@ -166,6 +168,8 @@ export const shoggothConfigSchema = z
       .object({
         allowPrivateIps: z.boolean().optional(),
         privateIpAllowlist: z.array(z.string()).optional(),
+        // Path to a PEM certificate bundle file (cf. operatorTokenPath)
+        caBundle: z.string().min(1).optional(),
       })
       .strict()
       .optional(),
