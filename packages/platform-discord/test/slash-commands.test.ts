@@ -3,7 +3,9 @@ import assert from "node:assert";
 import {
   createDiscordInteractionHandler,
   registerDiscordSlashCommands,
+  deregisterDiscordSlashCommands,
 } from "../src/slash-commands";
+import { createDiscordMessagingShutdownDrain } from "../src/bootstrap";
 import type { DiscordInteractionEvent } from "../src/interaction";
 import type { DiscordRestTransport } from "../src/transport";
 
@@ -791,5 +793,130 @@ describe("registerDiscordSlashCommands", () => {
       !options.some((o) => o.name === "model_selection"),
       "Should NOT have model_selection option (dropdown flow)",
     );
+  });
+});
+
+describe("deregisterDiscordSlashCommands", () => {
+  it("bulk-overwrites the global command list with an empty array", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransport(calls);
+
+    await deregisterDiscordSlashCommands({
+      transport,
+      applicationId: "app-123",
+    });
+
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0]!.method, "registerGlobalCommands");
+    const [appId, commands] = calls[0]!.args as [string, unknown[]];
+    assert.strictEqual(appId, "app-123");
+    assert.deepStrictEqual(commands, []);
+  });
+});
+
+describe("createDiscordMessagingShutdownDrain", () => {
+  it("de-registers slash commands before stopping when this instance registered them", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransport(calls);
+    const registrationRef = { current: "app-123" };
+    let stopped = false;
+
+    const drain = createDiscordMessagingShutdownDrain({
+      registrationRef,
+      transport,
+      logger: stubLogger(),
+      stop: () => {
+        assert.strictEqual(
+          calls.length,
+          1,
+          "slash commands must be de-registered before the transport stops",
+        );
+        stopped = true;
+      },
+    });
+
+    await drain();
+
+    assert.strictEqual(stopped, true);
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0]!.method, "registerGlobalCommands");
+    const [appId, commands] = calls[0]!.args as [string, unknown[]];
+    assert.strictEqual(appId, "app-123");
+    assert.deepStrictEqual(commands, []);
+    // The registration state is consumed, so a later stop path cannot repeat it.
+    assert.strictEqual(registrationRef.current, undefined);
+  });
+
+  it("does not de-register when this instance never registered (disabled or failed)", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransport(calls);
+    const registrationRef = { current: undefined };
+    let stopped = false;
+
+    const drain = createDiscordMessagingShutdownDrain({
+      registrationRef,
+      transport,
+      logger: stubLogger(),
+      stop: () => {
+        stopped = true;
+      },
+    });
+
+    await drain();
+
+    assert.strictEqual(calls.length, 0, "must not touch the global command list");
+    assert.strictEqual(stopped, true);
+  });
+
+  it("de-registers at most once across repeated drain invocations", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransport(calls);
+    const registrationRef = { current: "app-123" };
+
+    const drain = createDiscordMessagingShutdownDrain({
+      registrationRef,
+      transport,
+      logger: stubLogger(),
+      stop: () => {},
+    });
+
+    await drain();
+    await drain();
+
+    assert.strictEqual(calls.length, 1);
+  });
+
+  it("still stops messaging and does not reject when the de-registration REST call fails", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport: DiscordRestTransport = {
+      ...stubTransport(calls),
+      registerGlobalCommands: async () => {
+        throw new Error("Discord REST 500");
+      },
+    };
+    const warns: string[] = [];
+    const logger = {
+      info: () => {},
+      warn: (msg: string) => {
+        warns.push(msg);
+      },
+    };
+    const registrationRef = { current: "app-123" };
+    let stopped = false;
+
+    const drain = createDiscordMessagingShutdownDrain({
+      registrationRef,
+      transport,
+      logger,
+      stop: () => {
+        stopped = true;
+      },
+    });
+
+    await drain();
+
+    assert.strictEqual(stopped, true, "messaging must still stop after a REST failure");
+    assert.deepStrictEqual(warns, ["discord.slash_commands.deregistration_failed"]);
+    assert.strictEqual(registrationRef.current, undefined);
   });
 });

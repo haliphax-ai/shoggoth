@@ -15,7 +15,8 @@ import {
   resolveEffectiveDiscordRoutes,
   resolveShoggothAgentId,
 } from "./config";
-import { registerDiscordSlashCommands } from "./slash-commands";
+import { registerDiscordSlashCommands, deregisterDiscordSlashCommands } from "./slash-commands";
+import type { DiscordRestTransport } from "./transport";
 
 export type { DiscordMessagingRuntime };
 
@@ -34,6 +35,12 @@ export interface StartDaemonDiscordMessagingOptions {
   readonly noticeResolver?: NoticeResolver;
   /** When true, register global slash commands on startup (requires bot user id). */
   readonly registerSlashCommands?: boolean;
+  /**
+   * Registration-state signal: set to the application ID when this instance successfully
+   * registered the global slash commands, and cleared when they are de-registered. Lets
+   * the shutdown drain de-register only what this instance registered.
+   */
+  readonly slashCommandRegistrationRef?: { current: string | undefined };
 }
 
 /**
@@ -78,6 +85,9 @@ export async function startDaemonDiscordMessaging(
       opts.logger.info("discord.slash_commands.registered", {
         applicationId: runtime.discordBotUserId,
       });
+      if (opts.slashCommandRegistrationRef) {
+        opts.slashCommandRegistrationRef.current = runtime.discordBotUserId;
+      }
     } catch (e) {
       opts.logger.warn("discord.slash_commands.registration_failed", {
         err: String(e),
@@ -86,4 +96,46 @@ export async function startDaemonDiscordMessaging(
   }
 
   return runtime;
+}
+
+/**
+ * Shutdown drain for Discord messaging: de-registers the global slash commands this
+ * instance registered (if any) *before* stopping the transport, so the command list is
+ * cleaned up while the REST client is still usable.
+ *
+ * De-registration is skipped unless this instance registered at startup (registration
+ * was enabled and succeeded), and runs at most once per instance. Failures are logged
+ * and swallowed so shutdown never hangs or crashes on a REST error, but the attempt is
+ * awaited so the HTTP call completes before process exit.
+ */
+export function createDiscordMessagingShutdownDrain(opts: {
+  readonly registrationRef: { current: string | undefined };
+  readonly transport: DiscordRestTransport | undefined;
+  readonly logger: {
+    readonly info: (msg: string, fields?: Record<string, unknown>) => void;
+    readonly warn: (msg: string, fields?: Record<string, unknown>) => void;
+  };
+  readonly stop: () => void | Promise<void>;
+}): () => Promise<void> {
+  return async () => {
+    const applicationId = opts.registrationRef.current;
+    if (applicationId && opts.transport) {
+      // Consume the registration state first so de-registration happens at most once.
+      opts.registrationRef.current = undefined;
+      try {
+        await deregisterDiscordSlashCommands({
+          transport: opts.transport,
+          applicationId,
+        });
+        opts.logger.info("discord.slash_commands.deregistered", {
+          applicationId,
+        });
+      } catch (e) {
+        opts.logger.warn("discord.slash_commands.deregistration_failed", {
+          err: String(e),
+        });
+      }
+    }
+    await opts.stop();
+  };
 }

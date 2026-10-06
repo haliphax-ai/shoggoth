@@ -213,6 +213,18 @@ export async function registerDiscordSlashCommands(opts: {
   );
 }
 
+/**
+ * De-register global slash commands by bulk-overwriting the application's command list
+ * with an empty array (Discord's `PUT` replaces the whole list). Called on clean shutdown
+ * so an offline instance does not leave stale commands in the list.
+ */
+export async function deregisterDiscordSlashCommands(opts: {
+  readonly transport: DiscordRestTransport;
+  readonly applicationId: string;
+}): Promise<void> {
+  await opts.transport.registerGlobalCommands(opts.applicationId, []);
+}
+
 /** Interaction response type 4 = CHANNEL_MESSAGE_WITH_SOURCE. */
 const INTERACTION_RESPONSE_CHANNEL_MESSAGE = 4;
 /** Interaction response type 5 = DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE. */
