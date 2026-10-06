@@ -13,7 +13,11 @@ import { discordPlatformRegistration } from "./platform-registration";
 import { createDiscordProbe } from "./probe";
 import { startDaemonDiscordMessaging, type DiscordMessagingRuntime } from "./bootstrap";
 import { createHitlDiscordNoticeRegistry } from "./hitl/notice-registry";
-import { startDiscordPlatform, type DiscordPlatformHandle } from "./platform";
+import {
+  startDiscordPlatform,
+  type DiscordPlatformHandle,
+  type DiscordPlatformOptions,
+} from "./platform";
 import { createDiscordInteractionHandler } from "./slash-commands";
 import { handleDiscordHitlReactionAdd } from "./hitl/reaction-handler";
 import { resolveEffectiveDiscordRoutes, resolveDiscordOwnerUserId } from "./config";
@@ -28,6 +32,7 @@ import {
 import { resolvePlatformConfig } from "@shoggoth/shared";
 import { toolReadBinary } from "@shoggoth/os-exec";
 import { mdTableToAscii } from "./table-formatter.js";
+import type Database from "better-sqlite3";
 
 /** Reaction event shape (matches adapter's DiscordReactionAddEvent). */
 interface ReactionAddEvent {
@@ -159,7 +164,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           logger,
           config: configRef.current,
           botToken: state.getToken(),
-          noticeResolver: noticeResolver as any,
+          noticeResolver,
           onInteractionCreate: createDiscordInteractionHandler({
             transport: {
               interactionCallback: (interactionId, interactionToken, body) => {
@@ -239,7 +244,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
                     autoApprove: hitlAutoApproveGate as any,
                     ownerUserId: resolveDiscordOwnerUserId(configRef.current),
                     botUserIdRef: state.reactionBotUserIdRef,
-                    logger: (logger.child as any)?.({ component: "reactions" }) ?? logger,
+                    logger: logger.child?.({ component: "reactions" }) ?? logger,
                   });
                   if (!consumed) state.reactionPassthroughRef.current?.(ev);
                 }
@@ -265,22 +270,22 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
 
         // Start Discord platform (sessions, HITL, MCP, orchestrator)
         const discordPlatform = await startDiscordPlatform({
-          db: db as any,
+          db: db as Database.Database,
           config: configRef.current,
           configRef,
           policyEngine: policyEngine as any,
-          hitlConfigRef: platformDeps.hitlConfigRef as any,
+          hitlConfigRef: platformDeps.hitlConfigRef,
           hitlPending: hitlStack as any,
           hitlDiscordNoticeRegistry,
           hitlAutoApproveGate: hitlAutoApproveGate as any,
           logger,
           discord: discordMessaging,
-          deps: platformAssistantDeps as any,
+          deps: platformAssistantDeps as DiscordPlatformOptions["deps"],
         });
 
         state.platform = discordPlatform;
         registerPlatformFn("discord", discordPlatform);
-        setPlatformAdapter(discordPlatform.adapter as any);
+        setPlatformAdapter(discordPlatform.adapter);
 
         // Wire reaction passthrough
         state.reactionPassthroughRef.current = (ev) => {
@@ -403,7 +408,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           maxAttachmentBytes: configRef.current?.maxAttachmentBytes,
           getSessionWorkspace: (sid) => {
             try {
-              const row = (db as any)
+              const row = (db as Database.Database)
                 .prepare("SELECT workspace_path FROM sessions WHERE id = ?")
                 .get(sid) as { workspace_path: string } | undefined;
               return row?.workspace_path;
@@ -412,7 +417,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
             }
           },
           readWorkspaceFile: async (sid, relativePath) => {
-            const row = (db as any)
+            const row = (db as Database.Database)
               .prepare("SELECT workspace_path, runtime_uid, runtime_gid FROM sessions WHERE id = ?")
               .get(sid) as
               | { workspace_path: string; runtime_uid: number; runtime_gid: number }
@@ -480,7 +485,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
         ctx.registerProbe(
           createDiscordProbe({
             getToken: () => state.getToken(),
-          }) as any,
+          }),
         );
       },
     },

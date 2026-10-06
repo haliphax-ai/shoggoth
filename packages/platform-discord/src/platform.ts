@@ -404,8 +404,10 @@ export async function startDiscordPlatform(
               }
               return undefined;
             })(),
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            imageUrlPassthrough: (turnModel?.provider as any)?.imageUrlPassthrough === true,
+            imageUrlPassthrough:
+              turnModel !== null &&
+              turnModel.provider.kind !== "gemini" &&
+              turnModel.provider.imageUrlPassthrough === true,
             formatAttachmentMetadata,
             workspacePath: session.workspacePath,
             messageId: msg.id,
