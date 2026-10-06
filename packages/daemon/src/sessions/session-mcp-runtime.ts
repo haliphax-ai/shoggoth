@@ -13,6 +13,7 @@ import {
   partitionMcpServersByEffectiveScope,
   type AgentMcpContext,
   type ConnectShoggothMcpPoolOptions,
+  type McpServerConnectStatus,
 } from "../mcp/mcp-server-pool";
 import {
   registerMcpHttpCancelHandler,
@@ -42,6 +43,21 @@ import { resolveAgentCreds } from "../agent-creds";
 import { vaultServiceRef } from "../vault/vault-ref";
 
 const log = getLogger("session-mcp");
+
+/** Emit one log line per server outcome gathered from a parallel pool start. */
+function logMcpConnectStatuses(
+  statuses: readonly McpServerConnectStatus[] | undefined,
+  scope: Record<string, unknown>,
+): void {
+  for (const st of statuses ?? []) {
+    if (st.ok) {
+      log.info("session.mcp_pool.server_connected", { ...scope, sourceId: st.id });
+    } else {
+      log.warn("session.mcp_pool.server_failed", { ...scope, sourceId: st.id, err: st.error });
+    }
+  }
+}
+
 export type SessionMcpContextFinalizer = (
   ctx: SessionMcpToolContext,
   sessionId: string,
@@ -219,7 +235,8 @@ export async function createSessionMcpRuntime(
   async function connectGlobalPool(): Promise<void> {
     if (globalServers.length === 0) return;
     try {
-      const { pool, external } = await connectMcpPool(globalServers, mcpConnectOpts);
+      const { pool, external, statuses } = await connectMcpPool(globalServers, mcpConnectOpts);
+      logMcpConnectStatuses(statuses, { poolScope: "global" });
       const unregisterGlobal = registerMcpHttpCancelHandler(
         SHOGGOTH_GLOBAL_MCP_SESSION_KEY,
         (sourceId, requestId) => pool.cancelMcpRequest?.(sourceId, requestId) ?? false,
@@ -444,7 +461,8 @@ export async function createSessionMcpRuntime(
           const allowedServers = perAgentServers.filter(
             (s) => evaluateMcpServerRules(s.id, topRules) && evaluateMcpServerRules(s.id, subRules),
           );
-          const { pool, external } = await connectMcpPool(allowedServers, connectOpts);
+          const { pool, external, statuses } = await connectMcpPool(allowedServers, connectOpts);
+          logMcpConnectStatuses(statuses, { poolScope: "per_agent", agentId });
           const cancelKey = mcpAgentPoolKey(agentId);
           const unregister = registerMcpHttpCancelHandler(
             cancelKey,
@@ -550,10 +568,11 @@ export async function createSessionMcpRuntime(
           const allowedPerSessionServers = perSessionServers.filter((s) =>
             evaluateMcpServerRules(s.id, sessionRules),
           );
-          const { pool, external } = await connectMcpPool(
+          const { pool, external, statuses } = await connectMcpPool(
             allowedPerSessionServers,
             perSessionConnectOpts,
           );
+          logMcpConnectStatuses(statuses, { poolScope: "per_session", sessionId });
           const unregister = registerMcpHttpCancelHandler(
             sessionId,
             (sourceId, requestId) => pool.cancelMcpRequest?.(sourceId, requestId) ?? false,

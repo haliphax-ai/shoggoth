@@ -645,3 +645,226 @@ describe("MCP session lapse mid-turn — real pool close (stdio)", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Parallel startup: configured servers connect concurrently, outcomes are
+// gathered asynchronously, config order is preserved, and failures are
+// isolated per server.
+// ---------------------------------------------------------------------------
+
+type MockMcpHttpHandle = {
+  readonly url: string;
+  readonly close: () => void;
+};
+
+/**
+ * Minimal streamable-HTTP MCP server. `events` is shared across instances and
+ * records `${label}:initialize` / `${label}:tools` / `${label}:delete` in the
+ * order the server experiences them.
+ */
+async function startMockMcpHttp(opts: {
+  readonly label: string;
+  readonly events: string[];
+  /** Awaited before the initialize response is sent (barrier hook). */
+  readonly onInitialize?: () => Promise<void>;
+  /** Reply to tools/list with a JSON-RPC error instead of the tool list. */
+  readonly failToolsList?: boolean;
+}): Promise<MockMcpHttpHandle> {
+  const server = createServer(async (req, res: ServerResponse) => {
+    if (req.method === "DELETE") {
+      opts.events.push(`${opts.label}:delete`);
+      res.writeHead(204).end();
+      return;
+    }
+    if (req.method !== "POST") {
+      res.writeHead(405).end();
+      return;
+    }
+    const msg = (await readJsonBody(req)) as { method?: string; id?: number };
+    const { method, id } = msg;
+    if (method === "initialize") {
+      opts.events.push(`${opts.label}:initialize`);
+      await opts.onInitialize?.();
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "MCP-Session-Id": `mock-${opts.label}`,
+      });
+      res.end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id,
+          result: {
+            protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE,
+            capabilities: {},
+            serverInfo: { name: opts.label, version: "1" },
+          },
+        }),
+      );
+      return;
+    }
+    if (method === "notifications/initialized") {
+      res.writeHead(202).end();
+      return;
+    }
+    if (method === "tools/list") {
+      opts.events.push(`${opts.label}:tools`);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify(
+          opts.failToolsList
+            ? { jsonrpc: "2.0", id, error: { code: -32603, message: "tools/list exploded" } }
+            : {
+                jsonrpc: "2.0",
+                id,
+                result: {
+                  tools: [{ name: "echo", inputSchema: { type: "object", properties: {} } }],
+                },
+              },
+        ),
+      );
+      return;
+    }
+    res.writeHead(400).end();
+  });
+
+  const url: string = await new Promise((resolve, reject) => {
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      if (addr && typeof addr === "object") resolve(`http://127.0.0.1:${addr.port}/mcp`);
+      else reject(new Error("addr"));
+    });
+    server.on("error", reject);
+  });
+  return { url, close: () => void server.close() };
+}
+
+describe("connectShoggothMcpServers — parallel startup", () => {
+  it("starts every configured server before any can respond", async () => {
+    const events: string[] = [];
+    let arrivals = 0;
+    let release!: () => void;
+    const allStarted = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // Each server's initialize handler blocks until BOTH servers have started.
+    // A sequential implementation could never satisfy this barrier; a parallel
+    // one does, so this test deadlocks (and fails) if startup regresses.
+    const waitForBoth = async (): Promise<void> => {
+      arrivals++;
+      if (arrivals >= 2) release();
+      await allStarted;
+    };
+    const a = await startMockMcpHttp({ label: "alpha", events, onInitialize: waitForBoth });
+    const b = await startMockMcpHttp({ label: "beta", events, onInitialize: waitForBoth });
+    let connected: Awaited<ReturnType<typeof connectShoggothMcpServers>> | undefined;
+    try {
+      connected = await connectShoggothMcpServers([
+        { id: "alpha", transport: "http", url: a.url },
+        { id: "beta", transport: "http", url: b.url },
+      ]);
+      assert.ok(arrivals >= 2, "both servers were started before either responded");
+      assert.ok(events.includes("alpha:initialize"));
+      assert.ok(events.includes("beta:initialize"));
+      assert.deepEqual(connected.statuses, [
+        { id: "alpha", ok: true },
+        { id: "beta", ok: true },
+      ]);
+      assert.deepEqual(
+        connected.pool.externalSources.map((s) => s.sourceId),
+        ["alpha", "beta"],
+      );
+    } finally {
+      await connected?.pool.close().catch(() => {});
+      a.close();
+      b.close();
+    }
+  });
+
+  it("preserves config order when a later server connects first", async () => {
+    const events: string[] = [];
+    const slow = await startMockMcpHttp({
+      label: "slow",
+      events,
+      onInitialize: () => new Promise<void>((r) => setTimeout(r, 200)),
+    });
+    const fast = await startMockMcpHttp({ label: "fast", events });
+    let connected: Awaited<ReturnType<typeof connectShoggothMcpServers>> | undefined;
+    try {
+      connected = await connectShoggothMcpServers([
+        { id: "slow-first", transport: "http", url: slow.url },
+        { id: "fast-second", transport: "http", url: fast.url },
+      ]);
+      const fastAt = events.indexOf("fast:tools");
+      const slowAt = events.indexOf("slow:tools");
+      assert.ok(fastAt !== -1 && slowAt !== -1, "both servers served tools/list");
+      assert.ok(fastAt < slowAt, "the second-configured server completed first");
+      assert.deepEqual(
+        connected.pool.externalSources.map((s) => s.sourceId),
+        ["slow-first", "fast-second"],
+        "externalSources must follow config order, not completion order",
+      );
+      assert.deepEqual(
+        connected.statuses?.map((s) => s.id),
+        ["slow-first", "fast-second"],
+      );
+    } finally {
+      await connected?.pool.close().catch(() => {});
+      slow.close();
+      fast.close();
+    }
+  });
+
+  it("isolates a failing server and closes its partially-opened session", async () => {
+    const events: string[] = [];
+    const healthy = await startMockMcpHttp({ label: "healthy", events });
+    const broken = await startMockMcpHttp({ label: "broken", events, failToolsList: true });
+    let connected: Awaited<ReturnType<typeof connectShoggothMcpServers>> | undefined;
+    try {
+      connected = await connectShoggothMcpServers([
+        { id: "healthy", transport: "http", url: healthy.url },
+        { id: "broken", transport: "http", url: broken.url },
+      ]);
+      // The healthy server joins the pool; the broken one is skipped — no throw.
+      assert.deepEqual(
+        connected.pool.externalSources.map((s) => s.sourceId),
+        ["healthy"],
+      );
+      assert.deepEqual(connected.statuses?.[0], { id: "healthy", ok: true });
+      assert.equal(connected.statuses?.[1]?.id, "broken");
+      assert.equal(connected.statuses?.[1]?.ok, false);
+      assert.match(connected.statuses?.[1]?.error ?? "", /tools\/list exploded/);
+      // The broken server's partially-opened session was closed, not leaked.
+      assert.ok(events.includes("broken:delete"), "failed session must be closed");
+      assert.ok(!events.includes("healthy:delete"), "healthy session must stay open");
+      // Calls to the failed source report it is not connected.
+      const out = await connected.external({
+        sourceId: "broken",
+        originalName: "echo",
+        argsJson: "{}",
+        toolCallId: "c1",
+      });
+      assert.match(out.resultJson, /mcp_source_not_connected/);
+    } finally {
+      await connected?.pool.close().catch(() => {});
+      healthy.close();
+      broken.close();
+    }
+  });
+
+  it("throws an aggregate error when every configured server fails", async () => {
+    await assert.rejects(
+      () =>
+        connectShoggothMcpServers([
+          { id: "dead-one", transport: "http", url: "http://127.0.0.1:1/mcp" },
+          { id: "dead-two", transport: "http", url: "http://127.0.0.1:1/mcp" },
+        ]),
+      (e: unknown) => {
+        assert.ok(e instanceof AggregateError, "expected an AggregateError");
+        assert.equal(e.errors.length, 2, "one error per failed server");
+        assert.match(String(e), /dead-one/);
+        assert.match(String(e), /dead-two/);
+        return true;
+      },
+    );
+  });
+});

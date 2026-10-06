@@ -199,6 +199,7 @@ export {
   connectShoggothMcpServers,
   partitionMcpServersByEffectiveScope,
   type ConnectShoggothMcpPoolOptions,
+  type McpServerConnectStatus,
   type McpServerPool,
 } from "./mcp/mcp-server-pool";
 export {
