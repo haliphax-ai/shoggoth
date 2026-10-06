@@ -142,8 +142,10 @@ The system prompt also includes:
    - Validate arguments against the tool's JSON schema.
    - Resolve compound resources (e.g. `exec:curl`) for policy/HITL.
    - Run policy check (deny → review → allow → default_deny).
+   - Run configurable system gates (AGENTS.md discovery / re-read-required for configured external tools) — before HITL.
    - If HITL required: enqueue pending action, wait for approval/denial/timeout.
    - Execute the tool (with optional timeout).
+   - Run the system-gates post hook (re-read line-shift producer).
    - Push result back to model context.
    - Record to transcript and emit stats.
 4. Between tool call batches, drain any operator steer messages and inject them.
@@ -163,6 +165,28 @@ When `toolDiscovery.enabled` is true, the daemon maintains a collapsible tool ca
 - Trigger phrases in user messages can auto-enable tools.
 - Mid-loop refresh updates the tool set without restarting the turn.
 - Subagent spawns accept `enable_tools` (tool IDs/globs) which are added to the session's enabled set alongside the configured defaults.
+
+### System Gates
+
+Two system gates are hard-wired into specific builtin handlers: the **AGENTS.md discovery gate** (blocks tool execution until the agent reads project instructions) and the **re-read-required gate** (blocks edits using stale line numbers after file mutations). Historically these applied only to those `builtin-*` tools — MCP/external tools dispatched through the tool loop bypassed them.
+
+The `gates` config section extends the same two gates to any tool whose namespaced name matches a glob list:
+
+```jsonc
+// config fragment
+{
+  "gates": {
+    "agentsMd": { "tools": ["demo_ext-*"] },
+    "reRead": { "tools": ["filesystem-write"] },
+  },
+}
+```
+
+- Glob matching targets the routed namespaced name (e.g. `demo_ext-edit`, `builtin-read`), consistent with `contextLevelTools` / `toolDiscovery.alwaysOn`.
+- Defaults are empty tool lists — the feature is off until configured, and behavior is byte-identical to before for unlisted tools.
+- Gate order in the tool loop: system gates run **before** HITL approval, so an approval-worthy external tool is gated first (avoids approving a call that then gets gated and re-prompted). A gated call returns the normal `{ gated: true, ... }` payload to the model; the model fixes the condition and retries.
+- The re-read consumer scans any string values in the tool args as candidate paths (resolved against the working directory, restricted to the workspace); the re-read producer flags a file when the external tool changes its line count (mirrors `builtin-replace`). External reads do **not** clear flags — the gate message instructs `builtin-read`, which clears them.
+- `deepMerge` replaces arrays, so a later config fragment replaces a `gates.*.tools` list wholesale.
 
 ### Builtin Tool Registry
 

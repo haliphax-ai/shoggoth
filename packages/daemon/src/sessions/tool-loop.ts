@@ -8,6 +8,7 @@ import { resolveCompoundResource, type SubResourceExtractorRegistry } from "../p
 import type { HitlAutoApproveGate } from "../hitl/hitl-auto-approve";
 import type { HitlNotifier } from "../hitl/hitl-notifier";
 import type { PendingActionRow, PendingActionsStore } from "../hitl/pending-actions-store";
+import type { SystemGatesHook } from "./system-gates";
 import type { TranscriptStore } from "./transcript-store";
 import type { ToolRunStore } from "./tool-run-store";
 import { TurnAbortedError } from "./session-turn-abort";
@@ -125,6 +126,8 @@ export interface RunToolLoopOptions {
     name: string;
     inputSchema?: Record<string, unknown>;
   }>;
+  /** When set, configurable system gates (AGENTS.md / re-read) run before HITL and after execution. */
+  readonly systemGates?: SystemGatesHook;
 }
 
 /** Callback payload for incremental stats updates during the tool loop. */
@@ -155,6 +158,7 @@ export type ToolCallDispatchResultKind =
   | "skip_validation_error"
   | "skip_policy_denied"
   | "skip_review_unavailable"
+  | "skip_system_gated"
   | "skip_hitl_denied"
   | "proceed";
 
@@ -605,6 +609,39 @@ async function processSingleToolCall(
     return { kind: "skip_review_unavailable" };
   }
 
+  // ---- Stage 3.5: system gates (AGENTS.md / re-read for configured tools) ----
+  // Runs BEFORE HITL so an approval-worthy external tool is gated first —
+  // otherwise the operator approves a tool that then gets gated, and the
+  // model's retry triggers a second HITL prompt.
+
+  if (options.systemGates) {
+    const gated = await options.systemGates.pre({
+      toolName: tc.name,
+      args: toolArgs,
+      toolCallId: tc.id,
+    });
+    if (gated) {
+      options.audit.record({
+        phase: "system_gated",
+        tool: compoundResource,
+        toolCallId: tc.id,
+      });
+      options.model.pushToolMessage?.({
+        toolCallId: tc.id,
+        content: gated.resultJson,
+      });
+      if (options.transcript) {
+        appendTx({
+          role: "tool",
+          content: gated.resultJson,
+          toolCallId: tc.id,
+          metadata: { tool: tc.name },
+        });
+      }
+      return { kind: "skip_system_gated" };
+    }
+  }
+
   // ---- Stage 4: HITL approval gate ----
 
   if (options.hitl) {
@@ -724,6 +761,28 @@ async function processSingleToolCall(
     durationMs: Date.now() - t0,
     success: true,
   });
+
+  // ---- Stage 5.5: system gates post-execution producer ----
+  // Re-read line-shift detection for configured external tools. Never runs on
+  // timeout/error paths; the factory deletes its snapshot internally.
+
+  if (options.systemGates) {
+    try {
+      await options.systemGates.post({
+        toolName: tc.name,
+        args: toolArgs,
+        toolCallId: tc.id,
+        resultJson: out.resultJson,
+      });
+    } catch (e) {
+      log.warn("system gates post hook failed; ignoring", {
+        toolName: compoundResource,
+        toolCallId: tc.id,
+        sessionId: options.sessionId,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
 
   // ---- Stage 6: result feedback to model + transcript ----
 

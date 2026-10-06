@@ -7,6 +7,7 @@ import {
 } from "./common";
 import { shoggothModelsConfigSchema } from "./models";
 import { shoggothHitlConfigSchema, DEFAULT_HITL_CONFIG } from "./hitl";
+import { shoggothGatesConfigSchema, DEFAULT_GATES_CONFIG } from "./gates";
 import {
   shoggothPolicyConfigSchema,
   shoggothPolicyFragmentSchema,
@@ -98,6 +99,7 @@ const sharedConfigFields = {
   gateway: gatewayConfigSchema,
   retention: shoggothRetentionConfigSchema.optional(),
   vault: vaultConfigSchema,
+  gates: shoggothGatesConfigSchema.optional(),
 };
 
 export const shoggothConfigFragmentSchema = z
@@ -191,5 +193,6 @@ export function defaultConfig(configDirectory: string): ShoggothConfig {
     mcp: { servers: [], poolScope: "global" },
     policy: DEFAULT_POLICY_CONFIG,
     platforms: { discord: { enabled: true } },
+    gates: DEFAULT_GATES_CONFIG,
   };
 }
