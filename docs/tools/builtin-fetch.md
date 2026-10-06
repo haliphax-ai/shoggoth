@@ -75,6 +75,24 @@ Hostnames are resolved before the request is made. If any resolved IP is private
 - `fetch.allowPrivateIps` is `true` in the daemon config, or
 - the hostname or CIDR range is listed in `fetch.privateIpAllowlist`.
 
+## Custom Certificate Bundle
+
+Set `fetch.caBundle` in the daemon config to the path of a PEM certificate
+bundle file (for example a corporate or internal CA). HTTPS requests made by
+this tool then trust certificates signed by that bundle, which lets intranet
+sites with private CAs load. When unset, the default system trust store is
+used.
+
+The bundle is validated at daemon startup: if the file is missing,
+unreadable, empty, or not a parseable PEM certificate bundle, a warning is
+logged and startup continues (requests to HTTPS hosts will fail TLS
+verification until the path is fixed). The bundle is re-checked whenever a
+request first uses it.
+
+```json
+{ "fetch": { "caBundle": "/etc/ssl/certs/corp-ca.pem" } }
+```
+
 ## Tips
 
 - Redirects are **not** followed (redirect mode is `manual`). Check for 3xx status and the `location` header.

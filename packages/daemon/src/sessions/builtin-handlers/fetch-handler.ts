@@ -3,7 +3,11 @@
 // ---------------------------------------------------------------------------
 
 import { lookup } from "node:dns/promises";
+import { readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
+import { fetch as undiciFetch, Agent } from "undici";
 import { isPrivateIp } from "@shoggoth/shared";
+import { validateCaBundleContent } from "../../config/validate-fetch-ca-bundle";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
 import { truncateToolOutput } from "./truncate-output";
 
@@ -13,6 +17,42 @@ const VALID_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", 
 
 export function register(registry: BuiltinToolRegistry): void {
   registry.register("fetch", fetchHandler);
+}
+
+// ---------------------------------------------------------------------------
+// Dispatcher cache — every request goes through undici's fetch with one of
+// these dispatchers; only the dispatcher config differs.
+// ---------------------------------------------------------------------------
+
+let defaultDispatcher: Agent | undefined;
+let cachedCaBundlePath: string | undefined;
+let cachedCaAgent: Agent | undefined;
+
+/**
+ * Resolve the undici dispatcher for a request. Without a configured CA
+ * bundle a plain default Agent is built once and reused; with one, an Agent
+ * trusting the PEM certificate bundle at the configured path is built and
+ * cached per resolved path for the process lifetime (when the path changes,
+ * the previous agent is left open so in-flight requests using it can finish;
+ * its idle sockets close after undici's keep-alive timeout).
+ *
+ * Throws if the bundle file is missing, unreadable, or not a valid PEM
+ * certificate bundle.
+ */
+function getDispatcher(caBundlePath: string | undefined): Agent {
+  if (!caBundlePath) return (defaultDispatcher ??= new Agent());
+  const resolvedPath = resolvePath(caBundlePath);
+  if (cachedCaAgent && cachedCaBundlePath === resolvedPath) return cachedCaAgent;
+  const pem = readFileSync(resolvedPath, "utf8");
+  // Fail fast with a clear error on malformed bundles instead of a cryptic
+  // TLS failure mid-request (same check as the startup validation).
+  const validation = validateCaBundleContent(pem);
+  if (!validation.ok) {
+    throw new Error(`${resolvedPath}: ${validation.reason}`);
+  }
+  cachedCaAgent = new Agent({ connect: { ca: pem } });
+  cachedCaBundlePath = resolvedPath;
+  return cachedCaAgent;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +207,7 @@ async function fetchHandler(
 
   // --- Fetch config from runtime config ---
   const fetchConfig = (ctx.config as Record<string, unknown>).fetch as
-    | { allowPrivateIps?: boolean; privateIpAllowlist?: string[] }
+    | { allowPrivateIps?: boolean; privateIpAllowlist?: string[]; caBundle?: string }
     | undefined;
   const allowPrivateIps = fetchConfig?.allowPrivateIps ?? false;
   const privateIpAllowlist = fetchConfig?.privateIpAllowlist ?? [];
@@ -213,18 +253,31 @@ async function fetchHandler(
     }
   }
 
+  // --- Resolve dispatcher (cached; loads the CA bundle on first use) ---
+  let dispatcher: Agent;
+  try {
+    dispatcher = getDispatcher(fetchConfig?.caBundle);
+  } catch (err: unknown) {
+    return {
+      resultJson: JSON.stringify({
+        error: `Failed to load CA bundle: ${(err as Error).message}`,
+      }),
+    };
+  }
+
   // --- Execute fetch ---
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = await fetch(parsed.href, {
+    const res = (await undiciFetch(parsed.href, {
       method,
       headers,
       body: bodyPayload,
       signal: controller.signal,
       redirect: "manual", // no redirect following by default
-    });
+      dispatcher,
+    })) as unknown as Response;
     clearTimeout(timer);
 
     // --- Read response body with cap ---
@@ -304,9 +357,13 @@ async function fetchHandler(
         }),
       };
     }
+    // Network/TLS failures surface as a generic "fetch failed" wrapper with
+    // the real reason (e.g. "self-signed certificate") in `cause`.
+    const cause = (err as { cause?: unknown }).cause;
+    const detail = cause instanceof Error ? cause.message : (err as Error).message;
     return {
       resultJson: JSON.stringify({
-        error: `Fetch failed: ${(err as Error).message}`,
+        error: `Fetch failed: ${detail}`,
       }),
     };
   }

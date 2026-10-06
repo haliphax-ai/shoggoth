@@ -63,6 +63,7 @@ import { WIRE_VERSION } from "@shoggoth/authn";
 import { requestSessionTurnAbort } from "./sessions/session-turn-abort";
 import { createSessionStore } from "./sessions/session-store";
 import { initLogger, getLogger } from "./logging";
+import { validateFetchCaBundle } from "./config/validate-fetch-ca-bundle";
 
 const log = getLogger("shoggoth-daemon");
 import { createDelegatingPolicyEngine, createPolicyEngine } from "./policy/engine";
@@ -182,6 +183,18 @@ if (config.dynamicConfigDirectory) {
       resolvedConfig,
     });
     process.exit(1);
+  }
+}
+
+// Validate the fetch CA bundle when configured: warn so operators notice,
+// but never block startup on it — requests will just fail TLS verification.
+if (config.fetch?.caBundle) {
+  const caBundleValidation = validateFetchCaBundle(config.fetch.caBundle);
+  if (!caBundleValidation.ok) {
+    log.warn("fetch.caBundle failed validation; HTTPS fetches may fail TLS verification", {
+      caBundle: config.fetch.caBundle,
+      reason: caBundleValidation.reason,
+    });
   }
 }
 

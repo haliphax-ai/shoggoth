@@ -605,4 +605,32 @@ describe("fetch config", () => {
     });
     assert.ok(!r.success);
   });
+
+  it("accepts fetch with caBundle path in full config", () => {
+    const r = shoggothConfigSchema.safeParse(
+      fullConfigWith({
+        fetch: { caBundle: "/etc/ssl/certs/corp-ca.pem" },
+      }),
+    );
+    assert.ok(r.success, JSON.stringify((r as any).error?.issues));
+    assert.equal((r.data as any).fetch?.caBundle, "/etc/ssl/certs/corp-ca.pem");
+  });
+
+  it("rejects fetch with empty caBundle", () => {
+    const r = shoggothConfigSchema.safeParse(fullConfigWith({ fetch: { caBundle: "" } }));
+    assert.ok(!r.success);
+  });
+
+  it("rejects fetch with non-string caBundle", () => {
+    const r = shoggothConfigSchema.safeParse(fullConfigWith({ fetch: { caBundle: 123 } }));
+    assert.ok(!r.success);
+  });
+
+  it("accepts fetch with caBundle in config fragment schema", () => {
+    const r = shoggothConfigFragmentSchema.safeParse({
+      fetch: { allowPrivateIps: true, caBundle: "/etc/ssl/certs/corp-ca.pem" },
+    });
+    assert.ok(r.success);
+    assert.equal((r.data as any).fetch?.caBundle, "/etc/ssl/certs/corp-ca.pem");
+  });
 });
