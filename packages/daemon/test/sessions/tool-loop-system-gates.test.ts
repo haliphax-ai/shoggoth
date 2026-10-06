@@ -1,12 +1,9 @@
 // ---------------------------------------------------------------------------
 // tool-loop integration for configurable system gates.
 //
-// RED today: `RunToolLoopOptions.systemGates` (and the `skip_system_gated`
-// dispatch kind) don't exist yet. The `systemGates` option is passed via
-// object spread (excess-property-safe, so the file still typechecks); at
-// runtime the current tool-loop ignores it, the external executor IS invoked,
-// and the assertions below fail — the behavioral red. GREEN wires Stage 3.5
-// (pre-gate before HITL) via `options.systemGates`.
+// Exercises the tool loop's system-gate hook: `pre` short-circuits a call
+// before execution (and before HITL), while a null `pre` lets the external
+// executor run normally.
 //
 // Fixture pattern from `mcp/tool-loop-mcp.test.ts` (in-memory migrated DB +
 // createSessionStore + createToolLoopPolicyAndAudit) and the HITL queueing
@@ -146,8 +143,8 @@ describe("runToolLoop with systemGates", () => {
       },
     };
 
-    // systemGates does not exist yet on RunToolLoopOptions; spread keeps the
-    // call typechecking while remaining behaviorally red until GREEN.
+    // Spread keeps the call typechecking whether or not the option is declared
+    // on RunToolLoopOptions.
     return {
       options: opts.systemGates
         ? ({ ...base, systemGates: opts.systemGates } as RunToolLoopOptions)

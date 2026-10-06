@@ -1,11 +1,8 @@
 // ---------------------------------------------------------------------------
 // createSystemGates — configurable system gates for external (MCP) tools.
 //
-// RED today: `packages/daemon/src/sessions/system-gates.ts` does not exist, so
-// the value import below fails to resolve — the module-level RED state. GREEN
-// adds `createSystemGates(deps)` implementing the pre/post hook contract
-// described in tmp/system-gates-research.md (AGENTS.md discovery gate and
-// re-read-required gate applied to config.gates.*.tools globs).
+// Covers `createSystemGates(deps)` and its pre/post hook contract (AGENTS.md
+// discovery gate and re-read-required gate applied to config.gates.*.tools globs).
 //
 // Follows the fixture pattern of `agents-md-gate.test.ts` (openStateDb +
 // migrate + tmp workspace + createSessionStore).

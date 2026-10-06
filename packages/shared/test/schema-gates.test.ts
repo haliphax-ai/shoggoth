@@ -2,11 +2,8 @@
 // gates config schema — `gates.agentsMd.tools` / `gates.reRead.tools` glob
 // lists for the system gates (AGENTS.md discovery, re-read-required).
 //
-// RED today: `shoggothGatesConfigSchema` / `DEFAULT_GATES_CONFIG` are not
-// exported yet, and the strict fragment/full config schemas reject the unknown
-// `gates` key. GREEN adds `packages/shared/src/schema/gates.ts`, plumbs it
-// into `sharedConfigFields` + `defaultConfig()`, and re-exports from both
-// barrels.
+// Covers the gates schema (defaults, strictness) and `gates` acceptance in
+// both the fragment and full config schemas.
 // ---------------------------------------------------------------------------
 import { describe, it } from "vitest";
 import assert from "node:assert";

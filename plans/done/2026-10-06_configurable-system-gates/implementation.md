@@ -7,7 +7,7 @@ Additive schema section for the system gates.
 - Create `packages/shared/src/schema/gates.ts` with `shoggothGatesConfigSchema`, `ShoggothGatesConfig`, `DEFAULT_GATES_CONFIG`.
 - Add `gates: shoggothGatesConfigSchema.optional()` to `sharedConfigFields` in `packages/shared/src/schema/config.ts` and `gates: DEFAULT_GATES_CONFIG` to `defaultConfig()`.
 - Export from `packages/shared/src/schema.ts` and the named barrel `packages/shared/src/index.ts`.
-- RED/GREEN: `packages/shared/test/schema-gates.test.ts` (defaults, strictness, fragment/full parsing).
+- Tests: `packages/shared/test/schema-gates.test.ts` (defaults, strictness, fragment/full parsing).
 
 **Files:**
 
@@ -20,7 +20,7 @@ Additive schema section for the system gates.
 ## Phase 2: System gates factory (daemon)
 
 - Create `packages/daemon/src/sessions/system-gates.ts` implementing `createSystemGates(deps)` with the pre/post hook contract (AGENTS.md gate, re-read consumer + line-count snapshot, re-read producer).
-- RED/GREEN: `packages/daemon/test/sessions/system-gates.test.ts`.
+- Tests: `packages/daemon/test/sessions/system-gates.test.ts`.
 
 **Files:**
 
@@ -31,9 +31,9 @@ Additive schema section for the system gates.
 
 Additive changes to the tool loop and agent turn.
 
-- `packages/daemon/src/sessions/tool-loop.ts`: `RunToolLoopOptions.systemGates?`, `skip_system_gated` kind, Stage 3.5 pre-gate (before HITL), Stage 5.5 post-execution producer.
+- `packages/daemon/src/sessions/tool-loop.ts`: `RunToolLoopOptions.systemGates?`, `skip_system_gated` kind, pre-execution gate before HITL, and a post-execution producer.
 - `packages/daemon/src/sessions/session-agent-turn.ts`: build `createSystemGates(...)` once per turn and pass it into `loopImpl`.
-- RED/GREEN: `packages/daemon/test/sessions/tool-loop-system-gates.test.ts` (short-circuit before HITL; pass-through on null).
+- Tests: `packages/daemon/test/sessions/tool-loop-system-gates.test.ts` (short-circuit before HITL; pass-through on null).
 - Regression: full `packages/daemon` and `packages/shared` vitest suites + both packages' `tsc --noEmit`.
 
 **Files:**

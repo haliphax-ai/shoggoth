@@ -107,7 +107,7 @@ const systemGates = createSystemGates({
   },
 });
 
-// In the tool loop (Stage 3.5, before HITL):
+// In the tool loop (pre-execution, before HITL):
 const gated = await options.systemGates.pre({
   toolName: tc.name,
   args: toolArgs,

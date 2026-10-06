@@ -28,8 +28,8 @@ Glob matching reuses `toolIdGlobMatches` (`tool-id-glob.ts`), consistent with `c
 
 - New `RunToolLoopOptions.systemGates?` option (additive; absent ⇒ zero behavior change).
 - New `skip_system_gated` dispatch kind.
-- **Stage 3.5** — pre-gate before HITL: a gated call records an audit row with phase `system_gated`, pushes the gated payload to the model, appends it to the transcript, and short-circuits. Ordering matters: gates must run before HITL so an approval-worthy external tool is gated first and the operator is not prompted for a call that then gets gated.
-- **Stage 5.5** — post-execution producer inside a try/catch; never runs on timeout/error paths.
+- Pre-execution (before HITL): a gated call records an audit row with phase `system_gated`, pushes the gated payload to the model, appends it to the transcript, and short-circuits. Ordering matters: gates must run before HITL so an approval-worthy external tool is gated first and the operator is not prompted for a call that then gets gated.
+- Post-execution producer inside a try/catch; never runs on timeout/error paths.
 
 This placement automatically covers main sessions, subagents, and workflow-task agent turns, since everything routes through `executeSessionAgentTurn`.
 
@@ -39,9 +39,9 @@ This placement automatically covers main sessions, subagents, and workflow-task 
 
 ## Testing Strategy
 
-Red/green TDD: tests written before the implementation committed against them.
+Tests written before the implementation committed against them.
 
-- `packages/shared/test/schema-gates.test.ts` — schema defaults, strictness, fragment/full-config parsing (RED because strict schemas reject the unknown `gates` key).
+- `packages/shared/test/schema-gates.test.ts` — schema defaults, strictness, fragment/full-config parsing.
 - `packages/daemon/test/sessions/system-gates.test.ts` — factory behavior: AGENTS.md gating + marked-seen retry pass, non-match passthrough, re-read consumer gate on flagged files, producer line-shift marking (and no re-marking on unchanged files).
 - `packages/daemon/test/sessions/tool-loop-system-gates.test.ts` — tool-loop integration: gated `pre` short-circuits (executor never invoked, gated payload in transcript, no HITL row queued), `pre` returning null proceeds normally.
 
