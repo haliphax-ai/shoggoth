@@ -220,6 +220,16 @@ Global slash commands are registered on startup via `PUT /applications/{id}/comm
 
 When `session_id` is omitted, the handler resolves the session from the channel where the command was invoked.
 
+### De-Registration on Shutdown
+
+On clean shutdown the daemon removes the commands it registered by bulk-overwriting the list with an empty array (the same `PUT /applications/{id}/commands` call with `[]`). This keeps the slash command list clean when, for example, a test instance of the bot goes offline in the same channel as the main instance.
+
+- De-registration only happens when **this instance** successfully registered at startup (registration enabled and not failed).
+- The attempt is awaited inside the Discord messaging drain, before the transport stops, so the HTTP call completes before process exit.
+- A REST failure is logged as a warning and never blocks or fails shutdown.
+
+> **Note:** the bulk overwrite clears _all_ global commands for the Discord application, not just the ones Shoggoth added. If a shutting-down instance shares its bot application with a running instance, the shared command list is cleared until the running instance next starts (registration happens at startup only).
+
 ### Interaction Flow
 
 1. Gateway `INTERACTION_CREATE` → `discordInteractionCreateToEvent()` parses the payload.
