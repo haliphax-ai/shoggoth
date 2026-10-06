@@ -270,7 +270,11 @@ export type McpServerRules = z.infer<typeof mcpServerRulesSchema>;
 
 - **Pool warmth vs. resource usage:** Denied servers stay connected so re-enabling is instant. If resource usage becomes a concern (many configured but denied servers), a future optimization could defer connection for globally-denied servers. Not in scope here.
 - **Dynamic config reload:** When `serverRules` change via hot-reload, the next `resolveContext` call picks up the new rules automatically (rules are resolved per-call, not cached). No pool reconnect needed.
-- **`tools/list` refresh:** If a denied server's `tools/list` changes while denied, the stale catalog is used when re-enabled. This is the same staleness issue that exists today for all MCP servers — tracked in [#1](https://github.com/haliphax-openclaw/shoggoth/issues/1).
+- **`tools/list` refresh:** Resolved — a denied server's catalog no longer goes
+  stale while denied. Pools that stay connected re-fetch `tools/list` on
+  `notifications/tools/list_changed`, and a server that was filtered out at
+  connect time fetches a fresh list when it connects after re-enabling, so
+  re-enabling always shows current tools.
 - **Fragment schema:** The `shoggothConfigFragmentSchema` needs the same optional fields added so layered config and dynamic config can set `serverRules`.
 
 ## Migration
