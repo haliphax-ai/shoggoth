@@ -390,11 +390,17 @@ export function createMcpJsonRpcSession(
     input.off("error", onErr);
     failAll(new Error("MCP session closed"));
     await new Promise<void>((resolve) => {
-      if (output.writableEnded) {
+      if (output.writableEnded || output.destroyed) {
         resolve();
         return;
       }
-      output.end(() => resolve());
+      // Bound the flush wait: against a dead peer the end callback may never
+      // fire, and close() must not stall the caller.
+      const t = setTimeout(resolve, 2_000);
+      output.end(() => {
+        clearTimeout(t);
+        resolve();
+      });
     });
   }
 
@@ -453,6 +459,41 @@ async function connectMcpStdioSessionDirect(
     stdio: ["pipe", "pipe", "ignore"],
     ...(hasIdentity ? { detached: true } : {}),
   });
+  // Sink stream errors synchronously — on a failed spawn Node may destroy the
+  // pipes with an error before anything else attaches a listener, and an
+  // unhandled 'error' event on any stream is an uncaught exception. Write
+  // failures against a dead/dying server (EPIPE, ERR_STREAM_DESTROYED) also
+  // surface here; pending requests are already failed through the write
+  // callback and the session's stdout handlers.
+  proc.stdout?.on("error", () => {});
+  proc.stdin?.on("error", () => {});
+  // Attach failure handling synchronously — before any await — so EVERY spawn
+  // failure mode (ENOENT, EACCES/EPERM, EMFILE/ENFILE, ENOEXEC/failed exec,
+  // invalid uid/gid, resource exhaustion, ...) rejects the connect below
+  // instead of surfacing as an unhandled 'error' event that takes the whole
+  // daemon down. Node only emits 'spawn' when the child actually started;
+  // 'error' without 'spawn' means the process never existed.
+  let spawnedOk = false;
+  const spawned = new Promise<void>((resolve, reject) => {
+    proc.once("spawn", () => {
+      spawnedOk = true;
+      resolve();
+    });
+    proc.on("error", (err) => {
+      if (!spawnedOk) {
+        spawnedOk = true;
+        reject(err);
+      }
+      // After a successful spawn, a late 'error' (e.g. a failed kill) must
+      // never become unhandled; session death is detected via stdio EOF below.
+    });
+  });
+  try {
+    await spawned;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`MCP stdio spawn failed for "${opts.command}": ${reason}`, { cause: err });
+  }
   const out = proc.stdout;
   const inp = proc.stdin;
   if (!out || !inp) {
@@ -467,6 +508,11 @@ async function connectMcpStdioSessionDirect(
     notify: session.notify,
     close: async () => {
       await baseClose().catch(() => {});
+      if (proc.exitCode !== null || proc.signalCode !== null) {
+        // Already dead (crash between spawn and initialize, server exit, ...)
+        // — 'exit' has fired and will not fire again; do not wait the grace.
+        return;
+      }
       proc.kill("SIGTERM");
       await new Promise<void>((r) => {
         const t = setTimeout(() => {
@@ -506,6 +552,19 @@ async function connectMcpStdioSessionViaProcman(
 
   const managed: ManagedProcess = await pm.start(spec);
 
+  // pm.start() never rejects on a failed spawn — the failure is recorded in
+  // the process state instead — so check it here: wiring stdio to a process
+  // that never started would hang the initialize handshake until its timeout
+  // instead of failing the connect promptly.
+  if (managed.state !== "running") {
+    const failedState = managed.state;
+    // Deregister and cancel any pending restart attempts for this spec.
+    await pm.stop(specId).catch(() => {});
+    throw new Error(
+      `MCP stdio process failed to start via procman (state=${failedState}, command=${opts.command})`,
+    );
+  }
+
   // The managed process exposes stdout/stdin via events and writeStdin.
   // We need Readable/Writable streams for createMcpJsonRpcSession.
   // Build a PassThrough for stdout that receives data from the managed process events,
@@ -514,6 +573,14 @@ async function connectMcpStdioSessionViaProcman(
   const stdoutStream = new PassThrough();
   managed.on("stdout", (chunk: Buffer) => {
     stdoutStream.write(chunk);
+  });
+  // When the managed process dies (crash, signal, failed restart), end the
+  // stdout stream so pending requests (initialize) fail fast with EOF instead
+  // of hanging until their request timeout.
+  managed.on("exit", () => {
+    if (!stdoutStream.destroyed && !stdoutStream.writableEnded) {
+      stdoutStream.end();
+    }
   });
 
   // Writable shim that delegates to managed.writeStdin
@@ -584,7 +651,14 @@ export async function connectMcpTcpSession(opts: McpTcpConnectOptions): Promise<
  */
 export async function openMcpStdioClient(opts: McpStdioConnectOptions): Promise<McpJsonRpcSession> {
   const s = await connectMcpStdioSession(opts);
-  await mcpInitializeSession(s);
+  try {
+    await mcpInitializeSession(s);
+  } catch (err) {
+    // Never leak the spawned server when the handshake fails (process died
+    // between spawn and initialize, protocol mismatch, timeout, ...).
+    await s.close().catch(() => {});
+    throw err;
+  }
   return s;
 }
 
@@ -593,6 +667,12 @@ export async function openMcpStdioClient(opts: McpStdioConnectOptions): Promise<
  */
 export async function openMcpTcpClient(opts: McpTcpConnectOptions): Promise<McpJsonRpcSession> {
   const s = await connectMcpTcpSession(opts);
-  await mcpInitializeSession(s);
+  try {
+    await mcpInitializeSession(s);
+  } catch (err) {
+    // Never leak the socket when the handshake fails.
+    await s.close().catch(() => {});
+    throw err;
+  }
   return s;
 }

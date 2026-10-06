@@ -67,19 +67,11 @@ export class AcpxProcessSupervisor {
     });
 
     const pid = child.pid;
-    if (pid === undefined) {
-      throw new AcpxSupervisorError("ERR_ACPX_SPAWN", "spawn did not assign a pid");
-    }
-
-    const startedAtMs = Date.now();
-    this.byRoot.set(input.acpWorkspaceRoot, {
-      pid,
-      shoggothSessionId: input.shoggothSessionId,
-      startedAtMs,
-      child,
-    });
-
     const root = input.acpWorkspaceRoot;
+    // Attach listeners synchronously, before the pid check below: a spawn
+    // failure (ENOENT, EACCES, ...) surfaces as an async 'error' event, and
+    // throwing before a listener exists would leave that event unhandled —
+    // an uncaught exception that takes the whole daemon down.
     child.on("exit", (code, signal) => {
       const t = this.byRoot.get(root);
       if (t?.pid === pid) {
@@ -95,6 +87,20 @@ export class AcpxProcessSupervisor {
       }
     });
     child.unref();
+
+    if (pid === undefined) {
+      // The spawn failure itself is reported through the 'error' listener
+      // attached above; surface it synchronously to the caller as well.
+      throw new AcpxSupervisorError("ERR_ACPX_SPAWN", "spawn did not assign a pid");
+    }
+
+    const startedAtMs = Date.now();
+    this.byRoot.set(input.acpWorkspaceRoot, {
+      pid,
+      shoggothSessionId: input.shoggothSessionId,
+      startedAtMs,
+      child,
+    });
 
     return { pid };
   }

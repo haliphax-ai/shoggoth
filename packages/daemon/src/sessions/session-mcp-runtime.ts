@@ -51,9 +51,19 @@ function logMcpConnectStatuses(
 ): void {
   for (const st of statuses ?? []) {
     if (st.ok) {
-      log.info("session.mcp_pool.server_connected", { ...scope, sourceId: st.id });
+      log.info("session.mcp_pool.server_connected", {
+        ...scope,
+        sourceId: st.id,
+        attempts: st.attempts,
+      });
     } else {
-      log.warn("session.mcp_pool.server_failed", { ...scope, sourceId: st.id, err: st.error });
+      log.warn("session.mcp_pool.server_failed", {
+        ...scope,
+        sourceId: st.id,
+        err: st.error,
+        attempts: st.attempts,
+        circuitOpen: st.circuitOpen,
+      });
     }
   }
 }
@@ -239,12 +249,26 @@ export async function createSessionMcpRuntime(
   let globalExternalInvoke: ExternalMcpInvoke | undefined;
   let mcpShutdownGlobal: (() => Promise<void>) | undefined;
   let globalPoolConnected = false;
+  /**
+   * The last global connect attempt failed (per-server circuits are open).
+   * While set, resolveContext does not re-trigger a connect — re-running the
+   * whole retry budget on every tool resolution would be a churn loop.
+   */
+  let globalConnectFailed = false;
+  /**
+   * The pending global reconnect is explicit (idle eviction tore down a
+   * previously connected pool) — re-arm the circuit breakers for it.
+   */
+  let globalReconnectReArm = false;
 
   /** Connect (or reconnect) the global MCP pool. */
-  async function connectGlobalPool(): Promise<void> {
+  async function connectGlobalPool(rearmCircuits: boolean): Promise<void> {
     if (globalServers.length === 0) return;
     try {
-      const { pool, external, statuses } = await connectMcpPool(globalServers, mcpConnectOpts);
+      const { pool, external, statuses } = await connectMcpPool(globalServers, {
+        ...mcpConnectOpts,
+        rearmCircuits,
+      });
       logMcpConnectStatuses(statuses, { poolScope: "global" });
       const unregisterGlobal = registerMcpHttpCancelHandler(
         SHOGGOTH_GLOBAL_MCP_SESSION_KEY,
@@ -257,13 +281,16 @@ export async function createSessionMcpRuntime(
       globalExternalSources = pool.externalSources;
       globalExternalInvoke = external;
       globalPoolConnected = true;
+      globalConnectFailed = false;
     } catch (e) {
+      globalConnectFailed = true;
       log.error("session.mcp_pool.connect_failed", { err: String(e) });
     }
   }
 
-  // Initial global pool connect.
-  await connectGlobalPool();
+  // Initial global pool connect (explicit — re-arms circuits so a fresh
+  // daemon boot always gets a full retry budget).
+  await connectGlobalPool(true);
 
   // Pre-built context when only global servers exist (no per-agent, no per-session).
   function buildGlobalOnlyCtx(): SessionMcpToolContext {
@@ -378,10 +405,13 @@ export async function createSessionMcpRuntime(
       if (mcpShutdownGlobal) {
         const shutdownFn = mcpShutdownGlobal;
         // Optimistically clear state so resolveContext triggers a reconnect.
+        // The reconnect is explicit (eviction of a live pool): re-arm circuits.
         mcpShutdownGlobal = undefined;
         globalExternalSources = [];
         globalExternalInvoke = undefined;
         globalPoolConnected = false;
+        globalConnectFailed = false;
+        globalReconnectReArm = true;
         globalOnlyMcpCtx = buildGlobalOnlyCtx();
         globalOnlyMcpCtxEpoch = catalogEpoch;
         void shutdownFn().catch((err) => {
@@ -523,9 +553,18 @@ export async function createSessionMcpRuntime(
       return runContextFinalizers(builtinMcpCtx, sessionId);
     }
 
-    // Reconnect global pool if it was evicted by idle timer.
-    if (globalServers.length > 0 && !globalPoolConnected) {
-      await connectGlobalPool();
+    // Reconnect the global pool when it is not connected: after an explicit
+    // idle eviction (re-arms the circuit breakers), or after a failed connect
+    // only when some server's breaker has closed meanwhile. A failed connect
+    // with all circuits open is NOT retried here — that would re-run the
+    // retry budget on every resolveContext.
+    if (
+      globalServers.length > 0 &&
+      !globalPoolConnected &&
+      (!globalConnectFailed || globalReconnectReArm)
+    ) {
+      await connectGlobalPool(globalReconnectReArm);
+      globalReconnectReArm = false;
       globalOnlyMcpCtx = buildGlobalOnlyCtx();
       globalOnlyMcpCtxEpoch = catalogEpoch;
     }

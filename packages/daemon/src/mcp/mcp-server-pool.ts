@@ -19,6 +19,47 @@ import type { VaultService } from "../vault/vault-service";
 
 const log = getLogger("mcp-pool");
 
+// ── Connect retry + circuit breaker ─────────────────────────────────────────
+//
+// Every per-server connect attempt covers the WHOLE handshake (spawn, connect,
+// initialize, tools/list), so any failure mode — spawn errors (ENOENT, EACCES,
+// EMFILE, ENOEXEC, invalid uid/gid, ...), early process death, protocol
+// errors, timeouts — is retried the same way.
+
+/** Max connect attempts per server per pool connect (first try + retries). */
+const MCP_CONNECT_MAX_ATTEMPTS = 3;
+/** Base delay before the first retry; doubles after each failed attempt. */
+const MCP_CONNECT_RETRY_BASE_MS = 250;
+/** Upper bound for the exponential backoff delay between attempts. */
+const MCP_CONNECT_RETRY_MAX_MS = 4_000;
+
+/** Per-server circuit-breaker state, keyed by configured server id. */
+type McpServerCircuit = {
+  /** Failed connect attempts recorded in the current closed window. */
+  attempts: number;
+  /** True once the retry budget is exhausted; no attempts until re-armed. */
+  open: boolean;
+  lastError?: string;
+};
+
+const mcpServerCircuits = new Map<string, McpServerCircuit>();
+
+/**
+ * Close every server circuit (start a fresh window). Called by tests and by
+ * callers that want to force a full retry budget on the next connect; pool
+ * connects re-arm their own servers by default (`rearmCircuits`).
+ */
+export function resetMcpServerConnectCircuits(): void {
+  mcpServerCircuits.clear();
+}
+
+/** True while a server's circuit breaker is open (retry budget exhausted). */
+export function isMcpServerCircuitOpen(serverId: string): boolean {
+  return mcpServerCircuits.get(serverId)?.open === true;
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
 type EffectiveMcpPoolScope = "global" | "per_agent" | "per_session";
 
 /** Shape common to the stdio/tcp notification tap and the streamable HTTP server-message tap. */
@@ -104,6 +145,20 @@ export type ConnectShoggothMcpPoolOptions = {
    * `resolveContext` rebuilds from the refreshed arrays.
    */
   readonly onToolCatalogChange?: (input: { sourceId: string }) => void;
+  /**
+   * Re-arm (close) the circuit breakers of the servers in this connect before
+   * attempting them, granting each a fresh retry budget. Defaults to true, so
+   * every explicit pool connect retries normally. Pass false from automatic
+   * reconnect paths: servers whose breaker is open then fail fast without
+   * spawning, which is what keeps repeated `resolveContext`-driven reconnects
+   * from re-running the retry budget (churn).
+   */
+  readonly rearmCircuits?: boolean;
+  /** Per-connect retry knobs (defaults: 3 attempts, 250 ms base, x2 backoff). */
+  readonly connectRetry?: {
+    readonly attempts?: number;
+    readonly baseDelayMs?: number;
+  };
 };
 
 /** Per-server outcome of a pool start, gathered asynchronously across parallel connects. */
@@ -111,6 +166,10 @@ export type McpServerConnectStatus = {
   readonly id: string;
   readonly ok: boolean;
   readonly error?: string;
+  /** Connect attempts consumed in this pool connect (0 when skipped by an open circuit). */
+  readonly attempts?: number;
+  /** True when this server's circuit breaker is open (retry budget exhausted). */
+  readonly circuitOpen?: boolean;
 };
 
 type McpServerStartOutcome = {
@@ -202,66 +261,143 @@ export async function connectShoggothMcpServers(
 
   /** Open one server (env/vault resolution + connect + `tools/list`) in isolation. */
   async function startServer(s: ShoggothMcpServerEntry): Promise<McpServerStartOutcome> {
-    let session: McpJsonRpcSession | undefined;
-    let httpSession: McpStreamableHttpSession | undefined;
-    try {
-      if (s.transport === "stdio") {
-        // Build env: inherit process.env, override HOME for agent workspace,
-        // server config env takes highest priority
-        let baseEnv = {
-          ...process.env,
-          ...(agentCtx ? { HOME: agentCtx.workspacePath } : {}),
-          ...s.env,
-        };
-        // Resolve $vault: references in env vars if vault is available
-        if (baseEnv && options?.vault) {
-          baseEnv = await resolveVaultEnv(baseEnv, options.vault, options.agentId);
-        }
-        const cwd = s.cwd ?? agentCtx?.workspacePath;
-        session = await openMcpStdioClient({
-          command: s.command,
-          args: s.args,
-          cwd,
-          env: baseEnv,
-          uid: agentCtx?.uid,
-          gid: agentCtx?.gid,
-          processManager: getProcessManager(),
-          onServerNotification: (msg) => handleServerNotification(s.id, msg),
+    const rearm = options?.rearmCircuits ?? true;
+    const maxAttempts = Math.max(1, options?.connectRetry?.attempts ?? MCP_CONNECT_MAX_ATTEMPTS);
+    const baseDelayMs = options?.connectRetry?.baseDelayMs ?? MCP_CONNECT_RETRY_BASE_MS;
+
+    let circuit = mcpServerCircuits.get(s.id);
+    if (rearm) {
+      if (circuit?.open) {
+        log.info("mcp.pool.circuit_rearm", {
+          sourceId: s.id,
+          previousAttempts: circuit.attempts,
+          lastError: circuit.lastError,
         });
-      } else if (s.transport === "tcp") {
-        session = await openMcpTcpClient({
-          host: s.host,
-          port: s.port,
-          onServerNotification: (msg) => handleServerNotification(s.id, msg),
-        });
-      } else {
-        httpSession = await openMcpStreamableHttpClient({
-          url: s.url,
-          headers: s.headers,
-          // Always wired: the HTTP transport funnels id-less notifications through
-          // onServerMessage (POST JSON, POST SSE, and standing GET SSE all share
-          // one dispatch), so the tap doubles as the tools/list_changed trigger.
-          // The optional debug log tap (SHOGGOTH_MCP_LOG_SERVER_MESSAGES) still
-          // receives every forwarded message first.
-          onServerMessage: (msg) => {
-            onPoolMessage?.({ sourceId: s.id, msg });
-            handleServerNotification(s.id, msg);
-          },
-        });
-        session = httpSession;
       }
-      const tools = await mcpFetchToolsList(session);
+      circuit = { attempts: 0, open: false };
+      mcpServerCircuits.set(s.id, circuit);
+    } else if (circuit?.open) {
+      // Circuit open and no re-arm requested: fail fast WITHOUT spawning so
+      // automatic reconnects never re-run the retry budget for this server.
+      log.warn("mcp.pool.circuit_open_skip", {
+        sourceId: s.id,
+        attempts: circuit.attempts,
+        err: circuit.lastError,
+      });
       return {
-        status: { id: s.id, ok: true },
-        session,
-        httpSession,
-        catalog: mcpToolsToSourceCatalog(s.id, tools),
+        status: {
+          id: s.id,
+          ok: false,
+          error:
+            `circuit open: connect failed ${circuit.attempts} time(s) previously` +
+            (circuit.lastError ? ` (${circuit.lastError})` : ""),
+          attempts: 0,
+          circuitOpen: true,
+        },
       };
-    } catch (e) {
-      // Never leak a partially-opened session when this server fails.
-      if (session) await session.close().catch(() => {});
-      return { status: { id: s.id, ok: false, error: String(e) } };
     }
+    if (!circuit) {
+      // First time we see this server (e.g. rearm=false on a fresh id).
+      circuit = { attempts: 0, open: false };
+      mcpServerCircuits.set(s.id, circuit);
+    }
+
+    let lastError = "unknown error";
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let session: McpJsonRpcSession | undefined;
+      let httpSession: McpStreamableHttpSession | undefined;
+      try {
+        if (s.transport === "stdio") {
+          // Build env: inherit process.env, override HOME for agent workspace,
+          // server config env takes highest priority
+          let baseEnv = {
+            ...process.env,
+            ...(agentCtx ? { HOME: agentCtx.workspacePath } : {}),
+            ...s.env,
+          };
+          // Resolve $vault: references in env vars if vault is available
+          if (baseEnv && options?.vault) {
+            baseEnv = await resolveVaultEnv(baseEnv, options.vault, options.agentId);
+          }
+          const cwd = s.cwd ?? agentCtx?.workspacePath;
+          session = await openMcpStdioClient({
+            command: s.command,
+            args: s.args,
+            cwd,
+            env: baseEnv,
+            uid: agentCtx?.uid,
+            gid: agentCtx?.gid,
+            processManager: getProcessManager(),
+            onServerNotification: (msg) => handleServerNotification(s.id, msg),
+          });
+        } else if (s.transport === "tcp") {
+          session = await openMcpTcpClient({
+            host: s.host,
+            port: s.port,
+            onServerNotification: (msg) => handleServerNotification(s.id, msg),
+          });
+        } else {
+          httpSession = await openMcpStreamableHttpClient({
+            url: s.url,
+            headers: s.headers,
+            // Always wired: the HTTP transport funnels id-less notifications through
+            // onServerMessage (POST JSON, POST SSE, and standing GET SSE all share
+            // one dispatch), so the tap doubles as the tools/list_changed trigger.
+            // The optional debug log tap (SHOGGOTH_MCP_LOG_SERVER_MESSAGES) still
+            // receives every forwarded message first.
+            onServerMessage: (msg) => {
+              onPoolMessage?.({ sourceId: s.id, msg });
+              handleServerNotification(s.id, msg);
+            },
+          });
+          session = httpSession;
+        }
+        const tools = await mcpFetchToolsList(session);
+        if (circuit) {
+          circuit.attempts = 0;
+          circuit.open = false;
+          circuit.lastError = undefined;
+        }
+        return {
+          status: { id: s.id, ok: true, attempts: attempt },
+          session,
+          httpSession,
+          catalog: mcpToolsToSourceCatalog(s.id, tools),
+        };
+      } catch (e) {
+        // Never leak a partially-opened session when this server fails.
+        if (session) await session.close().catch(() => {});
+        lastError = String(e);
+        if (circuit) circuit.attempts += 1;
+        if (attempt < maxAttempts) {
+          const delayMs = Math.min(baseDelayMs * 2 ** (attempt - 1), MCP_CONNECT_RETRY_MAX_MS);
+          log.warn("mcp.pool.connect_retry", {
+            sourceId: s.id,
+            attempt,
+            maxAttempts,
+            delayMs,
+            err: lastError,
+          });
+          await sleep(delayMs);
+        }
+      }
+    }
+
+    // Retry budget exhausted: open the circuit for this server. It stays open
+    // (no further automatic attempts) until the next explicit pool connect
+    // re-arms it.
+    if (circuit) {
+      circuit.open = true;
+      circuit.lastError = lastError;
+    }
+    log.warn("mcp.pool.circuit_open", {
+      sourceId: s.id,
+      attempts: maxAttempts,
+      err: lastError,
+    });
+    return {
+      status: { id: s.id, ok: false, error: lastError, attempts: maxAttempts, circuitOpen: true },
+    };
   }
 
   // Start every configured server concurrently; Promise.all preserves input order, so
