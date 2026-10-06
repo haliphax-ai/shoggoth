@@ -61,6 +61,27 @@ export class UnboundThreadError extends Error {
   }
 }
 
+/**
+ * Match a channel/guild pair against static config routes and return the session
+ * ID of the first match, or `undefined`. Guild semantics: a route with a `guildId`
+ * only matches that exact guild; a route without one only matches DMs (no guild).
+ * Shared by the adapter, the bridge runtime, and plugin-side config resolution so
+ * all three agree on which route — if any — a channel maps to.
+ */
+export function resolveSessionIdForRoutes(
+  routes: readonly DiscordSessionRoute[],
+  channelId: string,
+  guildId?: string,
+): string | undefined {
+  for (const r of routes) {
+    if (r.channelId !== channelId) continue;
+    if (r.guildId !== undefined && r.guildId !== guildId) continue;
+    if (r.guildId === undefined && guildId !== undefined) continue;
+    return r.sessionId;
+  }
+  return undefined;
+}
+
 function resolveSessionId(
   routes: readonly DiscordSessionRoute[],
   guildId: string | undefined,
@@ -82,12 +103,8 @@ function resolveSessionId(
       throw new UnboundThreadError(threadId.trim());
     }
   }
-  for (const r of routes) {
-    if (r.channelId !== channelId) continue;
-    if (r.guildId !== undefined && r.guildId !== guildId) continue;
-    if (r.guildId === undefined && guildId !== undefined) continue;
-    return r.sessionId;
-  }
+  const staticSession = resolveSessionIdForRoutes(routes, channelId, guildId);
+  if (staticSession !== undefined) return staticSession;
   throw new Error(
     `Discord adapter: no session route for channel ${channelId}` +
       (guildId !== undefined ? ` guild ${guildId}` : " (DM)"),

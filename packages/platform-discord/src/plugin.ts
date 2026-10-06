@@ -16,7 +16,8 @@ import { createHitlDiscordNoticeRegistry } from "./hitl/notice-registry";
 import { startDiscordPlatform, type DiscordPlatformHandle } from "./platform";
 import { createDiscordInteractionHandler } from "./slash-commands";
 import { handleDiscordHitlReactionAdd } from "./hitl/reaction-handler";
-import { resolveDiscordOwnerUserId } from "./config";
+import { resolveEffectiveDiscordRoutes, resolveDiscordOwnerUserId } from "./config";
+import { resolveSessionIdForRoutes } from "./adapter";
 import {
   createActionToolDispatcher,
   type MessageToolDeps,
@@ -56,39 +57,19 @@ function resolveDiscordBotToken(config: any): string | undefined {
   return (dc?.token as string | undefined)?.trim() || undefined;
 }
 
-/** Resolve session ID for a given channel/guild from agent routes config. */
-
+/**
+ * Resolve a session ID for a channel/guild pair from static routes in config.
+ * Uses the same validated route extraction the bridge is built from and the
+ * shared route matcher the bridge and adapter use, so plugin-side resolution
+ * agrees with bridge routing on which routes exist.
+ */
 function resolveSessionForChannel(
   config: any,
   channelId: string,
   guildId?: string,
 ): string | undefined {
   try {
-    const agentsList = (config.agents as Record<string, unknown>)?.list as
-      | Record<string, unknown>
-      | undefined;
-    if (!agentsList) return undefined;
-    for (const agentDef of Object.values(agentsList)) {
-      if (typeof agentDef !== "object" || agentDef === null) continue;
-      const discordPlatform = (
-        (agentDef as Record<string, unknown>).platforms as Record<string, unknown>
-      )?.discord as Record<string, unknown> | undefined;
-      const routesList = discordPlatform?.routes;
-      if (!Array.isArray(routesList)) continue;
-      for (const r of routesList) {
-        if (typeof r !== "object" || r === null) continue;
-        const route = r as {
-          channelId?: string;
-          sessionId?: string;
-          guildId?: string;
-        };
-        if (route.channelId !== channelId) continue;
-        if (route.guildId !== undefined && route.guildId !== guildId) continue;
-        if (route.guildId === undefined && guildId !== undefined) continue;
-        return route.sessionId;
-      }
-    }
-    return undefined;
+    return resolveSessionIdForRoutes(resolveEffectiveDiscordRoutes(config), channelId, guildId);
   } catch {
     return undefined;
   }
