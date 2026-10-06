@@ -86,14 +86,38 @@ export type ConnectShoggothMcpPoolOptions = {
   readonly agentId?: string;
 };
 
+/** Per-server outcome of a pool start, gathered asynchronously across parallel connects. */
+export type McpServerConnectStatus = {
+  readonly id: string;
+  readonly ok: boolean;
+  readonly error?: string;
+};
+
+type McpServerStartOutcome = {
+  readonly status: McpServerConnectStatus;
+  readonly session?: McpJsonRpcSession;
+  readonly httpSession?: McpStreamableHttpSession;
+  readonly catalog?: McpSourceCatalog;
+};
+
 /**
- * Connects configured MCP servers (stdio, TCP, or streamable HTTP), runs `initialize` + `tools/list`,
- * and returns catalogs plus a {@link ExternalMcpInvoke} that routes `tools/call` to the right session.
+ * Connects configured MCP servers (stdio, TCP, or streamable HTTP) in parallel, runs
+ * `initialize` + `tools/list` on each, and returns catalogs plus a {@link ExternalMcpInvoke}
+ * that routes `tools/call` to the right session.
+ *
+ * Outcomes are gathered per server: a server that fails to connect is skipped (its
+ * partially-opened session is closed, never leaked) while the rest join the pool in config
+ * order. If every configured server fails, an `AggregateError` is thrown.
  */
 export async function connectShoggothMcpServers(
   servers: readonly ShoggothMcpServerEntry[],
   options?: ConnectShoggothMcpPoolOptions,
-): Promise<{ pool: McpServerPool; external: ExternalMcpInvoke }> {
+): Promise<{
+  pool: McpServerPool;
+  external: ExternalMcpInvoke;
+  /** Always set by this implementation; optional so injected fakes stay assignable. */
+  statuses?: readonly McpServerConnectStatus[];
+}> {
   const externalSources: McpSourceCatalog[] = [];
   const sessions = new Map<string, McpJsonRpcSession>();
   const streamableBySourceId = new Map<string, McpStreamableHttpSession>();
@@ -101,46 +125,79 @@ export async function connectShoggothMcpServers(
 
   const agentCtx = options?.agentContext;
 
-  for (const s of servers) {
-    let session: McpJsonRpcSession;
-
-    if (s.transport === "stdio") {
-      // Build env: inherit process.env, override HOME for agent workspace, server config env takes highest priority
-      let baseEnv = {
-        ...process.env,
-        ...(agentCtx ? { HOME: agentCtx.workspacePath } : {}),
-        ...s.env,
-      };
-      // Resolve $vault: references in env vars if vault is available
-      if (baseEnv && options?.vault) {
-        baseEnv = await resolveVaultEnv(baseEnv, options.vault, options.agentId);
+  /** Open one server (env/vault resolution + connect + `tools/list`) in isolation. */
+  async function startServer(s: ShoggothMcpServerEntry): Promise<McpServerStartOutcome> {
+    let session: McpJsonRpcSession | undefined;
+    let httpSession: McpStreamableHttpSession | undefined;
+    try {
+      if (s.transport === "stdio") {
+        // Build env: inherit process.env, override HOME for agent workspace,
+        // server config env takes highest priority
+        let baseEnv = {
+          ...process.env,
+          ...(agentCtx ? { HOME: agentCtx.workspacePath } : {}),
+          ...s.env,
+        };
+        // Resolve $vault: references in env vars if vault is available
+        if (baseEnv && options?.vault) {
+          baseEnv = await resolveVaultEnv(baseEnv, options.vault, options.agentId);
+        }
+        const cwd = s.cwd ?? agentCtx?.workspacePath;
+        session = await openMcpStdioClient({
+          command: s.command,
+          args: s.args,
+          cwd,
+          env: baseEnv,
+          uid: agentCtx?.uid,
+          gid: agentCtx?.gid,
+          processManager: getProcessManager(),
+        });
+      } else if (s.transport === "tcp") {
+        session = await openMcpTcpClient({ host: s.host, port: s.port });
+      } else {
+        httpSession = await openMcpStreamableHttpClient({
+          url: s.url,
+          headers: s.headers,
+          onServerMessage: onPoolMessage
+            ? (msg) => onPoolMessage({ sourceId: s.id, msg })
+            : undefined,
+        });
+        session = httpSession;
       }
-      const cwd = s.cwd ?? agentCtx?.workspacePath;
-      session = await openMcpStdioClient({
-        command: s.command,
-        args: s.args,
-        cwd,
-        env: baseEnv,
-        uid: agentCtx?.uid,
-        gid: agentCtx?.gid,
-        processManager: getProcessManager(),
-      });
-    } else if (s.transport === "tcp") {
-      session = await openMcpTcpClient({ host: s.host, port: s.port });
-    } else {
-      const httpSession = await openMcpStreamableHttpClient({
-        url: s.url,
-        headers: s.headers,
-        onServerMessage: onPoolMessage
-          ? (msg) => onPoolMessage({ sourceId: s.id, msg })
-          : undefined,
-      });
-      streamableBySourceId.set(s.id, httpSession);
-      session = httpSession;
+      const tools = await mcpFetchToolsList(session);
+      return {
+        status: { id: s.id, ok: true },
+        session,
+        httpSession,
+        catalog: mcpToolsToSourceCatalog(s.id, tools),
+      };
+    } catch (e) {
+      // Never leak a partially-opened session when this server fails.
+      if (session) await session.close().catch(() => {});
+      return { status: { id: s.id, ok: false, error: String(e) } };
     }
-    const tools = await mcpFetchToolsList(session);
-    externalSources.push(mcpToolsToSourceCatalog(s.id, tools));
-    sessions.set(s.id, session);
+  }
+
+  // Start every configured server concurrently; Promise.all preserves input order, so
+  // results are assembled in config order regardless of which server completes first.
+  const outcomes = await Promise.all(servers.map((s) => startServer(s)));
+  const statuses: McpServerConnectStatus[] = outcomes.map((o) => o.status);
+
+  const failed = outcomes.filter((o) => !o.status.ok);
+  if (failed.length > 0 && failed.length === servers.length) {
+    const errors = failed.map((o) => new Error(`${o.status.id}: ${o.status.error}`));
+    throw new AggregateError(
+      errors,
+      `all ${servers.length} configured MCP server(s) failed to connect: ` +
+        errors.map((e) => e.message).join("; "),
+    );
+  }
+
+  for (const o of outcomes) {
+    if (!o.session || !o.catalog) continue;
+    sessions.set(o.status.id, o.session);
+    externalSources.push(o.catalog);
+    if (o.httpSession) streamableBySourceId.set(o.status.id, o.httpSession);
   }
 
   const external: ExternalMcpInvoke = async ({ sourceId, originalName, argsJson }) => {
@@ -181,5 +238,5 @@ export async function connectShoggothMcpServers(
     },
   };
 
-  return { pool, external };
+  return { pool, external, statuses };
 }
