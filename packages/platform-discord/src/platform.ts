@@ -188,6 +188,37 @@ export async function startDiscordPlatform(
     }),
   );
 
+  /** Send the in-session HITL queued notice and wire up approval reactions. */
+  async function sendHitlQueuedNotice(
+    row: PendingActionRow,
+    delivery: {
+      readonly sessionId: string;
+      readonly userId?: string;
+      readonly replyToMessageId?: string;
+    },
+  ): Promise<void> {
+    const ref = await opts.discord.outbound.sendDiscord(
+      createOutboundMessage({
+        id: randomUUID(),
+        sessionId: delivery.sessionId,
+        userId: delivery.userId,
+        createdAt: new Date().toISOString(),
+        body: sliceDiscordPlatformMessageBody(buildHitlQueuedNoticeLines(row).join("\n")),
+        extensions: { replyToMessageId: delivery.replyToMessageId },
+      }),
+    );
+    if (opts.hitlDiscordNoticeRegistry) {
+      await registerDiscordHitlNoticeAndAddReactions({
+        transport: opts.discord.discordRestTransport,
+        channelId: ref.channelId,
+        messageId: ref.messageId,
+        row,
+        registry: opts.hitlDiscordNoticeRegistry,
+        logger: opts.logger,
+      });
+    }
+  }
+
   async function dispatchChained(sessionId: string, msg: InternalMessage): Promise<void> {
     const prev = chainTail.get(sessionId) ?? Promise.resolve();
     const run = prev.then(() => handleInbound(msg));
@@ -439,30 +470,12 @@ export async function startDiscordPlatform(
                   autoApprove: opts.hitlAutoApproveGate,
                   ...(hitlReplyInSession
                     ? {
-                        afterHitlQueued: async (row) => {
-                          const ref = await opts.discord.outbound.sendDiscord(
-                            createOutboundMessage({
-                              id: randomUUID(),
-                              sessionId: msg.sessionId,
-                              userId: msg.userId,
-                              createdAt: new Date().toISOString(),
-                              body: sliceDiscordPlatformMessageBody(
-                                buildHitlQueuedNoticeLines(row).join("\n"),
-                              ),
-                              extensions: { replyToMessageId: msg.id },
-                            }),
-                          );
-                          if (opts.hitlDiscordNoticeRegistry) {
-                            await registerDiscordHitlNoticeAndAddReactions({
-                              transport: opts.discord.discordRestTransport,
-                              channelId: ref.channelId,
-                              messageId: ref.messageId,
-                              row,
-                              registry: opts.hitlDiscordNoticeRegistry,
-                              logger: opts.logger,
-                            });
-                          }
-                        },
+                        afterHitlQueued: (row: PendingActionRow) =>
+                          sendHitlQueuedNotice(row, {
+                            sessionId: msg.sessionId,
+                            userId: msg.userId,
+                            replyToMessageId: msg.id,
+                          }),
                       }
                     : {}),
                 },
@@ -511,28 +524,12 @@ export async function startDiscordPlatform(
         readonly replyToMessageId?: string;
       }) =>
         hitlReplyInSession
-          ? async (row: PendingActionRow) => {
-              const ref = await opts.discord.outbound.sendDiscord(
-                createOutboundMessage({
-                  id: randomUUID(),
-                  sessionId: sid,
-                  userId: delivery.userId,
-                  createdAt: new Date().toISOString(),
-                  body: sliceDiscordPlatformMessageBody(buildHitlQueuedNoticeLines(row).join("\n")),
-                  extensions: { replyToMessageId: delivery.replyToMessageId },
-                }),
-              );
-              if (opts.hitlDiscordNoticeRegistry) {
-                await registerDiscordHitlNoticeAndAddReactions({
-                  transport: opts.discord.discordRestTransport,
-                  channelId: ref.channelId,
-                  messageId: ref.messageId,
-                  row,
-                  registry: opts.hitlDiscordNoticeRegistry,
-                  logger: opts.logger,
-                });
-              }
-            }
+          ? (row: PendingActionRow) =>
+              sendHitlQueuedNotice(row, {
+                sessionId: sid,
+                userId: delivery.userId,
+                replyToMessageId: delivery.replyToMessageId,
+              })
           : undefined;
 
       const executeTurn = (
@@ -602,28 +599,11 @@ export async function startDiscordPlatform(
           : undefined;
         if (parentChannelId) {
           const ownerUserId = resolveDiscordOwnerUserId(configForOwnerGate());
-          internalAfterHitlQueued = async (row: PendingActionRow) => {
-            const ref = await opts.discord.outbound.sendDiscord(
-              createOutboundMessage({
-                id: randomUUID(),
-                sessionId: sessionRow.parentSessionId!,
-                userId: ownerUserId ?? "system",
-                createdAt: new Date().toISOString(),
-                body: sliceDiscordPlatformMessageBody(buildHitlQueuedNoticeLines(row).join("\n")),
-                extensions: {},
-              }),
-            );
-            if (opts.hitlDiscordNoticeRegistry) {
-              await registerDiscordHitlNoticeAndAddReactions({
-                transport: opts.discord.discordRestTransport,
-                channelId: ref.channelId,
-                messageId: ref.messageId,
-                row,
-                registry: opts.hitlDiscordNoticeRegistry,
-                logger: opts.logger,
-              });
-            }
-          };
+          internalAfterHitlQueued = (row: PendingActionRow) =>
+            sendHitlQueuedNotice(row, {
+              sessionId: sessionRow.parentSessionId!,
+              userId: ownerUserId ?? "system",
+            });
         }
       }
 
