@@ -519,6 +519,189 @@ describe("createDiscordInteractionHandler", () => {
     // Should respond with modal (type 9)
     assert.strictEqual(body.type, 9, "Expected response type 9 (MODAL)");
   });
+
+  it("steers the channel's session when no session_id is provided", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransport(calls);
+    const invokeOps: Array<{ op: string; payload: Record<string, unknown> }> = [];
+    const handler = createDiscordInteractionHandler({
+      transport,
+      applicationId: "app-123",
+      logger: stubLogger(),
+      abortSession: async () => true,
+      invokeControlOp: async (op, payload) => {
+        invokeOps.push({ op, payload });
+        return { ok: true };
+      },
+      resolveSessionForChannel: (channelId) =>
+        channelId === "ch-1" ? "agent:sub:discord:channel:ch-1" : undefined,
+    });
+
+    const ev: DiscordInteractionEvent = {
+      kind: "interaction_create",
+      id: "int-steer-1",
+      token: "tok-steer-1",
+      type: 2,
+      channelId: "ch-1",
+      guildId: "g-1",
+      userId: "u-1",
+      data: {
+        name: "steer",
+        options: [{ name: "prompt", type: 3, value: "Focus on the failing tests first." }],
+      },
+    };
+
+    handler(ev);
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Dispatched session_steer against the channel's resolved session
+    assert.strictEqual(invokeOps.length, 1);
+    assert.strictEqual(invokeOps[0]!.op, "session_steer");
+    assert.strictEqual(invokeOps[0]!.payload.session_id, "agent:sub:discord:channel:ch-1");
+    assert.strictEqual(invokeOps[0]!.payload.prompt, "Focus on the failing tests first.");
+    assert.strictEqual(invokeOps[0]!.payload.delivery, undefined);
+
+    // Responded with success
+    assert.strictEqual(calls.length, 1);
+    const [, , body] = calls[0]!.args as [
+      string,
+      string,
+      { type: number; data: { content: string } },
+    ];
+    assert.strictEqual(body.type, 4);
+    assert.ok(body.data.content.includes("Steering prompt sent"));
+  });
+
+  it("prefers an explicit session_id and passes internal delivery through", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransport(calls);
+    const invokeOps: Array<{ op: string; payload: Record<string, unknown> }> = [];
+    let resolveCalls = 0;
+    const handler = createDiscordInteractionHandler({
+      transport,
+      applicationId: "app-123",
+      logger: stubLogger(),
+      abortSession: async () => true,
+      invokeControlOp: async (op, payload) => {
+        invokeOps.push({ op, payload });
+        return { ok: true };
+      },
+      resolveSessionForChannel: () => {
+        resolveCalls += 1;
+        return "agent:other:discord:channel:ch-9";
+      },
+    });
+
+    const ev: DiscordInteractionEvent = {
+      kind: "interaction_create",
+      id: "int-steer-2",
+      token: "tok-steer-2",
+      type: 2,
+      channelId: "ch-1",
+      guildId: "g-1",
+      userId: "u-1",
+      data: {
+        name: "steer",
+        options: [
+          { name: "prompt", type: 3, value: "Wrap up after this turn." },
+          { name: "session_id", type: 3, value: "agent:target:discord:channel:ch-7" },
+          { name: "delivery", type: 3, value: "internal" },
+        ],
+      },
+    };
+
+    handler(ev);
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.strictEqual(resolveCalls, 0, "Should not resolve from channel when session_id given");
+    assert.strictEqual(invokeOps.length, 1);
+    assert.strictEqual(invokeOps[0]!.op, "session_steer");
+    assert.strictEqual(invokeOps[0]!.payload.session_id, "agent:target:discord:channel:ch-7");
+    assert.strictEqual(invokeOps[0]!.payload.prompt, "Wrap up after this turn.");
+    assert.strictEqual(invokeOps[0]!.payload.delivery, "internal");
+  });
+
+  it("warns when no session is bound and no session_id is provided", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransport(calls);
+    const invokeOps: Array<{ op: string; payload: Record<string, unknown> }> = [];
+    const handler = createDiscordInteractionHandler({
+      transport,
+      applicationId: "app-123",
+      logger: stubLogger(),
+      abortSession: async () => true,
+      invokeControlOp: async (op, payload) => {
+        invokeOps.push({ op, payload });
+        return { ok: true };
+      },
+      resolveSessionForChannel: () => undefined,
+    });
+
+    const ev: DiscordInteractionEvent = {
+      kind: "interaction_create",
+      id: "int-steer-3",
+      token: "tok-steer-3",
+      type: 2,
+      channelId: "ch-1",
+      guildId: "g-1",
+      userId: "u-1",
+      data: {
+        name: "steer",
+        options: [{ name: "prompt", type: 3, value: "Anyone there?" }],
+      },
+    };
+
+    handler(ev);
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.strictEqual(invokeOps.length, 0, "Should not invoke the control op");
+    assert.strictEqual(calls.length, 1);
+    const [, , body] = calls[0]!.args as [
+      string,
+      string,
+      { type: number; data: { content: string } },
+    ];
+    assert.ok(body.data.content.includes("No session bound to this channel"));
+  });
+
+  it("surfaces session_steer failures in the response", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransport(calls);
+    const handler = createDiscordInteractionHandler({
+      transport,
+      applicationId: "app-123",
+      logger: stubLogger(),
+      abortSession: async () => true,
+      invokeControlOp: async () => ({ ok: false, error: "ERR_SESSION_INACTIVE" }),
+      resolveSessionForChannel: () => "agent:sub:discord:channel:ch-1",
+    });
+
+    const ev: DiscordInteractionEvent = {
+      kind: "interaction_create",
+      id: "int-steer-4",
+      token: "tok-steer-4",
+      type: 2,
+      channelId: "ch-1",
+      guildId: "g-1",
+      userId: "u-1",
+      data: {
+        name: "steer",
+        options: [{ name: "prompt", type: 3, value: "Hello?" }],
+      },
+    };
+
+    handler(ev);
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.strictEqual(calls.length, 1);
+    const [, , body] = calls[0]!.args as [
+      string,
+      string,
+      { type: number; data: { content: string } },
+    ];
+    assert.ok(body.data.content.includes("Steer failed"));
+    assert.ok(body.data.content.includes("ERR_SESSION_INACTIVE"));
+  });
 });
 
 describe("registerDiscordSlashCommands", () => {
@@ -535,14 +718,47 @@ describe("registerDiscordSlashCommands", () => {
     assert.strictEqual(calls[0]!.method, "registerGlobalCommands");
     const [appId, commands] = calls[0]!.args as [string, Array<Record<string, unknown>>];
     assert.strictEqual(appId, "app-123");
-    assert.strictEqual(commands.length, 8);
+    assert.strictEqual(commands.length, 9);
     assert.ok(commands.some((c) => c.name === "abort"));
+    assert.ok(commands.some((c) => c.name === "steer"));
     assert.ok(commands.some((c) => c.name === "new"));
     assert.ok(commands.some((c) => c.name === "reset"));
     assert.ok(commands.some((c) => c.name === "compact"));
     assert.ok(commands.some((c) => c.name === "status"));
     assert.ok(commands.some((c) => c.name === "model"));
     assert.ok(commands.some((c) => c.name === "queue"));
+  });
+
+  it("registers steer command with prompt, session_id, and delivery options", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransport(calls);
+
+    await registerDiscordSlashCommands({
+      transport,
+      applicationId: "app-123",
+    });
+
+    const [, commands] = calls[0]!.args as [string, Array<Record<string, unknown>>];
+    const steerCmd = commands.find((c) => c.name === "steer");
+    assert.ok(steerCmd, "Steer command should be registered");
+    const options = steerCmd!.options as Array<Record<string, unknown>>;
+    assert.ok(Array.isArray(options), "Steer command should have options");
+
+    const promptOpt = options.find((o) => o.name === "prompt");
+    assert.ok(promptOpt, "Should have prompt option");
+    assert.strictEqual(promptOpt!.required, true, "prompt should be required");
+
+    const sessionOpt = options.find((o) => o.name === "session_id");
+    assert.ok(sessionOpt, "Should have session_id option");
+    assert.strictEqual(sessionOpt!.required, false, "session_id should be optional");
+
+    const deliveryOpt = options.find((o) => o.name === "delivery");
+    assert.ok(deliveryOpt, "Should have delivery option");
+    const choices = deliveryOpt!.choices as Array<{ value: string }>;
+    assert.deepStrictEqual(
+      choices.map((c) => c.value),
+      ["surface", "internal"],
+    );
   });
 
   it("registers model command without model_selection option (dropdown flow)", async () => {

@@ -209,6 +209,7 @@ Global slash commands are registered on startup via `PUT /applications/{id}/comm
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `/elevate` | Grant or revoke [elevated privileges](daemon.md#elevation). Options: `action` (grant/revoke), `session_id`, `duration`, `grant_id`. |
 | `/abort`   | Abort the current session turn. Option: `session_id`.                                                                               |
+| `/steer`   | Steer a session with an operator prompt. Options: `prompt` (required), `session_id`, `delivery` (surface/internal).                 |
 | `/new`     | Start a new context segment (preserves history).                                                                                    |
 | `/reset`   | Reset session context (clears transcript).                                                                                          |
 | `/compact` | Compact transcript via [model summarization](models.md#transcript-compaction) (deferred response).                                  |
@@ -222,7 +223,7 @@ When `session_id` is omitted, the handler resolves the session from the channel 
 
 1. Gateway `INTERACTION_CREATE` → `discordInteractionCreateToEvent()` parses the payload.
 2. `discordInteractionToCommand()` extracts the command name and options into a `PlatformCommand`.
-3. `translateCommandToControlOp()` maps to a daemon control operation.
+3. `translateCommandToControlOp()` maps to a daemon control operation (`/steer` dispatches directly to the `session_steer` op).
 4. The handler executes the operation and responds via `interactionCallback` (type 4 = immediate, type 5 = deferred for long operations like `/compact`).
 
 ---

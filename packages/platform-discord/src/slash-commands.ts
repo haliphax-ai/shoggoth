@@ -3,7 +3,7 @@
  */
 
 import type { DiscordRestTransport } from "./transport";
-import type { DiscordInteractionEvent } from "./interaction";
+import type { DiscordInteractionEvent, DiscordParsedInteraction } from "./interaction";
 import { discordInteractionToCommand } from "./interaction";
 import { translateCommandToControlOp } from "@shoggoth/daemon/lib";
 import {
@@ -58,6 +58,34 @@ const GLOBAL_SLASH_COMMANDS = [
         type: 3, // STRING
         description: "Session URN to abort",
         required: false,
+      },
+    ],
+  },
+  {
+    name: "steer",
+    description: "Steer a session with an operator prompt",
+    options: [
+      {
+        name: "prompt",
+        type: 3, // STRING
+        description: "Steering prompt to deliver to the session",
+        required: true,
+      },
+      {
+        name: "session_id",
+        type: 3, // STRING
+        description: "Session URN (defaults to this channel's session)",
+        required: false,
+      },
+      {
+        name: "delivery",
+        type: 3, // STRING
+        description: "Response delivery (default: surface)",
+        required: false,
+        choices: [
+          { name: "surface", value: "surface" },
+          { name: "internal", value: "internal" },
+        ],
       },
     ],
   },
@@ -524,6 +552,13 @@ async function handleInteraction(
     return;
   }
 
+  // `steer` is not in the shared command-to-op translation table; dispatch it here so the
+  // operator prompt flows straight to the `session_steer` control op.
+  if (parsed.command.name === "steer") {
+    await handleSteerCommand(deps, parsed);
+    return;
+  }
+
   const controlOp = translateCommandToControlOp(parsed.command);
   if (!controlOp) {
     await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
@@ -971,4 +1006,55 @@ async function handleInteraction(
     type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
     data: { content: `Unhandled operation: \`${controlOp.op}\`` },
   });
+}
+
+/**
+ * Handle the `/steer` slash command: resolve the target session (explicit `session_id`,
+ * falling back to the channel's bound session) and dispatch the operator prompt via the
+ * `session_steer` control op.
+ */
+async function handleSteerCommand(
+  deps: DiscordInteractionHandlerDeps,
+  parsed: DiscordParsedInteraction,
+): Promise<void> {
+  const opts = parsed.command.options;
+  const prompt = opts.prompt?.trim();
+  if (!prompt) {
+    await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+      type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+      data: { content: "⚠️ Missing `prompt` option." },
+    });
+    return;
+  }
+
+  let sessionId = opts.session_id?.trim() || undefined;
+  if (!sessionId && deps.resolveSessionForChannel) {
+    sessionId = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
+  }
+  if (!sessionId) {
+    await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+      type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+      data: { content: "⚠️ No session bound to this channel. Provide a session_id." },
+    });
+    return;
+  }
+
+  const payload: Record<string, unknown> = { session_id: sessionId, prompt };
+  if (opts.delivery === "internal") payload.delivery = "internal";
+
+  try {
+    const res = await deps.invokeControlOp("session_steer", payload);
+    const content = res.ok
+      ? `✅ Steering prompt sent to \`${sessionId}\`.`
+      : `⚠️ Steer failed: ${res.error ?? "unknown error"}`;
+    await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+      type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+      data: { content },
+    });
+  } catch (err) {
+    await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+      type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+      data: { content: `⚠️ Steer failed: ${String(err)}` },
+    });
+  }
 }
