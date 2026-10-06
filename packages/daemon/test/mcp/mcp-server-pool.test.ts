@@ -766,8 +766,8 @@ describe("connectShoggothMcpServers — parallel startup", () => {
       assert.ok(events.includes("alpha:initialize"));
       assert.ok(events.includes("beta:initialize"));
       assert.deepEqual(connected.statuses, [
-        { id: "alpha", ok: true },
-        { id: "beta", ok: true },
+        { id: "alpha", ok: true, attempts: 1 },
+        { id: "beta", ok: true, attempts: 1 },
       ]);
       assert.deepEqual(
         connected.pool.externalSources.map((s) => s.sourceId),
@@ -829,7 +829,7 @@ describe("connectShoggothMcpServers — parallel startup", () => {
         connected.pool.externalSources.map((s) => s.sourceId),
         ["healthy"],
       );
-      assert.deepEqual(connected.statuses?.[0], { id: "healthy", ok: true });
+      assert.deepEqual(connected.statuses?.[0], { id: "healthy", ok: true, attempts: 1 });
       assert.equal(connected.statuses?.[1]?.id, "broken");
       assert.equal(connected.statuses?.[1]?.ok, false);
       assert.match(connected.statuses?.[1]?.error ?? "", /tools\/list exploded/);

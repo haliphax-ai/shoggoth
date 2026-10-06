@@ -147,13 +147,38 @@ export class ManagedProcess extends EventEmitter {
   async start(): Promise<void> {
     this._setState("starting");
     this._killFailed = false;
-    this._spawn();
+    const child = this._spawn();
+
+    // Wait for the spawn handshake before declaring the process running.
+    // A spawn failure (ENOENT, EACCES/EPERM, EMFILE/ENFILE, ENOEXEC/failed
+    // exec, invalid uid/gid, resource exhaustion, ...) surfaces as an async
+    // 'error' event; without this gate start() would resolve as "running" for
+    // a process that never existed, leaving callers unable to tell a failed
+    // spawn from a healthy start. Node only emits 'spawn' once the child
+    // actually started. The 'close' event still fires after a failed spawn
+    // and runs the normal exit/restart-policy accounting.
+    const spawned = new Promise<void>((resolve, reject) => {
+      child.once("spawn", resolve);
+      child.once("error", reject);
+    });
+    try {
+      await spawned;
+    } catch (err) {
+      // Settle as a failure instead of hanging in 'starting'; only touch the
+      // state if 'close' has not already advanced the state machine.
+      if (this._state === "starting") {
+        this._setState("failed");
+      }
+      throw err instanceof Error ? err : new Error(String(err));
+    }
 
     // If there's no health check, transition to running immediately
     if (!this.spec.health) {
-      this._setState("running");
-      this._startedAt = Date.now();
-      this._scheduleResetTimer();
+      if (this._state === "starting") {
+        this._setState("running");
+        this._startedAt = Date.now();
+        this._scheduleResetTimer();
+      }
     } else {
       await this._runHealthCheck();
     }
@@ -296,7 +321,7 @@ export class ManagedProcess extends EventEmitter {
     await this.start();
   }
 
-  private _spawn(): void {
+  private _spawn(): ChildProcess {
     // Defensive: remove listeners from a previous child if one still exists.
     // Normally _spawn() is only called after the old child has exited, but
     // this guard prevents a listener leak if the invariant is ever violated.
@@ -388,6 +413,8 @@ export class ManagedProcess extends EventEmitter {
         }, spec.limits.maxRuntimeSeconds * 1000),
       );
     }
+
+    return child;
   }
 
   // -- Internal: state machine ----------------------------------------------
@@ -426,7 +453,9 @@ export class ManagedProcess extends EventEmitter {
      *
      * - `"always"`: restart regardless of exit reason.
      * - `"on-failure"`: restart only on a non-zero exit code (i.e., the process
-     *   crashed or returned an error). Processes killed by an external signal
+     *   crashed or returned an error). Spawn failures — the child never
+     *   started, so the exit code is null — count as failures under this
+     *   policy. Processes killed by an external signal
      *   (e.g., SIGKILL from OOM or a manual `kill`) are **not** considered
      *   failures and will not trigger a restart under this policy.
      * - `"on-unexpected-exit"`: restart on any exit that is not a clean exit
@@ -537,9 +566,14 @@ export class ManagedProcess extends EventEmitter {
         }, timeoutMs);
 
         const check = () => {
-          if (this._stdoutMatchResolved || this._state !== "starting") {
+          if (this._stdoutMatchResolved || this._state === "running") {
             clearTimeout(timer);
             resolve();
+          } else if (this._state !== "starting") {
+            // The process exited (or failed) before the ready pattern appeared
+            // — fail the start() promise instead of resolving as healthy.
+            clearTimeout(timer);
+            reject(new Error(`process exited before stdout match for ${this.spec.id}`));
           } else {
             setTimeout(check, 100);
           }
@@ -557,8 +591,15 @@ export class ManagedProcess extends EventEmitter {
       this._healthRetries = 0;
 
       const attempt = async () => {
-        if (this._state !== "starting") {
+        if (this._state === "running") {
           resolve();
+          return;
+        }
+        if (this._state !== "starting") {
+          // The process died (or was stopped) while waiting for health — fail
+          // the start() promise so callers are never told a dead process is
+          // healthy.
+          reject(new Error(`process exited before becoming healthy for ${this.spec.id}`));
           return;
         }
 

@@ -27,6 +27,9 @@ vi.mock("node:child_process", () => ({
       pid: 99999,
       kill: vi.fn(),
     });
+    // Real ChildProcess emits 'spawn' asynchronously after a successful start;
+    // the connect handshake awaits it before returning the session.
+    setTimeout(() => proc.emit("spawn"), 0);
     // Immediately end stdout so the session doesn't hang
     setTimeout(() => stdout.end(), 5);
     return proc;
