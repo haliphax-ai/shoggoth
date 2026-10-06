@@ -209,6 +209,7 @@ Global slash commands are registered on startup via `PUT /applications/{id}/comm
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `/elevate` | Grant or revoke [elevated privileges](daemon.md#elevation). Options: `action` (grant/revoke), `session_id`, `duration`, `grant_id`. |
 | `/abort`   | Abort the current session turn. Option: `session_id`.                                                                               |
+| `/steer`   | Steer a session with an operator prompt. Options: `prompt` (required), `session_id`, `delivery` (surface/internal).                 |
 | `/new`     | Start a new context segment (preserves history).                                                                                    |
 | `/reset`   | Reset session context (clears transcript).                                                                                          |
 | `/compact` | Compact transcript via [model summarization](models.md#transcript-compaction) (deferred response).                                  |
