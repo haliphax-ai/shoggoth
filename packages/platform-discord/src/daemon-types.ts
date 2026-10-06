@@ -60,7 +60,7 @@ export type HitlAutoApproveGate = {
 
 // ── Health ────────────────────────────────────────────────────────────────────
 
-export type HealthStatus = "pass" | "fail" | "warn" | "skipped";
+export type HealthStatus = "pass" | "fail" | "skipped";
 
 export interface DependencyCheck {
   name: string;
