@@ -37,6 +37,8 @@ export {
   openMcpStdioClient,
   openMcpTcpClient,
   type McpJsonRpcSession,
+  type McpServerNotification,
+  type McpServerNotificationHandler,
   type McpStdioConnectOptions,
   type McpTcpConnectOptions,
   type McpToolListEntry,

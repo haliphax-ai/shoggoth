@@ -214,7 +214,16 @@ export async function createSessionMcpRuntime(
   const mcpPoolScope = opts.config.mcp?.poolScope ?? "global";
   const connectMcpPool = opts.deps?.connectShoggothMcpServers ?? connectShoggothMcpServers;
   const builtinMcpCtx = buildBuiltinOnlySessionMcpToolContext();
-  const mcpConnectOpts = buildMcpPoolConnectOptions(opts.env);
+  // Bumped whenever a pool re-fetches a source's tool catalog in place
+  // (notifications/tools/list_changed). Cached contexts snapshot their catalogs,
+  // so they compare against this generation on resolveContext and rebuild lazily.
+  let catalogEpoch = 0;
+  const mcpConnectOpts: ConnectShoggothMcpPoolOptions = {
+    ...buildMcpPoolConnectOptions(opts.env),
+    onToolCatalogChange: () => {
+      catalogEpoch += 1;
+    },
+  };
   const workspacesRoot = opts.config.workspacesRoot ?? LAYOUT.workspacesRoot;
 
   const { globalServers, perAgentServers, perSessionServers } = partitionMcpServersByEffectiveScope(
@@ -272,10 +281,23 @@ export async function createSessionMcpRuntime(
   }
 
   let globalOnlyMcpCtx = buildGlobalOnlyCtx();
+  let globalOnlyMcpCtxEpoch = catalogEpoch;
 
   // ── Per-session pool state ───────────────────────────────────────
   const perSessionMcpClose = new Map<string, () => Promise<void>>();
-  const perSessionMcpCtx = new Map<string, SessionMcpToolContext>();
+  /**
+   * A per-session context is a snapshot of aggregated tools. `rebuild` re-derives
+   * it from the live pool catalogs (arrays mutated in place on refresh), and
+   * `epoch` records the catalog generation it was built at — so when
+   * `onToolCatalogChange` bumps `catalogEpoch`, the next resolveContext rebuilds
+   * and serves the refreshed tool list without reconnecting.
+   */
+  type PerSessionMcpCacheEntry = {
+    ctx: SessionMcpToolContext;
+    rebuild: () => SessionMcpToolContext;
+    epoch: number;
+  };
+  const perSessionMcpCtx = new Map<string, PerSessionMcpCacheEntry>();
   const perSessionMcpConnect = new Map<string, Promise<SessionMcpToolContext>>();
 
   // ── Per-session cache size limit ─────────────────────────────────
@@ -361,6 +383,7 @@ export async function createSessionMcpRuntime(
         globalExternalInvoke = undefined;
         globalPoolConnected = false;
         globalOnlyMcpCtx = buildGlobalOnlyCtx();
+        globalOnlyMcpCtxEpoch = catalogEpoch;
         void shutdownFn().catch((err) => {
           log.error("session.mcp_pool.eviction_close_failed", {
             key,
@@ -504,10 +527,17 @@ export async function createSessionMcpRuntime(
     if (globalServers.length > 0 && !globalPoolConnected) {
       await connectGlobalPool();
       globalOnlyMcpCtx = buildGlobalOnlyCtx();
+      globalOnlyMcpCtxEpoch = catalogEpoch;
     }
 
     // Fast path: only global servers, no per-agent or per-session.
     if (perSessionServers.length === 0 && perAgentServers.length === 0) {
+      if (globalOnlyMcpCtxEpoch !== catalogEpoch) {
+        // A pool refreshed a catalog in place — rebuild the snapshot so the
+        // next resolveContext serves the current tool list.
+        globalOnlyMcpCtx = buildGlobalOnlyCtx();
+        globalOnlyMcpCtxEpoch = catalogEpoch;
+      }
       return runContextFinalizers(globalOnlyMcpCtx, sessionId);
     }
 
@@ -543,7 +573,13 @@ export async function createSessionMcpRuntime(
     // Check per-session cache first.
     const cachedSession = perSessionMcpCtx.get(sessionId);
     if (cachedSession) {
-      return runContextFinalizers(cachedSession, sessionId);
+      if (cachedSession.epoch !== catalogEpoch) {
+        // Catalog generation moved (a pool refreshed tools/list in place) —
+        // rebuild the snapshot from the live pool arrays; no reconnect happens.
+        cachedSession.ctx = cachedSession.rebuild();
+        cachedSession.epoch = catalogEpoch;
+      }
+      return runContextFinalizers(cachedSession.ctx, sessionId);
     }
 
     let inflight = perSessionMcpConnect.get(sessionId);
@@ -582,26 +618,29 @@ export async function createSessionMcpRuntime(
             await pool.close();
           });
 
-          let ctx: SessionMcpToolContext;
-          if (globalServers.length === 0 && agentSources.length === 0) {
-            // Only per-session sources.
-            ctx = buildSessionMcpToolContext(pool.externalSources, external);
-          } else if (agentSources.length > 0) {
-            // Three-tier: global + per-agent + per-session.
-            ctx = buildThreeTierSessionMcpToolContext(
-              globalExternalSources,
-              globalExternalInvoke,
-              agentSources,
-              agentExternal,
-              pool.externalSources,
-              external,
-              globalSourceIds,
-              perAgentSourceIds,
-              perSessionSourceIds,
-            );
-          } else {
+          // Closure reads the live pool arrays (mutated in place on catalog
+          // refresh) so the cached entry can be rebuilt without reconnecting.
+          const buildCtx = (): SessionMcpToolContext => {
+            if (globalServers.length === 0 && agentSources.length === 0) {
+              // Only per-session sources.
+              return buildSessionMcpToolContext(pool.externalSources, external);
+            }
+            if (agentSources.length > 0) {
+              // Three-tier: global + per-agent + per-session.
+              return buildThreeTierSessionMcpToolContext(
+                globalExternalSources,
+                globalExternalInvoke,
+                agentSources,
+                agentExternal,
+                pool.externalSources,
+                external,
+                globalSourceIds,
+                perAgentSourceIds,
+                perSessionSourceIds,
+              );
+            }
             // Two-tier: global + per-session.
-            ctx = buildMixedSessionMcpToolContext(
+            return buildMixedSessionMcpToolContext(
               globalExternalSources,
               globalExternalInvoke,
               pool.externalSources,
@@ -609,8 +648,9 @@ export async function createSessionMcpRuntime(
               globalSourceIds,
               perSessionSourceIds,
             );
-          }
-          perSessionMcpCtx.set(sessionId, ctx);
+          };
+          const ctx = buildCtx();
+          perSessionMcpCtx.set(sessionId, { ctx, rebuild: buildCtx, epoch: catalogEpoch });
           trackSessionCacheEntry(sessionId);
           return ctx;
         } catch (e) {
@@ -618,19 +658,20 @@ export async function createSessionMcpRuntime(
             err: String(e),
             sessionId,
           });
-          // Fallback: global + per-agent (no per-session).
-          let fallback: SessionMcpToolContext;
-          if (agentSources.length > 0) {
-            fallback = buildMixedSessionMcpToolContext(
-              globalExternalSources,
-              globalExternalInvoke,
-              agentSources,
-              agentExternal,
-              globalSourceIds,
-              perAgentSourceIds,
-            );
-          } else {
-            fallback = buildMixedSessionMcpToolContext(
+          // Fallback: global + per-agent (no per-session). Same rebuild contract
+          // as the success path — reads live arrays, snapshots on catalog epoch.
+          const buildFallback = (): SessionMcpToolContext => {
+            if (agentSources.length > 0) {
+              return buildMixedSessionMcpToolContext(
+                globalExternalSources,
+                globalExternalInvoke,
+                agentSources,
+                agentExternal,
+                globalSourceIds,
+                perAgentSourceIds,
+              );
+            }
+            return buildMixedSessionMcpToolContext(
               globalExternalSources,
               globalExternalInvoke,
               [],
@@ -638,8 +679,13 @@ export async function createSessionMcpRuntime(
               globalSourceIds,
               perSessionSourceIds,
             );
-          }
-          perSessionMcpCtx.set(sessionId, fallback);
+          };
+          const fallback = buildFallback();
+          perSessionMcpCtx.set(sessionId, {
+            ctx: fallback,
+            rebuild: buildFallback,
+            epoch: catalogEpoch,
+          });
           trackSessionCacheEntry(sessionId);
           return fallback;
         }

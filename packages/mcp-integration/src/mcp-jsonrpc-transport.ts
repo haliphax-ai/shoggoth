@@ -16,6 +16,15 @@ export interface McpJsonRpcSession {
   readonly close: () => Promise<void>;
 }
 
+/** Server-initiated JSON-RPC notification (message with a `method` and no `id`). */
+export interface McpServerNotification {
+  readonly method: string;
+  readonly params?: unknown;
+}
+
+/** Tap invoked for each server-initiated JSON-RPC notification received on a session. */
+export type McpServerNotificationHandler = (msg: McpServerNotification) => void;
+
 export interface McpToolListEntry {
   readonly name: string;
   readonly description?: string;
@@ -137,7 +146,8 @@ type Pending = {
 
 /**
  * Low-level: newline-delimited JSON-RPC 2.0 over separate readable/writable streams.
- * Supports concurrent requests; ignores JSON-RPC notifications (no `id`).
+ * Supports concurrent requests; server notifications (messages with a `method` and
+ * no `id`) are delivered to the optional `onServerNotification` tap.
  */
 export function createMcpJsonRpcSession(
   input: Readable,
@@ -145,6 +155,13 @@ export function createMcpJsonRpcSession(
   options?: {
     readonly onReaderError?: (err: unknown) => void;
     readonly onProtocolError?: (err: unknown) => void;
+    /**
+     * Invoked for each server-initiated JSON-RPC notification (message with a
+     * `method` and no `id`) received on this session. Tap errors are swallowed so
+     * the read loop never breaks. Responses to this client's requests are not
+     * delivered here; only id-less inbound messages are.
+     */
+    readonly onServerNotification?: McpServerNotificationHandler;
     /**
      * Timeout in milliseconds for pending JSON-RPC requests. If a response is not
      * received within this time, the pending promise is rejected with a timeout error.
@@ -217,6 +234,16 @@ export function createMcpJsonRpcSession(
       if (!m) continue;
       const idRaw = m.id;
       if (idRaw === undefined || idRaw === null) {
+        // JSON-RPC notification (server-initiated, no id). Deliver to the tap when
+        // it carries a method; id-less responses and malformed shapes stay ignored.
+        const method = m.method;
+        if (typeof method === "string") {
+          try {
+            options?.onServerNotification?.({ method, params: m.params });
+          } catch {
+            // A throwing tap must never break the message read loop.
+          }
+        }
         continue;
       }
       const id = typeof idRaw === "number" ? idRaw : Number(idRaw);
@@ -385,6 +412,8 @@ export interface McpStdioConnectOptions {
   readonly uid?: number;
   /** When set, the MCP server process is spawned with this POSIX GID (agent identity). */
   readonly gid?: number;
+  /** Optional tap for server-initiated JSON-RPC notifications received on this session. */
+  readonly onServerNotification?: McpServerNotificationHandler;
 }
 
 export interface McpTcpConnectOptions {
@@ -397,6 +426,8 @@ export interface McpTcpConnectOptions {
    * indefinitely, matching Node's default behavior.
    */
   readonly connectTimeout?: number;
+  /** Optional tap for server-initiated JSON-RPC notifications received on this session. */
+  readonly onServerNotification?: McpServerNotificationHandler;
 }
 
 /** Spawn a subprocess and return an MCP session on its stdio (JSON-RPC lines). */
@@ -427,7 +458,9 @@ async function connectMcpStdioSessionDirect(
   if (!out || !inp) {
     throw new Error("MCP stdio spawn did not yield stdin/stdout pipes");
   }
-  const session = createMcpJsonRpcSession(out, inp);
+  const session = createMcpJsonRpcSession(out, inp, {
+    onServerNotification: opts.onServerNotification,
+  });
   const baseClose = session.close.bind(session);
   return {
     request: session.request,
@@ -493,7 +526,9 @@ async function connectMcpStdioSessionViaProcman(
     }
   });
 
-  const session = createMcpJsonRpcSession(stdoutStream, stdinStream);
+  const session = createMcpJsonRpcSession(stdoutStream, stdinStream, {
+    onServerNotification: opts.onServerNotification,
+  });
   const baseClose = session.close.bind(session);
 
   return {
@@ -530,7 +565,9 @@ export async function connectMcpTcpSession(opts: McpTcpConnectOptions): Promise<
       });
     }
   });
-  const session = createMcpJsonRpcSession(socket, socket);
+  const session = createMcpJsonRpcSession(socket, socket, {
+    onServerNotification: opts.onServerNotification,
+  });
   const baseClose = session.close.bind(session);
   return {
     request: session.request,

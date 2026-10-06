@@ -11,12 +11,18 @@ import {
   type McpStreamableHttpSession,
 } from "@shoggoth/mcp-integration";
 import { getProcessManager } from "../process-manager-singleton";
+import { getLogger } from "../logging";
 import type { ShoggothMcpConfig, ShoggothMcpServerEntry } from "@shoggoth/shared";
 import type { ExternalMcpInvoke } from "./tool-loop-mcp";
 import { resolveVaultEnv } from "./vault-env-resolve";
 import type { VaultService } from "../vault/vault-service";
 
+const log = getLogger("mcp-pool");
+
 type EffectiveMcpPoolScope = "global" | "per_agent" | "per_session";
+
+/** Shape common to the stdio/tcp notification tap and the streamable HTTP server-message tap. */
+type ServerNotificationLike = { readonly method?: unknown; readonly id?: unknown };
 
 /** Resolve `entry.poolScope ?? "inherit"` then map `inherit` → top-level `mcp.poolScope`. */
 function effectiveMcpPoolScope(
@@ -54,6 +60,12 @@ export function partitionMcpServersByEffectiveScope(
 }
 
 export type McpServerPool = {
+  /**
+   * Live tool catalogs in config order. When a server signals
+   * `notifications/tools/list_changed`, its entry is replaced **in place** (same
+   * array identity, same index) after a `tools/list` re-fetch — hold the array
+   * reference rather than snapshotting its contents.
+   */
   readonly externalSources: readonly McpSourceCatalog[];
   /**
    * Streamable HTTP only: sends MCP `notifications/cancelled` for `requestId` on the session for `sourceId`.
@@ -84,6 +96,14 @@ export type ConnectShoggothMcpPoolOptions = {
   readonly vault?: VaultService;
   /** Agent ID for vault scope resolution. Required if vault is provided. */
   readonly agentId?: string;
+  /**
+   * Invoked after a source's tool catalog has been re-fetched and replaced in
+   * place in `pool.externalSources` because that server sent
+   * `notifications/tools/list_changed`. Consumers that snapshot catalogs (e.g.
+   * cached session MCP contexts) should invalidate on this so the next
+   * `resolveContext` rebuilds from the refreshed arrays.
+   */
+  readonly onToolCatalogChange?: (input: { sourceId: string }) => void;
 };
 
 /** Per-server outcome of a pool start, gathered asynchronously across parallel connects. */
@@ -125,6 +145,61 @@ export async function connectShoggothMcpServers(
 
   const agentCtx = options?.agentContext;
 
+  // ── tools/list_changed handling ─────────────────────────────────────
+  // Per-source coalescing state: a burst of notifications while a refresh is
+  // in flight queues exactly one follow-up fetch instead of stacking calls.
+  const toolCatalogRefreshing = new Set<string>();
+  const toolCatalogRefreshQueued = new Set<string>();
+
+  /**
+   * React to an inbound server message: on `notifications/tools/list_changed`,
+   * re-fetch `tools/list` and replace that source's catalog entry in place.
+   * Only id-less messages with the method are considered (JSON-RPC
+   * notification); servers that never advertised `capabilities.tools.listChanged`
+   * simply never trigger this path.
+   */
+  function handleServerNotification(sourceId: string, msg: ServerNotificationLike): void {
+    if (msg.id !== undefined && msg.id !== null) return;
+    if (msg.method !== "notifications/tools/list_changed") return;
+    refreshToolCatalog(sourceId);
+  }
+
+  /**
+   * Re-fetch `tools/list` for one source and swap its catalog entry in place
+   * (same `externalSources` array, same index — other components hold the array
+   * reference). Runs as floating work so a notification never blocks or rejects
+   * the transport's message loop. On failure the previous catalog is kept and the
+   * error logged — a transient error never blanks a working catalog. On success,
+   * `options.onToolCatalogChange` fires so consumers can invalidate snapshots.
+   */
+  function refreshToolCatalog(sourceId: string): void {
+    if (toolCatalogRefreshing.has(sourceId)) {
+      toolCatalogRefreshQueued.add(sourceId);
+      return;
+    }
+    toolCatalogRefreshing.add(sourceId);
+    void (async () => {
+      try {
+        const session = sessions.get(sourceId);
+        if (!session) return; // server not (yet) registered in this pool
+        const tools = await mcpFetchToolsList(session);
+        const idx = externalSources.findIndex((c) => c.sourceId === sourceId);
+        if (idx === -1) return;
+        externalSources[idx] = mcpToolsToSourceCatalog(sourceId, tools);
+        options?.onToolCatalogChange?.({ sourceId });
+      } catch (e) {
+        log.warn("mcp.pool.tool_catalog_refresh_failed", { sourceId, err: String(e) });
+      } finally {
+        toolCatalogRefreshing.delete(sourceId);
+        if (toolCatalogRefreshQueued.delete(sourceId)) {
+          refreshToolCatalog(sourceId);
+        }
+      }
+    })().catch((e) => {
+      log.error("mcp.pool.tool_catalog_refresh_crashed", { sourceId, err: String(e) });
+    });
+  }
+
   /** Open one server (env/vault resolution + connect + `tools/list`) in isolation. */
   async function startServer(s: ShoggothMcpServerEntry): Promise<McpServerStartOutcome> {
     let session: McpJsonRpcSession | undefined;
@@ -151,16 +226,27 @@ export async function connectShoggothMcpServers(
           uid: agentCtx?.uid,
           gid: agentCtx?.gid,
           processManager: getProcessManager(),
+          onServerNotification: (msg) => handleServerNotification(s.id, msg),
         });
       } else if (s.transport === "tcp") {
-        session = await openMcpTcpClient({ host: s.host, port: s.port });
+        session = await openMcpTcpClient({
+          host: s.host,
+          port: s.port,
+          onServerNotification: (msg) => handleServerNotification(s.id, msg),
+        });
       } else {
         httpSession = await openMcpStreamableHttpClient({
           url: s.url,
           headers: s.headers,
-          onServerMessage: onPoolMessage
-            ? (msg) => onPoolMessage({ sourceId: s.id, msg })
-            : undefined,
+          // Always wired: the HTTP transport funnels id-less notifications through
+          // onServerMessage (POST JSON, POST SSE, and standing GET SSE all share
+          // one dispatch), so the tap doubles as the tools/list_changed trigger.
+          // The optional debug log tap (SHOGGOTH_MCP_LOG_SERVER_MESSAGES) still
+          // receives every forwarded message first.
+          onServerMessage: (msg) => {
+            onPoolMessage?.({ sourceId: s.id, msg });
+            handleServerNotification(s.id, msg);
+          },
         });
         session = httpSession;
       }
