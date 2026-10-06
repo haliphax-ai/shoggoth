@@ -20,7 +20,11 @@ import {
 } from "./platform";
 import { createDiscordInteractionHandler } from "./slash-commands";
 import { handleDiscordHitlReactionAdd } from "./hitl/reaction-handler";
-import { resolveEffectiveDiscordRoutes, resolveDiscordOwnerUserId } from "./config";
+import {
+  resolveDiscordBotToken,
+  resolveEffectiveDiscordRoutes,
+  resolveDiscordOwnerUserId,
+} from "./config";
 import { resolveSessionIdForRoutes } from "./adapter";
 import {
   createActionToolDispatcher,
@@ -29,7 +33,6 @@ import {
   type PostActionDeps,
   type AttachmentDownloadActionDeps,
 } from "@shoggoth/messaging";
-import { resolvePlatformConfig } from "@shoggoth/shared";
 import { toolReadBinary } from "@shoggoth/os-exec";
 import { mdTableToAscii } from "./table-formatter.js";
 import type Database from "better-sqlite3";
@@ -51,15 +54,6 @@ interface DiscordPluginState {
     current: ((ev: ReactionAddEvent) => void) | undefined;
   };
   getToken: () => string | undefined;
-}
-
-/** Resolve the Discord bot token from env or config. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function resolveDiscordBotToken(config: any): string | undefined {
-  const fromEnv = process.env.DISCORD_BOT_TOKEN?.trim();
-  if (fromEnv) return fromEnv;
-  const dc = resolvePlatformConfig(config, "discord");
-  return (dc?.token as string | undefined)?.trim() || undefined;
 }
 
 /**

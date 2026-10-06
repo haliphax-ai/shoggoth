@@ -12,8 +12,12 @@ import { parseDiscordRoutesWithMeta, type DiscordSessionRoute } from "./bridge";
 // Register Discord-specific extension validator
 // ---------------------------------------------------------------------------
 
+/** Env var consulted for the bot token when `discord.tokenEnv` is not set. */
+const DEFAULT_DISCORD_BOT_TOKEN_ENV = "DISCORD_BOT_TOKEN";
+
 const discordExtensionSchema = z.object({
   token: z.string().optional(),
+  tokenEnv: z.string().min(1).optional(),
   ownerUserId: z.string().optional(),
   intents: z.number().optional(),
   allowBotMessages: z.boolean().optional(),
@@ -42,6 +46,30 @@ export function resolveShoggothAgentId(cfg: ShoggothConfig): string {
   const e = process.env.SHOGGOTH_AGENT_ID?.trim();
   if (e) return e;
   return cfg.runtime?.agentId?.trim() || "main";
+}
+
+/**
+ * Resolve the Discord bot token.
+ *
+ * **Resolution order** (env wins, matching this platform's historical behavior):
+ * 1. `process.env[tokenEnv]` when `discord.tokenEnv` names an env var (the
+ *    `*Env` convention used elsewhere in the configuration).
+ * 2. `process.env.DISCORD_BOT_TOKEN` — the long-standing default, kept so
+ *    existing deployments that never set `tokenEnv` behave unchanged.
+ * 3. The layered `discord.token` inline value.
+ *
+ * Note: model/memory providers resolve the inline value first
+ * (`apiKey ?? apiKeyEnv`). Discord has always resolved the environment first,
+ * and flipping that would silently change which token wins for existing
+ * deployments, so the platform-local order is preserved.
+ */
+export function resolveDiscordBotToken(cfg: ShoggothConfig): string | undefined {
+  const dc = resolveDiscordPlatformConfig(cfg);
+  const configured = (dc?.tokenEnv as string | undefined)?.trim();
+  const envName = configured || DEFAULT_DISCORD_BOT_TOKEN_ENV;
+  const fromEnv = process.env[envName]?.trim();
+  if (fromEnv) return fromEnv;
+  return (dc?.token as string | undefined)?.trim() || undefined;
 }
 
 export function resolveEffectiveDiscordRoutes(cfg: ShoggothConfig): DiscordSessionRoute[] {

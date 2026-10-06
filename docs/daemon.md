@@ -538,16 +538,16 @@ All control plane operations, retention jobs, and policy decisions are audited.
 
 ## Key Environment Variables
 
-| Variable                            | Purpose                                  |
-| ----------------------------------- | ---------------------------------------- |
-| `SHOGGOTH_CONFIG_DIR`               | Override config directory                |
-| `DISCORD_BOT_TOKEN`                 | Override Discord token from config       |
-| `SHOGGOTH_CONFIG_HOT_RELOAD`        | Set to `0` to disable                    |
-| `SHOGGOTH_SESSION_SYSTEM_PROMPT`    | Appended to system prompt                |
-| `SHOGGOTH_GLOBAL_INSTRUCTIONS_PATH` | Override operator instructions path      |
-| `SHOGGOTH_RETENTION_MS`             | Override retention interval (0 disables) |
-| `SHOGGOTH_MODEL`                    | Fallback model name                      |
-| `ANTHROPIC_BASE_URL`                | Anthropic API base URL                   |
+| Variable                            | Purpose                                                                       |
+| ----------------------------------- | ----------------------------------------------------------------------------- |
+| `SHOGGOTH_CONFIG_DIR`               | Override config directory                                                     |
+| `DISCORD_BOT_TOKEN`                 | Bot token when `discord.tokenEnv` is unset (overrides inline `discord.token`) |
+| `SHOGGOTH_CONFIG_HOT_RELOAD`        | Set to `0` to disable                                                         |
+| `SHOGGOTH_SESSION_SYSTEM_PROMPT`    | Appended to system prompt                                                     |
+| `SHOGGOTH_GLOBAL_INSTRUCTIONS_PATH` | Override operator instructions path                                           |
+| `SHOGGOTH_RETENTION_MS`             | Override retention interval (0 disables)                                      |
+| `SHOGGOTH_MODEL`                    | Fallback model name                                                           |
+| `ANTHROPIC_BASE_URL`                | Anthropic API base URL                                                        |
 
 ---
 
