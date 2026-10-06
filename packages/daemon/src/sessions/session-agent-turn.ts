@@ -36,6 +36,7 @@ import { vaultServiceRef } from "../vault/vault-ref";
 import { serviceToolRegistryRef } from "./service-tool-registry-ref";
 import { registerAllBuiltinHandlers } from "./builtin-handlers/index";
 import { createMcpRoutingToolExecutor } from "../mcp/tool-loop-mcp";
+import { createSystemGates } from "./system-gates";
 import { createToolLoopPolicyAndAudit } from "../policy/tool-loop-bridge";
 import { createDefaultSubResourceRegistry } from "../policy/sub-resource";
 import { runToolLoop, type RunToolLoopHitl, type RunToolLoopOptions } from "./tool-loop";
@@ -451,6 +452,23 @@ export async function executeSessionAgentTurn(
   // Reused on every tool call within this turn so the statement isn't re-prepared each time.
   const getWorkingDirStmt = input.db.prepare(`SELECT working_directory FROM sessions WHERE id = ?`);
 
+  // Configurable system gates (AGENTS.md discovery / re-read-required) for
+  // external tools matching config.gates.*.tools globs. Built once per turn;
+  // reads the working directory fresh per tool call so `cd` updates are visible.
+  const systemGates = createSystemGates({
+    db: input.db,
+    sessionId: input.sessionId,
+    contextSegmentId: ctxSeg,
+    workspacePath: input.session.workspacePath,
+    config: input.config,
+    getWorkingDirectory: () => {
+      const wd = getWorkingDirStmt.get(input.sessionId) as
+        | { working_directory: string | null }
+        | undefined;
+      return wd?.working_directory?.trim() || undefined;
+    },
+  });
+
   const executor = createMcpRoutingToolExecutor({
     aggregated: mcpCtx.fullAggregated ?? mcpCtx.aggregated,
     ...(mcpCtx.external ? { external: mcpCtx.external } : {}),
@@ -552,6 +570,7 @@ export async function executeSessionAgentTurn(
       contextSegmentId: ctxSeg,
       turnAbortSignal,
       subResourceRegistry: createDefaultSubResourceRegistry(),
+      systemGates,
       hitl: {
         ...input.hitl,
         config: input.getHitlConfig(),

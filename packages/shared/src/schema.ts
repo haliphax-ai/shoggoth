@@ -5,6 +5,7 @@ export * from "./schema/models";
 export * from "./schema/mcp";
 export * from "./schema/hitl";
 export * from "./schema/policy";
+export * from "./schema/gates";
 export * from "./schema/memory";
 export * from "./schema/agents";
 export * from "./schema/services";
