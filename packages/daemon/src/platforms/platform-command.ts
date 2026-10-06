@@ -53,6 +53,15 @@ const COMMAND_TO_OP: Record<string, (opts: Readonly<Record<string, string>>) => 
       op: "session_abort",
       payload: opts.session_id ? { session_id: opts.session_id } : {},
     }),
+    steer: (opts) => {
+      const payload: Record<string, unknown> = {};
+      const prompt = opts.prompt?.trim();
+      if (prompt) payload.prompt = prompt;
+      const sessionId = opts.session_id?.trim();
+      if (sessionId) payload.session_id = sessionId;
+      if (opts.delivery === "internal") payload.delivery = "internal";
+      return { op: "session_steer", payload };
+    },
     new: (opts) => ({
       op: "session_context_new",
       payload: opts.session_id ? { session_id: opts.session_id } : {},

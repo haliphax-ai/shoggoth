@@ -56,6 +56,69 @@ describe("translateCommandToControlOp", () => {
     });
   });
 
+  it("translates steer with prompt only (caller must resolve session)", () => {
+    const cmd: PlatformCommand = {
+      name: "steer",
+      options: { prompt: "  Focus on the failing tests first.  " },
+    };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "session_steer",
+      payload: { prompt: "Focus on the failing tests first." },
+    });
+  });
+
+  it("translates steer with session_id and trimmed prompt", () => {
+    const cmd: PlatformCommand = {
+      name: "steer",
+      options: {
+        prompt: "Wrap up after this turn.",
+        session_id: " agent:target:discord:channel:ch-7 ",
+      },
+    };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "session_steer",
+      payload: {
+        prompt: "Wrap up after this turn.",
+        session_id: "agent:target:discord:channel:ch-7",
+      },
+    });
+  });
+
+  it("translates steer with internal delivery", () => {
+    const cmd: PlatformCommand = {
+      name: "steer",
+      options: { prompt: "Hello?", delivery: "internal" },
+    };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "session_steer",
+      payload: { prompt: "Hello?", delivery: "internal" },
+    });
+  });
+
+  it("translates steer with surface delivery (omitted, daemon default)", () => {
+    const cmd: PlatformCommand = {
+      name: "steer",
+      options: { prompt: "Hello?", delivery: "surface" },
+    };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "session_steer",
+      payload: { prompt: "Hello?" },
+    });
+  });
+
+  it("translates steer with missing prompt (no prompt key)", () => {
+    const cmd: PlatformCommand = { name: "steer", options: {} };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "session_steer",
+      payload: {},
+    });
+  });
+
   it("translates model command with session_id", () => {
     const cmd: PlatformCommand = {
       name: "model",

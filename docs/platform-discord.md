@@ -223,7 +223,7 @@ When `session_id` is omitted, the handler resolves the session from the channel 
 
 1. Gateway `INTERACTION_CREATE` → `discordInteractionCreateToEvent()` parses the payload.
 2. `discordInteractionToCommand()` extracts the command name and options into a `PlatformCommand`.
-3. `translateCommandToControlOp()` maps to a daemon control operation (`/steer` dispatches directly to the `session_steer` op).
+3. `translateCommandToControlOp()` maps to a daemon control operation.
 4. The handler executes the operation and responds via `interactionCallback` (type 4 = immediate, type 5 = deferred for long operations like `/compact`).
 
 ---
