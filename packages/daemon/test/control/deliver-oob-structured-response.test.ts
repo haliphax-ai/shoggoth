@@ -164,6 +164,7 @@ describe("deliverOobStructuredResponse", () => {
     expect(runTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "parent-oob",
+        userContent: expect.stringContaining("__structured_output__"),
         modelInvocationOverride: expect.objectContaining({
           responseSchema: expect.objectContaining({ schema: expect.any(Object) }),
           structuredOutputMode: "best-effort",

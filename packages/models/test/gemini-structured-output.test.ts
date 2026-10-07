@@ -164,8 +164,18 @@ describe("Gemini structured output — responseSchema present", () => {
 describe("Gemini structured output — post-validation", () => {
   it("runs post-validation and does NOT throw on conformant response", async () => {
     const conformantJson = JSON.stringify({ name: "Alice", count: 5 });
-    const fetchImpl = async () =>
-      new Response(JSON.stringify(geminiTextResponse(conformantJson)), { status: 200 });
+    let callCount = 0;
+    const fetchImpl = async (_url: string | URL, _init?: RequestInit) => {
+      callCount++;
+      // First call: model returns text only (no tool calls) → triggers follow-up
+      if (callCount === 1) {
+        return new Response(JSON.stringify(geminiTextResponse("thinking...")), { status: 200 });
+      }
+      // Follow-up: model calls __structured_output__ with conformant JSON
+      return new Response(JSON.stringify(geminiSyntheticCallResponse(conformantJson)), {
+        status: 200,
+      });
+    };
 
     const p = createGeminiProvider({ id: "g", fetchImpl });
 
@@ -176,6 +186,7 @@ describe("Gemini structured output — post-validation", () => {
       responseSchema: RESPONSE_SCHEMA,
     });
     assert.ok(out.content);
+    assert.equal(out.content, conformantJson);
   });
 
   it("throws StructuredOutputValidationError on non-conformant response", async () => {
@@ -211,6 +222,37 @@ describe("Gemini structured output — post-validation", () => {
         );
         assert.equal(e.rawContent, nonConformantJson);
         assert.deepStrictEqual(e.schema, TEST_SCHEMA);
+        return true;
+      },
+    );
+  });
+
+  it("throws when the forced follow-up also returns text (text is never accepted as structured output)", async () => {
+    const textAnswer = JSON.stringify({ name: "Alice", count: 5 });
+    let callCount = 0;
+    const fetchImpl = async () => {
+      callCount++;
+      return new Response(JSON.stringify(geminiTextResponse(textAnswer)), { status: 200 });
+    };
+
+    const p = createGeminiProvider({ id: "g", fetchImpl });
+
+    await assert.rejects(
+      () =>
+        p.completeWithTools({
+          model: "gemini-pro",
+          messages: [{ role: "user", content: "give me data" }],
+          tools: TOOLS,
+          responseSchema: RESPONSE_SCHEMA,
+        }),
+      (e: unknown) => {
+        assert.ok(
+          e instanceof StructuredOutputValidationError,
+          `expected StructuredOutputValidationError, got ${(e as Error).constructor.name}`,
+        );
+        assert.match((e as Error).message, /__structured_output__/);
+        assert.equal(e.rawContent, textAnswer);
+        assert.equal(callCount, 2, "initial call plus forced follow-up");
         return true;
       },
     );
