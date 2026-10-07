@@ -41,19 +41,21 @@ type Body = { type: number; data: Record<string, unknown> };
 function makeHandler(
   calls: Array<{ method: string; args: unknown[] }>,
   invokeControlOp?: (op: string, payload: Record<string, unknown>) => Promise<unknown>,
+  resolveSessionForChannel?: (channelId: string, guildId?: string) => string | undefined,
 ) {
   return createDiscordInteractionHandler({
     transport: stubTransport(calls),
     applicationId: "app-123",
     logger: stubLogger(),
     abortSession: async () => false,
-    invokeControlOp:
-      invokeControlOp ?? (async () => ({ ok: true, result: { prompts: [] } })),
-    resolveSessionForChannel: () => SESSION,
+    invokeControlOp: invokeControlOp ?? (async () => ({ ok: true, result: { prompts: [] } })),
+    resolveSessionForChannel: resolveSessionForChannel ?? (() => SESSION),
   });
 }
 
-function slashPromptEvent(options: Array<{ name: string; value: string }>): DiscordInteractionEvent {
+function slashPromptEvent(
+  options: Array<{ name: string; value: string }>,
+): DiscordInteractionEvent {
   return {
     kind: "interaction_create",
     id: "int-1",
@@ -127,9 +129,9 @@ describe("prompt slash command", () => {
     await vi.advanceTimersByTimeAsync(50);
 
     const [, , body] = calls[0]!.args as [string, string, Body];
-    const select = (body.data.components as Array<{ components: Array<Record<string, unknown>> }>)[
-      0
-    ]!.components[0]!;
+    const select = (
+      body.data.components as Array<{ components: Array<Record<string, unknown>> }>
+    )[0]!.components[0]!;
     assert.deepStrictEqual(select.default_values, [{ name: "beta", value: "beta" }]);
     const options = select.options as Array<{ value: string; default?: boolean }>;
     assert.strictEqual(options.find((o) => o.value === "beta")?.default, true);
@@ -214,34 +216,28 @@ describe("prompt dropdown component → modal", () => {
 
     const [, , body] = calls[0]!.args as [string, string, Body];
     assert.strictEqual(body.type, 9); // modal
-    assert.strictEqual(
-      body.data.custom_id,
-      `prompt_modal|${SESSION}|triage`,
-    );
-    const components = body.data.components as Array<{ components: Array<Record<string, unknown>> }>;
+    assert.strictEqual(body.data.custom_id, `prompt_modal|${SESSION}|triage`);
+    const components = body.data.components as Array<{
+      components: Array<Record<string, unknown>>;
+    }>;
     assert.strictEqual(components.length, 2);
     assert.deepStrictEqual(
       components.map((c) => c.components[0]!.custom_id),
       ["cardId", "note"],
     );
-    assert.ok(
-      components.every((c) => c.components[0]!.label.length <= 32),
-    );
+    assert.ok(components.every((c) => c.components[0]!.label.length <= 32));
   });
 
   it("runs the prompt directly when the file has no placeholders", async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
     const invoked: Array<{ op: string; payload: Record<string, unknown> }> = [];
-    const handler = makeHandler(
-      calls,
-      async (op, payload) => {
-        invoked.push({ op, payload });
-        if (op === "prompt_list") {
-          return { ok: true, result: { prompts: [{ slug: "plain", placeholders: [] }] } };
-        }
-        return { ok: true, result: { reply: "ok" } };
-      },
-    );
+    const handler = makeHandler(calls, async (op, payload) => {
+      invoked.push({ op, payload });
+      if (op === "prompt_list") {
+        return { ok: true, result: { prompts: [{ slug: "plain", placeholders: [] }] } };
+      }
+      return { ok: true, result: { reply: "ok" } };
+    });
 
     handler(selectEvent("plain"));
     await vi.advanceTimersByTimeAsync(100);
@@ -250,6 +246,7 @@ describe("prompt dropdown component → modal", () => {
     assert.ok(promptCall);
     assert.strictEqual(promptCall!.payload.slug, "plain");
     assert.strictEqual(promptCall!.payload.session_id, SESSION);
+    assert.strictEqual(promptCall!.payload.platform_user_id, "u-1");
     const body = calls.find((c) => c.method === "editOriginalInteractionResponse");
     assert.ok(body, "should defer then edit the deferred response");
   });
@@ -318,6 +315,7 @@ describe("prompt modal submit → slash handler proxy", () => {
     assert.deepStrictEqual(promptCall!.payload, {
       slug: "triage",
       session_id: SESSION,
+      platform_user_id: "u-1",
       params: { cardId: "F-42", note: "" },
     });
 
@@ -357,5 +355,86 @@ describe("prompt modal submit → slash handler proxy", () => {
     const edit = calls.find((c) => c.method === "editOriginalInteractionResponse");
     assert.ok(edit);
     assert.ok((edit!.args[2] as { content: string }).content.includes("missing prompt parameters"));
+  });
+
+  it("resolves session_id from the channel when the modal carries none", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const invoked: Array<{ op: string; payload: Record<string, unknown> }> = [];
+    let resolvedWith: [string, string | undefined] | undefined;
+    const handler = makeHandler(
+      calls,
+      async (op, payload) => {
+        invoked.push({ op, payload });
+        return { ok: true, result: { reply: "ok" } };
+      },
+      (channelId, guildId) => {
+        resolvedWith = [channelId, guildId];
+        return SESSION;
+      },
+    );
+
+    const ev: DiscordInteractionEvent = {
+      kind: "interaction_create",
+      id: "int-5",
+      token: "tok-5",
+      type: 5,
+      channelId: "ch-1",
+      guildId: "g-1",
+      userId: "u-1",
+      data: {
+        // Blank session segment: the proxy must fall back to the channel route.
+        custom_id: "prompt_modal| |triage",
+        components: [{ type: 1, components: [{ type: 4, custom_id: "cardId", value: "F-42" }] }],
+      },
+    };
+
+    handler(ev);
+    await vi.advanceTimersByTimeAsync(100);
+
+    assert.deepStrictEqual(resolvedWith, ["ch-1", "g-1"]);
+    const promptCall = invoked.find((c) => c.op === "prompt");
+    assert.ok(promptCall, "prompt op should be invoked");
+    assert.strictEqual(promptCall!.payload.session_id, SESSION);
+    assert.strictEqual(promptCall!.payload.platform_user_id, "u-1");
+  });
+
+  it("warns without invoking the prompt op when no session is bound to the channel", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const invoked: Array<{ op: string; payload: Record<string, unknown> }> = [];
+    const handler = makeHandler(
+      calls,
+      async (op, payload) => {
+        invoked.push({ op, payload });
+        return { ok: true };
+      },
+      () => undefined,
+    );
+
+    const ev: DiscordInteractionEvent = {
+      kind: "interaction_create",
+      id: "int-6",
+      token: "tok-6",
+      type: 5,
+      channelId: "ch-1",
+      userId: "u-1",
+      data: {
+        custom_id: "prompt_modal| |triage",
+        components: [{ type: 1, components: [{ type: 4, custom_id: "cardId", value: "F-42" }] }],
+      },
+    };
+
+    handler(ev);
+    await vi.advanceTimersByTimeAsync(100);
+
+    assert.strictEqual(invoked.length, 0, "no control op should be invoked");
+    assert.strictEqual(calls.length, 1);
+    const [, , body] = calls[0]!.args as [string, string, Body];
+    assert.strictEqual(body.type, 4); // CHANNEL_MESSAGE
+    assert.strictEqual(
+      body.data.content,
+      "⚠️ No session bound to this channel. Provide a session_id.",
+    );
+    const edit = calls.find((c) => c.method === "editOriginalInteractionResponse");
+    assert.strictEqual(edit, undefined, "must not defer before warning");
   });
 });

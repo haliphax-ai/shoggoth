@@ -119,6 +119,40 @@ describe("translateCommandToControlOp", () => {
     });
   });
 
+  it("translates prompt with routing fields forwarded and the rest as params", () => {
+    const cmd: PlatformCommand = {
+      name: "prompt",
+      options: {
+        slug: " triage ",
+        session_id: " agent:main:discord:channel:abc ",
+        platform_user_id: " u-42 ",
+        cardId: "F-42",
+      },
+    };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "prompt",
+      payload: {
+        slug: "triage",
+        session_id: "agent:main:discord:channel:abc",
+        platform_user_id: "u-42",
+        params: { cardId: "F-42" },
+      },
+    });
+  });
+
+  it("omits platform_user_id from the prompt payload when not provided", () => {
+    const cmd: PlatformCommand = {
+      name: "prompt",
+      options: { slug: "triage" },
+    };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "prompt",
+      payload: { slug: "triage" },
+    });
+  });
+
   it("translates model command with session_id", () => {
     const cmd: PlatformCommand = {
       name: "model",
