@@ -84,21 +84,7 @@ Usage:
   shoggoth service rotate-key <id>         Rotate service identity key`);
 }
 
-export function parseServiceListArgs(argv: string[]): {
-  ok: boolean;
-  payload: Record<string, unknown>;
-} {
-  if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
-    return { ok: true, payload: {} };
-  }
-  // Reject any unexpected args
-  if (argv.some((arg) => arg.startsWith("-"))) {
-    return { ok: false, payload: {} };
-  }
-  return { ok: true, payload: {} };
-}
-
-export function parseServiceRequestsArgs(argv: string[]): {
+export function parseNoArgsCommand(argv: string[]): {
   ok: boolean;
   payload: Record<string, unknown>;
 } {
@@ -396,7 +382,7 @@ export async function runServiceCli(argv: string[]): Promise<void> {
   const sub = argv[0];
 
   if (sub === "list") {
-    const parsed = parseServiceListArgs(argv.slice(1));
+    const parsed = parseNoArgsCommand(argv.slice(1));
     if (!parsed.ok) {
       console.error("usage: shoggoth service list");
       process.exitCode = 1;
@@ -407,7 +393,7 @@ export async function runServiceCli(argv: string[]): Promise<void> {
   }
 
   if (sub === "requests") {
-    const parsed = parseServiceRequestsArgs(argv.slice(1));
+    const parsed = parseNoArgsCommand(argv.slice(1));
     if (!parsed.ok) {
       console.error("usage: shoggoth service requests");
       process.exitCode = 1;
