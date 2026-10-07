@@ -29,6 +29,7 @@ describe("prompt-ops", () => {
     writeFileSync(join(globalDir, "local.md"), "global shadow — should lose to workspace");
     writeFileSync(join(globalDir, "shadow-root.md"), "root also wins");
     writeFileSync(join(workspace, "shadow-root.md"), "workspace root wins over global");
+    writeFileSync(join(workspace, "AGENTS.md"), "workspace root agents doc");
   });
 
   afterAll(() => {
@@ -121,9 +122,9 @@ describe("prompt-ops", () => {
       const slugs = entries.map((e) => e.slug);
       assert.deepStrictEqual(slugs, slugs.slice().sort());
       assert.strictEqual(bySlug["local"]!.source, "workspace");
-      assert.strictEqual(bySlug["shadow-root"]!.source, "workspace");
+      assert.strictEqual(bySlug["shadow-root"]!.source, "global");
       assert.strictEqual(bySlug["shared"]!.source, "global");
-      assert.strictEqual(bySlug["root"]!.source, "workspace");
+      assert.ok(!("root" in bySlug), "workspace-root file must not be listed");
       assert.deepStrictEqual(bySlug["local"]!.placeholders, ["name", "cardId"]);
       assert.deepStrictEqual(bySlug["shared"]!.placeholders, ["who"]);
     });
@@ -135,6 +136,12 @@ describe("prompt-ops", () => {
         ["local", "shadow-root", "shared"],
       );
       assert.ok(entries.every((e) => e.source === "global"));
+    });
+
+    it("excludes workspace-root-only .md files (e.g. AGENTS.md) from the listing", () => {
+      const slugs = listPromptFiles(workspace, globalDir).map((e) => e.slug);
+      assert.ok(!slugs.includes("root"), "workspace-root root.md must not be listed");
+      assert.ok(!slugs.includes("AGENTS"), "workspace-root AGENTS.md must not be listed");
     });
   });
 });
