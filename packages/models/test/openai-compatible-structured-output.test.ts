@@ -302,6 +302,37 @@ describe("OpenAI structured output — best-effort mode", () => {
     assert.equal(out.content, conformantJson);
   });
 
+  it("throws when model answers with text and the forced follow-up also returns text (text is never accepted)", async () => {
+    const textAnswer = JSON.stringify({ name: "Alice", count: 5 });
+    const fetchImpl = async () => okJsonResponse(textAnswer);
+
+    const p = createOpenAICompatibleProvider({
+      id: "oai",
+      baseUrl: "https://api.openai.com/v1",
+      fetchImpl,
+    });
+
+    await assert.rejects(
+      () =>
+        p.completeWithTools({
+          model: "gpt-4o",
+          messages: [{ role: "user", content: "give me data" }],
+          tools: TOOLS,
+          responseSchema: RESPONSE_SCHEMA,
+          structuredOutputMode: "best-effort",
+        }),
+      (e: unknown) => {
+        assert.ok(
+          e instanceof StructuredOutputValidationError,
+          `expected StructuredOutputValidationError, got ${(e as Error).constructor.name}`,
+        );
+        assert.match((e as Error).message, /__structured_output__/);
+        assert.equal(e.rawContent, textAnswer);
+        return true;
+      },
+    );
+  });
+
   it("best-effort post-validation also works in complete() (non-tool path)", async () => {
     const nonConformantJson = JSON.stringify({ name: "Alice" });
     const fetchImpl = async () => okJsonResponse(nonConformantJson);

@@ -293,6 +293,41 @@ describe("Anthropic structured output — text-only response forces follow-up", 
     const parsed = JSON.parse(out.content!);
     assert.deepStrictEqual(parsed, structuredData);
   });
+
+  it("throws when the forced follow-up also returns text (text is never accepted as structured output)", async () => {
+    const textAnswer = "Here is some analysis about the data.";
+    let callCount = 0;
+    const fetchImpl = async () => {
+      callCount++;
+      return textOnlyResponse(textAnswer);
+    };
+
+    const p = createAnthropicMessagesProvider({
+      id: "anth",
+      baseUrl: "https://api.anthropic.com",
+      fetchImpl,
+    });
+
+    await assert.rejects(
+      () =>
+        p.completeWithTools({
+          model: "claude-3",
+          messages: [{ role: "user", content: "give me data" }],
+          tools: TOOLS,
+          responseSchema: RESPONSE_SCHEMA,
+        }),
+      (e: unknown) => {
+        assert.ok(
+          e instanceof StructuredOutputValidationError,
+          `expected StructuredOutputValidationError, got ${(e as Error).constructor.name}`,
+        );
+        assert.match((e as Error).message, /__structured_output__/);
+        assert.equal(e.rawContent, textAnswer);
+        assert.equal(callCount, 2, "initial call plus forced follow-up");
+        return true;
+      },
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -839,6 +839,13 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
                 usage: followUpResult.usage,
               };
             }
+            // The __structured_output__ tool is the only capture path for structured output —
+            // a text answer is never accepted, even after the forced follow-up.
+            throw new StructuredOutputValidationError(
+              "Model responded with text instead of calling the __structured_output__ tool",
+              textContent ?? "",
+              input.responseSchema!.schema,
+            );
           }
         }
 
@@ -964,6 +971,13 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
           if (followUpResult) {
             return { content: followUpResult.content, toolCalls: [], usage: followUpResult.usage };
           }
+          // The __structured_output__ tool is the only capture path for structured output —
+          // a text answer is never accepted, even after the forced follow-up.
+          throw new StructuredOutputValidationError(
+            "Model responded with text instead of calling the __structured_output__ tool",
+            finalContent ?? "",
+            input.responseSchema!.schema,
+          );
         }
       }
 

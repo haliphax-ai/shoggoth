@@ -41,7 +41,6 @@ import type {
 } from "./types";
 import type { FetchLike } from "./openai-compatible";
 
-
 export type AnthropicMessagesAuthStyle = "x-api-key" | "bearer";
 
 /** Extract usage metadata from an Anthropic Messages API response. */
@@ -103,11 +102,8 @@ function buildSyntheticTool(responseSchema: ResponseSchema): AnthropicToolDef {
   }));
 }
 
-
 /** Anthropic tool names must match `^[a-zA-Z0-9_-]{1,64}$` (dots/colons from OpenAI/MCP are invalid). */
 const ANTHROPIC_TOOL_NAME_MAX = 64;
-
-
 
 /**
  * OpenAI tool name → Anthropic-safe name for this request. Resolves collisions when two names
@@ -341,8 +337,6 @@ export function mapChatMessagesToAnthropicPayload(
   const system = systemParts.length > 0 ? systemParts.join("\n\n") : undefined;
   return { system, messages: out };
 }
-
-
 
 function contentBlocksToModelOutput(
   content: unknown,
@@ -738,8 +732,6 @@ export async function consumeAnthropicMessagesStream(
   return { content, toolCalls, usage, reasoningContent };
 }
 
-
-
 export function createAnthropicMessagesProvider(
   options: AnthropicMessagesProviderOptions,
 ): ModelProvider {
@@ -1000,6 +992,13 @@ export function createAnthropicMessagesProvider(
                 usage: followUpResult.usage,
               };
             }
+            // The __structured_output__ tool is the only capture path for structured output —
+            // a text answer is never accepted, even after the forced follow-up.
+            throw new StructuredOutputValidationError(
+              "Model responded with text instead of calling the __structured_output__ tool",
+              outText ?? "",
+              input.responseSchema!.schema,
+            );
           }
         }
 
@@ -1128,6 +1127,13 @@ export function createAnthropicMessagesProvider(
               reasoningContent,
             };
           }
+          // The __structured_output__ tool is the only capture path for structured output —
+          // a text answer is never accepted, even after the forced follow-up.
+          throw new StructuredOutputValidationError(
+            "Model responded with text instead of calling the __structured_output__ tool",
+            outText ?? "",
+            input.responseSchema!.schema,
+          );
         }
         // else: no synthetic call but has real tool calls — pass through normally
       }

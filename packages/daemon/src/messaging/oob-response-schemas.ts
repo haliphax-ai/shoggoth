@@ -46,8 +46,8 @@ export const OOB_NO_SENDER_GUIDANCE =
 
 /** Nudge message sent when the model's first OOB response was not valid structured JSON (subagent-result turns). */
 export const OOB_NUDGE_WITH_SENDER =
-  "\n\n⚠️ Your previous response was **not valid structured output**. You **MUST** respond with a JSON object containing `to_operator` (string or null) and `to_sender` (string or null). Respond with **only** the JSON object — no surrounding text.";
+  "\n\n⚠️ Your previous response was **not valid structured output**. You **MUST** call the `__structured_output__` tool with a JSON object containing `to_operator` (string or null) and `to_sender` (string or null). Do not answer with plain text — structured output is only captured from the `__structured_output__` tool call.";
 
 /** Nudge message sent when the model's first OOB response was not valid structured JSON (timer/cron turns). */
 export const OOB_NUDGE_NO_SENDER =
-  "\n\n⚠️ Your previous response was **not valid structured output**. You **MUST** respond with a JSON object containing `to_operator` (string or null). Respond with **only** the JSON object — no surrounding text.";
+  "\n\n⚠️ Your previous response was **not valid structured output**. You **MUST** call the `__structured_output__` tool with a JSON object containing `to_operator` (string or null). Do not answer with plain text — structured output is only captured from the `__structured_output__` tool call.";
