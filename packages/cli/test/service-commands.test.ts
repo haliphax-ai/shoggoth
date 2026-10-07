@@ -7,8 +7,7 @@ vi.mock("@shoggoth/daemon/lib", () => ({
 
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
 import {
-  parseServiceListArgs,
-  parseServiceRequestsArgs,
+  parseNoArgsCommand,
   parseServiceRequestArgs,
   parseServiceApproveArgs,
   parseServiceRevokeArgs,
@@ -24,28 +23,15 @@ describe("run-service CLI", () => {
     vi.clearAllMocks();
   });
 
-  describe("parseServiceListArgs", () => {
-    it("parses empty args for list command", () => {
-      const result = parseServiceListArgs([]);
+  describe("parseNoArgsCommand", () => {
+    it("parses empty args", () => {
+      const result = parseNoArgsCommand([]);
       expect(result.ok).toBe(true);
       expect(result.payload).toEqual({});
     });
 
     it("rejects unexpected args", () => {
-      const result = parseServiceListArgs(["--verbose"]);
-      expect(result.ok).toBe(false);
-    });
-  });
-
-  describe("parseServiceRequestsArgs", () => {
-    it("parses empty args for requests command", () => {
-      const result = parseServiceRequestsArgs([]);
-      expect(result.ok).toBe(true);
-      expect(result.payload).toEqual({});
-    });
-
-    it("rejects unexpected args", () => {
-      const result = parseServiceRequestsArgs(["--all"]);
+      const result = parseNoArgsCommand(["--verbose"]);
       expect(result.ok).toBe(false);
     });
   });
