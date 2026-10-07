@@ -345,17 +345,17 @@ describe("detectAndPersistOrphans", () => {
     );
     await saveWorkflow(baseDir, wf);
 
-    // Get the file's mtime before
-    const statBefore = fs.statSync(path.join(baseDir, "wf-no-orphan.json"));
+    // Pin mtime to a sentinel so a rewrite is detectable without waiting
+    // out filesystem timestamp granularity.
+    const statePath = path.join(baseDir, "wf-no-orphan.json");
+    fs.utimesSync(statePath, new Date(1_000_000_000_000), new Date(1_000_000_000_000));
+    const statBefore = fs.statSync(statePath);
 
     const poller: PollAdapter = {
       async poll(): Promise<PollResult> {
         return { status: "running" };
       },
     };
-
-    // Small delay to ensure mtime would differ if written
-    await new Promise((r) => setTimeout(r, 50));
 
     const result = await detectAndPersistOrphans(wf, poller, baseDir);
     assert.equal(result.orphanedCount, 0);

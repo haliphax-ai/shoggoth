@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -154,10 +154,13 @@ describe("Orchestrator restore()", () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "shoggoth-orch-restore-"));
+    // The stale-timer tests below create 60s handles — keep them fake.
+    vi.useFakeTimers();
   });
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
+    vi.useRealTimers();
   });
 
   function makeTaskList(): TaskList {

@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from "vitest";
+import { describe, it, beforeEach, afterEach, vi } from "vitest";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -33,21 +33,31 @@ function makeTask(id: number, prompt = `do task ${id}`): TaskDef {
   };
 }
 
+// Captured before fake timers install (they fake setImmediate too).
+const realSetImmediate = globalThis.setImmediate;
+
+/** Let real event-loop work (fs completions) settle without wall-clock waits. */
+async function flushEventLoop(rounds = 5): Promise<void> {
+  for (let i = 0; i < rounds; i++) {
+    await new Promise<void>((r) => realSetImmediate(r));
+  }
+}
+
 /**
- * Poll until a workflow is deleted or the deadline is reached.
- * Resilient to CI timer delays — the old approach used a fixed setTimeout
- * which was too tight for CI environments.
+ * Step the fake clock (which drives the production sweep timers in these
+ * tests) until the workflow file disappears. No wall-clock polling.
  */
-async function waitForDeletion(
+async function advanceUntilDeleted(
   baseDir: string,
   workflowId: string,
-  deadlineMs = 2_000,
+  maxSteps = 50,
 ): Promise<void> {
-  const deadline = Date.now() + deadlineMs;
-  while ((await loadWorkflow(baseDir, workflowId)) !== undefined) {
-    if (Date.now() >= deadline) break;
-    await new Promise((r) => setTimeout(r, 25));
+  for (let i = 0; i <= maxSteps; i++) {
+    if ((await loadWorkflow(baseDir, workflowId)) === undefined) return;
+    await vi.advanceTimersByTimeAsync(50);
+    await flushEventLoop();
   }
+  throw new Error(`advanceUntilDeleted: ${workflowId} was not deleted`);
 }
 
 function makeWorkflow(id: string, overrides?: Partial<TaskList>): TaskList {
@@ -372,9 +382,12 @@ describe("retention schedule", () => {
 
   beforeEach(() => {
     baseDir = makeTmpDir();
+    // Production sweep timers are driven by the fake clock in this suite.
+    vi.useFakeTimers();
   });
   afterEach(() => {
     stopRetentionSchedule();
+    vi.useRealTimers();
     fs.rmSync(baseDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
@@ -400,8 +413,8 @@ describe("retention schedule", () => {
 
     startRetentionSchedule(baseDir, 50);
 
-    // Poll for deletion — CI may delay timer ticks beyond a fixed timeout
-    await waitForDeletion(baseDir, "wf-scheduled");
+    // Drive fake-clock sweep ticks until the file is deleted.
+    await advanceUntilDeleted(baseDir, "wf-scheduled");
 
     assert.equal(await loadWorkflow(baseDir, "wf-scheduled"), undefined);
   });
@@ -425,8 +438,11 @@ describe("RetentionScheduler", () => {
 
   beforeEach(() => {
     baseDir = makeTmpDir();
+    // Production sweep timers are driven by the fake clock in this suite.
+    vi.useFakeTimers();
   });
   afterEach(() => {
+    vi.useRealTimers();
     fs.rmSync(baseDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
@@ -472,8 +488,8 @@ describe("RetentionScheduler", () => {
     scheduler.start(baseDir, 50);
     scheduler.start(baseDir, 50); // replace — should not leak timer
 
-    // Poll for deletion — CI may delay timer ticks beyond a fixed timeout
-    await waitForDeletion(baseDir, "wf-scheduler-1");
+    // Drive fake-clock sweep ticks until the file is deleted.
+    await advanceUntilDeleted(baseDir, "wf-scheduler-1");
     assert.equal(await loadWorkflow(baseDir, "wf-scheduler-1"), undefined);
     scheduler.stop();
   });
@@ -526,7 +542,13 @@ describe("RetentionScheduler", () => {
     schedulerA.start(dirA, 50);
     schedulerB.start(dirB, 50);
 
-    await new Promise((r) => setTimeout(r, 120));
+    // Step the fake clock until dirA's old workflow is pruned; dirB's
+    // recent workflow must survive its sweep.
+    for (let i = 0; i <= 10; i++) {
+      if ((await loadWorkflow(dirA, "wf-a-old")) === undefined) break;
+      await vi.advanceTimersByTimeAsync(50);
+      await flushEventLoop();
+    }
 
     // dirA: old workflow should be pruned
     assert.equal(await loadWorkflow(dirA, "wf-a-old"), undefined);
