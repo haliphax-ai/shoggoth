@@ -350,7 +350,7 @@ export async function runSessionCli(argv: string[]): Promise<void> {
       payload,
     });
     if (res.ok) {
-      console.log(formatModelResult(res as Record<string, unknown>));
+      console.log(formatModelResult(res.result));
     } else {
       console.error(`Failed: ${(res as Record<string, unknown>).error ?? "unknown error"}`);
       process.exitCode = 1;
