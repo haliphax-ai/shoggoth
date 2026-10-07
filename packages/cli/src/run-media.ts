@@ -58,7 +58,7 @@ export function parseMediaGenerateArgs(args: string[]):
         if (eq > 0) {
           params[raw.slice(0, eq)] = raw.slice(eq + 1);
         } else {
-          params[raw] = "";
+          return { ok: false, error: `--param must be key=value, got "${raw}"` };
         }
         hasParams = true;
       }

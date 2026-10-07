@@ -90,11 +90,10 @@ describe("parseMediaGenerateArgs", () => {
     assert.strictEqual(result.ok, false);
   });
 
-  it("handles --param with missing value gracefully", () => {
+  it("rejects --param without key=value syntax", () => {
     const result = parseMediaGenerateArgs(["--model", "m", "--prompt", "p", "--param", "noequals"]);
-    // A param without '=' should either be rejected or treated as key with empty value
-    // The implementation should handle this; either way it should not crash
-    assert.ok(typeof result.ok === "boolean");
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) assert.match(result.error, /--param must be key=value/);
   });
 });
 
