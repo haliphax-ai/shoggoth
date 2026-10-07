@@ -617,20 +617,48 @@ async function handleInteraction(
       });
       return;
     }
+    // The steer control op runs a full model turn that routinely outlives Discord's ~3s
+    // initial-response window, so defer FIRST (the one and only POST callback for this
+    // interaction) and deliver the outcome by editing the deferred response — the same
+    // pattern `/compact` uses. A second POST with this token would 404 "Unknown
+    // interaction", so the callback is never retried.
+    try {
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_DEFERRED,
+      });
+    } catch (err) {
+      deps.logger.warn("discord.interaction.steer_defer_failed", {
+        interactionId: parsed.interactionId,
+        err: String(err),
+      });
+    }
+    // Finish via PATCH `/webhooks/{appId}/{token}/messages/@original`. The token dies 15
+    // minutes after the interaction; if a long turn outlives it, log distinctly — never throw.
+    const finishSteer = async (content: string): Promise<void> => {
+      try {
+        await deps.transport.editOriginalInteractionResponse(
+          deps.applicationId,
+          parsed.interactionToken,
+          {
+            content,
+          },
+        );
+      } catch (err) {
+        deps.logger.warn("discord.interaction.steer_reply_undeliverable", {
+          interactionId: parsed.interactionId,
+          sessionId: payload.session_id,
+          err: String(err),
+        });
+      }
+    };
     try {
       const res = await deps.invokeControlOp("session_steer", payload);
       const content = res.ok
         ? `✅ Steering prompt sent to \`${payload.session_id}\`.`
         : `⚠️ Steer failed: ${res.error ?? "unknown error"}`;
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content },
-      });
+      await finishSteer(content);
     } catch (err) {
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content: `⚠️ Steer failed: ${String(err)}` },
-      });
+      await finishSteer(`⚠️ Steer failed: ${String(err)}`);
     }
     return;
   }
