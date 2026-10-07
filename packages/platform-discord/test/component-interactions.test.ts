@@ -1,4 +1,4 @@
-import { describe, it } from "vitest";
+import { describe, it, vi, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { createDiscordInteractionHandler } from "../src/slash-commands";
 import type { DiscordInteractionEvent } from "../src/interaction";
@@ -36,6 +36,14 @@ function stubLogger() {
 }
 
 describe("Component Interaction Handler (Phase 4 RED)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   describe("Provider select → custom", () => {
     it("responds with modal when user selects '(custom)' option", async () => {
       const calls: Array<{ method: string; args: unknown[] }> = [];
@@ -63,7 +71,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
       };
 
       handler(ev);
-      await new Promise((r) => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
 
       assert.strictEqual(calls.length, 1);
       assert.strictEqual(calls[0]!.method, "interactionCallback");
@@ -118,7 +126,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
       };
 
       handler(ev);
-      await new Promise((r) => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
 
       assert.strictEqual(calls.length, 1);
       assert.strictEqual(calls[0]!.method, "interactionCallback");
@@ -181,7 +189,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
       };
 
       handler(ev);
-      await new Promise((r) => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
 
       assert.strictEqual(calls.length, 1);
       assert.strictEqual(calls[0]!.method, "interactionCallback");
@@ -249,7 +257,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
       };
 
       handler(ev);
-      await new Promise((r) => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
 
       assert.strictEqual(calls.length, 1);
       const [id, token, body] = calls[0]!.args as [
@@ -299,7 +307,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
       };
 
       handler(ev);
-      await new Promise((r) => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
 
       // Should not call interactionCallback (no response)
       assert.strictEqual(calls.length, 0);
@@ -344,7 +352,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
       };
 
       handler(ev);
-      await new Promise((r) => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
 
       assert.strictEqual(calls.length, 1);
       assert.strictEqual(calls[0]!.method, "interactionCallback");

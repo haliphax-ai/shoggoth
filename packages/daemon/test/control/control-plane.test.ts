@@ -40,6 +40,14 @@ import {
 import { setSubagentRuntimeExtension } from "../../src/subagent/subagent-extension-ref";
 import { beforeAll, afterAll } from "vitest";
 
+/**
+ * Yield event-loop ticks so pending promise chains settle.
+ * setImmediate gates are event-loop yields, not wall-clock waits.
+ */
+async function flushAsyncWork(rounds = 10): Promise<void> {
+  for (let i = 0; i < rounds; i++) await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
 let prevOperatorToken: string | undefined;
 beforeAll(() => {
   prevOperatorToken = process.env.SHOGGOTH_OPERATOR_TOKEN;
@@ -1510,11 +1518,18 @@ describe("control plane (unix socket + JSONL)", () => {
     const modelTurnPromise = new Promise<void>((r) => {
       resolveModelTurn = r;
     });
+    let resolveDeliveryTurn!: () => void;
+    const deliveryTurnStarted = new Promise<void>((r) => {
+      resolveDeliveryTurn = r;
+    });
     setSubagentRuntimeExtension({
-      runSessionModelTurn: async () => {
+      runSessionModelTurn: async (input) => {
         // Wait until we explicitly resolve, proving the spawn returned first.
         await modelTurnPromise;
         turnResolved = true;
+        // The chain's delivery turn to respond_to runs after the child turn;
+        // it gates the final terminate step asserted below.
+        if (input.userMetadata?.subagent_result) resolveDeliveryTurn();
         return {
           latestAssistantText: "BG_REPLY",
           failoverMeta: undefined,
@@ -1561,10 +1576,11 @@ describe("control plane (unix socket + JSONL)", () => {
           assert.equal(turnResolved, false);
           assert.match(r.session_id, /^agent:par:discord:channel:/);
 
-          // Now let the model turn complete.
+          // Now let the model turn complete; gate on its delivery turn, then
+          // yield event-loop ticks so the final terminate step runs.
           resolveModelTurn!();
-          // Give the async turn a tick to settle.
-          await new Promise((r) => setTimeout(r, 50));
+          await deliveryTurnStarted;
+          await flushAsyncWork();
           assert.equal(turnResolved, true);
 
           // Session should be terminated after the background turn completes.
@@ -1605,6 +1621,10 @@ describe("control plane (unix socket + JSONL)", () => {
       userMetadata: Record<string, unknown>;
     }> = [];
     let childTurnCount = 0;
+    let resolveResultDelivered!: () => void;
+    const resultDelivered = new Promise<void>((r) => {
+      resolveResultDelivered = r;
+    });
 
     setSubagentRuntimeExtension({
       runSessionModelTurn: async (input) => {
@@ -1615,6 +1635,7 @@ describe("control plane (unix socket + JSONL)", () => {
             userContent: input.userContent,
             userMetadata: input.userMetadata as Record<string, unknown>,
           });
+          resolveResultDelivered();
           return {
             latestAssistantText: JSON.stringify({ to_operator: "ACK", to_sender: null }),
             failoverMeta: undefined,
@@ -1657,8 +1678,8 @@ describe("control plane (unix socket + JSONL)", () => {
           assert.equal(res.ok, true);
           const r = res.result as { session_id: string };
 
-          // Give the async turn + delivery a tick to settle.
-          await new Promise((resolve) => setTimeout(resolve, 100));
+          // Gate on the delivery turn to respond_to being recorded.
+          await resultDelivered;
 
           assert.equal(childTurnCount, 1);
           assert.equal(deliveryCalls.length, 1);
@@ -1706,6 +1727,10 @@ describe("control plane (unix socket + JSONL)", () => {
       userContent: string;
       userMetadata: Record<string, unknown>;
     }> = [];
+    let resolveResultDelivered!: () => void;
+    const resultDelivered = new Promise<void>((r) => {
+      resolveResultDelivered = r;
+    });
 
     setSubagentRuntimeExtension({
       runSessionModelTurn: async (input) => {
@@ -1715,6 +1740,7 @@ describe("control plane (unix socket + JSONL)", () => {
             userContent: input.userContent,
             userMetadata: input.userMetadata as Record<string, unknown>,
           });
+          resolveResultDelivered();
           return {
             latestAssistantText: JSON.stringify({ to_operator: "ACK", to_sender: null }),
             failoverMeta: undefined,
@@ -1755,8 +1781,8 @@ describe("control plane (unix socket + JSONL)", () => {
           assert.equal(res.ok, true);
           const r = res.result as { session_id: string };
 
-          // Give the async turn + delivery a tick to settle.
-          await new Promise((resolve) => setTimeout(resolve, 100));
+          // Gate on the delivery turn to respond_to being recorded.
+          await resultDelivered;
 
           assert.equal(deliveryCalls.length, 1);
           assert.equal(deliveryCalls[0].sessionId, parentId);
@@ -1794,6 +1820,10 @@ describe("control plane (unix socket + JSONL)", () => {
     });
 
     const deliveryCalls: Array<Record<string, unknown>> = [];
+    let resolveChildTurnSettled!: () => void;
+    const childTurnSettled = new Promise<void>((r) => {
+      resolveChildTurnSettled = r;
+    });
 
     setSubagentRuntimeExtension({
       runSessionModelTurn: async (input) => {
@@ -1804,6 +1834,9 @@ describe("control plane (unix socket + JSONL)", () => {
             failoverMeta: undefined,
           };
         }
+        // Signal the child's first turn so the test can gate on the spawn's
+        // follow-up chain reaching its delivery decision.
+        resolveChildTurnSettled();
         return {
           latestAssistantText: "THREAD_RESULT",
           failoverMeta: undefined,
@@ -1840,8 +1873,10 @@ describe("control plane (unix socket + JSONL)", () => {
           const res = parseResponseLine(line);
           assert.equal(res.ok, true);
 
-          // Give the async turn a tick to settle.
-          await new Promise((resolve) => setTimeout(resolve, 100));
+          // Gate on the child's first turn, then yield event-loop ticks so the
+          // spawn's follow-up chain evaluates its delivery decision.
+          await childTurnSettled;
+          await flushAsyncWork();
 
           // Thread-bound persistent subagents should NOT deliver to respond_to.
           assert.equal(deliveryCalls.length, 0);

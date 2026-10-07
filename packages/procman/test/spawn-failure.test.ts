@@ -6,7 +6,7 @@
  *    and stop after maxRetries — never an infinite restart loop, never a crash
  */
 import assert from "node:assert";
-import { describe, it } from "vitest";
+import { describe, it, vi } from "vitest";
 import {
   ManagedProcess,
   ProcessManager,
@@ -19,17 +19,18 @@ const OWNER: ProcessSpec["owner"] = { kind: "daemon", scopeId: "spawn-failure-te
 
 const SETTLED_STATES: ProcessState[] = ["failed", "exited", "dead"];
 
-function delay(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-async function waitFor(cond: () => boolean, timeoutMs: number, label: string): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (cond()) return;
-    await delay(20);
-  }
-  assert.ok(cond(), `timed out waiting for ${label}`);
+/** Resolves when `mp` next reaches a state satisfying `pred`. Event-driven: no
+ * wall-clock polling (vitest's own test timeout catches a hang). */
+function waitForState(mp: ManagedProcess, pred: (state: ProcessState) => boolean): Promise<void> {
+  if (pred(mp.state)) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const onChange = (newState: ProcessState) => {
+      if (!pred(newState)) return;
+      mp.removeListener("state-change", onChange);
+      resolve();
+    };
+    mp.on("state-change", onChange);
+  });
 }
 
 function spec(overrides: Partial<ProcessSpec> & { command: string }): ProcessSpec {
@@ -45,7 +46,7 @@ describe("ManagedProcess spawn failure", () => {
   it("start() rejects for a nonexistent binary instead of hanging in starting", async () => {
     const mp = new ManagedProcess(spec({ command: MISSING_COMMAND }));
     await assert.rejects(() => mp.start(), /ENOENT|spawn|EACCES/i);
-    await delay(100);
+    await waitForState(mp, (s) => SETTLED_STATES.includes(s));
     assert.ok(
       SETTLED_STATES.includes(mp.state),
       `state must settle (got "${mp.state}", not starting/running)`,
@@ -61,7 +62,7 @@ describe("ManagedProcess spawn failure", () => {
     chmodSync(file, 0o644);
     const mp = new ManagedProcess(spec({ command: file }));
     await assert.rejects(() => mp.start(), /EACCES|spawn/i);
-    await delay(100);
+    await waitForState(mp, (s) => SETTLED_STATES.includes(s));
     assert.ok(SETTLED_STATES.includes(mp.state), `state must settle (got "${mp.state}")`);
   });
 
@@ -85,14 +86,17 @@ describe("restart policy accounting for spawn failures", () => {
         restart: { mode: "on-failure", maxRetries: 2, initialDelayMs: 5, backoffMultiplier: 1 },
       });
       const mp = await pm.start(s);
-      await waitFor(
-        () => SETTLED_STATES.includes(mp.state) && mp.state === "dead",
-        5_000,
-        "process to exhaust restarts and go dead",
-      );
+      await waitForState(mp, (s) => s === "dead");
       assert.equal(mp.restartCount, 2, "exactly maxRetries restarts for spawn failures");
       const settled = mp.restartCount;
-      await delay(200);
+      // Any late restart would be scheduled as a timer by the restart policy;
+      // run the next 200ms of that clock (faked) and prove nothing fires.
+      vi.useFakeTimers();
+      try {
+        await vi.advanceTimersByTimeAsync(200);
+      } finally {
+        vi.useRealTimers();
+      }
       assert.equal(mp.restartCount, settled, "no restarts after settling dead");
       assert.equal(mp.state, "dead");
     } finally {
@@ -109,7 +113,7 @@ describe("restart policy accounting for spawn failures", () => {
         restart: { mode: "on-failure", maxRetries: 1, initialDelayMs: 5, backoffMultiplier: 1 },
       });
       const mp = await pm.start(s);
-      await waitFor(() => mp.state === "dead", 5_000, "crash-looping process to go dead");
+      await waitForState(mp, (s) => s === "dead");
       assert.equal(mp.restartCount, 1, "exactly maxRetries restarts for exit-code failures");
       assert.equal(mp.lastExitCode, 3);
     } finally {
@@ -126,7 +130,7 @@ describe("restart policy accounting for spawn failures", () => {
         restart: { mode: "on-failure", maxRetries: 3, initialDelayMs: 5, backoffMultiplier: 1 },
       });
       const mp = await pm.start(s);
-      await waitFor(() => mp.state === "dead", 5_000, "signal-killed process to settle dead");
+      await waitForState(mp, (s) => s === "dead");
       assert.equal(mp.restartCount, 0, "on-failure does not restart signal-killed processes");
       assert.equal(mp.lastSignal, "SIGKILL");
     } finally {
@@ -149,7 +153,7 @@ describe("restart policy accounting for spawn failures", () => {
         },
       });
       const mp = await pm.start(s);
-      await waitFor(() => mp.state === "dead", 5_000, "signal-killed process to exhaust restarts");
+      await waitForState(mp, (s) => s === "dead");
       assert.equal(mp.restartCount, 2, "signal deaths restart up to maxRetries");
     } finally {
       await pm.stopAll().catch(() => {});

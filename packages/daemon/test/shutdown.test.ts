@@ -1,4 +1,4 @@
-import { describe, it, vi } from "vitest";
+import { describe, it, vi, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { EventEmitter } from "node:events";
 import { createLogger } from "../src/logging";
@@ -6,6 +6,14 @@ import { ShutdownCoordinator } from "../src/shutdown";
 import { installSignalHandlers } from "../src/signals";
 
 describe("ShutdownCoordinator", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("runs drains in order then marks interrupted", async () => {
     const order: string[] = [];
     const log = createLogger({ component: "t", minLevel: "error" });
@@ -65,7 +73,11 @@ describe("ShutdownCoordinator", () => {
     );
 
     const start = Date.now();
-    await s.requestShutdown("test");
+    const shutdown = s.requestShutdown("test");
+    // Drive the fake clock: in parallel both group-1 drains finish at t=50;
+    // a sequential implementation would still hold a pending timer at t=50.
+    await vi.advanceTimersByTimeAsync(50);
+    await shutdown;
     const elapsed = Date.now() - start;
 
     // fast and slow ran in parallel, so total time should be ~50ms, not ~70ms
@@ -85,7 +97,10 @@ describe("ShutdownCoordinator", () => {
       markInterruptedRunsFailed: mark,
     });
     s.registerDrain("slow", () => new Promise<void>(() => {}));
-    await s.requestShutdown("sig");
+    const shutdown = s.requestShutdown("sig");
+    // The 30ms drain deadline fires on the fake clock — no wall-clock wait.
+    await vi.advanceTimersByTimeAsync(30);
+    await shutdown;
     assert.equal(mark.mock.calls.length, 1);
     const first = mark.mock.calls[0] as unknown[] | undefined;
     const reason = String(first?.[0] ?? "");

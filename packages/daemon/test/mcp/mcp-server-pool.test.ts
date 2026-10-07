@@ -669,6 +669,8 @@ async function startMockMcpHttp(opts: {
   readonly onInitialize?: () => Promise<void>;
   /** Reply to tools/list with a JSON-RPC error instead of the tool list. */
   readonly failToolsList?: boolean;
+  /** Called when this server serves tools/list (ordering gate hook). */
+  readonly onToolsList?: () => void;
 }): Promise<MockMcpHttpHandle> {
   const server = createServer(async (req, res: ServerResponse) => {
     if (req.method === "DELETE") {
@@ -708,6 +710,7 @@ async function startMockMcpHttp(opts: {
     }
     if (method === "tools/list") {
       opts.events.push(`${opts.label}:tools`);
+      opts.onToolsList?.();
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify(
@@ -782,12 +785,23 @@ describe("connectShoggothMcpServers — parallel startup", () => {
 
   it("preserves config order when a later server connects first", async () => {
     const events: string[] = [];
+    let fastServedTools!: () => void;
+    const fastDone = new Promise<void>((resolve) => {
+      fastServedTools = resolve;
+    });
+    // The first-configured server holds its initialize response until the
+    // second-configured server has served tools/list — completion order is
+    // forced by an event gate, not a wall-clock race.
     const slow = await startMockMcpHttp({
       label: "slow",
       events,
-      onInitialize: () => new Promise<void>((r) => setTimeout(r, 200)),
+      onInitialize: () => fastDone,
     });
-    const fast = await startMockMcpHttp({ label: "fast", events });
+    const fast = await startMockMcpHttp({
+      label: "fast",
+      events,
+      onToolsList: () => fastServedTools(),
+    });
     let connected: Awaited<ReturnType<typeof connectShoggothMcpServers>> | undefined;
     try {
       connected = await connectShoggothMcpServers([

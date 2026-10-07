@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from "vitest";
+import { describe, it, beforeEach, afterEach, vi } from "vitest";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -455,6 +455,13 @@ describe("Failure Handling", () => {
   });
 
   describe("runtime limit enforcement", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
     it("kills tasks that exceed their runtime limit", async () => {
       const spawner = mockSpawnAdapter();
       const pollResults = new Map<string, PollResult>();
@@ -468,8 +475,8 @@ describe("Failure Handling", () => {
       const tasks = [makeTask(1, "do task 1", { runtimeLimitMs: 1 })];
       await orch.start(tasks, "1", defaultOpts(baseDir));
 
-      // Wait a tiny bit so the limit is exceeded
-      await new Promise((r) => setTimeout(r, 10));
+      // Advance the fake clock so the limit is exceeded
+      await vi.advanceTimersByTimeAsync(10);
 
       // Task is still "running" from the poller's perspective
       pollResults.set("session-1", { status: "running" });
@@ -524,7 +531,7 @@ describe("Failure Handling", () => {
       const graphDsl = "1 2";
       await orch.start(tasks, graphDsl, defaultOpts(baseDir));
 
-      await new Promise((r) => setTimeout(r, 10));
+      await vi.advanceTimersByTimeAsync(10);
 
       pollResults.set("session-1", { status: "running" });
       pollResults.set("session-2", { status: "running" });
@@ -557,7 +564,7 @@ describe("Failure Handling", () => {
       const opts = defaultOpts(baseDir);
       await orch.start(tasks, "1", opts);
 
-      await new Promise((r) => setTimeout(r, 10));
+      await vi.advanceTimersByTimeAsync(10);
 
       pollResults.set("session-1", { status: "running" });
       await orch.tick();

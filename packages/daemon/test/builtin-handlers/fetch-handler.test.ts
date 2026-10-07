@@ -45,9 +45,10 @@ describe("fetch-handler — custom CA bundle over TLS", () => {
         res.writeHead(200, { "content-type": "text/plain" });
         res.end("secure hello");
       };
-      // "?slow" delays the response so the abort-timeout test is deterministic.
-      if (req.url?.includes("slow")) setTimeout(respond, 500);
-      else respond();
+      // "?slow" holds the response with no timer: the client's own abort
+      // timeout is the gate, so nothing is ever written on this route.
+      if (req.url?.includes("slow")) return;
+      respond();
     });
     await new Promise<void>((resolvePromise, reject) => {
       server.once("error", reject);

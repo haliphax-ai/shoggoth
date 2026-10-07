@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from "vitest";
+import { describe, it, vi, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { mkdtempSync } from "node:fs";
 import { closeTestDb } from "../helpers/close-test-db";
@@ -32,8 +32,8 @@ describe("heartbeat consumer", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("dispatches registered handler and completes event", async () => {
     let saw = 0;
@@ -150,29 +150,37 @@ describe("heartbeat consumer", () => {
   });
 
   it("runs handlers with concurrency > 1", async () => {
-    const done: number[] = [];
-    for (let i = 0; i < 6; i++) {
-      emitEvent(db, {
-        scope: EVENT_SCOPE_GLOBAL,
-        eventType: "parallel",
-        payload: { i },
-      });
-    }
-    await runHeartbeatBatch(db, {
-      batchLimit: 10,
-      concurrency: 3,
-      handlers: {
-        parallel: async (row) => {
-          const p = row.payload as { i: number };
-          await new Promise((r) => setTimeout(r, 5));
-          done.push(p.i);
+    vi.useFakeTimers();
+    try {
+      const done: number[] = [];
+      for (let i = 0; i < 6; i++) {
+        emitEvent(db, {
+          scope: EVENT_SCOPE_GLOBAL,
+          eventType: "parallel",
+          payload: { i },
+        });
+      }
+      const batch = runHeartbeatBatch(db, {
+        batchLimit: 10,
+        concurrency: 3,
+        handlers: {
+          parallel: async (row) => {
+            const p = row.payload as { i: number };
+            // Handler work takes 5ms of fake time — driven below, not slept.
+            await new Promise((r) => setTimeout(r, 5));
+            done.push(p.i);
+          },
         },
-      },
-    });
-    assert.equal(done.length, 6);
-    const pending = db
-      .prepare("SELECT COUNT(*) AS c FROM events WHERE status != 'completed'")
-      .get() as { c: number };
-    assert.equal(pending.c, 0);
+      });
+      await vi.advanceTimersByTimeAsync(50);
+      await batch;
+      assert.equal(done.length, 6);
+      const pending = db
+        .prepare("SELECT COUNT(*) AS c FROM events WHERE status != 'completed'")
+        .get() as { c: number };
+      assert.equal(pending.c, 0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

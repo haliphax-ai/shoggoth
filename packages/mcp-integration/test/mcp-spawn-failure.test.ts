@@ -8,7 +8,7 @@ import assert from "node:assert";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "vitest";
+import { describe, it, vi } from "vitest";
 import { ProcessManager } from "@shoggoth/procman";
 import { connectMcpStdioSession, openMcpStdioClient } from "../src/mcp-jsonrpc-transport";
 
@@ -68,8 +68,9 @@ describe("stdio connect spawn failures (direct spawn)", () => {
       command: process.execPath,
       args: ["-e", "process.exit(0)"],
     });
-    // Give the child time to die, then close: must not wait the 5s kill grace.
-    await new Promise((r) => setTimeout(r, 300));
+    // Gate on the child's death (its stream ends, failing pending requests)
+    // instead of sleeping on wall-clock time.
+    await assert.rejects(session.request("tools/list", {}), /stream ended/);
     await session.close();
     const elapsed = Date.now() - started;
     assert.ok(elapsed < 4_000, `close after death must not wait the grace (took ${elapsed}ms)`);
@@ -85,7 +86,14 @@ describe("stdio connect spawn failures (via procman)", () => {
         "procman nonexistent command",
       );
       // The managed process must not be left registered/restarting forever.
-      await new Promise((r) => setTimeout(r, 200));
+      // Any orphaned managed process would restart itself on a timer; run 200ms
+      // of that clock (faked) and prove nothing is left behind.
+      vi.useFakeTimers();
+      try {
+        await vi.advanceTimersByTimeAsync(200);
+      } finally {
+        vi.useRealTimers();
+      }
       assert.equal(pm.listByOwner({ kind: "mcp-server" }).length, 0, "no leaked managed process");
     } finally {
       await pm.stopAll().catch(() => {});

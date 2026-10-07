@@ -195,8 +195,8 @@ describe("mid-turn compaction in complete()", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("triggers compaction when estimated tokens exceed budget", async () => {
     // Set up: large tool message content so token estimate exceeds budget.
@@ -500,8 +500,8 @@ describe("dedicated compaction model", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("uses dedicated model when compactionModel is set", async () => {
     const bigToolContent = "x".repeat(400);
@@ -619,6 +619,7 @@ describe("abort during mid-turn compaction", () => {
   let tmp: string;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     tmp = mkdtempSync(join(tmpdir(), "shoggoth-stlmc-abort-"));
     db = new Database(join(tmp, "test.db"));
     db.pragma("foreign_keys = ON");
@@ -629,8 +630,9 @@ describe("abort during mid-turn compaction", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    vi.useRealTimers();
+    await closeTestDb(db, tmp);
+  });
 
   function makeCompactionConfig(overrides?: {
     turnAbortSignal?: AbortSignal;
@@ -684,13 +686,17 @@ describe("abort during mid-turn compaction", () => {
     // Fire abort after 30ms (while compaction is in progress)
     setTimeout(() => ac.abort(), 30);
 
-    await assert.rejects(
+    const rejects = assert.rejects(
       () => model.complete(),
       (err: Error) => {
         assert.ok(err instanceof TurnAbortedError);
         return true;
       },
     );
+
+    // Drive the fake clock: the 30ms abort, then the 100ms compaction.
+    for (let i = 0; i < 20; i++) await vi.advanceTimersByTimeAsync(10);
+    await rejects;
 
     // Compaction must have completed before the error was thrown
     assert.ok(compactionResolved, "compaction should have completed before TurnAbortedError");
@@ -745,8 +751,11 @@ describe("abort during mid-turn compaction", () => {
 
     model.pushToolMessage!({ toolCallId: "tc1", content: "x".repeat(400) });
 
-    // Should proceed without waiting for compaction to finish
-    const result = await model.complete();
+    // Should proceed without waiting for compaction to finish — the 50ms
+    // compaction timeout runs on the fake clock.
+    const completeP = model.complete();
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(10);
+    const result = await completeP;
     assert.equal(result.content, "done");
     // Transcript should NOT have been reloaded since we timed out
     assert.equal(vi.mocked(loadSessionTranscriptAsModelChat).mock.calls.length, 0);
@@ -777,12 +786,15 @@ describe("abort during mid-turn compaction", () => {
 
     model.pushToolMessage!({ toolCallId: "tc1", content: "x".repeat(400) });
 
-    await assert.rejects(
+    const rejects = assert.rejects(
       () => model.complete(),
       (err: Error) => {
         assert.ok(err instanceof TurnAbortedError);
         return true;
       },
     );
+    // The 50ms compaction timeout runs on the fake clock.
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(10);
+    await rejects;
   });
 });

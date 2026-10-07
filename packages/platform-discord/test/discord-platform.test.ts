@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from "vitest";
+import { describe, it, vi, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { mkdtempSync } from "node:fs";
 import { closeTestDb } from "../../daemon/test/helpers/close-test-db";
@@ -241,6 +241,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
   let tmp: string;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     tmp = mkdtempSync(join(tmpdir(), "shoggoth-discord-"));
     const dbPath = join(tmp, "s.db");
     db = new Database(dbPath);
@@ -264,7 +265,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         assert.ok(hitlStack.pending.approve(rows[0]!.id, "test-operator"));
         return;
       }
-      await new Promise((r) => setTimeout(r, 5));
+      await vi.advanceTimersByTimeAsync(5);
     }
     assert.fail("timed out waiting for HITL pending row");
   }
@@ -302,6 +303,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
   }
 
   afterEach(async () => {
+    vi.useRealTimers();
     await closeTestDb(db, tmp);
   });
 
@@ -366,7 +368,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       }),
     );
 
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     await platform.stop();
 
     assert.equal(sent.length, 1);
@@ -431,7 +433,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       }),
     );
 
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     await platform.stop();
 
     assert.equal(sent.length, 1);
@@ -498,7 +500,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       }),
     );
 
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     await platform.stop();
 
     assert.equal(sent.length, 1);
@@ -643,7 +645,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         body: "a",
       }),
     );
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     assert.equal(connectCalls, 1);
 
     bus.deliver(
@@ -655,7 +657,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         body: "b",
       }),
     );
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     assert.equal(connectCalls, 1);
 
     bus.deliver(
@@ -667,7 +669,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         body: "c",
       }),
     );
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     assert.equal(connectCalls, 2);
 
     await platform.stop();
@@ -739,10 +741,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         body: "a",
       }),
     );
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     assert.equal(connectCalls, 1);
 
-    await new Promise((r) => setTimeout(r, 120));
+    await vi.advanceTimersByTimeAsync(120);
 
     bus.deliver(
       "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
@@ -753,7 +755,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         body: "b",
       }),
     );
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     assert.equal(connectCalls, 2);
 
     await platform.stop();
@@ -825,10 +827,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         body: "a",
       }),
     );
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     assert.equal(connectCalls, 1);
 
-    await new Promise((r) => setTimeout(r, 120));
+    await vi.advanceTimersByTimeAsync(120);
 
     bus.deliver(
       "agent:test:discord:channel:10000000-0000-4000-8000-000000000001",
@@ -839,7 +841,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         body: "b",
       }),
     );
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     assert.equal(connectCalls, 1);
 
     await platform.stop();
@@ -937,7 +939,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         body: "a",
       }),
     );
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     assert.equal(connectLog.length, 2);
     assert.deepStrictEqual(connectLog[1]!.ids, ["p"]);
 
@@ -950,7 +952,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         body: "b",
       }),
     );
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     assert.equal(connectLog.length, 2);
 
     bus.deliver(
@@ -962,7 +964,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         body: "c",
       }),
     );
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     assert.equal(connectLog.length, 3);
     assert.deepStrictEqual(connectLog[2]!.ids, ["p"]);
 
@@ -1061,7 +1063,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         body: "a",
       }),
     );
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     assert.equal(connectCalls, 2);
     assert.deepEqual(
       connectArgs[1]!.map((s) => s.id),
@@ -1077,7 +1079,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         body: "b",
       }),
     );
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     assert.equal(connectCalls, 2);
 
     bus.deliver(
@@ -1089,7 +1091,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         body: "c",
       }),
     );
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     assert.equal(connectCalls, 3);
     assert.deepEqual(
       connectArgs[2]!.map((s) => s.id),
@@ -1180,7 +1182,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
         body: "hi",
       }),
     );
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     assert.equal(connectCalls, 1);
 
     await platform.stop();
@@ -1252,7 +1254,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     );
 
     await approveP;
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     await platform.stop();
 
     const opMsgs = createMessageCalls.filter((c) => c.channelId === notifyChannelId);
@@ -1336,7 +1338,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     );
 
     await approveP;
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     await platform.stop();
 
     assert.deepEqual(dmOpens, [targetDmUser]);
@@ -1408,7 +1410,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       );
 
       await approveP;
-      await new Promise((r) => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
       await platform.stop();
 
       const hook = fetchCalls.find((c) => c.url === webhookUrl);
@@ -1519,7 +1521,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       );
 
       await approveP;
-      await new Promise((r) => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
       await platform.stop();
 
       assert.ok(fetchCalls.some((c) => c.url === webhookUrl));
@@ -1607,7 +1609,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       );
 
       await approveP;
-      await new Promise((r) => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
       await platform.stop();
 
       assert.equal(createMessageCalls.length, 0);
@@ -1680,7 +1682,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     );
 
     await approveP;
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     await platform.stop();
 
     const hitlBodies = outboundBodies.filter(
@@ -1755,7 +1757,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     );
 
     await approveP;
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     await platform.stop();
 
     const hitlBodies = outboundBodies.filter(
@@ -1833,7 +1835,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     );
 
     await approveP;
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     await platform.stop();
 
     const hitlBodies = outboundBodies.filter(
@@ -1914,7 +1916,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       }),
     );
 
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     await platform.stop();
 
     assert.equal(sent.length, 0);
@@ -1992,7 +1994,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       }),
     );
 
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     await platform.stop();
 
     assert.equal(sent.length, 1);

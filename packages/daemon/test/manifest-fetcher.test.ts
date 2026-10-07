@@ -176,30 +176,45 @@ describe("ManifestFetcher", () => {
     });
 
     it("should respect timeout", async () => {
-      const slowFetcher = new ManifestFetcher({
-        registry,
-        timeoutMs: 100,
-        logger: { debug: vi.fn(), warn: vi.fn() },
-      });
+      vi.useFakeTimers();
+      try {
+        const slowFetcher = new ManifestFetcher({
+          registry,
+          timeoutMs: 100,
+          logger: { debug: vi.fn(), warn: vi.fn() },
+        });
 
-      // Create a fetch that respects AbortController signal
-      mockFetch.mockImplementation((_url: string, options?: { signal?: AbortSignal }) => {
-        return new Promise((_resolve, reject) => {
-          const timeout = setTimeout(() => {
-            reject(new DOMException("Aborted", "AbortError"));
-          }, 10000);
-          options?.signal?.addEventListener("abort", () => {
-            clearTimeout(timeout);
-            reject(new DOMException("Aborted", "AbortError"));
+        // The fetch never settles on its own; only the fetcher's abort signal
+        // (fired by its own timeout on the fake clock) resolves it.
+        mockFetch.mockImplementation((_url: string, options?: { signal?: AbortSignal }) => {
+          return new Promise((_resolve, reject) => {
+            options?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("Aborted", "AbortError"));
+            });
           });
         });
-      });
 
-      registry.register(createMockEntry({ id: "test-service" }));
+        registry.register(createMockEntry({ id: "test-service" }));
 
-      const result = await slowFetcher.fetchAndStore("test-service");
+        const fetchP = slowFetcher.fetchAndStore("test-service");
+        let settled = false;
+        fetchP.then(
+          () => {
+            settled = true;
+          },
+          () => {
+            settled = true;
+          },
+        );
+        for (let i = 0; i < 100 && !settled; i++) {
+          await vi.advanceTimersByTimeAsync(100);
+        }
+        const result = await fetchP;
 
-      expect(result).toBeNull();
+        expect(result).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });

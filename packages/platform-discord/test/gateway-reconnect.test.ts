@@ -149,15 +149,27 @@ function baseOpts(
   };
 }
 
+/**
+ * Flush fake-clock turns (due timers + microtasks) until cond holds.
+ * Replaces vi.waitFor, which polls on real timers even under fake clocks.
+ */
+async function until(cond: () => boolean, maxFlushes = 100): Promise<void> {
+  for (let i = 0; i < maxFlushes; i++) {
+    if (cond()) return;
+    await vi.advanceTimersByTimeAsync(0);
+  }
+  throw new Error("until: condition never became true");
+}
+
 /** Connect and complete the initial handshake, returning the session + first socket. */
 async function connectAndHandshake(factory: ReturnType<typeof createFakeSocketFactory>) {
   const sessionP = connectDiscordGateway(baseOpts({ createWebSocket: factory.createWebSocket }));
-  await vi.waitFor(() => expect(factory.sockets.length).toBeGreaterThan(0));
+  await until(() => factory.sockets.length > 0);
   const s0 = factory.sockets[0];
   s0.emitOpen();
-  await vi.waitFor(() => expect(s0.sent.length).toBe(0)); // wait for open to propagate
+  await until(() => s0.sent.length === 0); // wait for open to propagate
   s0.deliverHello();
-  await vi.waitFor(() => s0.sent.some((m) => m.includes('"op":2')));
+  await until(() => s0.sent.some((m) => m.includes('"op":2')));
   s0.deliverReady();
   const session = await sessionP;
   return { session, s0 };
@@ -193,9 +205,7 @@ describe("gateway reconnection", () => {
       s1.deliverHello();
 
       // Should send op 6 Resume, not op 2 Identify.
-      await vi.waitFor(() => {
-        expect(s1.sent.some((m) => m.includes('"op":6'))).toBe(true);
-      });
+      await until(() => s1.sent.some((m) => m.includes('"op":6')));
       expect(s1.sent.some((m) => m.includes('"op":2'))).toBe(false);
 
       s1.deliverResumed();
@@ -218,9 +228,7 @@ describe("gateway reconnection", () => {
       s1.emitOpen();
       s1.deliverHello();
 
-      await vi.waitFor(() => {
-        expect(s1.sent.some((m) => m.includes('"op":6'))).toBe(true);
-      });
+      await until(() => s1.sent.some((m) => m.includes('"op":6')));
 
       s1.deliverResumed();
       await session.stop();
@@ -237,9 +245,7 @@ describe("gateway reconnection", () => {
       s1.emitOpen();
       s1.deliverHello();
 
-      await vi.waitFor(() => {
-        expect(s1.sent.some((m) => m.includes('"op":2'))).toBe(true);
-      });
+      await until(() => s1.sent.some((m) => m.includes('"op":2')));
       expect(s1.sent.some((m) => m.includes('"op":6'))).toBe(false);
 
       s1.deliverReady();
@@ -258,11 +264,11 @@ describe("gateway reconnection", () => {
       const sessionP = connectDiscordGateway(
         baseOpts({ createWebSocket: factory.createWebSocket }),
       );
-      await vi.waitFor(() => expect(factory.sockets.length).toBeGreaterThan(0));
+      await until(() => factory.sockets.length > 0);
       const s0 = factory.sockets[0];
       s0.emitOpen();
       s0.deliverHello(heartbeatMs);
-      await vi.waitFor(() => s0.sent.some((m) => m.includes('"op":2')));
+      await until(() => s0.sent.some((m) => m.includes('"op":2')));
       s0.deliverReady();
       const session = await sessionP;
 
@@ -404,11 +410,11 @@ describe("gateway reconnection", () => {
       };
 
       const sessionP = connectDiscordGateway(baseOpts({ createWebSocket: trackingCreate }));
-      await vi.waitFor(() => expect(factory.sockets.length).toBeGreaterThan(0));
+      await until(() => factory.sockets.length > 0);
       const s0 = factory.sockets[0];
       s0.emitOpen();
       s0.deliverHello();
-      await vi.waitFor(() => s0.sent.some((m) => m.includes('"op":2')));
+      await until(() => s0.sent.some((m) => m.includes('"op":2')));
       s0.deliverReady({
         session_id: "sess-xyz",
         resume_gateway_url: "wss://resume.discord.gg",
@@ -427,11 +433,10 @@ describe("gateway reconnection", () => {
       // Should send op 6 with the session_id.
       s1.emitOpen();
       s1.deliverHello();
-      await vi.waitFor(() => {
-        const resumePayload = s1.sent.find((m) => m.includes('"op":6'));
-        expect(resumePayload).toBeDefined();
-        expect(resumePayload).toContain("sess-xyz");
-      });
+      await until(() => s1.sent.some((m) => m.includes('"op":6')));
+      const resumePayload = s1.sent.find((m) => m.includes('"op":6'));
+      expect(resumePayload).toBeDefined();
+      expect(resumePayload).toContain("sess-xyz");
 
       s1.deliverResumed();
       await session.stop();

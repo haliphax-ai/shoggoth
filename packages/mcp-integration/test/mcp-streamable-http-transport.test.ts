@@ -447,6 +447,10 @@ describe("mcp-streamable-http-transport", () => {
   it("onServerMessage skips a cancellation that rejected a pending request but reports an unmatched one", async () => {
     const inbound: McpStreamableHttpServerMessage[] = [];
     let matchedId: number | undefined;
+    let resolveUnmatchedCancel!: () => void;
+    const unmatchedCancelReceived = new Promise<void>((r) => {
+      resolveUnmatchedCancel = r;
+    });
     const server = createMockMcpHttpServer({
       serverName: "cancel-onmsg",
       sessionId: "sess-cancel-onmsg",
@@ -481,6 +485,7 @@ describe("mcp-streamable-http-transport", () => {
       url: baseUrl,
       onServerMessage: (m) => {
         inbound.push(m);
+        if (m.method === "notifications/cancelled") resolveUnmatchedCancel();
       },
     });
     try {
@@ -489,7 +494,7 @@ describe("mcp-streamable-http-transport", () => {
         assert.match(e.message, /MCP request cancelled/);
         return true;
       });
-      await new Promise((r) => setTimeout(r, 80));
+      await unmatchedCancelReceived;
       assert.equal(typeof matchedId, "number", "expected server to cancel a pending request");
       const cancels = inbound.filter((m) => m.method === "notifications/cancelled");
       assert.equal(cancels.length, 1, "only the unmatched cancellation reaches onServerMessage");
@@ -503,6 +508,10 @@ describe("mcp-streamable-http-transport", () => {
 
   it("onServerMessage receives JSON-RPC notification pushed on standing GET SSE", async () => {
     const inbound: McpStreamableHttpServerMessage[] = [];
+    let resolveCustomNotification!: () => void;
+    const customNotificationReceived = new Promise<void>((r) => {
+      resolveCustomNotification = r;
+    });
     const server = createMockMcpHttpServer({
       serverName: "onmsg",
       sessionId: "sess-onmsg",
@@ -529,11 +538,12 @@ describe("mcp-streamable-http-transport", () => {
       url: baseUrl,
       onServerMessage: (m) => {
         inbound.push(m);
+        if (m.method === "test/customNotification") resolveCustomNotification();
       },
     });
     try {
       await mcpFetchToolsList(session);
-      await new Promise((r) => setTimeout(r, 80));
+      await customNotificationReceived;
       const hit = inbound.find((m) => m.method === "test/customNotification");
       assert.ok(hit, "expected notification on inbound list");
       assert.deepEqual(hit.params, { hello: "from-get" });
@@ -544,6 +554,10 @@ describe("mcp-streamable-http-transport", () => {
   });
 
   it("standing GET reconnect sends Last-Event-ID after disconnect when server sent id: fields", async () => {
+    let resolveSecondGetArrived!: () => void;
+    const secondGetArrived = new Promise<void>((r) => {
+      resolveSecondGetArrived = r;
+    });
     const getRequestHeaders: Record<string, string | string[] | undefined>[] = [];
     let getCount = 0;
     let resolveToolCallId1: ((id: number) => void) | undefined;
@@ -558,6 +572,7 @@ describe("mcp-streamable-http-transport", () => {
       async onGet(req, res) {
         getCount++;
         getRequestHeaders.push({ ...req.headers });
+        if (getCount === 2) resolveSecondGetArrived();
         if (getCount === 1) {
           // First GET: send an event with id, then close (simulate disconnect)
           res.write(
@@ -596,8 +611,9 @@ describe("mcp-streamable-http-transport", () => {
     try {
       const tools = await mcpFetchToolsList(session);
       assert.equal(tools[0]!.name, "r");
-      // Wait for the first GET to connect, receive events, and disconnect
-      await new Promise((r) => setTimeout(r, 150));
+      // Gate: first GET connected, delivered events, disconnected, and the
+      // client reconnected — the server has now seen GET #2 arrive.
+      await secondGetArrived;
       // Now invoke a tool — POST returns 202, result comes on the reconnected GET
       const r = await mcpInvokeTool(session, "r", {});
       assert.deepEqual(r, { reconnected: true });
@@ -616,6 +632,10 @@ describe("mcp-streamable-http-transport", () => {
   });
 
   it("standing GET reconnect does NOT send Last-Event-ID when server never sent id: fields", async () => {
+    let resolveSecondGetArrived!: () => void;
+    const secondGetArrived = new Promise<void>((r) => {
+      resolveSecondGetArrived = r;
+    });
     const getRequestHeaders: Record<string, string | string[] | undefined>[] = [];
     let getCount = 0;
     let resolveToolCallId2: ((id: number) => void) | undefined;
@@ -630,6 +650,7 @@ describe("mcp-streamable-http-transport", () => {
       async onGet(req, res) {
         getCount++;
         getRequestHeaders.push({ ...req.headers });
+        if (getCount === 2) resolveSecondGetArrived();
         if (getCount === 1) {
           // First GET: send events WITHOUT id: fields, then close
           res.write(
@@ -661,8 +682,9 @@ describe("mcp-streamable-http-transport", () => {
     try {
       const tools = await mcpFetchToolsList(session);
       assert.equal(tools[0]!.name, "n");
-      // Wait for first GET to connect, receive events without ids, and disconnect
-      await new Promise((r) => setTimeout(r, 150));
+      // Gate: first GET connected, delivered id-less events, disconnected,
+      // and the client reconnected — the server has now seen GET #2 arrive.
+      await secondGetArrived;
       const r = await mcpInvokeTool(session, "n", {});
       assert.deepEqual(r, { noId: true });
       assert.ok(getCount >= 2, `expected at least 2 GET requests, got `);
@@ -685,6 +707,10 @@ describe("mcp-streamable-http-transport", () => {
   });
 
   it("standing GET reconnect updates Last-Event-ID across multiple disconnects", async () => {
+    let resolveThirdGetArrived!: () => void;
+    const thirdGetArrived = new Promise<void>((r) => {
+      resolveThirdGetArrived = r;
+    });
     const getRequestHeaders: Record<string, string | string[] | undefined>[] = [];
     let getCount = 0;
     let resolveToolCallId3: ((id: number) => void) | undefined;
@@ -699,6 +725,7 @@ describe("mcp-streamable-http-transport", () => {
       async onGet(req, res) {
         getCount++;
         getRequestHeaders.push({ ...req.headers });
+        if (getCount === 3) resolveThirdGetArrived();
         if (getCount === 1) {
           // First GET: send event with id, then disconnect
           res.write(
@@ -737,8 +764,9 @@ describe("mcp-streamable-http-transport", () => {
     const session = await openMcpStreamableHttpClient({ url: baseUrl });
     try {
       await mcpFetchToolsList(session);
-      // Wait for GET #1 to connect, send events, disconnect, then GET #2 to do the same
-      await new Promise((r) => setTimeout(r, 400));
+      // Gate: GET #1 and GET #2 each connected, delivered events, and
+      // disconnected — the server has now seen GET #3 arrive.
+      await thirdGetArrived;
       const r = await mcpInvokeTool(session, "m", {});
       assert.deepEqual(r, { multi: true });
       assert.ok(getCount >= 3, `expected at least 3 GET requests, got `);
@@ -768,10 +796,17 @@ describe("mcp-streamable-http-transport", () => {
 
   it("cancelRequest sends notifications/cancelled with requestId", async () => {
     let lastNotification: unknown;
+    let resolveCancelNotification!: () => void;
+    const cancelNotificationReceived = new Promise<void>((r) => {
+      resolveCancelNotification = r;
+    });
     const server = createMockMcpHttpServer({
       serverName: "cancel-req",
       onNotification(msg) {
         lastNotification = msg;
+        if ((msg as { method?: string }).method === "notifications/cancelled") {
+          resolveCancelNotification();
+        }
       },
     });
     const baseUrl = await startMockMcpHttpServer(server);
@@ -780,7 +815,7 @@ describe("mcp-streamable-http-transport", () => {
     try {
       await mcpInitializeSession(session, { protocolVersion: MCP_PROTOCOL_VERSION_STREAMABLE });
       session.cancelRequest(42);
-      await new Promise((r) => setTimeout(r, 30));
+      await cancelNotificationReceived;
       const n = lastNotification as {
         method?: string;
         params?: { requestId?: number };

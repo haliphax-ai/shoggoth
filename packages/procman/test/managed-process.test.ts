@@ -28,18 +28,11 @@ function makeRunningSpec(overrides: Partial<ProcessSpec> = {}): ProcessSpec {
   });
 }
 
-function waitForState(mp: ManagedProcess, target: string, timeoutMs = 10000): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
+function waitForState(mp: ManagedProcess, target: string): Promise<void> {
+  return new Promise<void>((resolve) => {
     if (mp.state === target) return resolve();
-    const timer = setTimeout(
-      () => reject(new Error(`Timeout waiting for state ${target}`)),
-      timeoutMs,
-    );
     mp.on("state-change", (s: string) => {
-      if (s === target) {
-        clearTimeout(timer);
-        resolve();
-      }
+      if (s === target) resolve();
     });
   });
 }
@@ -505,10 +498,10 @@ describe("ManagedProcess", () => {
       mp.kill();
 
       // Wait for process to exit
-      await waitForState(mp, "exited", 5000);
+      await waitForState(mp, "exited");
 
       // Should transition to dead without restarting
-      await waitForState(mp, "dead", 5000);
+      await waitForState(mp, "dead");
 
       assert.equal(mp.state, "dead");
       assert.equal(mp.restartCount, 0, "should not restart on signal kill");
@@ -573,7 +566,7 @@ describe("ManagedProcess", () => {
       await mp.start();
 
       // Wait for it to exhaust retries and go dead
-      await waitForState(mp, "dead", 10000);
+      await waitForState(mp, "dead");
 
       assert.equal(mp.state, "dead");
       assert.ok(
@@ -601,7 +594,7 @@ describe("ManagedProcess", () => {
       await mp.start();
 
       // Wait for it to exhaust retries and go dead
-      await waitForState(mp, "dead", 10000);
+      await waitForState(mp, "dead");
 
       assert.equal(mp.state, "dead");
       assert.ok(
@@ -685,7 +678,7 @@ describe("ManagedProcess", () => {
       assert.equal(mp.state, "running");
 
       // Wait for the runtime limit to trigger stop
-      await waitForState(mp, "dead", 10000);
+      await waitForState(mp, "dead");
 
       assert.equal(mp.state, "dead");
     }, 15000);
@@ -706,7 +699,7 @@ describe("ManagedProcess", () => {
       await mp.start();
       assert.equal(mp.state, "running");
 
-      await waitForState(mp, "dead", 10000);
+      await waitForState(mp, "dead");
 
       assert.ok(states.includes("stopping"), "should have passed through stopping state");
       assert.ok(states.includes("dead"), "should have reached dead state");
@@ -730,7 +723,7 @@ describe("ManagedProcess", () => {
 
       // Kill it first
       mp.kill();
-      await waitForState(mp, "dead", 5000);
+      await waitForState(mp, "dead");
       assert.equal(mp.state, "dead");
 
       // Calling stop on a dead process should be a no-op and resolve immediately
@@ -743,7 +736,7 @@ describe("ManagedProcess", () => {
 
       // The process is a short-lived echo — wait for it to finish naturally
       await mp.start();
-      await waitForState(mp, "dead", 5000);
+      await waitForState(mp, "dead");
 
       assert.equal(mp.state, "dead");
 
@@ -763,7 +756,7 @@ describe("ManagedProcess", () => {
 
       await mp.start();
       // echo exits immediately — wait for it to finish naturally
-      await waitForState(mp, "dead", 5000);
+      await waitForState(mp, "dead");
 
       assert.equal(mp.state, "dead");
       // Child process handle should be released to prevent zombie accumulation
@@ -783,7 +776,7 @@ describe("ManagedProcess", () => {
       );
 
       await mp.start();
-      await waitForState(mp, "dead", 5000);
+      await waitForState(mp, "dead");
 
       assert.equal(mp.state, "dead");
       assert.equal((mp as any)._child, null, "child should be null after non-zero exit");
@@ -807,7 +800,7 @@ describe("ManagedProcess", () => {
       );
 
       await mp.start();
-      await waitForState(mp, "dead", 10000);
+      await waitForState(mp, "dead");
 
       assert.equal(mp.state, "dead");
       assert.equal((mp as any)._child, null, "child should be null after exhausting retries");

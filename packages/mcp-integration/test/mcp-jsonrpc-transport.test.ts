@@ -1,7 +1,7 @@
 import assert from "node:assert";
-import { createServer } from "node:net";
+import { createServer, Socket } from "node:net";
 import { fileURLToPath } from "node:url";
-import { describe, it } from "vitest";
+import { describe, it, vi } from "vitest";
 import {
   connectMcpTcpSession,
   mcpFetchToolsList,
@@ -111,15 +111,20 @@ describe("mcp-jsonrpc-transport (tcp)", () => {
       server.on("error", reject);
     });
 
+    // Watch the socket-level deadline directly instead of idling past it:
+    // armed with connectTimeout on creation, cleared to 0 at handshake.
+    const deadlineSpy = vi.spyOn(Socket.prototype, "setTimeout");
     const session = await openMcpTcpClient({ host: "127.0.0.1", port, connectTimeout: 500 });
     try {
       const tools = await mcpFetchToolsList(session);
       assert.equal(tools[0]!.name, "ping");
       const r = await mcpInvokeTool(session, "ping", {});
       assert.deepEqual(r, { ok: true });
-      // The connect deadline must be cleared once the handshake completes:
-      // an idle session survives past connectTimeout.
-      await new Promise((resolve) => setTimeout(resolve, 700));
+      // The connect deadline must be cleared once the handshake completes.
+      const armedIdx = deadlineSpy.mock.calls.findIndex((c) => c[0] === 500);
+      const clearedIdx = deadlineSpy.mock.calls.findIndex((c, i) => i > armedIdx && c[0] === 0);
+      assert.ok(armedIdx !== -1, "connect deadline must be armed");
+      assert.ok(clearedIdx !== -1, "deadline must be cleared once the handshake completes");
       const again = await mcpInvokeTool(session, "ping", {});
       assert.deepEqual(again, { ok: true });
       assert.equal(
@@ -128,6 +133,7 @@ describe("mcp-jsonrpc-transport (tcp)", () => {
         `mock server received malformed JSON: ${malformedJson.join(" | ")}`,
       );
     } finally {
+      deadlineSpy.mockRestore();
       await session.close();
       server.close();
     }

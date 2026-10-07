@@ -8,7 +8,7 @@
  */
 import assert from "node:assert";
 import { fileURLToPath } from "node:url";
-import { beforeEach, describe, it } from "vitest";
+import { afterEach, beforeEach, describe, it, vi } from "vitest";
 import type { ShoggothMcpServerEntry } from "@shoggoth/shared";
 import {
   connectShoggothMcpServers,
@@ -35,16 +35,50 @@ function goodEntry(): ShoggothMcpServerEntry {
   return { id: GOOD_ID, transport: "stdio", command: process.execPath, args: [mockServerPath] };
 }
 
+/**
+ * Drive the fake clock through retry-backoff windows until the connect
+ * settles; once the fake-advance cap is reached the clock freezes and only
+ * real event-loop ticks flow, so child-process I/O completes without ever
+ * reaching production request-timeout thresholds.
+ */
+async function settleConnect<T>(promise: Promise<T>): Promise<T> {
+  let settled = false;
+  const guarded = promise.finally(() => {
+    settled = true;
+  });
+  guarded.catch(() => {});
+  const start = Date.now();
+  const FAKE_ADVANCE_CAP_MS = 1000;
+  while (!settled) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (settled) break;
+    if (Date.now() - start < FAKE_ADVANCE_CAP_MS) {
+      await vi.advanceTimersByTimeAsync(10);
+    }
+  }
+  return guarded;
+}
+
 describe("MCP pool connect retry + circuit breaker", () => {
   beforeEach(() => {
     resetMcpServerConnectCircuits();
+    // Fake the timer APIs the retry backoff uses (plus Date so the elapsed
+    // assertions are deterministic); setImmediate stays real so child-process
+    // I/O keeps flowing between fake-clock steps.
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"],
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("spends the retry budget, opens the breaker, and leaves other servers unaffected", async () => {
     const started = Date.now();
-    const { pool, statuses } = await connectShoggothMcpServers([badEntry(), goodEntry()], {
-      connectRetry: retry,
-    });
+    const { pool, statuses } = await settleConnect(
+      connectShoggothMcpServers([badEntry(), goodEntry()], { connectRetry: retry }),
+    );
     const elapsed = Date.now() - started;
     try {
       const bad = statuses!.find((s) => s.id === BAD_ID)!;
@@ -70,7 +104,7 @@ describe("MCP pool connect retry + circuit breaker", () => {
   });
 
   it("fails fast without spawning when re-arm is withheld", async () => {
-    await connectShoggothMcpServers([badEntry()], { connectRetry: retry }).then(
+    await settleConnect(connectShoggothMcpServers([badEntry()], { connectRetry: retry })).then(
       (r) => r.pool.close(),
       () => {},
     );
@@ -78,7 +112,9 @@ describe("MCP pool connect retry + circuit breaker", () => {
     // All servers open → AggregateError, but only after a fail-fast (no sleeps).
     const started = Date.now();
     await assert.rejects(
-      connectShoggothMcpServers([badEntry()], { rearmCircuits: false, connectRetry: retry }),
+      settleConnect(
+        connectShoggothMcpServers([badEntry()], { rearmCircuits: false, connectRetry: retry }),
+      ),
       /failed to connect/,
     );
     const elapsed = Date.now() - started;
@@ -88,10 +124,12 @@ describe("MCP pool connect retry + circuit breaker", () => {
     );
 
     // With a healthy server alongside, the status shape shows the skip.
-    const { pool, statuses } = await connectShoggothMcpServers([badEntry(), goodEntry()], {
-      rearmCircuits: false,
-      connectRetry: retry,
-    });
+    const { pool, statuses } = await settleConnect(
+      connectShoggothMcpServers([badEntry(), goodEntry()], {
+        rearmCircuits: false,
+        connectRetry: retry,
+      }),
+    );
     try {
       const bad = statuses!.find((s) => s.id === BAD_ID)!;
       assert.equal(bad.ok, false);
@@ -104,16 +142,20 @@ describe("MCP pool connect retry + circuit breaker", () => {
   });
 
   it("re-arm path: same server id succeeds after the command is fixed", async () => {
-    const first = await connectShoggothMcpServers([badEntry()], { connectRetry: retry }).then(
+    const first = await settleConnect(
+      connectShoggothMcpServers([badEntry()], { connectRetry: retry }),
+    ).then(
       (r) => r,
       () => undefined,
     );
     if (first) await first.pool.close();
     assert.ok(isMcpServerCircuitOpen(BAD_ID), "breaker must be open before re-arm");
 
-    const { pool, statuses } = await connectShoggothMcpServers(
-      [{ ...badEntry(), command: process.execPath, args: [mockServerPath] }],
-      { connectRetry: retry },
+    const { pool, statuses } = await settleConnect(
+      connectShoggothMcpServers(
+        [{ ...badEntry(), command: process.execPath, args: [mockServerPath] }],
+        { connectRetry: retry },
+      ),
     );
     try {
       const status = statuses!.find((s) => s.id === BAD_ID)!;

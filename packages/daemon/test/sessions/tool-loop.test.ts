@@ -36,8 +36,9 @@ describe("runToolLoop", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    vi.useRealTimers();
+    await closeTestDb(db, tmp);
+  });
 
   it("invokes executor and audit when policy allows", async () => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -363,6 +364,7 @@ describe("runToolLoop", () => {
     assert.equal(completeCalls, 1);
   });
   it("injects timeout error when tool call exceeds toolCallTimeoutMs", async () => {
+    vi.useFakeTimers();
     const pushed: { toolCallId: string; content: string }[] = [];
     let step = 0;
     const model: ModelClient = {
@@ -383,7 +385,7 @@ describe("runToolLoop", () => {
     const toolRuns = createToolRunStore(db);
     const tr = createTranscriptStore(db);
     const seg = getSessionContextSegmentId(db, "sess");
-    await runToolLoop({
+    const loopP = runToolLoop({
       db,
       sessionId: "sess",
       runId: "run-timeout",
@@ -401,6 +403,9 @@ describe("runToolLoop", () => {
       contextSegmentId: seg,
       toolCallTimeoutMs: 50,
     });
+    // The 50ms tool-call timeout runs on the fake clock — no wall-clock wait.
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(10);
+    await loopP;
     // The model should have received a timeout error message
     assert.equal(pushed.length, 1);
     const parsed = JSON.parse(pushed[0]!.content);

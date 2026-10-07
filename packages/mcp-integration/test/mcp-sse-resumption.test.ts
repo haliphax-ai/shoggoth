@@ -89,6 +89,10 @@ describe("standing GET SSE Last-Event-ID resumption", () => {
     const toolCallPromise = new Promise((r) => {
       resolveToolCall = r;
     });
+    let resolveSecondGet!: () => void;
+    const secondGet = new Promise<void>((r) => {
+      resolveSecondGet = r;
+    });
 
     mockFetch.mockImplementation(async (url: string, init: RequestInit) => {
       const method = init?.method ?? "GET";
@@ -136,6 +140,7 @@ describe("standing GET SSE Last-Event-ID resumption", () => {
 
       if (method === "GET") {
         getCallCount++;
+        if (getCallCount === 2) resolveSecondGet();
         if (getCallCount === 1) {
           // First GET: send SSE events WITH id: fields, then end (simulating disconnect)
           return sseResponse([
@@ -172,8 +177,9 @@ describe("standing GET SSE Last-Event-ID resumption", () => {
     // List tools (triggers standing GET via ensureStandingGet)
     await session.request("tools/list", {});
 
-    // Wait for first GET to connect, receive events with ids, and disconnect
-    await new Promise((r) => setTimeout(r, 200));
+    // Gate: first GET connected, delivered id-ed events, disconnected, and
+    // the client reconnected — the mock has now seen GET #2 arrive.
+    await secondGet;
 
     // Invoke tool — POST returns 202, result comes on reconnected GET
     const result = await session.request("tools/call", {
@@ -200,6 +206,10 @@ describe("standing GET SSE Last-Event-ID resumption", () => {
     let resolveToolCall: ((v: unknown) => void) | undefined;
     const toolCallPromise = new Promise((r) => {
       resolveToolCall = r;
+    });
+    let resolveSecondGet!: () => void;
+    const secondGet = new Promise<void>((r) => {
+      resolveSecondGet = r;
     });
 
     mockFetch.mockImplementation(async (url: string, init: RequestInit) => {
@@ -246,6 +256,7 @@ describe("standing GET SSE Last-Event-ID resumption", () => {
 
       if (method === "GET") {
         getCallCount++;
+        if (getCallCount === 2) resolveSecondGet();
         if (getCallCount === 1) {
           // First GET: send SSE events WITHOUT id: fields, then end (disconnect)
           return sseResponse([
@@ -276,8 +287,9 @@ describe("standing GET SSE Last-Event-ID resumption", () => {
     await session.notify("notifications/initialized");
     await session.request("tools/list", {});
 
-    // Wait for first GET to connect, receive events without ids, and disconnect
-    await new Promise((r) => setTimeout(r, 200));
+    // Gate: first GET connected, delivered id-less events, disconnected, and
+    // the client reconnected — the mock has now seen GET #2 arrive.
+    await secondGet;
 
     const result = await session.request("tools/call", {
       name: "t",
