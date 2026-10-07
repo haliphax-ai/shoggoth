@@ -104,6 +104,7 @@ describe("subagent_wait and subagent_result control ops", { concurrency: false }
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     await closeTestDb(db, tmp);
   });
 
@@ -380,6 +381,7 @@ describe("subagent_wait and subagent_result control ops", { concurrency: false }
   });
 
   it("subagent_wait polls and detects completion during wait", async () => {
+    vi.useFakeTimers();
     const sessions = createSessionStore(db);
 
     sessions.create({
@@ -400,11 +402,14 @@ describe("subagent_wait and subagent_result control ops", { concurrency: false }
       _poll_interval_ms: 20,
     });
     const start = Date.now();
-    const result = (await handleIntegrationControlOp(req, operatorPrincipal, ctx)) as {
+    const opP = handleIntegrationControlOp(req, operatorPrincipal, ctx) as Promise<{
       completed: { sessionId: string }[];
       pending: unknown[];
       timedOut: boolean;
-    };
+    }>;
+    // Drive the fake clock: 20ms poll ticks and the 30ms session termination.
+    for (let i = 0; i < 25; i++) await vi.advanceTimersByTimeAsync(20);
+    const result = await opP;
     const elapsed = Date.now() - start;
 
     assert.equal(result.completed.length, 1);
