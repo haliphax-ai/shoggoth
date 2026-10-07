@@ -91,35 +91,30 @@ describe("demo service auth integration", () => {
       stdio: "pipe",
     });
 
-    // Wait for server to be ready
+    // Wait for server to be ready: probe /health on event-loop ticks until
+    // it answers 200. Vitest's hook timeout is the start-up failure guard.
     await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("Server start timeout")), 10_000);
       const check = () => {
         makeRequest(port, "GET", "/health")
           .then((res) => {
-            if (res.status === 200) {
-              clearTimeout(timeout);
-              resolve();
-            } else {
-              setTimeout(check, 50);
-            }
+            if (res.status === 200) resolve();
+            else setImmediate(check);
           })
-          .catch(() => setTimeout(check, 50));
+          .catch(() => setImmediate(check));
       };
-      serverProcess!.on("error", (err) => {
-        clearTimeout(timeout);
-        reject(err);
-      });
-      setTimeout(check, 100);
+      serverProcess!.on("error", reject);
+      setImmediate(check);
     });
   });
 
   afterAll(async () => {
     if (serverProcess) {
-      serverProcess.kill("SIGTERM");
+      // The direct child's stdio pipes are inherited by the tsx grandchild,
+      // so "close" never fires here; wait for "exit" of the killed npx wrapper
+      // instead. Vitest's hook timeout is the guard.
       await new Promise<void>((resolve) => {
-        serverProcess!.on("close", () => resolve());
-        setTimeout(resolve, 2000);
+        serverProcess!.on("exit", () => resolve());
+        serverProcess!.kill("SIGKILL");
       });
     }
   });

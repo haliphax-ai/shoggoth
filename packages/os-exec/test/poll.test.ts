@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from "vitest";
+import { describe, it, beforeEach, afterEach, vi } from "vitest";
 import assert from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -579,17 +579,23 @@ describe("toolPoll", () => {
 
   describe("runtimeMs", () => {
     it("returns a reasonable runtime estimate", async () => {
-      const { pid, sessionId } = await spawnBg("sleep 2");
+      vi.useFakeTimers();
       try {
-        // Small delay to ensure measurable runtime
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        const r = await toolPoll({ pid });
-        assert.ok(!("error" in r));
-        const result = r as PollCombinedResult;
-        assert.ok(result.runtimeMs >= 50); // at least ~50ms
-        assert.ok(result.runtimeMs < 30000); // sanity upper bound
+        // _startedAt is captured under the fake clock; advancing it makes the
+        // uptime estimate deterministic instead of sleeping in real time.
+        const { pid, sessionId } = await spawnBg("sleep 2");
+        try {
+          await vi.advanceTimersByTimeAsync(100);
+          const r = await toolPoll({ pid });
+          assert.ok(!("error" in r));
+          const result = r as PollCombinedResult;
+          assert.ok(result.runtimeMs >= 50); // at least ~50ms
+          assert.ok(result.runtimeMs < 30000); // sanity upper bound
+        } finally {
+          await cleanup(sessionId);
+        }
       } finally {
-        await cleanup(sessionId);
+        vi.useRealTimers();
       }
     });
   });

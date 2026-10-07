@@ -153,8 +153,11 @@ describe("procman integration", () => {
       const removed = removeExecSession(bg.sessionId);
       assert.equal(removed, true);
 
-      // Give procman a moment to stop the process
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      // Yield event-loop ticks until stop() finishes and the manager drops
+      // the session — no wall-clock sleep.
+      for (let i = 0; i < 100 && getManagedExecSession(bg.sessionId) !== undefined; i++) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
 
       // Should no longer be in procman
       const mp = getManagedExecSession(bg.sessionId);
