@@ -197,6 +197,24 @@ const GLOBAL_SLASH_COMMANDS = [
       },
     ],
   },
+  {
+    name: "prompt",
+    description: "Run a canned prompt against a session",
+    options: [
+      {
+        name: "slug",
+        type: 3, // STRING
+        description: "Prompt slug (browse available prompts when omitted)",
+        required: false,
+      },
+      {
+        name: "session_id",
+        type: 3, // STRING
+        description: "Session URN (defaults to this channel's session)",
+        required: false,
+      },
+    ],
+  },
 ] as const;
 
 /**
@@ -241,6 +259,66 @@ const STRING_SELECT = 3;
 const TEXT_INPUT = 4;
 /** Text input style 1 = SHORT. */
 const TEXT_INPUT_SHORT = 1;
+
+// ---------------------------------------------------------------------------
+// Canned prompt flow: slug dropdown → dynamic modal → slash-handler proxy
+// ---------------------------------------------------------------------------
+
+/** Dropdown custom_id prefix. Format: `prompt_select|<sessionId>`. */
+const PROMPT_SELECT_PREFIX = "prompt_select|";
+/** Modal custom_id prefix. Format: `prompt_modal|<sessionId>|<slug>`. */
+const PROMPT_MODAL_PREFIX = "prompt_modal|";
+
+type PromptListEntry = { slug: string; placeholders?: readonly string[] };
+
+/**
+ * Defer, invoke the `prompt` op (translated through the slash-command handler),
+ * then deliver the outcome by editing the deferred response — the same pattern
+ * `/steer` uses, since the prompt runs a full model turn.
+ */
+async function runPromptProxy(
+  deps: DiscordInteractionHandlerDeps,
+  interactionId: string,
+  interactionToken: string,
+  options: Record<string, string>,
+): Promise<void> {
+  const controlOp = translateCommandToControlOp({ name: "prompt", options });
+  if (!controlOp) return;
+  try {
+    await deps.transport.interactionCallback(interactionId, interactionToken, {
+      type: INTERACTION_RESPONSE_DEFERRED,
+    });
+  } catch (err) {
+    deps.logger.warn("discord.interaction.prompt_defer_failed", {
+      interactionId,
+      err: String(err),
+    });
+  }
+  const finish = async (content: string): Promise<void> => {
+    try {
+      await deps.transport.editOriginalInteractionResponse(deps.applicationId, interactionToken, {
+        content,
+      });
+    } catch (err) {
+      deps.logger.warn("discord.interaction.prompt_reply_undeliverable", {
+        interactionId,
+        err: String(err),
+      });
+    }
+  };
+  try {
+    const res = await deps.invokeControlOp(controlOp.op, controlOp.payload);
+    if (!res.ok) {
+      await finish(`⚠️ Prompt failed: ${res.error ?? "unknown error"}`);
+      return;
+    }
+    const reply = (res.result as { reply?: string } | undefined)?.reply;
+    const body = reply ? `\n\n${reply.slice(0, 1500)}` : "";
+    await finish(`✅ Prompt \`${options.slug}\` sent to \`${options.session_id}\`.${body}`);
+  } catch (err) {
+    await finish(`⚠️ Prompt failed: ${String(err)}`);
+  }
+}
 
 export interface DiscordInteractionHandlerDeps {
   readonly transport: Pick<
@@ -304,6 +382,66 @@ async function handleInteraction(
       deps.logger.debug("discord.interaction.ignored", {
         type: ev.type,
         id: ev.id,
+      });
+      return;
+    }
+
+    // Canned prompt slug dropdown → dynamic modal
+    if (customId.startsWith(PROMPT_SELECT_PREFIX)) {
+      const sessionId = customId.slice(PROMPT_SELECT_PREFIX.length);
+      const values = ev.data?.values;
+      if (!values || values.length === 0) return;
+      const slug = values[0];
+      let placeholders: readonly string[] = [];
+      try {
+        const res = await deps.invokeControlOp("prompt_list", { session_id: sessionId });
+        if (res.ok && res.result) {
+          const prompts = (res.result as { prompts?: PromptListEntry[] }).prompts ?? [];
+          placeholders = prompts.find((p) => p.slug === slug)?.placeholders ?? [];
+        }
+      } catch (err) {
+        deps.logger.warn("discord.interaction.prompt_list_failed", {
+          sessionId,
+          err: String(err),
+        });
+      }
+      if (placeholders.length > 5) {
+        await deps.transport.interactionCallback(ev.id, ev.token, {
+          type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
+          data: {
+            content: `⚠️ Prompt \`${slug}\` has ${placeholders.length} parameters; Discord modals support at most 5.`,
+            components: [],
+          },
+        });
+        return;
+      }
+      // One text input per placeholder; the input custom_id carries the
+      // parameter name so the modal submit can rebuild the params record.
+      const components = placeholders.map((name) => ({
+        type: ACTION_ROW,
+        components: [
+          {
+            type: TEXT_INPUT,
+            custom_id: name,
+            label: name.slice(0, 32),
+            style: TEXT_INPUT_SHORT,
+            required: false, // empty values are valid; key must still be present
+            ...(placeholders.length === 1 ? { placeholder: `Value for ${name}` } : {}),
+          },
+        ],
+      }));
+      if (components.length === 0) {
+        // No placeholders — nothing to ask; run the prompt directly.
+        await runPromptProxy(deps, ev.id, ev.token, { slug, session_id: sessionId });
+        return;
+      }
+      await deps.transport.interactionCallback(ev.id, ev.token, {
+        type: INTERACTION_RESPONSE_MODAL,
+        data: {
+          title: `Prompt: ${slug}`.slice(0, 45),
+          custom_id: `${PROMPT_MODAL_PREFIX}${sessionId}|${slug}`,
+          components,
+        },
       });
       return;
     }
@@ -486,6 +624,30 @@ async function handleInteraction(
       return;
     }
 
+    // Canned prompt modal → proxy to the slash command handler
+    if (customId.startsWith(PROMPT_MODAL_PREFIX)) {
+      const rest = customId.slice(PROMPT_MODAL_PREFIX.length);
+      const sep = rest.indexOf("|");
+      if (sep <= 0) return;
+      const sessionId = rest.slice(0, sep);
+      const slug = rest.slice(sep + 1);
+      // Rebuild params from the inputs; every placeholder key must be present
+      // even when the user left the field empty (empty values are valid).
+      const params: Record<string, string> = {};
+      for (const row of ev.data?.components ?? []) {
+        const input = row.components?.[0];
+        if (input && typeof input.custom_id === "string") {
+          params[input.custom_id] = input.value ?? "";
+        }
+      }
+      await runPromptProxy(deps, ev.id, ev.token, {
+        slug,
+        session_id: sessionId,
+        ...params,
+      });
+      return;
+    }
+
     const decoded = decodeModelSelectCustomId(customId);
     if (!decoded) {
       // Unknown modal - ignore
@@ -660,6 +822,96 @@ async function handleInteraction(
     } catch (err) {
       await finishSteer(`⚠️ Steer failed: ${String(err)}`);
     }
+    return;
+  }
+
+  if (controlOp.op === "prompt") {
+    // Resolve the target session first — the prompt list is workspace-scoped.
+    const payload = { ...controlOp.payload };
+    if (!payload.session_id && deps.resolveSessionForChannel) {
+      const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
+      if (resolved) payload.session_id = resolved;
+    }
+    if (!payload.session_id) {
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content: "⚠️ No session bound to this channel. Provide a session_id." },
+      });
+      return;
+    }
+    const requestedSlug = typeof payload.slug === "string" ? payload.slug : undefined;
+    let prompts: PromptListEntry[] = [];
+    try {
+      const res = await deps.invokeControlOp("prompt_list", {
+        session_id: payload.session_id,
+      });
+      if (!res.ok) {
+        await deps.transport.interactionCallback(
+          parsed.interactionId,
+          parsed.interactionToken,
+          {
+            type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+            data: { content: `⚠️ Failed to list prompts: ${res.error ?? "unknown error"}` },
+          },
+        );
+        return;
+      }
+      prompts = (res.result as { prompts?: PromptListEntry[] } | undefined)?.prompts ?? [];
+    } catch (err) {
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content: `⚠️ Failed to list prompts: ${String(err)}` },
+      });
+      return;
+    }
+    if (requestedSlug && !prompts.some((p) => p.slug === requestedSlug)) {
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: {
+          content: `⚠️ Prompt not found: \`${requestedSlug}\``,
+          flags: 64, // Ephemeral
+        },
+      });
+      return;
+    }
+    if (prompts.length === 0) {
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: {
+          content: "No canned prompts available.",
+          flags: 64, // Ephemeral
+        },
+      });
+      return;
+    }
+    const sessionId = payload.session_id as string;
+    const options = prompts.map((p) => {
+      const preselected = p.slug === requestedSlug;
+      const entry: { label: string; value: string; default?: boolean } = {
+        label: p.slug.slice(0, 100),
+        value: p.slug,
+      };
+      if (preselected) entry.default = true;
+      return entry;
+    });
+    const selectComponent: Record<string, unknown> = {
+      type: STRING_SELECT,
+      custom_id: `${PROMPT_SELECT_PREFIX}${sessionId}`,
+      placeholder: "Select a canned prompt",
+      options,
+    };
+    if (requestedSlug) {
+      // Discord string-select pre-selection: default_values carries both fields.
+      selectComponent.default_values = [{ name: requestedSlug, value: requestedSlug }];
+    }
+    await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+      type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+      data: {
+        content: `📜 **Canned Prompts**\nSession: \`${sessionId}\``,
+        flags: 64, // Ephemeral
+        components: [{ type: ACTION_ROW, components: [selectComponent] }],
+      },
+    });
     return;
   }
 

@@ -10,6 +10,7 @@ import { runSubagentCli } from "./run-subagent";
 import { runSystemCli } from "./run-system";
 import { runProcmanCli } from "./run-procman";
 import { runQueueCli } from "./run-queue";
+import { runPromptCli } from "./run-prompt";
 import { printConfigHelp, runConfigShow } from "./run-config";
 import { runElevationCli } from "./run-elevation";
 import { runMediaCli } from "./run-media";
@@ -39,6 +40,7 @@ Usage:
   shoggoth system               System operations (see: shoggoth system --help)
   shoggoth procman              Process manager (see: shoggoth procman --help)
   shoggoth queue                Turn queue management (see: shoggoth queue --help)
+  shoggoth prompt               Run a canned prompt (see: shoggoth prompt --help)
   shoggoth elevation            Permission elevation (see: shoggoth elevation --help)
   shoggoth media                Media generation (see: shoggoth media --help)
   shoggoth service               Service management (see: shoggoth service --help)
@@ -218,6 +220,16 @@ if (argv[0] === "system") {
 if (argv[0] === "queue") {
   try {
     await runQueueCli(argv.slice(1));
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  }
+  process.exit(process.exitCode ?? 0);
+}
+
+if (argv[0] === "prompt") {
+  try {
+    await runPromptCli(argv.slice(1));
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
     process.exit(1);

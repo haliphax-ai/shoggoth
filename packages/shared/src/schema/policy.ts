@@ -99,6 +99,8 @@ export const DEFAULT_POLICY_CONFIG: ShoggothPolicyConfig = {
         "session_stats",
         "session_send",
         "session_steer",
+        "prompt",
+        "prompt_list",
         "session_abort",
         "session_kill",
         "config_request",
