@@ -918,7 +918,7 @@ describe("registerDiscordSlashCommands", () => {
     assert.strictEqual(calls[0]!.method, "registerGlobalCommands");
     const [appId, commands] = calls[0]!.args as [string, Array<Record<string, unknown>>];
     assert.strictEqual(appId, "app-123");
-    assert.strictEqual(commands.length, 9);
+    assert.strictEqual(commands.length, 10);
     assert.ok(commands.some((c) => c.name === "abort"));
     assert.ok(commands.some((c) => c.name === "steer"));
     assert.ok(commands.some((c) => c.name === "new"));
@@ -927,6 +927,7 @@ describe("registerDiscordSlashCommands", () => {
     assert.ok(commands.some((c) => c.name === "status"));
     assert.ok(commands.some((c) => c.name === "model"));
     assert.ok(commands.some((c) => c.name === "queue"));
+    assert.ok(commands.some((c) => c.name === "prompt"));
   });
 
   it("registers steer command with prompt, session_id, and delivery options", async () => {

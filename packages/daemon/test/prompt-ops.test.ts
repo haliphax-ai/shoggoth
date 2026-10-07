@@ -1,4 +1,4 @@
-import { describe, it, before, after } from "vitest";
+import { describe, it, beforeAll, afterAll } from "vitest";
 import assert from "node:assert";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,7 +17,7 @@ describe("prompt-ops", () => {
   let workspace: string;
   let globalDir: string;
 
-  before(() => {
+  beforeAll(() => {
     root = mkdtempSync(join(tmpdir(), "prompt-ops-"));
     workspace = join(root, "ws");
     globalDir = join(root, "global");
@@ -31,7 +31,7 @@ describe("prompt-ops", () => {
     writeFileSync(join(workspace, "shadow-root.md"), "workspace root wins over global");
   });
 
-  after(() => {
+  afterAll(() => {
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -50,10 +50,7 @@ describe("prompt-ops", () => {
 
   describe("renderPrompt", () => {
     it("interpolates values including empty strings", () => {
-      assert.strictEqual(
-        renderPrompt("X ${a} Y ${b} Z", { a: "", b: "bee" }),
-        "X  Y bee Z",
-      );
+      assert.strictEqual(renderPrompt("X ${a} Y ${b} Z", { a: "", b: "bee" }), "X  Y bee Z");
     });
 
     it("lists every missing parameter name in the error", () => {
@@ -91,7 +88,10 @@ describe("prompt-ops", () => {
     });
 
     it("resolves from global when no workspace is given", () => {
-      assert.strictEqual(resolvePromptFile(undefined, globalDir, "shared"), join(globalDir, "shared.md"));
+      assert.strictEqual(
+        resolvePromptFile(undefined, globalDir, "shared"),
+        join(globalDir, "shared.md"),
+      );
     });
 
     it("uses the default global dir when unconfigured", () => {
@@ -118,10 +118,8 @@ describe("prompt-ops", () => {
     it("unions workspace + global, dedupes by slug (workspace wins), sorts by slug", () => {
       const entries = listPromptFiles(workspace, globalDir);
       const bySlug = Object.fromEntries(entries.map((e) => [e.slug, e]));
-      assert.deepStrictEqual(
-        entries.map((e) => e.slug),
-        [...entries.map((e) => e.slug)].sort(),
-      );
+      const slugs = entries.map((e) => e.slug);
+      assert.deepStrictEqual(slugs, slugs.slice().sort());
       assert.strictEqual(bySlug["local"]!.source, "workspace");
       assert.strictEqual(bySlug["shadow-root"]!.source, "workspace");
       assert.strictEqual(bySlug["shared"]!.source, "global");
@@ -134,7 +132,7 @@ describe("prompt-ops", () => {
       const entries = listPromptFiles(undefined, globalDir);
       assert.deepStrictEqual(
         entries.map((e) => e.slug),
-        ["local", "shared", "shadow-root"],
+        ["local", "shadow-root", "shared"],
       );
       assert.ok(entries.every((e) => e.source === "global"));
     });
