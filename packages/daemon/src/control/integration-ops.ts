@@ -97,6 +97,7 @@ import {
   handleServiceRevoke,
   handleServiceRotateKey,
 } from "./service-ops";
+import { listPromptFiles, PromptOpError, renderPrompt, resolvePromptFile } from "./prompt-ops";
 
 export class IntegrationOpError extends Error {
   constructor(
@@ -2158,6 +2159,137 @@ export async function handleIntegrationControlOp(
         reply: turn.latestAssistantText,
         failover: turn.failoverMeta ?? null,
       };
+    }
+
+    case "prompt": {
+      ioLog.debug("canned prompt", { op: req.op, principalKind: principal.kind });
+      if (principal.kind !== "operator" && principal.kind !== "agent") {
+        throw new IntegrationOpError("ERR_FORBIDDEN", "prompt requires operator or agent principal");
+      }
+      const ext = subagentRuntimeExtensionRef.current;
+      if (!ext) {
+        throw new IntegrationOpError(
+          "ERR_SUBAGENT_RUNTIME_UNAVAILABLE",
+          "prompt requires messaging runtime",
+        );
+      }
+      const { sessions } = requireSubagentRuntime(ctx);
+      const pl = payloadObject(req);
+      const slug = requireString(pl, "slug");
+      const sessionId = resolveSessionSendTargetSessionId(pl, ctx.config);
+      assertAgentMayTargetSessionForSendOrList(principal, sessionId, ctx.config);
+      const paramsRaw = optionalRecordObject(pl, "params") ?? {};
+      const params: Record<string, string> = {};
+      for (const [k, v] of Object.entries(paramsRaw)) {
+        if (typeof v !== "string") {
+          throw new IntegrationOpError(
+            "ERR_INVALID_PAYLOAD",
+            `payload.params.${k} must be a string`,
+          );
+        }
+        params[k] = v;
+      }
+      const row = sessions.getById(sessionId);
+      if (!row || row.status === "terminated") {
+        throw new IntegrationOpError("ERR_SESSION_INACTIVE", "session is missing or terminated");
+      }
+      if (row.subagentMode === "one_shot") {
+        throw new IntegrationOpError(
+          "ERR_SUBAGENT_ONE_SHOT",
+          "one_shot subagents cannot receive prompt",
+        );
+      }
+      let message: string;
+      try {
+        const promptPath = resolvePromptFile(
+          row.workspacePath,
+          ctx.config.prompts?.globalDir,
+          slug,
+        );
+        if (!promptPath) {
+          throw new PromptOpError("ERR_PROMPT_NOT_FOUND", `prompt not found: ${slug}`);
+        }
+        message = renderPrompt(readFileSync(promptPath, "utf8"), params);
+      } catch (e) {
+        if (e instanceof PromptOpError) {
+          throw new IntegrationOpError(e.code, e.message);
+        }
+        throw e;
+      }
+      const silent = pl.silent === true;
+      const platformUserIdRaw = pl.platform_user_id;
+      const platformUserId =
+        typeof platformUserIdRaw === "string" && platformUserIdRaw.trim()
+          ? platformUserIdRaw.trim()
+          : undefined;
+      const replyToMessageId =
+        typeof pl.reply_to_message_id === "string" && pl.reply_to_message_id.trim()
+          ? pl.reply_to_message_id.trim()
+          : undefined;
+      const delivery = silent
+        ? ({ kind: "internal" } as const)
+        : (() => {
+            if (!platformUserId && !row.subagentPlatformThreadId?.trim()) {
+              throw new IntegrationOpError(
+                "ERR_MISSING_PLATFORM_USER_ID",
+                "platform_user_id is required for messaging_surface delivery",
+              );
+            }
+            return {
+              kind: "messaging_surface",
+              userId: platformUserId ?? "system",
+              replyToMessageId,
+            } as const;
+          })();
+      const senderSessionId =
+        principal.kind === "agent" ? principal.sessionId : `operator:${principal.operatorId}`;
+      const turn = await ext.runSessionModelTurn({
+        sessionId,
+        userContent: message,
+        userMetadata: { prompt: slug },
+        systemContext: {
+          kind: "session.message",
+          summary: `Canned prompt "${slug}" from session ${senderSessionId}.`,
+          data: { sender_session_id: senderSessionId, prompt_slug: slug },
+        },
+        delivery,
+      });
+      ctx.recordIntegrationAudit({
+        action: "prompt.run",
+        resource: sessionId,
+        outcome: "ok",
+        argsRedactedJson: JSON.stringify({ slug }),
+      });
+      return {
+        reply: turn.latestAssistantText,
+        failover: turn.failoverMeta ?? null,
+      };
+    }
+
+    case "prompt_list": {
+      if (principal.kind !== "operator" && principal.kind !== "agent") {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "prompt_list requires operator or agent principal",
+        );
+      }
+      const pl = payloadObject(req);
+      let workspaceDir: string | undefined;
+      const hasTarget =
+        (typeof pl.session_id === "string" && pl.session_id.trim()) ||
+        (typeof pl.agent_id === "string" && pl.agent_id.trim());
+      if (hasTarget) {
+        const { sessions } = requireSubagentRuntime(ctx);
+        const sessionId = resolveSessionSendTargetSessionId(pl, ctx.config);
+        assertAgentMayTargetSessionForSendOrList(principal, sessionId, ctx.config);
+        const row = sessions.getById(sessionId);
+        workspaceDir = row?.workspacePath;
+      } else if (principal.kind === "agent") {
+        const { sessions } = requireSubagentRuntime(ctx);
+        const row = sessions.getById(principal.sessionId);
+        workspaceDir = row?.workspacePath;
+      }
+      return { prompts: listPromptFiles(workspaceDir, ctx.config.prompts?.globalDir) };
     }
 
     case "session_abort": {

@@ -5,6 +5,15 @@ export type ShoggothPluginEntry = z.infer<typeof shoggothPluginEntrySchema>;
 export const shoggothSkillsConfigSchema = z.object({ scanRoots: z.array(z.string().min(1)), disabledIds: z.array(z.string().min(1)) }).strict();
 export type ShoggothSkillsConfig = z.infer<typeof shoggothSkillsConfigSchema>;
 export const DEFAULT_SKILLS_CONFIG: ShoggothSkillsConfig = { scanRoots: ["skills"], disabledIds: [] };
+
+export const shoggothPromptsConfigSchema = z
+  .object({ globalDir: z.string().min(1).optional() })
+  .strict();
+export type ShoggothPromptsConfig = z.infer<typeof shoggothPromptsConfigSchema>;
+/** Global canned-prompt folder; workspace `prompts/` files take precedence. */
+export const DEFAULT_PROMPTS_CONFIG: ShoggothPromptsConfig = {
+  globalDir: "/var/lib/shoggoth/shared/prompts",
+};
 export const shoggothRetentionConfigSchema = z.object({ inboundMediaMaxAgeDays: z.number().int().positive().optional(), inboundMediaMaxTotalBytes: z.number().int().positive().optional(), transcriptMessageMaxAgeDays: z.number().int().positive().optional(), transcriptMaxMessagesPerSession: z.number().int().positive().optional(), kvMaxEntries: z.number().int().positive().optional() }).strict();
 export type ShoggothRetentionConfig = z.infer<typeof shoggothRetentionConfigSchema>;
 export const shoggothSearxngConfigSchema = z.object({ baseUrl: z.string(), apiKey: z.string().optional(), defaultCount: z.number().int().min(1).max(20).optional(), defaultLanguage: z.string().optional(), defaultTimeRange: z.enum(["day", "week", "month", "year"]).optional(), engines: z.array(z.string()).optional() }).strict();
