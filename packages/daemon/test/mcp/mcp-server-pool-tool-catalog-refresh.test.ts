@@ -9,15 +9,21 @@ import { MCP_PROTOCOL_VERSION_STDIO, type McpSourceCatalog } from "@shoggoth/mcp
 import type { ShoggothMcpServerEntry } from "@shoggoth/shared";
 import assert from "node:assert";
 import { createServer, type Socket } from "node:net";
-import { describe, it, vi, afterEach } from "vitest";
+import { describe, it, vi, beforeEach, afterEach } from "vitest";
+import { createLogger, setRootLogger, type Logger } from "../../src/logging";
 import { connectShoggothMcpServers, type McpServerPool } from "../../src/mcp/mcp-server-pool";
 
 type FakeMcp = {
   readonly port: number;
   readonly toolsListCalls: () => number;
   readonly setTools: (names: readonly string[]) => void;
-  readonly setResponseDelay: (ms: number) => void;
   readonly setFailToolsList: (fail: boolean) => void;
+  /** Hold tools/list responses so a burst can land while a refresh is in flight. */
+  readonly holdResponses: () => void;
+  /** Release the hold and flush every held response. */
+  readonly releaseResponses: () => void;
+  /** Resolves when the fake server receives the next tools/list request. */
+  readonly nextToolsListRequest: () => Promise<void>;
   readonly pushListChanged: () => void;
   readonly close: () => Promise<void>;
 };
@@ -32,8 +38,10 @@ async function startFakeMcpServer(initialTools: readonly string[]): Promise<Fake
     tools: [...initialTools],
     calls: 0,
     fail: false,
-    responseDelayMs: 2,
+    hold: false,
   };
+  const heldToolsList: Array<() => void> = [];
+  let toolsListRequestWaiters: Array<() => void> = [];
   const sockets = new Set<Socket>();
   const server = createServer((socket) => {
     sockets.add(socket);
@@ -94,7 +102,12 @@ async function startFakeMcpServer(initialTools: readonly string[]): Promise<Fake
               );
             }
           };
-          setTimeout(respond, state.responseDelayMs);
+          if (state.hold) {
+            heldToolsList.push(respond);
+          } else {
+            respond();
+          }
+          for (const notify of toolsListRequestWaiters.splice(0)) notify();
         }
         // notifications/initialized and anything else: no response
       }
@@ -114,9 +127,17 @@ async function startFakeMcpServer(initialTools: readonly string[]): Promise<Fake
     setTools: (names) => {
       state.tools = [...names];
     },
-    setResponseDelay: (ms) => {
-      state.responseDelayMs = ms;
+    holdResponses: () => {
+      state.hold = true;
     },
+    releaseResponses: () => {
+      state.hold = false;
+      for (const flushHeld of heldToolsList.splice(0)) flushHeld();
+    },
+    nextToolsListRequest: () =>
+      new Promise<void>((resolve) => {
+        toolsListRequestWaiters.push(resolve);
+      }),
     setFailToolsList: (fail) => {
       state.fail = fail;
     },
@@ -144,19 +165,63 @@ function toolNames(catalog: McpSourceCatalog | undefined): string[] {
   return catalog?.tools.map((t) => t.name) ?? [];
 }
 
-async function waitFor(cond: () => boolean, timeoutMs = 5000): Promise<void> {
-  const start = Date.now();
-  while (!cond()) {
-    if (Date.now() - start > timeoutMs) throw new Error("waitFor: condition not met in time");
-    await new Promise((r) => setTimeout(r, 10));
+/**
+ * Event gates replace wall-clock polling: a successful refresh notifies
+ * `onToolCatalogChange`; a failed refresh is observable as the pool's
+ * `mcp.pool.tool_catalog_refresh_failed` warn on the root logger.
+ */
+let changeCount = 0;
+const changeWaiters: { n: number; resolve: () => void }[] = [];
+const onToolCatalogChange = vi.fn(() => {
+  changeCount += 1;
+  for (let i = changeWaiters.length - 1; i >= 0; i--) {
+    if (changeCount >= changeWaiters[i].n) changeWaiters.splice(i, 1)[0].resolve();
   }
+});
+
+function waitForChanges(n: number): Promise<void> {
+  if (changeCount >= n) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    changeWaiters.push({ n, resolve });
+  });
 }
 
-const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+let refreshFailureGate: (() => void) | null = null;
+const REFRESH_FAILED_LOG = "mcp.pool.tool_catalog_refresh_failed";
+
+function gateRefreshFailures(base: Logger): Logger {
+  return {
+    debug: (msg, fields) => base.debug(msg, fields),
+    info: (msg, fields) => base.info(msg, fields),
+    warn: (msg, fields) => {
+      if (msg === REFRESH_FAILED_LOG) {
+        const gate = refreshFailureGate;
+        refreshFailureGate = null;
+        gate?.();
+      }
+      base.warn(msg, fields);
+    },
+    error: (msg, fields) => base.error(msg, fields),
+    child: (extra) => gateRefreshFailures(base.child(extra)),
+  };
+}
+
+setRootLogger(gateRefreshFailures(createLogger({ component: "catalog-refresh.test" })));
+
+function nextRefreshFailure(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    refreshFailureGate = resolve;
+  });
+}
 
 describe("pool refresh on notifications/tools/list_changed", () => {
   // Pools own a stale-cleanup interval; close them all after each test.
   let openPools: McpServerPool[] = [];
+  beforeEach(() => {
+    changeCount = 0;
+    changeWaiters.length = 0;
+    onToolCatalogChange.mockClear();
+  });
   afterEach(async () => {
     const pools = openPools;
     openPools = [];
@@ -166,7 +231,6 @@ describe("pool refresh on notifications/tools/list_changed", () => {
   it("re-fetches tools/list and replaces the catalog entry in place, preserving order", async () => {
     const fakeA = await startFakeMcpServer(["alpha"]);
     const fakeB = await startFakeMcpServer(["omega"]);
-    const onToolCatalogChange = vi.fn();
     try {
       const { pool, statuses } = await connectShoggothMcpServers(
         [tcpServer("a", fakeA.port), tcpServer("b", fakeB.port)],
@@ -189,8 +253,9 @@ describe("pool refresh on notifications/tools/list_changed", () => {
       const callsAfterConnect = fakeA.toolsListCalls();
 
       fakeA.setTools(["alpha", "beta"]);
+      const refreshed = waitForChanges(1);
       fakeA.pushListChanged();
-      await waitFor(() => toolNames(pool.externalSources[0]).length === 2);
+      await refreshed;
 
       // Same array identity, same index, new entry object; B untouched.
       assert.strictEqual(pool.externalSources, sources);
@@ -218,20 +283,23 @@ describe("pool refresh on notifications/tools/list_changed", () => {
   it("coalesces a burst of notifications into exactly one follow-up fetch", async () => {
     const fake = await startFakeMcpServer(["v1"]);
     try {
-      const { pool } = await connectShoggothMcpServers([tcpServer("a", fake.port)]);
+      const { pool } = await connectShoggothMcpServers([tcpServer("a", fake.port)], {
+        onToolCatalogChange,
+      });
       openPools.push(pool);
       const callsAfterConnect = fake.toolsListCalls();
 
       fake.setTools(["v2"]);
-      // Slow down refreshes so the whole burst lands while the first is in flight.
-      fake.setResponseDelay(50);
-      for (let i = 0; i < 5; i++) fake.pushListChanged();
-
-      await waitFor(() => fake.toolsListCalls() >= callsAfterConnect + 2);
-      await waitFor(() => toolNames(pool.externalSources[0])[0] === "v2");
+      // Hold the first refresh's response so the burst provably lands in flight.
+      fake.holdResponses();
+      const firstRefreshRequest = fake.nextToolsListRequest();
+      fake.pushListChanged();
+      await firstRefreshRequest;
+      for (let i = 0; i < 4; i++) fake.pushListChanged();
+      fake.releaseResponses();
 
       // initial + first refresh + exactly one queued follow-up — nothing stacks.
-      await delay(200);
+      await waitForChanges(2);
       assert.equal(fake.toolsListCalls(), callsAfterConnect + 2);
       assert.deepEqual(toolNames(pool.externalSources[0]), ["v2"]);
     } finally {
@@ -242,14 +310,16 @@ describe("pool refresh on notifications/tools/list_changed", () => {
   it("keeps the previous catalog when a refresh fails, then recovers", async () => {
     const fake = await startFakeMcpServer(["keep"]);
     try {
-      const { pool } = await connectShoggothMcpServers([tcpServer("a", fake.port)]);
+      const { pool } = await connectShoggothMcpServers([tcpServer("a", fake.port)], {
+        onToolCatalogChange,
+      });
       openPools.push(pool);
 
       fake.setTools(["fresh"]);
       fake.setFailToolsList(true);
+      const failedRefresh = nextRefreshFailure();
       fake.pushListChanged();
-      await waitFor(() => fake.toolsListCalls() >= 2);
-      await delay(100); // let the failed refresh settle
+      await failedRefresh;
 
       // Failure must not blank a working catalog.
       assert.deepEqual(toolNames(pool.externalSources[0]), ["keep"]);
@@ -257,7 +327,7 @@ describe("pool refresh on notifications/tools/list_changed", () => {
       // A later successful notification still refreshes normally.
       fake.setFailToolsList(false);
       fake.pushListChanged();
-      await waitFor(() => toolNames(pool.externalSources[0])[0] === "fresh");
+      await waitForChanges(1);
       assert.deepEqual(toolNames(pool.externalSources[0]), ["fresh"]);
     } finally {
       await fake.close();
