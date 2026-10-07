@@ -272,18 +272,37 @@ const PROMPT_MODAL_PREFIX = "prompt_modal|";
 type PromptListEntry = { slug: string; placeholders?: readonly string[] };
 
 /**
- * Defer, invoke the `prompt` op (translated through the slash-command handler),
- * then deliver the outcome by editing the deferred response — the same pattern
- * `/steer` uses, since the prompt runs a full model turn.
+ * Translate the prompt options to a control op, resolving the target session
+ * from the interaction's channel when the payload carries none (responding
+ * with the unbound-channel warning instead of running the op when there is
+ * nothing to target), then defer, invoke, and deliver the outcome by editing
+ * the deferred response — the same pattern `/steer` uses, since the prompt
+ * runs a full model turn.
  */
 async function runPromptProxy(
   deps: DiscordInteractionHandlerDeps,
   interactionId: string,
   interactionToken: string,
   options: Record<string, string>,
+  channelId: string,
+  guildId: string | undefined,
 ): Promise<void> {
   const controlOp = translateCommandToControlOp({ name: "prompt", options });
   if (!controlOp) return;
+  // Same session-resolution pattern as the slash-command branches: fall back
+  // to the channel's bound session when the payload does not carry one.
+  const payload = { ...controlOp.payload };
+  if (!payload.session_id && deps.resolveSessionForChannel) {
+    const resolved = deps.resolveSessionForChannel(channelId, guildId);
+    if (resolved) payload.session_id = resolved;
+  }
+  if (!payload.session_id) {
+    await deps.transport.interactionCallback(interactionId, interactionToken, {
+      type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+      data: { content: "⚠️ No session bound to this channel. Provide a session_id." },
+    });
+    return;
+  }
   try {
     await deps.transport.interactionCallback(interactionId, interactionToken, {
       type: INTERACTION_RESPONSE_DEFERRED,
@@ -307,14 +326,14 @@ async function runPromptProxy(
     }
   };
   try {
-    const res = await deps.invokeControlOp(controlOp.op, controlOp.payload);
+    const res = await deps.invokeControlOp(controlOp.op, payload);
     if (!res.ok) {
       await finish(`⚠️ Prompt failed: ${res.error ?? "unknown error"}`);
       return;
     }
     const reply = (res.result as { reply?: string } | undefined)?.reply;
     const body = reply ? `\n\n${reply.slice(0, 1500)}` : "";
-    await finish(`✅ Prompt \`${options.slug}\` sent to \`${options.session_id}\`.${body}`);
+    await finish(`✅ Prompt \`${options.slug}\` sent to \`${payload.session_id}\`.${body}`);
   } catch (err) {
     await finish(`⚠️ Prompt failed: ${String(err)}`);
   }
@@ -432,7 +451,14 @@ async function handleInteraction(
       }));
       if (components.length === 0) {
         // No placeholders — nothing to ask; run the prompt directly.
-        await runPromptProxy(deps, ev.id, ev.token, { slug, session_id: sessionId });
+        await runPromptProxy(
+          deps,
+          ev.id,
+          ev.token,
+          { slug, session_id: sessionId, platform_user_id: ev.userId },
+          ev.channelId,
+          ev.guildId,
+        );
         return;
       }
       await deps.transport.interactionCallback(ev.id, ev.token, {
@@ -640,11 +666,19 @@ async function handleInteraction(
           params[input.custom_id] = input.value ?? "";
         }
       }
-      await runPromptProxy(deps, ev.id, ev.token, {
-        slug,
-        session_id: sessionId,
-        ...params,
-      });
+      await runPromptProxy(
+        deps,
+        ev.id,
+        ev.token,
+        {
+          slug,
+          session_id: sessionId,
+          platform_user_id: ev.userId,
+          ...params,
+        },
+        ev.channelId,
+        ev.guildId,
+      );
       return;
     }
 
@@ -846,14 +880,10 @@ async function handleInteraction(
         session_id: payload.session_id,
       });
       if (!res.ok) {
-        await deps.transport.interactionCallback(
-          parsed.interactionId,
-          parsed.interactionToken,
-          {
-            type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-            data: { content: `⚠️ Failed to list prompts: ${res.error ?? "unknown error"}` },
-          },
-        );
+        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+          data: { content: `⚠️ Failed to list prompts: ${res.error ?? "unknown error"}` },
+        });
         return;
       }
       prompts = (res.result as { prompts?: PromptListEntry[] } | undefined)?.prompts ?? [];

@@ -97,7 +97,8 @@ const COMMAND_TO_OP: Record<string, (opts: Readonly<Record<string, string>>) => 
       return { op: "session_model", payload };
     },
     prompt: (opts) => {
-      // Primary option is the slug; every other option is a placeholder
+      // Primary option is the slug; `session_id` and `platform_user_id` are
+      // routing fields forwarded as-is; every other option is a placeholder
       // parameter passed as its own name/value pair. All values are required
       // (validation happens in the daemon op against the prompt file).
       const slug = opts.slug?.trim();
@@ -105,11 +106,12 @@ const COMMAND_TO_OP: Record<string, (opts: Readonly<Record<string, string>>) => 
       if (slug) payload.slug = slug;
       const params: Record<string, string> = {};
       for (const [key, value] of Object.entries(opts)) {
-        if (key === "slug" || key === "session_id") continue;
+        if (key === "slug" || key === "session_id" || key === "platform_user_id") continue;
         params[key] = value;
       }
       if (Object.keys(params).length > 0) payload.params = params;
       if (opts.session_id?.trim()) payload.session_id = opts.session_id.trim();
+      if (opts.platform_user_id?.trim()) payload.platform_user_id = opts.platform_user_id.trim();
       return { op: "prompt", payload };
     },
     queue: (opts) => {

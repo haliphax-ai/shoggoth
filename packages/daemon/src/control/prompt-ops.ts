@@ -102,9 +102,9 @@ function listMdSlugs(dir: string): string[] {
 }
 
 /**
- * Union of workspace prompts (`prompts/` dir, then workspace root) and global
- * prompts, deduped by slug (workspace wins over global; `prompts/` wins over
- * root), sorted by slug.
+ * Union of workspace prompts (`prompts/` dir only) and global prompts, deduped
+ * by slug (workspace wins over global), sorted by slug. Workspace-root `*.md`
+ * files are intentionally excluded — they are not canned prompts.
  */
 export function listPromptFiles(
   workspaceDir: string | undefined,
@@ -127,13 +127,6 @@ export function listPromptFiles(
     });
   }
   if (workspaceDir) {
-    for (const slug of listMdSlugs(workspaceDir)) {
-      bySlug.set(slug, {
-        slug,
-        source: "workspace",
-        placeholders: readPlaceholders(join(workspaceDir, `${slug}.md`)),
-      });
-    }
     for (const slug of listMdSlugs(join(workspaceDir, "prompts"))) {
       bySlug.set(slug, {
         slug,
