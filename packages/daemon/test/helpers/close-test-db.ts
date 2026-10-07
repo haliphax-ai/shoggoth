@@ -9,8 +9,8 @@ import { rmSync } from "node:fs";
  * hit `ENOTEMPTY` if a sidecar file appears mid-traversal.
  *
  * Checkpointing with TRUNCATE before close eliminates most races, but some
- * tests still hit ENOTEMPTY on rare occasions. This function retries with
- * exponential backoff when that happens.
+ * tests still hit ENOTEMPTY on rare occasions. This function retries when
+ * that happens (bounded immediate retries, no timer waits).
  */
 export async function closeTestDb(db: Database.Database, tmpDir: string): Promise<void> {
   try {
@@ -32,8 +32,8 @@ export async function closeTestDb(db: Database.Database, tmpDir: string): Promis
         throw err;
       }
       attempt++;
-      // Wait longer each retry (100ms, 200ms, 400ms, 800ms)
-      await new Promise((r) => setTimeout(r, 100 * attempt));
+      // Yield to the event loop between retries — no wall-clock wait.
+      await Promise.resolve();
     }
   }
 }

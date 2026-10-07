@@ -29,10 +29,11 @@ function createMockEntry(overrides: Partial<ServiceEntry> = {}): ServiceEntry {
 function httpRequest(
   options: http.RequestOptions | string,
   body?: string,
-  timeout = 5000,
 ): Promise<{ statusCode: number; headers: http.IncomingHttpHeaders; body: string }> {
   return new Promise((resolve, reject) => {
-    const req = http.request(options, (res) => {
+    // agent: false — no keep-alive pooling. Each test restarts the gateway on
+    // the same port, so a pooled socket from a previous test would be dead.
+    const req = http.request({ ...options, agent: false }, (res) => {
       let data = "";
       res.on("data", (chunk) => (data += chunk));
       res.on("end", () => {
@@ -44,10 +45,6 @@ function httpRequest(
       });
     });
     req.on("error", reject);
-    req.setTimeout(timeout, () => {
-      req.destroy();
-      reject(new Error("Request timeout"));
-    });
     if (body) req.write(body);
     req.end();
   });
@@ -236,16 +233,11 @@ function sendUpgradeRequest(
     });
 
     let responseData = "";
-    const timeout = setTimeout(() => {
-      socket.destroy();
-      reject(new Error("Upgrade request timeout"));
-    }, 5000);
 
     socket.on("data", function onData(data) {
       responseData += data.toString();
       const headerEnd = responseData.indexOf("\r\n\r\n");
       if (headerEnd !== -1) {
-        clearTimeout(timeout);
         const statusLine = responseData.split("\r\n")[0];
         const statusCode = parseInt(statusLine.split(" ")[1], 10);
         socket.removeListener("data", onData);
@@ -259,7 +251,6 @@ function sendUpgradeRequest(
     });
 
     socket.on("error", (err) => {
-      clearTimeout(timeout);
       reject(err);
     });
   });
@@ -288,11 +279,9 @@ describe("ServiceGateway", () => {
     } catch {
       // Ignore errors if not running
     }
-    // NOTE: Real timers are used intentionally here. This test file sets up real HTTP
-    // servers, WebSocket servers, and TCP connections. Fake timers would interfere with
-    // the event loop and cause real I/O operations to hang.
-    // Allow port to be fully released between tests
-    await new Promise((r) => setTimeout(r, 50));
+    // gateway.stop() awaits the listener's close callback, and Node sets
+    // SO_REUSEADDR on listen, so the port is immediately re-bindable — no
+    // wall-clock settle delay needed between tests.
   });
 
   describe("start and port", () => {
@@ -430,10 +419,8 @@ describe("ServiceGateway", () => {
         maskedPayload,
       ]);
 
-      const echoPromise = new Promise<string>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error("Echo timeout")), 3000);
+      const echoPromise = new Promise<string>((resolve) => {
         socket.on("data", (data) => {
-          clearTimeout(timeout);
           // Parse the response frame (unmasked)
           if (data.length >= 2) {
             const len = data[1] & 0x7f;

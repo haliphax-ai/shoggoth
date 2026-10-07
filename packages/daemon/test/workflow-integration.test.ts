@@ -16,6 +16,7 @@ describe("Workflow Integration", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     rmSync(tempDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
@@ -143,10 +144,11 @@ describe("Workflow Integration", () => {
       createMessagePoster: mockCreateMessagePoster,
     };
 
+    vi.useFakeTimers();
     const { server } = initWorkflow(opts);
 
     // Start a workflow with a message task
-    const workflowId = await server.start(
+    const startP = server.start(
       [
         {
           kind: "message",
@@ -167,8 +169,9 @@ describe("Workflow Integration", () => {
       },
     );
 
-    // Wait for the workflow to complete
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Drive the fake clock until the workflow completes (50ms poll cadence).
+    await vi.advanceTimersByTimeAsync(1000);
+    const workflowId = await startP;
 
     const status = server.get(workflowId);
     expect(status).toBeDefined();
