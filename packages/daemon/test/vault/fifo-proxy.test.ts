@@ -1,8 +1,20 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdtempSync, rmSync, watch } from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createSecretFifo } from "../../src/vault/fifo-proxy";
+
+/** Resolve once the FIFO no longer exists — fs.watch reports the unlink event. */
+function watchForUnlink(path: string): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const watcher = watch(dirname(path), () => {
+      if (!existsSync(path)) {
+        watcher.close();
+        resolve();
+      }
+    });
+  });
+}
 
 describe("createSecretFifo", () => {
   let testDir: string;
@@ -50,6 +62,8 @@ describe("createSecretFifo", () => {
   it("FIFO is unlinked after read", async () => {
     const secret = "temp-secret";
     const path = await createSecretFifo(secret, 1000, 1000, undefined, testDir);
+    // Arm the unlink watcher before the reader opens (no missed events).
+    const unlinked = watchForUnlink(path);
 
     const { createReadStream } = await import("node:fs");
     await new Promise<string>((resolve, reject) => {
@@ -62,12 +76,9 @@ describe("createSecretFifo", () => {
       stream.on("error", reject);
     });
 
-    // Give a small delay for cleanup to complete
-    await vi.advanceTimersByTimeAsync(100);
-
-    await vi.waitFor(() => {
-      expect(existsSync(path)).toBe(false);
-    });
+    // The writer unlinks after closing; fs.watch observes it — no polling.
+    await unlinked;
+    expect(existsSync(path)).toBe(false);
   });
 
   it("timeout cleanup removes FIFO if not read", async () => {
@@ -77,12 +88,11 @@ describe("createSecretFifo", () => {
 
     expect(existsSync(path)).toBe(true);
 
-    // Wait for timeout to expire
+    // Arm the unlink watcher, then fire the fake cleanup timer.
+    const unlinked = watchForUnlink(path);
     await vi.advanceTimersByTimeAsync(timeoutMs + 200);
-
-    await vi.waitFor(() => {
-      expect(existsSync(path)).toBe(false);
-    });
+    await unlinked;
+    expect(existsSync(path)).toBe(false);
   });
 
   it("sets permissions to 0644", async () => {
