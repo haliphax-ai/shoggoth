@@ -48,6 +48,8 @@ export const DEFINED_CONTROL_OPS = [
   "session_list",
   "session_send",
   "session_steer",
+  "prompt",
+  "prompt_list",
   "session_abort",
   "session_kill",
   "session_model",

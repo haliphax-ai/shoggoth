@@ -37,7 +37,9 @@ import {
   shoggothAcpxConfigSchema,
   shoggothSearxngConfigSchema,
   shoggothRetentionConfigSchema,
+  shoggothPromptsConfigSchema,
   DEFAULT_SKILLS_CONFIG,
+  DEFAULT_PROMPTS_CONFIG,
 } from "./runtime";
 
 export const platformCommonConfigSchema = z
@@ -141,6 +143,7 @@ export const shoggothConfigFragmentSchema = z
       })
       .strict()
       .optional(),
+    prompts: shoggothPromptsConfigSchema.partial().optional(),
     policy: shoggothPolicyFragmentSchema,
   })
   .strict();
@@ -173,6 +176,7 @@ export const shoggothConfigSchema = z
       })
       .strict()
       .optional(),
+    prompts: shoggothPromptsConfigSchema.optional(),
     policy: shoggothPolicyConfigSchema,
   })
   .strict();
@@ -195,6 +199,7 @@ export function defaultConfig(configDirectory: string): ShoggothConfig {
     skills: DEFAULT_SKILLS_CONFIG,
     plugins: [{ package: "@shoggoth/platform-discord" }],
     mcp: { servers: [], poolScope: "global" },
+    prompts: DEFAULT_PROMPTS_CONFIG,
     policy: DEFAULT_POLICY_CONFIG,
     platforms: { discord: { enabled: true } },
     gates: DEFAULT_GATES_CONFIG,
