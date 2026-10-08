@@ -38,6 +38,7 @@ import {
   type SessionModelTurnDelivery,
   type PlatformAssistantDeps,
   resolveModel,
+  shouldSkipThreadSessionSentinel,
 } from "@shoggoth/daemon/lib";
 import type { HitlNotifier, PendingActionRow, Logger, HitlAutoApproveGate } from "./daemon-types";
 import { daemonNotice } from "./notices";
@@ -340,6 +341,31 @@ export async function startDiscordPlatform(
     extraUserMetadata: Record<string, unknown>,
     attachments?: readonly import("@shoggoth/messaging").MessageAttachment[],
   ): Promise<void> {
+    // Thread sentinel: a thread subagent session's first "." message only starts
+    // the thread (the creation status message was already posted at thread-create
+    // time), so exit before anything turn-shaped happens — no streaming placeholder
+    // ("…"), no typing indicator, no queue entry. The core check in
+    // runInboundSessionTurn runs after the platform has already posted the
+    // placeholder and started typing, so it cannot suppress them. Attachment-bearing
+    // "." messages keep their existing behavior: their enriched content is not ".",
+    // so the core sentinel check does not match them either. The session stays
+    // bound and later messages fire turns normally.
+    if (
+      !attachments?.length &&
+      shouldSkipThreadSessionSentinel({
+        db: opts.db,
+        sessions,
+        sessionId: msg.sessionId,
+        body: userContent,
+      })
+    ) {
+      opts.logger.debug("discord.platform.thread_sentinel_skipped", {
+        sessionId: msg.sessionId,
+        messageId: msg.id,
+      });
+      return;
+    }
+
     // Fire-and-forget: push to the turn queue (synchronous) and return immediately.
     // Create a label with truncated message content for display in queue
     const maxLabelLength = 100;

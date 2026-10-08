@@ -381,6 +381,94 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     assert.ok(typingSessions.every((s) => s === sessionUrn));
   });
 
+  it("thread sentinel '.' exits before placeholder, typing indicator, and turn", async () => {
+    const sent: { body: string }[] = [];
+    const typingSessions: string[] = [];
+    let streamStarts = 0;
+    let modelCalls = 0;
+    const bus = createAgentToAgentBus();
+    const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000002";
+    const sessions = createSessionStore(db);
+    sessions.create({ id: sessionUrn, workspacePath: tmp });
+    // Thread subagent session bound to a fresh thread (no transcript history yet).
+    sessions.update(sessionUrn, {
+      subagentMode: "persistent",
+      subagentPlatformThreadId: "thread-2",
+    });
+
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: stubDiscordGatewaySession,
+      discordBotUserId: undefined,
+      outbound: {
+        sendDiscord: async (msg) => {
+          sent.push({ body: msg.body });
+          return { channelId: "c", messageId: "mid" };
+        },
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      // Streaming enabled: start() would post the "…" placeholder message.
+      streamingForSession: () => ({
+        start: async () => {
+          streamStarts++;
+          sent.push({ body: "…" });
+          return {
+            setFullContent: async () => {},
+            pushUpdate: async () => {},
+          };
+        },
+      }),
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      registerPlatformThreadBinding: () => () => {},
+      notifyAgentTypingForSession: async (sid) => {
+        typingSessions.push(sid);
+      },
+      routes: [{ channelId: "thread-2", sessionId: sessionUrn }],
+    };
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: defaultConfig(tmp),
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      env: { SHOGGOTH_DISCORD_STREAM: "1" },
+      deps: {
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            modelCalls++;
+            return {
+              content: "should not run",
+              toolCalls: [],
+              usedModel: "m1",
+              usedProviderId: "p1",
+            };
+          },
+        }),
+      },
+    });
+
+    bus.deliver(
+      sessionUrn,
+      createInboundMessage({
+        id: "d1",
+        sessionId: sessionUrn,
+        createdAt: new Date().toISOString(),
+        body: ".",
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(50);
+    await platform.stop();
+
+    // Sentinel: the thread was already started by the creation status message, so
+    // the "." message must produce no placeholder, no typing, and no model turn.
+    assert.equal(streamStarts, 0);
+    assert.equal(sent.length, 0);
+    assert.equal(typingSessions.length, 0);
+    assert.equal(modelCalls, 0);
+  });
+
   it("on tool loop ModelHttpError 429, sends friendly Discord error body", async () => {
     const sent: { body: string }[] = [];
     const bus = createAgentToAgentBus();
