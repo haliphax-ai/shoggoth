@@ -35,7 +35,7 @@ ARG AGENT_UID=900
 ENV SHOGGOTH_AGENT_UID=${AGENT_UID}
 RUN --mount=type=cache,mode=0755,target=/var/cache/apt \
   rm -f /etc/apt/apt.conf.d/docker-clean \
-  && apt-get update && apt-get install -y --no-install-recommends acl ca-certificates git ripgrep \
+  && apt-get update && apt-get install -y --no-install-recommends acl ca-certificates git jq ripgrep \
   && rm -rf /var/lib/apt/lists/*
 RUN userdel node 2>/dev/null; groupdel node 2>/dev/null; \
   (groupadd --system --gid ${SHOGGOTH_UID} shoggoth || true) \
@@ -68,6 +68,9 @@ RUN chown root:shoggoth /usr/local/bin/shoggoth \
   && mkdir -p /var/lib/shoggoth/skills \
   && chown shoggoth:shoggoth /var/lib/shoggoth/skills \
   && chmod 0755 /var/lib/shoggoth/skills \
+  && mkdir -p /var/log/shoggoth \
+  && chown shoggoth:shoggoth /var/log/shoggoth \
+  && chmod 0750 /var/log/shoggoth \
   && git config --system core.sharedRepository group
 
 ENV NODE_ENV=production

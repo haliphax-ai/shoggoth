@@ -20,6 +20,7 @@ import { register as registerKv } from "./kv-handler";
 import { register as registerTimer } from "./timer-handler";
 import { register as registerDiscover } from "./discover-handler";
 import { register as registerSearch } from "./search-handler";
+import { register as registerLogs } from "./logs-handler";
 import { register as registerReplace } from "./replace-handler";
 import { register as registerCd } from "./cd-handler";
 import { register as registerElevate } from "./elevate-handler";
@@ -48,6 +49,7 @@ export function registerAllBuiltinHandlers(registry: BuiltinToolRegistry): void 
   registerTimer(registry);
   registerDiscover(registry);
   registerSearch(registry);
+  registerLogs(registry);
   registerReplace(registry);
   registerCd(registry);
   registerElevate(registry);

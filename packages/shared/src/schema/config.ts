@@ -72,6 +72,38 @@ export const vaultConfigSchema = z
   .optional();
 export type ShoggothVaultConfig = z.infer<typeof vaultConfigSchema>;
 
+/**
+ * Async file logging sink (`builtin-logs` reads what this writes). All fields
+ * optional so config fragments can override a subset; defaults live in
+ * DEFAULT_LOGGING_CONFIG.
+ */
+export const shoggothLoggingConfigSchema = z
+  .object({
+    file: z
+      .object({
+        enabled: z.boolean().optional(),
+        /** Directory for date-stamped log files (outside agent workspaces). */
+        dir: z.string().min(1).optional(),
+        /** Max pending queue entries; further entries are dropped and counted. */
+        maxQueue: z.number().int().positive().optional(),
+        /** Rotated `.log.gz` archives to retain. */
+        maxFiles: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type ShoggothLoggingConfig = z.infer<typeof shoggothLoggingConfigSchema>;
+
+export const DEFAULT_LOGGING_CONFIG: ShoggothLoggingConfig = {
+  file: {
+    enabled: true,
+    dir: LAYOUT.logDir,
+    maxQueue: 10_000,
+    maxFiles: 7,
+  },
+};
+
 const sharedConfigFields = {
   controlSocketMode: z.number().int().optional(),
   controlSocketUid: z.number().int().nonnegative().optional(),
@@ -101,6 +133,7 @@ const sharedConfigFields = {
   gateway: gatewayConfigSchema,
   retention: shoggothRetentionConfigSchema.optional(),
   vault: vaultConfigSchema,
+  logging: shoggothLoggingConfigSchema.optional(),
   gates: shoggothGatesConfigSchema.optional(),
 };
 
@@ -203,5 +236,6 @@ export function defaultConfig(configDirectory: string): ShoggothConfig {
     policy: DEFAULT_POLICY_CONFIG,
     platforms: { discord: { enabled: true } },
     gates: DEFAULT_GATES_CONFIG,
+    logging: DEFAULT_LOGGING_CONFIG,
   };
 }

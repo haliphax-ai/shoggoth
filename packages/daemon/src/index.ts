@@ -62,7 +62,7 @@ import { resolveSessionTargetFromCliArg } from "./control/resolve-session-cli-ta
 import { WIRE_VERSION } from "@shoggoth/authn";
 import { requestSessionTurnAbort } from "./sessions/session-turn-abort";
 import { createSessionStore } from "./sessions/session-store";
-import { initLogger, getLogger } from "./logging";
+import { initLogger, getLogger, initFileLogging, closeFileLogging } from "./logging";
 import { validateFetchCaBundle } from "./config/validate-fetch-ca-bundle";
 
 const log = getLogger("shoggoth-daemon");
@@ -174,6 +174,21 @@ const config = await loadLayeredConfigAsync(configDir);
 const configRef = { current: config };
 
 initLogger({ minLevel: config.logLevel });
+
+// Async JSON-lines file sink (readable via builtin-logs). Degrades to
+// stderr-only with a one-time warning when the directory is unwritable.
+const fileLogging: {
+  enabled?: boolean;
+  dir?: string;
+  maxQueue?: number;
+  maxFiles?: number;
+} = config.logging?.file ?? {};
+initFileLogging({
+  enabled: fileLogging.enabled ?? true,
+  dir: fileLogging.dir ?? LAYOUT.logDir,
+  maxQueue: fileLogging.maxQueue,
+  maxFiles: fileLogging.maxFiles,
+});
 
 // Assert dynamicConfigDirectory is below configDirectory when set.
 if (config.dynamicConfigDirectory) {
@@ -819,6 +834,8 @@ void (async () => {
     },
     { group: 0 },
   );
+
+  rt.shutdown.registerDrain("file-log-sink", () => closeFileLogging(), { group: 1 });
 
   if (!db) {
     getLogger("daemon").warn("plugins and event loops skipped (no state database)");

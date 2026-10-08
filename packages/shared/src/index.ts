@@ -115,6 +115,9 @@ export {
   type AttachmentHandlingConfig,
   vaultConfigSchema,
   type ShoggothVaultConfig,
+  shoggothLoggingConfigSchema,
+  type ShoggothLoggingConfig,
+  DEFAULT_LOGGING_CONFIG,
   shoggothMediaGenerationConfigSchema,
   type ShoggothMediaGenerationConfig,
 } from "./schema";
@@ -174,11 +177,22 @@ export {
   type Logger,
   type LogLevel,
   type LogFields,
+  type FileLoggingInitOptions,
   createLogger,
   initLogger,
   getLogger,
   setRootLogger,
+  initFileLogging,
+  flushFileLogging,
+  closeFileLogging,
+  getFileLoggingStats,
 } from "./logging.js";
+export {
+  FileLogSink,
+  type FileLogSinkOptions,
+  logFileNameForDate,
+  logArchiveNameForDate,
+} from "./logging-file-sink.js";
 export {
   IMAGE_MIME_TYPES,
   IMAGE_EXTENSION_TO_MIME,

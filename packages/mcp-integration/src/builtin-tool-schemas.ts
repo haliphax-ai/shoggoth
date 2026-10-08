@@ -554,6 +554,38 @@ export const lsArgs = {
   },
 } as const;
 
+export const logsArgs = {
+  type: "object",
+  description:
+    "View Shoggoth daemon logs (date-stamped JSON lines) by piping them through a jq filter. Hidden by default; enable via builtin-discover. The log directory is outside agent workspaces — this tool is the only access path.",
+  properties: {
+    filter: {
+      type: "string",
+      description:
+        "jq program applied to each JSON log line, e.g. '. | select(.level == \"error\")' or '.msg'",
+    },
+    days: {
+      type: "integer",
+      description:
+        "How many days back to include (today plus N-1 previous days; rotated .log.gz archives are decompressed transparently). Default: 1. Maximum: 31.",
+      minimum: 1,
+      maximum: 31,
+    },
+    tail: {
+      type: "integer",
+      description:
+        "Only process the most recent N lines of the selected window (applied before the filter). Default: 5000. Maximum: 20000.",
+      minimum: 1,
+      maximum: 20000,
+    },
+    compact: {
+      type: "boolean",
+      description: "Output one compact JSON value per input line. Default: true.",
+    },
+  },
+  required: ["filter"],
+} as const;
+
 export const fetchArgs = {
   type: "object",
   description:

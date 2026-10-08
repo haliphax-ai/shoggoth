@@ -23,6 +23,7 @@ describe("classifyToolRisk", () => {
     assert.equal(classifyToolRisk("builtin-exec", {}), "critical");
     assert.equal(classifyToolRisk("builtin-memory-search", {}), "safe");
     assert.equal(classifyToolRisk("builtin-memory-ingest", {}), "caution");
+    assert.equal(classifyToolRisk("builtin-logs", {}), "critical");
   });
 
   it("unknown tool names fall back to caution", () => {
