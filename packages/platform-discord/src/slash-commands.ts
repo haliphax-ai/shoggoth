@@ -247,6 +247,8 @@ export async function deregisterDiscordSlashCommands(opts: {
 const INTERACTION_RESPONSE_CHANNEL_MESSAGE = 4;
 /** Interaction response type 5 = DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE. */
 const INTERACTION_RESPONSE_DEFERRED = 5;
+/** Interaction response type 6 = DEFERRED_UPDATE_MESSAGE (component interactions only). */
+const INTERACTION_RESPONSE_DEFERRED_UPDATE = 6;
 /** Interaction response type 7 = UPDATE_MESSAGE. */
 const INTERACTION_RESPONSE_UPDATE_MESSAGE = 7;
 /** Interaction response type 9 = MODAL. */
@@ -261,7 +263,8 @@ const TEXT_INPUT = 4;
 const TEXT_INPUT_SHORT = 1;
 
 // ---------------------------------------------------------------------------
-// Canned prompt flow: slug dropdown → dynamic modal → slash-handler proxy
+// Canned prompt flow: staged inline message updates (slug dropdown →
+// optional parameter modal → final recap), mirroring the /model flow
 // ---------------------------------------------------------------------------
 
 /** Dropdown custom_id prefix. Format: `prompt_select|<sessionId>`. */
@@ -272,12 +275,33 @@ const PROMPT_MODAL_PREFIX = "prompt_modal|";
 type PromptListEntry = { slug: string; placeholders?: readonly string[] };
 
 /**
+ * How a prompt run's outcome is delivered back to Discord. Each stage of the
+ * staged `/prompt` flow uses a different style so message A (the slug
+ * dropdown) always transitions forward instead of being left behind:
+ *
+ * - `deferred-channel` — ACK with DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE (5),
+ *   which creates a new "thinking" message, then deliver the outcome via
+ *   `editOriginalInteractionResponse`. Used by the slash command's direct run
+ *   (no dropdown stage exists to update).
+ * - `deferred-update` — ACK with DEFERRED_UPDATE_MESSAGE (6), which marks the
+ *   message the component was attached to for a later edit, then deliver the
+ *   outcome via `editOriginalInteractionResponse`. Used by slug-dropdown
+ *   selections with no placeholders, so message A transitions straight from
+ *   dropdown to final recap.
+ * - `inline-update` — ACK FIRST with UPDATE_MESSAGE (7), rewriting message A
+ *   in place with a pending state, then deliver the outcome via
+ *   `editOriginalInteractionResponse`. Used by modal submits: Discord text
+ *   inputs are modal-only, so message A stays visible as the dropdown while
+ *   the modal is open and is rewritten here once the parameters are known.
+ */
+type PromptReplyStyle = "deferred-channel" | "deferred-update" | "inline-update";
+
+/**
  * Translate the prompt options to a control op, resolving the target session
  * from the interaction's channel when the payload carries none (responding
  * with the unbound-channel warning instead of running the op when there is
- * nothing to target), then defer, invoke, and deliver the outcome by editing
- * the deferred response — the same pattern `/steer` uses, since the prompt
- * runs a full model turn.
+ * nothing to target), then run the op and deliver the outcome according to
+ * `replyStyle` (see {@link PromptReplyStyle}).
  */
 async function runPromptProxy(
   deps: DiscordInteractionHandlerDeps,
@@ -286,6 +310,7 @@ async function runPromptProxy(
   options: Record<string, string>,
   channelId: string,
   guildId: string | undefined,
+  replyStyle: PromptReplyStyle,
 ): Promise<void> {
   const controlOp = translateCommandToControlOp({ name: "prompt", options });
   if (!controlOp) return;
@@ -303,21 +328,61 @@ async function runPromptProxy(
     });
     return;
   }
+  // ACK unconditionally and FIRST — before `invokeControlOp`. The prompt
+  // control op awaits the full model turn (runSessionModelTurn), which
+  // routinely outlives Discord's ~3s initial-response window, so the ack must
+  // precede it (same rationale as the `/steer` branch).
   try {
-    await deps.transport.interactionCallback(interactionId, interactionToken, {
-      type: INTERACTION_RESPONSE_DEFERRED,
-    });
+    if (replyStyle === "inline-update") {
+      // Type 6 (DEFERRED_UPDATE) is invalid for modal submits — it only
+      // applies to component interactions — so the modal path ACKs with
+      // UPDATE_MESSAGE (7) instead: this satisfies the 3s window AND rewrites
+      // message A (the dropdown) in place with a pending state. If Discord
+      // rejects type 7 for modal submits the first ack throws — only then
+      // fall back to DEFERRED (5), which degrades to a new "thinking" message
+      // while message A stays as the dropdown. Never send a second POST after
+      // a successful first ack.
+      try {
+        await deps.transport.interactionCallback(interactionId, interactionToken, {
+          type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
+          data: { content: `⏳ Running \`${options.slug}\`...`, components: [] },
+        });
+      } catch (err) {
+        deps.logger.warn("discord.interaction.prompt_ack_failed", {
+          interactionId,
+          err: String(err),
+        });
+        await deps.transport.interactionCallback(interactionId, interactionToken, {
+          type: INTERACTION_RESPONSE_DEFERRED,
+        });
+      }
+    } else {
+      await deps.transport.interactionCallback(interactionId, interactionToken, {
+        type:
+          replyStyle === "deferred-update"
+            ? INTERACTION_RESPONSE_DEFERRED_UPDATE
+            : INTERACTION_RESPONSE_DEFERRED,
+      });
+    }
   } catch (err) {
     deps.logger.warn("discord.interaction.prompt_defer_failed", {
       interactionId,
       err: String(err),
     });
   }
-  const finish = async (content: string): Promise<void> => {
+  // Every terminal state clears components so the updated message never
+  // keeps an inert slug dropdown (or modal-era inputs) around.
+  const deliver = async (content: string): Promise<void> => {
+    // Held in a variable: the transport body type only declares `content`, so
+    // a fresh inline literal with `components` would fail excess-property
+    // checks (the field is still serialized to Discord's PATCH body).
+    const data = { content, components: [] as Array<Record<string, unknown>> };
     try {
-      await deps.transport.editOriginalInteractionResponse(deps.applicationId, interactionToken, {
-        content,
-      });
+      await deps.transport.editOriginalInteractionResponse(
+        deps.applicationId,
+        interactionToken,
+        data,
+      );
     } catch (err) {
       deps.logger.warn("discord.interaction.prompt_reply_undeliverable", {
         interactionId,
@@ -328,12 +393,12 @@ async function runPromptProxy(
   try {
     const res = await deps.invokeControlOp(controlOp.op, payload);
     if (!res.ok) {
-      await finish(`⚠️ Prompt failed: ${res.error ?? "unknown error"}`);
+      await deliver(`⚠️ Prompt failed: ${res.error ?? "unknown error"}`);
       return;
     }
-    await finish(`✅ Prompt \`${options.slug}\` sent to \`${payload.session_id}\`.`);
+    await deliver(`✅ Prompt \`${options.slug}\` sent to \`${payload.session_id}\`.`);
   } catch (err) {
-    await finish(`⚠️ Prompt failed: ${String(err)}`);
+    await deliver(`⚠️ Prompt failed: ${String(err)}`);
   }
 }
 
@@ -403,7 +468,9 @@ async function handleInteraction(
       return;
     }
 
-    // Canned prompt slug dropdown → dynamic modal
+    // Stage 2: canned prompt slug dropdown selected. No placeholders →
+    // defer-update (6) so message A becomes the final recap; placeholders →
+    // modal (9), after which stage 3 rewrites message A on submit.
     if (customId.startsWith(PROMPT_SELECT_PREFIX)) {
       const sessionId = customId.slice(PROMPT_SELECT_PREFIX.length);
       const values = ev.data?.values;
@@ -448,7 +515,9 @@ async function handleInteraction(
         ],
       }));
       if (components.length === 0) {
-        // No placeholders — nothing to ask; run the prompt directly.
+        // No placeholders — nothing to ask. ACK with DEFERRED_UPDATE (6)
+        // rather than a fresh deferred message so message A itself is
+        // updated into the final recap instead of being left behind.
         await runPromptProxy(
           deps,
           ev.id,
@@ -456,9 +525,13 @@ async function handleInteraction(
           { slug, session_id: sessionId, platform_user_id: ev.userId },
           ev.channelId,
           ev.guildId,
+          "deferred-update",
         );
         return;
       }
+      // Message A stays visible as the dropdown while the modal is open —
+      // unavoidable, since Discord text inputs exist only inside modals.
+      // Stage 3 rewrites message A when the modal is submitted.
       await deps.transport.interactionCallback(ev.id, ev.token, {
         type: INTERACTION_RESPONSE_MODAL,
         data: {
@@ -648,7 +721,8 @@ async function handleInteraction(
       return;
     }
 
-    // Canned prompt modal → proxy to the slash command handler
+    // Stage 3: canned prompt modal submitted → run the prompt and rewrite
+    // message A (the dropdown) with the final recap.
     if (customId.startsWith(PROMPT_MODAL_PREFIX)) {
       const rest = customId.slice(PROMPT_MODAL_PREFIX.length);
       const sep = rest.indexOf("|");
@@ -676,6 +750,12 @@ async function handleInteraction(
         },
         ev.channelId,
         ev.guildId,
+        // ACK FIRST with UPDATE_MESSAGE (7), rewriting message A in place
+        // with a pending state: the prompt op awaits the full model turn, so
+        // it must not run before the ~3s ack window (and type 6 is invalid
+        // for modal submits — component interactions only). The outcome is
+        // then delivered via editOriginalInteractionResponse.
+        "inline-update",
       );
       return;
     }
@@ -913,6 +993,31 @@ async function handleInteraction(
       return;
     }
     const sessionId = payload.session_id as string;
+    const requestedEntry = requestedSlug
+      ? prompts.find((p) => p.slug === requestedSlug)
+      : undefined;
+    if (requestedSlug && requestedEntry && (requestedEntry.placeholders ?? []).length === 0) {
+      // Slug given and the prompt takes no parameters: skip the dropdown
+      // confirmation round-trip entirely and run it directly (deferred
+      // channel message → edit). A slug WITH placeholders keeps the
+      // pre-selected dropdown below (rather than jumping straight to the
+      // modal) so the operator can still switch slugs, and so the modal
+      // building logic stays in exactly one place (stage 2).
+      await runPromptProxy(
+        deps,
+        parsed.interactionId,
+        parsed.interactionToken,
+        {
+          slug: requestedSlug,
+          session_id: sessionId,
+          platform_user_id: ev.userId,
+        },
+        parsed.channelId,
+        parsed.guildId,
+        "deferred-channel",
+      );
+      return;
+    }
     const options = prompts.map((p) => {
       const preselected = p.slug === requestedSlug;
       const entry: { label: string; value: string; default?: boolean } = {

@@ -2216,12 +2216,16 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     assert.ok(result.latestAssistantText.length > 0);
   });
 
-  it("canned prompt delivers the assistant reply exactly once (platform post + ack-only interaction edit)", async () => {
+  it("canned prompt delivers the assistant reply exactly once (platform post + ack-then-edit interaction flow)", async () => {
     const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
     const marker = "unique-reply-marker";
 
     // Channel-visible posts captured from both delivery surfaces.
     const sent: { body: string }[] = [];
+    const interactionResponses: Array<{
+      type: number;
+      data?: { content?: string; components?: readonly unknown[] };
+    }> = [];
     const interactionEdits: Array<{ content: string }> = [];
     const bus = createAgentToAgentBus();
     const discord: DiscordMessagingRuntime = {
@@ -2266,7 +2270,9 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     // messaging_surface path) and returns the rendered reply in the result.
     const handler = createDiscordInteractionHandler({
       transport: {
-        interactionCallback: async () => {},
+        interactionCallback: async (_id, _token, body) => {
+          interactionResponses.push(body);
+        },
         editOriginalInteractionResponse: async (_appId, _token, body) => {
           interactionEdits.push(body);
         },
@@ -2304,7 +2310,14 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     };
 
     handler(ev);
-    for (let i = 0; i < 100 && interactionEdits.length === 0; i++) {
+    // The ack lands BEFORE the turn starts, so keep advancing timers until the
+    // post-turn edit has been delivered too — otherwise platform.stop() could
+    // tear things down between the ack and the outcome edit.
+    for (
+      let i = 0;
+      i < 200 && (interactionResponses.length === 0 || interactionEdits.length === 0);
+      i++
+    ) {
       await vi.advanceTimersByTimeAsync(10);
     }
     await platform.stop();
@@ -2317,15 +2330,27 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       "assistant reply should be posted exactly once by the platform path",
     );
 
-    // …and the interaction edit carries only the ack — never the reply text.
-    assert.strictEqual(interactionEdits.length, 1);
+    // …and the modal submit is ACKed up front with one UPDATE_MESSAGE (7)
+    // carrying the pending state — never the reply text.
+    assert.strictEqual(interactionResponses.length, 1, "modal submit ACKs exactly once");
+    const resp = interactionResponses[0]!;
+    assert.strictEqual(resp.type, 7, "modal submit should update message A in place");
     assert.ok(
-      interactionEdits[0]!.content.includes("✅ Prompt"),
-      "interaction edit should carry the prompt ack",
+      resp.data?.content?.includes("⏳ Running"),
+      "interaction response should carry the pending-state ack",
     );
     assert.ok(
-      !interactionEdits[0]!.content.includes(marker),
-      "interaction edit must not repeat the assistant reply",
+      !resp.data?.content?.includes(marker),
+      "interaction response must not repeat the assistant reply",
     );
+    assert.deepStrictEqual(resp.data?.components, [], "dropdown must be cleared");
+
+    // The outcome then lands as a single edit of that response (the ack
+    // already rewrote message A, so the edit updates it in place rather than
+    // leaving it stale) — still never repeating the reply text.
+    assert.strictEqual(interactionEdits.length, 1, "outcome is delivered via one edit");
+    const edit = interactionEdits[0]!;
+    assert.ok(edit.content.includes("✅ Prompt"), "edit should carry the prompt ack");
+    assert.ok(!edit.content.includes(marker), "edit must not repeat the assistant reply");
   });
 });
