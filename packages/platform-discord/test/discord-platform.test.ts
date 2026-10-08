@@ -2216,7 +2216,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     assert.ok(result.latestAssistantText.length > 0);
   });
 
-  it("canned prompt delivers the assistant reply exactly once (platform post + ack-only interaction update)", async () => {
+  it("canned prompt delivers the assistant reply exactly once (platform post + ack-then-edit interaction flow)", async () => {
     const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
     const marker = "unique-reply-marker";
 
@@ -2310,7 +2310,14 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     };
 
     handler(ev);
-    for (let i = 0; i < 100 && interactionResponses.length === 0; i++) {
+    // The ack lands BEFORE the turn starts, so keep advancing timers until the
+    // post-turn edit has been delivered too — otherwise platform.stop() could
+    // tear things down between the ack and the outcome edit.
+    for (
+      let i = 0;
+      i < 200 && (interactionResponses.length === 0 || interactionEdits.length === 0);
+      i++
+    ) {
       await vi.advanceTimersByTimeAsync(10);
     }
     await platform.stop();
@@ -2323,24 +2330,27 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       "assistant reply should be posted exactly once by the platform path",
     );
 
-    // …and the single interaction response (UPDATE_MESSAGE, no defer) carries
-    // only the ack — never the reply text.
-    assert.strictEqual(interactionResponses.length, 1, "modal submit answers exactly once");
+    // …and the modal submit is ACKed up front with one UPDATE_MESSAGE (7)
+    // carrying the pending state — never the reply text.
+    assert.strictEqual(interactionResponses.length, 1, "modal submit ACKs exactly once");
     const resp = interactionResponses[0]!;
     assert.strictEqual(resp.type, 7, "modal submit should update message A in place");
     assert.ok(
-      resp.data?.content?.includes("✅ Prompt"),
-      "interaction response should carry the prompt ack",
+      resp.data?.content?.includes("⏳ Running"),
+      "interaction response should carry the pending-state ack",
     );
     assert.ok(
       !resp.data?.content?.includes(marker),
       "interaction response must not repeat the assistant reply",
     );
     assert.deepStrictEqual(resp.data?.components, [], "dropdown must be cleared");
-    assert.strictEqual(
-      interactionEdits.length,
-      0,
-      "modal flow must not defer+edit, which would leave message A stale",
-    );
+
+    // The outcome then lands as a single edit of that response (the ack
+    // already rewrote message A, so the edit updates it in place rather than
+    // leaving it stale) — still never repeating the reply text.
+    assert.strictEqual(interactionEdits.length, 1, "outcome is delivered via one edit");
+    const edit = interactionEdits[0]!;
+    assert.ok(edit.content.includes("✅ Prompt"), "edit should carry the prompt ack");
+    assert.ok(!edit.content.includes(marker), "edit must not repeat the assistant reply");
   });
 });

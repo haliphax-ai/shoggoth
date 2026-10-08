@@ -288,11 +288,11 @@ type PromptListEntry = { slug: string; placeholders?: readonly string[] };
  *   outcome via `editOriginalInteractionResponse`. Used by slug-dropdown
  *   selections with no placeholders, so message A transitions straight from
  *   dropdown to final recap.
- * - `inline-update` — no up-front ACK; the prompt control op resolves quickly,
- *   so invoke it synchronously and answer with UPDATE_MESSAGE (7), rewriting
- *   message A in place. Used by modal submits: Discord text inputs are
- *   modal-only, so message A stays visible as the dropdown while the modal is
- *   open and is rewritten here once the parameters are known.
+ * - `inline-update` — ACK FIRST with UPDATE_MESSAGE (7), rewriting message A
+ *   in place with a pending state, then deliver the outcome via
+ *   `editOriginalInteractionResponse`. Used by modal submits: Discord text
+ *   inputs are modal-only, so message A stays visible as the dropdown while
+ *   the modal is open and is rewritten here once the parameters are known.
  */
 type PromptReplyStyle = "deferred-channel" | "deferred-update" | "inline-update";
 
@@ -328,44 +328,61 @@ async function runPromptProxy(
     });
     return;
   }
-  if (replyStyle !== "inline-update") {
-    try {
+  // ACK unconditionally and FIRST — before `invokeControlOp`. The prompt
+  // control op awaits the full model turn (runSessionModelTurn), which
+  // routinely outlives Discord's ~3s initial-response window, so the ack must
+  // precede it (same rationale as the `/steer` branch).
+  try {
+    if (replyStyle === "inline-update") {
+      // Type 6 (DEFERRED_UPDATE) is invalid for modal submits — it only
+      // applies to component interactions — so the modal path ACKs with
+      // UPDATE_MESSAGE (7) instead: this satisfies the 3s window AND rewrites
+      // message A (the dropdown) in place with a pending state. If Discord
+      // rejects type 7 for modal submits the first ack throws — only then
+      // fall back to DEFERRED (5), which degrades to a new "thinking" message
+      // while message A stays as the dropdown. Never send a second POST after
+      // a successful first ack.
+      try {
+        await deps.transport.interactionCallback(interactionId, interactionToken, {
+          type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
+          data: { content: `⏳ Running \`${options.slug}\`...`, components: [] },
+        });
+      } catch (err) {
+        deps.logger.warn("discord.interaction.prompt_ack_failed", {
+          interactionId,
+          err: String(err),
+        });
+        await deps.transport.interactionCallback(interactionId, interactionToken, {
+          type: INTERACTION_RESPONSE_DEFERRED,
+        });
+      }
+    } else {
       await deps.transport.interactionCallback(interactionId, interactionToken, {
         type:
           replyStyle === "deferred-update"
             ? INTERACTION_RESPONSE_DEFERRED_UPDATE
             : INTERACTION_RESPONSE_DEFERRED,
       });
-    } catch (err) {
-      deps.logger.warn("discord.interaction.prompt_defer_failed", {
-        interactionId,
-        err: String(err),
-      });
     }
+  } catch (err) {
+    deps.logger.warn("discord.interaction.prompt_defer_failed", {
+      interactionId,
+      err: String(err),
+    });
   }
+  // Every terminal state clears components so the updated message never
+  // keeps an inert slug dropdown (or modal-era inputs) around.
   const deliver = async (content: string): Promise<void> => {
-    // Every terminal state clears components so the updated message never
-    // keeps an inert slug dropdown (or modal-era inputs) around.
+    // Held in a variable: the transport body type only declares `content`, so
+    // a fresh inline literal with `components` would fail excess-property
+    // checks (the field is still serialized to Discord's PATCH body).
     const data = { content, components: [] as Array<Record<string, unknown>> };
     try {
-      if (replyStyle === "inline-update") {
-        // UPDATE_MESSAGE (7) on a MODAL_SUBMIT rewrites the message the modal
-        // was triggered from (message A). Our test harness accepts any
-        // response body, so the assumption holds within the suite; if Discord
-        // itself ever rejects type 7 for modal submits, fall back to
-        // INTERACTION_RESPONSE_CHANNEL_MESSAGE (4), which creates a new
-        // message instead of updating message A.
-        await deps.transport.interactionCallback(interactionId, interactionToken, {
-          type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
-          data,
-        });
-      } else {
-        await deps.transport.editOriginalInteractionResponse(
-          deps.applicationId,
-          interactionToken,
-          data,
-        );
-      }
+      await deps.transport.editOriginalInteractionResponse(
+        deps.applicationId,
+        interactionToken,
+        data,
+      );
     } catch (err) {
       deps.logger.warn("discord.interaction.prompt_reply_undeliverable", {
         interactionId,
@@ -733,9 +750,11 @@ async function handleInteraction(
         },
         ev.channelId,
         ev.guildId,
-        // No defer: the prompt control op resolves quickly (file read +
-        // template render + queue message), so we can answer with
-        // UPDATE_MESSAGE (7) directly, rewriting message A in place.
+        // ACK FIRST with UPDATE_MESSAGE (7), rewriting message A in place
+        // with a pending state: the prompt op awaits the full model turn, so
+        // it must not run before the ~3s ack window (and type 6 is invalid
+        // for modal submits — component interactions only). The outcome is
+        // then delivered via editOriginalInteractionResponse.
         "inline-update",
       );
       return;
