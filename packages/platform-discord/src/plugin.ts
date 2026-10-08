@@ -29,7 +29,7 @@ import {
   resolveEffectiveDiscordRoutes,
   resolveDiscordOwnerUserId,
 } from "./config";
-import { resolveSessionIdForRoutes } from "./adapter";
+import { resolveSessionIdForRoutes, type DiscordThreadCreateEvent } from "./adapter";
 import {
   createActionToolDispatcher,
   type MessageToolDeps,
@@ -60,6 +60,8 @@ interface DiscordPluginState {
   /** Set when this instance registered the global slash commands; cleared when de-registered. */
   slashCommandRegistrationRef: { current: string | undefined };
   getToken: () => string | undefined;
+  /** THREAD_CREATE events received before the platform handle exists (gateway connects first). */
+  pendingThreadCreates: DiscordThreadCreateEvent[];
 }
 
 /**
@@ -110,6 +112,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
     reactionPassthroughRef: { current: undefined },
     slashCommandRegistrationRef: { current: undefined },
     getToken: () => undefined,
+    pendingThreadCreates: [],
   };
 
   return defineMessagingPlatformPlugin({
@@ -160,6 +163,64 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           current: DiscordMessagingRuntime["discordRestTransport"] | undefined;
         } = { current: undefined };
 
+        // Thread-create handling: parse/resolve/send stay here; every decision
+        // (toggle, guards, session creation, status body) belongs to the daemon core.
+        // The gateway connects before the platform handle exists, so early events
+        // are queued until both are wired.
+        const threadCreateRefs: {
+          messaging: DiscordMessagingRuntime | undefined;
+          platform: DiscordPlatformHandle | undefined;
+        } = { messaging: undefined, platform: undefined };
+
+        const processThreadCreate = (ev: DiscordThreadCreateEvent): void => {
+          const { messaging, platform } = threadCreateRefs;
+          if (!messaging || !platform) {
+            state.pendingThreadCreates.push(ev);
+            return;
+          }
+          const handler = (
+            platformDeps as {
+              handleThreadCreate?: (input: {
+                db: unknown;
+                config: unknown;
+                threadId: string;
+                parentChannelId: string;
+                guildId?: string;
+                resolveSessionForChannel: (
+                  channelId: string,
+                  guildId?: string,
+                ) => string | undefined;
+                registerPlatformThreadBinding: (threadId: string, sessionId: string) => () => void;
+                subscribeSubagentSession: (sessionId: string) => () => void;
+                sendStatusMessage: (sessionId: string, body: string) => Promise<void>;
+              }) => Promise<{ created: boolean }>;
+            }
+          ).handleThreadCreate;
+          if (!handler) {
+            logger.debug("discord.thread_create.no_core_handler", { threadId: ev.threadId });
+            return;
+          }
+          void handler({
+            db,
+            config: configRef.current,
+            threadId: ev.threadId,
+            parentChannelId: ev.parentChannelId,
+            guildId: ev.guildId,
+            resolveSessionForChannel: (channelId, guildId2) =>
+              messaging.resolveSessionId(channelId, guildId2) ??
+              resolveSessionForChannel(configRef.current, channelId, guildId2),
+            registerPlatformThreadBinding: (threadId, sessionId) =>
+              messaging.registerPlatformThreadBinding(threadId, sessionId),
+            subscribeSubagentSession: (sessionId) => platform.subscribeSubagentSession(sessionId),
+            sendStatusMessage: (sessionId, body) => platform.adapter.sendBody(sessionId, body),
+          }).catch((e) => {
+            logger.warn("discord.thread_create.failed", {
+              threadId: ev.threadId,
+              err: String(e),
+            });
+          });
+        };
+
         // Start Discord messaging (gateway)
         const discordMessaging = await startDaemonDiscordMessaging({
           logger,
@@ -167,6 +228,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           botToken: state.getToken(),
           noticeResolver,
           slashCommandRegistrationRef: state.slashCommandRegistrationRef,
+          onThreadCreate: processThreadCreate,
           onInteractionCreate: createDiscordInteractionHandler({
             transport: {
               interactionCallback: (interactionId, interactionToken, body) => {
@@ -298,6 +360,15 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
         state.platform = discordPlatform;
         registerPlatformFn("discord", discordPlatform);
         setPlatformAdapter(discordPlatform.adapter);
+
+        // Wire thread-create handling now that the platform handle exists, and flush
+        // any events that arrived while the gateway was connecting.
+        threadCreateRefs.messaging = discordMessaging;
+        threadCreateRefs.platform = discordPlatform;
+        const queuedThreadCreates = state.pendingThreadCreates.splice(0);
+        for (const ev of queuedThreadCreates) {
+          processThreadCreate(ev);
+        }
 
         // Wire reaction passthrough
         state.reactionPassthroughRef.current = (ev) => {

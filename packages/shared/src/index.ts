@@ -132,6 +132,7 @@ export {
   mergeAgentToAgentAllowPatterns,
 } from "./agent-to-agent-policy";
 export { effectiveSpawnSubagentsEnabled } from "./spawn-subagents-policy";
+export { effectiveThreadSubagentsEnabled } from "./thread-subagents-policy";
 export {
   agentMayInvokeSubagentSpawnByAllowlist,
   effectiveSubagentSpawnAllowedAgentIds,

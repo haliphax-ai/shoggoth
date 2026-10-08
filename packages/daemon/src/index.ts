@@ -78,6 +78,7 @@ import { createToolRunStore } from "./sessions/tool-run-store";
 import { registerPlatform as registerMessagingPlatform } from "@shoggoth/messaging";
 import { registerPlatform, stopAllPlatforms } from "./platforms/platform-registry";
 import { reconcilePersistentSubagents } from "./subagent/reconcile-persistent-subagents";
+import { handlePlatformThreadCreate } from "./subagent/thread-subagent-autocreate";
 import { messageToolContextRef } from "./messaging/message-tool-context-ref";
 import { OOB_SCHEMA_NO_SENDER, OOB_NO_SENDER_GUIDANCE } from "./messaging/oob-response-schemas";
 import {
@@ -902,7 +903,9 @@ void (async () => {
   const serviceToolDispatcher = new ServiceToolDispatcher(serviceRegistry);
   const serviceToolRegistry = createServiceToolRegistry(serviceRegistry, serviceToolDispatcher);
 
-  const platformDeps: PlatformDeps = {
+  const platformDeps: PlatformDeps & {
+    handleThreadCreate?: (input: any) => Promise<any>;
+  } = {
     hitlStack,
     policyEngine,
     hitlConfigRef: hitlRef,
@@ -955,6 +958,24 @@ void (async () => {
         sessionManager,
         sessions,
       })) as PlatformDeps["reconcilePersistentSubagents"],
+    // Core ownership of automatic thread-based subagent session creation: platforms
+    // forward thread-create events with platform callbacks; all decisions live here.
+    handleThreadCreate: (input: any) =>
+      handlePlatformThreadCreate({
+        db: input.db,
+        config: configRef.current,
+        sessionManager,
+        sessions,
+        threadId: input.threadId,
+        parentChannelId: input.parentChannelId,
+        guildId: input.guildId,
+        platform: {
+          resolveSessionForChannel: input.resolveSessionForChannel,
+          registerPlatformThreadBinding: input.registerPlatformThreadBinding,
+          subscribeSubagentSession: input.subscribeSubagentSession,
+          sendStatusMessage: input.sendStatusMessage,
+        },
+      }),
     noticeResolver: daemonNotice as (key: string, params?: Record<string, unknown>) => string,
   };
 

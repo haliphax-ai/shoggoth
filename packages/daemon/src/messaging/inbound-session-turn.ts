@@ -2,6 +2,7 @@ import type { SessionToolLoopFailoverState } from "../sessions/session-tool-loop
 import { createSessionStore } from "../sessions/session-store";
 import { deliverSubagentResult } from "../control/integration-ops";
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
+import { shouldSkipThreadSessionSentinel } from "../subagent/thread-subagent-autocreate";
 import {
   executeSessionAgentTurn,
   type ExecuteSessionAgentTurnInput,
@@ -135,6 +136,29 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
 
   try {
     const turn = await options.buildTurn();
+
+    // Thread sentinel (core inbound path, upstream of the turn): a thread-bound
+    // subagent session ignores a leading inbound message that is only "." while it
+    // has no transcript history yet — lets the operator set the thread up (e.g.
+    // switch the model) before submitting a real prompt. The session stays bound and
+    // later messages fire turns normally.
+    if (
+      turn.db &&
+      turn.sessionId &&
+      typeof turn.userContent === "string" &&
+      shouldSkipThreadSessionSentinel({
+        db: turn.db,
+        sessions: createSessionStore(turn.db),
+        sessionId: turn.sessionId,
+        body: turn.userContent,
+      })
+    ) {
+      log.debug("inbound_session_turn.thread_sentinel_skipped", {
+        sessionId: turn.sessionId,
+      });
+      return;
+    }
+
     const turnResult = await executeSessionAgentTurn({
       ...turn,
       stream: streamPusher

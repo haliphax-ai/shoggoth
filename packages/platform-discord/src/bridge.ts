@@ -11,9 +11,14 @@ import {
   type DiscordInboundEvent,
   type DiscordReactionAddEvent,
   type DiscordSessionRoute,
+  type DiscordThreadCreateEvent,
 } from "./adapter";
 
-export type { DiscordReactionAddEvent, DiscordSessionRoute } from "./adapter";
+export type {
+  DiscordReactionAddEvent,
+  DiscordSessionRoute,
+  DiscordThreadCreateEvent,
+} from "./adapter";
 import type { DiscordInteractionEvent } from "./interaction";
 import { connectDiscordGateway, type DiscordGatewaySession } from "./gateway-client";
 import { DISCORD_GATEWAY_INTENTS_DEFAULT } from "./gateway-payload";
@@ -123,6 +128,8 @@ export interface StartDiscordMessagingOptions {
   readonly onMessageReactionAdd?: (ev: DiscordReactionAddEvent) => void;
   /** Gateway `INTERACTION_CREATE` (e.g. slash commands). */
   readonly onInteractionCreate?: (ev: DiscordInteractionEvent) => void;
+  /** Gateway `THREAD_CREATE` — forwarded verbatim; the daemon core decides what to do. */
+  readonly onThreadCreate?: (ev: DiscordThreadCreateEvent) => void;
   /** Filled with resolved bot user id after connect (ignore reaction events from this user). */
   readonly reactionBotUserIdRef?: { current: string | undefined };
   readonly deps?: DiscordMessagingDeps;
@@ -310,6 +317,7 @@ export async function startDiscordMessagingIfConfigured(
     onMessageCreate,
     onMessageReactionAdd: opts.onMessageReactionAdd,
     onInteractionCreate: opts.onInteractionCreate,
+    onThreadCreate: opts.onThreadCreate,
   });
   gatewayRef.current = gateway;
 

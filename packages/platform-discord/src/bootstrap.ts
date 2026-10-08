@@ -2,6 +2,7 @@ import {
   startDiscordMessagingIfConfigured,
   type DiscordMessagingRuntime,
   type DiscordReactionAddEvent,
+  type DiscordThreadCreateEvent,
 } from "./bridge";
 import type { DiscordInteractionEvent } from "./interaction";
 import { isPlatformEnabled, type ShoggothConfig } from "@shoggoth/shared";
@@ -30,6 +31,8 @@ export interface StartDaemonDiscordMessagingOptions {
   readonly botToken: string | undefined;
   readonly onMessageReactionAdd?: (ev: DiscordReactionAddEvent) => void;
   readonly onInteractionCreate?: (ev: DiscordInteractionEvent) => void;
+  /** Gateway `THREAD_CREATE` — forwarded verbatim; the daemon core decides what to do. */
+  readonly onThreadCreate?: (ev: DiscordThreadCreateEvent) => void;
   readonly reactionBotUserIdRef?: { current: string | undefined };
   /** Daemon's notice resolver — wired into platform-discord's `setNoticeResolver` at startup. */
   readonly noticeResolver?: NoticeResolver;
@@ -73,6 +76,7 @@ export async function startDaemonDiscordMessaging(
     },
     onMessageReactionAdd: opts.onMessageReactionAdd,
     onInteractionCreate: opts.onInteractionCreate,
+    onThreadCreate: opts.onThreadCreate,
     reactionBotUserIdRef: opts.reactionBotUserIdRef,
   });
 

@@ -4,6 +4,7 @@ import {
   discordMessageCreateToInboundEvent,
   discordMessageReactionAddToEvent,
   discordInteractionCreateToEvent,
+  discordThreadCreateToInboundEvent,
 } from "../src/gateway-payload";
 
 describe("discordMessageCreateToInboundEvent", () => {
@@ -147,5 +148,46 @@ describe("discordInteractionCreateToEvent", () => {
       }),
       null,
     );
+  });
+});
+
+describe("discordThreadCreateToInboundEvent", () => {
+  it("maps a public thread (type 11) THREAD_CREATE payload", () => {
+    const ev = discordThreadCreateToInboundEvent({
+      id: "tid",
+      parent_id: "cid",
+      guild_id: "gid",
+      name: "my thread",
+      type: 11,
+    });
+    assert.ok(ev);
+    assert.equal(ev.kind, "thread_create");
+    assert.equal(ev.threadId, "tid");
+    assert.equal(ev.parentChannelId, "cid");
+    assert.equal(ev.guildId, "gid");
+    assert.equal(ev.name, "my thread");
+  });
+
+  it("maps a private thread (type 12) and news thread (type 10)", () => {
+    const priv = discordThreadCreateToInboundEvent({ id: "t2", parent_id: "c2", type: 12 });
+    assert.ok(priv);
+    assert.equal(priv.threadId, "t2");
+    assert.equal(priv.parentChannelId, "c2");
+    assert.equal(priv.guildId, undefined);
+
+    const news = discordThreadCreateToInboundEvent({ id: "t3", parent_id: "c3", type: 10 });
+    assert.ok(news);
+    assert.equal(news.threadId, "t3");
+  });
+
+  it("returns null for non-thread channel payloads", () => {
+    assert.equal(discordThreadCreateToInboundEvent({ id: "c1", parent_id: "x", type: 0 }), null);
+  });
+
+  it("returns null when id or parent_id is missing", () => {
+    assert.equal(discordThreadCreateToInboundEvent({ parent_id: "c1", type: 11 }), null);
+    assert.equal(discordThreadCreateToInboundEvent({ id: "t1", type: 11 }), null);
+    assert.equal(discordThreadCreateToInboundEvent(null), null);
+    assert.equal(discordThreadCreateToInboundEvent("nope"), null);
   });
 });

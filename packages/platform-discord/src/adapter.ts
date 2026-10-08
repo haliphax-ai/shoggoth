@@ -29,6 +29,18 @@ export interface DiscordInboundEvent {
   readonly threadId?: string;
 }
 
+/**
+ * Gateway `THREAD_CREATE`: a thread channel (type 10/11/12) created in a parent
+ * channel. Parsed as a dumb field mapping; routing decisions belong to the daemon.
+ */
+export interface DiscordThreadCreateEvent {
+  readonly kind: "thread_create";
+  readonly threadId: string;
+  readonly parentChannelId: string;
+  readonly guildId?: string;
+  readonly name?: string;
+}
+
 /** Gateway `MESSAGE_REACTION_ADD` (unicode or custom emoji). */
 export interface DiscordReactionAddEvent {
   readonly kind: "message_reaction_add";
