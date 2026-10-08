@@ -402,6 +402,73 @@ async function runPromptProxy(
   }
 }
 
+/**
+ * Shared parameter-modal logic for the canned-prompt flow, used by both the
+ * slug-dropdown handler (stage 2) and the `/prompt` slash command when the
+ * slug arrives as an argument. Select-menu pre-selection never fires the
+ * onchange event, so a slug WITH placeholders must open this modal directly
+ * instead of routing through a pre-selected dropdown (a dead end).
+ *
+ * - More than 5 placeholders → guard error, delivered per `guardStyle`:
+ *   in-place message update on the dropdown path, ephemeral slash response.
+ * - Placeholders present → type-9 modal with `custom_id`
+ *   `prompt_modal|<sessionId>|<slug>`, so stage 3 rebuilds the params from
+ *   the input custom_ids.
+ *
+ * Callers must only invoke this with a non-empty placeholders list; the
+ * no-placeholders shortcut (run the prompt directly) belongs to each caller.
+ */
+async function respondWithPromptParameterModal(
+  deps: DiscordInteractionHandlerDeps,
+  interactionId: string,
+  interactionToken: string,
+  sessionId: string,
+  slug: string,
+  placeholders: readonly string[],
+  guardStyle: "update-message" | "ephemeral-channel",
+): Promise<void> {
+  if (placeholders.length > 5) {
+    // Same wording on every path; only the delivery mechanics differ — the
+    // dropdown path updates message A in place, the slash path answers the
+    // command ephemerally.
+    await deps.transport.interactionCallback(interactionId, interactionToken, {
+      type:
+        guardStyle === "update-message"
+          ? INTERACTION_RESPONSE_UPDATE_MESSAGE
+          : INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+      data: {
+        content: `⚠️ Prompt \`${slug}\` has ${placeholders.length} parameters; Discord modals support at most 5.`,
+        components: [],
+        ...(guardStyle === "ephemeral-channel" ? { flags: 64 } : {}),
+      },
+    });
+    return;
+  }
+  // One text input per placeholder; the input custom_id carries the
+  // parameter name so the modal submit can rebuild the params record.
+  const components = placeholders.map((name) => ({
+    type: ACTION_ROW,
+    components: [
+      {
+        type: TEXT_INPUT,
+        custom_id: name,
+        label: name.slice(0, 32),
+        style: TEXT_INPUT_SHORT,
+        required: false, // empty values are valid; key must still be present
+        ...(placeholders.length === 1 ? { placeholder: `Value for ${name}` } : {}),
+      },
+    ],
+  }));
+  await deps.transport.interactionCallback(interactionId, interactionToken, {
+    type: INTERACTION_RESPONSE_MODAL,
+    data: {
+      title: `Prompt: ${slug}`.slice(0, 45),
+      custom_id: `${PROMPT_MODAL_PREFIX}${sessionId}|${slug}`,
+      components,
+    },
+  });
+}
+
 export interface DiscordInteractionHandlerDeps {
   readonly transport: Pick<
     DiscordRestTransport,
@@ -470,7 +537,9 @@ async function handleInteraction(
 
     // Stage 2: canned prompt slug dropdown selected. No placeholders →
     // defer-update (6) so message A becomes the final recap; placeholders →
-    // modal (9), after which stage 3 rewrites message A on submit.
+    // modal (9), after which stage 3 rewrites message A on submit. The
+    // /prompt slash command with a slug argument opens the same modal
+    // directly when the prompt has placeholders (bypassing this dropdown).
     if (customId.startsWith(PROMPT_SELECT_PREFIX)) {
       const sessionId = customId.slice(PROMPT_SELECT_PREFIX.length);
       const values = ev.data?.values;
@@ -489,32 +558,7 @@ async function handleInteraction(
           err: String(err),
         });
       }
-      if (placeholders.length > 5) {
-        await deps.transport.interactionCallback(ev.id, ev.token, {
-          type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
-          data: {
-            content: `⚠️ Prompt \`${slug}\` has ${placeholders.length} parameters; Discord modals support at most 5.`,
-            components: [],
-          },
-        });
-        return;
-      }
-      // One text input per placeholder; the input custom_id carries the
-      // parameter name so the modal submit can rebuild the params record.
-      const components = placeholders.map((name) => ({
-        type: ACTION_ROW,
-        components: [
-          {
-            type: TEXT_INPUT,
-            custom_id: name,
-            label: name.slice(0, 32),
-            style: TEXT_INPUT_SHORT,
-            required: false, // empty values are valid; key must still be present
-            ...(placeholders.length === 1 ? { placeholder: `Value for ${name}` } : {}),
-          },
-        ],
-      }));
-      if (components.length === 0) {
+      if (placeholders.length === 0) {
         // No placeholders — nothing to ask. ACK with DEFERRED_UPDATE (6)
         // rather than a fresh deferred message so message A itself is
         // updated into the final recap instead of being left behind.
@@ -529,17 +573,19 @@ async function handleInteraction(
         );
         return;
       }
-      // Message A stays visible as the dropdown while the modal is open —
-      // unavoidable, since Discord text inputs exist only inside modals.
-      // Stage 3 rewrites message A when the modal is submitted.
-      await deps.transport.interactionCallback(ev.id, ev.token, {
-        type: INTERACTION_RESPONSE_MODAL,
-        data: {
-          title: `Prompt: ${slug}`.slice(0, 45),
-          custom_id: `${PROMPT_MODAL_PREFIX}${sessionId}|${slug}`,
-          components,
-        },
-      });
+      // Placeholders present → shared parameter modal. Message A stays
+      // visible while the modal is open — unavoidable, since Discord text
+      // inputs exist only inside modals; stage 3 rewrites message A when
+      // the modal is submitted.
+      await respondWithPromptParameterModal(
+        deps,
+        ev.id,
+        ev.token,
+        sessionId,
+        slug,
+        placeholders,
+        "update-message",
+      );
       return;
     }
 
@@ -999,10 +1045,7 @@ async function handleInteraction(
     if (requestedSlug && requestedEntry && (requestedEntry.placeholders ?? []).length === 0) {
       // Slug given and the prompt takes no parameters: skip the dropdown
       // confirmation round-trip entirely and run it directly (deferred
-      // channel message → edit). A slug WITH placeholders keeps the
-      // pre-selected dropdown below (rather than jumping straight to the
-      // modal) so the operator can still switch slugs, and so the modal
-      // building logic stays in exactly one place (stage 2).
+      // channel message → edit).
       await runPromptProxy(
         deps,
         parsed.interactionId,
@@ -1018,25 +1061,34 @@ async function handleInteraction(
       );
       return;
     }
-    const options = prompts.map((p) => {
-      const preselected = p.slug === requestedSlug;
-      const entry: { label: string; value: string; default?: boolean } = {
-        label: p.slug.slice(0, 100),
-        value: p.slug,
-      };
-      if (preselected) entry.default = true;
-      return entry;
-    });
+    if (requestedSlug && requestedEntry) {
+      // Slug given and the prompt HAS placeholders: go straight to the
+      // parameter modal as the initial interaction response. A pre-selected
+      // dropdown would be a dead end — Discord never fires a select menu's
+      // onchange for `default_values` pre-selection, so the flow could not
+      // advance to the modal.
+      await respondWithPromptParameterModal(
+        deps,
+        parsed.interactionId,
+        parsed.interactionToken,
+        sessionId,
+        requestedSlug,
+        requestedEntry.placeholders ?? [],
+        "ephemeral-channel",
+      );
+      return;
+    }
+    // Slug omitted — stage 1: interactive selection via the dropdown.
+    const options = prompts.map((p) => ({
+      label: p.slug.slice(0, 100),
+      value: p.slug,
+    }));
     const selectComponent: Record<string, unknown> = {
       type: STRING_SELECT,
       custom_id: `${PROMPT_SELECT_PREFIX}${sessionId}`,
       placeholder: "Select a canned prompt",
       options,
     };
-    if (requestedSlug) {
-      // Discord string-select pre-selection: default_values carries both fields.
-      selectComponent.default_values = [{ name: requestedSlug, value: requestedSlug }];
-    }
     await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
       type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
       data: {
