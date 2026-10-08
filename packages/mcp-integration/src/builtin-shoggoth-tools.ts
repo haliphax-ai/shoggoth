@@ -18,6 +18,7 @@ import {
   fetchArgs,
   kvArgs,
   timerArgs,
+  logsArgs,
 } from "./builtin-tool-schemas";
 
 /**
@@ -233,6 +234,12 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
           },
           required: ["path", "pattern"],
         },
+      },
+      {
+        name: "logs",
+        description:
+          "View Shoggoth daemon logs (date-stamped JSON lines) via jq filtering. Hidden by default — enable via builtin-discover.",
+        inputSchema: logsArgs,
       },
       {
         name: "replace",

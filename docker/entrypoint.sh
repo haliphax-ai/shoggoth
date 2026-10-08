@@ -35,6 +35,8 @@ fix_dir /var/lib/shoggoth/operator 0700 shoggoth shoggoth
 fix_dir /var/lib/shoggoth/skills 0755 shoggoth shoggoth
 fix_dir /var/lib/shoggoth/media/inbound 0750 shoggoth shoggoth
 fix_dir /run/shoggoth 0750 shoggoth shoggoth
+# Daemon log files (JSON lines for builtin-logs); agent UID must not read this tree.
+fix_dir /var/log/shoggoth 0750 shoggoth shoggoth
 
 # Vault key: restrict to daemon user only
 if [ -f /var/lib/shoggoth/daemon/vault.key ]; then

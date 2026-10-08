@@ -22,4 +22,6 @@ export const LAYOUT = {
   inboundMediaRoot: "/var/lib/shoggoth/media/inbound",
   runDir: "/run/shoggoth",
   controlSocket: "/run/shoggoth/control.sock",
+  /** Daemon log files (JSON lines). Daemon-writable only — agent UID must not read this tree. */
+  logDir: "/var/log/shoggoth",
 } as const;

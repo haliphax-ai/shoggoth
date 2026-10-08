@@ -25,7 +25,7 @@ describe("aggregateMcpCatalogs", () => {
         ],
       },
     ]);
-    assert.equal(agg.tools.length, 25);
+    assert.equal(agg.tools.length, 26);
     const read = agg.tools.find((t) => t.namespacedName === "a-read");
     assert.ok(read);
     assert.equal(read?.originalName, "read");
