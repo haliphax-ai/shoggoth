@@ -1,10 +1,15 @@
 import type { Logger } from "@shoggoth/shared";
-import type { DiscordInboundEvent, DiscordReactionAddEvent } from "./adapter";
+import type {
+  DiscordInboundEvent,
+  DiscordReactionAddEvent,
+  DiscordThreadCreateEvent,
+} from "./adapter";
 import type { DiscordInteractionEvent } from "./interaction";
 import {
   discordMessageCreateToInboundEvent,
   discordMessageReactionAddToEvent,
   discordInteractionCreateToEvent,
+  discordThreadCreateToInboundEvent,
   discordReadyPayloadToBotUserId,
   DISCORD_GATEWAY_INTENTS_DEFAULT,
 } from "./gateway-payload";
@@ -16,6 +21,8 @@ export interface DiscordGatewayConnectOptions {
   readonly onMessageCreate: (ev: DiscordInboundEvent) => void;
   readonly onMessageReactionAdd?: (ev: DiscordReactionAddEvent) => void;
   readonly onInteractionCreate?: (ev: DiscordInteractionEvent) => void;
+  /** Gateway `THREAD_CREATE` (thread channel created in a parent channel). */
+  readonly onThreadCreate?: (ev: DiscordThreadCreateEvent) => void;
   /** Default false: ignore bot-authored messages to avoid accidental feedback loops. */
   readonly allowBotMessages?: boolean;
   readonly fetchFn?: typeof fetch;
@@ -172,6 +179,9 @@ export async function connectDiscordGateway(
     } else if (msg.t === "INTERACTION_CREATE") {
       const ev = discordInteractionCreateToEvent(msg.d);
       if (ev) options.onInteractionCreate?.(ev);
+    } else if (msg.t === "THREAD_CREATE") {
+      const ev = discordThreadCreateToInboundEvent(msg.d);
+      if (ev) options.onThreadCreate?.(ev);
     }
   }
 

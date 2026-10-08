@@ -134,6 +134,14 @@ export {
 } from "./hitl/pending-actions-store";
 export { invokeControlRequest, type InvokeControlRequestInput } from "./control/control-client";
 export { SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS } from "./subagent/subagent-constants";
+export {
+  handlePlatformThreadCreate,
+  shouldSkipThreadSessionSentinel,
+  THREAD_SUBAGENT_SESSION_LIFETIME_MS,
+  type PlatformThreadCreateInput,
+  type ThreadCreateHandlingResult,
+  type ThreadSubagentPlatformDeps,
+} from "./subagent/thread-subagent-autocreate";
 export { resolveSessionTargetFromCliArg } from "./control/resolve-session-cli-target";
 export { createLogger, type Logger, type LogLevel, type LogFields } from "./logging";
 export { createHitlAutoApproveGate, type HitlAutoApproveGate } from "./hitl/hitl-auto-approve";

@@ -2,6 +2,7 @@ import type {
   DiscordInboundAttachment,
   DiscordInboundEvent,
   DiscordReactionAddEvent,
+  DiscordThreadCreateEvent,
 } from "./adapter";
 import type { DiscordInteractionEvent } from "./interaction";
 
@@ -89,6 +90,31 @@ export function discordMessageCreateToInboundEvent(
     attachments,
     referencedMessageId,
     threadId,
+  };
+}
+
+/**
+ * Maps a Discord Gateway `THREAD_CREATE` `d` payload (a thread channel object:
+ * type 10 news thread / 11 public thread / 12 private thread) to our inbound event
+ * shape. Returns null for payloads missing required fields. Field mapping only —
+ * no routing or policy decisions.
+ */
+export function discordThreadCreateToInboundEvent(d: unknown): DiscordThreadCreateEvent | null {
+  const o = asRecord(d);
+  if (!o) return null;
+  const threadId = o.id;
+  const parentChannelId = o.parent_id;
+  if (typeof threadId !== "string" || typeof parentChannelId !== "string") return null;
+  const type = o.type;
+  if (type !== 10 && type !== 11 && type !== 12) return null;
+  const guildId = o.guild_id;
+  const name = o.name;
+  return {
+    kind: "thread_create",
+    threadId,
+    parentChannelId,
+    guildId: typeof guildId === "string" ? guildId : undefined,
+    name: typeof name === "string" ? name : undefined,
   };
 }
 

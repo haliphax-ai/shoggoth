@@ -84,6 +84,28 @@ export interface PlatformDeps {
     readonly config: ShoggothConfig;
     readonly ext: unknown;
   }) => { restored: number; expiredKilled: number };
+  /**
+   * Core entry point for automatic thread-based subagent session creation. Platform
+   * plugins forward platform thread-create events with platform callbacks (channel →
+   * session resolution, thread binding, bus subscription, status-message delivery);
+   * the daemon core owns all decisions (toggle, guards, session creation, status body).
+   */
+  readonly handleThreadCreate?: (input: {
+    readonly db: unknown;
+    readonly config: ShoggothConfig;
+    readonly threadId: string;
+    readonly parentChannelId: string;
+    readonly guildId?: string;
+    readonly resolveSessionForChannel: (channelId: string, guildId?: string) => string | undefined;
+    readonly registerPlatformThreadBinding: (threadId: string, sessionId: string) => () => void;
+    readonly subscribeSubagentSession: (sessionId: string) => () => void;
+    readonly sendStatusMessage: (sessionId: string, body: string) => Promise<void>;
+  }) => Promise<{
+    readonly created: boolean;
+    readonly sessionId?: string;
+    readonly parentSessionId?: string;
+    readonly reason?: string;
+  }>;
   readonly noticeResolver: (key: string, params?: Record<string, unknown>) => string;
 }
 
