@@ -69,7 +69,20 @@ export async function runQueueCli(argv: string[]): Promise<void> {
       payload.by = "index";
       payload.index = Number(args.index);
     } else if (args.range) {
-      const [s, e] = args.range.split("-").map(Number);
+      const parts = args.range.split("-");
+      const s = Number(parts[0]);
+      const e = Number(parts[1]);
+      const valid =
+        parts.length === 2 &&
+        parts[0].trim() !== "" &&
+        parts[1].trim() !== "" &&
+        Number.isFinite(s) &&
+        Number.isFinite(e);
+      if (!valid) {
+        console.error("error: --range must be two numbers separated by '-' (e.g. 3-7)");
+        process.exitCode = 1;
+        return;
+      }
       payload.by = "range";
       payload.start = s;
       payload.end = e;
