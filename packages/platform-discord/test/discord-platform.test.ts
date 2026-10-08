@@ -2441,4 +2441,114 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     assert.ok(edit.content.includes("✅ Prompt"), "edit should carry the prompt ack");
     assert.ok(!edit.content.includes(marker), "edit must not repeat the assistant reply");
   });
+
+  it("canned prompt with streaming enabled streams the reply instead of posting it at once", async () => {
+    const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
+    const marker = "streamed-reply-marker";
+
+    // At-once outbound posts vs streaming message edits, in call order.
+    const sent: { body: string }[] = [];
+    const events: string[] = [];
+    const streamPushes: string[] = [];
+    let finalBody: string | undefined;
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: stubDiscordGatewaySession,
+      discordBotUserId: undefined,
+      outbound: {
+        sendDiscord: async (m) => {
+          sent.push({ body: m.body });
+          return { channelId: "c", messageId: "mid" };
+        },
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      streamingForSession: () => ({
+        start: async () => {
+          events.push("stream-start");
+          return {
+            setFullContent: async (text: string) => {
+              events.push("stream-finalize");
+              finalBody = text;
+            },
+            pushUpdate: async (text: string) => {
+              events.push("stream-push");
+              streamPushes.push(text);
+            },
+          };
+        },
+      }),
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      registerPlatformThreadBinding: () => () => {},
+      notifyAgentTypingForSession: async () => {
+        events.push("typing");
+      },
+      routes: [{ channelId: "c1", sessionId: sessionUrn }],
+    };
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: defaultConfig(tmp),
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      env: { SHOGGOTH_DISCORD_STREAM: "1" },
+      deps: {
+        createToolCallingClient: () => ({
+          async completeWithTools(input: {
+            onTextDelta?: (delta: string, accumulated: string) => void;
+          }) {
+            events.push("model-call");
+            input.onTextDelta?.("streamed ", "streamed ");
+            input.onTextDelta?.("reply", marker);
+            return {
+              content: marker,
+              toolCalls: [],
+              usedModel: "m1",
+              usedProviderId: "p1",
+            };
+          },
+        }),
+      },
+    });
+
+    // Mirrors the daemon prompt op: the canned prompt turn runs through the
+    // messaging_surface delivery path.
+    const result = await platform.runSessionModelTurn({
+      sessionId: sessionUrn,
+      userContent: "canned prompt run",
+      delivery: { kind: "messaging_surface", userId: "u-1", replyToMessageId: undefined },
+    });
+    await platform.stop();
+
+    assert.ok(result.latestAssistantText.includes(marker));
+
+    // The stream handle (placeholder message) is started before the typing
+    // indicator and before the turn runs…
+    assert.ok(
+      events.indexOf("stream-start") >= 0 &&
+        events.indexOf("stream-start") < events.indexOf("typing"),
+      "stream placeholder must be posted before the typing indicator",
+    );
+    assert.ok(events.indexOf("stream-start") < events.indexOf("model-call"));
+
+    // …model deltas were pushed as live stream edits…
+    assert.ok(
+      streamPushes.some((p) => p.includes(marker)),
+      "model text deltas should reach the stream handle as live updates",
+    );
+
+    // …and the stream was finalized with the formatted reply.
+    assert.ok(
+      finalBody?.includes(marker),
+      "stream should be finalized with the full formatted reply",
+    );
+
+    // The reply must NOT also be posted at once via the outbound surface.
+    assert.strictEqual(
+      sent.filter((s) => s.body.includes(marker)).length,
+      0,
+      "streamed reply must not be double-posted",
+    );
+  });
 });
