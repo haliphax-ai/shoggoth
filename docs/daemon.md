@@ -329,6 +329,7 @@ Elevation grants temporary privileged execution to a session.
 
 - `schedule(db, timer)` — inserts a timer row and adds to an in-memory min-heap. Reschedules the next `setTimeout`.
 - `cancel(db, id)` — marks fired in DB, removes from heap.
+- `cancelByAnchorSession(sessionId)` — cancels all unfired timers anchored to a session; idempotent, returns count canceled.
 - `restore(db)` — on startup, fires all past-due timers immediately and schedules the rest.
 - `shutdown()` — clears the pending timeout.
 

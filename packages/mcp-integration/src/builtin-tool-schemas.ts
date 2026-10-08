@@ -630,7 +630,7 @@ export const kvArgs = {
 export const timerArgs = {
   type: "object",
   description:
-    "Schedule, cancel, or list deferred timer actions. Timers fire as user-turn messages at the specified time. Relative durations: Xs, Xm, Xh, Xd. Min 2 minutes, max 30 days. Per-session cap: 50 active timers.",
+    "Schedule, cancel, or list deferred timer actions. Timers fire as user-turn messages at the specified time. Relative durations: Xs, Xm, Xh, Xd. Min 2 minutes, max 30 days. Per-session cap: 50 active timers. Optional anchor_session auto-cancels the timer when the anchored session terminates.",
   properties: {
     action: {
       type: "string",
@@ -649,6 +649,11 @@ export const timerArgs = {
     message: {
       type: "string",
       description: "Message content delivered when the timer fires. Default: the label.",
+    },
+    anchor_session: {
+      type: "string",
+      description:
+        "Optional session ID to anchor this timer to. When the anchored session terminates, the timer is automatically canceled. The session must exist and not be terminated.",
     },
     id: {
       type: "string",
