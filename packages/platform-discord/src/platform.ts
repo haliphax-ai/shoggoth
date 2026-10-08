@@ -11,6 +11,7 @@ import {
   type SystemContext,
 } from "@shoggoth/shared";
 import {
+  createCoalescingStreamPusher,
   createHitlPendingResolutionStack,
   createPolicyEngine,
   createSessionStore,
@@ -34,8 +35,10 @@ import {
   type HitlPendingStack,
   type PolicyEngine,
   type HitlConfigRef,
+  type ExecuteSessionAgentTurnInput,
   type SessionAgentTurnResult,
   type SessionModelTurnDelivery,
+  type StreamHandle,
   type PlatformAssistantDeps,
   resolveModel,
   shouldSkipThreadSessionSentinel,
@@ -560,7 +563,7 @@ export async function startDiscordPlatform(
 
       const executeTurn = (
         afterHitlQueued?: (row: PendingActionRow) => void | Promise<void>,
-        streamOverride?: { streamModel: boolean },
+        streamOverride?: ExecuteSessionAgentTurnInput["stream"],
       ) =>
         executeSessionAgentTurn({
           db: opts.db,
@@ -595,11 +598,44 @@ export async function startDiscordPlatform(
 
       if (input.delivery.kind === "messaging_surface") {
         const delivery = input.delivery;
+
+        // When streaming is enabled, post the placeholder ("…") BEFORE starting
+        // the typing indicator — Discord cancels typing when a bot posts a
+        // message — and coalesce model text deltas into live edits of that
+        // message, matching the standard inbound-turn pathway.
+        let surfaceStreamHandle: StreamHandle | undefined;
+        if (streamEnabled()) {
+          const streamingOutbound = opts.discord.streamingForSession(sid);
+          if (streamingOutbound) {
+            try {
+              const raw = await streamingOutbound.start();
+              surfaceStreamHandle = {
+                setFullContent: (text: string) => raw.setFullContent(text),
+                pushUpdate: (text: string) => raw.pushUpdate(text),
+              };
+            } catch (e) {
+              opts.logger.warn("discord.platform.stream_start_failed", {
+                err: String(e),
+                sessionId: sid,
+              });
+            }
+          }
+        }
+        const surfaceStreamPusher = surfaceStreamHandle
+          ? createCoalescingStreamPusher((s) => surfaceStreamHandle!.pushUpdate(s), streamMinMs())
+          : undefined;
+
         await adapter.withTypingIndicator(sid, async () => {
-          const surfaceStreamModel = env.SHOGGOTH_DISCORD_STREAM === "1";
           turnResult = await executeTurn(
             buildAfterHitlQueued(delivery),
-            surfaceStreamModel ? { streamModel: true } : undefined,
+            surfaceStreamPusher
+              ? {
+                  streamModel: true,
+                  onModelTextDelta: (t: string) => surfaceStreamPusher.push(t.trim() ? t : "…"),
+                }
+              : streamEnabled()
+                ? { streamModel: true }
+                : undefined,
           );
           const cfg = opts.configRef?.current ?? opts.config;
           const fullBody = formatAssistantReply(
@@ -609,9 +645,19 @@ export async function startDiscordPlatform(
             turnResult.latestAssistantText,
             turnResult.failoverMeta,
           );
-          await adapter.sendBody(sid, fullBody, {
-            replyTo: delivery.replyToMessageId,
-          });
+          if (surfaceStreamPusher && surfaceStreamHandle) {
+            await surfaceStreamPusher.flush();
+            await surfaceStreamHandle.setFullContent(fullBody);
+            // Stream edits can't carry file attachments — send as follow-up.
+            const attachments = turnResult.showAttachments;
+            if (attachments?.length) {
+              await adapter.sendBody(sid, "", { attachments: [...attachments] });
+            }
+          } else {
+            await adapter.sendBody(sid, fullBody, {
+              replyTo: delivery.replyToMessageId,
+            });
+          }
         });
         return;
       }
