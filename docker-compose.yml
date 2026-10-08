@@ -13,6 +13,9 @@ services:
         max-size: "10m"
         max-file: "5"
         tag: "shoggoth"
+    # Optional: add `secrets: [ discord_token ]` and top-level `secrets:` — files under /run/secrets (0700 root).
+    # Copy needed files into /var/lib/shoggoth/operator (0700 shoggoth) via a custom entrypoint if the daemon
+    # must read them as user shoggoth; never expose operator paths to the agent UID/GID (900).
     volumes:
       - shoggoth-daemon:/var/lib/shoggoth/daemon
       - shoggoth-state:/var/lib/shoggoth/state
@@ -21,17 +24,14 @@ services:
       - shoggoth-workspaces:/var/lib/shoggoth/workspaces
       # Config is loaded recursively from /etc/shoggoth/config.d in full-path alphabetical order.
       # Base config (operator-managed, read-only):
-      # - ./config/base:/etc/shoggoth/config.d/base:ro
+      - ./config/base:/etc/shoggoth/config.d/base:ro
       # Dynamic config (daemon-writable at runtime):
-      # - ./config/dynamic:/etc/shoggoth/config.d/dynamic
+      - ./config/dynamic:/etc/shoggoth/config.d/dynamic
     # Root here is required so entrypoint can chown/chmod volume roots, then drop to shoggoth (default UID 1000) with setpriv
     # so SETUID/SETGID caps survive. Builtins spawn agent children as the agent UID/GID (default 900).
     cap_add:
       - SETUID
       - SETGID
-    # Optional: add `secrets: [ discord_token ]` and top-level `secrets:` — files under /run/secrets (0700 root).
-    # Copy needed files into /var/lib/shoggoth/operator (0700 shoggoth) via a custom entrypoint if the daemon
-    # must read them as user shoggoth; never expose operator paths to the agent UID/GID (901).
     user: "0:0"
 
 volumes:
