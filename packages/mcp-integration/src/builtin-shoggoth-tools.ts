@@ -179,7 +179,7 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
       {
         name: "timer",
         description:
-          "Schedule, cancel, or list deferred timer actions. Timers fire as user-turn messages at the specified time. Relative durations: Xs, Xm, Xh, Xd. Min 2 minutes, max 30 days. Per-session cap: 50 active timers.",
+          "Schedule, cancel, or list deferred timer actions. Timers fire as user-turn messages at the specified time. Relative durations: Xs, Xm, Xh, Xd. Min 2 minutes, max 30 days. Per-session cap: 50 active timers. Optional anchor_session auto-cancels the timer when the anchored session terminates.",
         inputSchema: timerArgs,
       },
       {

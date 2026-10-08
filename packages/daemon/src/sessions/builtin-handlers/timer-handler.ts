@@ -17,6 +17,10 @@ export function setTimerScheduler(scheduler: TimerScheduler): void {
   schedulerRef = scheduler;
 }
 
+export function getTimerScheduler(): TimerScheduler | undefined {
+  return schedulerRef;
+}
+
 export function register(registry: BuiltinToolRegistry): void {
   registry.register("timer", timerHandler);
 }
@@ -53,6 +57,22 @@ function timerSet(
   const label = String(args.label ?? "").trim();
   if (!label) {
     return { resultJson: JSON.stringify({ error: "label is required" }) };
+  }
+
+  const anchorRaw = args.anchor_session;
+  let sessionAnchor: string | null = null;
+  if (anchorRaw !== undefined && anchorRaw !== null && String(anchorRaw).trim() !== "") {
+    const anchorId = String(anchorRaw).trim();
+    const sess = ctx.db.prepare("SELECT status FROM sessions WHERE id = ?").get(anchorId) as
+      | { status: string }
+      | undefined;
+    if (!sess) {
+      return { resultJson: JSON.stringify({ error: `unknown session: ${anchorId}` }) };
+    }
+    if (sess.status === "terminated") {
+      return { resultJson: JSON.stringify({ error: `session ${anchorId} is terminated` }) };
+    }
+    sessionAnchor = anchorId;
   }
 
   const atRaw = args.at;
@@ -114,9 +134,9 @@ function timerSet(
     label,
     fireAt: fireAtIso,
     message,
+    sessionAnchor,
   });
 
-  // --- MODIFICATION START ---
   const allTimers = scheduler.listForSession(ctx.db, ctx.sessionId);
   return {
     resultJson: JSON.stringify({
@@ -129,10 +149,10 @@ function timerSet(
         label: t.label,
         fireAt: t.fireAt,
         message: t.message,
+        sessionAnchor: t.sessionAnchor,
       })),
     }),
   };
-  // --- MODIFICATION END ---
 }
 
 function timerCancel(
@@ -174,6 +194,7 @@ function timerList(ctx: BuiltinToolContext, scheduler: TimerScheduler): { result
         label: t.label,
         fireAt: t.fireAt,
         message: t.message,
+        sessionAnchor: t.sessionAnchor,
       })),
     }),
   };

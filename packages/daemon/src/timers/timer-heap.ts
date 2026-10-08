@@ -8,6 +8,7 @@ export interface TimerEntry {
   readonly label: string;
   readonly fireAt: string; // ISO 8601 UTC
   readonly message: string;
+  readonly sessionAnchor?: string | null;
 }
 
 /**

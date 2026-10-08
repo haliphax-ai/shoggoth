@@ -14,6 +14,7 @@ interface TimerRecord {
   readonly label: string;
   readonly fireAt: string; // ISO 8601 UTC
   readonly message: string;
+  readonly sessionAnchor?: string | null;
 }
 
 type TimerDeliveryFn = (sessionId: string, message: string) => Promise<void>;
@@ -38,9 +39,16 @@ export class TimerScheduler {
   schedule(db: Database.Database, timer: TimerRecord): void {
     this.db = db;
     db.prepare(
-      `INSERT INTO timers (id, session_id, label, fire_at, message)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run(timer.id, timer.sessionId, timer.label, timer.fireAt, timer.message);
+      `INSERT INTO timers (id, session_id, label, fire_at, message, session_anchor)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      timer.id,
+      timer.sessionId,
+      timer.label,
+      timer.fireAt,
+      timer.message,
+      timer.sessionAnchor ?? null,
+    );
 
     let buf = this.pendingTimers.get(timer.sessionId);
     if (!buf) {
@@ -67,6 +75,7 @@ export class TimerScheduler {
         label: timer.label,
         fireAt: timer.fireAt,
         message: timer.message,
+        sessionAnchor: timer.sessionAnchor,
       });
     }
 
@@ -103,11 +112,25 @@ export class TimerScheduler {
     return true;
   }
 
+  /** Cancel all unfired timers anchored to a session. Idempotent — safe when no timers are anchored. Returns count canceled. */
+  cancelByAnchorSession(sessionId: string): number {
+    const db = this.db;
+    if (!db) return 0;
+    const rows = db
+      .prepare("SELECT id FROM timers WHERE session_anchor = ? AND fired = 0")
+      .all(sessionId) as Array<{ id: string }>;
+    let count = 0;
+    for (const r of rows) {
+      if (this.cancel(db, r.id)) count += 1;
+    }
+    return count;
+  }
+
   /** List active (unfired) timers for a session. */
   listForSession(db: Database.Database, sessionId: string): TimerRecord[] {
     const rows = db
       .prepare(
-        "SELECT id, session_id, label, fire_at, message FROM timers WHERE session_id = ? AND fired = 0 ORDER BY fire_at ASC",
+        "SELECT id, session_id, label, fire_at, message, session_anchor FROM timers WHERE session_id = ? AND fired = 0 ORDER BY fire_at ASC",
       )
       .all(sessionId) as Array<{
       id: string;
@@ -115,6 +138,7 @@ export class TimerScheduler {
       label: string;
       fire_at: string;
       message: string;
+      session_anchor: string | null;
     }>;
     return rows.map((r) => ({
       id: r.id,
@@ -122,6 +146,7 @@ export class TimerScheduler {
       label: r.label,
       fireAt: r.fire_at,
       message: r.message,
+      sessionAnchor: r.session_anchor,
     }));
   }
 
@@ -138,7 +163,7 @@ export class TimerScheduler {
     this.db = db;
     const rows = db
       .prepare(
-        "SELECT id, session_id, label, fire_at, message FROM timers WHERE fired = 0 ORDER BY fire_at ASC",
+        "SELECT id, session_id, label, fire_at, message, session_anchor FROM timers WHERE fired = 0 ORDER BY fire_at ASC",
       )
       .all() as Array<{
       id: string;
@@ -146,6 +171,7 @@ export class TimerScheduler {
       label: string;
       fire_at: string;
       message: string;
+      session_anchor: string | null;
     }>;
 
     const now = new Date().toISOString();
@@ -156,6 +182,7 @@ export class TimerScheduler {
         label: r.label,
         fireAt: r.fire_at,
         message: r.message,
+        sessionAnchor: r.session_anchor,
       };
       if (r.fire_at <= now) {
         await this.fireTimer(db, entry);

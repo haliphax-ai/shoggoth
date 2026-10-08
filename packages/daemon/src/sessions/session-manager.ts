@@ -17,6 +17,7 @@ import type Database from "better-sqlite3";
 import { ensureAgentWorkspaceLayout } from "../workspaces/agent-workspace-layout";
 import { resolveAgentCreds } from "../agent-creds";
 import type { SessionStore } from "./session-store";
+import { getTimerScheduler } from "./builtin-handlers/timer-handler";
 
 export type SpawnSessionResult = {
   sessionId: string;
@@ -184,6 +185,7 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
     kill(sessionId) {
       options.agentTokens.revoke(sessionId);
       options.sessions.update(sessionId, { status: "terminated" });
+      getTimerScheduler()?.cancelByAnchorSession(sessionId);
     },
 
     attachPromptStack(sessionId, stack) {
