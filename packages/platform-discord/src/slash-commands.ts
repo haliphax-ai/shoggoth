@@ -331,9 +331,7 @@ async function runPromptProxy(
       await finish(`⚠️ Prompt failed: ${res.error ?? "unknown error"}`);
       return;
     }
-    const reply = (res.result as { reply?: string } | undefined)?.reply;
-    const body = reply ? `\n\n${reply.slice(0, 1500)}` : "";
-    await finish(`✅ Prompt \`${options.slug}\` sent to \`${payload.session_id}\`.${body}`);
+    await finish(`✅ Prompt \`${options.slug}\` sent to \`${payload.session_id}\`.`);
   } catch (err) {
     await finish(`⚠️ Prompt failed: ${String(err)}`);
   }

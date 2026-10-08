@@ -38,6 +38,8 @@ import {
 import type { PendingActionRow } from "../src/daemon-types";
 import type { DiscordMessagingRuntime } from "../src/bridge";
 import { setNoticeResolver } from "../src/notices";
+import { createDiscordInteractionHandler } from "../src/slash-commands";
+import type { DiscordInteractionEvent } from "../src/interaction";
 
 // Wire daemon notice resolver so platform-discord's daemonNotice() works in tests.
 loadDaemonNotices();
@@ -2212,5 +2214,118 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     );
 
     assert.ok(result.latestAssistantText.length > 0);
+  });
+
+  it("canned prompt delivers the assistant reply exactly once (platform post + ack-only interaction edit)", async () => {
+    const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
+    const marker = "unique-reply-marker";
+
+    // Channel-visible posts captured from both delivery surfaces.
+    const sent: { body: string }[] = [];
+    const interactionEdits: Array<{ content: string }> = [];
+    const bus = createAgentToAgentBus();
+    const discord: DiscordMessagingRuntime = {
+      stop: async () => {},
+      gateway: stubDiscordGatewaySession,
+      discordBotUserId: undefined,
+      outbound: {
+        sendDiscord: async (m) => {
+          sent.push({ body: m.body });
+          return { channelId: "c", messageId: "mid" };
+        },
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      streamingForSession: () => undefined,
+      bus,
+      capabilities: discordCapabilityDescriptor(),
+      registerPlatformThreadBinding: () => () => {},
+      notifyAgentTypingForSession: stubNotifyAgentTyping,
+      routes: [{ channelId: "c1", sessionId: sessionUrn }],
+    };
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: defaultConfig(tmp),
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord,
+      deps: {
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            return {
+              content: marker,
+              toolCalls: [],
+              usedProviderId: "p1",
+              usedModel: "m1",
+            };
+          },
+        }),
+      },
+    });
+
+    // Mirrors the daemon prompt op: runs the turn (delivered via the
+    // messaging_surface path) and returns the rendered reply in the result.
+    const handler = createDiscordInteractionHandler({
+      transport: {
+        interactionCallback: async () => {},
+        editOriginalInteractionResponse: async (_appId, _token, body) => {
+          interactionEdits.push(body);
+        },
+      },
+      applicationId: "app-123",
+      logger: { info: () => {}, warn: () => {}, debug: () => {} },
+      abortSession: async () => false,
+      invokeControlOp: async (op, payload) => {
+        if (op !== "prompt") return { ok: false, error: `unexpected op ${op}` };
+        await platform.runSessionModelTurn({
+          sessionId: String(payload.session_id),
+          userContent: "canned prompt run",
+          delivery: {
+            kind: "messaging_surface",
+            userId: "u-1",
+            replyToMessageId: undefined,
+          },
+        });
+        return { ok: true, result: { reply: marker } };
+      },
+      resolveSessionForChannel: () => sessionUrn,
+    });
+
+    const ev: DiscordInteractionEvent = {
+      kind: "interaction_create",
+      id: "int-9",
+      token: "tok-9",
+      type: 5,
+      channelId: "c1",
+      userId: "u-1",
+      data: {
+        custom_id: `prompt_modal|${sessionUrn}|triage`,
+        components: [{ type: 1, components: [{ type: 4, custom_id: "cardId", value: "F-1" }] }],
+      },
+    };
+
+    handler(ev);
+    for (let i = 0; i < 100 && interactionEdits.length === 0; i++) {
+      await vi.advanceTimersByTimeAsync(10);
+    }
+    await platform.stop();
+
+    // The platform path posts the full reply exactly once…
+    const replyPosts = sent.filter((s) => s.body.includes(marker));
+    assert.strictEqual(
+      replyPosts.length,
+      1,
+      "assistant reply should be posted exactly once by the platform path",
+    );
+
+    // …and the interaction edit carries only the ack — never the reply text.
+    assert.strictEqual(interactionEdits.length, 1);
+    assert.ok(
+      interactionEdits[0]!.content.includes("✅ Prompt"),
+      "interaction edit should carry the prompt ack",
+    );
+    assert.ok(
+      !interactionEdits[0]!.content.includes(marker),
+      "interaction edit must not repeat the assistant reply",
+    );
   });
 });
