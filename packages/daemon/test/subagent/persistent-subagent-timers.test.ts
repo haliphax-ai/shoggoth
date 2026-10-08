@@ -6,7 +6,10 @@ import {
   clearPersistentSubagentInactivityTimer,
   touchPersistentSubagentInactivityTimer,
 } from "../../src/subagent/persistent-subagent-timers";
-import { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS } from "../../src/subagent/subagent-constants";
+import { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES } from "../../src/subagent/subagent-constants";
+
+/** Default window in ms — the public constant is minutes; timers are ms internally. */
+const DEFAULT_WINDOW_MS = SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES * 60_000;
 
 function stubSessions() {
   const updates: Array<{ id: string; patch: { subagentExpiresAtMs?: number | null } }> = [];
@@ -39,15 +42,15 @@ describe("persistent-subagent-timers", () => {
       "s1",
     );
 
-    expect(expiresAtMs).toBe(started + SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS);
+    expect(expiresAtMs).toBe(started + DEFAULT_WINDOW_MS);
     expect(updates).toEqual([
       {
         id: "s1",
-        patch: { subagentExpiresAtMs: started + SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS },
+        patch: { subagentExpiresAtMs: started + DEFAULT_WINDOW_MS },
       },
     ]);
 
-    vi.advanceTimersByTime(SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS - 1);
+    vi.advanceTimersByTime(DEFAULT_WINDOW_MS - 1);
     expect(timeouts).toEqual([]);
     vi.advanceTimersByTime(1);
     expect(timeouts).toEqual(["s1"]);

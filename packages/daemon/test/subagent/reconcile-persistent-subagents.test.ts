@@ -15,7 +15,10 @@ import {
   clearAllPersistentSubagentInactivityTimers,
   touchPersistentSubagentInactivityTimer,
 } from "../../src/subagent/persistent-subagent-timers";
-import { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS } from "../../src/subagent/subagent-constants";
+import { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES } from "../../src/subagent/subagent-constants";
+
+/** Default inactivity window in ms (the exported constant is minutes). */
+const INACTIVITY_WINDOW_MS = SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES * 60_000;
 
 describe("reconcilePersistentSubagents", () => {
   let dir: string;
@@ -207,7 +210,7 @@ describe("reconcilePersistentSubagents", () => {
     assert.equal(r.expiredKilled, 0);
     const row = sessions.getById(child);
     assert.ok(row?.subagentExpiresAtMs !== undefined);
-    assert.ok(row.subagentExpiresAtMs >= before + SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS);
+    assert.ok(row.subagentExpiresAtMs >= before + INACTIVITY_WINDOW_MS);
     disposeSubagentRuntime(child);
   });
 

@@ -14,9 +14,12 @@ import {
   shouldSkipThreadSessionSentinel,
   type ThreadSubagentPlatformDeps,
 } from "../../src/subagent/thread-subagent-autocreate";
-import { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS } from "../../src/subagent/subagent-constants";
+import { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES } from "../../src/subagent/subagent-constants";
 import { clearAllPersistentSubagentInactivityTimers } from "../../src/subagent/persistent-subagent-timers";
 import type { ShoggothConfig } from "@shoggoth/shared";
+
+/** Default inactivity window in ms (the exported constant is minutes). */
+const INACTIVITY_WINDOW_MS = SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES * 60_000;
 
 // Keep session spawns hermetic (no workspace-layout script execution).
 vi.mock("../../src/workspaces/agent-workspace-layout", () => ({
@@ -135,7 +138,7 @@ describe("handlePlatformThreadCreate", { concurrency: false }, () => {
     // Inactivity window from creation time — not a far-future lifetime.
     assert.ok(child.subagentExpiresAtMs !== undefined);
     assert.ok(child.subagentExpiresAtMs > Date.now());
-    assert.ok(child.subagentExpiresAtMs <= Date.now() + SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS);
+    assert.ok(child.subagentExpiresAtMs <= Date.now() + INACTIVITY_WINDOW_MS);
 
     assert.equal(bindings.get("thread-1"), childId);
 

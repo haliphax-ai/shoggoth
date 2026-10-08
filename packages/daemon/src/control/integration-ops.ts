@@ -61,7 +61,7 @@ import {
   buildFormattedStats,
 } from "../sessions/session-stats-store";
 import { dispatchMcpHttpCancelRequest } from "../mcp/mcp-http-cancel-registry";
-import { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS } from "../subagent/subagent-constants";
+import { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES } from "../subagent/subagent-constants";
 import { armPersistentSubagentInactivityTimer } from "../subagent/persistent-subagent-timers";
 import { enableToolsForSession } from "../sessions/session-tool-discovery";
 import { requestSessionTurnAbort } from "../sessions/session-turn-abort";
@@ -1444,12 +1444,13 @@ export async function handleIntegrationControlOp(
       } else {
         platformThreadId = rawTrimmed;
       }
-      // `lifetime_ms` (if provided) is the inactivity window: the session is terminated
-      // after this long without a delivered assistant response. The clock resets on
-      // every delivered response (touchPersistentSubagentInactivityTimer), and the
-      // computed expiry is persisted so restart reconcile re-arms it correctly.
-      const inactivityTimeoutMs =
-        optionalFinitePositiveInt(pl, "lifetime_ms") ?? SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS;
+      // `inactivity_minutes` (if provided) is the inactivity window: the session is
+      // terminated after this long without a delivered assistant response. The clock
+      // resets on every delivered response (touchPersistentSubagentInactivityTimer),
+      // and the computed expiry is persisted so restart reconcile re-arms it correctly.
+      const inactivityMinutes =
+        optionalFinitePositiveInt(pl, "inactivity_minutes") ??
+        SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES;
       const platformUserIdRaw = pl.platform_user_id;
       const platformUserId =
         typeof platformUserIdRaw === "string" && platformUserIdRaw.trim()
@@ -1485,7 +1486,7 @@ export async function handleIntegrationControlOp(
           },
         },
         childId,
-        { timeoutMs: inactivityTimeoutMs },
+        { timeoutMs: inactivityMinutes * 60_000 },
       );
       rememberSubagentHandles(childId, {
         unregisterThread,

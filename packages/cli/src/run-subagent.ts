@@ -1,7 +1,7 @@
 import {
   invokeControlRequest,
   resolveSessionTargetFromCliArg,
-  SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS,
+  SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES,
 } from "@shoggoth/daemon/lib";
 import { loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
 
@@ -109,16 +109,16 @@ Usage:
 
   Child inherits parent session model_selection by default; --model-options is a JSON object overlay.
 
-  Env: SHOGGOTH_SUBAGENT_LIFETIME_MS (persistent only; inactivity window in ms that resets on each delivered response, default ${String(SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS)})`);
+  Env: SHOGGOTH_SUBAGENT_INACTIVITY_MINUTES (persistent only; inactivity window in minutes that resets on each delivered response, default ${String(SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES)})`);
 }
 
 const SPAWN_USAGE =
   "usage: shoggoth subagent spawn [--model-options <json>] one_shot <parentUrn|agentId> <prompt...>\n" +
   "       shoggoth subagent spawn [--model-options <json>] persistent <parentUrn|agentId> [threadId] <prompt...>\n" +
   "       (see: shoggoth subagent --help)\n" +
-  "       env: optional SHOGGOTH_SUBAGENT_LIFETIME_MS (persistent only; inactivity window" +
-  " that resets on each delivered response, default " +
-  String(SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS) +
+  "       env: optional SHOGGOTH_SUBAGENT_INACTIVITY_MINUTES (persistent only; inactivity" +
+  " window in minutes that resets on each delivered response, default " +
+  String(SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES) +
   ")";
 
 export async function runSubagentCli(argv: string[]): Promise<void> {
@@ -184,8 +184,8 @@ export async function runSubagentCli(argv: string[]): Promise<void> {
         process.exitCode = 1;
         return;
       }
-      const lifetimeRaw = process.env.SHOGGOTH_SUBAGENT_LIFETIME_MS?.trim();
-      const lifetimeMs = lifetimeRaw ? Number.parseInt(lifetimeRaw, 10) : undefined;
+      const inactivityRaw = process.env.SHOGGOTH_SUBAGENT_INACTIVITY_MINUTES?.trim();
+      const inactivityMinutes = inactivityRaw ? Number.parseInt(inactivityRaw, 10) : undefined;
       payload = {
         parent_session_id: parentSessionId,
         prompt,
@@ -194,8 +194,12 @@ export async function runSubagentCli(argv: string[]): Promise<void> {
       if (threadId) {
         payload.platform_thread_id = threadId;
       }
-      if (lifetimeMs !== undefined && Number.isFinite(lifetimeMs) && lifetimeMs > 0) {
-        payload.lifetime_ms = lifetimeMs;
+      if (
+        inactivityMinutes !== undefined &&
+        Number.isFinite(inactivityMinutes) &&
+        inactivityMinutes > 0
+      ) {
+        payload.inactivity_minutes = inactivityMinutes;
       }
     }
     if (modelOptions !== undefined) {

@@ -19,12 +19,12 @@ Every subcommand also accepts `--help` / `-h` for its own usage text.
 
 ## Environment Variables
 
-| Variable                        | Description                                                                                                      |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `SHOGGOTH_OPERATOR_TOKEN`       | Operator bearer token. Required for all authenticated commands.                                                  |
-| `SHOGGOTH_CONTROL_SOCKET`       | Override the Unix socket path used to reach the daemon. Falls back to the `socketPath` in layered config.        |
-| `SHOGGOTH_CONFIG_DIR`           | Override the config directory (default: built-in `LAYOUT.configDir`).                                            |
-| `SHOGGOTH_SUBAGENT_LIFETIME_MS` | Inactivity window for persistent subagents in ms (default defined by daemon); resets on each delivered response. |
+| Variable                               | Description                                                                                               |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `SHOGGOTH_OPERATOR_TOKEN`              | Operator bearer token. Required for all authenticated commands.                                           |
+| `SHOGGOTH_CONTROL_SOCKET`              | Override the Unix socket path used to reach the daemon. Falls back to the `socketPath` in layered config. |
+| `SHOGGOTH_CONFIG_DIR`                  | Override the config directory (default: built-in `LAYOUT.configDir`).                                     |
+| `SHOGGOTH_SUBAGENT_INACTIVITY_MINUTES` | Inactivity window for persistent subagents in minutes (default 1440); resets on each delivered response.  |
 
 ---
 
@@ -163,10 +163,10 @@ shoggoth subagent spawn [--model-options <json>] one_shot <parentUrn|agentId> <p
 shoggoth subagent spawn [--model-options <json>] persistent <parentUrn|agentId> [threadId] <prompt...>
 ```
 
-| Mode         | Description                                                                                                                                                                                                                         |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `one_shot`   | Internal one-shot child session. Runs a single turn and terminates.                                                                                                                                                                 |
-| `persistent` | Long-lived child session. Optional numeric `threadId` binds replies to a platform thread; omit for agent-to-agent only. Auto-terminated after the inactivity window (`SHOGGOTH_SUBAGENT_LIFETIME_MS`) without a delivered response. |
+| Mode         | Description                                                                                                                                                                                                                                            |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `one_shot`   | Internal one-shot child session. Runs a single turn and terminates.                                                                                                                                                                                    |
+| `persistent` | Long-lived child session. Optional numeric `threadId` binds replies to a platform thread; omit for agent-to-agent only. Auto-terminated after the inactivity window (`SHOGGOTH_SUBAGENT_INACTIVITY_MINUTES`, in minutes) without a delivered response. |
 
 - `--model-options <json>` — JSON object merged as a model options overlay. Child inherits the parent's `model_selection` by default.
 

@@ -14,7 +14,7 @@
 
 import { getLogger } from "../logging";
 import type { SessionStore } from "../sessions/session-store";
-import { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS } from "./subagent-constants";
+import { subagentPersistentInactivityTimeoutMs } from "./subagent-constants";
 
 const log = getLogger("persistent-subagent-timers");
 
@@ -33,8 +33,8 @@ const bySession = new Map<string, TimerEntry>();
 
 export type ArmPersistentSubagentTimerOptions = {
   /**
-   * Inactivity window used for this arm and for subsequent touch() re-arms.
-   * Defaults to SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS.
+   * Inactivity window (ms) used for this arm and for subsequent touch() re-arms.
+   * Defaults to SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES converted to ms.
    */
   readonly timeoutMs?: number;
   /**
@@ -59,7 +59,7 @@ export function armPersistentSubagentInactivityTimer(
 ): { readonly expiresAtMs: number; readonly dispose: () => void } {
   const sid = sessionId.trim();
   clearPersistentSubagentInactivityTimer(sid);
-  const timeoutMs = options?.timeoutMs ?? SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS;
+  const timeoutMs = options?.timeoutMs ?? subagentPersistentInactivityTimeoutMs();
   const now = options?.now ?? Date.now();
   const expiresAtMs = options?.expiresAtMs ?? now + timeoutMs;
   try {

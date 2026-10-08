@@ -133,7 +133,7 @@ export {
   type PendingActionStatus,
 } from "./hitl/pending-actions-store";
 export { invokeControlRequest, type InvokeControlRequestInput } from "./control/control-client";
-export { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS } from "./subagent/subagent-constants";
+export { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES } from "./subagent/subagent-constants";
 export {
   handlePlatformThreadCreate,
   shouldSkipThreadSessionSentinel,

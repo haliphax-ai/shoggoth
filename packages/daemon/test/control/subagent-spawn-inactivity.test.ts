@@ -1,8 +1,11 @@
 /**
  * Persistent subagent spawns arm an inactivity timeout, not a wall-clock lifetime:
- * the session is auto-terminated after `lifetime_ms` (or the default inactivity window
- * when omitted) without a delivered response, for both thread-bound and threadless
- * spawns. A touch (one fired per delivered response in the daemon) resets the clock.
+ * the window is configured in minutes via `inactivity_minutes` (defaulting to the
+ * daemon's inactivity timeout when omitted) for both thread-bound and threadless
+ * spawns, and a touch (one fired per delivered response in the daemon) re-arms it.
+ * Short-window expiry and touch semantics are covered by the
+ * persistent-subagent-timers unit tests (fake timers); these tests verify the
+ * control-op wiring without sleeping through a minutes-scale window.
  */
 
 import { describe, it, beforeAll, afterAll, afterEach, vi } from "vitest";
@@ -32,11 +35,14 @@ import {
   clearAllPersistentSubagentInactivityTimers,
   touchPersistentSubagentInactivityTimer,
 } from "../../src/subagent/persistent-subagent-timers";
-import { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS } from "../../src/subagent/subagent-constants";
+import { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES } from "../../src/subagent/subagent-constants";
 import { startControlPlane } from "../../src/control/control-plane";
 import { createLogger } from "../../src/logging";
 import { HealthRegistry } from "../../src/health";
 import { ShutdownCoordinator } from "../../src/shutdown";
+
+/** Default inactivity window in ms (the exported constant is minutes). */
+const INACTIVITY_WINDOW_MS = SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES * 60_000;
 
 let prevOperatorToken: string | undefined;
 beforeAll(async () => {
@@ -174,10 +180,6 @@ async function spawnPersistent(
   return captured;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 async function setupDb(): Promise<{
   db: Database.Database;
   config: ShoggothConfig;
@@ -210,18 +212,18 @@ describe("subagent_spawn persistent inactivity timeout", () => {
     setSubagentRuntimeExtension(undefined);
   });
 
-  it("thread-bound spawn arms lifetime_ms as the inactivity window and expires without touch", async () => {
+  it("thread-bound spawn arms inactivity_minutes as the inactivity window", async () => {
     if (process.platform !== "linux") return;
     const { db, config, parentId } = await setupDb();
 
     const before = Date.now();
     const r = await spawnPersistent(db, config, parentId, {
       platform_thread_id: "555",
-      lifetime_ms: 400,
+      inactivity_minutes: 2,
     });
 
-    assert.ok(r.expires_at_ms >= before + 400);
-    assert.ok(r.expires_at_ms <= Date.now() + 400);
+    assert.ok(r.expires_at_ms >= before + 2 * 60_000);
+    assert.ok(r.expires_at_ms <= Date.now() + 2 * 60_000);
 
     const store = createSessionStore(db);
     const row = store.getById(r.session_id);
@@ -229,22 +231,19 @@ describe("subagent_spawn persistent inactivity timeout", () => {
     assert.equal(row.subagentMode, "persistent");
     assert.equal(row.subagentPlatformThreadId, "555");
     assert.equal(row.subagentExpiresAtMs, r.expires_at_ms);
-
-    // No delivered response within the window → inactivity expiry terminates it.
-    await sleep(1_000);
-    assert.equal(sessionStatus(db, r.session_id), "terminated");
+    assert.equal(sessionStatus(db, r.session_id), "active");
     db.close();
   });
 
-  it("threadless spawn without lifetime_ms defaults to the inactivity timeout", async () => {
+  it("threadless spawn without inactivity_minutes defaults to the inactivity timeout", async () => {
     if (process.platform !== "linux") return;
     const { db, config, parentId } = await setupDb();
 
     const before = Date.now();
     const r = await spawnPersistent(db, config, parentId, {});
 
-    assert.ok(r.expires_at_ms >= before + SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS);
-    assert.ok(r.expires_at_ms <= Date.now() + SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS);
+    assert.ok(r.expires_at_ms >= before + INACTIVITY_WINDOW_MS);
+    assert.ok(r.expires_at_ms <= Date.now() + INACTIVITY_WINDOW_MS);
 
     const row = createSessionStore(db).getById(r.session_id);
     assert.ok(row);
@@ -254,26 +253,19 @@ describe("subagent_spawn persistent inactivity timeout", () => {
     db.close();
   });
 
-  it("a touch (delivered response) resets the inactivity clock", async () => {
+  it("a touch (delivered response) re-arms a full window and persists the new expiry", async () => {
     if (process.platform !== "linux") return;
     const { db, config, parentId } = await setupDb();
 
-    const r = await spawnPersistent(db, config, parentId, { lifetime_ms: 1_500 });
+    const r = await spawnPersistent(db, config, parentId, { inactivity_minutes: 2 });
     const store = createSessionStore(db);
 
-    await sleep(600);
+    const before = Date.now();
     touchPersistentSubagentInactivityTimer(r.session_id);
     const touched = store.getById(r.session_id);
     assert.ok(touched?.subagentExpiresAtMs !== undefined);
-    assert.ok(touched.subagentExpiresAtMs > r.expires_at_ms);
-
-    // Past the original expiry, within the re-armed window: still alive.
-    await sleep(700);
+    assert.ok(touched.subagentExpiresAtMs >= before + 2 * 60_000);
     assert.equal(sessionStatus(db, r.session_id), "active");
-
-    // Past the re-armed expiry: terminated.
-    await sleep(1_200);
-    assert.equal(sessionStatus(db, r.session_id), "terminated");
     db.close();
   });
 });
