@@ -303,10 +303,16 @@ describe("prompt dropdown component → modal", () => {
     assert.ok(components.every((c) => c.components[0]!.label.length <= 32));
   });
 
-  it("defers with UPDATE (type 6) when the file has no placeholders, then edits message A", async () => {
+  it("acks with UPDATE (type 7) pending state, then edits message A with the outcome", async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
     const invoked: Array<{ op: string; payload: Record<string, unknown> }> = [];
+    // The ack must already be on the wire before the op dispatches — the op
+    // awaits the full model turn, which cannot fit Discord's 3s window.
+    let ackBeforeInvoke = false;
     const handler = makeHandler(calls, async (op, payload) => {
+      if (op === "prompt") {
+        ackBeforeInvoke = calls.filter((c) => c.method === "interactionCallback").length === 1;
+      }
       invoked.push({ op, payload });
       if (op === "prompt_list") {
         return { ok: true, result: { prompts: [{ slug: "plain", placeholders: [] }] } };
@@ -323,12 +329,20 @@ describe("prompt dropdown component → modal", () => {
     assert.strictEqual(promptCall!.payload.session_id, SESSION);
     assert.strictEqual(promptCall!.payload.platform_user_id, "u-1");
 
-    // The single ACK is DEFERRED_UPDATE (6), not a fresh deferred message,
-    // so the edit lands on message A (the dropdown) itself.
+    // Ack FIRST: a single UPDATE_MESSAGE (7) rewrites message A (the
+    // dropdown) in place with a pending state before the op runs — dropdown
+    // cleared immediately, `⏳ Running` visible for the whole model turn.
     const callback = calls.find((c) => c.method === "interactionCallback");
     assert.ok(callback, "should ACK the selection");
-    assert.strictEqual((callback!.args[2] as Body).type, 6);
+    const ack = callback!.args[2] as Body;
+    assert.strictEqual(ack.type, 7);
+    assert.ok((ack.data.content as string).includes("⏳ Running"));
+    assert.ok((ack.data.content as string).includes("`plain`"));
+    assert.ok(!(ack.data.content as string).includes("✅ Prompt"));
+    assert.deepStrictEqual(ack.data.components, [], "dropdown must be cleared at ack time");
+    assert.ok(ackBeforeInvoke, "ack must precede the prompt op");
 
+    // …then the outcome is delivered by editing that response into the recap.
     const edit = calls.find((c) => c.method === "editOriginalInteractionResponse");
     assert.ok(edit, "should edit message A with the outcome");
     const editBody = edit!.args[2] as { content: string; components: unknown[] };

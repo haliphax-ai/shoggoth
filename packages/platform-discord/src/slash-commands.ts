@@ -247,8 +247,6 @@ export async function deregisterDiscordSlashCommands(opts: {
 const INTERACTION_RESPONSE_CHANNEL_MESSAGE = 4;
 /** Interaction response type 5 = DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE. */
 const INTERACTION_RESPONSE_DEFERRED = 5;
-/** Interaction response type 6 = DEFERRED_UPDATE_MESSAGE (component interactions only). */
-const INTERACTION_RESPONSE_DEFERRED_UPDATE = 6;
 /** Interaction response type 7 = UPDATE_MESSAGE. */
 const INTERACTION_RESPONSE_UPDATE_MESSAGE = 7;
 /** Interaction response type 9 = MODAL. */
@@ -283,18 +281,15 @@ type PromptListEntry = { slug: string; placeholders?: readonly string[] };
  *   which creates a new "thinking" message, then deliver the outcome via
  *   `editOriginalInteractionResponse`. Used by the slash command's direct run
  *   (no dropdown stage exists to update).
- * - `deferred-update` — ACK with DEFERRED_UPDATE_MESSAGE (6), which marks the
- *   message the component was attached to for a later edit, then deliver the
- *   outcome via `editOriginalInteractionResponse`. Used by slug-dropdown
- *   selections with no placeholders, so message A transitions straight from
- *   dropdown to final recap.
  * - `inline-update` — ACK FIRST with UPDATE_MESSAGE (7), rewriting message A
  *   in place with a pending state, then deliver the outcome via
- *   `editOriginalInteractionResponse`. Used by modal submits: Discord text
- *   inputs are modal-only, so message A stays visible as the dropdown while
- *   the modal is open and is rewritten here once the parameters are known.
+ *   `editOriginalInteractionResponse`. Used by BOTH the slug-dropdown
+ *   selection (no placeholders) and modal submits: Discord text inputs are
+ *   modal-only, so message A stays visible as the dropdown while the modal
+ *   is open and is rewritten here once the parameters are known. For the
+ *   dropdown selection the pending rewrite clears the dropdown immediately.
  */
-type PromptReplyStyle = "deferred-channel" | "deferred-update" | "inline-update";
+type PromptReplyStyle = "deferred-channel" | "inline-update";
 
 /**
  * Translate the prompt options to a control op, resolving the target session
@@ -334,14 +329,14 @@ async function runPromptProxy(
   // precede it (same rationale as the `/steer` branch).
   try {
     if (replyStyle === "inline-update") {
-      // Type 6 (DEFERRED_UPDATE) is invalid for modal submits — it only
-      // applies to component interactions — so the modal path ACKs with
-      // UPDATE_MESSAGE (7) instead: this satisfies the 3s window AND rewrites
-      // message A (the dropdown) in place with a pending state. If Discord
-      // rejects type 7 for modal submits the first ack throws — only then
-      // fall back to DEFERRED (5), which degrades to a new "thinking" message
-      // while message A stays as the dropdown. Never send a second POST after
-      // a successful first ack.
+      // Both inline-update callers (the slug-dropdown selection with no
+      // placeholders and the modal submit) ACK FIRST with UPDATE_MESSAGE (7):
+      // this satisfies the 3s window AND rewrites message A (the dropdown) in
+      // place with a pending state, so the dropdown is cleared immediately
+      // instead of sitting inert for the whole model turn. If Discord rejects
+      // type 7 the first ack throws — only then fall back to DEFERRED (5),
+      // which degrades to a new "thinking" message while message A stays as
+      // the dropdown. Never send a second POST after a successful first ack.
       try {
         await deps.transport.interactionCallback(interactionId, interactionToken, {
           type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
@@ -357,11 +352,10 @@ async function runPromptProxy(
         });
       }
     } else {
+      // deferred-channel: no message A to update (direct slash-command run),
+      // so a plain DEFERRED ack creates the "thinking" message.
       await deps.transport.interactionCallback(interactionId, interactionToken, {
-        type:
-          replyStyle === "deferred-update"
-            ? INTERACTION_RESPONSE_DEFERRED_UPDATE
-            : INTERACTION_RESPONSE_DEFERRED,
+        type: INTERACTION_RESPONSE_DEFERRED,
       });
     }
   } catch (err) {
@@ -536,7 +530,7 @@ async function handleInteraction(
     }
 
     // Stage 2: canned prompt slug dropdown selected. No placeholders →
-    // defer-update (6) so message A becomes the final recap; placeholders →
+    // immediate UPDATE_MESSAGE (7) pending rewrite of message A; placeholders →
     // modal (9), after which stage 3 rewrites message A on submit. The
     // /prompt slash command with a slug argument opens the same modal
     // directly when the prompt has placeholders (bypassing this dropdown).
@@ -559,9 +553,10 @@ async function handleInteraction(
         });
       }
       if (placeholders.length === 0) {
-        // No placeholders — nothing to ask. ACK with DEFERRED_UPDATE (6)
-        // rather than a fresh deferred message so message A itself is
-        // updated into the final recap instead of being left behind.
+        // No placeholders — nothing to ask. ACK FIRST with UPDATE_MESSAGE (7)
+        // so message A is immediately rewritten in place with a `⏳ Running`
+        // pending state (dropdown cleared), then the outcome is delivered by
+        // editing that response into the final recap.
         await runPromptProxy(
           deps,
           ev.id,
@@ -569,7 +564,7 @@ async function handleInteraction(
           { slug, session_id: sessionId, platform_user_id: ev.userId },
           ev.channelId,
           ev.guildId,
-          "deferred-update",
+          "inline-update",
         );
         return;
       }
