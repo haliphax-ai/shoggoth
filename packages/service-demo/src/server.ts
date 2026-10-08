@@ -16,6 +16,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createIdentityHandler, TokenValidator } from "@shoggoth/service-auth";
+import { getLogger } from "@shoggoth/shared";
+
+const log = getLogger("demo-service");
 
 const PORT = Number(process.env.DEMO_SERVICE_PORT) || Number(process.argv[2]) || 3200;
 const HOST = process.env.DEMO_SERVICE_HOST || "127.0.0.1";
@@ -45,12 +48,12 @@ const identityHandler = createIdentityHandler({
   provisionSecret: PROVISION_SECRET || undefined,
   onReceive(identity: string) {
     storedIdentity = identity;
-    console.log(`[demo-service] Identity received and stored (${identity.slice(0, 20)}...)`);
+    log.info(`Identity received and stored (${identity.slice(0, 20)}...)`);
     try {
       writeFileSync(KEY_PATH, identity, "utf-8");
-      console.log(`[demo-service] Identity written to ${KEY_PATH}`);
+      log.info(`Identity written to ${KEY_PATH}`);
     } catch (err) {
-      console.warn(`[demo-service] Failed to write identity to ${KEY_PATH}:`, err);
+      log.warn(`Failed to write identity to ${KEY_PATH}`, { err: String(err) });
     }
   },
 });
@@ -179,12 +182,12 @@ async function handler(req: IncomingMessage, res: ServerResponse): Promise<void>
           return;
         }
         storedIdentity = parsed.identity;
-        console.log(`[demo-service] Identity rotated (${parsed.identity.slice(0, 20)}...)`);
+        log.info(`Identity rotated (${parsed.identity.slice(0, 20)}...)`);
         try {
           writeFileSync(KEY_PATH, parsed.identity, "utf-8");
-          console.log(`[demo-service] Rotated identity written to ${KEY_PATH}`);
+          log.info(`Rotated identity written to ${KEY_PATH}`);
         } catch (err) {
-          console.warn(`[demo-service] Failed to write rotated identity to ${KEY_PATH}:`, err);
+          log.warn(`Failed to write rotated identity to ${KEY_PATH}`, { err: String(err) });
         }
         json(res, 200, { ok: true });
         return;
@@ -258,7 +261,7 @@ async function handler(req: IncomingMessage, res: ServerResponse): Promise<void>
 
 const server = createServer((req, res) => {
   handler(req, res).catch((err) => {
-    console.error("Request error:", err);
+    log.error("Request error", { err: String(err) });
     if (!res.headersSent) {
       json(res, 500, { error: "internal server error" });
     }
@@ -266,9 +269,10 @@ const server = createServer((req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`Demo service listening on http://${HOST}:${PORT}`);
-  console.log(`  Manifest: http://${HOST}:${PORT}/manifest`);
-  console.log(`  Tools: demo.set_message, demo.get_message`);
+  log.info(`Demo service listening on http://${HOST}:${PORT}`, {
+    manifest: `http://${HOST}:${PORT}/manifest`,
+    tools: "demo.set_message, demo.get_message",
+  });
 });
 
 // Graceful shutdown
