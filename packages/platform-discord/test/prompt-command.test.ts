@@ -325,8 +325,8 @@ describe("prompt modal submit → slash handler proxy", () => {
     const edit = calls.find((c) => c.method === "editOriginalInteractionResponse");
     assert.ok(edit);
     const editBody = edit!.args[2] as { content: string };
-    assert.ok(editBody.content.includes("✅"));
-    assert.ok(editBody.content.includes("rendered reply"));
+    assert.ok(editBody.content.includes("✅ Prompt"));
+    assert.ok(!editBody.content.includes("rendered reply"));
   });
 
   it("reports daemon validation failures in the edited response", async () => {
