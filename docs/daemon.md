@@ -522,7 +522,7 @@ Subagent sessions are child sessions spawned from a parent:
 
 - URN format: `agent:<agentId>:<platform>:channel:<parentLeafUuid>:<newUuid>`
 - Inherit parent's workspace and working directory.
-- Modes: `one_shot` (terminates after one turn) or `persistent` (lives until TTL or explicit kill).
+- Modes: `one_shot` (terminates after one turn) or `persistent` (terminated by an inactivity timeout — window in minutes (`inactivity_minutes`, default 1440 / 24h) since the last delivered response, reset by each delivered response — or by explicit kill).
 - `reconcilePersistentSubagents()` runs at startup to restore or expire persistent subagents.
 
 The `subagentRuntimeExtensionRef` provides `runSessionModelTurn` and `subscribeSubagentSession` to the rest of the daemon.

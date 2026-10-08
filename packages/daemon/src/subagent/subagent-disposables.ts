@@ -1,5 +1,7 @@
 /** Runtime handles for persistent subagents (thread routing, bus subscription, TTL). */
 
+import { clearPersistentSubagentInactivityTimer } from "./persistent-subagent-timers";
+
 type SubagentRuntimeHandles = {
   readonly unregisterThread: () => void;
   readonly unsubscribeBus: () => void;
@@ -14,6 +16,9 @@ export function rememberSubagentHandles(sessionId: string, handles: SubagentRunt
 
 export function disposeSubagentRuntime(sessionId: string): void {
   const sid = sessionId.trim();
+  // Belt-and-suspenders: clear the shared inactivity timer even if the handles map
+  // was lost (the armed handle's clearTtl is the same clear, kept for symmetry).
+  clearPersistentSubagentInactivityTimer(sid);
   const h = bySession.get(sid);
   if (!h) return;
   try {

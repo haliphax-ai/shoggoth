@@ -160,9 +160,10 @@ export const subagentToolArgs = {
       type: "string",
       description: "spawn_persistent, steer: optional reply reference",
     },
-    lifetime_ms: {
+    inactivity_minutes: {
       type: "integer",
-      description: "spawn_persistent: optional persistent lifetime in ms",
+      description:
+        "spawn_persistent: optional inactivity window in minutes (session is terminated after this long without a delivered response; the clock resets on each delivered response)",
     },
     session_id: {
       type: "string",

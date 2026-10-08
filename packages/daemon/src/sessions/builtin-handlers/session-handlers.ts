@@ -303,9 +303,9 @@ async function subagentHandler(
     if (typeof du === "string" && du.trim()) payload.platform_user_id = du.trim();
     const rt = args.reply_to_message_id;
     if (typeof rt === "string" && rt.trim()) payload.reply_to_message_id = rt.trim();
-    const lt = args.lifetime_ms;
-    if (typeof lt === "number" && Number.isFinite(lt) && lt > 0) {
-      payload.lifetime_ms = Math.trunc(lt);
+    const im = args.inactivity_minutes;
+    if (typeof im === "number" && Number.isFinite(im) && im > 0) {
+      payload.inactivity_minutes = Math.trunc(im);
     }
     const respondTo = args.respond_to;
     if (typeof respondTo === "string" && respondTo.trim()) {

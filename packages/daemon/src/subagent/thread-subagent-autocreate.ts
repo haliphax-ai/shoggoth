@@ -7,16 +7,10 @@ import { createTranscriptStore } from "../sessions/transcript-store";
 import type { SessionManager } from "../sessions/session-manager";
 import { resolveModel } from "../sessions/model-resolution";
 import { rememberSubagentHandles } from "./subagent-disposables";
+import { armPersistentSubagentInactivityTimer } from "./persistent-subagent-timers";
+import { terminatePersistentSubagentSession } from "./subagent-kill";
 
 const log = getLogger("thread-subagent-autocreate");
-
-/**
- * Far-future expiry for auto-created thread subagent sessions. Thread sessions are
- * intentionally long-lived (they live as long as their thread); the value must be a
- * finite positive timestamp so the startup persistent-subagent reconcile keeps the
- * session instead of assigning the short default persistent-subagent TTL and killing it.
- */
-export const THREAD_SUBAGENT_SESSION_LIFETIME_MS = 10 * 365 * 24 * 60 * 60 * 1000;
 
 /** Platform-supplied capabilities used when auto-creating a thread subagent session. */
 export interface ThreadSubagentPlatformDeps {
@@ -124,15 +118,24 @@ export async function handlePlatformThreadCreate(
     parentSessionId,
     subagentMode: "persistent",
     subagentPlatformThreadId: threadId,
-    subagentExpiresAtMs: Date.now() + THREAD_SUBAGENT_SESSION_LIFETIME_MS,
   });
 
   const unregisterThread = input.platform.registerPlatformThreadBinding(threadId, childId);
   const unsubscribeBus = input.platform.subscribeSubagentSession(childId);
+  // Arm the shared inactivity clock (default window, reset on each delivered response)
+  // instead of a far-future lifetime; the expiry is persisted for restart reconcile.
+  const { dispose: clearTtl } = armPersistentSubagentInactivityTimer(
+    {
+      sessions,
+      onTimeout: (sid) =>
+        terminatePersistentSubagentSession(input.sessionManager, sid, "ttl_expired"),
+    },
+    childId,
+  );
   rememberSubagentHandles(childId, {
     unregisterThread,
     unsubscribeBus,
-    clearTtl: () => {},
+    clearTtl,
   });
 
   // Status message: session URN + current model, posted to the thread immediately

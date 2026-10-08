@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, vi } from "vitest";
+import { describe, it, beforeEach, afterEach, vi } from "vitest";
 import assert from "node:assert";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
@@ -12,10 +12,14 @@ import { createSqliteAgentTokenStore } from "../../src/auth/sqlite-agent-tokens"
 import {
   handlePlatformThreadCreate,
   shouldSkipThreadSessionSentinel,
-  THREAD_SUBAGENT_SESSION_LIFETIME_MS,
   type ThreadSubagentPlatformDeps,
 } from "../../src/subagent/thread-subagent-autocreate";
+import { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES } from "../../src/subagent/subagent-constants";
+import { clearAllPersistentSubagentInactivityTimers } from "../../src/subagent/persistent-subagent-timers";
 import type { ShoggothConfig } from "@shoggoth/shared";
+
+/** Default inactivity window in ms (the exported constant is minutes). */
+const INACTIVITY_WINDOW_MS = SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES * 60_000;
 
 // Keep session spawns hermetic (no workspace-layout script execution).
 vi.mock("../../src/workspaces/agent-workspace-layout", () => ({
@@ -97,6 +101,11 @@ describe("handlePlatformThreadCreate", { concurrency: false }, () => {
     ({ db, tmp } = makeDb());
   });
 
+  afterEach(() => {
+    // Created thread sessions arm inactivity timers; clear so they don't leak.
+    clearAllPersistentSubagentInactivityTimers();
+  });
+
   it("creates a thread-bound subagent session and posts a status message", async () => {
     const {
       sessionId: parentSessionId,
@@ -126,10 +135,10 @@ describe("handlePlatformThreadCreate", { concurrency: false }, () => {
     assert.equal(child.parentSessionId, parentSessionId);
     assert.equal(child.subagentMode, "persistent");
     assert.equal(child.subagentPlatformThreadId, "thread-1");
-    assert.ok(
-      child.subagentExpiresAtMs !== undefined &&
-        child.subagentExpiresAtMs > Date.now() + THREAD_SUBAGENT_SESSION_LIFETIME_MS - 60_000,
-    );
+    // Inactivity window from creation time — not a far-future lifetime.
+    assert.ok(child.subagentExpiresAtMs !== undefined);
+    assert.ok(child.subagentExpiresAtMs > Date.now());
+    assert.ok(child.subagentExpiresAtMs <= Date.now() + INACTIVITY_WINDOW_MS);
 
     assert.equal(bindings.get("thread-1"), childId);
 
@@ -283,6 +292,11 @@ describe("shouldSkipThreadSessionSentinel", { concurrency: false }, () => {
   let tmp: string;
   let childId: string;
   let sessions: ReturnType<typeof createSessionStore>;
+
+  afterEach(() => {
+    // The beforeEach-created thread session arms an inactivity timer.
+    clearAllPersistentSubagentInactivityTimers();
+  });
 
   beforeEach(async () => {
     ({ db, tmp } = makeDb());

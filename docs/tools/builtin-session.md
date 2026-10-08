@@ -65,19 +65,19 @@ Spawn and manage subagent sessions. Only available to top-level (non-subagent) s
 
 #### spawn_one_shot / spawn_persistent
 
-| Param                 | Type     | Required | Notes                                                                         |
-| --------------------- | -------- | -------- | ----------------------------------------------------------------------------- |
-| `prompt`              | string   | yes      | Task prompt for the subagent                                                  |
-| `respond_to`          | string   | no       | Session to deliver the result to (default: parent)                            |
-| `internal`            | boolean  | no       | Set `false` to surface delivery to messaging platform                         |
-| `background`          | boolean  | no       | Return immediately without waiting (one_shot only)                            |
-| `delivery_mode`       | string   | no       | `inline` (default), `queue`, or `drop`                                        |
-| `model_options`       | object   | no       | Override model settings                                                       |
-| `enable_tools`        | string[] | no       | Tool IDs/globs (e.g. `kanban-*`) enabled for the subagent (added to defaults) |
-| `thread_id`           | string   | no       | Platform thread (persistent only)                                             |
-| `platform_user_id`    | string   | no       | Persistent only                                                               |
-| `reply_to_message_id` | string   | no       | Persistent only                                                               |
-| `lifetime_ms`         | number   | no       | Auto-kill timeout (persistent only)                                           |
+| Param                 | Type     | Required | Notes                                                                             |
+| --------------------- | -------- | -------- | --------------------------------------------------------------------------------- |
+| `prompt`              | string   | yes      | Task prompt for the subagent                                                      |
+| `respond_to`          | string   | no       | Session to deliver the result to (default: parent)                                |
+| `internal`            | boolean  | no       | Set `false` to surface delivery to messaging platform                             |
+| `background`          | boolean  | no       | Return immediately without waiting (one_shot only)                                |
+| `delivery_mode`       | string   | no       | `inline` (default), `queue`, or `drop`                                            |
+| `model_options`       | object   | no       | Override model settings                                                           |
+| `enable_tools`        | string[] | no       | Tool IDs/globs (e.g. `kanban-*`) enabled for the subagent (added to defaults)     |
+| `thread_id`           | string   | no       | Platform thread (persistent only)                                                 |
+| `platform_user_id`    | string   | no       | Persistent only                                                                   |
+| `reply_to_message_id` | string   | no       | Persistent only                                                                   |
+| `inactivity_minutes`  | number   | no       | Inactivity window in minutes (persistent only; resets on each delivered response) |
 
 ##### delivery_mode
 
@@ -162,7 +162,7 @@ No additional parameters. Returns info about the current session.
   "action": "spawn_persistent",
   "prompt": "Monitor CI",
   "thread_id": "t-abc",
-  "lifetime_ms": 300000
+  "inactivity_minutes": 30
 }
 ```
 
