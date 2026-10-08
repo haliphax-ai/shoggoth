@@ -61,7 +61,8 @@ import {
   buildFormattedStats,
 } from "../sessions/session-stats-store";
 import { dispatchMcpHttpCancelRequest } from "../mcp/mcp-http-cancel-registry";
-import { SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS } from "../subagent/subagent-constants";
+import { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS } from "../subagent/subagent-constants";
+import { armPersistentSubagentInactivityTimer } from "../subagent/persistent-subagent-timers";
 import { enableToolsForSession } from "../sessions/session-tool-discovery";
 import { requestSessionTurnAbort } from "../sessions/session-turn-abort";
 import { validateModelRefExists } from "../sessions/model-resolution";
@@ -1256,7 +1257,6 @@ export async function handleIntegrationControlOp(
       if (enableTools && enableTools.length > 0 && ctx.stateDb) {
         enableToolsForSession(ctx.stateDb, childId, enableTools);
       }
-      const now = Date.now();
       if (modeRaw === "one_shot") {
         sessions.update(childId, {
           parentSessionId,
@@ -1444,8 +1444,12 @@ export async function handleIntegrationControlOp(
       } else {
         platformThreadId = rawTrimmed;
       }
-      const lifetimeMs =
-        optionalFinitePositiveInt(pl, "lifetime_ms") ?? SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS;
+      // `lifetime_ms` (if provided) is the inactivity window: the session is terminated
+      // after this long without a delivered assistant response. The clock resets on
+      // every delivered response (touchPersistentSubagentInactivityTimer), and the
+      // computed expiry is persisted so restart reconcile re-arms it correctly.
+      const inactivityTimeoutMs =
+        optionalFinitePositiveInt(pl, "lifetime_ms") ?? SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS;
       const platformUserIdRaw = pl.platform_user_id;
       const platformUserId =
         typeof platformUserIdRaw === "string" && platformUserIdRaw.trim()
@@ -1455,12 +1459,10 @@ export async function handleIntegrationControlOp(
         typeof pl.reply_to_message_id === "string" && pl.reply_to_message_id.trim()
           ? pl.reply_to_message_id.trim()
           : undefined;
-      const expiresAt = now + lifetimeMs;
       sessions.update(childId, {
         parentSessionId,
         subagentMode: "persistent",
         subagentPlatformThreadId: platformThreadId ?? null,
-        subagentExpiresAtMs: expiresAt,
         subagentDeliveryMode: deliveryMode,
         subagentRespondTo: respondTo,
       });
@@ -1468,22 +1470,23 @@ export async function handleIntegrationControlOp(
         ? ext.registerPlatformThreadBinding(platformThreadId, childId)
         : () => {};
       const unsubscribeBus = ext.subscribeSubagentSession(childId);
-      let ttlTimer: ReturnType<typeof setTimeout> | undefined;
-      const clearTtl = () => {
-        if (ttlTimer !== undefined) {
-          clearTimeout(ttlTimer);
-          ttlTimer = undefined;
-        }
-      };
-      ttlTimer = setTimeout(() => {
-        ttlTimer = undefined;
-        terminatePersistentSubagentSession(
-          sessionManager,
-          childId,
-          "ttl_expired",
-          ctx.hitlClear?.autoApproveGate,
-        );
-      }, lifetimeMs);
+      // Arm the shared inactivity clock (persists subagentExpiresAtMs, reset on each
+      // delivered response). Applies uniformly to thread-bound and threadless spawns.
+      const { expiresAtMs, dispose: clearTtl } = armPersistentSubagentInactivityTimer(
+        {
+          sessions,
+          onTimeout: (sid) => {
+            terminatePersistentSubagentSession(
+              sessionManager,
+              sid,
+              "ttl_expired",
+              ctx.hitlClear?.autoApproveGate,
+            );
+          },
+        },
+        childId,
+        { timeoutMs: inactivityTimeoutMs },
+      );
       rememberSubagentHandles(childId, {
         unregisterThread,
         unsubscribeBus,
@@ -1552,14 +1555,14 @@ export async function handleIntegrationControlOp(
         argsRedactedJson: JSON.stringify({
           parent_session_id: parentSessionId,
           platform_thread_id: platformThreadId ?? null,
-          expires_at_ms: expiresAt,
+          expires_at_ms: expiresAtMs,
         }),
       });
       return {
         session_id: childId,
         mode: "persistent",
         platform_thread_id: platformThreadId ?? null,
-        expires_at_ms: expiresAt,
+        expires_at_ms: expiresAtMs,
         respond_to: respondTo,
         internal: internalDelivery,
       };
@@ -2164,7 +2167,10 @@ export async function handleIntegrationControlOp(
     case "prompt": {
       ioLog.debug("canned prompt", { op: req.op, principalKind: principal.kind });
       if (principal.kind !== "operator" && principal.kind !== "agent") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "prompt requires operator or agent principal");
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "prompt requires operator or agent principal",
+        );
       }
       const ext = subagentRuntimeExtensionRef.current;
       if (!ext) {

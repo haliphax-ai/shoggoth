@@ -1,7 +1,7 @@
 import {
   invokeControlRequest,
   resolveSessionTargetFromCliArg,
-  SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS,
+  SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS,
 } from "@shoggoth/daemon/lib";
 import { loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
 
@@ -109,15 +109,16 @@ Usage:
 
   Child inherits parent session model_selection by default; --model-options is a JSON object overlay.
 
-  Env: SHOGGOTH_SUBAGENT_LIFETIME_MS (persistent only, default ${String(SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS)})`);
+  Env: SHOGGOTH_SUBAGENT_LIFETIME_MS (persistent only; inactivity window in ms that resets on each delivered response, default ${String(SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS)})`);
 }
 
 const SPAWN_USAGE =
   "usage: shoggoth subagent spawn [--model-options <json>] one_shot <parentUrn|agentId> <prompt...>\n" +
   "       shoggoth subagent spawn [--model-options <json>] persistent <parentUrn|agentId> [threadId] <prompt...>\n" +
   "       (see: shoggoth subagent --help)\n" +
-  "       env: optional SHOGGOTH_SUBAGENT_LIFETIME_MS (persistent only, default " +
-  String(SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS) +
+  "       env: optional SHOGGOTH_SUBAGENT_LIFETIME_MS (persistent only; inactivity window" +
+  " that resets on each delivered response, default " +
+  String(SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS) +
   ")";
 
 export async function runSubagentCli(argv: string[]): Promise<void> {

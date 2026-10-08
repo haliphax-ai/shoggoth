@@ -5,7 +5,7 @@ import type { SessionManager } from "../sessions/session-manager";
 import type { SessionStore } from "../sessions/session-store";
 
 const log = getLogger("subagent-reconcile");
-import { SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS } from "./subagent-constants";
+import { armPersistentSubagentInactivityTimer } from "./persistent-subagent-timers";
 import { rememberSubagentHandles } from "./subagent-disposables";
 import type { SubagentRuntimeExtension } from "./subagent-extension-ref";
 import { terminatePersistentSubagentSession } from "./subagent-kill";
@@ -38,13 +38,14 @@ export function reconcilePersistentSubagents(input: {
 
   for (const s of candidates) {
     const threadId = s.subagentPlatformThreadId?.trim() || undefined;
-    let expiresAt = s.subagentExpiresAtMs;
-    if (typeof expiresAt !== "number" || !Number.isFinite(expiresAt) || expiresAt <= 0) {
-      expiresAt = now + SUBAGENT_DEFAULT_PERSISTENT_LIFETIME_MS;
-      sessions.update(s.id, { subagentExpiresAtMs: expiresAt });
-    }
+    const persistedExpiry = s.subagentExpiresAtMs;
+    const validExpiry =
+      typeof persistedExpiry === "number" && Number.isFinite(persistedExpiry) && persistedExpiry > 0
+        ? persistedExpiry
+        : undefined;
 
-    if (expiresAt <= now) {
+    // The persisted inactivity expiry already elapsed while the daemon was down.
+    if (validExpiry !== undefined && validExpiry <= now) {
       terminatePersistentSubagentSession(sessionManager, s.id, "ttl_expired");
       expiredKilled++;
       log.info("subagent.reconcile.expired_killed", { sessionId: s.id });
@@ -55,18 +56,18 @@ export function reconcilePersistentSubagents(input: {
       ? input.ext.registerPlatformThreadBinding(threadId, s.id)
       : () => {};
     const unsubscribeBus = input.ext.subscribeSubagentSession(s.id);
-    let ttlTimer: ReturnType<typeof setTimeout> | undefined;
-    const clearTtl = () => {
-      if (ttlTimer !== undefined) {
-        clearTimeout(ttlTimer);
-        ttlTimer = undefined;
-      }
-    };
-    const remainingMs = expiresAt - now;
-    ttlTimer = setTimeout(() => {
-      ttlTimer = undefined;
-      terminatePersistentSubagentSession(sessionManager, s.id, "ttl_expired");
-    }, remainingMs);
+    // Arm the shared inactivity timer: honors the remaining persisted window (restart
+    // safety), or defaults to a fresh full inactivity window when the persisted expiry
+    // is missing/invalid. The timer persists the expiry again and is re-armed by
+    // touchPersistentSubagentInactivityTimer on each delivered response.
+    const { expiresAtMs: expiresAt, dispose: clearTtl } = armPersistentSubagentInactivityTimer(
+      {
+        sessions,
+        onTimeout: (sid) => terminatePersistentSubagentSession(sessionManager, sid, "ttl_expired"),
+      },
+      s.id,
+      validExpiry !== undefined ? { expiresAtMs: validExpiry } : {},
+    );
 
     rememberSubagentHandles(s.id, {
       unregisterThread,

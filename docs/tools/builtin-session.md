@@ -77,7 +77,7 @@ Spawn and manage subagent sessions. Only available to top-level (non-subagent) s
 | `thread_id`           | string   | no       | Platform thread (persistent only)                                             |
 | `platform_user_id`    | string   | no       | Persistent only                                                               |
 | `reply_to_message_id` | string   | no       | Persistent only                                                               |
-| `lifetime_ms`         | number   | no       | Auto-kill timeout (persistent only)                                           |
+| `lifetime_ms`         | number   | no       | Inactivity window in ms (persistent only; resets on each delivered response)  |
 
 ##### delivery_mode
 

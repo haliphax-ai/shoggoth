@@ -78,6 +78,7 @@ import { createToolRunStore } from "./sessions/tool-run-store";
 import { registerPlatform as registerMessagingPlatform } from "@shoggoth/messaging";
 import { registerPlatform, stopAllPlatforms } from "./platforms/platform-registry";
 import { reconcilePersistentSubagents } from "./subagent/reconcile-persistent-subagents";
+import { touchPersistentSubagentInactivityTimer } from "./subagent/persistent-subagent-timers";
 import { handlePlatformThreadCreate } from "./subagent/thread-subagent-autocreate";
 import { messageToolContextRef } from "./messaging/message-tool-context-ref";
 import { OOB_SCHEMA_NO_SENDER, OOB_NO_SENDER_GUIDANCE } from "./messaging/oob-response-schemas";
@@ -425,6 +426,10 @@ async function initTimerScheduler(db: ReturnType<typeof openStateDb>) {
   setTimerScheduler(timerScheduler);
   getTurnQueue().setOnTurnEnd((sessionId) => {
     timerScheduler.flushSession(sessionId);
+    // Reset the persistent-subagent inactivity clock at turn end: a completed turn
+    // means an assistant response was delivered, which restarts the clock. No-op for
+    // sessions without an armed inactivity timer (regular and one-shot sessions).
+    touchPersistentSubagentInactivityTimer(sessionId);
   });
 
   try {

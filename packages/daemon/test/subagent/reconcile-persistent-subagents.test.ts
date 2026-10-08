@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { describe, it, beforeEach, afterEach } from "vitest";
+import { describe, it, beforeEach, afterEach, vi } from "vitest";
 import { mkdirSync } from "node:fs";
 import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
@@ -11,6 +11,11 @@ import { createSessionStore } from "../../src/sessions/session-store";
 import type { SessionManager } from "../../src/sessions/session-manager";
 import { reconcilePersistentSubagents } from "../../src/subagent/reconcile-persistent-subagents";
 import { disposeSubagentRuntime } from "../../src/subagent/subagent-disposables";
+import {
+  clearAllPersistentSubagentInactivityTimers,
+  touchPersistentSubagentInactivityTimer,
+} from "../../src/subagent/persistent-subagent-timers";
+import { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS } from "../../src/subagent/subagent-constants";
 
 describe("reconcilePersistentSubagents", () => {
   let dir: string;
@@ -25,6 +30,7 @@ describe("reconcilePersistentSubagents", () => {
   });
 
   afterEach(async () => {
+    clearAllPersistentSubagentInactivityTimers();
     await closeTestDb(db, dir);
   });
 
@@ -162,5 +168,143 @@ describe("reconcilePersistentSubagents", () => {
     // Bus subscription still happens
     assert.deepStrictEqual(subscribed, [child]);
     disposeSubagentRuntime(child);
+  });
+
+  it("defaults a missing expiry to a full inactivity window and persists it", () => {
+    const sessions = createSessionStore(db);
+    const parent = "agent:p:discord:channel:40000000-0000-4000-8000-000000000099";
+    const child =
+      "agent:p:discord:channel:40000000-0000-4000-8000-000000000099:dddddddd-bbbb-4ccc-dddd-eeeeeeeeeeee";
+    sessions.create({ id: parent, workspacePath: "/w", status: "active" });
+    sessions.create({ id: child, workspacePath: "/w", status: "active" });
+    sessions.update(child, {
+      parentSessionId: parent,
+      subagentMode: "persistent",
+      subagentPlatformThreadId: "thread-z",
+      // no subagentExpiresAtMs — must default to a fresh inactivity window
+    });
+
+    const before = Date.now();
+    const mockSessionManager = {
+      kill: (sid: string) => sessions.update(sid, { status: "terminated" }),
+    } as unknown as SessionManager;
+    const r = reconcilePersistentSubagents({
+      db,
+      config: defaultConfig(dir),
+      sessions,
+      sessionManager: mockSessionManager,
+      ext: {
+        runSessionModelTurn: async () => ({
+          latestAssistantText: "",
+          failoverMeta: undefined,
+        }),
+        subscribeSubagentSession: () => () => {},
+        registerPlatformThreadBinding: () => () => {},
+      },
+    });
+
+    assert.equal(r.restored, 1);
+    assert.equal(r.expiredKilled, 0);
+    const row = sessions.getById(child);
+    assert.ok(row?.subagentExpiresAtMs !== undefined);
+    assert.ok(row.subagentExpiresAtMs >= before + SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MS);
+    disposeSubagentRuntime(child);
+  });
+
+  it("re-arms the persisted window: touch resets the expiry and the timer", () => {
+    vi.useFakeTimers();
+    try {
+      const sessions = createSessionStore(db);
+      const parent = "agent:p:discord:channel:50000000-0000-4000-8000-000000000099";
+      const child =
+        "agent:p:discord:channel:50000000-0000-4000-8000-000000000099:eeeeeeee-bbbb-4ccc-dddd-eeeeeeeeeeee";
+      sessions.create({ id: parent, workspacePath: "/w", status: "active" });
+      sessions.create({ id: child, workspacePath: "/w", status: "active" });
+      const future = Date.now() + 1_000;
+      sessions.update(child, {
+        parentSessionId: parent,
+        subagentMode: "persistent",
+        subagentExpiresAtMs: future,
+      });
+
+      const killed: string[] = [];
+      const mockSessionManager = {
+        kill: (sid: string) => {
+          killed.push(sid);
+          sessions.update(sid, { status: "terminated" });
+        },
+      } as unknown as SessionManager;
+      const r = reconcilePersistentSubagents({
+        db,
+        config: defaultConfig(dir),
+        sessions,
+        sessionManager: mockSessionManager,
+        ext: {
+          runSessionModelTurn: async () => ({
+            latestAssistantText: "",
+            failoverMeta: undefined,
+          }),
+          subscribeSubagentSession: () => () => {},
+          registerPlatformThreadBinding: () => () => {},
+        },
+      });
+      assert.equal(r.restored, 1);
+
+      // A delivered response resets the clock before the persisted expiry elapses.
+      vi.advanceTimersByTime(600);
+      touchPersistentSubagentInactivityTimer(child);
+      const touched = sessions.getById(child);
+      assert.ok(touched?.subagentExpiresAtMs !== undefined);
+      assert.ok(touched.subagentExpiresAtMs > future);
+
+      // The original persisted expiry passes without a kill — the timer was re-armed.
+      vi.advanceTimersByTime(500);
+      assert.equal(sessions.getById(child)?.status, "active");
+      assert.deepEqual(killed, []);
+      disposeSubagentRuntime(child);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("terminates the session when the re-armed timer elapses without a touch", () => {
+    vi.useFakeTimers();
+    try {
+      const sessions = createSessionStore(db);
+      const parent = "agent:p:discord:channel:60000000-0000-4000-8000-000000000099";
+      const child =
+        "agent:p:discord:channel:60000000-0000-4000-8000-000000000099:ffffffff-bbbb-4ccc-dddd-eeeeeeeeeeee";
+      sessions.create({ id: parent, workspacePath: "/w", status: "active" });
+      sessions.create({ id: child, workspacePath: "/w", status: "active" });
+      sessions.update(child, {
+        parentSessionId: parent,
+        subagentMode: "persistent",
+        subagentExpiresAtMs: Date.now() + 1_000,
+      });
+
+      const mockSessionManager = {
+        kill: (sid: string) => sessions.update(sid, { status: "terminated" }),
+      } as unknown as SessionManager;
+      const r = reconcilePersistentSubagents({
+        db,
+        config: defaultConfig(dir),
+        sessions,
+        sessionManager: mockSessionManager,
+        ext: {
+          runSessionModelTurn: async () => ({
+            latestAssistantText: "",
+            failoverMeta: undefined,
+          }),
+          subscribeSubagentSession: () => () => {},
+          registerPlatformThreadBinding: () => () => {},
+        },
+      });
+      assert.equal(r.restored, 1);
+
+      vi.advanceTimersByTime(1_500);
+      assert.equal(sessions.getById(child)?.status, "terminated");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
