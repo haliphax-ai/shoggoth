@@ -562,7 +562,7 @@ export const logsArgs = {
     filter: {
       type: "string",
       description:
-        "jq program applied to each JSON log line, e.g. '. | select(.level == \"error\")' or '.msg'",
+        "jq program applied to each JSON log line, e.g. '. | select(.level == \"error\")' or '.msg'. Whole-stream filters (group_by/sort_by/map) need an explicit slurp: '[., inputs] | group_by(.level)'.",
     },
     days: {
       type: "integer",
