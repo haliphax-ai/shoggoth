@@ -113,16 +113,17 @@ describe("prompt slash command", () => {
     );
   });
 
-  it("pre-selects the provided slug via default_values", async () => {
+  it("opens the parameter modal directly when the slug argument has placeholders", async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
-    // beta has a placeholder, so the slash command still shows the
-    // pre-selected dropdown instead of taking the direct-run shortcut.
+    // beta has placeholders, so the slash command answers with the parameter
+    // modal directly — a pre-selected dropdown would be a dead end, since
+    // default_values pre-selection never fires the select onchange event.
     const handler = makeHandler(calls, async () => ({
       ok: true,
       result: {
         prompts: [
           { slug: "alpha", source: "workspace", placeholders: [] },
-          { slug: "beta", source: "global", placeholders: ["topic"] },
+          { slug: "beta", source: "global", placeholders: ["topic", "audience"] },
         ],
       },
     }));
@@ -130,14 +131,48 @@ describe("prompt slash command", () => {
     handler(slashPromptEvent([{ name: "slug", value: "beta" }]));
     await vi.advanceTimersByTimeAsync(50);
 
+    // Exactly one callback: the modal (type 9) — no dropdown is rendered.
+    assert.strictEqual(calls.length, 1, "should not render a dropdown");
     const [, , body] = calls[0]!.args as [string, string, Body];
-    const select = (
-      body.data.components as Array<{ components: Array<Record<string, unknown>> }>
-    )[0]!.components[0]!;
-    assert.deepStrictEqual(select.default_values, [{ name: "beta", value: "beta" }]);
-    const options = select.options as Array<{ value: string; default?: boolean }>;
-    assert.strictEqual(options.find((o) => o.value === "beta")?.default, true);
-    assert.strictEqual(options.find((o) => o.value === "alpha")?.default, undefined);
+    assert.strictEqual(body.type, 9); // modal
+    assert.strictEqual(body.data.custom_id, `prompt_modal|${SESSION}|beta`);
+    assert.strictEqual(body.data.title, "Prompt: beta");
+    assert.strictEqual(body.data.flags, undefined);
+    const components = body.data.components as Array<{
+      components: Array<Record<string, unknown>>;
+    }>;
+    assert.strictEqual(components.length, 2, "one input per placeholder");
+    assert.deepStrictEqual(
+      components.map((c) => c.components[0]!.custom_id),
+      ["topic", "audience"],
+    );
+    assert.ok(components.every((c) => c.components[0]!.required === false));
+  });
+
+  it("returns an ephemeral error for a slug with more than 5 placeholders", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const invoked: Array<{ op: string; payload: Record<string, unknown> }> = [];
+    const handler = makeHandler(calls, async (op, payload) => {
+      invoked.push({ op, payload });
+      return {
+        ok: true,
+        result: {
+          prompts: [{ slug: "huge", placeholders: ["a", "b", "c", "d", "e", "f"] }],
+        },
+      };
+    });
+
+    handler(slashPromptEvent([{ name: "slug", value: "huge" }]));
+    await vi.advanceTimersByTimeAsync(50);
+
+    // One ephemeral error callback; no modal, no dropdown, no prompt run.
+    assert.strictEqual(calls.length, 1);
+    const [, , body] = calls[0]!.args as [string, string, Body];
+    assert.strictEqual(body.type, 4);
+    assert.strictEqual(body.data.flags, 64); // ephemeral
+    assert.ok((body.data.content as string).includes("6 parameters"));
+    assert.ok((body.data.content as string).includes("at most 5"));
+    assert.ok(!invoked.some((c) => c.op === "prompt"), "prompt op must not run");
   });
 
   it("runs the prompt directly for a slug without placeholders (no dropdown)", async () => {
