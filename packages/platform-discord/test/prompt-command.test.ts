@@ -115,12 +115,14 @@ describe("prompt slash command", () => {
 
   it("pre-selects the provided slug via default_values", async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
+    // beta has a placeholder, so the slash command still shows the
+    // pre-selected dropdown instead of taking the direct-run shortcut.
     const handler = makeHandler(calls, async () => ({
       ok: true,
       result: {
         prompts: [
           { slug: "alpha", source: "workspace", placeholders: [] },
-          { slug: "beta", source: "global", placeholders: [] },
+          { slug: "beta", source: "global", placeholders: ["topic"] },
         ],
       },
     }));
@@ -136,6 +138,44 @@ describe("prompt slash command", () => {
     const options = select.options as Array<{ value: string; default?: boolean }>;
     assert.strictEqual(options.find((o) => o.value === "beta")?.default, true);
     assert.strictEqual(options.find((o) => o.value === "alpha")?.default, undefined);
+  });
+
+  it("runs the prompt directly for a slug without placeholders (no dropdown)", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const invoked: Array<{ op: string; payload: Record<string, unknown> }> = [];
+    const handler = makeHandler(calls, async (op, payload) => {
+      invoked.push({ op, payload });
+      if (op === "prompt_list") {
+        return { ok: true, result: { prompts: [{ slug: "plain", placeholders: [] }] } };
+      }
+      return { ok: true, result: { reply: "ok" } };
+    });
+
+    handler(slashPromptEvent([{ name: "slug", value: "plain" }]));
+    await vi.advanceTimersByTimeAsync(100);
+
+    // The prompt op is invoked directly with the resolved routing fields.
+    const promptCall = invoked.find((c) => c.op === "prompt");
+    assert.ok(promptCall, "prompt op should be invoked");
+    assert.strictEqual(promptCall!.payload.slug, "plain");
+    assert.strictEqual(promptCall!.payload.session_id, SESSION);
+    assert.strictEqual(promptCall!.payload.platform_user_id, "u-1");
+
+    // Exactly one callback: the deferred channel-message ACK (type 5) — no
+    // dropdown message is ever shown.
+    const callbacks = calls.filter((c) => c.method === "interactionCallback");
+    assert.strictEqual(callbacks.length, 1, "should not render a dropdown");
+    const ack = callbacks[0]!.args[2] as Body;
+    assert.strictEqual(ack.type, 5);
+    assert.strictEqual((ack as { data?: Record<string, unknown> }).data, undefined);
+
+    // …then the deferred response is edited with the success recap.
+    const edit = calls.find((c) => c.method === "editOriginalInteractionResponse");
+    assert.ok(edit, "should edit the deferred response with the outcome");
+    const editBody = edit!.args[2] as { content: string; components: unknown[] };
+    assert.ok(editBody.content.includes("✅ Prompt"));
+    assert.ok(editBody.content.includes("`plain`"));
+    assert.deepStrictEqual(editBody.components, []);
   });
 
   it("returns an ephemeral error without dropdown for an unknown slug", async () => {
@@ -228,7 +268,7 @@ describe("prompt dropdown component → modal", () => {
     assert.ok(components.every((c) => c.components[0]!.label.length <= 32));
   });
 
-  it("runs the prompt directly when the file has no placeholders", async () => {
+  it("defers with UPDATE (type 6) when the file has no placeholders, then edits message A", async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
     const invoked: Array<{ op: string; payload: Record<string, unknown> }> = [];
     const handler = makeHandler(calls, async (op, payload) => {
@@ -247,8 +287,20 @@ describe("prompt dropdown component → modal", () => {
     assert.strictEqual(promptCall!.payload.slug, "plain");
     assert.strictEqual(promptCall!.payload.session_id, SESSION);
     assert.strictEqual(promptCall!.payload.platform_user_id, "u-1");
-    const body = calls.find((c) => c.method === "editOriginalInteractionResponse");
-    assert.ok(body, "should defer then edit the deferred response");
+
+    // The single ACK is DEFERRED_UPDATE (6), not a fresh deferred message,
+    // so the edit lands on message A (the dropdown) itself.
+    const callback = calls.find((c) => c.method === "interactionCallback");
+    assert.ok(callback, "should ACK the selection");
+    assert.strictEqual((callback!.args[2] as Body).type, 6);
+
+    const edit = calls.find((c) => c.method === "editOriginalInteractionResponse");
+    assert.ok(edit, "should edit message A with the outcome");
+    const editBody = edit!.args[2] as { content: string; components: unknown[] };
+    assert.ok(editBody.content.includes("✅ Prompt"));
+    assert.ok(editBody.content.includes("`plain`"));
+    assert.ok(editBody.content.includes(SESSION));
+    assert.deepStrictEqual(editBody.components, [], "dropdown must be cleared");
   });
 
   it("reports an error when the prompt has more than 5 placeholders", async () => {
@@ -319,17 +371,20 @@ describe("prompt modal submit → slash handler proxy", () => {
       params: { cardId: "F-42", note: "" },
     });
 
-    // Deferred first (type 5), then edited with the result.
-    const callback = calls.find((c) => c.method === "interactionCallback");
-    assert.strictEqual((callback!.args[2] as Body).type, 5);
+    // No defer: a single UPDATE_MESSAGE (7) response carries the outcome and
+    // rewrites message A (the dropdown) in place, components cleared.
+    const callbacks = calls.filter((c) => c.method === "interactionCallback");
+    assert.strictEqual(callbacks.length, 1, "modal submit must not defer");
+    const body = callbacks[0]!.args[2] as Body;
+    assert.strictEqual(body.type, 7); // UPDATE_MESSAGE
+    assert.ok((body.data.content as string).includes("✅ Prompt"));
+    assert.ok(!(body.data.content as string).includes("rendered reply"));
+    assert.deepStrictEqual(body.data.components, []);
     const edit = calls.find((c) => c.method === "editOriginalInteractionResponse");
-    assert.ok(edit);
-    const editBody = edit!.args[2] as { content: string };
-    assert.ok(editBody.content.includes("✅ Prompt"));
-    assert.ok(!editBody.content.includes("rendered reply"));
+    assert.strictEqual(edit, undefined, "must not defer+edit, which would leave message A stale");
   });
 
-  it("reports daemon validation failures in the edited response", async () => {
+  it("reports daemon validation failures in the UPDATE_MESSAGE response", async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
     const handler = makeHandler(calls, async () => ({
       ok: false,
@@ -352,9 +407,13 @@ describe("prompt modal submit → slash handler proxy", () => {
     handler(ev);
     await vi.advanceTimersByTimeAsync(100);
 
-    const edit = calls.find((c) => c.method === "editOriginalInteractionResponse");
-    assert.ok(edit);
-    assert.ok((edit!.args[2] as { content: string }).content.includes("missing prompt parameters"));
+    const callback = calls.find((c) => c.method === "interactionCallback");
+    assert.ok(callback, "failure must still answer the interaction");
+    const body = callback!.args[2] as Body;
+    assert.strictEqual(body.type, 7); // UPDATE_MESSAGE
+    assert.ok((body.data.content as string).includes("⚠️ Prompt failed"));
+    assert.ok((body.data.content as string).includes("missing prompt parameters"));
+    assert.deepStrictEqual(body.data.components, []);
   });
 
   it("resolves session_id from the channel when the modal carries none", async () => {
