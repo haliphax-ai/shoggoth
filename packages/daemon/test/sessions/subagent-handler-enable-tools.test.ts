@@ -1,16 +1,25 @@
 import { describe, it } from "vitest";
 import assert from "node:assert";
+import Database from "better-sqlite3";
 import {
   BuiltinToolRegistry,
   type BuiltinToolContext,
 } from "../../src/sessions/builtin-tool-registry";
 import { register as registerSubagent } from "../../src/sessions/builtin-handlers/session-handlers";
+import { createSessionStore } from "../../src/sessions/session-store";
+import { migrate, defaultMigrationsDir } from "../../src/db/migrate";
 
+const SESSION_ID = "agent:test:discord:channel:123";
+
+// The subagent handler resolves the invoking session's spawn depth through the
+// session store, so the stub context needs a real db with the session row present.
 function stubCtx(invoker: (op: string, payload: unknown) => Promise<unknown>): BuiltinToolContext {
+  const db = new Database(":memory:");
+  migrate(db, defaultMigrationsDir());
+  createSessionStore(db).create({ id: SESSION_ID, workspacePath: "/tmp", status: "active" });
   return {
-    sessionId: "agent:test:discord:channel:123",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    db: {} as any,
+    sessionId: SESSION_ID,
+    db,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     config: {} as any,
     env: {},

@@ -634,3 +634,47 @@ describe("fetch config", () => {
     assert.equal((r.data as any).fetch?.caBundle, "/etc/ssl/certs/corp-ca.pem");
   });
 });
+
+// ---------------------------------------------------------------------------
+// maxSpawnDepth on config fragment and agent entry
+// ---------------------------------------------------------------------------
+describe("maxSpawnDepth schema field", () => {
+  it("accepts maxSpawnDepth on shoggothConfigFragmentSchema", () => {
+    const r = shoggothConfigFragmentSchema.safeParse({ maxSpawnDepth: 2 });
+    assert.ok(r.success);
+    assert.equal(r.data!.maxSpawnDepth, 2);
+  });
+
+  it("accepts maxSpawnDepth 0 (disables spawning) on config fragment", () => {
+    const r = shoggothConfigFragmentSchema.safeParse({ maxSpawnDepth: 0 });
+    assert.ok(r.success);
+    assert.equal(r.data!.maxSpawnDepth, 0);
+  });
+
+  it("accepts config fragment without maxSpawnDepth (optional)", () => {
+    const r = shoggothConfigFragmentSchema.safeParse({});
+    assert.ok(r.success);
+    assert.equal(r.data!.maxSpawnDepth, undefined);
+  });
+
+  it("rejects negative maxSpawnDepth on config fragment", () => {
+    const r = shoggothConfigFragmentSchema.safeParse({ maxSpawnDepth: -1 });
+    assert.ok(!r.success);
+  });
+
+  it("rejects non-integer maxSpawnDepth on config fragment", () => {
+    const r = shoggothConfigFragmentSchema.safeParse({ maxSpawnDepth: 1.5 });
+    assert.ok(!r.success);
+  });
+
+  it("accepts maxSpawnDepth on shoggothAgentEntrySchema", () => {
+    const r = shoggothAgentEntrySchema.safeParse({ maxSpawnDepth: 2 });
+    assert.ok(r.success);
+    assert.equal(r.data!.maxSpawnDepth, 2);
+  });
+
+  it("rejects negative maxSpawnDepth on agent entry", () => {
+    const r = shoggothAgentEntrySchema.safeParse({ maxSpawnDepth: -2 });
+    assert.ok(!r.success);
+  });
+});

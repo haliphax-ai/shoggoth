@@ -60,7 +60,7 @@ export function effectiveSubagentSpawnAllowedAgentIds(
 
 /**
  * Whether an **agent** principal may invoke `subagent_spawn` (allowlist only; combine with
- * {@link effectiveSpawnSubagentsEnabled} separately). Operators are not checked here.
+ * the `maxSpawnDepth` gate separately). Operators are not checked here.
  *
  * The sender may spawn only when their logical agent id is among the effective allowed ids (see
  * {@link effectiveSubagentSpawnAllowedAgentIds}) or `"*"` is present in that list.

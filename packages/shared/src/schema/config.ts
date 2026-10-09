@@ -119,8 +119,13 @@ const sharedConfigFields = {
   runtime: shoggothRuntimeConfigSchema.optional(),
   agents: shoggothAgentsConfigSchema.optional(),
   agentToAgent: shoggothAgentToAgentConfigSchema.optional(),
-  spawnSubagents: z.boolean().optional(),
   subagentSpawnAllow: shoggothSubagentSpawnAllowSchema.optional(),
+  /**
+   * Max nested subagent levels below a top-level session (depth of a top-level session = 0).
+   * Default 1: only top-level sessions may spawn. `0` disables subagent spawning entirely.
+   * Combined with (not a replacement for) the `subagentSpawnAllow` allowlist.
+   */
+  maxSpawnDepth: z.number().int().nonnegative().optional(),
   sessionQuery: shoggothSessionQueryConfigSchema.optional(),
   contextLevelTools: contextLevelToolsConfigSchema.optional(),
   processes: z.array(processDeclarationSchema).optional(),

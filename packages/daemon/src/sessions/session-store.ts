@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import {
   assertValidAgentId,
+  computeSessionDepth,
   generateSystemContextToken,
   type ContextLevel,
 } from "@shoggoth/shared";
@@ -182,6 +183,19 @@ export interface SessionStore {
   update(id: string, patch: UpdateSessionInput): void;
   delete(id: string): void;
   list(filter?: SessionListFilter): SessionRow[];
+}
+
+/**
+ * Depth of `sessionId` in the subagent tree (top-level = 0, each nested subagent
+ * level +1) by walking `parent_session_id` links. Returns -1 when the lineage
+ * cannot be fully resolved (missing row or cycle) — callers must treat that as
+ * "deny" (see `maySpawnSubagentAtDepth` in @shoggoth/shared).
+ */
+export function computeSessionDepthFromStore(store: SessionStore, sessionId: string): number {
+  return computeSessionDepth((id) => {
+    const row = store.getById(id);
+    return row ? (row.parentSessionId ?? null) : undefined;
+  }, sessionId);
 }
 
 /** Current `context_segment_id` for model transcript scoping. */

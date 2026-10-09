@@ -13,8 +13,9 @@ import {
   assertValidAgentId,
   crossAgentSessionSendAllowed,
   deepMerge,
-  effectiveSpawnSubagentsEnabled,
+  effectiveMaxSpawnDepth,
   loadLayeredConfigAsync,
+  maySpawnSubagentAtDepth,
   parseAgentSessionUrn,
   redactDeep,
   resolveEffectiveModelsConfig,
@@ -32,6 +33,7 @@ import { AcpxSupervisorError } from "../acpx/acpx-process-supervisor";
 import type { AcpxBindingStore } from "../acpx/sqlite-acpx-bindings";
 import { SessionManagerError, type SessionManager } from "../sessions/session-manager";
 import type { SessionRow, SessionStore, SessionSortBy } from "../sessions/session-store";
+import { computeSessionDepthFromStore } from "../sessions/session-store";
 import { resolveSessionTargetFromCliArg } from "./resolve-session-cli-target";
 import {
   applySessionContextSegmentNew,
@@ -326,11 +328,19 @@ function requireSubagentRuntime(ctx: IntegrationOpsContext): {
   return { sessions: ctx.sessions, sessionManager: ctx.sessionManager };
 }
 
-/** Top-level agents may spawn subagents under their own session id only; nested subagents may not spawn. */
+/**
+ * Agents may spawn subagents under their own session id only, and only while
+ * their session's depth in the subagent tree is below `maxSpawnDepth` (default 1:
+ * top-level sessions may spawn, subagents may not; `0` disables spawning entirely).
+ * Depth is computed by walking `parent_session_id` lineage; an unresolvable lineage
+ * is treated as "deny". This is the sole spawn-permission + depth gate for agents;
+ * it runs *after* the `subagentSpawnAllow` allowlist check and never widens it.
+ */
 function assertAgentMayUseSubagentSpawn(
   principal: AuthenticatedPrincipal,
   parentSessionId: string,
   sessions: SessionStore,
+  config: ShoggothConfig,
 ): void {
   if (principal.kind !== "agent") return;
   if (principal.sessionId !== parentSessionId) {
@@ -346,25 +356,56 @@ function assertAgentMayUseSubagentSpawn(
       "parent session is missing or terminated",
     );
   }
-  if (row.parentSessionId) {
+  // Thread-bound persistent subagents are subject to this gate like any other
+  // session: pure `parent_session_id` lineage depth, no platform-thread carve-outs.
+  // They were previously exempt from the nesting ban; `maxSpawnDepth` now governs
+  // them uniformly.
+  const depth = computeSessionDepthFromStore(sessions, principal.sessionId);
+  const maxDepth = effectiveMaxSpawnDepth(
+    config,
+    parseAgentSessionUrn(principal.sessionId)?.agentId,
+  );
+  if (!maySpawnSubagentAtDepth(depth, maxDepth)) {
     throw new IntegrationOpError(
       "ERR_SUBAGENT_NESTING_FORBIDDEN",
-      "subagents cannot spawn nested subagents",
+      `subagent spawn denied: nesting depth limit reached (maxSpawnDepth: ${maxDepth})`,
     );
   }
 }
 
-/** When false in config, agent principals cannot use subagent spawn, inspect, steer, abort, or kill. */
-function assertAgentSpawnSubagentsAllowed(
+/**
+ * Agent principals may manage a subagent session (inspect / steer / wait / result /
+ * abort / kill) only while their own session's depth is below `maxSpawnDepth`
+ * (default 1: top-level sessions only; `0` disables all subagent operations).
+ * Mirrors the spawn gate so that non-spawn subagent ops never widen the nesting
+ * ceiling. The `subagentSpawnAllow` allowlist applies to spawn only and is not
+ * re-checked here. Targeting restrictions (direct child / own session) are
+ * enforced per-op.
+ *
+ * Thread-bound persistent subagents are subject to this gate like any other
+ * session: pure `parent_session_id` lineage depth, no platform-thread carve-outs.
+ * They were previously exempt from the nesting ban; `maxSpawnDepth` now governs
+ * them uniformly.
+ */
+function assertAgentMayUseSubagentSessionOps(
   principal: AuthenticatedPrincipal,
-  config: ShoggothConfig,
+  ctx: IntegrationOpsContext,
 ): void {
   if (principal.kind !== "agent") return;
-  const agentId = parseAgentSessionUrn(principal.sessionId)?.agentId;
-  if (!effectiveSpawnSubagentsEnabled(config, agentId)) {
+  const { sessions } = requireSubagentRuntime(ctx);
+  const row = sessions.getById(principal.sessionId);
+  if (!row) {
+    throw new IntegrationOpError("ERR_PARENT_SESSION_INVALID", "session is missing or terminated");
+  }
+  const depth = computeSessionDepthFromStore(sessions, principal.sessionId);
+  const maxDepth = effectiveMaxSpawnDepth(
+    ctx.config,
+    parseAgentSessionUrn(principal.sessionId)?.agentId,
+  );
+  if (!maySpawnSubagentAtDepth(depth, maxDepth)) {
     throw new IntegrationOpError(
-      "ERR_FORBIDDEN",
-      "subagent operations disabled for this agent (spawnSubagents is false)",
+      "ERR_SUBAGENT_NESTING_FORBIDDEN",
+      `subagent operations denied: nesting depth limit reached (maxSpawnDepth: ${maxDepth})`,
     );
   }
 }
@@ -1180,7 +1221,6 @@ export async function handleIntegrationControlOp(
         );
       }
       if (principal.kind === "agent") {
-        assertAgentSpawnSubagentsAllowed(principal, ctx.config);
         const callerAgentId = parseAgentSessionUrn(principal.sessionId)?.agentId;
         if (callerAgentId && !agentMayInvokeSubagentSpawnByAllowlist(ctx.config, callerAgentId)) {
           throw new IntegrationOpError(
@@ -1199,7 +1239,7 @@ export async function handleIntegrationControlOp(
       const { sessions, sessionManager } = requireSubagentRuntime(ctx);
       const pl = payloadObject(req);
       const parentSessionId = requireString(pl, "parent_session_id");
-      assertAgentMayUseSubagentSpawn(principal, parentSessionId, sessions);
+      assertAgentMayUseSubagentSpawn(principal, parentSessionId, sessions, ctx.config);
       const prompt = requireString(pl, "prompt");
       const modeRaw = requireString(pl, "mode");
       if (modeRaw !== "one_shot" && modeRaw !== "persistent") {
@@ -1614,7 +1654,7 @@ export async function handleIntegrationControlOp(
         );
       }
       if (principal.kind === "agent") {
-        assertAgentSpawnSubagentsAllowed(principal, ctx.config);
+        assertAgentMayUseSubagentSessionOps(principal, ctx);
       }
       const { sessions } = requireSubagentRuntime(ctx);
       const pl = payloadObject(req);
@@ -1753,7 +1793,7 @@ export async function handleIntegrationControlOp(
         );
       }
       if (principal.kind === "agent") {
-        assertAgentSpawnSubagentsAllowed(principal, ctx.config);
+        assertAgentMayUseSubagentSessionOps(principal, ctx);
       }
       const { sessions } = requireSubagentRuntime(ctx);
       const pl = payloadObject(req);
@@ -1998,7 +2038,7 @@ export async function handleIntegrationControlOp(
             "agent may only session_inspect own session",
           );
         }
-        assertAgentSpawnSubagentsAllowed(principal, ctx.config);
+        assertAgentMayUseSubagentSessionOps(principal, ctx);
       }
       const row = sessions.getById(sessionId);
       if (!row) {
@@ -2120,7 +2160,7 @@ export async function handleIntegrationControlOp(
         );
       }
       if (principal.kind === "agent") {
-        assertAgentSpawnSubagentsAllowed(principal, ctx.config);
+        assertAgentMayUseSubagentSessionOps(principal, ctx);
       }
       const ext = subagentRuntimeExtensionRef.current;
       if (!ext) {
@@ -2351,7 +2391,7 @@ export async function handleIntegrationControlOp(
         throw new IntegrationOpError("ERR_SESSION_INACTIVE", "session is missing or terminated");
       }
       if (principal.kind === "agent") {
-        assertAgentSpawnSubagentsAllowed(principal, ctx.config);
+        assertAgentMayUseSubagentSessionOps(principal, ctx);
         const own = sessionId === principal.sessionId;
         const directChild = row.parentSessionId === principal.sessionId;
         if (!own && !directChild) {
@@ -2383,7 +2423,7 @@ export async function handleIntegrationControlOp(
       const sessionId = requireSessionId(pl, ctx.config);
       const targetRow = sessions.getById(sessionId);
       if (principal.kind === "agent") {
-        assertAgentSpawnSubagentsAllowed(principal, ctx.config);
+        assertAgentMayUseSubagentSessionOps(principal, ctx);
         if (!targetRow || targetRow.status === "terminated") {
           throw new IntegrationOpError("ERR_SESSION_INACTIVE", "session is missing or terminated");
         }
