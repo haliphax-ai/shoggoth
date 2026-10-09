@@ -53,9 +53,9 @@ On failure the result contains an `error` string instead: a validation failure (
 { "filter": ".", "tail": 100 }
 ```
 
-## Slurping filters (jq 1.6)
+## Slurping filters
 
-The container ships jq 1.6, where `group_by`/`sort_by`/`map` do not auto-slurp JSON-lines streams — each filter invocation receives one log line at a time. When a filter needs the whole stream as a single array, slurp it explicitly with `[., inputs]`:
+`group_by`/`sort_by`/`map` and other whole-input filters do **not** slurp JSON-lines streams on any jq version — each filter invocation receives one log line at a time (verified on the jq 1.8.x shipped in the container; this is jq stream semantics, not a version-specific bug). When a filter needs the whole stream as a single array, slurp it explicitly with `[., inputs]`:
 
 Fails (`group_by` receives one object per invocation):
 
