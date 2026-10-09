@@ -102,6 +102,8 @@ export const shoggothAgentEntrySchema = z
     agentToAgent: shoggothAgentToAgentAllowSchema.optional(),
     subagentSpawnAllow: shoggothSubagentSpawnAllowSchema.optional(),
     spawnSubagents: z.boolean().optional(),
+    /** Per-agent override of top-level `maxSpawnDepth` (nested subagent levels below a top-level session). */
+    maxSpawnDepth: z.number().int().nonnegative().optional(),
     sessionQuery: shoggothSessionQueryAllowSchema.optional(),
     policy: z.object({ tools: shoggothToolRulesSchema.partial().optional() }).strict().optional(),
     hitl: z

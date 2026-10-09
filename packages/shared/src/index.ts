@@ -135,6 +135,12 @@ export {
   mergeAgentToAgentAllowPatterns,
 } from "./agent-to-agent-policy";
 export { effectiveSpawnSubagentsEnabled } from "./spawn-subagents-policy";
+export {
+  DEFAULT_MAX_SPAWN_DEPTH,
+  computeSessionDepth,
+  effectiveMaxSpawnDepth,
+  maySpawnSubagentAtDepth,
+} from "./spawn-depth";
 export { effectiveThreadSubagentsEnabled } from "./thread-subagents-policy";
 export {
   agentMayInvokeSubagentSpawnByAllowlist,

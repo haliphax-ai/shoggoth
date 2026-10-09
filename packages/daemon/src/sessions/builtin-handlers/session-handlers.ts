@@ -3,10 +3,17 @@
 // ---------------------------------------------------------------------------
 
 import {
+  effectiveMaxSpawnDepth,
+  maySpawnSubagentAtDepth,
   resolveAgentIdFromSessionId,
   resolveEffectiveSessionQueryAllowedAgentIds,
 } from "@shoggoth/shared";
 import { IntegrationOpError } from "../../control/integration-ops";
+import {
+  computeSessionDepthFromStore,
+  createSessionStore,
+  type SessionStore,
+} from "../session-store";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
 import { getLogger } from "../../logging";
 
@@ -252,9 +259,16 @@ async function subagentHandler(
       resultJson: JSON.stringify({ error: "subagent_control_unavailable" }),
     };
   }
-  if (ctx.isSubagentSession) {
+  // Nesting gate: a session may use subagent ops only while its depth in the
+  // subagent tree is below maxSpawnDepth (default 1 — top-level sessions only).
+  // Depth is computed by walking parent-session lineage, not URN shape. The
+  // control-op layer re-checks this authoritatively on spawn.
+  const sessions = createSessionStore(ctx.db);
+  const depth = computeSessionDepthFromStore(sessions, ctx.sessionId);
+  const agentId = resolveAgentIdFromSessionId(ctx.sessionId);
+  if (!maySpawnSubagentAtDepth(depth, effectiveMaxSpawnDepth(ctx.config, agentId))) {
     return {
-      resultJson: JSON.stringify({ error: "subagent_tool_top_level_only" }),
+      resultJson: JSON.stringify({ error: "subagent_tool_depth_exceeded" }),
     };
   }
   const action = String(args.action ?? "").trim();
@@ -327,6 +341,9 @@ async function subagentHandler(
         resultJson: JSON.stringify({ error: "session_id and prompt required" }),
       };
     }
+    if (!isDirectSubagentChild(sessions, ctx.sessionId, sid, false)) {
+      return { resultJson: JSON.stringify({ error: "subagent_target_not_child" }) };
+    }
     op = "session_steer";
     payload = { session_id: sid, prompt };
     const del = args.delivery;
@@ -340,12 +357,18 @@ async function subagentHandler(
     if (!sid) {
       return { resultJson: JSON.stringify({ error: "session_id required" }) };
     }
+    if (!isDirectSubagentChild(sessions, ctx.sessionId, sid, true)) {
+      return { resultJson: JSON.stringify({ error: "subagent_target_not_child" }) };
+    }
     op = "session_abort";
     payload = { session_id: sid };
   } else if (action === "kill") {
     const sid = String(args.session_id ?? "").trim();
     if (!sid) {
       return { resultJson: JSON.stringify({ error: "session_id required" }) };
+    }
+    if (!isDirectSubagentChild(sessions, ctx.sessionId, sid, false)) {
+      return { resultJson: JSON.stringify({ error: "subagent_target_not_child" }) };
     }
     op = "session_kill";
     payload = { session_id: sid };
@@ -435,6 +458,22 @@ async function subagentHandler(
     });
   }
   return result;
+}
+
+/**
+ * steer/kill may target only direct children of the invoking session; abort may
+ * also target the session itself. Enforced here (not just by same-agent scoping
+ * at the control-op layer) so a subagent with spawn privileges can never
+ * steer/kill outside its own subtree.
+ */
+function isDirectSubagentChild(
+  sessions: SessionStore,
+  parentSessionId: string,
+  targetSessionId: string,
+  allowSelf: boolean,
+): boolean {
+  if (allowSelf && targetSessionId === parentSessionId) return true;
+  return sessions.getById(targetSessionId)?.parentSessionId === parentSessionId;
 }
 
 // ---------------------------------------------------------------------------

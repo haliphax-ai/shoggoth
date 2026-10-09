@@ -53,8 +53,9 @@ export interface BuiltinToolContext {
   readonly runtimeOpenaiBaseUrl: string | undefined;
 
   /**
-   * Whether the current session is a subagent session.
-   * Used by the subagent handler to reject nested spawns.
+   * Whether the current session is a subagent session (informational; derived
+   * from the session URN). Nesting enforcement is depth-based — see the
+   * subagent handler and `maxSpawnDepth` in config.
    */
   readonly isSubagentSession: boolean;
 

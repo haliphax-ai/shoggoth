@@ -13,8 +13,10 @@ import {
   assertValidAgentId,
   crossAgentSessionSendAllowed,
   deepMerge,
+  effectiveMaxSpawnDepth,
   effectiveSpawnSubagentsEnabled,
   loadLayeredConfigAsync,
+  maySpawnSubagentAtDepth,
   parseAgentSessionUrn,
   redactDeep,
   resolveEffectiveModelsConfig,
@@ -32,6 +34,7 @@ import { AcpxSupervisorError } from "../acpx/acpx-process-supervisor";
 import type { AcpxBindingStore } from "../acpx/sqlite-acpx-bindings";
 import { SessionManagerError, type SessionManager } from "../sessions/session-manager";
 import type { SessionRow, SessionStore, SessionSortBy } from "../sessions/session-store";
+import { computeSessionDepthFromStore } from "../sessions/session-store";
 import { resolveSessionTargetFromCliArg } from "./resolve-session-cli-target";
 import {
   applySessionContextSegmentNew,
@@ -326,11 +329,20 @@ function requireSubagentRuntime(ctx: IntegrationOpsContext): {
   return { sessions: ctx.sessions, sessionManager: ctx.sessionManager };
 }
 
-/** Top-level agents may spawn subagents under their own session id only; nested subagents may not spawn. */
+/**
+ * Agents may spawn subagents under their own session id only, and only while
+ * their session's depth in the subagent tree is below `maxSpawnDepth` (default 1:
+ * top-level sessions may spawn, subagents may not). Depth is computed by walking
+ * `parent_session_id` lineage; an unresolvable lineage is treated as "deny".
+ * This gate runs *after* the spawn-permission gates (`spawnSubagents`,
+ * `subagentSpawnAllow`) and only tightens nesting depth for callers that already
+ * passed them.
+ */
 function assertAgentMayUseSubagentSpawn(
   principal: AuthenticatedPrincipal,
   parentSessionId: string,
   sessions: SessionStore,
+  config: ShoggothConfig,
 ): void {
   if (principal.kind !== "agent") return;
   if (principal.sessionId !== parentSessionId) {
@@ -346,10 +358,15 @@ function assertAgentMayUseSubagentSpawn(
       "parent session is missing or terminated",
     );
   }
-  if (row.parentSessionId) {
+  const depth = computeSessionDepthFromStore(sessions, principal.sessionId);
+  const maxDepth = effectiveMaxSpawnDepth(
+    config,
+    parseAgentSessionUrn(principal.sessionId)?.agentId,
+  );
+  if (!maySpawnSubagentAtDepth(depth, maxDepth)) {
     throw new IntegrationOpError(
       "ERR_SUBAGENT_NESTING_FORBIDDEN",
-      "subagents cannot spawn nested subagents",
+      `subagent spawn denied: nesting depth limit reached (maxSpawnDepth: ${maxDepth})`,
     );
   }
 }
@@ -1199,7 +1216,7 @@ export async function handleIntegrationControlOp(
       const { sessions, sessionManager } = requireSubagentRuntime(ctx);
       const pl = payloadObject(req);
       const parentSessionId = requireString(pl, "parent_session_id");
-      assertAgentMayUseSubagentSpawn(principal, parentSessionId, sessions);
+      assertAgentMayUseSubagentSpawn(principal, parentSessionId, sessions, ctx.config);
       const prompt = requireString(pl, "prompt");
       const modeRaw = requireString(pl, "mode");
       if (modeRaw !== "one_shot" && modeRaw !== "persistent") {

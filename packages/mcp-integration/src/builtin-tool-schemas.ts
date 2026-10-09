@@ -117,7 +117,7 @@ export const memoryIngestArgs = {
 export const subagentToolArgs = {
   type: "object",
   description:
-    "Subagent spawn, inspect, steer, abort, kill, wait, and result. Allowed only when spawnSubagents is true (top-level and/or agents.list.<id>.spawnSubagents). Top-level sessions only for spawn; steer/kill target direct child subagents; abort may target own session or a direct child. wait blocks until one or more subagents complete; result retrieves the final output of a completed subagent.",
+    "Subagent spawn, inspect, steer, abort, kill, wait, and result. Allowed only when spawnSubagents is true (top-level and/or agents.list.<id>.spawnSubagents). Spawn depth is limited by maxSpawnDepth (default 1: only top-level sessions may spawn; increase to permit nested spawning). steer/kill target direct child subagents; abort may target own session or a direct child. wait blocks until one or more subagents complete; result retrieves the final output of a completed subagent.",
   properties: {
     action: {
       type: "string",
