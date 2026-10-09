@@ -1,8 +1,8 @@
 /**
  * Tests for the maxSpawnDepth nesting gate on the subagent_spawn control op.
  *
- * The depth gate is an *additional* check that runs after the spawn-permission
- * gates (spawnSubagents / subagentSpawnAllow — covered elsewhere). Default
+ * The depth gate is the sole spawn-permission + depth check for agents; the
+ * `subagentSpawnAllow` allowlist is a separate gate (covered elsewhere). Default
  * config (maxSpawnDepth unset = 1) preserves the historical behavior: a
  * top-level session may spawn, a subagent may not.
  */

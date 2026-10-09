@@ -18,7 +18,7 @@ const MAX_LINEAGE_WALK = 64;
  * `0` disables subagent spawning entirely.
  *
  * This is purely an *additional* nesting gate that applies to sessions already
- * permitted to spawn by `spawnSubagents` / `subagentSpawnAllow` — it does not
+ * permitted to spawn by the `subagentSpawnAllow` allowlist — it does not
  * replace or modify those gates. It also governs session-level subagent nesting
  * only, not the workflow engine's separate `maxDepth`.
  */

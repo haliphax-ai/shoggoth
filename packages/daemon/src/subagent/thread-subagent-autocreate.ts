@@ -71,7 +71,7 @@ export async function handlePlatformThreadCreate(
   }
 
   // Enabled by default: only an explicit `agents.threadSubagents: false` disables
-  // (same `!== false` read-site semantics as `spawnSubagents` — see
+  // (same `!== false` read-site semantics as other boolean flags — see
   // effectiveThreadSubagentsEnabled in @shoggoth/shared for the documented helper).
   const agentsCfg = (input.config as { agents?: { threadSubagents?: boolean } } | undefined)
     ?.agents;

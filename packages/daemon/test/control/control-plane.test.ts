@@ -1888,7 +1888,7 @@ describe("control plane (unix socket + JSONL)", () => {
     db.close();
   });
 
-  it("subagent_spawn denied for agent when spawnSubagents false", async () => {
+  it("subagent_spawn denied for agent when maxSpawnDepth is 0", async () => {
     if (process.platform !== "linux") return;
 
     const dir = await mkdtemp(join(tmpdir(), "shoggoth-sub-spawn-off-"));
@@ -1923,7 +1923,7 @@ describe("control plane (unix socket + JSONL)", () => {
       await withControlPlaneSession(
         {
           stateDb: db,
-          config: { ...minimalConfig(sock), spawnSubagents: false },
+          config: { ...minimalConfig(sock), maxSpawnDepth: 0 },
         },
         async (send) => {
           const line = await send({
@@ -1943,7 +1943,7 @@ describe("control plane (unix socket + JSONL)", () => {
           });
           const res = parseResponseLine(line);
           assert.equal(res.ok, false);
-          assert.equal(res.error?.code, "ERR_FORBIDDEN");
+          assert.equal(res.error?.code, "ERR_SUBAGENT_NESTING_FORBIDDEN");
         },
       );
     } finally {
@@ -2019,7 +2019,7 @@ describe("control plane (unix socket + JSONL)", () => {
     db.close();
   });
 
-  it("session_inspect denied for agent when spawnSubagents false", async () => {
+  it("session_inspect denied for agent when maxSpawnDepth is 0", async () => {
     if (process.platform !== "linux") return;
 
     const dir = await mkdtemp(join(tmpdir(), "shoggoth-insp-off-"));
@@ -2040,7 +2040,7 @@ describe("control plane (unix socket + JSONL)", () => {
     await withControlPlaneSession(
       {
         stateDb: db,
-        config: { ...minimalConfig(sock), spawnSubagents: false },
+        config: { ...minimalConfig(sock), maxSpawnDepth: 0 },
       },
       async (send) => {
         const line = await send({
@@ -2052,7 +2052,7 @@ describe("control plane (unix socket + JSONL)", () => {
         });
         const res = parseResponseLine(line);
         assert.equal(res.ok, false);
-        assert.equal(res.error?.code, "ERR_FORBIDDEN");
+        assert.equal(res.error?.code, "ERR_SUBAGENT_NESTING_FORBIDDEN");
       },
     );
     db.close();

@@ -94,7 +94,7 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
       {
         name: "subagent",
         description:
-          "Unified subagent control: spawn (one_shot or persistent), inspect this session's children, steer/abort/kill child sessions (or abort own in-flight turn). Requires spawnSubagents in config when using agent token.",
+          "Unified subagent control: spawn (one_shot or persistent), inspect this session's children, steer/abort/kill child sessions (or abort own in-flight turn). Gated by maxSpawnDepth when using agent token (default 1: only top-level sessions; 0 disables).",
         inputSchema: subagentToolArgs,
       },
       {
