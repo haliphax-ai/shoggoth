@@ -822,12 +822,15 @@ export async function handleIntegrationControlOp(
           "session_context_new requires operator principal",
         );
       }
-      if (!ctx.stateDb || !ctx.sessions) {
+      if (!ctx.stateDb || !ctx.sessions || !ctx.sessionManager) {
         throw new IntegrationOpError(
           "ERR_STATE_DB_REQUIRED",
-          "session context ops require state database",
+          "session context ops require state database and session manager",
         );
       }
+      // A session manager is always created alongside the state DB (see control-plane), so one is
+      // guaranteed here — captured for the kill closure without a non-null assertion.
+      const sessionManager = ctx.sessionManager;
       const pl = payloadObject(req);
       const sessionId = requireString(pl, "session_id");
       const out = applySessionContextSegmentNew({
@@ -835,18 +838,16 @@ export async function handleIntegrationControlOp(
         sessions: ctx.sessions,
         sessionId,
         pending: ctx.hitlPending,
-        killSubagents: ctx.sessionManager
-          ? (childIds) => {
-              for (const cid of childIds) {
-                terminatePersistentSubagentSession(
-                  ctx.sessionManager!,
-                  cid,
-                  "killed",
-                  ctx.hitlClear?.autoApproveGate,
-                );
-              }
-            }
-          : undefined,
+        killSubagents: (childIds) => {
+          for (const cid of childIds) {
+            terminatePersistentSubagentSession(
+              sessionManager,
+              cid,
+              "killed",
+              ctx.hitlClear?.autoApproveGate,
+            );
+          }
+        },
       });
       ctx.recordIntegrationAudit({
         action: "session.context_segment_new",
@@ -864,12 +865,15 @@ export async function handleIntegrationControlOp(
           "session_context_reset requires operator principal",
         );
       }
-      if (!ctx.stateDb || !ctx.sessions) {
+      if (!ctx.stateDb || !ctx.sessions || !ctx.sessionManager) {
         throw new IntegrationOpError(
           "ERR_STATE_DB_REQUIRED",
-          "session context ops require state database",
+          "session context ops require state database and session manager",
         );
       }
+      // A session manager is always created alongside the state DB (see control-plane), so one is
+      // guaranteed here — captured for the kill closure without a non-null assertion.
+      const sessionManager = ctx.sessionManager;
       const pl = payloadObject(req);
       const sessionId = requireString(pl, "session_id");
       const out = applySessionContextSegmentReset({
@@ -877,6 +881,16 @@ export async function handleIntegrationControlOp(
         sessions: ctx.sessions,
         sessionId,
         pending: ctx.hitlPending,
+        killSubagents: (childIds) => {
+          for (const cid of childIds) {
+            terminatePersistentSubagentSession(
+              sessionManager,
+              cid,
+              "killed",
+              ctx.hitlClear?.autoApproveGate,
+            );
+          }
+        },
       });
       ctx.recordIntegrationAudit({
         action: "session.context_segment_reset",
