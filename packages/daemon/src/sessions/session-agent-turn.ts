@@ -39,7 +39,12 @@ import { createMcpRoutingToolExecutor } from "../mcp/tool-loop-mcp";
 import { createSystemGates } from "./system-gates";
 import { createToolLoopPolicyAndAudit } from "../policy/tool-loop-bridge";
 import { createDefaultSubResourceRegistry } from "../policy/sub-resource";
-import { runToolLoop, type RunToolLoopHitl, type RunToolLoopOptions } from "./tool-loop";
+import {
+  runToolLoop,
+  type RunToolLoopHitl,
+  type RunToolLoopOptions,
+  type ToolCallEvent,
+} from "./tool-loop";
 import type { TranscriptStore } from "./transcript-store";
 import type { ToolRunStore } from "./tool-run-store";
 import type { SessionRow } from "./session-store";
@@ -111,6 +116,16 @@ export interface ExecuteSessionAgentTurnInput {
   readonly throwOnError?: boolean;
   /** Optional override merged into the session's model invocation params before the turn. */
   readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
+  /** Optional turn lifecycle events for the status bar / external observers. */
+  readonly events?: {
+    /** Reasoning/thinking content is streaming from the model. */
+    readonly onThinkingDelta?: (accumulated: string) => void;
+    readonly onToolCall?: (ev: ToolCallEvent) => void;
+    /** A HITL approval row was queued for a tool call (⏸️). */
+    readonly onHitlQueued?: (call: { name: string; argsJson: string }) => void;
+    /** A mid-turn compaction completed. */
+    readonly onCompaction?: () => void;
+  };
 }
 
 export interface SessionAgentTurnResult {
@@ -118,6 +133,8 @@ export interface SessionAgentTurnResult {
   readonly latestAssistantText: string;
   /** Outbound attachments extracted from `show` tool results in this turn. */
   readonly showAttachments?: readonly OutboundAttachment[];
+  /** Maps to 🛑/❌/✅ in the status bar. */
+  readonly outcome: "completed" | "aborted" | "failed";
 }
 
 function sessionCreds(uid?: number, gid?: number): AgentCredentials {
@@ -409,6 +426,8 @@ export async function executeSessionAgentTurn(
     modelInvocation,
     streamModel: Boolean(input.stream?.streamModel),
     onModelTextDelta: input.stream?.onModelTextDelta,
+    onThinkingDelta: input.events?.onThinkingDelta,
+    onCompaction: input.events?.onCompaction,
     onUsageDelta: (delta) => {
       incrementTokenUsage(input.db, input.sessionId, delta);
     },
@@ -574,7 +593,18 @@ export async function executeSessionAgentTurn(
       hitl: {
         ...input.hitl,
         config: input.getHitlConfig(),
+        // Wrap the inbound afterHitlQueued so the status bar tracker learns
+        // about queued approvals (pause) even when no platform notice is configured.
+        afterHitlQueued: (row) => {
+          const payload = row.payload as { argsJson?: string } | undefined;
+          input.events?.onHitlQueued?.({
+            name: row.toolName,
+            argsJson: payload?.argsJson ?? "",
+          });
+          return input.hitl.afterHitlQueued?.(row);
+        },
       },
+      onToolCallEvent: input.events?.onToolCall,
       toolCallTimeoutMs: resolveToolCallTimeoutMs(input.config, input.sessionId),
       onStatsUpdate: (update) => {
         if (update.estimatedInputTokens) {
@@ -623,6 +653,7 @@ export async function executeSessionAgentTurn(
       return {
         failoverMeta: failoverMeta ? { ...failoverMeta, primaryModel } : undefined,
         latestAssistantText,
+        outcome: "aborted",
       };
     }
     // Catch-all: log the error and return whatever partial response exists
@@ -647,6 +678,7 @@ export async function executeSessionAgentTurn(
     return {
       failoverMeta: failoverMeta2 ? { ...failoverMeta2, primaryModel: primaryModel2 } : undefined,
       latestAssistantText: latestAssistantText2,
+      outcome: "failed",
     };
   } finally {
     endTurnAbortScope();
@@ -717,6 +749,7 @@ export async function executeSessionAgentTurn(
       : undefined,
     latestAssistantText,
     showAttachments: showAttachments.length > 0 ? showAttachments : undefined,
+    outcome: "completed",
   };
 }
 
