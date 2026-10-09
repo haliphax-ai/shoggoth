@@ -111,7 +111,7 @@ function setupDb(): { db: Database.Database; sessionId: string } {
   const db = new Database(":memory:");
   migrate(db, defaultMigrationsDir());
   const sessions = createSessionStore(db);
-  const sessionId = "test-session-model-val";
+  const sessionId = "agent:test-session-model-val:discord:channel:sess1";
   sessions.create({ id: sessionId, workspacePath: "/w", status: "active" });
   return { db, sessionId };
 }

@@ -958,24 +958,24 @@ describe("control plane (unix socket + JSONL)", () => {
     const db = new Database(dbPath);
     migrate(db, defaultMigrationsDir());
     createSessionStore(db).create({
-      id: "sess-cx",
+      id: "agent:test:discord:channel:sess-cx",
       workspacePath: "/tmp/w",
       status: "active",
     });
-    const seg1 = getSessionContextSegmentId(db, "sess-cx");
+    const seg1 = getSessionContextSegmentId(db, "agent:test:discord:channel:sess-cx");
     const tr = createTranscriptStore(db);
     tr.append({
-      sessionId: "sess-cx",
+      sessionId: "agent:test:discord:channel:sess-cx",
       contextSegmentId: seg1,
       role: "user",
       content: "x",
     });
-    insertSessionToolAutoApprove(db, "sess-cx", "builtin-write");
+    insertSessionToolAutoApprove(db, "agent:test:discord:channel:sess-cx", "builtin-write");
     const countSessionAutoApprove = () =>
       (
         db
           .prepare(`SELECT COUNT(*) AS c FROM hitl_session_tool_auto_approve WHERE session_id = ?`)
-          .get("sess-cx") as { c: number }
+          .get("agent:test:discord:channel:sess-cx") as { c: number }
       ).c;
     assert.equal(countSessionAutoApprove(), 1);
 
@@ -994,7 +994,7 @@ describe("control plane (unix socket + JSONL)", () => {
           id: "scn1",
           op: "session_context_new",
           auth: opAuth,
-          payload: { session_id: "sess-cx" },
+          payload: { session_id: "agent:test:discord:channel:sess-cx" },
         });
         const newRes = parseResponseLine(lineNew);
         assert.equal(newRes.ok, true);
@@ -1009,24 +1009,24 @@ describe("control plane (unix socket + JSONL)", () => {
         // Transcript rows are abandoned (not deleted); old rows remain in SQLite.
         const nAll = db
           .prepare(`SELECT COUNT(*) AS c FROM transcript_messages WHERE session_id = ?`)
-          .get("sess-cx") as { c: number };
+          .get("agent:test:discord:channel:sess-cx") as { c: number };
         assert.equal(nAll.c, 1);
 
-        const seg2 = getSessionContextSegmentId(db, "sess-cx");
+        const seg2 = getSessionContextSegmentId(db, "agent:test:discord:channel:sess-cx");
         tr.append({
-          sessionId: "sess-cx",
+          sessionId: "agent:test:discord:channel:sess-cx",
           contextSegmentId: seg2,
           role: "user",
           content: "y",
         });
-        insertSessionToolAutoApprove(db, "sess-cx", "builtin-write");
+        insertSessionToolAutoApprove(db, "agent:test:discord:channel:sess-cx", "builtin-write");
         assert.equal(countSessionAutoApprove(), 1);
         const lineReset = await send({
           v: WIRE_VERSION,
           id: "scr1",
           op: "session_context_reset",
           auth: opAuth,
-          payload: { session_id: "sess-cx" },
+          payload: { session_id: "agent:test:discord:channel:sess-cx" },
         });
         const resetRes = parseResponseLine(lineReset);
         assert.equal(resetRes.ok, true);
@@ -1041,7 +1041,7 @@ describe("control plane (unix socket + JSONL)", () => {
           .prepare(
             `SELECT COUNT(*) AS c FROM transcript_messages WHERE session_id = ? AND context_segment_id = ?`,
           )
-          .get("sess-cx", seg2) as { c: number };
+          .get("agent:test:discord:channel:sess-cx", seg2) as { c: number };
         assert.equal(nSeg2.c, 1);
         assert.equal(countSessionAutoApprove(), 1);
       },

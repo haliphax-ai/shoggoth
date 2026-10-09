@@ -181,10 +181,10 @@ Human-in-the-loop approval queue management.
 #### List pending actions
 
 ```
-shoggoth hitl list [sessionId]
+shoggoth hitl list [sessionId|agentId]
 ```
 
-Lists all pending HITL actions. Optionally filter by session URN.
+Lists all pending HITL actions. Optionally filter by a session URN or bare agent id.
 
 #### Get a pending action
 
@@ -206,11 +206,11 @@ Approve or deny a pending tool invocation.
 #### Clear pending actions
 
 ```
-shoggoth hitl clear <agentId|all> [--session <sessionURN>] [--noauto]
+shoggoth hitl clear <agentId|all> [--session <sessionURN|agentId>] [--noauto]
 ```
 
 - `<agentId|all>` — target agent, or `all` for every agent.
-- `--session <sessionURN>` — scope to a single session; leaves auto-approve state unchanged.
+- `--session <sessionURN|agentId>` — scope to a single session (session URN or bare agent id); leaves auto-approve state unchanged.
 - `--noauto` — clear pending rows only; preserve session and agent auto-approve settings.
 
 Output: JSON.

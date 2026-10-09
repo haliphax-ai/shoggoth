@@ -32,7 +32,7 @@ const GLOBAL_SLASH_COMMANDS = [
       {
         name: "session_id",
         type: 3,
-        description: "Session URN (defaults to this channel's session)",
+        description: "Session URN or agent ID (defaults to this channel's session)",
         required: false,
       },
       {
@@ -56,7 +56,7 @@ const GLOBAL_SLASH_COMMANDS = [
       {
         name: "session_id",
         type: 3, // STRING
-        description: "Session URN to abort",
+        description: "Session URN or agent ID to abort",
         required: false,
       },
     ],
@@ -74,7 +74,7 @@ const GLOBAL_SLASH_COMMANDS = [
       {
         name: "session_id",
         type: 3, // STRING
-        description: "Session URN (defaults to this channel's session)",
+        description: "Session URN or agent ID (defaults to this channel's session)",
         required: false,
       },
       {
@@ -96,7 +96,7 @@ const GLOBAL_SLASH_COMMANDS = [
       {
         name: "session_id",
         type: 3,
-        description: "Session URN",
+        description: "Session URN or agent ID",
         required: false,
       },
     ],
@@ -108,7 +108,7 @@ const GLOBAL_SLASH_COMMANDS = [
       {
         name: "session_id",
         type: 3,
-        description: "Session URN",
+        description: "Session URN or agent ID",
         required: false,
       },
     ],
@@ -120,7 +120,7 @@ const GLOBAL_SLASH_COMMANDS = [
       {
         name: "session_id",
         type: 3,
-        description: "Session URN",
+        description: "Session URN or agent ID",
         required: false,
       },
     ],
@@ -132,7 +132,7 @@ const GLOBAL_SLASH_COMMANDS = [
       {
         name: "session_id",
         type: 3,
-        description: "Session URN",
+        description: "Session URN or agent ID",
         required: false,
       },
     ],
@@ -144,7 +144,7 @@ const GLOBAL_SLASH_COMMANDS = [
       {
         name: "session_id",
         type: 3,
-        description: "Session URN",
+        description: "Session URN or agent ID",
         required: false,
       },
       {
@@ -192,7 +192,7 @@ const GLOBAL_SLASH_COMMANDS = [
       {
         name: "session_id",
         type: 3,
-        description: "Session URN",
+        description: "Session URN or agent ID",
         required: false,
       },
     ],
@@ -210,7 +210,7 @@ const GLOBAL_SLASH_COMMANDS = [
       {
         name: "session_id",
         type: 3, // STRING
-        description: "Session URN (defaults to this channel's session)",
+        description: "Session URN or agent ID (defaults to this channel's session)",
         required: false,
       },
     ],
