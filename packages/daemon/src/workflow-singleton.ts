@@ -33,6 +33,11 @@ interface WorkflowSingletonOptions {
   killer: KillAdapter;
   /** Factory to create a per-workflow MessageAdapter bound to a specific session. */
   createMessageAdapter?: (sessionId: string) => MessageAdapter;
+  /**
+   * Pin workflow status posts when (re)created on platforms that support pinning.
+   * Default: true.
+   */
+  pinStatusPost?: boolean;
   /** Factory to create a per-workflow NotificationAdapter for task failure delivery. */
   createNotificationAdapter?: (sessionId: string) => NotificationAdapter;
   /** Factory to create a per-workflow MessagePoster for message tasks. */
@@ -52,7 +57,10 @@ export function initWorkflow(opts: WorkflowSingletonOptions): {
   mkdirSync(stateDir, { recursive: true });
 
   const createStatusManager = opts.createMessageAdapter
-    ? (sessionId: string) => new StatusManager(opts.createMessageAdapter!(sessionId))
+    ? (sessionId: string) =>
+        new StatusManager(opts.createMessageAdapter!(sessionId), {
+          pinStatusPost: opts.pinStatusPost ?? true,
+        })
     : undefined;
 
   const createKiller = opts.killer ? (_sessionId: string) => opts.killer : undefined;

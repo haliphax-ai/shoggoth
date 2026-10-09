@@ -71,7 +71,7 @@ export { formatDuration } from "./format.js";
 // Status messaging
 export { formatStatusMessage, formatSummaryMessage } from "./status-message.js";
 export type { MessageAdapter } from "./message-adapter.js";
-export { StatusManager } from "./status-manager.js";
+export { StatusManager, type StatusManagerOptions } from "./status-manager.js";
 
 // Message posting
 export type { MessagePoster } from "./message-poster.js";

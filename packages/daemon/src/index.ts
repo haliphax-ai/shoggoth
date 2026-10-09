@@ -619,6 +619,7 @@ async function initWorkflowServer(
     stateDir: workflowStateDir,
     spawner,
     poller,
+    pinStatusPost: configRef.current.workflow?.pinStatusPost ?? true,
     notifier: {
       async notify(workflowId, success, context) {
         getLogger("daemon").info("workflow completed", {
@@ -683,10 +684,21 @@ async function initWorkflowServer(
     createMessageAdapter: (sessionId: string) =>
       createDaemonMessageAdapter({
         getMessageContext: () => messageToolContextRef.current ?? undefined,
-        resolveChannelId: () => {
-          // This will be resolved after platform starts - the platform adapter handles this
-          return undefined;
-        },
+        resolveChannelId: () =>
+          subagentRuntimeExtensionRef.current?.resolveOutboundChannelIdForSession?.(sessionId),
+        pinMessage: subagentRuntimeExtensionRef.current?.pinMessage
+          ? async (messageId: string) => {
+              const channelId =
+                subagentRuntimeExtensionRef.current?.resolveOutboundChannelIdForSession?.(
+                  sessionId,
+                );
+              if (!channelId) return;
+              await subagentRuntimeExtensionRef.current!.pinMessage!({
+                channelId,
+                messageId,
+              });
+            }
+          : undefined,
         sessionId,
       }),
     createMessagePoster: (_sessionId: string) =>

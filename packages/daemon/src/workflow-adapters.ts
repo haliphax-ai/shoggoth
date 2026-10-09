@@ -309,6 +309,11 @@ export interface DaemonMessageAdapterDeps {
       }
     | undefined;
   readonly resolveChannelId: () => string | undefined;
+  /**
+   * Optional pin-message op, resolved from the active platform. Only present when
+   * the platform supports message pinning.
+   */
+  readonly pinMessage?: (messageId: string) => Promise<void>;
   /** The session ID this adapter is bound to (set at creation time, per-workflow). */
   readonly sessionId: string;
 }
@@ -398,6 +403,19 @@ export function createDaemonMessageAdapter(deps: DaemonMessageAdapterDeps): Mess
       } catch (e) {
         log.error("editMessage threw", { err: String(e), messageId });
         return false;
+      }
+    },
+
+    async pinMessage(messageId: string): Promise<void> {
+      if (!deps.pinMessage) {
+        log.debug("pinMessage skipped: platform has no pinning support", { messageId });
+        return;
+      }
+      try {
+        await deps.pinMessage(messageId);
+        log.debug("pinMessage sent", { messageId });
+      } catch (e) {
+        log.warn("pinMessage failed", { err: String(e), messageId });
       }
     },
   };

@@ -28,6 +28,7 @@ function allCaps(): MessagingAdapterCapabilities {
       reactions: true,
       search: true,
       attachmentDownload: true,
+      pin: true,
     },
     parameterSchemas: {
       outboundText: { type: "object" },
@@ -76,6 +77,7 @@ function mockTransport(overrides?: Partial<MessageToolTransport>): MessageToolTr
     async searchMessages() {
       return { messages: [], total_results: 0 };
     },
+    async pinMessage() {},
     ...overrides,
   };
 }
@@ -1323,6 +1325,61 @@ describe("executeMessageToolAction", () => {
       { capabilities: caps, transport, sessionToChannel: () => "c" },
       "sess",
       { action: "delete" },
+    );
+    assert.equal((r as { ok: boolean }).ok, false);
+    assert.ok((r as { error: string }).error.includes("message_id"));
+  });
+
+  // --- pin ---
+  it("pin: calls pinMessage with channel and message", async () => {
+    let pinned: { ch: string; mid: string } | undefined;
+    const transport = mockTransport({
+      async pinMessage(ch, mid) {
+        pinned = { ch, mid };
+      },
+    });
+    const r = await executeMessageToolAction(
+      { capabilities: caps, transport, sessionToChannel: () => "ch1" },
+      "sess",
+      { action: "pin", message_id: "m9" },
+    );
+    assert.deepEqual(r, { ok: true, message_id: "m9", channel_id: "ch1" });
+    assert.deepEqual(pinned, { ch: "ch1", mid: "m9" });
+  });
+
+  it("pin: rejected when capability off", async () => {
+    const transport = mockTransport();
+    const noPin = {
+      ...caps,
+      extensions: { ...caps.extensions, pin: false },
+    };
+    const r = await executeMessageToolAction(
+      { capabilities: noPin, transport, sessionToChannel: () => "c" },
+      "sess",
+      { action: "pin", message_id: "m1" },
+    );
+    assert.equal((r as { ok: boolean }).ok, false);
+    assert.ok((r as { error: string }).error.includes("not supported"));
+  });
+
+  it("pin: rejected when transport has no pinMessage", async () => {
+    const transport = mockTransport();
+    delete transport.pinMessage;
+    const r = await executeMessageToolAction(
+      { capabilities: caps, transport, sessionToChannel: () => "c" },
+      "sess",
+      { action: "pin", message_id: "m1" },
+    );
+    assert.equal((r as { ok: boolean }).ok, false);
+    assert.ok((r as { error: string }).error.includes("not supported"));
+  });
+
+  it("pin: requires message_id", async () => {
+    const transport = mockTransport();
+    const r = await executeMessageToolAction(
+      { capabilities: caps, transport, sessionToChannel: () => "c" },
+      "sess",
+      { action: "pin" },
     );
     assert.equal((r as { ok: boolean }).ok, false);
     assert.ok((r as { error: string }).error.includes("message_id"));

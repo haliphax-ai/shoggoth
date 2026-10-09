@@ -422,6 +422,7 @@ const descriptor = buildMessageToolDescriptor({
   reactions: true,
   search: true,
   attachmentDownload: true,
+  pin: true,
 });
 ```
 
@@ -440,6 +441,7 @@ const descriptor = buildMessageToolDescriptor({
 | `reactions`          | Adds `reactions` action with `emoji` filter.                                                               |
 | `search`             | Adds `search` action with `query`, `author_id`, `author_ids`, `before`, `after`, `from_me`, `channel_ids`. |
 | `attachmentDownload` | Adds `attachment-download` action with `filename`, `index`, `path`.                                        |
+| `pin`                | Adds `pin` action (pins a message by `message_id`).                                                        |
 
 The schema is intentionally flat (no `oneOf`/`anyOf`/`allOf` at the top level) for compatibility with Anthropic Messages API and similar gateways. Per-action field requirements are enforced at execution time, not in the schema.
 
