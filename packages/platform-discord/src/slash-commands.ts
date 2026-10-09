@@ -265,9 +265,17 @@ const TEXT_INPUT_SHORT = 1;
 // optional parameter modal → final recap), mirroring the /model flow
 // ---------------------------------------------------------------------------
 
-/** Dropdown custom_id prefix. Format: `prompt_select|<sessionId>`. */
+/**
+ * Dropdown custom_id. Format: `prompt_select|` (no payload). The session is
+ * re-derived from the interaction's channel at stage 2, so the full session
+ * URN is never embedded — a thread-bound subagent URN (~87 chars) otherwise
+ * overflows Discord's 100-char custom_id limit (400 BASE_TYPE_BAD_LENGTH).
+ */
 const PROMPT_SELECT_PREFIX = "prompt_select|";
-/** Modal custom_id prefix. Format: `prompt_modal|<sessionId>|<slug>`. */
+/**
+ * Modal custom_id prefix. Format: `prompt_modal|<slug>`. Only the slug is
+ * carried; the session is re-derived from the interaction's channel at stage 3.
+ */
 const PROMPT_MODAL_PREFIX = "prompt_modal|";
 
 type PromptListEntry = { slug: string; placeholders?: readonly string[] };
@@ -406,8 +414,8 @@ async function runPromptProxy(
  * - More than 5 placeholders → guard error, delivered per `guardStyle`:
  *   in-place message update on the dropdown path, ephemeral slash response.
  * - Placeholders present → type-9 modal with `custom_id`
- *   `prompt_modal|<sessionId>|<slug>`, so stage 3 rebuilds the params from
- *   the input custom_ids.
+ *   `prompt_modal|<slug>`, so stage 3 rebuilds the params from the input
+ *   custom_ids and re-derives the session from the interaction's channel.
  *
  * Callers must only invoke this with a non-empty placeholders list; the
  * no-placeholders shortcut (run the prompt directly) belongs to each caller.
@@ -416,7 +424,6 @@ async function respondWithPromptParameterModal(
   deps: DiscordInteractionHandlerDeps,
   interactionId: string,
   interactionToken: string,
-  sessionId: string,
   slug: string,
   placeholders: readonly string[],
   guardStyle: "update-message" | "ephemeral-channel",
@@ -457,7 +464,7 @@ async function respondWithPromptParameterModal(
     type: INTERACTION_RESPONSE_MODAL,
     data: {
       title: `Prompt: ${slug}`.slice(0, 45),
-      custom_id: `${PROMPT_MODAL_PREFIX}${sessionId}|${slug}`,
+      custom_id: `${PROMPT_MODAL_PREFIX}${slug}`,
       components,
     },
   });
@@ -535,10 +542,23 @@ async function handleInteraction(
     // /prompt slash command with a slug argument opens the same modal
     // directly when the prompt has placeholders (bypassing this dropdown).
     if (customId.startsWith(PROMPT_SELECT_PREFIX)) {
-      const sessionId = customId.slice(PROMPT_SELECT_PREFIX.length);
       const values = ev.data?.values;
       if (!values || values.length === 0) return;
       const slug = values[0];
+      // The session is no longer carried in custom_id (Discord's 100-char limit
+      // overflows for long thread-bound subagent URNs). Re-derive it from the
+      // interaction's channel, which resolves subagent sessions via the dynamic
+      // thread binding. NOTE: an explicit cross-channel `session_id` override is
+      // intentionally only honored on the direct-run path (slug + no placeholders);
+      // this staged browse/modal flow always targets the channel-bound session.
+      const sessionId = deps.resolveSessionForChannel?.(ev.channelId, ev.guildId);
+      if (!sessionId) {
+        await deps.transport.interactionCallback(ev.id, ev.token, {
+          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+          data: { content: "⚠️ No session bound to this channel.", flags: 64 },
+        });
+        return;
+      }
       let placeholders: readonly string[] = [];
       try {
         const res = await deps.invokeControlOp("prompt_list", { session_id: sessionId });
@@ -576,7 +596,6 @@ async function handleInteraction(
         deps,
         ev.id,
         ev.token,
-        sessionId,
         slug,
         placeholders,
         "update-message",
@@ -595,7 +614,17 @@ async function handleInteraction(
       return;
     }
 
-    const { step, sessionId, extra } = decoded;
+    const { step, extra } = decoded;
+    // The session is not encoded in custom_id (Discord's 100-char limit breaks
+    // for long thread-bound subagent URNs); re-derive it from the channel.
+    const sessionId = deps.resolveSessionForChannel?.(ev.channelId, ev.guildId);
+    if (!sessionId) {
+      await deps.transport.interactionCallback(ev.id, ev.token, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content: "⚠️ No session bound to this channel.", flags: 64 },
+      });
+      return;
+    }
 
     if (step === "provider") {
       const values = ev.data?.values;
@@ -610,7 +639,7 @@ async function handleInteraction(
           type: INTERACTION_RESPONSE_MODAL,
           data: {
             title: "Enter Model",
-            custom_id: encodeModelSelectCustomId("custom_modal", sessionId),
+            custom_id: encodeModelSelectCustomId("custom_modal"),
             components: [
               {
                 type: ACTION_ROW,
@@ -681,7 +710,7 @@ async function handleInteraction(
               components: [
                 {
                   type: STRING_SELECT,
-                  custom_id: encodeModelSelectCustomId("provider", sessionId),
+                  custom_id: encodeModelSelectCustomId("provider"),
                   placeholder: "Select a provider",
                   options: providerOptions,
                 },
@@ -692,7 +721,7 @@ async function handleInteraction(
               components: [
                 {
                   type: STRING_SELECT,
-                  custom_id: encodeModelSelectCustomId("model", sessionId, value),
+                  custom_id: encodeModelSelectCustomId("model", value),
                   placeholder: "Select a model",
                   options: modelOptions,
                 },
@@ -765,11 +794,11 @@ async function handleInteraction(
     // Stage 3: canned prompt modal submitted → run the prompt and rewrite
     // message A (the dropdown) with the final recap.
     if (customId.startsWith(PROMPT_MODAL_PREFIX)) {
-      const rest = customId.slice(PROMPT_MODAL_PREFIX.length);
-      const sep = rest.indexOf("|");
-      if (sep <= 0) return;
-      const sessionId = rest.slice(0, sep);
-      const slug = rest.slice(sep + 1);
+      // custom_id carries only the slug (`prompt_modal|<slug>`); the session is
+      // NOT embedded (a thread-bound subagent URN overflows Discord's 100-char
+      // custom_id limit). runPromptProxy resolves it from this channel.
+      const slug = customId.slice(PROMPT_MODAL_PREFIX.length);
+      if (!slug) return;
       // Rebuild params from the inputs; every placeholder key must be present
       // even when the user left the field empty (empty values are valid).
       const params: Record<string, string> = {};
@@ -785,7 +814,6 @@ async function handleInteraction(
         ev.token,
         {
           slug,
-          session_id: sessionId,
           platform_user_id: ev.userId,
           ...params,
         },
@@ -816,6 +844,17 @@ async function handleInteraction(
       return;
     }
 
+    // The session is not encoded in custom_id (Discord's 100-char limit breaks
+    // for long thread-bound subagent URNs); re-derive it from the channel.
+    const sessionId = deps.resolveSessionForChannel?.(ev.channelId, ev.guildId);
+    if (!sessionId) {
+      await deps.transport.interactionCallback(ev.id, ev.token, {
+        type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
+        data: { content: "⚠️ No session bound to this channel.", components: [] },
+      });
+      return;
+    }
+
     // Extract text input value
     const components = ev.data?.components;
     if (!components || components.length === 0) {
@@ -843,7 +882,7 @@ async function handleInteraction(
 
     try {
       const res = await deps.invokeControlOp("session_model", {
-        session_id: decoded.sessionId,
+        session_id: sessionId,
         model_selection: { model: value },
       });
 
@@ -1066,7 +1105,6 @@ async function handleInteraction(
         deps,
         parsed.interactionId,
         parsed.interactionToken,
-        sessionId,
         requestedSlug,
         requestedEntry.placeholders ?? [],
         "ephemeral-channel",
@@ -1080,7 +1118,9 @@ async function handleInteraction(
     }));
     const selectComponent: Record<string, unknown> = {
       type: STRING_SELECT,
-      custom_id: `${PROMPT_SELECT_PREFIX}${sessionId}`,
+      // Session is re-derived at stage 2 from this channel — never embed the
+      // (potentially long) session URN in custom_id.
+      custom_id: `${PROMPT_SELECT_PREFIX}`,
       placeholder: "Select a canned prompt",
       options,
     };
@@ -1235,7 +1275,7 @@ async function handleInteraction(
           type: INTERACTION_RESPONSE_MODAL,
           data: {
             title: "Enter Model",
-            custom_id: encodeModelSelectCustomId("custom_modal", payload.session_id as string),
+            custom_id: encodeModelSelectCustomId("custom_modal"),
             components: [
               {
                 type: 1,
@@ -1294,7 +1334,7 @@ async function handleInteraction(
           components: [
             {
               type: 3, // STRING_SELECT
-              custom_id: encodeModelSelectCustomId("provider", payload.session_id as string),
+              custom_id: encodeModelSelectCustomId("provider"),
               placeholder: "Select a provider",
               options: providerOptions,
             },
@@ -1308,11 +1348,7 @@ async function handleInteraction(
           components: [
             {
               type: 3, // STRING_SELECT
-              custom_id: encodeModelSelectCustomId(
-                "model",
-                payload.session_id as string,
-                activeProviderId,
-              ),
+              custom_id: encodeModelSelectCustomId("model", activeProviderId),
               placeholder: "Select a model",
               options: modelOptions,
             },

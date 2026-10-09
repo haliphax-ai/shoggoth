@@ -54,6 +54,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
         logger: stubLogger(),
         abortSession: async () => false,
         invokeControlOp: async () => ({ ok: true }),
+        resolveSessionForChannel: () => "agent:main:discord:channel:abc",
       });
 
       const ev: DiscordInteractionEvent = {
@@ -64,7 +65,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
         channelId: "ch-1",
         userId: "u-1",
         data: {
-          custom_id: "model_select|provider|agent:main:discord:channel:abc",
+          custom_id: "model_select|provider",
           values: ["__custom__"],
           component_type: 3, // STRING_SELECT
         },
@@ -84,7 +85,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
       assert.strictEqual(token, "tok-1");
       assert.strictEqual(body.type, 9); // MODAL response
       assert.strictEqual(body.data.title, "Enter Model");
-      assert.ok(body.data.custom_id.startsWith("model_select|custom_modal|"));
+      assert.strictEqual(body.data.custom_id, "model_select|custom_modal");
       assert.ok(Array.isArray(body.data.components));
       assert.strictEqual(body.data.components.length, 1);
     });
@@ -100,6 +101,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
         logger: stubLogger(),
         abortSession: async () => false,
         invokeControlOp: async () => ({ ok: true }),
+        resolveSessionForChannel: () => "agent:main:discord:channel:abc",
         getModelsConfig: async () => ({
           providers: [
             {
@@ -119,7 +121,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
         channelId: "ch-1",
         userId: "u-1",
         data: {
-          custom_id: "model_select|provider|agent:main:discord:channel:abc",
+          custom_id: "model_select|provider",
           values: ["anthropic"],
           component_type: 3, // STRING_SELECT
         },
@@ -146,7 +148,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
       const providerRow = body.data.components[0] as { components: unknown[] };
       const providerSelect = providerRow.components[0] as { type: number; custom_id: string };
       assert.strictEqual(providerSelect.type, 3); // STRING_SELECT
-      assert.ok(providerSelect.custom_id.includes("model_select|provider|"));
+      assert.strictEqual(providerSelect.custom_id, "model_select|provider");
 
       // Second action row: model select
       const modelRow = body.data.components[1] as { components: unknown[] };
@@ -171,6 +173,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
           invokeCalls.push({ op, payload });
           return { ok: true };
         },
+        resolveSessionForChannel: () => "agent:main:discord:channel:abc",
       });
 
       const sessionId = "agent:main:discord:channel:abc";
@@ -182,7 +185,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
         channelId: "ch-1",
         userId: "u-1",
         data: {
-          custom_id: `model_select|model|${sessionId}|anthropic`,
+          custom_id: "model_select|model|anthropic",
           values: ["claude-3-5-sonnet"],
           component_type: 3, // STRING_SELECT
         },
@@ -229,6 +232,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
           invokeCalls.push({ op, payload });
           return { ok: true };
         },
+        resolveSessionForChannel: () => "agent:main:discord:channel:abc",
       });
 
       const sessionId = "agent:main:discord:channel:abc";
@@ -240,7 +244,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
         channelId: "ch-1",
         userId: "u-1",
         data: {
-          custom_id: `model_select|custom_modal|${sessionId}`,
+          custom_id: "model_select|custom_modal",
           components: [
             {
               type: 1,
@@ -324,9 +328,9 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
         logger: stubLogger(),
         abortSession: async () => false,
         invokeControlOp: async () => ({ ok: true }),
+        resolveSessionForChannel: () => "agent:main:discord:channel:abc",
       });
 
-      const sessionId = "agent:main:discord:channel:abc";
       const ev: DiscordInteractionEvent = {
         kind: "interaction_create",
         id: "int-6",
@@ -335,7 +339,7 @@ describe("Component Interaction Handler (Phase 4 RED)", () => {
         channelId: "ch-1",
         userId: "u-1",
         data: {
-          custom_id: `model_select|custom_modal|${sessionId}`,
+          custom_id: "model_select|custom_modal",
           components: [
             {
               type: 1,

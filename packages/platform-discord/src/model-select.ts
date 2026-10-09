@@ -29,11 +29,16 @@ export type Step = "provider" | "model" | "custom_modal";
 const CUSTOM_ID_PREFIX = "model_select|";
 
 /**
- * Encodes a model select custom ID with step, session ID, and optional extra data.
- * Format: model_select|<step>|<sessionId>|<extra?>
+ * Encodes a model select custom ID with step and optional extra data.
+ * Format: model_select|<step>|<extra?>
+ *
+ * The session is intentionally NOT encoded — a thread-bound subagent session
+ * URN (~87 chars) overflows Discord's 100-char custom_id limit (400
+ * BASE_TYPE_BAD_LENGTH). Handlers re-derive the session from the interaction's
+ * channel instead.
  */
-export function encodeModelSelectCustomId(step: Step, sessionId: string, extra?: string): string {
-  const parts = ["model_select", step, sessionId];
+export function encodeModelSelectCustomId(step: Step, extra?: string): string {
+  const parts = ["model_select", step];
   if (extra !== undefined) {
     parts.push(extra);
   }
@@ -45,23 +50,20 @@ export function encodeModelSelectCustomId(step: Step, sessionId: string, extra?:
  * Returns null if the string doesn't start with 'model_select|'
  * or if the format is malformed.
  */
-export function decodeModelSelectCustomId(
-  customId: string,
-): { step: Step; sessionId: string; extra?: string } | null {
+export function decodeModelSelectCustomId(customId: string): { step: Step; extra?: string } | null {
   if (!customId.startsWith(CUSTOM_ID_PREFIX)) {
     return null;
   }
 
   const parts = customId.substring(CUSTOM_ID_PREFIX.length).split("|");
 
-  // Must have at least step and sessionId
-  if (parts.length < 2) {
+  // Must have at least the step
+  if (parts.length < 1) {
     return null;
   }
 
   const step = parts[0];
-  const sessionId = parts[1];
-  const extra = parts[2];
+  const extra = parts[1];
 
   // Validate step is one of the expected values
   if (step !== "provider" && step !== "model" && step !== "custom_modal") {
@@ -70,7 +72,6 @@ export function decodeModelSelectCustomId(
 
   return {
     step,
-    sessionId,
     extra: extra !== undefined ? extra : undefined,
   };
 }

@@ -25,32 +25,29 @@ interface FailoverChainEntry {
 }
 
 describe("encodeModelSelectCustomId / decodeModelSelectCustomId", () => {
-  it("round-trip: encode('provider', 'session:abc') then decode → gets back { step: 'provider', sessionId: 'session:abc' }", () => {
-    const encoded = encodeModelSelectCustomId("provider", "session:abc");
+  it("round-trip: encode('provider') then decode → gets back { step: 'provider' }", () => {
+    const encoded = encodeModelSelectCustomId("provider");
     const decoded = decodeModelSelectCustomId(encoded);
     assert.deepStrictEqual(decoded, {
       step: "provider",
-      sessionId: "session:abc",
       extra: undefined,
     });
   });
 
-  it("round-trip with extra: encode('model', 'session:abc', 'anthropic') → decode → { step: 'model', sessionId: 'session:abc', extra: 'anthropic' }", () => {
-    const encoded = encodeModelSelectCustomId("model", "session:abc", "anthropic");
+  it("round-trip with extra: encode('model', 'anthropic') → decode → { step: 'model', extra: 'anthropic' }", () => {
+    const encoded = encodeModelSelectCustomId("model", "anthropic");
     const decoded = decodeModelSelectCustomId(encoded);
     assert.deepStrictEqual(decoded, {
       step: "model",
-      sessionId: "session:abc",
       extra: "anthropic",
     });
   });
 
   it("round-trip for custom_modal step", () => {
-    const encoded = encodeModelSelectCustomId("custom_modal", "session:abc", "openai");
+    const encoded = encodeModelSelectCustomId("custom_modal", "openai");
     const decoded = decodeModelSelectCustomId(encoded);
     assert.deepStrictEqual(decoded, {
       step: "custom_modal",
-      sessionId: "session:abc",
       extra: "openai",
     });
   });
@@ -65,13 +62,13 @@ describe("encodeModelSelectCustomId / decodeModelSelectCustomId", () => {
     assert.strictEqual(decoded, null);
   });
 
-  it("decode returns null for malformed strings (missing parts)", () => {
-    const decoded = decodeModelSelectCustomId("provider");
+  it("decode returns null for malformed strings (missing step)", () => {
+    const decoded = decodeModelSelectCustomId("model_select|");
     assert.strictEqual(decoded, null);
   });
 
-  it("decode returns null for malformed strings (invalid format)", () => {
-    const decoded = decodeModelSelectCustomId("provider|session:abc");
+  it("decode returns null for malformed strings (invalid step)", () => {
+    const decoded = decodeModelSelectCustomId("model_select|bogus");
     assert.strictEqual(decoded, null);
   });
 });
