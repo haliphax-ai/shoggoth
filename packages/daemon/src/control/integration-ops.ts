@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type Database from "better-sqlite3";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import { getLogger } from "../logging";
+import { resolveConfiguredSubagentModel } from "../config/effective-runtime";
 const ioLog = getLogger("integration-ops");
 import { getProcessManager } from "../process-manager-singleton";
 import {
@@ -1263,11 +1264,7 @@ export async function handleIntegrationControlOp(
       const hasSpawnModel =
         modelOptions && typeof modelOptions.model === "string" && modelOptions.model.trim();
       const parentAgentId = parseAgentSessionUrn(parentSessionId)?.agentId;
-      const perAgent = parentAgentId
-        ? ctx.config.agents?.list?.[parentAgentId]?.subagentModel
-        : undefined;
-      const globalDefault = ctx.config.agents?.subagentModel;
-      const configSubagentModel = perAgent ?? globalDefault;
+      const configSubagentModel = resolveConfiguredSubagentModel(ctx.config, parentAgentId);
       if (!hasSpawnModel) {
         if (configSubagentModel) {
           const base =

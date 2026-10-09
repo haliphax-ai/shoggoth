@@ -1,4 +1,10 @@
-import { DEFAULT_HITL_CONFIG, loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
+import {
+  DEFAULT_HITL_CONFIG,
+  loadLayeredConfigAsync,
+  LAYOUT,
+  VERSION,
+  parseAgentSessionUrn,
+} from "@shoggoth/shared";
 import {
   serviceProvisionSecrets,
   serviceRegistryRef as svcRegRef,
@@ -117,7 +123,7 @@ import {
 } from "./workflow-adapters";
 import { createSessionManager } from "./sessions/session-manager";
 import { createSqliteAgentTokenStore } from "./auth/sqlite-agent-tokens";
-import { resolveShoggothAgentId } from "./config/effective-runtime";
+import { resolveConfiguredSubagentModel, resolveShoggothAgentId } from "./config/effective-runtime";
 import { TimerScheduler } from "./timers/timer-scheduler";
 import { setTimerScheduler } from "./sessions/builtin-handlers/timer-handler";
 import {
@@ -577,18 +583,17 @@ async function initWorkflowServer(
 
   // (sessions and sessionManager passed as parameters)
 
-  // Resolve configured subagentModel (per-agent override > global default).
-  const workflowAgentId = resolveShoggothAgentId(config);
-  const workflowPerAgentModel = workflowAgentId
-    ? config.agents?.list?.[workflowAgentId]?.subagentModel
-    : undefined;
-  const workflowSubagentModel = workflowPerAgentModel ?? config.agents?.subagentModel;
-
   const spawner = createDaemonSpawnAdapter({
     sessionManager,
     sessions,
     requestTurnAbort: (id) => requestSessionTurnAbort(id),
-    subagentModel: workflowSubagentModel,
+    // Resolve the effective subagent model per spawn from the OWNING AGENT of
+    // the parent session (agents.list.<id>.subagentModel ?? agents.subagentModel),
+    // reading the live config so hot-reload changes are picked up. See issue #375.
+    resolveSubagentModel: (parentSessionId) => {
+      const agentId = parseAgentSessionUrn(parentSessionId)?.agentId;
+      return resolveConfiguredSubagentModel(configRef.current, agentId);
+    },
     stateDb: db,
     runSessionModelTurn: (input) => {
       const ext = subagentRuntimeExtensionRef.current;
