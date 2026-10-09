@@ -7,6 +7,7 @@ import {
   executeSessionAgentTurn,
   type ExecuteSessionAgentTurnInput,
 } from "../sessions/session-agent-turn";
+import type { ToolCallEvent } from "../sessions/tool-loop";
 import type { OutboundAttachment } from "../presentation/platform-adapter";
 import { getLogger } from "../logging";
 
@@ -92,6 +93,29 @@ export interface RunInboundSessionTurnOptions {
    * streamed message cannot carry file attachments).
    */
   readonly sendAttachments?: (attachments: readonly OutboundAttachment[]) => Promise<void>;
+  /**
+   * Optional status bar factory; wired at turn start when the platform surface supports it.
+   * `create` returns the tracker sink for this turn's delivery, or `undefined` to skip (e.g.
+   * non-messaging-surface delivery where no in-flight message can carry a bar).
+   */
+  readonly statusBar?: {
+    readonly enabled: boolean;
+    readonly create: () => Promise<
+      | {
+          readonly setStatusBar: (line: string | null) => Promise<void>;
+          /** Terminal render (✅/🛑/❌); returns the rendered bar line for delivery. */
+          readonly finish: (outcome: string) => Promise<string | undefined>;
+          /** Reasoning/thinking content is streaming from the model. */
+          readonly onThinkingDelta?: (accumulated: string) => void;
+          readonly onToolCall?: (ev: ToolCallEvent) => void;
+          /** A HITL approval row was queued for a tool call (⏸️). */
+          readonly onHitlQueued?: (call: { name: string; argsJson: string }) => void;
+          /** A mid-turn compaction completed. */
+          readonly onCompaction?: () => void;
+        }
+      | undefined
+    >;
+  };
   readonly mcpLifecycle?: {
     readonly onTurnBegin?: () => void;
     readonly onTurnEnd?: () => void;
@@ -118,6 +142,31 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       }
     | undefined;
   let streamPusher: ReturnType<typeof createCoalescingStreamPusher> | undefined;
+  let statusBar:
+    | {
+        setStatusBar: (line: string | null) => Promise<void>;
+        finish: (outcome: string) => Promise<string | undefined>;
+        onThinkingDelta?: (accumulated: string) => void;
+        onToolCall?: (ev: ToolCallEvent) => void;
+        onHitlQueued?: (call: { name: string; argsJson: string }) => void;
+        onCompaction?: () => void;
+      }
+    | undefined;
+
+  // Create the status bar tracker at turn start when the platform surface
+  // enables it. `create` resolves to undefined for non-messaging-surface
+  // delivery, where no in-flight message can carry a bar — skip entirely then.
+  if (options.statusBar?.enabled) {
+    try {
+      statusBar = await options.statusBar.create();
+    } catch (e) {
+      log.warn("inbound_session_turn.status_bar_create_failed", {
+        ...ctx,
+        err: String(e),
+      });
+      statusBar = undefined;
+    }
+  }
 
   if (streaming) {
     try {
@@ -172,6 +221,16 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
             })(),
           }
         : undefined,
+      // Forward status bar events (thinking / tool / hitl / compaction) into the
+      // turn so the tracker can re-render live while the turn executes.
+      events: statusBar
+        ? {
+            onThinkingDelta: (accumulated) => statusBar?.onThinkingDelta?.(accumulated),
+            onToolCall: (ev) => statusBar?.onToolCall?.(ev),
+            onHitlQueued: (call) => statusBar?.onHitlQueued?.(call),
+            onCompaction: () => statusBar?.onCompaction?.(),
+          }
+        : undefined,
     });
 
     // All-turn delivery for persistent subagents
@@ -210,10 +269,27 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
 
     const attachments = turnResult.showAttachments;
 
+    // Finish the tracker BEFORE final delivery so the last setFullContent /
+    // sendAssistantBody carries the frozen bar line (✅ / 🛑 / ❌).
+    let barLine: string | undefined;
+    if (statusBar) {
+      try {
+        barLine = await statusBar.finish(turnResult.outcome);
+      } catch (e) {
+        log.warn("inbound_session_turn.status_bar_finish_failed", {
+          ...ctx,
+          err: String(e),
+        });
+        barLine = undefined;
+      }
+    }
+
+    const bodyWithBar = barLine ? `${rawBody}\n\n${barLine}` : rawBody;
+
     if (streamPusher && streamSink) {
       await streamPusher.flush();
       // Pass the full body — setFullContent handles its own message splitting.
-      await streamSink.setFullContent(rawBody);
+      await streamSink.setFullContent(bodyWithBar);
       // Streaming edits can't carry file attachments — send as follow-up.
       if (attachments?.length && options.sendAttachments) {
         try {
@@ -227,15 +303,29 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       }
     } else {
       await options.sendAssistantBody(
-        sliceDisplayText(rawBody),
+        sliceDisplayText(bodyWithBar),
         attachments?.length ? { attachments } : undefined,
       );
     }
   } catch (e) {
+    // Terminal ❌ bar before the error body — finish with "failed" so the tracker
+    // freezes; the rendered line is returned for delivery with the error body.
+    let barLine: string | undefined;
+    if (statusBar) {
+      try {
+        barLine = await statusBar.finish("failed");
+      } catch (barErr) {
+        log.warn("inbound_session_turn.status_bar_finish_failed", {
+          ...ctx,
+          err: String(barErr),
+        });
+      }
+    }
     options.onTurnExecutionFailed?.(e);
     log.warn("inbound_session_turn.failed", { ...ctx, err: String(e) });
     try {
-      await options.sendErrorBody(sliceDisplayText(formatErrorReply(e)));
+      const errorBody = barLine ? `${formatErrorReply(e)}\n\n${barLine}` : formatErrorReply(e);
+      await options.sendErrorBody(sliceDisplayText(errorBody));
     } catch (sendErr) {
       log.error("inbound_session_turn.error_delivery_failed", {
         ...ctx,
