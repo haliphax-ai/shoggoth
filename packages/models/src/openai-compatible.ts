@@ -9,7 +9,7 @@ import {
   structuredOutputFollowUp,
   executeStructuredOutputApiCall,
 } from "./structured-output-follow-up";
-import { sanitizeToolName } from "@shoggoth/shared";
+import { getLogger, sanitizeToolName } from "@shoggoth/shared";
 import { openaiImageBlockCodec } from "./image-codec";
 import { getResilienceGate, type ModelResilienceGate } from "./resilience";
 import {
@@ -41,6 +41,8 @@ import type {
   OpenAIToolFunctionDefinition,
   ResponseSchema,
 } from "./types";
+
+const log = getLogger("models");
 
 function buildSyntheticTool(responseSchema: ResponseSchema): OpenAIToolFunctionDefinition {
   return buildSyntheticToolRaw(responseSchema, (name, description, schema) => ({
@@ -232,9 +234,10 @@ async function consumeOpenAIChatCompletionStream(
       reasoningBuf += d.reasoning_content;
       const maxBytes = options.maxReasoningContentBytes ?? 200 * 1024;
       if (reasoningBuf.length > maxBytes) {
-        console.debug(
-          `[models] Reasoning content truncated from ${prevLen + d.reasoning_content.length} to ${maxBytes} bytes`,
-        );
+        log.debug("Reasoning content truncated", {
+          from: prevLen + d.reasoning_content.length,
+          to: maxBytes,
+        });
         reasoningBuf = reasoningBuf.slice(0, maxBytes);
       }
     }

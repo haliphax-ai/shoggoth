@@ -1,12 +1,15 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { deepMerge } from "./merge";
+import { getLogger } from "./logging.js";
 import {
   defaultConfig,
   shoggothConfigFragmentSchema,
   shoggothConfigSchema,
   type ShoggothConfig,
 } from "./schema";
+
+const log = getLogger("config");
 
 async function listJsonFilesRecursiveAsync(dir: string): Promise<string[]> {
   const results: string[] = [];
@@ -57,7 +60,7 @@ export async function loadLayeredConfigAsync(configDir: string): Promise<Shoggot
         raw = await readFile(file, "utf8");
       } catch (e) {
         if (isDynamic) {
-          console.warn(`[config] skipping ${file}: ${(e as Error).message}`);
+          log.warn(`skipping ${file}: ${(e as Error).message}`);
           continue;
         }
         throw new Error(`Cannot read config file ${file}: ${(e as Error).message}`, { cause: e });
@@ -68,7 +71,7 @@ export async function loadLayeredConfigAsync(configDir: string): Promise<Shoggot
         parsed = JSON.parse(raw) as unknown;
       } catch (e) {
         if (isDynamic) {
-          console.warn(`[config] skipping ${file}: invalid JSON — ${(e as Error).message}`);
+          log.warn(`skipping ${file}: invalid JSON — ${(e as Error).message}`);
           continue;
         }
         throw new Error(`Invalid JSON in config file ${file}: ${(e as Error).message}`, {
@@ -81,9 +84,7 @@ export async function loadLayeredConfigAsync(configDir: string): Promise<Shoggot
         fragment = shoggothConfigFragmentSchema.parse(parsed);
       } catch (e) {
         if (isDynamic) {
-          console.warn(
-            `[config] skipping ${file}: schema validation failed — ${(e as Error).message}`,
-          );
+          log.warn(`skipping ${file}: schema validation failed — ${(e as Error).message}`);
           continue;
         }
         throw new Error(`Invalid config fragment in ${file}: ${(e as Error).message}`, {

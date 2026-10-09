@@ -17,6 +17,7 @@ const MAX_TAIL_LINES = 20_000;
 /** Hard cap on raw input fed to jq (oldest bytes are dropped first). */
 const MAX_INPUT_BYTES = 8 * 1024 * 1024;
 const JQ_TIMEOUT_MS = 15_000;
+const PREFILTER_TIMEOUT_MS = 5_000;
 
 export function register(registry: BuiltinToolRegistry): void {
   registry.register("logs", logsHandler);
@@ -78,15 +79,22 @@ async function readGzFile(file: string): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-interface JqRunResult {
+interface BinRunResult {
   stdout: string;
+  stderr: string;
+  exitCode: number | null;
   error?: string;
 }
 
-function runJq(jqArgs: string[], input: string): Promise<JqRunResult> {
+function runStdio(
+  bin: string,
+  binArgs: string[],
+  input: string,
+  timeoutMs: number,
+): Promise<BinRunResult> {
   return new Promise((resolve) => {
-    // Minimal environment: jq's `env` builtin must not expose daemon secrets.
-    const child = spawn("jq", jqArgs, {
+    // Minimal environment: the child's `env` builtin must not expose daemon secrets.
+    const child = spawn(bin, binArgs, {
       env: {
         PATH: process.env.PATH ?? "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
       },
@@ -96,7 +104,7 @@ function runJq(jqArgs: string[], input: string): Promise<JqRunResult> {
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const finish = (result: JqRunResult) => {
+    const finish = (result: BinRunResult) => {
       if (settled) return;
       settled = true;
       resolve(result);
@@ -104,8 +112,13 @@ function runJq(jqArgs: string[], input: string): Promise<JqRunResult> {
 
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
-      finish({ stdout: "", error: `jq timed out after ${JQ_TIMEOUT_MS}ms` });
-    }, JQ_TIMEOUT_MS);
+      finish({
+        stdout: "",
+        stderr: "",
+        exitCode: null,
+        error: `${bin} timed out after ${timeoutMs}ms`,
+      });
+    }, timeoutMs);
 
     child.stdout.on("data", (d: Buffer) => {
       stdout += d.toString();
@@ -115,17 +128,18 @@ function runJq(jqArgs: string[], input: string): Promise<JqRunResult> {
     });
     child.on("error", (err) => {
       clearTimeout(timer);
-      finish({ stdout: "", error: `jq failed to start: ${err.message}` });
+      finish({
+        stdout: "",
+        stderr: "",
+        exitCode: null,
+        error: `${bin} failed to start: ${err.message}`,
+      });
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      if (code === 0) {
-        finish({ stdout });
-      } else {
-        finish({ stdout: "", error: stderr.trim() || `jq exited with code ${code}` });
-      }
+      finish({ stdout, stderr, exitCode: code });
     });
-    // EPIPE when jq exits early (e.g. compile error) — the close handler reports it.
+    // EPIPE when the child exits early (e.g. jq compile error) — the close handler reports it.
     child.stdin.on("error", () => {});
     child.stdin.end(input);
   });
@@ -202,10 +216,28 @@ async function logsHandler(
   const start = Math.max(0, allLines.length - tailLines, trimmedFront ? 1 : 0);
   const windowed = allLines.slice(start).join("\n");
 
+  // Pre-filter: drop any line that doesn't start with "{" — garbage or
+  // partial lines (rotation races, truncated writes) would otherwise poison
+  // the entire jq run. rg exit 1 = no matches (empty input), 2 = error.
+  const pre = await runStdio("rg", ["--text", "--", "^\\{"], windowed, PREFILTER_TIMEOUT_MS);
+  if (pre.error !== undefined) {
+    return { resultJson: JSON.stringify({ error: pre.error }) };
+  }
+  if (pre.exitCode === 2) {
+    return { resultJson: JSON.stringify({ error: pre.stderr.trim() || "rg error" }) };
+  }
+
   const jqArgs = compact ? ["-c", filter, "-"] : [filter, "-"];
-  const run = await runJq(jqArgs, windowed);
+  const run = await runStdio("jq", jqArgs, pre.stdout, JQ_TIMEOUT_MS);
   if (run.error !== undefined) {
     return { resultJson: JSON.stringify({ error: run.error }) };
+  }
+  if (run.exitCode !== 0) {
+    return {
+      resultJson: JSON.stringify({
+        error: run.stderr.trim() || `jq exited with code ${run.exitCode}`,
+      }),
+    };
   }
 
   return {

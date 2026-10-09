@@ -10,6 +10,7 @@ import { register, validateJqFilter } from "../../src/sessions/builtin-handlers/
 import { defaultConfig, type ShoggothConfig } from "@shoggoth/shared";
 
 const jqAvailable = spawnSync("jq", ["--version"], { stdio: "ignore" }).status === 0;
+const rgAvailable = spawnSync("rg", ["--version"], { stdio: "ignore" }).status === 0;
 
 function utcStamp(offsetDays: number): string {
   return new Date(Date.now() - offsetDays * 86_400_000).toISOString().slice(0, 10);
@@ -105,7 +106,7 @@ describe("logs-handler", () => {
     expect(parsed.days).toBe(1);
   });
 
-  describe.skipIf(!jqAvailable)("jq execution", () => {
+  describe.skipIf(!jqAvailable || !rgAvailable)("jq execution", () => {
     it("filters the current day's log file", async () => {
       writeFileSync(
         join(logDir, `shoggoth-${utcStamp(0)}.log`),
@@ -155,6 +156,27 @@ describe("logs-handler", () => {
       );
       const parsed = JSON.parse(result.resultJson);
       expect(parsed.output.trim().split("\n")).toEqual(["7", "8", "9"]);
+    });
+
+    it("drops malformed non-JSON lines before filtering", async () => {
+      writeFileSync(
+        join(logDir, `shoggoth-${utcStamp(0)}.log`),
+        [
+          JSON.stringify({ ts: "t1", level: "info", msg: "first" }),
+          "partially written garbage from a truncated write",
+          JSON.stringify({ ts: "t2", level: "error", msg: "boom" }),
+          "",
+        ].join("\n"),
+      );
+
+      const result = await registry.execute(
+        "logs",
+        { filter: ".msg" },
+        makeCtx(makeConfig(logDir)),
+      );
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.error).toBeUndefined();
+      expect(parsed.output.trim().split("\n")).toEqual(['"first"', '"boom"']);
     });
 
     it("surfaces jq compile errors", async () => {

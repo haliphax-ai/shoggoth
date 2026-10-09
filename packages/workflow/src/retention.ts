@@ -1,5 +1,8 @@
+import { getLogger } from "@shoggoth/shared";
 import type { TaskList } from "./types.js";
 import { listAllWorkflows, deleteWorkflow } from "./state.js";
+
+const log = getLogger("workflow");
 
 // --- Constants ---
 
@@ -112,7 +115,7 @@ export class RetentionScheduler {
     this.timer = setInterval(async () => {
       await retentionRun(baseDir, opts).catch((err) => {
         // Swallow errors from periodic retention runs to prevent timer crash
-        console.error("retention run failed:", err);
+        log.error("retention run failed", { err: String(err) });
       });
     }, intervalMs);
   }
