@@ -96,7 +96,20 @@ export interface DaemonSpawnAdapterDeps {
   readonly completionMap?: CompletionMap;
   /** Context level for spawned workflow task sessions. Defaults to "minimal". */
   readonly contextLevel?: ContextLevel;
-  /** Resolved subagent model ref from config (agents.list.<id>.subagentModel or agents.subagentModel). */
+  /**
+   * Resolves the effective subagent model for a workflow task spawn from the
+   * owning agent of the parent session. Given the parent session id (a URN of
+   * the form `agent:<agentId>:...`), it should return the owning agent's
+   * `agents.list.<agentId>.subagentModel` falling back to the global
+   * `agents.subagentModel`, or `undefined` to inherit (no override). Injected
+   * as a getter so live config (config hot-reload) is read per spawn.
+   */
+  readonly resolveSubagentModel?: (parentSessionId: string) => string | undefined;
+  /**
+   * @deprecated Fixed subagent model applied to every spawned task regardless
+   * of the owning agent. Prefer `resolveSubagentModel`, which resolves the
+   * model per spawn from the parent session's owning agent config.
+   */
   readonly subagentModel?: string;
   /** State DB for recording spawn-time enableTools entries (exact IDs or glob patterns). */
   readonly stateDb?: Database.Database;
@@ -125,10 +138,15 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
         contextLevel: deps.contextLevel ?? "minimal",
       });
 
-      // Build modelSelection: per-task model_options > subagentModel from config
+      // Build modelSelection: per-task model_options > owning-agent subagentModel
+      // (agents.list.<agentId>.subagentModel ?? agents.subagentModel) > inherit.
       const modelSelection: Record<string, unknown> = {};
-      if (deps.subagentModel) {
-        modelSelection.model = deps.subagentModel;
+      const configSubagentModel =
+        (deps.resolveSubagentModel && parentSessionId
+          ? deps.resolveSubagentModel(parentSessionId)
+          : undefined) ?? deps.subagentModel;
+      if (configSubagentModel) {
+        modelSelection.model = configSubagentModel;
       }
       // Per-task model override takes highest priority
       if (req.modelOptions?.model) {
