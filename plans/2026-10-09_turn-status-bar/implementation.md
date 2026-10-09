@@ -37,7 +37,7 @@ Emit streaming reasoning/thinking deltas so the tracker can show 🧠.
 New platform-agnostic tracker and the Discord renderer, both fully unit-tested in isolation with no call-site changes yet.
 
 - Create `createTurnStatusBar()` per [`spec.md`](spec.md): state machine, dirty tracking, 1s batched renders, terminal freeze, `null` render when all sections off.
-- Create `renderDiscordStatusBar()`: section toggles, token/percent formatting, running (bold) vs. idle (monospace + runtime) tool display, builtin arg extract, omission rules.
+- Create `renderDiscordStatusBar()`: section toggles, token/percent formatting, running (bold) vs. idle (monospace + runtime) vs. ⏸️-queued (monospace, no runtime, uncounted) tool display, builtin arg extract, omission rules.
 - Tests: fake timers for batching cadence and terminal flush; snapshot-style tests per phase/section combination; arg-extract cases for `builtin-exec` (argv executable) and generic builtins.
 
 **Files:**
@@ -53,8 +53,8 @@ New optional callbacks and the `outcome` result field. Existing behavior unchang
 
 - `packages/daemon/src/sessions/tool-loop.ts`: add `ToolCallEvent` + `onToolCallEvent` to `RunToolLoopOptions`; fire around `executor.execute` in the dispatch path (start/end, runtime measured) for executed calls only.
 - `packages/daemon/src/sessions/session-tool-loop-model-client.ts`: add `onThinkingDelta` (wired to the model client's `onReasoningDelta`) and `onCompaction` (fires when mid-turn compaction completes with `compacted: true`).
-- `packages/daemon/src/sessions/session-agent-turn.ts`: add `input.events` (forwarded to model client + loop impl); set `outcome` on all three return paths (`completed` / `aborted` / `failed`); update all construction sites of `SessionAgentTurnResult`.
-- Tests: event ordering across a multi-hop tool loop; runtime measurement; abort path returns `"aborted"`; catch-all error path returns `"failed"`; skipped dispatches emit no events.
+- `packages/daemon/src/sessions/session-agent-turn.ts`: add `input.events` (forwarded to model client + loop impl; wraps `hitl.afterHitlQueued` to emit `onHitlQueued` for ⏸️); set `outcome` on all three return paths (`completed` / `aborted` / `failed`); update all construction sites of `SessionAgentTurnResult`.
+- Tests: event ordering across a multi-hop tool loop; runtime measurement; abort path returns `"aborted"`; catch-all error path returns `"failed"`; skipped dispatches emit no events; HITL-queued approval emits `onHitlQueued` with no start/end until approved, then start/end on execution.
 
 **Files:**
 
@@ -72,7 +72,7 @@ Wire the tracker through the presentation layer (still platform-agnostic; sinks/
 - `packages/daemon/src/messaging/inbound-session-turn.ts`: optional `statusBar` factory in options; create tracker at turn start (sequence from `session_stats.turn_count`, compactions from stats, context from stats/model metadata), forward `events` into `executeSessionAgentTurn`, call `finish(outcome)` before the final delivery (streaming: last `setFullContent` carries the bar; at-once: bar passed with `sendAssistantBody`; errors: bar with `sendErrorBody`). Skip entirely when disabled.
 - `packages/daemon/src/presentation/turn-orchestrator.ts`: optional `statusBar` dep (config + renderer + `attachSink`); wrap pre-started/lazy stream handles; pass through to `runInboundSessionTurn`.
 - `packages/daemon/src/lib.ts`: export new symbols for platform consumption.
-- Tests: integration tests with fake adapter/sink covering ✅/🛑/❌ lifecycles, at-once delivery with bar, disabled config no-op, and non-messaging delivery untouched.
+- Tests: integration tests with fake adapter/sink covering ✅/🛑/❌ lifecycles and ⏸️ pause/resume, at-once delivery with bar, disabled config no-op, and non-messaging delivery untouched.
 
 **Files:**
 
@@ -102,7 +102,7 @@ Apply the bar in Discord transports and both turn call sites.
 
 - Document `platforms.statusBar` in the config reference under `docs/`.
 - Full type check, lint, format, and test suite via git hooks.
-- Manual smoke test against the test bot: streaming turn (all sections), `session_abort` mid-turn (🛑), a failing turn (❌), config toggles off/on.
+- Manual smoke test against the test bot: streaming turn (all sections), a HITL-gated tool pause/resume (⏸️), `session_abort` mid-turn (🛑), a failing turn (❌), config toggles off/on.
 - Update this plan's frontmatter and move to `plans/done/` once all phases land on main.
 
 **Files:**

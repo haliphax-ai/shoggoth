@@ -77,6 +77,7 @@ export type TurnStatusPhase =
   | "thinking"
   | "prose"
   | "tool"
+  | "paused"
   | "finished"
   | "aborted"
   | "failed";
@@ -122,6 +123,8 @@ export interface TurnStatusBar {
   }): Promise<void>;
   markThinking(): void; // 🧠
   markProse(): void; // 💬
+  /** ⏸️ — HITL approval queued; shows the queued tool until resolved. */
+  markPaused(tool: StatusBarToolCall): void;
   toolStarted(call: StatusBarToolCall): void; // ⚡
   toolFinished(): void; // records runtime for the last call
   updateContext(currentTokens: number, totalTokens?: number): void;
@@ -147,6 +150,7 @@ Behavior:
 - Any state mutation marks the tracker dirty; a render fires when the dirty flag is set and either (a) the 1s cadence window has elapsed, or (b) an external flush (e.g. a prose push about to hit the sink) requests it. Renders always call `sink.setStatusBar` with the full rendered line (or `null` when the bar renders empty because all sections are disabled).
 - `finish()` renders immediately (no batching), then freezes. `markX()`/`toolStarted()` after `finish()` are no-ops.
 - Tool runtime is measured with `now()` between `toolStarted` and `toolFinished`; a new `toolStarted` while a call is in flight replaces `last` (parallel calls only bump `total`).
+- `markPaused(tool)` sets phase ⏸️ and stores the queued tool as `last` (monospace, no runtime, not counted in `total`); any subsequent phase event — tool execution, thinking/prose delta, or terminal render — clears it.
 
 ## Turn event plumbing — daemon core
 
@@ -164,12 +168,16 @@ readonly onToolCallEvent?: (ev: ToolCallEvent) => void;
 
 Fired around `executor.execute` in the dispatch path — only for calls that proceed to execution (not policy-denied, HITL-queued, or validation-skipped dispatches).
 
+`onHitlQueued` is emitted separately: `session-agent-turn.ts` wraps the inbound `hitl.afterHitlQueued` callback so the tracker learns about queued approvals even when no platform notice is configured.
+
 ```ts
 // packages/daemon/src/sessions/session-agent-turn.ts — ExecuteSessionAgentTurnInput addition
 readonly events?: {
   /** Reasoning/thinking content is streaming from the model. */
   readonly onThinkingDelta?: (accumulated: string) => void;
   readonly onToolCall?: (ev: ToolCallEvent) => void;
+  /** A HITL approval row was queued for a tool call (⏸️). */
+  readonly onHitlQueued?: (call: { name: string; argsJson: string }) => void;
   /** A mid-turn compaction completed. */
   readonly onCompaction?: () => void;
 };
@@ -235,12 +243,13 @@ Format (sections joined with `｜`):
 
 | Section     | Format                                                                                                                         |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Status      | `⏳` `🧠` `💬` `⚡` `✅` `🛑` `❌`                                                                                             |
+| Status      | `⏳` `🧠` `💬` `⚡` `⏸️` `✅` `🛑` `❌`                                                                                        |
 | Sequence    | `` 🔢 `217` ``                                                                                                                 |
 | Tool calls  | `` 🔧 `34` `` + ` `**`builtin-exec:bash`**``while running /` `​`builtin-exec:bash`​` 34ms`when idle; omitted when`total === 0` |
 | Context     | ``🪟 `10.1K/1M` **10.1%**``; omitted until usage data exists                                                                   |
 | Compactions | `` 🗑️ `1` ``                                                                                                                   |
 
+- While ⏸️, the tool section shows the queued tool's name in monospace (no runtime, not counted in `total`).
 - Token formatting: `<10K` → plain integer with thousands separators; `≥10K` → one-decimal K; `≥1M` → one-decimal M. Percentage: one decimal.
 - Builtin arg extract: for `builtin-*` tools, the first string/argv entry of `argsJson`; for `builtin-exec`, `argv[1]` (the executable).
 - Message body assembly: `\n\n> <line>` appended to the **last** chunk. In `streaming.ts`, the split budget becomes `maxContentLength - (line.length + 2)` while a bar is active; `setStatusBar` re-edits using the last pushed text.
@@ -253,6 +262,7 @@ Format (sections joined with `｜`):
 🧠 ｜ 🔢 `217` ｜ 🪟 `9.0K/1M` ｜ 🗑️ `1`          (reasoning delta)
 💬 ｜ 🔢 `217` ｜ 🪟 `10.3K/1M` **10.3%** ｜ 🗑️ `1` (prose streaming)
 ⚡ ｜ 🔢 `217` ｜ 🔧 `1` **builtin-read** ｜ 🪟 `11.0K/1M` ｜ 🗑️ `1` (tool running)
+⏸️ ｜ 🔢 `217` ｜ 🔧 `builtin-exec` ｜ 🪟 `11.0K/1M` ｜ 🗑️ `1` (HITL approval queued)
 ⚡ ｜ 🔢 `217` ｜ 🔧 `2` `builtin-read` 120ms ｜ 🪟 `12.4K/1M` ｜ 🗑️ `1` (tool done, prose again would show 💬)
 ✅ ｜ 🔢 `217` ｜ 🔧 `2` `builtin-read` 120ms ｜ 🪟 `13.1K/1M` **13.1%** ｜ 🗑️ `1` (terminal, frozen)
 ```

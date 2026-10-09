@@ -25,13 +25,13 @@ The bar is a single blockquote line appended to the end of the message body:
 
 Sections, left to right, each individually toggleable (all enabled by default):
 
-| Section        | Contents                                                                                                                                                                                                                          |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Status         | ⏳ starting · 🧠 thinking · 💬 generating prose · ⚡ calling tools · ✅ turn finished · 🛑 turn aborted · ❌ turn failed                                                                                                          |
-| Sequence       | Current turn sequence number (`session_stats.turn_count`)                                                                                                                                                                         |
-| Tool calls     | Total calls this turn; last call's tool name — **bold** while running, monospace when idle; runtime of the last (idle) call; arg extract for `builtin-*` tools (e.g. `builtin-exec:bash`); section omitted when no calls have run |
-| Context window | Current/total tokens and percentage used                                                                                                                                                                                          |
-| Compactions    | Compaction count for the current context segment                                                                                                                                                                                  |
+| Section        | Contents                                                                                                                                                                                                                                                                       |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Status         | ⏳ starting · 🧠 thinking · 💬 generating prose · ⚡ calling tools · ⏸️ awaiting HITL approval · ✅ turn finished · 🛑 turn aborted · ❌ turn failed                                                                                                                           |
+| Sequence       | Current turn sequence number (`session_stats.turn_count`)                                                                                                                                                                                                                      |
+| Tool calls     | Total calls this turn; last call's tool name — **bold** while running, monospace when idle or awaiting HITL approval; runtime of the last (idle) call; arg extract for `builtin-*` tools (e.g. `builtin-exec:bash`); section omitted when no calls have run and none is queued |
+| Context window | Current/total tokens and percentage used                                                                                                                                                                                                                                       |
+| Compactions    | Compaction count for the current context segment                                                                                                                                                                                                                               |
 
 ### Architecture
 
@@ -39,7 +39,7 @@ The feature splits along the existing presentation/platform boundary:
 
 - **Config** (`shared`): a new `platforms.statusBar` block (sibling of platform ids, alongside `platforms.attachmentHandling`) with a zod schema and a resolver. Defaults: everything enabled.
 - **Status tracker** (`daemon` presentation layer): a platform-agnostic state machine (`createTurnStatusBar`) that receives turn events (phase transitions, tool call start/end, usage deltas, compactions), holds the latest snapshot, and pushes re-renders to a sink at most once per second. Terminal states freeze the bar.
-- **Event sources** (daemon core): new optional callbacks threaded through the existing seams — `RunToolLoopOptions.onToolCallEvent` in `tool-loop.ts`, `onThinkingDelta`/`onCompaction` on the session tool-loop model client, and a `reasoning` delta callback in the models SSE stream parser. `SessionAgentTurnResult` gains an `outcome: "completed" | "aborted" | "failed"` field so callers can distinguish the 🛑 abort path (currently swallowed into a normal result with `"<Aborted>"` appended) from success.
+- **Event sources** (daemon core): new optional callbacks threaded through the existing seams — `RunToolLoopOptions.onToolCallEvent` in `tool-loop.ts`, `onThinkingDelta`/`onCompaction` on the session tool-loop model client, `onHitlQueued` surfaced from the HITL enqueue hook (⏸️), and a `reasoning` delta callback in the models SSE stream parser. `SessionAgentTurnResult` gains an `outcome: "completed" | "aborted" | "failed"` field so callers can distinguish the 🛑 abort path (currently swallowed into a normal result with `"<Aborted>"` appended) from success.
 - **Platform contract**: `StreamHandle` gains an optional `setStatusBar(line)` method; `PlatformAdapter.sendBody`/`sendError` gain an optional `statusBar` option. The platform renders the snapshot (emoji line) via a renderer it supplies to the presentation layer — blockquote syntax, token formatting, and chunk-splitting interplay stay platform-owned.
 - **Discord** (`platform-discord`): the streaming outbound stores the current bar line and re-edits the message when it changes; the bar is appended to the _last_ chunk after message splitting (split budget reduced by the bar's length so the 2000-char limit still holds). At-once deliveries append the bar before splitting. Both call sites in `platform.ts` (inbound turns and `messaging_surface` delivery) wire the tracker.
 
@@ -61,7 +61,7 @@ The feature splits along the existing presentation/platform boundary:
 Red/green TDD per project rules; each phase ships with its tests.
 
 - **Tracker state machine** (unit, fake timers): all phase transitions, terminal freeze, batching cadence, section toggles omitting content, no-op renders.
-- **Renderer** (unit/snapshot): every status emoji, running vs. idle tool display, builtin arg extract, token/percentage formatting across magnitudes (K/M), omitted sections.
+- **Renderer** (unit/snapshot): every status emoji (including ⏸️), running vs. idle vs. HITL-queued tool display, builtin arg extract, token/percentage formatting across magnitudes (K/M), omitted sections.
 - **Config**: schema defaults, resolver precedence over missing/partial blocks.
 - **Discord streaming outbound**: bar appended to last chunk only; split budget accounts for bar length; bar update triggers a single edit; final content keeps the bar.
 - **Tool loop**: `onToolCallEvent` ordering (start → end), runtime measurement, non-executed dispatches excluded.
@@ -72,7 +72,7 @@ Red/green TDD per project rules; each phase ships with its tests.
 ## Considerations
 
 - **Rate limits**: at most one extra message edit per second per stream for bar-only changes; prose and bar changes share the same edit path, so combined cost is unchanged from today.
-- **HITL pauses**: no dedicated emoji exists; the tracker holds its last phase (⚡, since the pause occurs inside tool dispatch). A dedicated ⏸️ state is deferred.
+- **HITL pauses**: dedicated ⏸️ state, entered when a pending approval row is queued (the queued tool's name appears in the tool section without a runtime or count) and exited when the tool executes (⚡) or the next model round emits a thinking/prose delta — the bar may sit at ⏸️ briefly after a denial while the next round spins up. Terminal states (✅/🛑/❌) always win over ⏸️.
 - **Thinking detection limits**: only providers exposing reasoning deltas (openai-compatible `reasoning_content` streams) can show 🧠 mid-stream; providers whose thinking is normalized into content will read as 💬. Acceptable approximation; anthropic/gemini reasoning deltas can be added later.
 - **Internal/subagent delivery**: turns with `delivery.kind !== "messaging_surface"` have no visible surface and skip the bar entirely.
 - **`/status` and system-prompt stats**: unchanged; the bar reuses the same underlying `session_stats` data.
