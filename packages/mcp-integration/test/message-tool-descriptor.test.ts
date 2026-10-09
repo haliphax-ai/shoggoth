@@ -14,6 +14,7 @@ const fullSlice = {
   reactions: true,
   search: true,
   attachmentDownload: true,
+  pin: true,
 } as const;
 
 describe("buildMessageToolDescriptor", () => {
@@ -41,6 +42,7 @@ describe("buildMessageToolDescriptor", () => {
       "reactions",
       "search",
       "attachment-download",
+      "pin",
     ]);
     assert.deepEqual(d!.inputSchema.required, ["action"]);
     assert.ok(d!.inputSchema.properties?.attachments);
@@ -77,6 +79,7 @@ describe("buildMessageToolDescriptor", () => {
       reactions: false,
       search: false,
       attachmentDownload: false,
+      pin: false,
     });
     assert.ok(d);
     assert.equal(d!.inputSchema.oneOf, undefined);
@@ -110,6 +113,7 @@ describe("buildMessageToolDescriptor", () => {
       reactions: false,
       search: false,
       attachmentDownload: false,
+      pin: false,
     });
     assert.ok(d);
     const action = d!.inputSchema.properties?.action;
@@ -135,6 +139,7 @@ describe("buildMessageToolDescriptor", () => {
       reactions: false,
       search: true,
       attachmentDownload: false,
+      pin: false,
     });
     assert.ok(d);
     const action = d!.inputSchema.properties?.action;
@@ -163,6 +168,7 @@ describe("buildMessageToolDescriptor", () => {
       reactions: false,
       search: false,
       attachmentDownload: true,
+      pin: false,
     });
     assert.ok(d);
     const action = d!.inputSchema.properties?.action;
@@ -171,5 +177,49 @@ describe("buildMessageToolDescriptor", () => {
     assert.ok(d!.inputSchema.properties?.filename);
     assert.ok(d!.inputSchema.properties?.index);
     assert.ok(d!.inputSchema.properties?.path);
+  });
+
+  it("pin-enabled slice includes pin action", () => {
+    const d = buildMessageToolDescriptor({
+      attachments: false,
+      messageEdit: false,
+      messageDelete: false,
+      threadCreate: false,
+      threadDelete: false,
+      replies: false,
+      messageGet: false,
+      react: false,
+      reactions: false,
+      search: false,
+      attachmentDownload: false,
+      pin: true,
+    });
+    assert.ok(d);
+    const action = d!.inputSchema.properties?.action;
+    assert.ok(action && "enum" in action && Array.isArray(action.enum));
+    assert.ok(action.enum.includes("pin"));
+    // message_id is a base property (shared across actions) — it is always present.
+    assert.ok(d!.inputSchema.properties?.message_id);
+  });
+
+  it("pin-disabled slice omits pin action", () => {
+    const d = buildMessageToolDescriptor({
+      attachments: false,
+      messageEdit: false,
+      messageDelete: false,
+      threadCreate: false,
+      threadDelete: false,
+      replies: false,
+      messageGet: false,
+      react: false,
+      reactions: false,
+      search: false,
+      attachmentDownload: false,
+      pin: false,
+    });
+    assert.ok(d);
+    const action = d!.inputSchema.properties?.action;
+    assert.ok(action && "enum" in action && Array.isArray(action.enum));
+    assert.ok(!action.enum.includes("pin"));
   });
 });

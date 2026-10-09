@@ -348,4 +348,24 @@ describe("Discord REST transport", () => {
     assert.match(calls[0]!.url, /\/channels\/ch-typing-1\/typing$/);
     assert.equal(calls[0]!.body, "{}");
   });
+
+  it("pinMessage PUTs the pins endpoint and accepts 204", async () => {
+    const calls: { url: string; method: string }[] = [];
+    const fetchFn: typeof fetch = async (url, init) => {
+      calls.push({
+        url: String(url),
+        method: (init?.method as string) ?? "GET",
+      });
+      return new Response(null, { status: 204 });
+    };
+    const t = createDiscordRestTransport({
+      botToken: "tok",
+      fetchFn,
+      apiBase: "https://example.com/v10",
+    });
+    await t.pinMessage!("ch1", "m1");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]!.method, "PUT");
+    assert.match(calls[0]!.url, /\/channels\/ch1\/pins\/m1$/);
+  });
 });
