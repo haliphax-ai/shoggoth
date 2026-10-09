@@ -223,6 +223,29 @@ function optionalNonEmptySessionId(pl: Record<string, unknown>): string | undefi
   return v.trim();
 }
 
+/**
+ * Resolve `payload.session_id` to a full agent session URN. Accepts either a valid session URN
+ * or a bare agent id (substituted with that agent's bootstrap primary session URN).
+ */
+function requireSessionId(pl: Record<string, unknown>, cfg: ShoggothConfig): string {
+  return resolveTargetSessionIdOrThrow(requireString(pl, "session_id"), cfg);
+}
+
+/** Like {@link requireSessionId}, but returns undefined when `payload.session_id` is absent. */
+function optionalSessionId(pl: Record<string, unknown>, cfg: ShoggothConfig): string | undefined {
+  const raw = optionalNonEmptySessionId(pl);
+  if (raw === undefined) return undefined;
+  return resolveTargetSessionIdOrThrow(raw, cfg);
+}
+
+function resolveTargetSessionIdOrThrow(raw: string, cfg: ShoggothConfig): string {
+  try {
+    return resolveSessionTargetFromCliArg(raw, cfg);
+  } catch (e) {
+    throw new IntegrationOpError("ERR_INVALID_PAYLOAD", e instanceof Error ? e.message : String(e));
+  }
+}
+
 function mapSessionListRow(row: SessionRow) {
   return {
     id: row.id,
@@ -254,7 +277,7 @@ function resolveSessionSendTargetSessionId(
       "payload must not set both session_id and agent_id",
     );
   }
-  if (hasSid) return (sidRaw as string).trim();
+  if (hasSid) return resolveTargetSessionIdOrThrow((sidRaw as string).trim(), cfg);
   if (hasAid) {
     return resolveSessionTargetFromCliArg((aidRaw as string).trim(), cfg);
   }
@@ -829,7 +852,7 @@ export async function handleIntegrationControlOp(
         );
       }
       const pl = payloadObject(req);
-      const sessionId = requireString(pl, "session_id");
+      const sessionId = requireSessionId(pl, ctx.config);
       const out = applySessionContextSegmentNew({
         db: ctx.stateDb,
         sessions: ctx.sessions,
@@ -871,7 +894,7 @@ export async function handleIntegrationControlOp(
         );
       }
       const pl = payloadObject(req);
-      const sessionId = requireString(pl, "session_id");
+      const sessionId = requireSessionId(pl, ctx.config);
       const out = applySessionContextSegmentReset({
         db: ctx.stateDb,
         sessions: ctx.sessions,
@@ -901,7 +924,7 @@ export async function handleIntegrationControlOp(
         );
       }
       const pl = payloadObject(req);
-      const sessionId = requireString(pl, "session_id");
+      const sessionId = requireSessionId(pl, ctx.config);
       const modelsConfig = resolveEffectiveModelsConfig(ctx.config, sessionId) ?? ctx.config.models;
       const policy = resolveCompactionPolicyFromModelsConfig(modelsConfig);
       const client = createFailoverClientFromModelsConfig(modelsConfig, {
@@ -930,8 +953,8 @@ export async function handleIntegrationControlOp(
         throw new IntegrationOpError("ERR_HITL_UNAVAILABLE", "HITL pending store not configured");
       }
       const pl = payloadObject(req);
-      const sessionId = pl.session_id;
-      if (typeof sessionId === "string" && sessionId.trim()) {
+      const sessionId = optionalSessionId(pl, ctx.config);
+      if (sessionId) {
         return { pending: ctx.hitlPending.listPendingForSession(sessionId) };
       }
       const limitRaw = pl.limit;
@@ -1018,7 +1041,7 @@ export async function handleIntegrationControlOp(
       if (agentIdRaw !== "all") {
         assertValidAgentId(agentIdRaw);
       }
-      const sessionIdOpt = optionalNonEmptySessionId(pl);
+      const sessionIdOpt = optionalSessionId(pl, ctx.config);
       const noAuto = pl.no_auto === true;
       /** Session-scoped clear never touches auto-approve (SQLite / z-JSON / memory). */
       const skipAutoClear = Boolean(sessionIdOpt) || noAuto;
@@ -1873,7 +1896,7 @@ export async function handleIntegrationControlOp(
       }
       const sessionsStore = ctx.sessions;
       const pl = payloadObject(req);
-      const sessionId = requireString(pl, "session_id");
+      const sessionId = requireSessionId(pl, ctx.config);
       if (principal.kind === "agent" && sessionId !== principal.sessionId) {
         throw new IntegrationOpError(
           "ERR_FORBIDDEN",
@@ -1953,7 +1976,7 @@ export async function handleIntegrationControlOp(
       }
       const { sessions } = requireSubagentRuntime(ctx);
       const pl = payloadObject(req);
-      const sessionId = requireString(pl, "session_id");
+      const sessionId = requireSessionId(pl, ctx.config);
       if (principal.kind === "agent") {
         if (sessionId !== principal.sessionId) {
           throw new IntegrationOpError(
@@ -2094,7 +2117,7 @@ export async function handleIntegrationControlOp(
       }
       const { sessions } = requireSubagentRuntime(ctx);
       const pl = payloadObject(req);
-      const sessionId = requireString(pl, "session_id");
+      const sessionId = requireSessionId(pl, ctx.config);
       const prompt = requireString(pl, "prompt");
       const row = sessions.getById(sessionId);
       if (!row || row.status === "terminated") {
@@ -2308,7 +2331,7 @@ export async function handleIntegrationControlOp(
       }
       const { sessions } = requireSubagentRuntime(ctx);
       const pl = payloadObject(req);
-      const sessionId = requireString(pl, "session_id");
+      const sessionId = requireSessionId(pl, ctx.config);
       const row = sessions.getById(sessionId);
       if (!row || row.status === "terminated") {
         throw new IntegrationOpError("ERR_SESSION_INACTIVE", "session is missing or terminated");
@@ -2343,7 +2366,7 @@ export async function handleIntegrationControlOp(
       }
       const { sessions, sessionManager } = requireSubagentRuntime(ctx);
       const pl = payloadObject(req);
-      const sessionId = requireString(pl, "session_id");
+      const sessionId = requireSessionId(pl, ctx.config);
       const targetRow = sessions.getById(sessionId);
       if (principal.kind === "agent") {
         assertAgentSpawnSubagentsAllowed(principal, ctx.config);
@@ -2387,7 +2410,7 @@ export async function handleIntegrationControlOp(
         );
       }
       const pl = payloadObject(req);
-      const sessionId = requireString(pl, "session_id");
+      const sessionId = requireSessionId(pl, ctx.config);
       const row = ctx.sessions.getById(sessionId);
       if (!row) {
         throw new IntegrationOpError("ERR_SESSION_INACTIVE", "session not found");
@@ -2580,7 +2603,7 @@ export async function handleIntegrationControlOp(
         );
       }
       const pl = payloadObject(req);
-      const sessionId = requireString(pl, "session_id");
+      const sessionId = requireSessionId(pl, ctx.config);
       const action = requireString(pl, "action");
       const priorityRaw = pl.priority;
       const priority = priorityRaw === "system" || priorityRaw === "user" ? priorityRaw : undefined;
@@ -2662,11 +2685,12 @@ export async function handleIntegrationControlOp(
         throw new IntegrationOpError("ERR_FORBIDDEN", "elevation_grant is operator-only");
       }
       const elevGrantPl = payloadObject(req);
-      const elevGrantSessionId =
+      const elevGrantSessionIdRaw =
         typeof elevGrantPl.session_id === "string" ? elevGrantPl.session_id : undefined;
-      if (!elevGrantSessionId) {
+      if (!elevGrantSessionIdRaw) {
         throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "payload.session_id is required");
       }
+      const elevGrantSessionId = resolveTargetSessionIdOrThrow(elevGrantSessionIdRaw, ctx.config);
       if (!ctx.stateDb) {
         throw new IntegrationOpError("ERR_STATE_DB_REQUIRED", "elevation requires state DB");
       }
@@ -2694,14 +2718,15 @@ export async function handleIntegrationControlOp(
         const revokeOk = elevStoreRevoke.revoke(elevRevokePl.grant_id);
         return { ok: revokeOk, revoked: revokeOk };
       }
-      const elevRevokeSessionId =
+      const elevRevokeSessionIdRaw =
         typeof elevRevokePl.session_id === "string" ? elevRevokePl.session_id : undefined;
-      if (!elevRevokeSessionId) {
+      if (!elevRevokeSessionIdRaw) {
         throw new IntegrationOpError(
           "ERR_INVALID_PAYLOAD",
           "payload.grant_id or payload.session_id is required",
         );
       }
+      const elevRevokeSessionId = resolveTargetSessionIdOrThrow(elevRevokeSessionIdRaw, ctx.config);
       const revokeCount = elevStoreRevoke.revokeAllForSession(elevRevokeSessionId);
       return { ok: true, revokedCount: revokeCount };
     }
