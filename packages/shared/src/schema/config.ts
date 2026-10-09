@@ -60,6 +60,19 @@ export const attachmentHandlingSchema = z
 export type AttachmentHandlingMode = (typeof attachmentHandlingModes)[number];
 export type AttachmentHandlingConfig = z.infer<typeof attachmentHandlingSchema>;
 
+export const statusBarConfigSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    statusEnabled: z.boolean().optional(),
+    sequenceEnabled: z.boolean().optional(),
+    toolCallsEnabled: z.boolean().optional(),
+    contextWindowEnabled: z.boolean().optional(),
+    compactionsEnabled: z.boolean().optional(),
+  })
+  .strict()
+  .optional();
+export type StatusBarConfig = z.infer<typeof statusBarConfigSchema>;
+
 /** Default maximum attachment size in bytes for message-tool uploads and downloads (25 MB). */
 export const DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
@@ -113,7 +126,10 @@ const sharedConfigFields = {
   maxAttachmentBytes: z.number().int().positive().optional(),
   models: shoggothModelsConfigSchema.optional(),
   platforms: z
-    .object({ attachmentHandling: attachmentHandlingSchema })
+    .object({
+      attachmentHandling: attachmentHandlingSchema,
+      statusBar: statusBarConfigSchema,
+    })
     .catchall(platformCommonConfigSchema)
     .optional(),
   runtime: shoggothRuntimeConfigSchema.optional(),

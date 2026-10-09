@@ -113,6 +113,8 @@ export {
   attachmentHandlingModes,
   type AttachmentHandlingMode,
   type AttachmentHandlingConfig,
+  statusBarConfigSchema,
+  type StatusBarConfig,
   vaultConfigSchema,
   type ShoggothVaultConfig,
   shoggothLoggingConfigSchema,
@@ -128,6 +130,9 @@ export {
   resolveAgentPlatformConfig,
   registerPlatformConfigValidator,
   validatePlatformExtensions,
+  resolveStatusBarConfig,
+  DEFAULT_STATUS_BAR_CONFIG,
+  type ResolvedStatusBarConfig,
   type PlatformConfigValidator,
 } from "./platform-config";
 export {
