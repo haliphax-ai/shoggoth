@@ -35,8 +35,11 @@ ARG AGENT_UID=900
 ENV SHOGGOTH_AGENT_UID=${AGENT_UID}
 RUN --mount=type=cache,mode=0755,target=/var/cache/apt \
   rm -f /etc/apt/apt.conf.d/docker-clean \
-  && apt-get update && apt-get install -y --no-install-recommends acl ca-certificates git jq ripgrep \
-  && rm -rf /var/lib/apt/lists/*
+  && apt-get update && apt-get install -y --no-install-recommends acl ca-certificates curl git ripgrep \
+  && rm -rf /var/lib/apt/lists/* \
+  && curl -fsSL https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-linux-amd64 -o /usr/local/bin/jq \
+  && bash -c '[[ "$(sha256sum /usr/local/bin/jq)" == *"b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f"* ]] || exit 1' \
+  && chmod a+x /usr/local/bin/jq
 RUN userdel node 2>/dev/null; groupdel node 2>/dev/null; \
   (groupadd --system --gid ${SHOGGOTH_UID} shoggoth || true) \
   && useradd --system --uid ${SHOGGOTH_UID} --gid shoggoth --home-dir /var/lib/shoggoth --shell /usr/sbin/nologin shoggoth \
