@@ -123,7 +123,7 @@ import {
 } from "./workflow-adapters";
 import { createSessionManager } from "./sessions/session-manager";
 import { createSqliteAgentTokenStore } from "./auth/sqlite-agent-tokens";
-import { resolveShoggothAgentId } from "./config/effective-runtime";
+import { resolveConfiguredSubagentModel, resolveShoggothAgentId } from "./config/effective-runtime";
 import { TimerScheduler } from "./timers/timer-scheduler";
 import { setTimerScheduler } from "./sessions/builtin-handlers/timer-handler";
 import {
@@ -592,11 +592,7 @@ async function initWorkflowServer(
     // reading the live config so hot-reload changes are picked up. See issue #375.
     resolveSubagentModel: (parentSessionId) => {
       const agentId = parseAgentSessionUrn(parentSessionId)?.agentId;
-      const perAgent = agentId
-        ? configRef.current.agents?.list?.[agentId]?.subagentModel
-        : undefined;
-      const globalDefault = configRef.current.agents?.subagentModel;
-      return perAgent ?? globalDefault ?? undefined;
+      return resolveConfiguredSubagentModel(configRef.current, agentId);
     },
     stateDb: db,
     runSessionModelTurn: (input) => {
