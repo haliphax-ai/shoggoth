@@ -1,5 +1,5 @@
 import { loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
-import { invokeControlRequest } from "@shoggoth/daemon/lib";
+import { invokeControlRequest, resolveSessionTargetFromCliArg } from "@shoggoth/daemon/lib";
 
 function controlAuth(): { kind: "operator_token"; token: string } {
   const token = process.env.SHOGGOTH_OPERATOR_TOKEN?.trim();
@@ -14,15 +14,26 @@ async function socketPathFromEnv(configPath: string): Promise<string> {
   return config.socketPath;
 }
 
+async function resolveSessionTargetOrExit(configDir: string, raw: string): Promise<string | null> {
+  const config = await loadLayeredConfigAsync(configDir);
+  try {
+    return resolveSessionTargetFromCliArg(raw, config);
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exitCode = 1;
+    return null;
+  }
+}
+
 function printHitlHelp(): void {
   console.log(`shoggoth ${VERSION}
 Usage:
-  shoggoth hitl list [sessionId]   List pending HITL actions (JSON via control socket)
+  shoggoth hitl list [sessionId|agentId]   List pending HITL actions (JSON via control socket)
   shoggoth hitl get <id>           Fetch one pending row (JSON)
   shoggoth hitl approve <id>       Approve pending tool (JSON)
   shoggoth hitl deny <id>          Deny pending tool (JSON)
   shoggoth hitl clear <agent id>   Clear pending HITL rows (use agent id \`all\` for every agent)
-    [--session <session URN>]      Only this session; leaves auto-approve state unchanged
+    [--session <sessionUrn|agentId>]  Only this session; leaves auto-approve state unchanged
     [--noauto]                     Clear pending only; keep session + agent auto-approve`);
 }
 
@@ -37,7 +48,13 @@ export async function runHitlCli(argv: string[]): Promise<void> {
 
   const sub = argv[0];
   if (sub === "list") {
-    const sessionId = argv[1]?.trim();
+    const rawTarget = argv[1]?.trim();
+    let sessionId: string | undefined;
+    if (rawTarget) {
+      const resolved = await resolveSessionTargetOrExit(configDir, rawTarget);
+      if (!resolved) return;
+      sessionId = resolved;
+    }
     const res = await invokeControlRequest({
       socketPath,
       auth,
@@ -108,7 +125,7 @@ export async function runHitlCli(argv: string[]): Promise<void> {
     const agentId = tail[0]?.trim();
     if (!agentId) {
       console.error(
-        "usage: shoggoth hitl clear <agent id|all> [--session <session URN>] [--noauto]",
+        "usage: shoggoth hitl clear <agent id|all> [--session <sessionUrn|agentId>] [--noauto]",
       );
       process.exitCode = 1;
       return;
@@ -120,11 +137,13 @@ export async function runHitlCli(argv: string[]): Promise<void> {
       if (t === "--session") {
         const v = tail[i + 1]?.trim();
         if (!v) {
-          console.error("usage: shoggoth hitl clear ... --session <session URN>");
+          console.error("usage: shoggoth hitl clear ... --session <sessionUrn|agentId>");
           process.exitCode = 1;
           return;
         }
-        sessionId = v;
+        const resolvedSession = await resolveSessionTargetOrExit(configDir, v);
+        if (!resolvedSession) return;
+        sessionId = resolvedSession;
         i += 1;
         continue;
       }
@@ -152,7 +171,7 @@ export async function runHitlCli(argv: string[]): Promise<void> {
   }
 
   console.error(
-    `usage: shoggoth hitl list [sessionId] | get <id> | approve <id> | deny <id> | clear <agent id|all> ...`,
+    `usage: shoggoth hitl list [sessionId|agentId] | get <id> | approve <id> | deny <id> | clear <agent id|all> ...`,
   );
   process.exitCode = 1;
 }
