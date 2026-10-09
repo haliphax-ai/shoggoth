@@ -295,7 +295,7 @@ Governs _session-level subagent nesting depth_ — how many nested subagent leve
 
 Depth of a top-level session is 0; a session at depth `d` may spawn a subagent iff `d < maxSpawnDepth`. With the default of `1`, subagents may not spawn; with `2`, a subagent may spawn a depth-2 subagent which then may not spawn, and so on. `0` disables subagent spawning entirely.
 
-This is the sole spawn-permission and nesting gate for agent principals on the subagent builtins and control ops. It is evaluated alongside (never widened by) the `subagentSpawnAllow` allowlist, which governs which agent ids a sender may spawn _as_.
+This is the sole spawn-permission and nesting gate for agent principals on the subagent builtins and control ops. Thread-bound persistent subagents are governed by it like any other session — depth is pure `parent_session_id` lineage with no platform-thread exemptions. It is evaluated alongside (never widened by) the `subagentSpawnAllow` allowlist, which governs which agent ids a sender may spawn _as_.
 
 **Helpers (`spawn-depth.ts`):**
 

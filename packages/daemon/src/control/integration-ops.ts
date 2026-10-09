@@ -356,9 +356,10 @@ function assertAgentMayUseSubagentSpawn(
       "parent session is missing or terminated",
     );
   }
-  // TODO: thread-bound subagent depth semantics pending operator decision. Thread-bound
-  // (platform-thread-attached, user-visible) persistent subagents must remain able to spawn;
-  // this call site currently applies pure lineage depth via `computeSessionDepthFromStore`.
+  // Thread-bound persistent subagents are subject to this gate like any other
+  // session: pure `parent_session_id` lineage depth, no platform-thread carve-outs.
+  // They were previously exempt from the nesting ban; `maxSpawnDepth` now governs
+  // them uniformly.
   const depth = computeSessionDepthFromStore(sessions, principal.sessionId);
   const maxDepth = effectiveMaxSpawnDepth(
     config,
@@ -381,9 +382,10 @@ function assertAgentMayUseSubagentSpawn(
  * re-checked here. Targeting restrictions (direct child / own session) are
  * enforced per-op.
  *
- * TODO: thread-bound subagent depth semantics pending operator decision —
- * thread-bound persistent subagents must remain able to manage their children,
- * so this may need to relax for platform-thread-attached sessions.
+ * Thread-bound persistent subagents are subject to this gate like any other
+ * session: pure `parent_session_id` lineage depth, no platform-thread carve-outs.
+ * They were previously exempt from the nesting ban; `maxSpawnDepth` now governs
+ * them uniformly.
  */
 function assertAgentMayUseSubagentSessionOps(
   principal: AuthenticatedPrincipal,

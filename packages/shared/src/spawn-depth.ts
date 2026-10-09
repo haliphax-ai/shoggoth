@@ -21,6 +21,10 @@ const MAX_LINEAGE_WALK = 64;
  * permitted to spawn by the `subagentSpawnAllow` allowlist — it does not
  * replace or modify those gates. It also governs session-level subagent nesting
  * only, not the workflow engine's separate `maxDepth`.
+ *
+ * The gate is uniform: thread-bound persistent subagents are subject to it like
+ * any other session — depth is pure `parent_session_id` lineage with no
+ * platform-thread exemptions.
  */
 export function effectiveMaxSpawnDepth(
   cfg: ShoggothConfig,
