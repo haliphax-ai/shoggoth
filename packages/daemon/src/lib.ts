@@ -245,6 +245,17 @@ export {
   type MinimalContextInput,
 } from "./presentation/minimal-context";
 export { setNoticeResolver as setPresentationNoticeResolver } from "./presentation/notices";
+export {
+  createTurnStatusBar,
+  type TurnStatusBar,
+  type TurnStatusPhase,
+  type StatusBarToolCall,
+  type StatusBarSnapshot,
+  type StatusBarSink,
+  type StatusBarRenderer,
+} from "./presentation/status-bar";
+
+// --- Presentation layer: platform adapter interface ---
 
 // --- Presentation layer: platform adapter interface ---
 export type {
