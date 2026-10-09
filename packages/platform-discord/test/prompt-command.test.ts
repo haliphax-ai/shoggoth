@@ -103,7 +103,7 @@ describe("prompt slash command", () => {
       components: Array<Record<string, unknown>>;
     }>;
     const select = components[0]!.components[0]!;
-    assert.strictEqual(select.custom_id, `prompt_select|${SESSION}`);
+    assert.strictEqual(select.custom_id, "prompt_select|");
     assert.strictEqual(select.placeholder, "Select a canned prompt");
     assert.strictEqual((select.default_values as unknown[] | undefined)?.length ?? 0, 0);
     const options = select.options as Array<{ label: string; value: string }>;
@@ -135,7 +135,7 @@ describe("prompt slash command", () => {
     assert.strictEqual(calls.length, 1, "should not render a dropdown");
     const [, , body] = calls[0]!.args as [string, string, Body];
     assert.strictEqual(body.type, 9); // modal
-    assert.strictEqual(body.data.custom_id, `prompt_modal|${SESSION}|beta`);
+    assert.strictEqual(body.data.custom_id, "prompt_modal|beta");
     assert.strictEqual(body.data.title, "Prompt: beta");
     assert.strictEqual(body.data.flags, undefined);
     const components = body.data.components as Array<{
@@ -267,7 +267,7 @@ describe("prompt dropdown component → modal", () => {
       channelId: "ch-1",
       userId: "u-1",
       data: {
-        custom_id: `prompt_select|${SESSION}`,
+        custom_id: "prompt_select|",
         values: [slug],
         component_type: 3,
       },
@@ -291,7 +291,7 @@ describe("prompt dropdown component → modal", () => {
 
     const [, , body] = calls[0]!.args as [string, string, Body];
     assert.strictEqual(body.type, 9); // modal
-    assert.strictEqual(body.data.custom_id, `prompt_modal|${SESSION}|triage`);
+    assert.strictEqual(body.data.custom_id, "prompt_modal|triage");
     const components = body.data.components as Array<{
       components: Array<Record<string, unknown>>;
     }>;
@@ -404,7 +404,7 @@ describe("prompt modal submit → slash handler proxy", () => {
       channelId: "ch-1",
       userId: "u-1",
       data: {
-        custom_id: `prompt_modal|${SESSION}|triage`,
+        custom_id: "prompt_modal|triage",
         components: [
           { type: 1, components: [{ type: 4, custom_id: "cardId", value: "F-42" }] },
           { type: 1, components: [{ type: 4, custom_id: "note", value: "" }] },
@@ -460,7 +460,7 @@ describe("prompt modal submit → slash handler proxy", () => {
       channelId: "ch-1",
       userId: "u-1",
       data: {
-        custom_id: `prompt_modal|${SESSION}|triage`,
+        custom_id: "prompt_modal|triage",
         components: [{ type: 1, components: [{ type: 4, custom_id: "cardId", value: "" }] }],
       },
     };
@@ -510,8 +510,8 @@ describe("prompt modal submit → slash handler proxy", () => {
       guildId: "g-1",
       userId: "u-1",
       data: {
-        // Blank session segment: the proxy must fall back to the channel route.
-        custom_id: "prompt_modal| |triage",
+        // The modal carries no session — the proxy resolves it from the channel.
+        custom_id: "prompt_modal|triage",
         components: [{ type: 1, components: [{ type: 4, custom_id: "cardId", value: "F-42" }] }],
       },
     };
@@ -546,7 +546,7 @@ describe("prompt modal submit → slash handler proxy", () => {
       channelId: "ch-1",
       userId: "u-1",
       data: {
-        custom_id: "prompt_modal| |triage",
+        custom_id: "prompt_modal|triage",
         components: [{ type: 1, components: [{ type: 4, custom_id: "cardId", value: "F-42" }] }],
       },
     };
@@ -564,5 +564,112 @@ describe("prompt modal submit → slash handler proxy", () => {
     );
     const edit = calls.find((c) => c.method === "editOriginalInteractionResponse");
     assert.strictEqual(edit, undefined, "must not defer before warning");
+  });
+});
+
+describe("custom_id length safety (long subagent session URNs)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // A thread-bound subagent session URN = parent channel URN + ":<uuid>" (87
+  // chars). Before the fix this was embedded in custom_id and overflowed
+  // Discord's 100-char limit (400 BASE_TYPE_BAD_LENGTH), breaking /prompt in
+  // any thread with an attached subagent.
+  const SUBAGENT_URN =
+    "agent:developer:discord:channel:1480957862858719232:b5a49a1b-24f9-44ce-a9a1-669c43f2dea4";
+
+  it("dropdown and modal custom_ids stay within 100 chars and never embed the URN", async () => {
+    assert.ok(SUBAGENT_URN.length >= 87, "fixture URN must be realistically long");
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const handler = makeHandler(
+      calls,
+      async (op) => {
+        assert.strictEqual(op, "prompt_list");
+        return { ok: true, result: { prompts: [{ slug: "triage", placeholders: ["cardId"] }] } };
+      },
+      () => SUBAGENT_URN,
+    );
+
+    // Stage 1: the dropdown custom_id is a bare prefix — no session embedded.
+    handler({
+      kind: "interaction_create",
+      id: "int-a",
+      token: "tok-a",
+      type: 2,
+      channelId: "ch-1",
+      guildId: "g-1",
+      userId: "u-1",
+      data: { name: "prompt", options: [] },
+    });
+    await vi.advanceTimersByTimeAsync(50);
+    const dropdown = (calls[0]!.args[2] as Body).data.components as Array<{
+      components: Array<Record<string, unknown>>;
+    }>;
+    const selectCustomId = dropdown[0]!.components[0]!.custom_id as string;
+    assert.strictEqual(selectCustomId, "prompt_select|");
+    assert.ok(selectCustomId.length <= 100, "dropdown custom_id must fit Discord's limit");
+    assert.ok(!selectCustomId.includes(SUBAGENT_URN));
+
+    // Stage 2: the modal custom_id carries only the slug.
+    calls.length = 0;
+    handler({
+      kind: "interaction_create",
+      id: "int-b",
+      token: "tok-b",
+      type: 3,
+      channelId: "ch-1",
+      guildId: "g-1",
+      userId: "u-1",
+      data: { custom_id: "prompt_select|", values: ["triage"], component_type: 3 },
+    });
+    await vi.advanceTimersByTimeAsync(50);
+    const modalBody = calls[0]!.args[2] as Body;
+    assert.strictEqual(modalBody.type, 9);
+    const modalCustomId = modalBody.data.custom_id as string;
+    assert.strictEqual(modalCustomId, "prompt_modal|triage");
+    assert.ok(modalCustomId.length <= 100, "modal custom_id must fit Discord's limit");
+    assert.ok(!modalCustomId.includes(SUBAGENT_URN));
+  });
+
+  it("stage 3 re-derives the long subagent session from the channel", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const invoked: Array<{ op: string; payload: Record<string, unknown> }> = [];
+    const handler = makeHandler(
+      calls,
+      async (op, payload) => {
+        invoked.push({ op, payload });
+        return { ok: true, result: { reply: "ok" } };
+      },
+      () => SUBAGENT_URN,
+    );
+
+    handler({
+      kind: "interaction_create",
+      id: "int-c",
+      token: "tok-c",
+      type: 5,
+      channelId: "ch-1",
+      guildId: "g-1",
+      userId: "u-1",
+      data: {
+        custom_id: "prompt_modal|triage",
+        components: [{ type: 1, components: [{ type: 4, custom_id: "cardId", value: "F-42" }] }],
+      },
+    });
+    await vi.advanceTimersByTimeAsync(100);
+
+    const promptCall = invoked.find((c) => c.op === "prompt");
+    assert.ok(promptCall, "prompt op should be invoked");
+    assert.strictEqual(
+      promptCall!.payload.session_id,
+      SUBAGENT_URN,
+      "session re-derived from the channel",
+    );
+    assert.strictEqual(promptCall!.payload.slug, "triage");
   });
 });
