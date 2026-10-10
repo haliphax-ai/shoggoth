@@ -1,33 +1,37 @@
 import { describe, it, expect, vi } from "vitest";
 import { runInboundSessionTurn } from "../../src/messaging/inbound-session-turn";
 
+type ExecuteSessionAgentTurnInput = Parameters<
+  typeof import("../../src/sessions/session-agent-turn").executeSessionAgentTurn
+>[0];
+
 vi.mock("../../src/sessions/session-agent-turn.js", () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let fail = false;
   return {
     __setFail: (v: boolean) => {
       fail = v;
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    executeSessionAgentTurn: vi.fn().mockImplementation(async (input: any) => {
-      if (fail) throw new Error("boom");
-      if (input.stream?.onModelTextDelta) {
-        for (let i = 1; i <= 10; i++) {
-          input.stream.onModelTextDelta("a".repeat(i * 30));
+    executeSessionAgentTurn: vi
+      .fn()
+      .mockImplementation(async (input: ExecuteSessionAgentTurnInput) => {
+        if (fail) throw new Error("boom");
+        if (input.stream?.onModelTextDelta) {
+          for (let i = 1; i <= 10; i++) {
+            input.stream.onModelTextDelta("a".repeat(i * 30));
+          }
         }
-      }
-      return {
-        latestAssistantText: "a".repeat(300),
-        failoverMeta: undefined,
-        showAttachments: undefined,
-        outcome: "completed",
-      };
-    }),
+        return {
+          latestAssistantText: "a".repeat(300),
+          failoverMeta: undefined,
+          showAttachments: undefined,
+          outcome: "completed",
+        };
+      }),
   };
 });
 
-// Default turn builder shared across tests.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// Default turn builder shared across tests. `config`/`stateDb` are unused by
+// the status-bar paths under test, so stubs (repo convention) suffice here.
 function defaultBuildTurn() {
   return Promise.resolve({
     sessionId: "s1",
@@ -36,10 +40,8 @@ function defaultBuildTurn() {
     messages: [],
     tools: [],
     systemPrompt: "",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    config: {} as any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    stateDb: {} as any,
+    config: {} as never,
+    stateDb: {} as never,
   });
 }
 
