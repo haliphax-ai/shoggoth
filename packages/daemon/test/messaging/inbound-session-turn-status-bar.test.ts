@@ -136,4 +136,60 @@ describe("runInboundSessionTurn status bar", () => {
     // Normal streaming delivery still succeeds untouched.
     expect(setFullContent).toHaveBeenCalled();
   });
+
+  it("(d) attachSink wraps the stream handle after start; live pushes reach it", async () => {
+    const setFullContent = vi.fn().mockResolvedValue(undefined);
+    const pushUpdate = vi.fn().mockResolvedValue(undefined);
+    const handle: {
+      setFullContent: typeof setFullContent;
+      pushUpdate: typeof pushUpdate;
+      setStatusBar?: (line: string | null) => Promise<void>;
+    } = { setFullContent, pushUpdate };
+    const streamStart = vi.fn().mockResolvedValue(handle);
+
+    // Mimics the platform dep: attachSink augments the handle in place with a
+    // live setStatusBar sink.
+    const liveStatusBar = vi.fn().mockResolvedValue(undefined);
+    const attachSink = vi.fn().mockImplementation((h: typeof handle) => {
+      h.setStatusBar = liveStatusBar;
+      return h;
+    });
+
+    const finish = vi.fn().mockResolvedValue("✅ bar");
+    let capturedTracker:
+      | {
+          setStatusBar: (line: string | null) => Promise<void>;
+          finish: (outcome: string) => Promise<string | undefined>;
+        }
+      | undefined;
+    const create = vi.fn().mockImplementation(async () => {
+      capturedTracker = {
+        // Lazy binding: by the time the turn pushes, attachSink has wrapped the
+        // handle, so the live setter exists.
+        setStatusBar: (line) => handle.setStatusBar?.(line) ?? Promise.resolve(),
+        finish,
+      };
+      return capturedTracker;
+    });
+
+    await runInboundSessionTurn({
+      buildTurn: defaultBuildTurn,
+      streaming: { minIntervalMs: 0, start: streamStart },
+      statusBar: { enabled: true, create, attachSink },
+      sliceDisplayText: (t) => t,
+      formatAssistantReply: (text) => text,
+      formatErrorReply: (err) => String(err),
+      sendAssistantBody: vi.fn().mockResolvedValue(undefined),
+      sendErrorBody: vi.fn().mockResolvedValue(undefined),
+    });
+
+    // The handle gained setStatusBar via attachSink right after streaming start.
+    expect(attachSink).toHaveBeenCalledTimes(1);
+    expect(attachSink.mock.calls[0]?.[0]).toBe(handle);
+    expect(handle.setStatusBar).toBe(liveStatusBar);
+
+    // A live mid-turn push through the tracker reaches the wrapped handle sink.
+    await capturedTracker?.setStatusBar("🧠 live");
+    expect(liveStatusBar).toHaveBeenCalledWith("🧠 live");
+  });
 });
