@@ -49,6 +49,7 @@ import { daemonNotice } from "./notices";
 import type { DiscordMessagingRuntime } from "./bridge";
 import { mergeOrchestratorEnv, resolveDiscordOwnerUserId } from "./config";
 import { registerDiscordHitlNoticeAndAddReactions } from "./hitl/reaction-wiring";
+import { formatTokens } from "./status-bar";
 import type { HitlDiscordNoticeRegistry } from "./hitl/notice-registry";
 import { buildHitlQueuedNoticeLines, createDiscordHitlNotifier } from "./hitl/notifier";
 import { sliceDiscordPlatformMessageBody } from "./errors";
@@ -114,13 +115,17 @@ function readStatusBarStats(db: Database.Database, sessionId: string): StatusBar
   };
 }
 
-/** Terminal Discord status bar line (✅ ｜ 🔢 `n` ｜ 🗑️ `n` ｜ 🪟 `x/y`). */
+/** Terminal Discord status bar line (✅ ｜ 🔢 `n` ｜ 🗑️ `n` ｜ 🪟 `p%/y`). */
 function renderStatusBarTerminalLine(s: StatusBarTurnStats): string {
   const sections = ["✅", `🔢 \`${s.sequence}\``, `🗑️ \`${s.compactions}\``];
   if (s.inputTokens > 0) {
-    const total =
-      s.windowTokens && s.windowTokens > 0 ? `/${s.windowTokens.toLocaleString("en-US")}` : "";
-    sections.push(`🪟 \`${s.inputTokens.toLocaleString("en-US")}${total}\``);
+    const hasWindow = s.windowTokens !== null && s.windowTokens > 0;
+    const percent = hasWindow
+      ? `${((s.inputTokens / s.windowTokens!) * 100).toFixed(1)}%`
+      : undefined;
+    const total = hasWindow ? `/${formatTokens(s.windowTokens!)}` : "";
+    // Compact display: `31.4%/100K`; without a known window, just `31.4K`.
+    sections.push(`🪟 \`${percent ? `${percent}${total}` : formatTokens(s.inputTokens)}\``);
   }
   return sections.join(" ｜ ");
 }

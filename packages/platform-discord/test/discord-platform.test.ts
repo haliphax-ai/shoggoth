@@ -2766,7 +2766,7 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
       `terminal bar must carry compactions 2 from session_stats.compaction_count, got: ${terminalLine}`,
     );
     assert.ok(
-      terminalLine!.includes("31,421"),
+      terminalLine!.includes("31.4%/100K"),
       `terminal bar must carry the latest per-call input tokens as context, got: ${terminalLine}`,
     );
 
@@ -2831,7 +2831,7 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
       `final sendBody must carry compactions 2 from session_stats.compaction_count, got: ${last}`,
     );
     assert.ok(
-      last.includes("31,421"),
+      last.includes("31.4%/100K"),
       `final sendBody must carry the latest per-call input tokens as context, got: ${last}`,
     );
   });

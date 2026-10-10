@@ -13,7 +13,7 @@ const PHASE_EMOJI: Record<TurnStatusPhase, string> = {
 };
 
 /** `<10K` → plain integer with thousands separators; `≥10K` → one-decimal K; `≥1M` → one-decimal M. */
-function formatTokens(value: number): string {
+export function formatTokens(value: number): string {
   if (value < 10_000) return value.toLocaleString("en-US");
   if (value < 1_000_000) return trimTrailingZero((value / 1_000).toFixed(1)) + "K";
   return trimTrailingZero((value / 1_000_000).toFixed(1)) + "M";
@@ -49,13 +49,13 @@ export function renderDiscordStatusBar(
   }
 
   if (cfg.contextWindowEnabled && snap.context) {
-    const current = formatTokens(snap.context.currentTokens);
     const total = formatTokens(snap.context.totalTokens);
     const percent =
       snap.context.totalTokens > 0
         ? ((snap.context.currentTokens / snap.context.totalTokens) * 100).toFixed(1)
         : "0.0";
-    sections.push(`🪟 \`${current}/${total}\` **${percent}%**`);
+    // Compact display: `31.4%/100K` (percent of window over abbreviated total).
+    sections.push(`🪟 \`${percent}%/${total}\``);
   }
 
   if (cfg.compactionsEnabled) {

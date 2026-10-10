@@ -138,29 +138,29 @@ describe("renderDiscordStatusBar", () => {
     expect(line).not.toContain("🪟");
   });
 
-  it("formats tokens below 10K as a plain integer with thousands separators", () => {
+  it("renders context as percent over the abbreviated window total", () => {
     const line = renderDiscordStatusBar(
       snap({ context: { currentTokens: 9_999, totalTokens: 100_000 } }),
       defaultCfg,
     );
     expect(line).toContain("🪟");
-    expect(line).toContain("9,999/100K");
+    expect(line).toContain("10.0%/100K");
   });
 
-  it("formats tokens at 10K and above as one-decimal K", () => {
+  it("abbreviates the window total at 1M", () => {
     const line = renderDiscordStatusBar(
       snap({ context: { currentTokens: 10_100, totalTokens: 1_000_000 } }),
       defaultCfg,
     );
-    expect(line).toContain("10.1K/1M");
+    expect(line).toContain("1.0%/1M");
   });
 
-  it("formats tokens at 1M and above as one-decimal M", () => {
+  it("abbreviates the window total at 50M", () => {
     const line = renderDiscordStatusBar(
       snap({ context: { currentTokens: 1_050_000, totalTokens: 50_000_000 } }),
       defaultCfg,
     );
-    expect(line).toContain("1.1M/50M");
+    expect(line).toContain("2.1%/50M");
   });
 
   it("formats percentage with one decimal", () => {
@@ -168,7 +168,7 @@ describe("renderDiscordStatusBar", () => {
       snap({ context: { currentTokens: 10_300, totalTokens: 100_000 } }),
       defaultCfg,
     );
-    expect(line).toContain("**10.3%**");
+    expect(line).toContain("10.3%/100K");
   });
 
   it("formats compactions with the compactions emoji", () => {
