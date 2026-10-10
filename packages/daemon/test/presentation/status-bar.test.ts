@@ -1,5 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createTurnStatusBar } from "../../src/presentation/status-bar";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import Database from "better-sqlite3";
+import {
+  createTurnStatusBar,
+  getStatusBarStats,
+  renderStatusBarTerminalBar,
+} from "../../src/presentation/status-bar";
+import type { StatusBarStats } from "../../src/presentation/status-bar";
+import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
+import { createSessionStore } from "../../src/sessions/session-store";
 import type {
   StatusBarSnapshot,
   StatusBarSink,
@@ -331,5 +342,173 @@ describe("TurnStatusBar contract types", () => {
     expect(typeof surface.setCompactions).toBe("function");
     expect(typeof surface.finish).toBe("function");
     expect(typeof surface.dispose).toBe("function");
+  });
+});
+
+describe("getStatusBarStats", () => {
+  let tmp: string;
+  let db: Database.Database;
+
+  function seedStats(
+    sessionId: string,
+    values: Partial<{
+      turn_count: number;
+      compaction_count: number;
+      input_tokens: number;
+      context_window_tokens: number | null;
+    }>,
+  ): void {
+    db.prepare(
+      `INSERT INTO session_stats (session_id, turn_count, compaction_count, input_tokens,
+              context_window_tokens, updated_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+    ).run(
+      sessionId,
+      values.turn_count ?? 0,
+      values.compaction_count ?? 0,
+      values.input_tokens ?? 0,
+      values.context_window_tokens ?? null,
+    );
+  }
+
+  /** 128_000 chars ≈ 32_000 estimated tokens in the session's current segment. */
+  function seedSegmentTranscript(sessionId: string, content: string): void {
+    const segmentId = createSessionStore(db).getById(sessionId)!.contextSegmentId;
+    db.prepare(
+      `INSERT INTO transcript_messages (session_id, context_segment_id, seq, role, content)
+       VALUES (?, ?, 0, 'user', ?)`,
+    ).run(sessionId, segmentId, content);
+  }
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "shoggoth-sb-stats-"));
+    db = new Database(join(tmp, "s.db"));
+    db.pragma("foreign_keys = ON");
+    migrate(db, defaultMigrationsDir());
+    const sessions = createSessionStore(db);
+    sessions.create({ id: "s1", workspacePath: tmp });
+    sessions.create({ id: "s2", workspacePath: tmp });
+    sessions.create({ id: "s3", workspacePath: tmp });
+    sessions.create({ id: "s4", workspacePath: tmp });
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("maps session_stats turn_count to sequence and compaction_count to compactions", () => {
+    seedStats("s1", { turn_count: 5, compaction_count: 2, input_tokens: 99_999 });
+    const stats = getStatusBarStats(db, "s1");
+    expect(stats.sequence).toBe(5);
+    expect(stats.compactions).toBe(2);
+    expect(stats.context).toBeUndefined();
+  });
+
+  it("derives context from the segment estimate and the total from context_window_tokens", () => {
+    seedStats("s2", {
+      turn_count: 7,
+      compaction_count: 1,
+      input_tokens: 500_000,
+      context_window_tokens: 128_000,
+    });
+    seedSegmentTranscript("s2", "x".repeat(128_000));
+    expect(getStatusBarStats(db, "s2").context).toEqual({
+      currentTokens: 32_000,
+      totalTokens: 128_000,
+    });
+  });
+
+  it("omits context when the segment estimate is 0", () => {
+    seedStats("s3", { turn_count: 3, context_window_tokens: 128_000 });
+    const stats = getStatusBarStats(db, "s3");
+    expect(stats.sequence).toBe(3);
+    expect(stats.context).toBeUndefined();
+  });
+
+  it("regression: huge cumulative input_tokens never becomes the current fill", () => {
+    // input_tokens is a cumulative running sum across every model call of the
+    // segment; a long session can far exceed the window (the ~2000% bug).
+    seedStats("s4", {
+      turn_count: 9,
+      compaction_count: 4,
+      input_tokens: 2_000_000,
+      context_window_tokens: 1_000_000,
+    });
+    seedSegmentTranscript("s4", "x".repeat(4_000)); // ≈1_000 estimated tokens
+    expect(getStatusBarStats(db, "s4").context).toEqual({
+      currentTokens: 1_000,
+      totalTokens: 1_000_000,
+    });
+  });
+
+  it("defaults to zeroed stats for an unknown session", () => {
+    expect(getStatusBarStats(db, "missing")).toEqual({ sequence: 0, compactions: 0 });
+  });
+});
+
+describe("renderStatusBarTerminalBar", () => {
+  const stats: StatusBarStats = {
+    sequence: 7,
+    compactions: 2,
+    context: { currentTokens: 1_000, totalTokens: 1_000_000 },
+  };
+
+  it("renders the finished (✅) terminal line byte-identically", () => {
+    expect(renderStatusBarTerminalBar(stats, "finished")).toBe(
+      "✅ ｜ 🔢 `7` ｜ 🗑️ `2` ｜ 🪟 `0.1%/1M`",
+    );
+  });
+
+  it("maps the turn outcome to the phase emoji (🛑 aborted / ❌ failed)", () => {
+    expect(renderStatusBarTerminalBar(stats, "aborted")).toBe(
+      "🛑 ｜ 🔢 `7` ｜ 🗑️ `2` ｜ 🪟 `0.1%/1M`",
+    );
+    expect(renderStatusBarTerminalBar(stats, "failed")).toBe(
+      "❌ ｜ 🔢 `7` ｜ 🗑️ `2` ｜ 🪟 `0.1%/1M`",
+    );
+  });
+
+  it("omits the context section when stats carry no context", () => {
+    expect(renderStatusBarTerminalBar({ sequence: 0, compactions: 0 }, "finished")).toBe(
+      "✅ ｜ 🔢 `0` ｜ 🗑️ `0`",
+    );
+  });
+
+  it("falls back to the plain token total when no window is known", () => {
+    const line = renderStatusBarTerminalBar(
+      { sequence: 1, compactions: 0, context: { currentTokens: 31_400, totalTokens: 31_400 } },
+      "finished",
+    );
+    expect(line).toBe("✅ ｜ 🔢 `1` ｜ 🗑️ `0` ｜ 🪟 `31.4K`");
+  });
+
+  it("round-trips getStatusBarStats output for the same session", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "shoggoth-sb-rt-"));
+    const db = new Database(join(tmp, "s.db"));
+    db.pragma("foreign_keys = ON");
+    migrate(db, defaultMigrationsDir());
+    try {
+      const sessions = createSessionStore(db);
+      sessions.create({ id: "rt1", workspacePath: tmp });
+      db.prepare(
+        `INSERT INTO session_stats (session_id, turn_count, compaction_count, input_tokens,
+                context_window_tokens, updated_at)
+         VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+      ).run("rt1", 3, 1, 2_000_000, 1_000_000);
+      const segmentId = sessions.getById("rt1")!.contextSegmentId;
+      db.prepare(
+        `INSERT INTO transcript_messages (session_id, context_segment_id, seq, role, content)
+         VALUES (?, ?, 0, 'user', ?)`,
+      ).run("rt1", segmentId, "x".repeat(4_000)); // ≈1_000 estimated tokens
+      // Same regression shape as the platform e2e test: the bar must show the
+      // segment-estimate fill (0.1%/1M), never the cumulative column.
+      expect(renderStatusBarTerminalBar(getStatusBarStats(db, "rt1"), "finished")).toBe(
+        "✅ ｜ 🔢 `3` ｜ 🗑️ `1` ｜ 🪟 `0.1%/1M`",
+      );
+    } finally {
+      db.close();
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

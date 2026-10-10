@@ -19,7 +19,6 @@ import {
   createToolRunStore,
   applySessionContextSegmentNew,
   applySessionContextSegmentReset,
-  estimateCurrentContextFill,
   parseSessionSegmentInlineCommand,
   sessionSegmentStartupUserContent,
   resolveSessionBypassUpTo,
@@ -27,6 +26,8 @@ import {
   createSessionMcpRuntime,
   defaultPlatformAssistantDeps,
   getTurnQueue,
+  getStatusBarStats,
+  renderStatusBarTerminalBar,
   formatAssistantReply,
   routeReaction,
   formatGlobalReactionEventContext,
@@ -50,7 +51,6 @@ import { daemonNotice } from "./notices";
 import type { DiscordMessagingRuntime } from "./bridge";
 import { mergeOrchestratorEnv, resolveDiscordOwnerUserId } from "./config";
 import { registerDiscordHitlNoticeAndAddReactions } from "./hitl/reaction-wiring";
-import { formatTokens } from "./status-bar";
 import type { HitlDiscordNoticeRegistry } from "./hitl/notice-registry";
 import { buildHitlQueuedNoticeLines, createDiscordHitlNotifier } from "./hitl/notifier";
 import { sliceDiscordPlatformMessageBody } from "./errors";
@@ -92,78 +92,9 @@ export function buildStatusBarDep(
       return h as StreamHandle & typeof sink;
     },
     // Pre-turn stats for seeding the bar (sequence / compactions / context
-    // window fill), reusing the same query the terminal-bar path uses.
-    stats: (sessionId: string) => {
-      const s = readStatusBarStats(db, sessionId);
-      return {
-        sequence: s.sequence,
-        compactions: s.compactions,
-        ...(s.contextFillTokens > 0
-          ? {
-              context: {
-                currentTokens: s.contextFillTokens,
-                totalTokens:
-                  s.windowTokens !== null && s.windowTokens > 0
-                    ? s.windowTokens
-                    : s.contextFillTokens,
-              },
-            }
-          : {}),
-      };
-    },
+    // window fill) — sourced daemon-side; the platform only wires them in.
+    stats: (sessionId: string) => getStatusBarStats(db, sessionId),
   };
-}
-
-interface StatusBarTurnStats {
-  readonly sequence: number;
-  readonly compactions: number;
-  readonly contextFillTokens: number;
-  readonly windowTokens: number | null;
-}
-
-/** Sequence from session_stats.turn_count, compactions from compaction_count,
- *  context fill estimated from the current context segment's transcript
- *  (session_stats.input_tokens is a cumulative running sum and must never be
- *  treated as current context-window fill). */
-function readStatusBarStats(db: Database.Database, sessionId: string): StatusBarTurnStats {
-  const row = db
-    .prepare(
-      `SELECT turn_count, compaction_count, context_window_tokens
-       FROM session_stats WHERE session_id = ?`,
-    )
-    .get(sessionId) as
-    | {
-        turn_count: number;
-        compaction_count: number;
-        context_window_tokens: number | null;
-      }
-    | undefined;
-  const segmentId = createSessionStore(db).getById(sessionId)?.contextSegmentId;
-  const contextFillTokens =
-    segmentId !== undefined && segmentId.length > 0
-      ? estimateCurrentContextFill(db, sessionId, segmentId)
-      : 0;
-  return {
-    sequence: row?.turn_count ?? 0,
-    compactions: row?.compaction_count ?? 0,
-    contextFillTokens,
-    windowTokens: row?.context_window_tokens ?? null,
-  };
-}
-
-/** Terminal Discord status bar line (✅ ｜ 🔢 `n` ｜ 🗑️ `n` ｜ 🪟 `p%/y`). */
-function renderStatusBarTerminalLine(s: StatusBarTurnStats): string {
-  const sections = ["✅", `🔢 \`${s.sequence}\``, `🗑️ \`${s.compactions}\``];
-  if (s.contextFillTokens > 0) {
-    const hasWindow = s.windowTokens !== null && s.windowTokens > 0;
-    const percent = hasWindow
-      ? `${((s.contextFillTokens / s.windowTokens!) * 100).toFixed(1)}%`
-      : undefined;
-    const total = hasWindow ? `/${formatTokens(s.windowTokens!)}` : "";
-    // Compact display: `31.4%/100K`; without a known window, just `31.4K`.
-    sections.push(`🪟 \`${percent ? `${percent}${total}` : formatTokens(s.contextFillTokens)}\``);
-  }
-  return sections.join(" ｜ ");
 }
 
 function pickDiscordAssistantDeps(
@@ -772,7 +703,7 @@ export async function startDiscordPlatform(
           // session_stats.turn_count, and the bar must report the sequence of
           // the very turn it belongs to (not the next one).
           const statsAtTurnStart = statusBarDep.config.enabled
-            ? readStatusBarStats(opts.db, sid)
+            ? getStatusBarStats(opts.db, sid)
             : undefined;
           turnResult = await executeTurn(
             buildAfterHitlQueued(delivery),
@@ -795,10 +726,13 @@ export async function startDiscordPlatform(
           );
           // Terminal bar for this turn, rendered from the turn-start stats
           // snapshot (sequence, compactions, context window fill).
+          // The messaging_surface terminal bar has always rendered the finished
+          // (✅) phase regardless of how the turn ended; pass "finished" to keep
+          // the delivered line byte-identical to the pre-refactor behavior.
           const terminalBar =
             statsAtTurnStart === undefined
               ? undefined
-              : renderStatusBarTerminalLine(statsAtTurnStart);
+              : renderStatusBarTerminalBar(statsAtTurnStart, "finished");
           if (surfaceStreamPusher && surfaceStreamHandle) {
             await surfaceStreamPusher.flush();
             if (terminalBar && surfaceStreamHandle.setStatusBar) {

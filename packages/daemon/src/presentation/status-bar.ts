@@ -1,4 +1,7 @@
+import type Database from "better-sqlite3";
 import type { ResolvedStatusBarConfig } from "@shoggoth/shared";
+import { createSessionStore } from "../sessions/session-store";
+import { estimateCurrentContextFill } from "../sessions/session-stats-store";
 
 export type TurnStatusPhase =
   | "starting"
@@ -237,4 +240,95 @@ export function createTurnStatusBar(opts: {
       }
     },
   };
+}
+
+/** Pre-turn stats for the turn status bar: sequence (session_stats.turn_count),
+ *  compactions (compaction_count), and current context-window fill estimated
+ *  from the session's current context segment. `session_stats.input_tokens` is
+ *  a cumulative running sum across every model call and must NEVER be treated
+ *  as current context-window fill. */
+export interface StatusBarStats {
+  readonly sequence: number;
+  readonly compactions: number;
+  readonly context?: { readonly currentTokens: number; readonly totalTokens: number };
+}
+
+/** `<10K` → plain integer with thousands separators; `≥10K` → one-decimal K; `≥1M` → one-decimal M. */
+export function formatTokens(value: number): string {
+  if (value < 10_000) return value.toLocaleString("en-US");
+  if (value < 1_000_000) return trimTrailingZero((value / 1_000).toFixed(1)) + "K";
+  return trimTrailingZero((value / 1_000_000).toFixed(1)) + "M";
+}
+
+function trimTrailingZero(formatted: string): string {
+  return formatted.endsWith(".0") ? formatted.slice(0, -2) : formatted;
+}
+
+/** Sequence from session_stats.turn_count, compactions from compaction_count,
+ *  context fill estimated from the current context segment's transcript
+ *  (session_stats.input_tokens is a cumulative running sum and must never be
+ *  treated as current context-window fill). `context` is omitted when the
+ *  segment estimate is 0; `totalTokens` falls back to the estimate when the
+ *  session has no known context window. */
+export function getStatusBarStats(db: Database.Database, sessionId: string): StatusBarStats {
+  const row = db
+    .prepare(
+      `SELECT turn_count, compaction_count, context_window_tokens
+       FROM session_stats WHERE session_id = ?`,
+    )
+    .get(sessionId) as
+    | {
+        turn_count: number;
+        compaction_count: number;
+        context_window_tokens: number | null;
+      }
+    | undefined;
+  const segmentId = createSessionStore(db).getById(sessionId)?.contextSegmentId;
+  const currentTokens =
+    segmentId !== undefined && segmentId.length > 0
+      ? estimateCurrentContextFill(db, sessionId, segmentId)
+      : 0;
+  const sequence = row?.turn_count ?? 0;
+  const compactions = row?.compaction_count ?? 0;
+  if (currentTokens <= 0) return { sequence, compactions };
+  const windowTokens = row?.context_window_tokens ?? 0;
+  return {
+    sequence,
+    compactions,
+    context: { currentTokens, totalTokens: windowTokens > 0 ? windowTokens : currentTokens },
+  };
+}
+
+const TERMINAL_PHASE_EMOJI: Record<"finished" | "aborted" | "failed", string> = {
+  finished: "✅",
+  aborted: "🛑",
+  failed: "❌",
+};
+
+/** Terminal status-bar line composed platform-agnostically from pre-turn stats
+ *  (e.g. `✅ ｜ 🔢 \`7\` ｜ 🗑️ \`2\` ｜ 🪟 \`0.1%/1M\``). Sections — phase, sequence,
+ *  compactions, context window fill (omitted when stats carry no context) —
+ *  and their exact format are byte-identical to the pre-refactor terminal
+ *  line the Discord platform used to compose itself. */
+export function renderStatusBarTerminalBar(
+  stats: StatusBarStats,
+  outcome: "finished" | "aborted" | "failed",
+): string {
+  const sections = [
+    TERMINAL_PHASE_EMOJI[outcome],
+    `🔢 \`${stats.sequence}\``,
+    `🗑️ \`${stats.compactions}\``,
+  ];
+  const ctx = stats.context;
+  if (ctx !== undefined && ctx.currentTokens > 0) {
+    // The window is "known" only when the total differs from the estimate
+    // (getStatusBarStats falls back to the estimate when no window is stored).
+    const hasWindow = ctx.totalTokens !== ctx.currentTokens;
+    const compact = hasWindow
+      ? `${((ctx.currentTokens / ctx.totalTokens) * 100).toFixed(1)}%/${formatTokens(ctx.totalTokens)}`
+      : formatTokens(ctx.currentTokens);
+    // Compact display: `31.4%/100K`; without a known window, just `31.4K`.
+    sections.push(`🪟 \`${compact}\``);
+  }
+  return sections.join(" ｜ ");
 }
