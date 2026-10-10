@@ -40,7 +40,7 @@ class MockMessageAdapter implements MessageAdapter {
   posted: Array<{ content: string; messageId: string }> = [];
   edited: Array<{ messageId: string; content: string }> = [];
   pinned: string[] = [];
-  editShouldFail = false;
+  editFailureReason: "not_found" | "unsupported" | "transient" | null = null;
   private nextId = 1;
 
   async postMessage(content: string): Promise<{ messageId: string }> {
@@ -49,10 +49,13 @@ class MockMessageAdapter implements MessageAdapter {
     return { messageId };
   }
 
-  async editMessage(messageId: string, content: string): Promise<boolean> {
-    if (this.editShouldFail) return false;
+  async editMessage(
+    messageId: string,
+    content: string,
+  ): Promise<{ ok: true } | { ok: false; reason: "not_found" | "unsupported" | "transient" }> {
+    if (this.editFailureReason) return { ok: false, reason: this.editFailureReason };
     this.edited.push({ messageId, content });
-    return true;
+    return { ok: true };
   }
 
   async pinMessage(messageId: string): Promise<void> {
@@ -120,41 +123,80 @@ describe("StatusManager", () => {
       assert.ok(adapter.edited[0].content.includes("🚀 1 - Task"));
     });
 
-    it("falls back to repost when edit fails", async () => {
+    it("reposts when the message is gone (not_found)", async () => {
       const graph: DependencyGraph = new Map([[1, new Set()]]);
       const wf = makeWorkflow("wf", [makeTask(1, "Task", "pending")], graph);
 
       await manager.postInitialStatus(wf);
       assert.equal(adapter.posted.length, 1);
 
-      adapter.editShouldFail = true;
+      adapter.editFailureReason = "not_found";
       wf.tasks[0].status = "in_progress";
       wf.tasks[0].startedAt = Date.now();
       await manager.updateStatus(wf);
 
-      // Should have reposted instead of edited
+      // The message is genuinely gone — repost instead of editing
       assert.equal(adapter.posted.length, 2);
       assert.equal(adapter.edited.length, 0);
     });
 
-    it("continues reposting after first edit failure", async () => {
+    it("continues editing after the message was recreated by a repost", async () => {
       const graph: DependencyGraph = new Map([[1, new Set()]]);
       const wf = makeWorkflow("wf", [makeTask(1, "Task", "pending")], graph);
 
       await manager.postInitialStatus(wf);
-      adapter.editShouldFail = true;
+      adapter.editFailureReason = "not_found";
 
       wf.tasks[0].status = "in_progress";
       wf.tasks[0].startedAt = Date.now();
       await manager.updateStatus(wf);
 
-      // Even if edit would now succeed, should stay in repost mode
-      adapter.editShouldFail = false;
+      // Once the message exists again, edits resume against the new message ID
+      adapter.editFailureReason = null;
       await manager.updateStatus(wf);
 
-      // 1 initial + 1 reposts + 1 edit
+      // 1 initial + 1 repost + 1 edit (against msg-2, the reposted message)
       assert.equal(adapter.posted.length, 2);
       assert.equal(adapter.edited.length, 1);
+      assert.equal(adapter.edited[0].messageId, "msg-2");
+    });
+
+    it("does NOT repost on transient edit failures (rate limit, 5xx, network)", async () => {
+      const graph: DependencyGraph = new Map([[1, new Set()]]);
+      const wf = makeWorkflow("wf", [makeTask(1, "Task", "pending")], graph);
+
+      await manager.postInitialStatus(wf);
+      assert.equal(adapter.posted.length, 1);
+
+      adapter.editFailureReason = "transient";
+      wf.tasks[0].status = "in_progress";
+      wf.tasks[0].startedAt = Date.now();
+      await manager.updateStatus(wf);
+
+      // The message still exists — no repost, no orphaned duplicate
+      assert.equal(adapter.posted.length, 1);
+      assert.equal(adapter.edited.length, 0);
+
+      // Next tick retries the edit in place once the transient clears
+      adapter.editFailureReason = null;
+      await manager.updateStatus(wf);
+      assert.equal(adapter.posted.length, 1);
+      assert.equal(adapter.edited.length, 1);
+      assert.equal(adapter.edited[0].messageId, "msg-1");
+    });
+
+    it("reposts when the platform does not support edits (unsupported)", async () => {
+      const graph: DependencyGraph = new Map([[1, new Set()]]);
+      const wf = makeWorkflow("wf", [makeTask(1, "Task", "pending")], graph);
+
+      await manager.postInitialStatus(wf);
+      adapter.editFailureReason = "unsupported";
+      wf.tasks[0].status = "in_progress";
+      wf.tasks[0].startedAt = Date.now();
+      await manager.updateStatus(wf);
+
+      assert.equal(adapter.posted.length, 2);
+      assert.equal(adapter.edited.length, 0);
     });
 
     it("does nothing if no initial status was posted", async () => {
@@ -230,7 +272,7 @@ describe("StatusManager", () => {
       await manager.postInitialStatus(wf);
       assert.deepEqual(adapter.pinned, ["msg-1"]);
 
-      adapter.editShouldFail = true;
+      adapter.editFailureReason = "not_found";
       wf.tasks[0].status = "in_progress";
       wf.tasks[0].startedAt = Date.now();
       await manager.updateStatus(wf);
@@ -258,8 +300,8 @@ describe("StatusManager", () => {
           posts.push({ content, messageId });
           return { messageId };
         },
-        async editMessage(): Promise<boolean> {
-          return true;
+        async editMessage() {
+          return { ok: true as const };
         },
         // no pinMessage — platform without pinning support
       };

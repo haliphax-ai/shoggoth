@@ -366,7 +366,7 @@ describe("createDaemonMessageAdapter", () => {
     assert.equal(callArgs.target, "channel-abc");
   });
 
-  it("edits a message and returns true on success", async () => {
+  it("edits a message and returns ok on success", async () => {
     const executeCalls: unknown[] = [];
     const adapter = createDaemonMessageAdapter({
       getMessageContext: () => ({
@@ -380,7 +380,7 @@ describe("createDaemonMessageAdapter", () => {
     });
 
     const ok = await adapter.editMessage("msg-123", "updated content");
-    assert.equal(ok, true);
+    assert.deepEqual(ok, { ok: true });
     assert.equal(executeCalls.length, 1);
     const callArgs = executeCalls[0] as Record<string, unknown>;
     assert.equal(callArgs.action, "edit");
@@ -388,7 +388,7 @@ describe("createDaemonMessageAdapter", () => {
     assert.equal(callArgs.message_id, "msg-123");
   });
 
-  it("returns false when edit throws", async () => {
+  it("classifies a thrown edit as transient", async () => {
     const adapter = createDaemonMessageAdapter({
       getMessageContext: () => ({
         execute: async () => {
@@ -399,8 +399,59 @@ describe("createDaemonMessageAdapter", () => {
       sessionId: "agent:main:discord:channel:abc",
     });
 
-    const ok = await adapter.editMessage("msg-123", "updated");
-    assert.equal(ok, false);
+    const res = await adapter.editMessage("msg-123", "updated");
+    assert.deepEqual(res, { ok: false, reason: "transient" });
+  });
+
+  it("classifies an edit failure with http 404 as not_found", async () => {
+    const adapter = createDaemonMessageAdapter({
+      getMessageContext: () => ({
+        execute: async () => ({
+          ok: false,
+          error: "Discord REST editMessage 404: unknown message",
+          http_status: 404,
+        }),
+      }),
+      resolveChannelId: () => "channel-abc",
+      sessionId: "agent:main:discord:channel:abc",
+    });
+
+    const res = await adapter.editMessage("msg-123", "updated");
+    assert.deepEqual(res, { ok: false, reason: "not_found" });
+  });
+
+  it("classifies a rate-limited edit (http 429) as transient, not not_found", async () => {
+    const adapter = createDaemonMessageAdapter({
+      getMessageContext: () => ({
+        execute: async () => ({
+          ok: false,
+          error: "Discord REST editMessage 429: rate limited",
+          http_status: 429,
+        }),
+      }),
+      resolveChannelId: () => "channel-abc",
+      sessionId: "agent:main:discord:channel:abc",
+    });
+
+    const res = await adapter.editMessage("msg-123", "updated");
+    assert.deepEqual(res, { ok: false, reason: "transient" });
+  });
+
+  it("classifies the edit_unsupported code as unsupported", async () => {
+    const adapter = createDaemonMessageAdapter({
+      getMessageContext: () => ({
+        execute: async () => ({
+          ok: false,
+          error: "edit not supported on this platform",
+          code: "edit_unsupported",
+        }),
+      }),
+      resolveChannelId: () => "channel-abc",
+      sessionId: "agent:main:discord:channel:abc",
+    });
+
+    const res = await adapter.editMessage("msg-123", "updated");
+    assert.deepEqual(res, { ok: false, reason: "unsupported" });
   });
 
   it("returns false when no message context is available", async () => {
@@ -416,15 +467,15 @@ describe("createDaemonMessageAdapter", () => {
     assert.equal(result.messageId, "");
   });
 
-  it("returns false for edit when no message context is available", async () => {
+  it("classifies edit as transient when no message context is available", async () => {
     const adapter = createDaemonMessageAdapter({
       getMessageContext: () => undefined,
       resolveChannelId: () => "channel-abc",
       sessionId: "agent:main:discord:channel:abc",
     });
 
-    const ok = await adapter.editMessage("msg-123", "updated");
-    assert.equal(ok, false);
+    const res = await adapter.editMessage("msg-123", "updated");
+    assert.deepEqual(res, { ok: false, reason: "transient" });
   });
 
   it("pins a message when a pinMessage op is wired", async () => {

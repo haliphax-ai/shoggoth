@@ -252,7 +252,16 @@ export async function executeMessageToolAction(
     return await handler({ deps, sid, channelId: boundChannel }, args);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { ok: false, error: msg };
+    // Platform transports may attach a numeric `status` to errors (e.g. the
+    // Discord REST client's typed errors). Surface it so callers can tell a
+    // permanent 404 ("message gone, safe to repost") from transient failures
+    // (rate limits, 5xx, network) instead of matching on error strings.
+    const status = (e as { status?: unknown } | null)?.status;
+    return {
+      ok: false,
+      error: msg,
+      ...(typeof status === "number" ? { http_status: status } : {}),
+    };
   }
 }
 
@@ -429,7 +438,9 @@ async function handleEditAction(
   const { deps, channelId } = ctx;
   const { capabilities: caps, transport: t } = deps;
   const x = caps.extensions;
-  if (!x.messageEdit) return { ok: false, error: "edit not supported on this platform" };
+  if (!x.messageEdit) {
+    return { ok: false, error: "edit not supported on this platform", code: "edit_unsupported" };
+  }
   const messageId = str(args.message_id, "message_id");
   const content = typeof args.content === "string" ? args.content : "";
   await t.editMessage(channelId, messageId, { content });

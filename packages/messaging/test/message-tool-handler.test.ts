@@ -1261,6 +1261,42 @@ describe("executeMessageToolAction", () => {
     assert.deepEqual(edited, { ch: "ch1", mid: "m1", content: "updated text" });
   });
 
+  it("edit: propagates http_status from typed transport errors", async () => {
+    // The Discord REST client throws errors with a numeric `status`; the
+    // handler must surface it so callers can tell 404 from transient failures.
+    const transport = mockTransport({
+      async editMessage() {
+        const err = new Error("Discord REST editMessage 404: unknown message") as Error & {
+          status: number;
+        };
+        err.status = 404;
+        throw err;
+      },
+    });
+    const r = await executeMessageToolAction(
+      { capabilities: caps, transport, sessionToChannel: () => "ch1" },
+      "sess",
+      { action: "edit", message_id: "m1", content: "x" },
+    );
+    assert.equal((r as { ok: boolean }).ok, false);
+    assert.equal((r as { http_status?: number }).http_status, 404);
+  });
+
+  it("edit: omits http_status for plain errors", async () => {
+    const transport = mockTransport({
+      async editMessage() {
+        throw new Error("boom");
+      },
+    });
+    const r = await executeMessageToolAction(
+      { capabilities: caps, transport, sessionToChannel: () => "ch1" },
+      "sess",
+      { action: "edit", message_id: "m1", content: "x" },
+    );
+    assert.equal((r as { ok: boolean }).ok, false);
+    assert.equal((r as { http_status?: number }).http_status, undefined);
+  });
+
   it("edit: rejected when capability off", async () => {
     const transport = mockTransport();
     const noEdit = {
