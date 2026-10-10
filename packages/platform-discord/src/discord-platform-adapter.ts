@@ -57,7 +57,7 @@ export class DiscordPlatformAdapter implements PlatformAdapter {
   async sendBody(
     sessionId: string,
     body: string,
-    opts?: { replyTo?: string; attachments?: OutboundAttachment[] },
+    opts?: { replyTo?: string; attachments?: OutboundAttachment[]; statusBar?: string },
   ): Promise<void> {
     const attachmentFiles = opts?.attachments?.map((a) => ({
       filename: a.filename,
@@ -65,7 +65,11 @@ export class DiscordPlatformAdapter implements PlatformAdapter {
       data: a.data,
     }));
 
-    const chunks = splitDiscordMessage(mdTableToAscii(body));
+    // Append the pre-rendered status bar to the body BEFORE splitting so the
+    // bar stays intact at the end of the last chunk (blockquote on its own line).
+    const converted = mdTableToAscii(body);
+    const fullBody = opts?.statusBar ? `${converted}\n\n${opts.statusBar}` : converted;
+    const chunks = splitDiscordMessage(fullBody);
     for (let i = 0; i < chunks.length; i++) {
       // Attach files only to the first chunk.
       const chunkFiles = i === 0 ? attachmentFiles : undefined;
@@ -86,7 +90,7 @@ export class DiscordPlatformAdapter implements PlatformAdapter {
   async sendError(
     sessionId: string,
     body: string,
-    opts?: { replyTo?: string; attachments?: OutboundAttachment[] },
+    opts?: { replyTo?: string; attachments?: OutboundAttachment[]; statusBar?: string },
   ): Promise<void> {
     try {
       const attachmentFiles = opts?.attachments?.map((a) => ({
@@ -94,13 +98,19 @@ export class DiscordPlatformAdapter implements PlatformAdapter {
         contentType: a.contentType,
         data: a.data,
       }));
+      // Reserve room for the bar so it survives the 2000-char slice.
+      const bar = opts?.statusBar;
+      const bodyPart = bar
+        ? body.slice(0, DISCORD_PLATFORM_MAX_MESSAGE_BODY_CHARS - bar.length - 2)
+        : sliceDiscordPlatformMessageBody(body);
+      const fullBody = bar ? `${bodyPart}\n\n${bar}` : bodyPart;
       await this.discord.outbound.sendDiscord(
         createOutboundMessage({
           id: randomUUID(),
           sessionId,
           userId: "system",
           createdAt: new Date().toISOString(),
-          body: sliceDiscordPlatformMessageBody(body),
+          body: fullBody,
           extensions: opts?.replyTo ? { replyToMessageId: opts.replyTo } : {},
         }),
         attachmentFiles?.length ? { attachments: attachmentFiles } : undefined,
@@ -125,6 +135,8 @@ export class DiscordPlatformAdapter implements PlatformAdapter {
     return {
       setFullContent: (text: string) => handle.setFullContent(text),
       pushUpdate: (text: string) => handle.pushUpdate(text),
+      setStatusBar: (line: string | null) =>
+        handle.setStatusBar ? handle.setStatusBar(line) : Promise.resolve(),
     };
   }
 
