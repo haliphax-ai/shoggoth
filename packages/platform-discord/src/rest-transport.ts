@@ -1,3 +1,5 @@
+import { createDiscordRestClient, discordRestRateLimitPolicy } from "./rest-client";
+import type { DiscordRestClient, DiscordRestPriority } from "./rest-client";
 import type {
   DiscordChannelMessagesQuery,
   DiscordEditMessageBody,
@@ -11,124 +13,88 @@ export interface DiscordRestTransportOptions {
   readonly apiBase?: string;
 }
 
-/** Exported for tests and observability. */
-export const discordRestRateLimitPolicy = {
-  maxAttempts: 6,
-  maxTotalWaitMs: 90_000,
-  /** Extra delay spread (ms) after Discord's suggested wait. */
-  jitterMaxMs: 250,
-  /** When Discord returns 429 but no `retry_after` / `Retry-After`, wait this many seconds before retrying. */
-  default429DelaySec: 1,
-} as const;
-
-function parseRetryDelaySeconds(res: Response, bodyText: string): number | null {
-  try {
-    const j = JSON.parse(bodyText) as { retry_after?: unknown };
-    if (typeof j.retry_after === "number" && Number.isFinite(j.retry_after)) {
-      return Math.max(0, j.retry_after);
-    }
-  } catch {
-    /* not JSON or unexpected shape */
-  }
-  const h = res.headers.get("Retry-After");
-  if (h == null || h === "") return null;
-  const n = Number(h);
-  if (Number.isFinite(n)) return Math.max(0, n);
-  return null;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-type DiscordRestOperation =
-  | "createMessage"
-  | "createMessageWithFiles"
-  | "editMessage"
-  | "deleteMessage"
-  | "pinMessage"
-  | "getMessage"
-  | "getChannelMessages"
-  | "createThreadFromMessage"
-  | "createThread"
-  | "deleteChannel"
-  | "openDmChannel"
-  | "createMessageReaction"
-  | "getMessageReactions"
-  | "searchMessages"
-  | "triggerTypingIndicator";
-
-async function discordFetchWithRateLimitRetry(
-  doFetch: () => Promise<Response>,
-  operation: DiscordRestOperation,
-): Promise<Response> {
-  const { maxAttempts, maxTotalWaitMs, jitterMaxMs, default429DelaySec } =
-    discordRestRateLimitPolicy;
-  let totalWaitedMs = 0;
-  let attempt = 0;
-
-  while (true) {
-    attempt++;
-    const res = await doFetch();
-    if (res.ok) return res;
-
-    const status = res.status;
-    const bodyText = await res.text();
-    const retryAfterHeaderPresent =
-      res.headers.get("Retry-After") != null && res.headers.get("Retry-After") !== "";
-    const shouldRetry = status === 429 || (status === 503 && retryAfterHeaderPresent);
-
-    if (!shouldRetry || attempt >= maxAttempts) {
-      throw new Error(`Discord REST ${operation} ${status}: ${bodyText}`);
-    }
-
-    let delaySec = parseRetryDelaySeconds(res, bodyText);
-    if (delaySec === null && status === 429) delaySec = default429DelaySec;
-    if (delaySec === null) {
-      throw new Error(`Discord REST ${operation} ${status}: ${bodyText}`);
-    }
-
-    const jitter = jitterMaxMs > 0 ? Math.floor(Math.random() * jitterMaxMs) : 0;
-    const waitMs = Math.ceil(delaySec * 1000) + jitter;
-    if (totalWaitedMs + waitMs > maxTotalWaitMs) {
-      throw new Error(
-        `Discord REST ${operation} ${status}: rate limit retry budget exceeded (${totalWaitedMs}ms waited, next wait ${waitMs}ms)`,
-      );
-    }
-    totalWaitedMs += waitMs;
-    await sleep(waitMs);
-  }
-}
+// Re-exported for tests and observability (the retry budget now lives in the
+// centralized client; the shape is unchanged).
+export { discordRestRateLimitPolicy };
 
 /**
- * Discord REST v10 transport. Uses Bot token; suitable for daemon wiring and CI mocks via `fetchFn`.
- * Retries on 429 and on 503 when a `Retry-After` header is present, respecting `retry_after` / `Retry-After` with capped attempts and total wait.
+ * Default priority lane per operation. User-facing sends and edits outrank
+ * background probes so reads (message history, search, reactions) never starve
+ * a send behind a saturated bucket. Workflow-status edits and streaming edits
+ * share the user lane — both are user-visible, and same-message contention is
+ * handled by edit coalescing rather than lane ordering.
+ */
+const OPERATION_PRIORITY: Record<string, DiscordRestPriority> = {
+  createMessage: "user",
+  createMessageWithFiles: "user",
+  editMessage: "user",
+  deleteMessage: "user",
+  pinMessage: "user",
+  createThreadFromMessage: "user",
+  createThread: "user",
+  deleteChannel: "user",
+  openDmChannel: "user",
+  createMessageReaction: "user",
+  deleteMessageReaction: "user",
+  interactionCallback: "user",
+  editOriginalInteractionResponse: "user",
+  getMessage: "background",
+  getChannelMessages: "background",
+  getMessageReactions: "background",
+  searchMessages: "background",
+  triggerTypingIndicator: "background",
+  registerGlobalCommands: "background",
+};
+
+/**
+ * Discord REST v10 transport. Uses Bot token; suitable for daemon wiring and
+ * CI mocks via `fetchFn`.
+ *
+ * All requests flow through a single rate-limit-aware client (see
+ * `rest-client.ts`): proactive bucket metering from response headers,
+ * per-bucket priority queues, latest-wins coalescing of same-message edits,
+ * one backoff mechanism for 429/503 (whole-client pause on `global` limits),
+ * and a typed error taxonomy instead of string-matched errors.
+ *
+ * Route keys follow Discord's major-parameter rules (channel/guild/webhook ids
+ * kept; other dynamic segments normalized) so the `X-RateLimit-Bucket` hash
+ * learned on one route meters every sibling route.
  */
 export function createDiscordRestTransport(
   options: DiscordRestTransportOptions,
 ): DiscordRestTransport {
-  const base = (options.apiBase ?? "https://discord.com/api/v10").replace(/\/$/, "");
-  const fetchFn = options.fetchFn ?? globalThis.fetch.bind(globalThis);
-  const auth = `Bot ${options.botToken}`;
+  const client: DiscordRestClient = createDiscordRestClient({
+    botToken: options.botToken,
+    ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
+    ...(options.apiBase ? { apiBase: options.apiBase } : {}),
+  });
 
-  async function discordFetch(path: string, init: RequestInit): Promise<Response> {
-    const headers = new Headers(init.headers);
-    if (!headers.has("Authorization")) headers.set("Authorization", auth);
-    if (init.body != null && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
-      headers.set("Content-Type", "application/json");
-    }
-    return fetchFn(`${base}${path}`, { ...init, headers });
+  function op(
+    operation: keyof typeof OPERATION_PRIORITY | string,
+    method: string,
+    path: string,
+    routeKey: string,
+    body?: BodyInit,
+    coalesceKey?: string,
+  ): Promise<Response> {
+    return client.request({
+      operation,
+      method,
+      path,
+      routeKey,
+      ...(body !== undefined ? { body } : {}),
+      ...(coalesceKey ? { coalesceKey } : {}),
+    });
   }
 
   return {
     async openDmChannel(recipientUserId) {
-      const res = await discordFetchWithRateLimitRetry(
-        () =>
-          discordFetch(`/users/@me/channels`, {
-            method: "POST",
-            body: JSON.stringify({ recipient_id: recipientUserId }),
-          }),
+      const res = await op(
         "openDmChannel",
+        "POST",
+        `/users/@me/channels`,
+        `POST /users/@me/channels`,
+        JSON.stringify({ recipient_id: recipientUserId }),
       );
       const j = (await res.json()) as { id?: string };
       if (!j.id) throw new Error("Discord REST openDmChannel: missing id in response");
@@ -136,13 +102,12 @@ export function createDiscordRestTransport(
     },
 
     async createMessage(channelId, body) {
-      const res = await discordFetchWithRateLimitRetry(
-        () =>
-          discordFetch(`/channels/${encodeURIComponent(channelId)}/messages`, {
-            method: "POST",
-            body: JSON.stringify(body),
-          }),
+      const res = await op(
         "createMessage",
+        "POST",
+        `/channels/${encodeURIComponent(channelId)}/messages`,
+        `POST /channels/${channelId}/messages`,
+        JSON.stringify(body),
       );
       const j = (await res.json()) as { id?: string };
       if (!j.id) throw new Error("Discord REST createMessage: missing id in response");
@@ -157,13 +122,12 @@ export function createDiscordRestTransport(
         const blob = new Blob([f.data as BlobPart], { type: "application/octet-stream" });
         form.append(`files[${i}]`, blob, f.filename);
       }
-      const res = await discordFetchWithRateLimitRetry(
-        () =>
-          discordFetch(`/channels/${encodeURIComponent(channelId)}/messages`, {
-            method: "POST",
-            body: form,
-          }),
+      const res = await op(
         "createMessageWithFiles",
+        "POST",
+        `/channels/${encodeURIComponent(channelId)}/messages`,
+        `POST /channels/${channelId}/messages`,
+        form,
       );
       const j = (await res.json()) as { id?: string };
       if (!j.id) throw new Error("Discord REST createMessageWithFiles: missing id in response");
@@ -171,60 +135,44 @@ export function createDiscordRestTransport(
     },
 
     async editMessage(channelId, messageId, body: DiscordEditMessageBody) {
-      await discordFetchWithRateLimitRetry(
-        () =>
-          discordFetch(
-            `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
-            {
-              method: "PATCH",
-              body: JSON.stringify(body),
-            },
-          ),
+      // Latest-wins coalescing: concurrent edits to the same message (streaming
+      // updates vs. workflow status ticks) collapse to one in-flight request
+      // plus the newest queued body; superseded edits settle with the survivor.
+      await op(
         "editMessage",
+        "PATCH",
+        `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
+        `PATCH /channels/${channelId}/messages/:id`,
+        JSON.stringify(body),
+        `edit:${channelId}:${messageId}`,
       );
     },
 
     async deleteMessage(channelId, messageId) {
-      const res = await discordFetchWithRateLimitRetry(
-        () =>
-          discordFetch(
-            `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
-            { method: "DELETE" },
-          ),
+      await op(
         "deleteMessage",
+        "DELETE",
+        `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
+        `DELETE /channels/${channelId}/messages/:id`,
       );
-      const bodyText = await res.text();
-      if (!res.ok && res.status !== 204) {
-        throw new Error(`Discord REST deleteMessage ${res.status}: ${bodyText}`);
-      }
     },
 
     async pinMessage(channelId, messageId) {
-      const res = await discordFetchWithRateLimitRetry(
-        () =>
-          discordFetch(
-            `/channels/${encodeURIComponent(channelId)}/pins/${encodeURIComponent(messageId)}`,
-            { method: "PUT" },
-          ),
+      await op(
         "pinMessage",
+        "PUT",
+        `/channels/${encodeURIComponent(channelId)}/pins/${encodeURIComponent(messageId)}`,
+        `PUT /channels/${channelId}/pins/:id`,
       );
-      const bodyText = await res.text();
-      if (!res.ok && res.status !== 204) {
-        throw new Error(`Discord REST pinMessage ${res.status}: ${bodyText}`);
-      }
     },
 
     async createThreadFromMessage(channelId, messageId, threadBody) {
-      const res = await discordFetchWithRateLimitRetry(
-        () =>
-          discordFetch(
-            `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/threads`,
-            {
-              method: "POST",
-              body: JSON.stringify(threadBody),
-            },
-          ),
+      const res = await op(
         "createThreadFromMessage",
+        "POST",
+        `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/threads`,
+        `POST /channels/${channelId}/messages/:id/threads`,
+        JSON.stringify(threadBody),
       );
       const j = (await res.json()) as { id?: string };
       if (!j.id) throw new Error("Discord REST createThreadFromMessage: missing id in response");
@@ -232,13 +180,12 @@ export function createDiscordRestTransport(
     },
 
     async createThread(channelId, threadBody) {
-      const res = await discordFetchWithRateLimitRetry(
-        () =>
-          discordFetch(`/channels/${encodeURIComponent(channelId)}/threads`, {
-            method: "POST",
-            body: JSON.stringify(threadBody),
-          }),
+      const res = await op(
         "createThread",
+        "POST",
+        `/channels/${encodeURIComponent(channelId)}/threads`,
+        `POST /channels/${channelId}/threads`,
+        JSON.stringify(threadBody),
       );
       const j2 = (await res.json()) as { id?: string };
       if (!j2.id) throw new Error("Discord REST createThread: missing id in response");
@@ -246,27 +193,20 @@ export function createDiscordRestTransport(
     },
 
     async deleteChannel(channelId) {
-      const res = await discordFetchWithRateLimitRetry(
-        () =>
-          discordFetch(`/channels/${encodeURIComponent(channelId)}`, {
-            method: "DELETE",
-          }),
+      await op(
         "deleteChannel",
+        "DELETE",
+        `/channels/${encodeURIComponent(channelId)}`,
+        `DELETE /channels/${channelId}`,
       );
-      const bodyText = await res.text();
-      if (!res.ok && res.status !== 204) {
-        throw new Error(`Discord REST deleteChannel ${res.status}: ${bodyText}`);
-      }
     },
 
     async getMessage(channelId, messageId) {
-      const res = await discordFetchWithRateLimitRetry(
-        () =>
-          discordFetch(
-            `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
-            { method: "GET" },
-          ),
+      const res = await op(
         "getMessage",
+        "GET",
+        `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
+        `GET /channels/${channelId}/messages/:id`,
       );
       const j = (await res.json()) as Record<string, unknown>;
       if (typeof j.id !== "string") {
@@ -290,10 +230,11 @@ export function createDiscordRestTransport(
       if (query.after) params.set("after", query.after);
       if (query.around) params.set("around", query.around);
       const q = params.toString();
-      const path = `/channels/${encodeURIComponent(channelId)}/messages${q ? `?${q}` : ""}`;
-      const res = await discordFetchWithRateLimitRetry(
-        () => discordFetch(path, { method: "GET" }),
+      const res = await op(
         "getChannelMessages",
+        "GET",
+        `/channels/${encodeURIComponent(channelId)}/messages${q ? `?${q}` : ""}`,
+        `GET /channels/${channelId}/messages`,
       );
       const j = (await res.json()) as unknown;
       if (!Array.isArray(j)) {
@@ -304,45 +245,31 @@ export function createDiscordRestTransport(
 
     async createMessageReaction(channelId, messageId, emoji) {
       const enc = encodeURIComponent(emoji);
-      const res = await discordFetchWithRateLimitRetry(
-        () =>
-          discordFetch(
-            `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/reactions/${enc}/@me`,
-            { method: "PUT" },
-          ),
+      await op(
         "createMessageReaction",
+        "PUT",
+        `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/reactions/${enc}/@me`,
+        `PUT /channels/${channelId}/messages/:id/reactions/:emoji/@me`,
       );
-      const bodyText = await res.text();
-      if (!res.ok && res.status !== 204) {
-        throw new Error(`Discord REST createMessageReaction ${res.status}: ${bodyText}`);
-      }
     },
 
     async deleteMessageReaction(channelId, messageId, emoji) {
       const enc = encodeURIComponent(emoji);
-      const res = await discordFetchWithRateLimitRetry(
-        () =>
-          discordFetch(
-            `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/reactions/${enc}/@me`,
-            { method: "DELETE" },
-          ),
-        "createMessageReaction",
+      await op(
+        "deleteMessageReaction",
+        "DELETE",
+        `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/reactions/${enc}/@me`,
+        `DELETE /channels/${channelId}/messages/:id/reactions/:emoji/@me`,
       );
-      const bodyText = await res.text();
-      if (!res.ok && res.status !== 204) {
-        throw new Error(`Discord REST deleteMessageReaction ${res.status}: ${bodyText}`);
-      }
     },
 
     async getMessageReactions(channelId, messageId, emoji) {
       const enc = encodeURIComponent(emoji);
-      const res = await discordFetchWithRateLimitRetry(
-        () =>
-          discordFetch(
-            `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/reactions/${enc}`,
-            { method: "GET" },
-          ),
+      const res = await op(
         "getMessageReactions",
+        "GET",
+        `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/reactions/${enc}`,
+        `GET /channels/${channelId}/messages/:id/reactions/:emoji`,
       );
       const j = (await res.json()) as unknown;
       if (!Array.isArray(j)) {
@@ -367,10 +294,11 @@ export function createDiscordRestTransport(
       if (query.limit !== undefined)
         params.set("limit", String(Math.min(25, Math.max(1, Math.trunc(query.limit)))));
       const q = params.toString();
-      const path = `/guilds/${encodeURIComponent(guildId)}/messages/search${q ? `?${q}` : ""}`;
-      const res = await discordFetchWithRateLimitRetry(
-        () => discordFetch(path, { method: "GET" }),
+      const res = await op(
         "searchMessages",
+        "GET",
+        `/guilds/${encodeURIComponent(guildId)}/messages/search${q ? `?${q}` : ""}`,
+        `GET /guilds/${guildId}/messages/search`,
       );
       const j = (await res.json()) as {
         messages?: unknown[][];
@@ -383,69 +311,46 @@ export function createDiscordRestTransport(
     },
 
     async triggerTypingIndicator(channelId) {
-      const res = await discordFetchWithRateLimitRetry(
-        () =>
-          discordFetch(`/channels/${encodeURIComponent(channelId)}/typing`, {
-            method: "POST",
-            body: JSON.stringify({}),
-          }),
+      await op(
         "triggerTypingIndicator",
+        "POST",
+        `/channels/${encodeURIComponent(channelId)}/typing`,
+        `POST /channels/${channelId}/typing`,
+        JSON.stringify({}),
       );
-      if (!res.ok) {
-        const bodyText = await res.text();
-        throw new Error(`Discord REST triggerTypingIndicator ${res.status}: ${bodyText}`);
-      }
     },
 
     async interactionCallback(interactionId, interactionToken, body) {
-      const res = await discordFetchWithRateLimitRetry(
-        () =>
-          discordFetch(
-            `/interactions/${encodeURIComponent(interactionId)}/${encodeURIComponent(interactionToken)}/callback`,
-            {
-              method: "POST",
-              body: JSON.stringify(body),
-            },
-          ),
-        "interactionCallback" as DiscordRestOperation,
+      await op(
+        "interactionCallback",
+        "POST",
+        `/interactions/${encodeURIComponent(interactionId)}/${encodeURIComponent(interactionToken)}/callback`,
+        `POST /interactions/:id/:token/callback`,
+        JSON.stringify(body),
       );
-      if (!res.ok) {
-        const bodyText = await res.text();
-        throw new Error(`Discord REST interactionCallback ${res.status}: ${bodyText}`);
-      }
     },
 
     async registerGlobalCommands(applicationId, commands) {
-      const res = await discordFetchWithRateLimitRetry(
-        () =>
-          discordFetch(`/applications/${encodeURIComponent(applicationId)}/commands`, {
-            method: "PUT",
-            body: JSON.stringify(commands),
-          }),
-        "registerGlobalCommands" as DiscordRestOperation,
+      await op(
+        "registerGlobalCommands",
+        "PUT",
+        `/applications/${encodeURIComponent(applicationId)}/commands`,
+        `PUT /applications/:id/commands`,
+        JSON.stringify(commands),
       );
-      if (!res.ok) {
-        const bodyText = await res.text();
-        throw new Error(`Discord REST registerGlobalCommands ${res.status}: ${bodyText}`);
-      }
     },
 
     async editOriginalInteractionResponse(applicationId, interactionToken, body) {
-      const res = await discordFetchWithRateLimitRetry(
-        () =>
-          discordFetch(
-            `/webhooks/${encodeURIComponent(applicationId)}/${encodeURIComponent(interactionToken)}/messages/@original`,
-            {
-              method: "PATCH",
-              body: JSON.stringify(body),
-            },
-          ),
-        "editOriginalInteractionResponse" as DiscordRestOperation,
+      // Coalesced like editMessage: repeated rewrites of the same deferred
+      // response collapse to the newest body.
+      await op(
+        "editOriginalInteractionResponse",
+        "PATCH",
+        `/webhooks/${encodeURIComponent(applicationId)}/${encodeURIComponent(interactionToken)}/messages/@original`,
+        `PATCH /webhooks/:id/:token/messages/@original`,
+        JSON.stringify(body),
+        `edit-oir:${applicationId}:${interactionToken}`,
       );
-      if (!res.ok) {
-        const bodyText = await res.text();
-        throw new Error(`Discord REST editOriginalInteractionResponse ${res.status}: ${bodyText}`);
-      }
     },
   };
 }

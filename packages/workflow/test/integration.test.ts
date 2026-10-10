@@ -117,7 +117,7 @@ function mockMessageAdapter(): MessageAdapter & {
     },
     async editMessage(messageId: string, content: string) {
       this.edited.push({ id: messageId, content });
-      return true;
+      return { ok: true as const };
     },
   };
 }
