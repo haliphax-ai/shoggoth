@@ -59,11 +59,7 @@ import {
   resolveEmbeddingsHealthProbeApiKey,
 } from "./config/effective-runtime";
 import { startControlPlane } from "./control/control-plane";
-import {
-  deliverOobStructuredResponse,
-  handleIntegrationControlOp,
-  type IntegrationOpsContext,
-} from "./control/integration-ops";
+import { handleIntegrationControlOp, type IntegrationOpsContext } from "./control/integration-ops";
 import { resolveSessionTargetFromCliArg } from "./control/resolve-session-cli-target";
 import { WIRE_VERSION } from "@shoggoth/authn";
 import { requestSessionTurnAbort } from "./sessions/session-turn-abort";
@@ -87,7 +83,6 @@ import { reconcilePersistentSubagents } from "./subagent/reconcile-persistent-su
 import { touchPersistentSubagentInactivityTimer } from "./subagent/persistent-subagent-timers";
 import { handlePlatformThreadCreate } from "./subagent/thread-subagent-autocreate";
 import { messageToolContextRef } from "./messaging/message-tool-context-ref";
-import { OOB_SCHEMA_NO_SENDER, OOB_NO_SENDER_GUIDANCE } from "./messaging/oob-response-schemas";
 import {
   setSubagentRuntimeExtension,
   subagentRuntimeExtensionRef,
@@ -125,6 +120,7 @@ import { createSessionManager } from "./sessions/session-manager";
 import { createSqliteAgentTokenStore } from "./auth/sqlite-agent-tokens";
 import { resolveConfiguredSubagentModel, resolveShoggothAgentId } from "./config/effective-runtime";
 import { TimerScheduler } from "./timers/timer-scheduler";
+import { deliverTimerMessage } from "./timers/timer-delivery";
 import { setTimerScheduler } from "./sessions/builtin-handlers/timer-handler";
 import {
   ShoggothPluginSystem,
@@ -410,39 +406,7 @@ async function loadPlugins(db: ReturnType<typeof openStateDb>) {
  * DB, wire the turn-end flush, and return a disposer function.
  */
 async function initTimerScheduler(db: ReturnType<typeof openStateDb>) {
-  const timerScheduler = new TimerScheduler(async (sessionId, message) => {
-    const ext = subagentRuntimeExtensionRef.current;
-    if (!ext) {
-      getLogger("timer-scheduler").warn("timer delivery skipped: subagent runtime not available", {
-        sessionId,
-      });
-      return;
-    }
-    const turn = await ext.runSessionModelTurn({
-      sessionId,
-      userContent: message,
-      userMetadata: { timer_fire: true },
-      delivery: { kind: "internal" },
-      systemContext: {
-        kind: "timer.fire",
-        summary: "This turn was triggered by a deferred timer.",
-        guidance: OOB_NO_SENDER_GUIDANCE,
-      },
-      modelInvocationOverride: {
-        responseSchema: { schema: OOB_SCHEMA_NO_SENDER },
-        structuredOutputMode: "best-effort",
-      },
-    });
-    if (turn?.latestAssistantText) {
-      await deliverOobStructuredResponse({
-        structuredResponse: turn.latestAssistantText,
-        respondTo: sessionId,
-        ext,
-        subLog: getLogger("timer"),
-        hasSender: false,
-      });
-    }
-  });
+  const timerScheduler = new TimerScheduler(deliverTimerMessage);
 
   setTimerScheduler(timerScheduler);
   getTurnQueue().setOnTurnEnd((sessionId) => {
