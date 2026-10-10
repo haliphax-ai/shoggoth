@@ -8,7 +8,7 @@ import {
   type ExecuteSessionAgentTurnInput,
 } from "../sessions/session-agent-turn";
 import type { ToolCallEvent } from "../sessions/tool-loop";
-import type { OutboundAttachment } from "../presentation/platform-adapter";
+import type { OutboundAttachment, StreamHandle } from "../presentation/platform-adapter";
 import { getLogger } from "../logging";
 
 const log = getLogger("inbound-session-turn");
@@ -96,10 +96,16 @@ export interface RunInboundSessionTurnOptions {
   /**
    * Optional status bar factory; wired at turn start when the platform surface supports it.
    * `create` returns the tracker sink for this turn's delivery, or `undefined` to skip (e.g.
+    readonly enabled: boolean;
    * non-messaging-surface delivery where no in-flight message can carry a bar).
    */
   readonly statusBar?: {
     readonly enabled: boolean;
+    /**
+     * Wraps the streaming handle right after start so the in-flight message
+     * carries `setStatusBar` (live mid-turn bar). Returns the augmented handle.
+     */
+    readonly attachSink?: (h: StreamHandle) => StreamHandle;
     readonly create: () => Promise<
       | {
           readonly setStatusBar: (line: string | null) => Promise<void>;
@@ -167,9 +173,12 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       statusBar = undefined;
     }
   }
-
   if (streaming) {
     try {
+      streamSink = await streaming.start();
+      // Live mid-turn bar: let the status bar option wrap the handle so its
+      // sink can apply renders to the in-flight message while the turn runs.
+      streamSink = options.statusBar?.attachSink?.(streamSink) ?? streamSink;
       streamSink = await streaming.start();
       streamPusher = createCoalescingStreamPusher(
         (s) => streamSink!.pushUpdate(s),

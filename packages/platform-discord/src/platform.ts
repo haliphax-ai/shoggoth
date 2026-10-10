@@ -59,11 +59,20 @@ import { resolveStatusBarConfig, type ResolvedStatusBarConfig } from "@shoggoth/
 import { renderDiscordStatusBar } from "./status-bar";
 
 /** Minimal status-bar dep: config from resolveStatusBarConfig, render from renderDiscordStatusBar,
- *  and a no-op attachSink; passed to the presentation orchestrator when status is enabled. */
-function buildStatusBarDep(cfg: ResolvedStatusBarConfig): {
+ *  attachSink for live-bar stream wrapping, and stats seeded from session_stats (turn.db is
+ *  unavailable when the orchestrator creates the tracker); passed to the presentation orchestrator. */
+export function buildStatusBarDep(
+  db: Database.Database,
+  cfg: ResolvedStatusBarConfig,
+): {
   config: ResolvedStatusBarConfig;
   render: (snap: StatusBarSnapshot, c: ResolvedStatusBarConfig) => string;
   attachSink: (h: StreamHandle) => { setStatusBar(line: string | null): Promise<void> };
+  stats: (sessionId: string) => {
+    sequence: number;
+    compactions: number;
+    context?: { currentTokens: number; totalTokens: number };
+  };
 } {
   return {
     config: cfg,
@@ -80,6 +89,24 @@ function buildStatusBarDep(cfg: ResolvedStatusBarConfig): {
       };
       h.setStatusBar = (line: string | null) => sink.setStatusBar(line);
       return h as StreamHandle & typeof sink;
+    },
+    // Pre-turn stats for seeding the bar (sequence / compactions / context
+    // window fill), reusing the same query the terminal-bar path uses.
+    stats: (sessionId: string) => {
+      const s = readStatusBarStats(db, sessionId);
+      return {
+        sequence: s.sequence,
+        compactions: s.compactions,
+        ...(s.inputTokens > 0
+          ? {
+              context: {
+                currentTokens: s.inputTokens,
+                totalTokens:
+                  s.windowTokens !== null && s.windowTokens > 0 ? s.windowTokens : s.inputTokens,
+              },
+            }
+          : {}),
+      };
     },
   };
 }
@@ -222,6 +249,7 @@ export async function startDiscordPlatform(
     opts.hitlConfigRef ? opts.hitlConfigRef.value : { ...DEFAULT_HITL_CONFIG, ...opts.config.hitl };
 
   const statusBarDep = buildStatusBarDep(
+    opts.db,
     resolveStatusBarConfig(opts.configRef?.current ?? opts.config),
   );
 
@@ -501,9 +529,19 @@ export async function startDiscordPlatform(
           if (streamingOutbound) {
             try {
               const raw = await streamingOutbound.start();
+              // Wrap the raw stream handle with the status-bar sink so the bar
+              // can be applied to the in-flight message (mirrors the
+              // messaging_surface path below). Delegates to any native
+              // setStatusBar on the handle.
+              if (statusBarDep.config.enabled) {
+                statusBarDep.attachSink(raw as unknown as StreamHandle);
+              }
               preStartedStreamHandle = {
                 setFullContent: (text: string) => raw.setFullContent(text),
                 pushUpdate: (text: string) => raw.pushUpdate(text),
+                ...(raw.setStatusBar
+                  ? { setStatusBar: (line: string | null) => raw.setStatusBar!(line) }
+                  : {}),
               };
             } catch (e) {
               opts.logger.warn("discord.platform.stream_start_failed", {
