@@ -52,4 +52,15 @@ export interface PlatformHandle {
     readonly sessionId: string;
     readonly reason: "ttl_expired" | "killed";
   }) => void;
+
+  /**
+   * Pin a message in the given channel.
+   *
+   * Optional capability — platforms that support message pinning implement it;
+   * platforms without pinning simply omit it and callers treat it as a no-op.
+   */
+  readonly pinMessage?: (input: {
+    readonly channelId: string;
+    readonly messageId: string;
+  }) => Promise<void>;
 }

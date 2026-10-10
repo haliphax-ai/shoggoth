@@ -38,6 +38,8 @@ export interface MessageToolTransport {
   ): Promise<{ readonly id: string }>;
   editMessage(channelId: string, messageId: string, body: EditMessageBody): Promise<void>;
   deleteMessage(channelId: string, messageId: string): Promise<void>;
+  /** Pin a message in a channel. Optional capability: transports without pinning omit it. */
+  pinMessage?(channelId: string, messageId: string): Promise<void>;
   getMessage(channelId: string, messageId: string): Promise<Record<string, unknown>>;
   getChannelMessages(
     channelId: string,

@@ -37,6 +37,11 @@ export interface DiscordRestTransport {
   /** DELETE `/channels/{channel.id}/messages/{message.id}` */
   deleteMessage(channelId: string, messageId: string): Promise<void>;
   /**
+   * PUT `/channels/{channel.id}/pins/{message.id}` — pins a message in a channel.
+   * Optional capability: platforms/transports without pinning omit it.
+   */
+  pinMessage?(channelId: string, messageId: string): Promise<void>;
+  /**
    * POST `/channels/{channel.id}/messages/{message.id}/threads` — returns the new thread channel id.
    */
   createThreadFromMessage(

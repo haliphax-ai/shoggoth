@@ -293,6 +293,8 @@ On startup, `WorkflowServer.resume()` loads all incomplete workflows from disk a
 
 The `StatusManager` posts and edits a live status message for each workflow via a `MessageAdapter` (platform-agnostic interface for post/edit).
 
+When the platform supports message pinning, the status post is pinned whenever it is (re)created (e.g. the initial post or a repost after a failed edit). Pinning is enabled by default and can be disabled by setting `workflow.pinStatusPost: false` in the system configuration.
+
 ### Status Message Format
 
 ```

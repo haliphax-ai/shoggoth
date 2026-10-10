@@ -449,6 +449,20 @@ async function handleDeleteAction(
   return { ok: true, message_id: messageId, channel_id: channelId };
 }
 
+async function handlePinAction(
+  ctx: ChannelActionContext,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const { deps, channelId } = ctx;
+  const { capabilities: caps, transport: t } = deps;
+  const x = caps.extensions;
+  if (!x.pin) return { ok: false, error: "pin not supported on this platform" };
+  if (!t.pinMessage) return { ok: false, error: "pin not supported on this platform" };
+  const messageId = str(args.message_id, "message_id");
+  await t.pinMessage(channelId, messageId);
+  return { ok: true, message_id: messageId, channel_id: channelId };
+}
+
 async function handleCreateThreadAction(
   ctx: ChannelActionContext,
   args: Record<string, unknown>,
@@ -824,6 +838,7 @@ const CHANNEL_ACTION_HANDLERS: Record<string, ChannelActionHandler | undefined> 
   post: handlePostAction,
   edit: handleEditAction,
   delete: handleDeleteAction,
+  pin: handlePinAction,
   create_thread: handleCreateThreadAction,
   delete_thread: handleDeleteThreadAction,
   react: handleReactAction,
