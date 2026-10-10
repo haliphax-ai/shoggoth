@@ -181,7 +181,6 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       // Live mid-turn bar: let the status bar option wrap the handle so its
       // sink can apply renders to the in-flight message while the turn runs.
       streamSink = options.statusBar?.attachSink?.(streamSink) ?? streamSink;
-      streamSink = await streaming.start();
       streamPusher = createCoalescingStreamPusher(
         (s) => streamSink!.pushUpdate(s),
         streaming.minIntervalMs,

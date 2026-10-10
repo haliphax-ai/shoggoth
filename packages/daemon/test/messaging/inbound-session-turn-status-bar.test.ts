@@ -71,6 +71,9 @@ describe("runInboundSessionTurn status bar", () => {
     expect(create).toHaveBeenCalledTimes(1);
     expect(finish).toHaveBeenCalledWith("completed");
 
+    // Exactly one streaming start per turn — a double start orphans a handle.
+    expect(streamStart).toHaveBeenCalledTimes(1);
+
     // The final setFullContent carries the rendered bar line appended to the body.
     const lastCall = setFullContent.mock.calls.at(-1)?.[0] as string;
     expect(lastCall).toContain(BAR_LINE);
