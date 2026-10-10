@@ -3,6 +3,8 @@ import type { MessageAttachment } from "@shoggoth/messaging";
 import type { ImageBlockCodec, ChatContentPart } from "@shoggoth/models";
 import type { SessionToolLoopFailoverState } from "../sessions/session-tool-loop-model-client.js";
 import type { PlatformAdapter, StreamHandle, OutboundAttachment } from "./platform-adapter.js";
+import type { StatusBarRenderer, StatusBarSink } from "./status-bar.js";
+import type { ResolvedStatusBarConfig } from "@shoggoth/shared";
 import type { InboundSessionTurnInput } from "../messaging/inbound-session-turn.js";
 import {
   runInboundSessionTurn,
@@ -87,6 +89,12 @@ export interface PresentationTurnOrchestratorDeps {
   readonly configRef?: { readonly current: ShoggothConfig };
   /** Prefix prepended to error replies (e.g. "⚠️ "). Default: "". */
   readonly errorReplyPrefix?: string;
+  readonly statusBar?: {
+    readonly config: ResolvedStatusBarConfig;
+    readonly render: StatusBarRenderer;
+    /** Wraps a stream handle with a bar sink; returns the same handle augmented. */
+    readonly attachSink: (handle: StreamHandle) => StatusBarSink;
+  };
 }
 
 export class PresentationTurnOrchestrator {
@@ -134,17 +142,24 @@ export class PresentationTurnOrchestrator {
       text.length > maxLen ? text.slice(0, maxLen) : text;
 
     // If a pre-started stream handle was provided, wrap it; otherwise let
-    // runInboundSessionTurn call adapter.startStream lazily.
+    // runInboundSessionTurn call adapter.startStream lazily. When a status bar
+    // dep is configured, wrap the stream handle with attachSink so the in-flight
+    // message handle carries setStatusBar (the sink IS the augmented handle).
+    const wrapForStatusBar = (handle: StreamHandle): StreamHandle => {
+      const sink = this.deps.statusBar?.attachSink(handle);
+      return (sink ?? handle) as unknown as StreamHandle;
+    };
     let streaming: RunInboundSessionTurnOptions["streaming"];
     if (input.preStartedStreamHandle) {
       streaming = {
         minIntervalMs: this.streamingIntervalMs,
-        start: () => Promise.resolve(input.preStartedStreamHandle!),
+        start: () => Promise.resolve(wrapForStatusBar(input.preStartedStreamHandle!)),
       };
     } else if (adapter.startStream && this.streamingIntervalMs > 0) {
       streaming = {
         minIntervalMs: this.streamingIntervalMs,
-        start: () => adapter.startStream!(sessionId, { replyTo: replyToMessageId }),
+        start: () =>
+          adapter.startStream!(sessionId, { replyTo: replyToMessageId }).then(wrapForStatusBar),
         onStartFailed: input.onStreamStartFailed,
       };
     }
@@ -249,6 +264,7 @@ export class PresentationTurnOrchestrator {
       mcpLifecycle,
       logContext,
       onTurnExecutionFailed,
+      statusBar: this.deps.statusBar as unknown as RunInboundSessionTurnOptions["statusBar"],
     });
   }
 }
