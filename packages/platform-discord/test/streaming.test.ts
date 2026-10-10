@@ -481,3 +481,130 @@ describe("DiscordStreamingOutbound", () => {
     expect(msg4Deleted).toBe(true);
   });
 });
+
+describe("DiscordStreamingOutbound status bar", () => {
+  it("setStatusBar stores the bar line and re-edits the in-flight message using the last pushed content", async () => {
+    const transport = createMockTransport();
+    const caps = discordCapabilityDescriptor();
+    const maxLen = 2000;
+
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: caps,
+      channelId: "ch-1",
+      maxContentLength: maxLen,
+    });
+
+    const handle = await streaming.start();
+    // Clear the initial createMessage call
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (transport.createMessage as any).mockClear();
+
+    await handle.pushUpdate("hello world");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (transport.editMessage as any).mockClear();
+
+    await handle.setStatusBar!("> ✅");
+
+    // Re-edits the in-flight message with the last pushed content + the bar
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const editCalls = (transport.editMessage as any).mock.calls;
+    expect(editCalls).toHaveLength(1);
+    expect(editCalls[0][0]).toBe("ch-1");
+    expect(editCalls[0][1]).toBe("msg-1");
+    expect(editCalls[0][2].content).toBe("hello world\n\n> ✅");
+
+    // A later bar update re-edits using the latest pushed content
+    await handle.pushUpdate("second update");
+    await handle.setStatusBar!("> 🧠 ｜ 🔢 `2`");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const laterCalls = (transport.editMessage as any).mock.calls;
+    expect(laterCalls[laterCalls.length - 1][2].content).toBe("second update\n\n> 🧠 ｜ 🔢 `2`");
+
+    // Clearing the bar strips it from the last pushed content
+    await handle.setStatusBar!(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const finalCalls = (transport.editMessage as any).mock.calls;
+    expect(finalCalls[finalCalls.length - 1][2].content).toBe("second update");
+  });
+
+  it("reserves the bar line in the split budget so the 2000-char limit holds while a bar is active", async () => {
+    const transport = createMockTransport();
+    const caps = discordCapabilityDescriptor();
+    const maxLen = 2000;
+    const bar = "> ✅ ｜ 🔢 `217` ｜ 🗑️ `1`";
+
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: caps,
+      channelId: "ch-1",
+      maxContentLength: maxLen,
+    });
+
+    const handle = await streaming.start();
+    // Clear the initial createMessage call
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (transport.createMessage as any).mockClear();
+
+    // Body whose last chunk would overflow 2000 once the bar is appended
+    const body = "a".repeat(1990) + "\n" + "b".repeat(1990);
+    await handle.pushUpdate(body);
+    await handle.setStatusBar!(bar);
+
+    // Every edit stays within the 2000-char limit
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const editCalls = (transport.editMessage as any).mock.calls;
+    for (const call of editCalls) {
+      expect(call[2].content.length).toBeLessThanOrEqual(maxLen);
+    }
+    // The bar made it onto the last delivered chunk as a blank-line-separated
+    // blockquote. With the bar reserved in the split budget the reduced budget
+    // produces an extra overflow message, so the last delivered chunk may be a
+    // create rather than an edit.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const editCallsAll = (transport.editMessage as any).mock.calls;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const createCallsAll = (transport.createMessage as any).mock.calls;
+    const delivered = [
+      ...editCallsAll.map((call) => call[2].content),
+      ...createCallsAll.map((call) => call[1].content),
+    ];
+    for (const content of delivered) {
+      expect(content.length).toBeLessThanOrEqual(maxLen);
+    }
+    const lastDelivered = delivered[delivered.length - 1];
+    expect(lastDelivered.endsWith("\n\n" + bar)).toBe(true);
+    expect(lastDelivered.length).toBeLessThanOrEqual(maxLen);
+  });
+
+  it("lands the bar on the last chunk only as a blank-line-separated blockquote", async () => {
+    const transport = createMockTransport();
+    const caps = discordCapabilityDescriptor();
+    const maxLen = 100;
+    const bar = "> ✅";
+
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: caps,
+      channelId: "ch-1",
+      maxContentLength: maxLen,
+    });
+
+    const handle = await streaming.start();
+    // Clear the initial createMessage call
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (transport.createMessage as any).mockClear();
+
+    // Three-chunk body: the bar must appear only on the final chunk
+    const body = "a".repeat(80) + "\n" + "b".repeat(80) + "\n" + "c".repeat(80);
+    await handle.pushUpdate(body);
+    await handle.setStatusBar!(bar);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const editCalls = (transport.editMessage as any).mock.calls;
+    const barEdits = editCalls.filter((call) => call[2].content.includes(bar));
+    expect(barEdits).toHaveLength(1);
+    // The single bar edit is the last chunk, blank-line-separated blockquote
+    expect(editCalls[editCalls.length - 1][2].content.endsWith("\n\n" + bar)).toBe(true);
+  });
+});
