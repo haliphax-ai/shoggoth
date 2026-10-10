@@ -725,14 +725,19 @@ export async function startDiscordPlatform(
             turnResult.failoverMeta,
           );
           // Terminal bar for this turn, rendered from the turn-start stats
-          // snapshot (sequence, compactions, context window fill).
+          // snapshot (sequence, compactions, context window fill) through the
+          // same StatusBarRenderer the live bar uses, so both share one format.
           // The messaging_surface terminal bar has always rendered the finished
-          // (✅) phase regardless of how the turn ended; pass "finished" to keep
-          // the delivered line byte-identical to the pre-refactor behavior.
+          // (✅) phase regardless of how the turn ended; keep "finished".
           const terminalBar =
             statsAtTurnStart === undefined
               ? undefined
-              : renderStatusBarTerminalBar(statsAtTurnStart, "finished");
+              : renderStatusBarTerminalBar(
+                  statsAtTurnStart,
+                  "finished",
+                  statusBarDep.config,
+                  renderDiscordStatusBar,
+                );
           if (surfaceStreamPusher && surfaceStreamHandle) {
             await surfaceStreamPusher.flush();
             if (terminalBar && surfaceStreamHandle.setStatusBar) {

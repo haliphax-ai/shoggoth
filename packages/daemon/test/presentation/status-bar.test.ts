@@ -454,33 +454,51 @@ describe("renderStatusBarTerminalBar", () => {
     context: { currentTokens: 1_000, totalTokens: 1_000_000 },
   };
 
-  it("renders the finished (✅) terminal line byte-identically", () => {
-    expect(renderStatusBarTerminalBar(stats, "finished")).toBe(
-      "✅ ｜ 🔢 `7` ｜ 🗑️ `2` ｜ 🪟 `0.1%/1M`",
-    );
+  it("builds a snapshot from the stats and hands it to the injected renderer with cfg", () => {
+    const render = vi.fn((_snap: StatusBarSnapshot, _cfg: ResolvedStatusBarConfig) => "> ✅");
+    expect(renderStatusBarTerminalBar(stats, "finished", defaultCfg, render)).toBe("> ✅");
+    expect(render).toHaveBeenCalledTimes(1);
+    const [snap, cfg] = render.mock.calls[0]!;
+    expect(snap).toEqual({
+      phase: "finished",
+      sequence: 7,
+      toolCalls: { total: 0 },
+      context: { currentTokens: 1_000, totalTokens: 1_000_000 },
+      compactions: 2,
+    });
+    expect(cfg).toBe(defaultCfg);
   });
 
-  it("maps the turn outcome to the phase emoji (🛑 aborted / ❌ failed)", () => {
-    expect(renderStatusBarTerminalBar(stats, "aborted")).toBe(
-      "🛑 ｜ 🔢 `7` ｜ 🗑️ `2` ｜ 🪟 `0.1%/1M`",
-    );
-    expect(renderStatusBarTerminalBar(stats, "failed")).toBe(
-      "❌ ｜ 🔢 `7` ｜ 🗑️ `2` ｜ 🪟 `0.1%/1M`",
-    );
-  });
-
-  it("omits the context section when stats carry no context", () => {
-    expect(renderStatusBarTerminalBar({ sequence: 0, compactions: 0 }, "finished")).toBe(
-      "✅ ｜ 🔢 `0` ｜ 🗑️ `0`",
-    );
-  });
-
-  it("falls back to the plain token total when no window is known", () => {
-    const line = renderStatusBarTerminalBar(
-      { sequence: 1, compactions: 0, context: { currentTokens: 31_400, totalTokens: 31_400 } },
+  it("maps every turn outcome to the matching snapshot phase", () => {
+    const render = vi.fn((_snap: StatusBarSnapshot, _cfg: ResolvedStatusBarConfig) => "x");
+    for (const outcome of ["finished", "aborted", "failed"] as const) {
+      renderStatusBarTerminalBar(stats, outcome, defaultCfg, render);
+    }
+    expect(render.mock.calls.map(([snap]) => snap.phase)).toEqual([
       "finished",
-    );
-    expect(line).toBe("✅ ｜ 🔢 `1` ｜ 🗑️ `0` ｜ 🪟 `31.4K`");
+      "aborted",
+      "failed",
+    ]);
+  });
+
+  it("reports zero tool calls (the renderer omits the section when empty)", () => {
+    const render = vi.fn((_snap: StatusBarSnapshot, _cfg: ResolvedStatusBarConfig) => "x");
+    renderStatusBarTerminalBar(stats, "finished", defaultCfg, render);
+    expect(render.mock.calls[0]![0].toolCalls).toEqual({ total: 0 });
+  });
+
+  it("omits the context field from the snapshot when stats carry no context", () => {
+    const render = vi.fn((_snap: StatusBarSnapshot, _cfg: ResolvedStatusBarConfig) => "x");
+    renderStatusBarTerminalBar({ sequence: 0, compactions: 0 }, "finished", defaultCfg, render);
+    const [snap] = render.mock.calls[0]!;
+    expect(snap.context).toBeUndefined();
+    expect(snap.sequence).toBe(0);
+    expect(snap.compactions).toBe(0);
+  });
+
+  it("returns undefined when the renderer yields an empty line", () => {
+    const render = vi.fn((_snap: StatusBarSnapshot, _cfg: ResolvedStatusBarConfig) => "");
+    expect(renderStatusBarTerminalBar(stats, "finished", defaultCfg, render)).toBeUndefined();
   });
 
   it("round-trips getStatusBarStats output for the same session", () => {
@@ -501,11 +519,15 @@ describe("renderStatusBarTerminalBar", () => {
         `INSERT INTO transcript_messages (session_id, context_segment_id, seq, role, content)
          VALUES (?, ?, 0, 'user', ?)`,
       ).run("rt1", segmentId, "x".repeat(4_000)); // ≈1_000 estimated tokens
-      // Same regression shape as the platform e2e test: the bar must show the
-      // segment-estimate fill (0.1%/1M), never the cumulative column.
-      expect(renderStatusBarTerminalBar(getStatusBarStats(db, "rt1"), "finished")).toBe(
-        "✅ ｜ 🔢 `3` ｜ 🗑️ `1` ｜ 🪟 `0.1%/1M`",
-      );
+      // Same regression shape as the platform e2e test: the snapshot must
+      // carry the segment-estimate fill (0.1%/1M), never the cumulative
+      // input_tokens column.
+      const render = vi.fn((_snap: StatusBarSnapshot, _cfg: ResolvedStatusBarConfig) => "x");
+      renderStatusBarTerminalBar(getStatusBarStats(db, "rt1"), "finished", defaultCfg, render);
+      const [snap] = render.mock.calls[0]!;
+      expect(snap.sequence).toBe(3);
+      expect(snap.compactions).toBe(1);
+      expect(snap.context).toEqual({ currentTokens: 1_000, totalTokens: 1_000_000 });
     } finally {
       db.close();
       rmSync(tmp, { recursive: true, force: true });

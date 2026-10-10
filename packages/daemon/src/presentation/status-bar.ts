@@ -299,36 +299,27 @@ export function getStatusBarStats(db: Database.Database, sessionId: string): Sta
   };
 }
 
-const TERMINAL_PHASE_EMOJI: Record<"finished" | "aborted" | "failed", string> = {
-  finished: "✅",
-  aborted: "🛑",
-  failed: "❌",
-};
-
-/** Terminal status-bar line composed platform-agnostically from pre-turn stats
- *  (e.g. `✅ ｜ 🔢 \`7\` ｜ 🗑️ \`2\` ｜ 🪟 \`0.1%/1M\``). Sections — phase, sequence,
- *  compactions, context window fill (omitted when stats carry no context) —
- *  and their exact format are byte-identical to the pre-refactor terminal
- *  line the Discord platform used to compose itself. */
+/** Terminal status-bar line for the messaging_surface, routed through the
+ *  platform-supplied renderer so the terminal bar shares the live bar's
+ *  format (blockquote prefix, section order, config toggles). Builds a
+ *  StatusBarSnapshot from the pre-turn stats — phase from the outcome (the
+ *  renderer's PHASE_EMOJI maps it), toolCalls `{ total: 0 }` (the renderer
+ *  omits the tool section when there's nothing to show), context omitted
+ *  when stats carry none. Returns undefined when the renderer yields an
+ *  empty line (e.g. every section disabled). */
 export function renderStatusBarTerminalBar(
   stats: StatusBarStats,
   outcome: "finished" | "aborted" | "failed",
-): string {
-  const sections = [
-    TERMINAL_PHASE_EMOJI[outcome],
-    `🔢 \`${stats.sequence}\``,
-    `🗑️ \`${stats.compactions}\``,
-  ];
-  const ctx = stats.context;
-  if (ctx !== undefined && ctx.currentTokens > 0) {
-    // The window is "known" only when the total differs from the estimate
-    // (getStatusBarStats falls back to the estimate when no window is stored).
-    const hasWindow = ctx.totalTokens !== ctx.currentTokens;
-    const compact = hasWindow
-      ? `${((ctx.currentTokens / ctx.totalTokens) * 100).toFixed(1)}%/${formatTokens(ctx.totalTokens)}`
-      : formatTokens(ctx.currentTokens);
-    // Compact display: `31.4%/100K`; without a known window, just `31.4K`.
-    sections.push(`🪟 \`${compact}\``);
-  }
-  return sections.join(" ｜ ");
+  cfg: ResolvedStatusBarConfig,
+  render: StatusBarRenderer,
+): string | undefined {
+  const snapshot: StatusBarSnapshot = {
+    phase: outcome,
+    sequence: stats.sequence,
+    toolCalls: { total: 0 },
+    ...(stats.context ? { context: stats.context } : {}),
+    compactions: stats.compactions,
+  };
+  const line = render(snapshot, cfg);
+  return line.trim().length > 0 ? line : undefined;
 }
