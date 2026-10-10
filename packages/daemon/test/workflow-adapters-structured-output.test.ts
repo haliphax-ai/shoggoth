@@ -97,6 +97,51 @@ describe("createDaemonSpawnAdapter responseSchema forwarding", () => {
     assert.deepEqual(modelSelection.responseSchema, responseSchema);
   });
 
+  it("sets structuredOutputMode to best-effort alongside responseSchema", async () => {
+    const sm = fakeSessionManager();
+    const sessions = fakeSessionStore();
+    const turn = fakeRunSessionModelTurn();
+
+    const adapter = createDaemonSpawnAdapter({
+      sessionManager: sm,
+      sessions,
+      parentSessionId: "agent:main:discord:channel:abc",
+      runSessionModelTurn: turn.fn,
+    });
+
+    const responseSchema = {
+      schema: {
+        type: "object",
+        properties: { count: { type: "number" } },
+        required: ["count"],
+        additionalProperties: false,
+      },
+    };
+
+    await adapter.spawn({
+      taskId: 1,
+      prompt: "Count items",
+      replyTo: "agent:main:discord:channel:abc",
+      timeoutMs: 30_000,
+      responseSchema,
+    } as any);
+
+    const updateCall = sessions.updateCalls.find((call) => {
+      const data = call[1] as Record<string, unknown>;
+      return data.modelSelection !== undefined;
+    });
+
+    assert.ok(updateCall, "sessions.update should have been called with modelSelection");
+
+    const updateData = updateCall![1] as Record<string, unknown>;
+    const modelSelection = updateData.modelSelection as Record<string, unknown>;
+    assert.equal(
+      modelSelection.structuredOutputMode,
+      "best-effort",
+      "structuredOutputMode should default to best-effort when a responseSchema is set",
+    );
+  });
+
   it("does not set modelSelection.responseSchema when spawn request has no responseSchema", async () => {
     const sm = fakeSessionManager();
     const sessions = fakeSessionStore();
@@ -125,6 +170,11 @@ describe("createDaemonSpawnAdapter responseSchema forwarding", () => {
           ms.responseSchema,
           undefined,
           "modelSelection.responseSchema should not be set when not provided",
+        );
+        assert.equal(
+          ms.structuredOutputMode,
+          undefined,
+          "modelSelection.structuredOutputMode should not be set when no responseSchema is provided",
         );
       }
     }

@@ -154,6 +154,11 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
       }
       if (req.responseSchema) {
         modelSelection.responseSchema = req.responseSchema;
+        // Schema-bearing task turns belong to the same family as OOB structured
+        // turns, which pin best-effort explicitly. Left unset, the mode resolves
+        // to the provider adapter's ceiling (strict on OpenAI-compatible and
+        // Gemini), where capture-path schema validation is skipped.
+        modelSelection.structuredOutputMode = "best-effort";
       }
 
       deps.sessions.update(childId, {
