@@ -19,6 +19,7 @@ import {
   createToolRunStore,
   applySessionContextSegmentNew,
   applySessionContextSegmentReset,
+  estimateCurrentContextFill,
   parseSessionSegmentInlineCommand,
   sessionSegmentStartupUserContent,
   resolveSessionBypassUpTo,
@@ -97,12 +98,14 @@ export function buildStatusBarDep(
       return {
         sequence: s.sequence,
         compactions: s.compactions,
-        ...(s.inputTokens > 0
+        ...(s.contextFillTokens > 0
           ? {
               context: {
-                currentTokens: s.inputTokens,
+                currentTokens: s.contextFillTokens,
                 totalTokens:
-                  s.windowTokens !== null && s.windowTokens > 0 ? s.windowTokens : s.inputTokens,
+                  s.windowTokens !== null && s.windowTokens > 0
+                    ? s.windowTokens
+                    : s.contextFillTokens,
               },
             }
           : {}),
@@ -114,30 +117,36 @@ export function buildStatusBarDep(
 interface StatusBarTurnStats {
   readonly sequence: number;
   readonly compactions: number;
-  readonly inputTokens: number;
+  readonly contextFillTokens: number;
   readonly windowTokens: number | null;
 }
 
 /** Sequence from session_stats.turn_count, compactions from compaction_count,
- *  context from the latest per-call input tokens (input_tokens column). */
+ *  context fill estimated from the current context segment's transcript
+ *  (session_stats.input_tokens is a cumulative running sum and must never be
+ *  treated as current context-window fill). */
 function readStatusBarStats(db: Database.Database, sessionId: string): StatusBarTurnStats {
   const row = db
     .prepare(
-      `SELECT turn_count, compaction_count, input_tokens, context_window_tokens
+      `SELECT turn_count, compaction_count, context_window_tokens
        FROM session_stats WHERE session_id = ?`,
     )
     .get(sessionId) as
     | {
         turn_count: number;
         compaction_count: number;
-        input_tokens: number;
         context_window_tokens: number | null;
       }
     | undefined;
+  const segmentId = createSessionStore(db).getById(sessionId)?.contextSegmentId;
+  const contextFillTokens =
+    segmentId !== undefined && segmentId.length > 0
+      ? estimateCurrentContextFill(db, sessionId, segmentId)
+      : 0;
   return {
     sequence: row?.turn_count ?? 0,
     compactions: row?.compaction_count ?? 0,
-    inputTokens: row?.input_tokens ?? 0,
+    contextFillTokens,
     windowTokens: row?.context_window_tokens ?? null,
   };
 }
@@ -145,14 +154,14 @@ function readStatusBarStats(db: Database.Database, sessionId: string): StatusBar
 /** Terminal Discord status bar line (✅ ｜ 🔢 `n` ｜ 🗑️ `n` ｜ 🪟 `p%/y`). */
 function renderStatusBarTerminalLine(s: StatusBarTurnStats): string {
   const sections = ["✅", `🔢 \`${s.sequence}\``, `🗑️ \`${s.compactions}\``];
-  if (s.inputTokens > 0) {
+  if (s.contextFillTokens > 0) {
     const hasWindow = s.windowTokens !== null && s.windowTokens > 0;
     const percent = hasWindow
-      ? `${((s.inputTokens / s.windowTokens!) * 100).toFixed(1)}%`
+      ? `${((s.contextFillTokens / s.windowTokens!) * 100).toFixed(1)}%`
       : undefined;
     const total = hasWindow ? `/${formatTokens(s.windowTokens!)}` : "";
     // Compact display: `31.4%/100K`; without a known window, just `31.4K`.
-    sections.push(`🪟 \`${percent ? `${percent}${total}` : formatTokens(s.inputTokens)}\``);
+    sections.push(`🪟 \`${percent ? `${percent}${total}` : formatTokens(s.contextFillTokens)}\``);
   }
   return sections.join(" ｜ ");
 }
