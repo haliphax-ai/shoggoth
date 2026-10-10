@@ -145,6 +145,8 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
     | {
         setFullContent: (body: string) => Promise<void>;
         pushUpdate: (body: string) => Promise<void>;
+        /** Present when the platform augments the handle (attachSink) with a live bar sink. */
+        setStatusBar?: (line: string | null) => Promise<void>;
       }
     | undefined;
   let streamPusher: ReturnType<typeof createCoalescingStreamPusher> | undefined;
@@ -293,6 +295,23 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       }
     }
 
+    // The tracker's finish() terminal render flowed through the sink into the
+    // in-flight handle's setStatusBar, which remembers the bar as active state
+    // and re-applies it on every subsequent setFullContent. Clear that state
+    // BEFORE final delivery: the delivery body already appends barLine itself,
+    // and the still-active bar would stack a second copy on top of it. A sink
+    // failure must never block delivery.
+    if (barLine && streamSink?.setStatusBar) {
+      try {
+        await streamSink.setStatusBar(null);
+      } catch (clearErr) {
+        log.warn("inbound_session_turn.status_bar_clear_failed", {
+          ...ctx,
+          err: String(clearErr),
+        });
+      }
+    }
+
     const bodyWithBar = barLine ? `${rawBody}\n\n${barLine}` : rawBody;
 
     if (streamPusher && streamSink) {
@@ -327,6 +346,20 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
         log.warn("inbound_session_turn.status_bar_finish_failed", {
           ...ctx,
           err: String(barErr),
+        });
+      }
+    }
+    // finish()'s terminal render flowed through the sink into the in-flight
+    // handle's setStatusBar, which keeps the bar as active state and re-applies
+    // it on future renders. Clear that state so a stale bar is never re-applied;
+    // a sink failure must never block error delivery.
+    if (barLine && streamSink?.setStatusBar) {
+      try {
+        await streamSink.setStatusBar(null);
+      } catch (clearErr) {
+        log.warn("inbound_session_turn.status_bar_clear_failed", {
+          ...ctx,
+          err: String(clearErr),
         });
       }
     }
