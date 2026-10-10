@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type Database from "better-sqlite3";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import { getLogger } from "../logging";
+import { resolveConfiguredSubagentModel } from "../config/effective-runtime";
 const ioLog = getLogger("integration-ops");
 import { getProcessManager } from "../process-manager-singleton";
 import {
@@ -415,6 +416,7 @@ function assertAgentMayUseSubagentSessionOps(
  */
 export async function deliverOobStructuredResponse(opts: {
   structuredResponse: string;
+  aborted?: boolean;
   respondTo: string;
   childSessionId?: string;
   ext: NonNullable<typeof subagentRuntimeExtensionRef.current>;
@@ -431,6 +433,23 @@ export async function deliverOobStructuredResponse(opts: {
     maxChars = 8000,
     hasSender,
   } = opts;
+
+  const announceAbort = async (): Promise<void> => {
+    subLog.info("out-of-band turn aborted", { respondTo });
+    try {
+      if (!ext.resolveOutboundChannelIdForSession?.(respondTo)) return;
+      await ext.postToOperator?.({
+        sessionId: respondTo,
+        userContent: "🛑 An out-of-band turn was aborted.",
+      });
+    } catch (err) {
+      subLog.warn("failed to announce out-of-band abort", { respondTo, error: String(err) });
+    }
+  };
+  if (opts.aborted) {
+    await announceAbort();
+    return;
+  }
 
   let parsed: Record<string, unknown>;
   try {
@@ -454,6 +473,11 @@ export async function deliverOobStructuredResponse(opts: {
           structuredOutputMode: "best-effort",
         },
       });
+
+      if (nudgeResult?.aborted) {
+        await announceAbort();
+        return;
+      }
 
       if (nudgeResult?.latestAssistantText) {
         try {
@@ -626,9 +650,10 @@ export async function deliverSubagentResult(
         ...modelInvocationOverride,
       },
     });
-    if (turnResult?.latestAssistantText) {
+    if (turnResult?.aborted || turnResult?.latestAssistantText) {
       await deliverOobStructuredResponse({
         structuredResponse: turnResult.latestAssistantText,
+        aborted: turnResult.aborted,
         respondTo,
         childSessionId,
         ext,
@@ -1263,11 +1288,7 @@ export async function handleIntegrationControlOp(
       const hasSpawnModel =
         modelOptions && typeof modelOptions.model === "string" && modelOptions.model.trim();
       const parentAgentId = parseAgentSessionUrn(parentSessionId)?.agentId;
-      const perAgent = parentAgentId
-        ? ctx.config.agents?.list?.[parentAgentId]?.subagentModel
-        : undefined;
-      const globalDefault = ctx.config.agents?.subagentModel;
-      const configSubagentModel = perAgent ?? globalDefault;
+      const configSubagentModel = resolveConfiguredSubagentModel(ctx.config, parentAgentId);
       if (!hasSpawnModel) {
         if (configSubagentModel) {
           const base =

@@ -131,6 +131,8 @@ export interface ExecuteSessionAgentTurnInput {
 export interface SessionAgentTurnResult {
   readonly failoverMeta: SessionToolLoopFailoverState | undefined;
   readonly latestAssistantText: string;
+  /** Cancellation is separate from partial text, which may itself be valid JSON. */
+  readonly aborted?: boolean;
   /** Outbound attachments extracted from `show` tool results in this turn. */
   readonly showAttachments?: readonly OutboundAttachment[];
   /** Maps to 🛑/❌/✅ in the status bar. */
@@ -653,7 +655,11 @@ export async function executeSessionAgentTurn(
       return {
         failoverMeta: failoverMeta ? { ...failoverMeta, primaryModel } : undefined,
         latestAssistantText,
+        // Dual contract: `outcome` feeds the turn status tracker; the legacy
+        // `aborted` flag is still read by the OOB delivery machinery to skip
+        // structured-output repair on cancelled turns.
         outcome: "aborted",
+        aborted: true,
       };
     }
     // Catch-all: log the error and return whatever partial response exists

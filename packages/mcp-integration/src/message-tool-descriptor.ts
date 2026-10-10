@@ -17,6 +17,8 @@ export interface MessageToolPlatformSlice {
   readonly reactions: boolean;
   readonly search: boolean;
   readonly attachmentDownload: boolean;
+  /** Agent `message` tool: pin messages. */
+  readonly pin: boolean;
 }
 
 /**
@@ -40,6 +42,7 @@ export function buildMessageToolDescriptor(
   if (slice.reactions) actions.push("reactions");
   if (slice.search) actions.push("search");
   if (slice.attachmentDownload) actions.push("attachment-download");
+  if (slice.pin) actions.push("pin");
 
   const properties: Record<string, JsonSchemaLike> = {
     action: {
@@ -56,7 +59,7 @@ export function buildMessageToolDescriptor(
     message_id: {
       type: "string",
       description:
-        "get: fetch this message only (single-message mode). edit/delete: target message. create_thread: optional message to branch from (omit for standalone thread). react/reactions: target message. attachment-download: message containing the attachment.",
+        "get: fetch this message only (single-message mode). edit/delete/pin: target message. create_thread: optional message to branch from (omit for standalone thread). react/reactions: target message. attachment-download: message containing the attachment.",
     },
     name: {
       type: "string",
@@ -223,7 +226,7 @@ export function buildMessageToolDescriptor(
   return {
     name: "message",
     description:
-      "Messaging surface control for this session's bound channel: read messages (get), post (optional attachments / reply), edit or delete messages, create or delete threads, add/remove reactions (react), read reactions (reactions), search messages by keyword/author/time (search), download file attachments (attachment-download). Only actions supported by the current platform appear in action's enum. Regular assistant replies are delivered by the platform and do not use this tool.",
+      "Messaging surface control for this session's bound channel: read messages (get), post (optional attachments / reply), edit or delete messages, create or delete threads, add/remove reactions (react), read reactions (reactions), search messages by keyword/author/time (search), download file attachments (attachment-download), pin messages (pin). Only actions supported by the current platform appear in action's enum. Regular assistant replies are delivered by the platform and do not use this tool.",
     inputSchema: {
       type: "object",
       properties,

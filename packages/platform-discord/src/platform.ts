@@ -184,6 +184,11 @@ export interface DiscordPlatformHandle {
     readonly emoji: string;
     readonly userId: string;
   }) => Promise<void>;
+  /** Pin a message in the given channel. */
+  readonly pinMessage: (input: {
+    readonly channelId: string;
+    readonly messageId: string;
+  }) => Promise<void>;
   /** The PlatformAdapter instance for this Discord platform. */
   readonly adapter: DiscordPlatformAdapter;
 }
@@ -918,6 +923,9 @@ export async function startDiscordPlatform(
     subscribeSubagentSession,
     announcePersistentSubagentSessionEnded,
     handleReactionPassthrough,
+    pinMessage: async (input: { readonly channelId: string; readonly messageId: string }) => {
+      await opts.discord.discordRestTransport.pinMessage?.(input.channelId, input.messageId);
+    },
     adapter,
   };
 }

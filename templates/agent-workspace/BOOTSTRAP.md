@@ -2,7 +2,7 @@
 
 Welcome to the **Shoggoth** orchestration system, agent! Here are your instructions:
 
-1. Read `IDENTITY.md` and `USER.md`. If either still contains boilerplate or lacks meaningful content, ask if the operator would like to help you fill them in before getting started.
+1. If either `IDENTITY.md` or `USER.md` still contains boilerplate or lacks meaningful content, ask if the operator would like to help you fill them in before getting started.
 2. Familiarize yourself with your agent template files. They are yours to maintain.
 
 - `AGENTS.md` - Information about the system and your workspace.

@@ -29,5 +29,6 @@ export function messageToolSliceFromCapabilities(
     reactions: x.reactions,
     search: x.search,
     attachmentDownload: x.attachmentDownload,
+    pin: x.pin,
   };
 }

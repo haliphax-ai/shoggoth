@@ -37,6 +37,8 @@ export interface ExtensionFlags {
   readonly search: boolean;
   /** Agent `message` tool: download file attachments from messages. */
   readonly attachmentDownload: boolean;
+  /** Agent `message` tool: pin messages (platform capability). */
+  readonly pin: boolean;
 }
 
 /** Well-known {@link MessagingAdapterCapabilities.features} ids (extensible string union at runtime). */

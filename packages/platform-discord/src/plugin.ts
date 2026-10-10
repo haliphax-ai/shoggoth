@@ -443,6 +443,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           ) => discordMessaging.discordRestTransport.createThread(channelId, body),
           resolveOutboundChannelIdForSession: (sessionId: string) =>
             discordMessaging.resolveOutboundChannelIdForSession?.(sessionId),
+          pinMessage: discordPlatform.pinMessage,
           postToOperator: async (input: {
             readonly sessionId: string;
             readonly userContent: string;

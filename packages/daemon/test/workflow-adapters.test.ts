@@ -426,4 +426,51 @@ describe("createDaemonMessageAdapter", () => {
     const ok = await adapter.editMessage("msg-123", "updated");
     assert.equal(ok, false);
   });
+
+  it("pins a message when a pinMessage op is wired", async () => {
+    const pinned: string[] = [];
+    const adapter = createDaemonMessageAdapter({
+      getMessageContext: () => ({
+        execute: async () => ({ ok: true }),
+      }),
+      resolveChannelId: () => "channel-abc",
+      pinMessage: async (messageId: string) => {
+        pinned.push(messageId);
+      },
+      sessionId: "agent:main:discord:channel:abc",
+    });
+
+    await adapter.pinMessage!("msg-123");
+
+    assert.deepEqual(pinned, ["msg-123"]);
+  });
+
+  it("pinMessage is a no-op when no pinMessage op is wired", async () => {
+    const adapter = createDaemonMessageAdapter({
+      getMessageContext: () => ({
+        execute: async () => ({ ok: true }),
+      }),
+      resolveChannelId: () => "channel-abc",
+      sessionId: "agent:main:discord:channel:abc",
+    });
+
+    await adapter.pinMessage!("msg-123");
+    // No throw — behaves as a no-op.
+  });
+
+  it("pinMessage swallows errors from the underlying op", async () => {
+    const adapter = createDaemonMessageAdapter({
+      getMessageContext: () => ({
+        execute: async () => ({ ok: true }),
+      }),
+      resolveChannelId: () => "channel-abc",
+      pinMessage: async () => {
+        throw new Error("permission denied");
+      },
+      sessionId: "agent:main:discord:channel:abc",
+    });
+
+    await adapter.pinMessage!("msg-123");
+    // No throw — pin failures are best-effort.
+  });
 });

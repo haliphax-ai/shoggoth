@@ -46,6 +46,7 @@ type DiscordRestOperation =
   | "createMessageWithFiles"
   | "editMessage"
   | "deleteMessage"
+  | "pinMessage"
   | "getMessage"
   | "getChannelMessages"
   | "createThreadFromMessage"
@@ -195,6 +196,21 @@ export function createDiscordRestTransport(
       const bodyText = await res.text();
       if (!res.ok && res.status !== 204) {
         throw new Error(`Discord REST deleteMessage ${res.status}: ${bodyText}`);
+      }
+    },
+
+    async pinMessage(channelId, messageId) {
+      const res = await discordFetchWithRateLimitRetry(
+        () =>
+          discordFetch(
+            `/channels/${encodeURIComponent(channelId)}/pins/${encodeURIComponent(messageId)}`,
+            { method: "PUT" },
+          ),
+        "pinMessage",
+      );
+      const bodyText = await res.text();
+      if (!res.ok && res.status !== 204) {
+        throw new Error(`Discord REST pinMessage ${res.status}: ${bodyText}`);
       }
     },
 

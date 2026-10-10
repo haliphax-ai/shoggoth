@@ -151,9 +151,9 @@ export async function handlePlatformThreadCreate(
   }
   const modelLabel = resolvedModel ? resolvedModel.ref : "default (agent default)";
   const statusBody = [
-    "Thread subagent session created.",
-    `Session: ${childId}`,
-    `Model: ${modelLabel}`,
+    "> 🧵 Thread subagent session created.",
+    `> 🎯 Session: \`${childId}\``,
+    `> 🥸 Model: ${modelLabel}`,
   ].join("\n");
   try {
     await input.platform.sendStatusMessage(childId, statusBody);

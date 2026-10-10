@@ -111,6 +111,7 @@ const messagingCapabilities: MessagingAdapterCapabilities = {
     reactions: true,
     search: true,
     attachmentDownload: true,
+    pin: true,
   },
   features: ["typing_notification", "silent_replies_channel_aware"],
   parameterSchemas: {

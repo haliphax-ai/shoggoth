@@ -39,6 +39,7 @@ function makeWorkflow(name: string, tasks: TaskState[], graph: DependencyGraph):
 class MockMessageAdapter implements MessageAdapter {
   posted: Array<{ content: string; messageId: string }> = [];
   edited: Array<{ messageId: string; content: string }> = [];
+  pinned: string[] = [];
   editShouldFail = false;
   private nextId = 1;
 
@@ -52,6 +53,10 @@ class MockMessageAdapter implements MessageAdapter {
     if (this.editShouldFail) return false;
     this.edited.push({ messageId, content });
     return true;
+  }
+
+  async pinMessage(messageId: string): Promise<void> {
+    this.pinned.push(messageId);
   }
 }
 
@@ -205,6 +210,78 @@ describe("StatusManager", () => {
 
       assert.ok(adapter.posted[0].content.includes("❌ **Failed:** 1/2"));
       assert.ok(adapter.posted[0].content.includes("- 2 - Bad (3s)"));
+    });
+  });
+
+  describe("pinning", () => {
+    it("pins the status post on creation by default when the adapter supports it", async () => {
+      const graph: DependencyGraph = new Map([[1, new Set()]]);
+      const wf = makeWorkflow("wf", [makeTask(1, "Task", "pending")], graph);
+
+      await manager.postInitialStatus(wf);
+
+      assert.deepEqual(adapter.pinned, ["msg-1"]);
+    });
+
+    it("re-pins the reposted message when edit fails", async () => {
+      const graph: DependencyGraph = new Map([[1, new Set()]]);
+      const wf = makeWorkflow("wf", [makeTask(1, "Task", "pending")], graph);
+
+      await manager.postInitialStatus(wf);
+      assert.deepEqual(adapter.pinned, ["msg-1"]);
+
+      adapter.editShouldFail = true;
+      wf.tasks[0].status = "in_progress";
+      wf.tasks[0].startedAt = Date.now();
+      await manager.updateStatus(wf);
+
+      assert.deepEqual(adapter.pinned, ["msg-1", "msg-2"]);
+    });
+
+    it("does not pin when pinStatusPost is false", async () => {
+      const graph: DependencyGraph = new Map([[1, new Set()]]);
+      const wf = makeWorkflow("wf", [makeTask(1, "Task", "pending")], graph);
+      const noPin = new StatusManager(adapter, { pinStatusPost: false });
+
+      await noPin.postInitialStatus(wf);
+
+      assert.deepEqual(adapter.pinned, []);
+    });
+
+    it("does not pin when the adapter has no pinMessage support", async () => {
+      const graph: DependencyGraph = new Map([[1, new Set()]]);
+      const wf = makeWorkflow("wf", [makeTask(1, "Task", "pending")], graph);
+      const posts: Array<{ content: string; messageId: string }> = [];
+      const noPinAdapter: MessageAdapter = {
+        async postMessage(content: string): Promise<{ messageId: string }> {
+          const messageId = "plain-msg-1";
+          posts.push({ content, messageId });
+          return { messageId };
+        },
+        async editMessage(): Promise<boolean> {
+          return true;
+        },
+        // no pinMessage — platform without pinning support
+      };
+      const m = new StatusManager(noPinAdapter);
+
+      await m.postInitialStatus(wf);
+
+      assert.equal(posts.length, 1);
+    });
+
+    it("pin failure does not fail the status flow", async () => {
+      const graph: DependencyGraph = new Map([[1, new Set()]]);
+      const wf = makeWorkflow("wf", [makeTask(1, "Task", "pending")], graph);
+      const failing = new MockMessageAdapter();
+      failing.pinMessage = async () => {
+        throw new Error("permission denied");
+      };
+      const m = new StatusManager(failing);
+
+      await m.postInitialStatus(wf);
+
+      assert.equal(failing.posted.length, 1);
     });
   });
 });

@@ -59,6 +59,22 @@ export function resolveShoggothAgentId(cfg: ShoggothConfig): string {
 }
 
 /**
+ * Resolve the effective configured subagent model: per-agent override
+ * `agents.list.<id>.subagentModel` wins, else the global default
+ * `agents.subagentModel`. An undefined/unknown agent id falls back to the
+ * global default; `undefined` if neither is configured. Per-task / per-spawn
+ * `model_options.model` overrides happen at the call sites — this helper only
+ * resolves the config-level default.
+ */
+export function resolveConfiguredSubagentModel(
+  cfg: ShoggothConfig,
+  agentId: string | undefined,
+): string | undefined {
+  const perAgent = agentId ? cfg.agents?.list?.[agentId]?.subagentModel : undefined;
+  return perAgent ?? cfg.agents?.subagentModel;
+}
+
+/**
  * Model endpoint health probe base URL. Env `ANTHROPIC_BASE_URL` (origin) is checked first for
  * Anthropic-style stacks; then `OPENAI_BASE_URL` / `OLLAMA_HOST`, then config.
  */

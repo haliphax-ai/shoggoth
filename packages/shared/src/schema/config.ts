@@ -156,6 +156,14 @@ const sharedConfigFields = {
   vault: vaultConfigSchema,
   logging: shoggothLoggingConfigSchema.optional(),
   gates: shoggothGatesConfigSchema.optional(),
+  /** Workflow engine configuration. */
+  workflow: z
+    .object({
+      /** Pin workflow status posts (when (re)created) on platforms that support pinning. Default: true. */
+      pinStatusPost: z.boolean().optional(),
+    })
+    .strict()
+    .optional(),
 };
 
 export const shoggothConfigFragmentSchema = z
@@ -258,5 +266,6 @@ export function defaultConfig(configDirectory: string): ShoggothConfig {
     platforms: { discord: { enabled: true } },
     gates: DEFAULT_GATES_CONFIG,
     logging: DEFAULT_LOGGING_CONFIG,
+    workflow: { pinStatusPost: true },
   };
 }

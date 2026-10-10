@@ -1,4 +1,10 @@
-import { DEFAULT_HITL_CONFIG, loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
+import {
+  DEFAULT_HITL_CONFIG,
+  loadLayeredConfigAsync,
+  LAYOUT,
+  VERSION,
+  parseAgentSessionUrn,
+} from "@shoggoth/shared";
 import {
   serviceProvisionSecrets,
   serviceRegistryRef as svcRegRef,
@@ -53,11 +59,7 @@ import {
   resolveEmbeddingsHealthProbeApiKey,
 } from "./config/effective-runtime";
 import { startControlPlane } from "./control/control-plane";
-import {
-  deliverOobStructuredResponse,
-  handleIntegrationControlOp,
-  type IntegrationOpsContext,
-} from "./control/integration-ops";
+import { handleIntegrationControlOp, type IntegrationOpsContext } from "./control/integration-ops";
 import { resolveSessionTargetFromCliArg } from "./control/resolve-session-cli-target";
 import { WIRE_VERSION } from "@shoggoth/authn";
 import { requestSessionTurnAbort } from "./sessions/session-turn-abort";
@@ -81,7 +83,6 @@ import { reconcilePersistentSubagents } from "./subagent/reconcile-persistent-su
 import { touchPersistentSubagentInactivityTimer } from "./subagent/persistent-subagent-timers";
 import { handlePlatformThreadCreate } from "./subagent/thread-subagent-autocreate";
 import { messageToolContextRef } from "./messaging/message-tool-context-ref";
-import { OOB_SCHEMA_NO_SENDER, OOB_NO_SENDER_GUIDANCE } from "./messaging/oob-response-schemas";
 import {
   setSubagentRuntimeExtension,
   subagentRuntimeExtensionRef,
@@ -117,8 +118,9 @@ import {
 } from "./workflow-adapters";
 import { createSessionManager } from "./sessions/session-manager";
 import { createSqliteAgentTokenStore } from "./auth/sqlite-agent-tokens";
-import { resolveShoggothAgentId } from "./config/effective-runtime";
+import { resolveConfiguredSubagentModel, resolveShoggothAgentId } from "./config/effective-runtime";
 import { TimerScheduler } from "./timers/timer-scheduler";
+import { deliverTimerMessage } from "./timers/timer-delivery";
 import { setTimerScheduler } from "./sessions/builtin-handlers/timer-handler";
 import {
   ShoggothPluginSystem,
@@ -404,39 +406,7 @@ async function loadPlugins(db: ReturnType<typeof openStateDb>) {
  * DB, wire the turn-end flush, and return a disposer function.
  */
 async function initTimerScheduler(db: ReturnType<typeof openStateDb>) {
-  const timerScheduler = new TimerScheduler(async (sessionId, message) => {
-    const ext = subagentRuntimeExtensionRef.current;
-    if (!ext) {
-      getLogger("timer-scheduler").warn("timer delivery skipped: subagent runtime not available", {
-        sessionId,
-      });
-      return;
-    }
-    const turn = await ext.runSessionModelTurn({
-      sessionId,
-      userContent: message,
-      userMetadata: { timer_fire: true },
-      delivery: { kind: "internal" },
-      systemContext: {
-        kind: "timer.fire",
-        summary: "This turn was triggered by a deferred timer.",
-        guidance: OOB_NO_SENDER_GUIDANCE,
-      },
-      modelInvocationOverride: {
-        responseSchema: { schema: OOB_SCHEMA_NO_SENDER },
-        structuredOutputMode: "best-effort",
-      },
-    });
-    if (turn?.latestAssistantText) {
-      await deliverOobStructuredResponse({
-        structuredResponse: turn.latestAssistantText,
-        respondTo: sessionId,
-        ext,
-        subLog: getLogger("timer"),
-        hasSender: false,
-      });
-    }
-  });
+  const timerScheduler = new TimerScheduler(deliverTimerMessage);
 
   setTimerScheduler(timerScheduler);
   getTurnQueue().setOnTurnEnd((sessionId) => {
@@ -577,18 +547,17 @@ async function initWorkflowServer(
 
   // (sessions and sessionManager passed as parameters)
 
-  // Resolve configured subagentModel (per-agent override > global default).
-  const workflowAgentId = resolveShoggothAgentId(config);
-  const workflowPerAgentModel = workflowAgentId
-    ? config.agents?.list?.[workflowAgentId]?.subagentModel
-    : undefined;
-  const workflowSubagentModel = workflowPerAgentModel ?? config.agents?.subagentModel;
-
   const spawner = createDaemonSpawnAdapter({
     sessionManager,
     sessions,
     requestTurnAbort: (id) => requestSessionTurnAbort(id),
-    subagentModel: workflowSubagentModel,
+    // Resolve the effective subagent model per spawn from the OWNING AGENT of
+    // the parent session (agents.list.<id>.subagentModel ?? agents.subagentModel),
+    // reading the live config so hot-reload changes are picked up. See issue #375.
+    resolveSubagentModel: (parentSessionId) => {
+      const agentId = parseAgentSessionUrn(parentSessionId)?.agentId;
+      return resolveConfiguredSubagentModel(configRef.current, agentId);
+    },
     stateDb: db,
     runSessionModelTurn: (input) => {
       const ext = subagentRuntimeExtensionRef.current;
@@ -614,6 +583,7 @@ async function initWorkflowServer(
     stateDir: workflowStateDir,
     spawner,
     poller,
+    pinStatusPost: configRef.current.workflow?.pinStatusPost ?? true,
     notifier: {
       async notify(workflowId, success, context) {
         getLogger("daemon").info("workflow completed", {
@@ -678,10 +648,21 @@ async function initWorkflowServer(
     createMessageAdapter: (sessionId: string) =>
       createDaemonMessageAdapter({
         getMessageContext: () => messageToolContextRef.current ?? undefined,
-        resolveChannelId: () => {
-          // This will be resolved after platform starts - the platform adapter handles this
-          return undefined;
-        },
+        resolveChannelId: () =>
+          subagentRuntimeExtensionRef.current?.resolveOutboundChannelIdForSession?.(sessionId),
+        pinMessage: subagentRuntimeExtensionRef.current?.pinMessage
+          ? async (messageId: string) => {
+              const channelId =
+                subagentRuntimeExtensionRef.current?.resolveOutboundChannelIdForSession?.(
+                  sessionId,
+                );
+              if (!channelId) return;
+              await subagentRuntimeExtensionRef.current!.pinMessage!({
+                channelId,
+                messageId,
+              });
+            }
+          : undefined,
         sessionId,
       }),
     createMessagePoster: (_sessionId: string) =>

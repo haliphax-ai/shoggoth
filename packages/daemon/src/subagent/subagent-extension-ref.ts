@@ -45,6 +45,11 @@ export type SubagentRuntimeExtension = {
     readonly sessionId: string;
     readonly userContent: string;
   }) => Promise<void>;
+  /** Pin a message in the resolved channel for a session. Optional platform capability. */
+  readonly pinMessage?: (input: {
+    readonly channelId: string;
+    readonly messageId: string;
+  }) => Promise<void>;
 };
 
 export const subagentRuntimeExtensionRef: {

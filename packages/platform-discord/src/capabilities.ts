@@ -68,6 +68,7 @@ export function discordCapabilityDescriptor(): MessagingAdapterCapabilities {
       reactions: true,
       search: true,
       attachmentDownload: true,
+      pin: true,
     },
     features: [
       MESSAGING_FEATURE.TYPING_NOTIFICATION,
