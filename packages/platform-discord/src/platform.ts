@@ -38,6 +38,7 @@ import {
   type ExecuteSessionAgentTurnInput,
   type SessionAgentTurnResult,
   type SessionModelTurnDelivery,
+  type StatusBarSnapshot,
   type StreamHandle,
   type PlatformAssistantDeps,
   resolveModel,
@@ -53,6 +54,76 @@ import { buildHitlQueuedNoticeLines, createDiscordHitlNotifier } from "./hitl/no
 import { sliceDiscordPlatformMessageBody } from "./errors";
 import { formatAttachmentMetadata } from "./attachment-metadata";
 import { DiscordPlatformAdapter } from "./discord-platform-adapter";
+import { resolveStatusBarConfig, type ResolvedStatusBarConfig } from "@shoggoth/shared";
+import { renderDiscordStatusBar } from "./status-bar";
+
+/** Minimal status-bar dep: config from resolveStatusBarConfig, render from renderDiscordStatusBar,
+ *  and a no-op attachSink; passed to the presentation orchestrator when status is enabled. */
+function buildStatusBarDep(cfg: ResolvedStatusBarConfig): {
+  config: ResolvedStatusBarConfig;
+  render: (snap: StatusBarSnapshot, c: ResolvedStatusBarConfig) => string;
+  attachSink: (h: StreamHandle) => { setStatusBar(line: string | null): Promise<void> };
+} {
+  return {
+    config: cfg,
+    render: renderDiscordStatusBar,
+    // Wrap the stream handle in place: the sink delegates to any native
+    // setStatusBar (Discord streaming applies the bar to the in-flight message)
+    // and the augmented handle is returned so streaming keeps working through it.
+    attachSink: (h: StreamHandle) => {
+      const native = h.setStatusBar?.bind(h);
+      const sink = {
+        setStatusBar: async (line: string | null) => {
+          await native?.(line);
+        },
+      };
+      h.setStatusBar = (line: string | null) => sink.setStatusBar(line);
+      return h as StreamHandle & typeof sink;
+    },
+  };
+}
+
+interface StatusBarTurnStats {
+  readonly sequence: number;
+  readonly compactions: number;
+  readonly inputTokens: number;
+  readonly windowTokens: number | null;
+}
+
+/** Sequence from session_stats.turn_count, compactions from compaction_count,
+ *  context from the latest per-call input tokens (input_tokens column). */
+function readStatusBarStats(db: Database.Database, sessionId: string): StatusBarTurnStats {
+  const row = db
+    .prepare(
+      `SELECT turn_count, compaction_count, input_tokens, context_window_tokens
+       FROM session_stats WHERE session_id = ?`,
+    )
+    .get(sessionId) as
+    | {
+        turn_count: number;
+        compaction_count: number;
+        input_tokens: number;
+        context_window_tokens: number | null;
+      }
+    | undefined;
+  return {
+    sequence: row?.turn_count ?? 0,
+    compactions: row?.compaction_count ?? 0,
+    inputTokens: row?.input_tokens ?? 0,
+    windowTokens: row?.context_window_tokens ?? null,
+  };
+}
+
+/** Terminal Discord status bar line (✅ ｜ 🔢 `n` ｜ 🗑️ `n` ｜ 🪟 `x/y`). */
+function renderStatusBarTerminalLine(s: StatusBarTurnStats): string {
+  const sections = ["✅", `🔢 \`${s.sequence}\``, `🗑️ \`${s.compactions}\``];
+  if (s.inputTokens > 0) {
+    const total =
+      s.windowTokens && s.windowTokens > 0 ? `/${s.windowTokens.toLocaleString("en-US")}` : "";
+    sections.push(`🪟 \`${s.inputTokens.toLocaleString("en-US")}${total}\``);
+  }
+  return sections.join(" ｜ ");
+}
 
 function pickDiscordAssistantDeps(
   input?: Partial<PlatformAssistantDeps> & {
@@ -140,6 +211,10 @@ export async function startDiscordPlatform(
   const getHitlConfig = (): ShoggothConfig["hitl"] =>
     opts.hitlConfigRef ? opts.hitlConfigRef.value : { ...DEFAULT_HITL_CONFIG, ...opts.config.hitl };
 
+  const statusBarDep = buildStatusBarDep(
+    resolveStatusBarConfig(opts.configRef?.current ?? opts.config),
+  );
+
   const mcpRuntime = await createSessionMcpRuntime({
     config: opts.config,
     db: opts.db,
@@ -180,6 +255,7 @@ export async function startDiscordPlatform(
       return streamEnabled() ? streamMinMs() : 0;
     },
     errorReplyPrefix: "⚠️ ",
+    statusBar: statusBarDep,
   });
 
   const unsubs = opts.discord.routes.map((route) =>
@@ -609,9 +685,18 @@ export async function startDiscordPlatform(
           if (streamingOutbound) {
             try {
               const raw = await streamingOutbound.start();
+              // Wrap the raw stream handle with the status-bar sink so the bar
+              // can be applied to the in-flight message (test: raw handles carry
+              // setStatusBar). Delegates to any native setStatusBar on the handle.
+              if (statusBarDep.config.enabled) {
+                statusBarDep.attachSink(raw as unknown as StreamHandle);
+              }
               surfaceStreamHandle = {
                 setFullContent: (text: string) => raw.setFullContent(text),
                 pushUpdate: (text: string) => raw.pushUpdate(text),
+                ...(raw.setStatusBar
+                  ? { setStatusBar: (line: string | null) => raw.setStatusBar!(line) }
+                  : {}),
               };
             } catch (e) {
               opts.logger.warn("discord.platform.stream_start_failed", {
@@ -626,6 +711,12 @@ export async function startDiscordPlatform(
           : undefined;
 
         await adapter.withTypingIndicator(sid, async () => {
+          // Snapshot stats BEFORE the turn runs: executing the turn increments
+          // session_stats.turn_count, and the bar must report the sequence of
+          // the very turn it belongs to (not the next one).
+          const statsAtTurnStart = statusBarDep.config.enabled
+            ? readStatusBarStats(opts.db, sid)
+            : undefined;
           turnResult = await executeTurn(
             buildAfterHitlQueued(delivery),
             surfaceStreamPusher
@@ -645,8 +736,17 @@ export async function startDiscordPlatform(
             turnResult.latestAssistantText,
             turnResult.failoverMeta,
           );
+          // Terminal bar for this turn, rendered from the turn-start stats
+          // snapshot (sequence, compactions, context window fill).
+          const terminalBar =
+            statsAtTurnStart === undefined
+              ? undefined
+              : renderStatusBarTerminalLine(statsAtTurnStart);
           if (surfaceStreamPusher && surfaceStreamHandle) {
             await surfaceStreamPusher.flush();
+            if (terminalBar && surfaceStreamHandle.setStatusBar) {
+              await surfaceStreamHandle.setStatusBar(terminalBar);
+            }
             await surfaceStreamHandle.setFullContent(fullBody);
             // Stream edits can't carry file attachments — send as follow-up.
             const attachments = turnResult.showAttachments;
@@ -654,15 +754,13 @@ export async function startDiscordPlatform(
               await adapter.sendBody(sid, "", { attachments: [...attachments] });
             }
           } else {
-            await adapter.sendBody(sid, fullBody, {
+            await adapter.sendBody(sid, terminalBar ? `${fullBody}\n\n${terminalBar}` : fullBody, {
               replyTo: delivery.replyToMessageId,
             });
           }
         });
         return;
       }
-
-      // Internal delivery (e.g. one-shot subagents): resolve parent session's channel for HITL notices
       let internalAfterHitlQueued: ((row: PendingActionRow) => void | Promise<void>) | undefined;
       if (sessionRow.parentSessionId && hitlReplyInSession) {
         const parentRow = sessions.getById(sessionRow.parentSessionId);
