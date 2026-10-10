@@ -25,7 +25,11 @@ export function createFailoverToolCallingClient(
         hooks,
         input,
         async (entry, input) => {
-          const req: ModelToolCompleteInput = { ...input, model: entry.model };
+          const req: ModelToolCompleteInput = {
+            ...input,
+            model: entry.model,
+            onReasoningDelta: input.onReasoningDelta,
+          };
           return entry.provider.completeWithTools(req);
         },
         (result, entry, i, thinkingFormat) => ({

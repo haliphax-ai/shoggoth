@@ -1,6 +1,51 @@
 import type { ShoggothConfig } from "./schema.js";
 
 // ---------------------------------------------------------------------------
+// Status bar config resolution
+// ---------------------------------------------------------------------------
+
+export interface ResolvedStatusBarConfig {
+  readonly enabled: boolean;
+  readonly statusEnabled: boolean;
+  readonly sequenceEnabled: boolean;
+  readonly toolCallsEnabled: boolean;
+  readonly contextWindowEnabled: boolean;
+  readonly compactionsEnabled: boolean;
+}
+
+/** Defaults: every section enabled. */
+export const DEFAULT_STATUS_BAR_CONFIG: ResolvedStatusBarConfig = {
+  enabled: true,
+  statusEnabled: true,
+  sequenceEnabled: true,
+  toolCallsEnabled: true,
+  contextWindowEnabled: true,
+  compactionsEnabled: true,
+};
+
+/**
+ * Resolve `platforms.statusBar`, merged over defaults.
+ * Env `SHOGGOTH_STATUS_BAR=0` disables entirely.
+ */
+export function resolveStatusBarConfig(cfg: ShoggothConfig): ResolvedStatusBarConfig {
+  const block = cfg.platforms?.statusBar;
+  const merged: ResolvedStatusBarConfig = {
+    enabled: block?.enabled ?? DEFAULT_STATUS_BAR_CONFIG.enabled,
+    statusEnabled: block?.statusEnabled ?? DEFAULT_STATUS_BAR_CONFIG.statusEnabled,
+    sequenceEnabled: block?.sequenceEnabled ?? DEFAULT_STATUS_BAR_CONFIG.sequenceEnabled,
+    toolCallsEnabled: block?.toolCallsEnabled ?? DEFAULT_STATUS_BAR_CONFIG.toolCallsEnabled,
+    contextWindowEnabled:
+      block?.contextWindowEnabled ?? DEFAULT_STATUS_BAR_CONFIG.contextWindowEnabled,
+    compactionsEnabled: block?.compactionsEnabled ?? DEFAULT_STATUS_BAR_CONFIG.compactionsEnabled,
+  };
+  // Env kill switch wins over config (mirrors the platform flag pattern).
+  if (process.env.SHOGGOTH_STATUS_BAR === "0") {
+    return { ...merged, enabled: false };
+  }
+  return merged;
+}
+
+// ---------------------------------------------------------------------------
 // Platform extension validation registry
 // ---------------------------------------------------------------------------
 

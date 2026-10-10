@@ -32,8 +32,7 @@ describe("DiscordStreamingOutbound", () => {
     await handle.setFullContent(longText);
 
     expect(transport.editMessage).toHaveBeenCalledTimes(1);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const createCalls = (transport.createMessage as any).mock.calls;
+    const createCalls = vi.mocked(transport.createMessage).mock.calls;
     // First call is the "…" placeholder, subsequent calls are overflow
     expect(createCalls.length).toBeGreaterThanOrEqual(2);
   });
@@ -77,10 +76,8 @@ describe("DiscordStreamingOutbound", () => {
     await handle.setFullContent(sliced);
 
     // Reset mocks to isolate the final call
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transport.editMessage as any).mockClear();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transport.createMessage as any).mockClear();
+    vi.mocked(transport.editMessage).mockClear();
+    vi.mocked(transport.createMessage).mockClear();
 
     // Final setFullContent with full body (mirrors inbound-session-turn)
     await handle.setFullContent(fullResponse);
@@ -88,10 +85,7 @@ describe("DiscordStreamingOutbound", () => {
     // Should edit original with first chunk
     expect(transport.editMessage).toHaveBeenCalledTimes(1);
     // Should create overflow message(s) for remaining content
-    expect(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (transport.createMessage as any).mock.calls.length,
-    ).toBeGreaterThanOrEqual(1);
+    expect(vi.mocked(transport.createMessage).mock.calls.length).toBeGreaterThanOrEqual(1);
   });
 
   it("pushUpdate edits original message when content fits", async () => {
@@ -108,18 +102,15 @@ describe("DiscordStreamingOutbound", () => {
 
     const handle = await streaming.start();
     // Clear the initial createMessage call
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transport.createMessage as any).mockClear();
+    vi.mocked(transport.createMessage).mockClear();
 
     await handle.pushUpdate("update message");
 
     expect(transport.editMessage).toHaveBeenCalledTimes(1);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const editCalls = (transport.editMessage as any).mock.calls;
+    const editCalls = vi.mocked(transport.editMessage).mock.calls;
     expect(editCalls[0][2].content).toBe("update message");
     // No overflow messages should be created
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((transport.createMessage as any).mock.calls.length).toBe(0);
+    expect(vi.mocked(transport.createMessage).mock.calls.length).toBe(0);
   });
 
   it("pushUpdate creates overflow when content exceeds maxContentLength", async () => {
@@ -136,22 +127,19 @@ describe("DiscordStreamingOutbound", () => {
 
     const handle = await streaming.start();
     // Clear the initial createMessage call
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transport.createMessage as any).mockClear();
+    vi.mocked(transport.createMessage).mockClear();
 
     const longText = "a".repeat(80) + "\n" + "b".repeat(80);
     await handle.pushUpdate(longText);
 
     // Should edit original message with first chunk
     expect(transport.editMessage).toHaveBeenCalledTimes(1);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const editCalls = (transport.editMessage as any).mock.calls;
+    const editCalls = vi.mocked(transport.editMessage).mock.calls;
     expect(editCalls[0][0]).toBe("ch-1");
     expect(editCalls[0][1]).toBe("msg-1");
 
     // Should create overflow message(s) for remaining content
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const createCalls = (transport.createMessage as any).mock.calls;
+    const createCalls = vi.mocked(transport.createMessage).mock.calls;
     expect(createCalls.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -169,24 +157,19 @@ describe("DiscordStreamingOutbound", () => {
 
     const handle = await streaming.start();
     // Clear the initial createMessage call
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transport.createMessage as any).mockClear();
+    vi.mocked(transport.createMessage).mockClear();
 
     // First, send content that requires overflow
     const longText = "a".repeat(80) + "\n" + "b".repeat(80);
     await handle.pushUpdate(longText);
 
     // Mock createMessage to return different IDs for overflow messages
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transport.createMessage as any).mockResolvedValueOnce({ id: "msg-2" });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transport.createMessage as any).mockResolvedValueOnce({ id: "msg-3" });
+    vi.mocked(transport.createMessage).mockResolvedValueOnce({ id: "msg-2" });
+    vi.mocked(transport.createMessage).mockResolvedValueOnce({ id: "msg-3" });
 
     // Reset mocks to track the next call
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transport.editMessage as any).mockClear();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transport.createMessage as any).mockClear();
+    vi.mocked(transport.editMessage).mockClear();
+    vi.mocked(transport.createMessage).mockClear();
 
     // Now send content that fits in one message
     await handle.pushUpdate("short message");
@@ -194,8 +177,7 @@ describe("DiscordStreamingOutbound", () => {
     // Should edit original message
     expect(transport.editMessage).toHaveBeenCalledTimes(1);
     // Should delete overflow messages
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const deleteCalls = (transport.deleteMessage as any).mock.calls;
+    const deleteCalls = vi.mocked(transport.deleteMessage).mock.calls;
     expect(deleteCalls.length).toBeGreaterThan(0);
     // Check that the correct channel and message IDs are used for deletion
     expect(deleteCalls[0][0]).toBe("ch-1");
@@ -224,24 +206,18 @@ describe("DiscordStreamingOutbound", () => {
 
       const handle = await streaming.start();
       // Clear the initial createMessage call
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (transport.createMessage as any).mockClear();
+      vi.mocked(transport.createMessage).mockClear();
 
       // First, send content that requires 3 chunks (2 overflow messages)
       const longText = "a".repeat(80) + "\n" + "b".repeat(80) + "\n" + "c".repeat(80);
       await handle.pushUpdate(longText);
 
       // Reset mocks to track the next call; every deletion now fails
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (transport.editMessage as any).mockClear();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (transport.deleteMessage as any).mockClear();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (transport.deleteMessage as any).mockRejectedValue(new Error("boom"));
+      vi.mocked(transport.editMessage).mockClear();
+      vi.mocked(transport.deleteMessage).mockClear();
+      vi.mocked(transport.deleteMessage).mockRejectedValue(new Error("boom"));
 
-      const deleteCount = () =>
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (transport.deleteMessage as any).mock.calls.length;
+      const deleteCount = () => vi.mocked(transport.deleteMessage).mock.calls.length;
 
       const update = handle.pushUpdate("short message");
 
@@ -272,8 +248,7 @@ describe("DiscordStreamingOutbound", () => {
       );
 
       // The failed entries were dropped: a later update retries nothing
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (transport.deleteMessage as any).mockClear();
+      vi.mocked(transport.deleteMessage).mockClear();
       await handle.pushUpdate("short again");
       expect(deleteCount()).toBe(0);
     } finally {
@@ -304,8 +279,7 @@ describe("DiscordStreamingOutbound", () => {
 
       const handle = await streaming.start();
       // Give overflow messages distinct ids: msg-2 and msg-3
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (transport.createMessage as any)
+      vi.mocked(transport.createMessage)
         .mockResolvedValueOnce({ id: "msg-2" })
         .mockResolvedValueOnce({ id: "msg-3" });
 
@@ -314,12 +288,9 @@ describe("DiscordStreamingOutbound", () => {
       await handle.pushUpdate(longText);
 
       // Reset mocks; msg-2 deletion always fails, msg-3 succeeds
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (transport.editMessage as any).mockClear();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (transport.deleteMessage as any).mockClear();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (transport.deleteMessage as any).mockImplementation((_ch: string, id: string) =>
+      vi.mocked(transport.editMessage).mockClear();
+      vi.mocked(transport.deleteMessage).mockClear();
+      vi.mocked(transport.deleteMessage).mockImplementation((_ch: string, id: string) =>
         id === "msg-2" ? Promise.reject(new Error("boom")) : Promise.resolve(undefined),
       );
 
@@ -331,9 +302,7 @@ describe("DiscordStreamingOutbound", () => {
       // msg-3 is still processed afterwards despite msg-2's failure
       await vi.advanceTimersByTimeAsync(0);
       await update;
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const deleteCalls = (transport.deleteMessage as any).mock.calls;
+      const deleteCalls = vi.mocked(transport.deleteMessage).mock.calls;
       const forMsg2 = deleteCalls.filter((call) => call[1] === "msg-2");
       const forMsg3 = deleteCalls.filter((call) => call[1] === "msg-3");
       expect(forMsg2.length).toBe(3); // finite retries, then give up
@@ -354,8 +323,7 @@ describe("DiscordStreamingOutbound", () => {
     const maxLen = 100;
 
     // Mock createMessage to return different IDs for overflow messages
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transport.createMessage as any)
+    vi.mocked(transport.createMessage)
       .mockResolvedValueOnce({ id: "msg-1" }) // initial message
       .mockResolvedValueOnce({ id: "msg-2" }) // overflow 1
       .mockResolvedValueOnce({ id: "msg-3" }); // overflow 2
@@ -374,22 +342,18 @@ describe("DiscordStreamingOutbound", () => {
     await handle.pushUpdate(longText1);
 
     // Reset mocks to track the next call
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transport.editMessage as any).mockClear();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transport.createMessage as any).mockClear();
+    vi.mocked(transport.editMessage).mockClear();
+    vi.mocked(transport.createMessage).mockClear();
 
     // Now send slightly different content that still requires overflow
     const longText2 = "c".repeat(80) + "\n" + "d".repeat(80);
     await handle.pushUpdate(longText2);
 
     // Should edit original message with first chunk and edit existing overflow messages
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const editCalls = (transport.editMessage as any).mock.calls;
+    const editCalls = vi.mocked(transport.editMessage).mock.calls;
     // First edit is original message, subsequent edits should be for overflow messages
     expect(editCalls.length).toBeGreaterThanOrEqual(2);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const createCalls = (transport.createMessage as any).mock.calls;
+    const createCalls = vi.mocked(transport.createMessage).mock.calls;
     expect(createCalls.length).toBe(0); // Should not create new messages
   });
 
@@ -399,8 +363,7 @@ describe("DiscordStreamingOutbound", () => {
     const maxLen = 100;
 
     // Mock createMessage to return different IDs for overflow messages
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transport.createMessage as any)
+    vi.mocked(transport.createMessage)
       .mockResolvedValueOnce({ id: "msg-1" }) // initial message
       .mockResolvedValueOnce({ id: "msg-2" }) // overflow 1
       .mockResolvedValueOnce({ id: "msg-3" }); // overflow 2
@@ -419,18 +382,15 @@ describe("DiscordStreamingOutbound", () => {
     await handle.pushUpdate(longText);
 
     // Reset mocks to track the next call
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transport.editMessage as any).mockClear();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transport.createMessage as any).mockClear();
+    vi.mocked(transport.editMessage).mockClear();
+    vi.mocked(transport.createMessage).mockClear();
 
     // Now send content that only requires 2 chunks
     const shorterText = "x".repeat(80) + "\n" + "y".repeat(80);
     await handle.pushUpdate(shorterText);
 
     // Should delete the third overflow message (msg-4)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const deleteCalls = (transport.deleteMessage as any).mock.calls;
+    const deleteCalls = vi.mocked(transport.deleteMessage).mock.calls;
     expect(deleteCalls.length).toBeGreaterThan(0);
     // Check that msg-4 is deleted (the stale overflow message)
     const msg4Deleted = deleteCalls.some((call) => call[1] === "msg-3");
@@ -443,8 +403,7 @@ describe("DiscordStreamingOutbound", () => {
     const maxLen = 100;
 
     // Mock createMessage to return different IDs for overflow messages
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transport.createMessage as any)
+    vi.mocked(transport.createMessage)
       .mockResolvedValueOnce({ id: "msg-1" }) // initial message
       .mockResolvedValueOnce({ id: "msg-2" }) // overflow 1
       .mockResolvedValueOnce({ id: "msg-3" }); // overflow 2
@@ -463,21 +422,133 @@ describe("DiscordStreamingOutbound", () => {
     await handle.setFullContent(longText);
 
     // Reset mocks to track the next call
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transport.editMessage as any).mockClear();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transport.createMessage as any).mockClear();
+    vi.mocked(transport.editMessage).mockClear();
+    vi.mocked(transport.createMessage).mockClear();
 
     // Now send content that only requires 2 chunks
     const shorterText = "x".repeat(80) + "\n" + "y".repeat(80);
     await handle.setFullContent(shorterText);
 
     // Should delete the third overflow message (msg-4)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const deleteCalls = (transport.deleteMessage as any).mock.calls;
+    const deleteCalls = vi.mocked(transport.deleteMessage).mock.calls;
     expect(deleteCalls.length).toBeGreaterThan(0);
     // Check that msg-4 is deleted (the stale overflow message)
     const msg4Deleted = deleteCalls.some((call) => call[1] === "msg-3");
     expect(msg4Deleted).toBe(true);
+  });
+});
+
+describe("DiscordStreamingOutbound status bar", () => {
+  it("setStatusBar stores the bar line and re-edits the in-flight message using the last pushed content", async () => {
+    const transport = createMockTransport();
+    const caps = discordCapabilityDescriptor();
+    const maxLen = 2000;
+
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: caps,
+      channelId: "ch-1",
+      maxContentLength: maxLen,
+    });
+
+    const handle = await streaming.start();
+    // Clear the initial createMessage call
+    vi.mocked(transport.createMessage).mockClear();
+
+    await handle.pushUpdate("hello world");
+    vi.mocked(transport.editMessage).mockClear();
+
+    await handle.setStatusBar!("> ✅");
+
+    // Re-edits the in-flight message with the last pushed content + the bar
+    const editCalls = vi.mocked(transport.editMessage).mock.calls;
+    expect(editCalls).toHaveLength(1);
+    expect(editCalls[0][0]).toBe("ch-1");
+    expect(editCalls[0][1]).toBe("msg-1");
+    expect(editCalls[0][2].content).toBe("hello world\n\n> ✅");
+
+    // A later bar update re-edits using the latest pushed content
+    await handle.pushUpdate("second update");
+    await handle.setStatusBar!("> 🧠 ｜ 🔢 `2`");
+    const laterCalls = vi.mocked(transport.editMessage).mock.calls;
+    expect(laterCalls[laterCalls.length - 1][2].content).toBe("second update\n\n> 🧠 ｜ 🔢 `2`");
+
+    // Clearing the bar strips it from the last pushed content
+    await handle.setStatusBar!(null);
+    const finalCalls = vi.mocked(transport.editMessage).mock.calls;
+    expect(finalCalls[finalCalls.length - 1][2].content).toBe("second update");
+  });
+
+  it("reserves the bar line in the split budget so the 2000-char limit holds while a bar is active", async () => {
+    const transport = createMockTransport();
+    const caps = discordCapabilityDescriptor();
+    const maxLen = 2000;
+    const bar = "> ✅ ｜ 🔢 `217` ｜ 🗑️ `1`";
+
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: caps,
+      channelId: "ch-1",
+      maxContentLength: maxLen,
+    });
+
+    const handle = await streaming.start();
+    // Clear the initial createMessage call
+    vi.mocked(transport.createMessage).mockClear();
+
+    // Body whose last chunk would overflow 2000 once the bar is appended
+    const body = "a".repeat(1990) + "\n" + "b".repeat(1990);
+    await handle.pushUpdate(body);
+    await handle.setStatusBar!(bar);
+
+    // Every edit stays within the 2000-char limit
+    const editCalls = vi.mocked(transport.editMessage).mock.calls;
+    for (const call of editCalls) {
+      expect(call[2].content.length).toBeLessThanOrEqual(maxLen);
+    }
+    // The bar made it onto the last delivered chunk as a blank-line-separated
+    // blockquote. With the bar reserved in the split budget the reduced budget
+    // produces an extra overflow message, so the last delivered chunk may be a
+    // create rather than an edit.
+    const editCallsAll = vi.mocked(transport.editMessage).mock.calls;
+    const createCallsAll = vi.mocked(transport.createMessage).mock.calls;
+    const delivered = [
+      ...editCallsAll.map((call) => call[2].content),
+      ...createCallsAll.map((call) => call[1].content),
+    ];
+    for (const content of delivered) {
+      expect(content.length).toBeLessThanOrEqual(maxLen);
+    }
+    const lastDelivered = delivered[delivered.length - 1];
+    expect(lastDelivered.endsWith("\n\n" + bar)).toBe(true);
+    expect(lastDelivered.length).toBeLessThanOrEqual(maxLen);
+  });
+
+  it("lands the bar on the last chunk only as a blank-line-separated blockquote", async () => {
+    const transport = createMockTransport();
+    const caps = discordCapabilityDescriptor();
+    const maxLen = 100;
+    const bar = "> ✅";
+
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: caps,
+      channelId: "ch-1",
+      maxContentLength: maxLen,
+    });
+
+    const handle = await streaming.start();
+    // Clear the initial createMessage call
+    vi.mocked(transport.createMessage).mockClear();
+
+    // Three-chunk body: the bar must appear only on the final chunk
+    const body = "a".repeat(80) + "\n" + "b".repeat(80) + "\n" + "c".repeat(80);
+    await handle.pushUpdate(body);
+    await handle.setStatusBar!(bar);
+    const editCalls = vi.mocked(transport.editMessage).mock.calls;
+    const barEdits = editCalls.filter((call) => call[2].content.includes(bar));
+    expect(barEdits).toHaveLength(1);
+    // The single bar edit is the last chunk, blank-line-separated blockquote
+    expect(editCalls[editCalls.length - 1][2].content.endsWith("\n\n" + bar)).toBe(true);
   });
 });

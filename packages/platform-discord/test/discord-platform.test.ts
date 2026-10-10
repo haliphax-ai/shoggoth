@@ -2552,3 +2552,287 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     );
   });
 });
+
+describe("platform status bar dep wiring", { concurrency: false }, () => {
+  let db: Database.Database;
+  let tmp: string;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    tmp = mkdtempSync(join(tmpdir(), "shoggoth-discord-status-"));
+    const dbPath = join(tmp, "s.db");
+    db = new Database(dbPath);
+    db.pragma("foreign_keys = ON");
+    migrate(db, defaultMigrationsDir());
+    setTurnQueue(new TieredTurnQueue());
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await closeTestDb(db, tmp);
+  });
+
+  /** Seed session_stats for the session: sequence from turn_count, compactions from compaction_count,
+   *  context from the latest per-call input_tokens (input_tokens column). */
+  function seedStats(
+    sessionUrn: string,
+    overrides: Partial<{
+      turn_count: number;
+      compaction_count: number;
+      input_tokens: number;
+      context_window_tokens: number;
+    }> = {},
+  ) {
+    db.prepare(
+      `INSERT INTO session_stats (session_id, turn_count, compaction_count, input_tokens, output_tokens, context_window_tokens, updated_at)
+       VALUES (@sid, @tc, @cc, @it, 0, @cwt, datetime('now'))`,
+    ).run({
+      sid: sessionUrn,
+      tc: overrides.turn_count ?? 7,
+      cc: overrides.compaction_count ?? 2,
+      it: overrides.input_tokens ?? 31_421,
+      cwt: overrides.context_window_tokens ?? 100_000,
+    });
+  }
+
+  function baseRuntime(sessionUrn: string, capture: { body: string }[]): DiscordMessagingRuntime {
+    return {
+      stop: async () => {},
+      gateway: stubDiscordGatewaySession,
+      discordBotUserId: undefined,
+      outbound: {
+        sendDiscord: async (m) => {
+          capture.push({ body: m.body });
+          return { channelId: "c", messageId: "mid" };
+        },
+      },
+      discordRestTransport: stubDiscordRestTransport,
+      streamingForSession: () => undefined,
+      bus: createAgentToAgentBus(),
+      capabilities: discordCapabilityDescriptor(),
+      registerPlatformThreadBinding: () => () => {},
+      notifyAgentTypingForSession: stubNotifyAgentTyping,
+      routes: [{ channelId: "c1", sessionId: sessionUrn }],
+    };
+  }
+
+  it("builds the statusBar dep {config from resolveStatusBarConfig, render from renderDiscordStatusBar, attachSink} and passes it to the presentation orchestrator when status is enabled", async () => {
+    const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
+    createSessionStore(db).create({ id: sessionUrn, workspacePath: tmp });
+
+    // The orchestrator wraps pre-started stream handles with attachSink only when
+    // streaming is enabled. To observe the dep end-to-end we enable streaming so
+    // the platform builds a stream handle; the orchestrator then calls the dep's
+    // attachSink. The stub attachSink is a no-op, so the returned handle never
+    // gains setStatusBar — asserting on that proves the sink was NOT attached.
+    const capture: { body: string }[] = [];
+    const streamHandles: Array<{
+      setFullContent(text: string): Promise<void>;
+      pushUpdate(text: string): Promise<void>;
+      setStatusBar?: (line: string | null) => Promise<void>;
+    }> = [];
+    const runtime: DiscordMessagingRuntime = {
+      ...baseRuntime(sessionUrn, capture),
+      streamingForSession: () => ({
+        start: async () => {
+          const handle = {
+            setFullContent: async () => {},
+            pushUpdate: async () => {},
+          };
+          streamHandles.push(handle);
+          return handle;
+        },
+      }),
+    };
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: {
+        ...defaultConfig(tmp),
+        platforms: { statusBar: { enabled: true } },
+      },
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord: runtime,
+      env: { SHOGGOTH_DISCORD_STREAM: "1" },
+      deps: {
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            return {
+              content: "wired",
+              toolCalls: [],
+              usedModel: "m1",
+              usedProviderId: "p1",
+            };
+          },
+        }),
+      },
+    });
+
+    await platform.runSessionModelTurn({
+      sessionId: sessionUrn,
+      userContent: "hi",
+      delivery: { kind: "messaging_surface", userId: "u-1" },
+    });
+    await platform.stop();
+
+    // The platform builds a status bar dep and the orchestrator wraps the pre-started
+    // stream handle via attachSink, returning a handle that can carry setStatusBar.
+    // With the minimal no-op stub the handle never gains setStatusBar, so this FAILS
+    // until the real attachSink is wired (GREEN task).
+    assert.ok(
+      streamHandles.length > 0,
+      "streaming should start a stream handle for the messaging_surface path",
+    );
+    assert.ok(
+      streamHandles.every((h) => typeof h.setStatusBar === "function"),
+      "the orchestrator must attach the status-bar sink so the stream handle carries setStatusBar",
+    );
+  });
+
+  it("runSessionModelTurn messaging_surface: tracker wraps the stream pusher and the terminal bar lands on the final setFullContent", async () => {
+    const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
+    createSessionStore(db).create({ id: sessionUrn, workspacePath: tmp });
+    seedStats(sessionUrn, {
+      turn_count: 7,
+      compaction_count: 2,
+      input_tokens: 31_421,
+      context_window_tokens: 100_000,
+    });
+
+    const capture: { body: string }[] = [];
+    let finalBody: string | undefined;
+    const barLines: Array<string | null> = [];
+    const runtime: DiscordMessagingRuntime = {
+      ...baseRuntime(sessionUrn, capture),
+      streamingForSession: () => ({
+        start: async () => ({
+          setFullContent: async (text: string) => {
+            finalBody = text;
+          },
+          pushUpdate: async () => {},
+          setStatusBar: async (line: string | null) => {
+            barLines.push(line);
+          },
+        }),
+      }),
+    };
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: {
+        ...defaultConfig(tmp),
+        platforms: { statusBar: { enabled: true } },
+      },
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord: runtime,
+      env: { SHOGGOTH_DISCORD_STREAM: "1" },
+      deps: {
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            return {
+              content: "streamed reply",
+              toolCalls: [],
+              usedModel: "m1",
+              usedProviderId: "p1",
+            };
+          },
+        }),
+      },
+    });
+
+    await platform.runSessionModelTurn({
+      sessionId: sessionUrn,
+      userContent: "hi",
+      delivery: { kind: "messaging_surface", userId: "u-1" },
+    });
+    await platform.stop();
+
+    // The terminal bar (✅ ｜ 🔢 `7` ｜ 🗑️ `2` ｜ 🪟 ...) must land on the final
+    // stream delivery. The tracker renders it and passes it through the sink that
+    // wraps the stream pusher; with the no-op attachSink the handle never receives
+    // the bar, so this FAILS until the real sink applies the line.
+    const terminalLine = barLines.at(-1);
+    assert.ok(
+      terminalLine !== undefined,
+      "the terminal bar must be applied to the in-flight stream message",
+    );
+    assert.ok(terminalLine!.includes("✅"), "terminal bar must render the ✅ finished phase");
+    assert.ok(
+      terminalLine!.includes("`7`"),
+      `terminal bar must carry sequence 7 from session_stats.turn_count, got: ${terminalLine}`,
+    );
+    assert.ok(
+      terminalLine!.includes("`2`"),
+      `terminal bar must carry compactions 2 from session_stats.compaction_count, got: ${terminalLine}`,
+    );
+    assert.ok(
+      terminalLine!.includes("31.4%/100K"),
+      `terminal bar must carry the latest per-call input tokens as context, got: ${terminalLine}`,
+    );
+
+    // The body that lands on the final setFullContent is the formatted reply; with the
+    // real sink the bar is appended to it (body ends with the bar).
+    assert.ok(finalBody !== undefined, "final setFullContent must be called");
+  });
+
+  it("runSessionModelTurn messaging_surface at-once: terminal bar lands on the final sendBody", async () => {
+    const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
+    createSessionStore(db).create({ id: sessionUrn, workspacePath: tmp });
+    seedStats(sessionUrn, {
+      turn_count: 7,
+      compaction_count: 2,
+      input_tokens: 31_421,
+      context_window_tokens: 100_000,
+    });
+
+    const capture: { body: string }[] = [];
+    const platform = await startDiscordPlatform({
+      db,
+      config: {
+        ...defaultConfig(tmp),
+        platforms: { statusBar: { enabled: true } },
+      },
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord: baseRuntime(sessionUrn, capture),
+      deps: {
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            return {
+              content: "plain reply",
+              toolCalls: [],
+              usedModel: "m1",
+              usedProviderId: "p1",
+            };
+          },
+        }),
+      },
+    });
+
+    await platform.runSessionModelTurn({
+      sessionId: sessionUrn,
+      userContent: "hi",
+      delivery: { kind: "messaging_surface", userId: "u-1" },
+    });
+    await platform.stop();
+
+    // At-once path: the final sendBody must carry the terminal bar appended.
+    assert.ok(
+      capture.length > 0,
+      "the messaging_surface at-once path must deliver the reply via sendBody",
+    );
+    const last = capture[capture.length - 1]!.body;
+    assert.ok(last.includes("✅"), `final sendBody must carry the terminal ✅ bar, got: ${last}`);
+    assert.ok(
+      last.includes("`7`"),
+      `final sendBody must carry sequence 7 from session_stats.turn_count, got: ${last}`,
+    );
+    assert.ok(
+      last.includes("`2`"),
+      `final sendBody must carry compactions 2 from session_stats.compaction_count, got: ${last}`,
+    );
+    assert.ok(
+      last.includes("31.4%/100K"),
+      `final sendBody must carry the latest per-call input tokens as context, got: ${last}`,
+    );
+  });
+});

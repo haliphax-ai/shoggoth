@@ -27,6 +27,9 @@ export interface StreamHandle {
 
   /** Update the current message content incrementally. */
   pushUpdate(text: string): Promise<void>;
+
+  /** Optional: apply the rendered status bar to the in-flight message. */
+  setStatusBar?(line: string | null): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,6 +75,7 @@ export interface PlatformAdapter {
       replyTo?: string;
       attachments?: OutboundAttachment[];
       thinkingDisplay?: ThinkingDisplay;
+      statusBar?: string;
     },
   ): Promise<void>;
 
@@ -83,6 +87,7 @@ export interface PlatformAdapter {
       replyTo?: string;
       attachments?: OutboundAttachment[];
       thinkingDisplay?: ThinkingDisplay;
+      statusBar?: string;
     },
   ): Promise<void>;
 

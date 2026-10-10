@@ -30,6 +30,14 @@ export class ToolCallTimeoutError extends Error {
   }
 }
 
+export interface ToolCallEvent {
+  readonly phase: "start" | "end";
+  readonly name: string;
+  readonly argsJson: string;
+  /** Present on "end". */
+  readonly runtimeMs?: number;
+}
+
 export interface ToolCall {
   readonly id: string;
   readonly name: string;
@@ -128,6 +136,11 @@ export interface RunToolLoopOptions {
   }>;
   /** When set, configurable system gates (AGENTS.md / re-read) run before HITL and after execution. */
   readonly systemGates?: SystemGatesHook;
+  /**
+   * Fired around executor.execute for calls that proceed to execution (not policy-denied,
+   * HITL-queued, or validation-skipped dispatches). "start" then "end" per executed call.
+   */
+  readonly onToolCallEvent?: (ev: ToolCallEvent) => void;
 }
 
 /** Callback payload for incremental stats updates during the tool loop. */
@@ -675,12 +688,19 @@ async function processSingleToolCall(
     sessionId: options.sessionId,
   });
 
+  // Fired only for calls that proceed to execution (not policy-denied,
+  // HITL-queued, or validation-skipped dispatches).
+  options.onToolCallEvent?.({
+    phase: "start",
+    name: compoundResource,
+    argsJson: tc.argsJson,
+  });
+
   const execPromise = options.executor.execute({
     name: tc.name,
     argsJson: tc.argsJson,
     toolCallId: tc.id,
   });
-
   let out: { resultJson: string; contentParts?: ChatContentPart[] };
   const timeoutMs = options.toolCallTimeoutMs;
   try {
@@ -760,6 +780,13 @@ async function processSingleToolCall(
     sessionId: options.sessionId,
     durationMs: Date.now() - t0,
     success: true,
+  });
+
+  options.onToolCallEvent?.({
+    phase: "end",
+    name: compoundResource,
+    argsJson: tc.argsJson,
+    runtimeMs: Date.now() - t0,
   });
 
   // ---- Stage 5.5: system gates post-execution producer ----
