@@ -66,6 +66,7 @@ Defines the entire Shoggoth configuration surface as Zod schemas. Every config k
 | `ShoggothRetentionConfig`          | Data lifecycle: `inboundMediaMaxAgeDays`, `inboundMediaMaxTotalBytes`, `transcriptMessageMaxAgeDays`, `transcriptMaxMessagesPerSession`, `kvMaxEntries`. See [Daemon — Retention](daemon.md#retention).                                                                                                        |
 | `AttachmentHandlingMode`           | `"download"` \| `"inline"` \| `"hybrid"` — how inbound platform attachments are processed. Default: `"download"`.                                                                                                                                                                                              |
 | `AttachmentHandlingConfig`         | `{ mode?: AttachmentHandlingMode }` — optional block under `platforms.attachmentHandling` (global) and `agents.list.<id>.platforms.attachmentHandling` (per-agent). Per-agent takes precedence over global; default `"download"`.                                                                              |
+| `StatusBarConfig`                  | `{ enabled?, statusEnabled?, sequenceEnabled?, toolCallsEnabled?, contextWindowEnabled?, compactionsEnabled? }` — optional block under `platforms.statusBar`. Defaults: every section enabled; `SHOGGOTH_STATUS_BAR=0` disables entirely.                                                                      |
 | `ShoggothRuntimeConfig`            | Daemon timers, feature flags, resilience settings. Includes `agentId`, `toolCallTimeoutMs`, `modelResilience`, `turnQueue`, `minimalContext`, etc.                                                                                                                                                             |
 | `ShoggothAgentsConfig`             | Global agent defaults: `contextLevel`, `subagentContextLevel`, `internalStreaming`, `subagentModel`, `subagentMcp`. Contains `list` map of per-agent entries.                                                                                                                                                  |
 | `ShoggothAgentEntry`               | Per-agent overrides: `displayName`, `emoji`, `models`, `platforms`, `memory`, `agentToAgent`, `subagentSpawnAllow`, `maxSpawnDepth`, `sessionQuery`, `policy`, `hitl`, `contextLevel`, `subagentContextLevel`, `toolDiscovery`, `thinkingDisplay`, `subagentModel`, `mcp`, `subagentMcp`, `toolCallTimeoutMs`. |
@@ -389,6 +390,56 @@ Controls how inbound platform attachments (images, files) are processed before b
 2. Check `agents.list.<agentId>.platforms.attachmentHandling.mode` — if set, use it.
 3. Fall back to `platforms.attachmentHandling.mode`.
 4. Default: `"download"`.
+
+---
+
+## Status Bar
+
+**Schema:** `statusBarConfigSchema` in `schema.ts`
+
+Controls the per-turn status bar rendered at the end of platform messages (e.g. the Discord turn status bar). Configurable globally under `platforms.statusBar`. Default: every section enabled.
+
+### Fields
+
+| Field                  | Description                                                |
+| ---------------------- | ---------------------------------------------------------- |
+| `enabled`              | Master toggle for the status bar. Default: `true`.         |
+| `statusEnabled`        | Show the status line (✅ / 🛑 / ❌ / ⏸️). Default: `true`. |
+| `sequenceEnabled`      | Show the turn sequence number. Default: `true`.            |
+| `toolCallsEnabled`     | Show the tool call line. Default: `true`.                  |
+| `contextWindowEnabled` | Show the context window usage. Default: `true`.            |
+| `compactionsEnabled`   | Show the compaction counter. Default: `true`.              |
+
+### Config Example
+
+```jsonc
+// Everything enabled (default)
+{
+  "platforms": {
+    "statusBar": {}
+  }
+}
+
+// Status line only; hide sequence, tool calls, context, compactions
+{
+  "platforms": {
+    "statusBar": {
+      "statusEnabled": true,
+      "sequenceEnabled": false,
+      "toolCallsEnabled": false,
+      "contextWindowEnabled": false,
+      "compactionsEnabled": false
+    }
+  }
+}
+```
+
+### Resolution
+
+`resolveStatusBarConfig(cfg)` in `packages/shared/src/platform-config.ts`:
+
+1. Merge `platforms.statusBar` over `DEFAULT_STATUS_BAR_CONFIG` (every section enabled).
+2. `SHOGGOTH_STATUS_BAR=0` disables the bar entirely (env wins over config).
 
 ---
 
