@@ -236,4 +236,33 @@ describe("createFailoverToolCallingClient", () => {
       assert.deepEqual(exhaustedIds, ["a", "b"]);
     });
   });
+
+  describe("onReasoningDelta forwarding", () => {
+    it("forwards onReasoningDelta identically to the active provider's completeWithTools", async () => {
+      const provider: ModelProvider = {
+        id: "a",
+        async complete() {
+          return { content: "ok" };
+        },
+        async completeWithTools(input) {
+          input.onReasoningDelta?.("step1 ", "step1 ");
+          input.onReasoningDelta?.("step2", "step1 step2");
+          return { content: "ok", toolCalls: [] };
+        },
+      };
+      const c = createFailoverToolCallingClient([{ provider, model: "m1" }]);
+
+      const reasoningDeltas: Array<[string, string]> = [];
+      await c.completeWithTools({
+        messages: [{ role: "user", content: "x" }],
+        tools: [],
+        onReasoningDelta: (d, acc) => reasoningDeltas.push([d, acc]),
+      });
+
+      assert.deepEqual(reasoningDeltas, [
+        ["step1 ", "step1 "],
+        ["step2", "step1 step2"],
+      ]);
+    });
+  });
 });

@@ -72,6 +72,9 @@ export interface OpenAIToolFunctionDefinition {
 /** Optional callback for streaming assistant text (`stream: true` on OpenAI-compatible providers). */
 export type ModelStreamTextDeltaCallback = (delta: string, accumulated: string) => void;
 
+/** Optional callback for streaming reasoning/thinking deltas (`stream: true` on OpenAI-compatible providers). */
+export type ModelStreamReasoningDeltaCallback = (delta: string, accumulated: string) => void;
+
 /**
  * Extended thinking (Anthropic Messages `thinking` block). When `enabled`, providers that support it
  * send `budget_tokens` (default applied in the Anthropic adapter when omitted).
@@ -134,6 +137,7 @@ export interface ModelToolCompleteInput extends ModelInvocationParams {
   /** When true, request SSE (`stream: true`); omitted or false keeps JSON non-streaming behavior. */
   readonly stream?: boolean;
   readonly onTextDelta?: ModelStreamTextDeltaCallback;
+  readonly onReasoningDelta?: ModelStreamReasoningDeltaCallback;
 }
 
 /** Token usage metadata returned by model providers (when available). */
@@ -157,6 +161,7 @@ export interface ModelCompleteInput extends ModelInvocationParams {
   readonly messages: readonly ChatMessage[];
   readonly stream?: boolean;
   readonly onTextDelta?: ModelStreamTextDeltaCallback;
+  readonly onReasoningDelta?: ModelStreamReasoningDeltaCallback;
 }
 
 export interface ModelCompleteOutput {

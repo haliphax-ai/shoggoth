@@ -590,3 +590,83 @@ describe("serializeChatMessage with ChatContentPart[]", () => {
     assert.equal(body.messages[0]!.reasoning_content, undefined);
   });
 });
+
+describe("reasoning delta streaming (onReasoningDelta)", () => {
+  it("calls onReasoningDelta with correct delta and accumulated values for interleaved reasoning/content deltas", async () => {
+    const reasoningDeltas: Array<[string, string]> = [];
+    const textDeltas: Array<[string, string]> = [];
+    const fetchImpl = async () =>
+      sseResponse([
+        'data: {"choices":[{"delta":{"reasoning_content":"Let me "}}]}',
+        'data: {"choices":[{"delta":{"content":"The answer "}}]}',
+        'data: {"choices":[{"delta":{"reasoning_content":"calculate"}}]}',
+        'data: {"choices":[{"delta":{"content":"is 42."}}]}',
+        'data: {"choices":[{"delta":{"reasoning_content":"..."}}]}',
+        "data: [DONE]",
+      ]);
+
+    const p = createOpenAICompatibleProvider({
+      id: "p1",
+      baseUrl: "https://api.example/v1",
+      fetchImpl,
+    });
+
+    const out = await p.completeWithTools({
+      model: "m",
+      messages: [{ role: "user", content: "p" }],
+      tools: [
+        {
+          type: "function",
+          function: { name: "noop", parameters: { type: "object", properties: {} } },
+        },
+      ],
+      stream: true,
+      onTextDelta: (d, acc) => textDeltas.push([d, acc]),
+      onReasoningDelta: (d, acc) => reasoningDeltas.push([d, acc]),
+    });
+
+    assert.equal(out.content, "The answer is 42.");
+    assert.equal(out.reasoningContent, "Let me calculate...");
+    assert.deepEqual(reasoningDeltas, [
+      ["Let me ", "Let me "],
+      ["calculate", "Let me calculate"],
+      ["...", "Let me calculate..."],
+    ]);
+    assert.deepEqual(textDeltas, [
+      ["The answer ", "The answer "],
+      ["is 42.", "The answer is 42."],
+    ]);
+  });
+
+  it("does not call onReasoningDelta when the stream has no reasoning fields", async () => {
+    const reasoningDeltas: Array<[string, string]> = [];
+    const fetchImpl = async () =>
+      sseResponse([
+        'data: {"choices":[{"delta":{"content":"Hi "}}]}',
+        'data: {"choices":[{"delta":{"content":"there"}}]}',
+        "data: [DONE]",
+      ]);
+
+    const p = createOpenAICompatibleProvider({
+      id: "p1",
+      baseUrl: "https://api.example/v1",
+      fetchImpl,
+    });
+
+    const out = await p.completeWithTools({
+      model: "m",
+      messages: [{ role: "user", content: "p" }],
+      tools: [
+        {
+          type: "function",
+          function: { name: "noop", parameters: { type: "object", properties: {} } },
+        },
+      ],
+      stream: true,
+      onReasoningDelta: (d, acc) => reasoningDeltas.push([d, acc]),
+    });
+
+    assert.equal(out.content, "Hi there");
+    assert.deepEqual(reasoningDeltas, []);
+  });
+});

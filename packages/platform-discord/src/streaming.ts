@@ -30,6 +30,8 @@ export interface DiscordStreamHandle {
   readonly messageId: string;
   setFullContent(text: string): Promise<void>;
   pushUpdate(text: string): Promise<void>;
+  /** Optional: apply the rendered status bar line to the in-flight message. */
+  setStatusBar?(line: string | null): Promise<void>;
 }
 
 export interface DiscordStreamingOutbound {
@@ -63,6 +65,10 @@ export function createDiscordStreamingOutbound(
       });
       const messageId = created.id;
       const overflowMessages = new Map<number, OverflowMessage>();
+      /** Rendered status bar line while a bar is active; null when no bar is set. */
+      let _statusBarLine: string | null = null;
+      /** Most recently pushed/full body text (formatted, bar excluded). */
+      let lastPushedText: string | null = null;
 
       const reconcileOverflow = async (chunks: string[]): Promise<void> => {
         // Edit original message with first chunk
@@ -130,6 +136,21 @@ export function createDiscordStreamingOutbound(
         return false;
       };
 
+      /** Split budget while a bar is active: reserve the bar line plus its blank separator. */
+      const splitBudget = (line: string | null): number =>
+        line === null ? maxContentLength : maxContentLength - (line.length + 2);
+
+      /**
+       * Append the active status bar to the last chunk as a blank-line-separated
+       * blockquote so it lands once, at the end of the message.
+       */
+      const applyStatusBar = (chunks: string[], line: string): string[] => {
+        if (chunks.length === 0) return chunks;
+        const withBar = [...chunks];
+        withBar[withBar.length - 1] = withBar[withBar.length - 1] + "\n\n" + line;
+        return withBar;
+      };
+
       return {
         messageId,
         async setFullContent(text: string): Promise<void> {
@@ -138,9 +159,13 @@ export function createDiscordStreamingOutbound(
             formattedText = formatMessageWithThinking(text, thinkingDisplay);
           }
           formattedText = mdTableToAscii(formattedText);
+          lastPushedText = formattedText;
 
-          const chunks = splitDiscordMessage(formattedText, maxContentLength);
-          await reconcileOverflow(chunks);
+          const budget = splitBudget(_statusBarLine);
+          const chunks = splitDiscordMessage(formattedText, budget);
+          const finalChunks =
+            _statusBarLine === null ? chunks : applyStatusBar(chunks, _statusBarLine);
+          await reconcileOverflow(finalChunks);
         },
         async pushUpdate(text: string): Promise<void> {
           let formattedText = text;
@@ -148,10 +173,16 @@ export function createDiscordStreamingOutbound(
             formattedText = formatMessageWithThinking(text, thinkingDisplay);
           }
           formattedText = mdTableToAscii(formattedText);
+          lastPushedText = formattedText;
 
-          if (formattedText.length <= maxContentLength) {
+          const budget = splitBudget(_statusBarLine);
+          const chunks = splitDiscordMessage(formattedText, budget);
+          const finalChunks =
+            _statusBarLine === null ? chunks : applyStatusBar(chunks, _statusBarLine);
+
+          if (finalChunks.length === 1) {
             // Simple case: update original message only
-            await transport.editMessage(channelId, messageId, { content: formattedText });
+            await transport.editMessage(channelId, messageId, { content: finalChunks[0] });
             // Delete all overflow messages. Each deletion is retried with
             // backoff a finite number of times; a failure on one message must
             // never abort cleanup of the remaining ones. Entries that still
@@ -163,9 +194,18 @@ export function createDiscordStreamingOutbound(
               overflowMessages.delete(index);
             }
           } else {
-            const chunks = splitDiscordMessage(formattedText, maxContentLength);
-            await reconcileOverflow(chunks);
+            await reconcileOverflow(finalChunks);
           }
+        },
+        async setStatusBar(line: string | null): Promise<void> {
+          _statusBarLine = line;
+          // Re-render the in-flight message from the last pushed/full content so
+          // the bar appears (or disappears) without waiting for the next push.
+          if (lastPushedText === null) return;
+          const budget = splitBudget(line);
+          const chunks = splitDiscordMessage(lastPushedText, budget);
+          const finalChunks = line === null ? chunks : applyStatusBar(chunks, line);
+          await reconcileOverflow(finalChunks);
         },
       };
     },

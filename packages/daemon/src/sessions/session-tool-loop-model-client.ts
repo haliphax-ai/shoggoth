@@ -66,6 +66,10 @@ export function createSessionToolLoopModelClient(input: {
    * Use for incremental stats persistence so mid-turn queries see up-to-date numbers.
    */
   readonly onUsageDelta?: (delta: ModelUsage) => void;
+  /** Reasoning/thinking content is streaming from the model (mapped from onReasoningDelta). */
+  readonly onThinkingDelta?: (accumulated: string) => void;
+  /** Fires when a mid-turn compaction completes with `compacted: true`. */
+  readonly onCompaction?: () => void;
   /** Optional: enables mid-turn context compaction before each model call. */
   readonly compaction?: {
     readonly db: Database.Database;
@@ -175,6 +179,7 @@ export function createSessionToolLoopModelClient(input: {
               log.debug("mid-turn compaction completed", {
                 sessionId: c.sessionId,
               });
+              input.onCompaction?.();
             }
           })();
 
@@ -219,6 +224,9 @@ export function createSessionToolLoopModelClient(input: {
               onTextDelta: (_delta: string, accumulated: string) => {
                 const display = priorRoundsStreamText + accumulated;
                 void Promise.resolve(input.onModelTextDelta?.(display)).catch(() => {});
+              },
+              onReasoningDelta: (_delta: string, accumulated: string) => {
+                input.onThinkingDelta?.(accumulated);
               },
             }
           : {};

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { setNoticeResolver } from "../../src/presentation/notices";
 import { PresentationTurnOrchestrator } from "../../src/presentation/turn-orchestrator";
 import type { PlatformAdapter, StreamHandle } from "../../src/presentation/platform-adapter";
+import { DEFAULT_STATUS_BAR_CONFIG, type ResolvedStatusBarConfig } from "@shoggoth/shared";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import type { MessageAttachment } from "@shoggoth/messaging";
 import type { ImageBlockCodec } from "@shoggoth/models";
@@ -73,8 +74,7 @@ describe("PresentationTurnOrchestrator", () => {
     });
 
     // Access private field via any to verify default
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((orch as any).streamingIntervalMs).toBe(0);
+    expect((orch as unknown as { streamingIntervalMs: number }).streamingIntervalMs).toBe(0);
   });
 
   it("uses provided streamingIntervalMs", () => {
@@ -84,8 +84,7 @@ describe("PresentationTurnOrchestrator", () => {
       adapter,
       streamingIntervalMs: 500,
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((orch as any).streamingIntervalMs).toBe(500);
+    expect((orch as unknown as { streamingIntervalMs: number }).streamingIntervalMs).toBe(500);
   });
 
   it("orchestrateInboundTurn calls runInboundSessionTurn", async () => {
@@ -123,8 +122,7 @@ describe("PresentationTurnOrchestrator", () => {
       buildTurn: vi.fn().mockResolvedValue({}),
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const call = (runInboundSessionTurn as any).mock.calls.at(-1)?.[0];
+    const call = vi.mocked(runInboundSessionTurn).mock.calls.at(-1)?.[0];
     expect(call.streaming).toBeDefined();
     expect(call.streaming.minIntervalMs).toBe(400);
   });
@@ -145,8 +143,7 @@ describe("PresentationTurnOrchestrator", () => {
       buildTurn: vi.fn().mockResolvedValue({}),
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const call = (runInboundSessionTurn as any).mock.calls.at(-1)?.[0];
+    const call = vi.mocked(runInboundSessionTurn).mock.calls.at(-1)?.[0];
     expect(call.streaming).toBeUndefined();
   });
 
@@ -163,10 +160,68 @@ describe("PresentationTurnOrchestrator", () => {
       buildTurn: vi.fn().mockResolvedValue({}),
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const call = (runInboundSessionTurn as any).mock.calls.at(-1)?.[0];
+    const call = vi.mocked(runInboundSessionTurn).mock.calls.at(-1)?.[0];
     expect(call.sliceDisplayText("hello world!")).toBe("hello worl");
     expect(call.sliceDisplayText("short")).toBe("short");
+  });
+
+  it("passes the statusBar dep through to runInboundSessionTurn", async () => {
+    const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn.js");
+    const config = { ...DEFAULT_STATUS_BAR_CONFIG } as ResolvedStatusBarConfig;
+    const render = vi.fn();
+    const attachSink = vi.fn();
+    const adapter = createMockAdapter();
+    const orch = new PresentationTurnOrchestrator({
+      config: {} as ShoggothConfig,
+      adapter,
+      statusBar: { config, render, attachSink },
+    });
+
+    await orch.orchestrateInboundTurn({
+      sessionId: "s1",
+      buildTurn: vi.fn().mockResolvedValue({}),
+    });
+
+    const call = vi.mocked(runInboundSessionTurn).mock.calls.at(-1)?.[0];
+    expect(call.statusBar).toBeDefined();
+    expect(call.statusBar.config).toBe(config);
+    expect(call.statusBar.render).toBe(render);
+    expect(call.statusBar.attachSink).toBe(attachSink);
+  });
+
+  it("wraps stream handles with attachSink so handle.setStatusBar applies", async () => {
+    const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn.js");
+    const config = { ...DEFAULT_STATUS_BAR_CONFIG } as ResolvedStatusBarConfig;
+    const render = vi.fn();
+
+    const baseHandle: StreamHandle = {
+      setFullContent: vi.fn().mockResolvedValue(undefined),
+      pushUpdate: vi.fn().mockResolvedValue(undefined),
+    };
+    const sink = { setStatusBar: vi.fn().mockResolvedValue(undefined) };
+    const attachSink = vi.fn().mockReturnValue(sink);
+    const adapter = createMockAdapter({
+      startStream: vi.fn().mockResolvedValue(baseHandle),
+    });
+    const orch = new PresentationTurnOrchestrator({
+      config: {} as ShoggothConfig,
+      adapter,
+      streamingIntervalMs: 400,
+      statusBar: { config, render, attachSink },
+    });
+
+    await orch.orchestrateInboundTurn({
+      sessionId: "s1",
+      buildTurn: vi.fn().mockResolvedValue({}),
+    });
+
+    const call = vi.mocked(runInboundSessionTurn).mock.calls.at(-1)?.[0];
+    expect(call.statusBar).toBeDefined();
+    // The start() function wraps the stream handle with attachSink so the
+    // returned handle carries the applied setStatusBar method.
+    const wrapped = await call.streaming.start();
+    expect(attachSink).toHaveBeenCalledWith(baseHandle);
+    expect(wrapped.setStatusBar).toBeInstanceOf(Function);
   });
 });
 
@@ -230,8 +285,7 @@ describe("PresentationTurnOrchestrator — mode-aware attachment handling", () =
     });
 
     // Extract the wrappedBuildTurn that was passed to runInboundSessionTurn
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const lastCall = (runInboundSessionTurn as any).mock.calls.at(-1)?.[0];
+    const lastCall = vi.mocked(runInboundSessionTurn).mock.calls.at(-1)?.[0];
     expect(lastCall).toBeDefined();
     expect(lastCall.buildTurn).toBeInstanceOf(Function);
 
