@@ -440,7 +440,7 @@ export async function deliverOobStructuredResponse(opts: {
       if (!ext.resolveOutboundChannelIdForSession?.(respondTo)) return;
       await ext.postToOperator?.({
         sessionId: respondTo,
-        userContent: "An out-of-band turn was aborted.",
+        userContent: "🛑 An out-of-band turn was aborted.",
       });
     } catch (err) {
       subLog.warn("failed to announce out-of-band abort", { respondTo, error: String(err) });
