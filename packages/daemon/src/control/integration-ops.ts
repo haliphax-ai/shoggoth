@@ -416,6 +416,7 @@ function assertAgentMayUseSubagentSessionOps(
  */
 export async function deliverOobStructuredResponse(opts: {
   structuredResponse: string;
+  aborted?: boolean;
   respondTo: string;
   childSessionId?: string;
   ext: NonNullable<typeof subagentRuntimeExtensionRef.current>;
@@ -432,6 +433,23 @@ export async function deliverOobStructuredResponse(opts: {
     maxChars = 8000,
     hasSender,
   } = opts;
+
+  const announceAbort = async (): Promise<void> => {
+    subLog.info("out-of-band turn aborted", { respondTo });
+    try {
+      if (!ext.resolveOutboundChannelIdForSession?.(respondTo)) return;
+      await ext.postToOperator?.({
+        sessionId: respondTo,
+        userContent: "An out-of-band turn was aborted.",
+      });
+    } catch (err) {
+      subLog.warn("failed to announce out-of-band abort", { respondTo, error: String(err) });
+    }
+  };
+  if (opts.aborted) {
+    await announceAbort();
+    return;
+  }
 
   let parsed: Record<string, unknown>;
   try {
@@ -455,6 +473,11 @@ export async function deliverOobStructuredResponse(opts: {
           structuredOutputMode: "best-effort",
         },
       });
+
+      if (nudgeResult?.aborted) {
+        await announceAbort();
+        return;
+      }
 
       if (nudgeResult?.latestAssistantText) {
         try {
@@ -627,9 +650,10 @@ export async function deliverSubagentResult(
         ...modelInvocationOverride,
       },
     });
-    if (turnResult?.latestAssistantText) {
+    if (turnResult?.aborted || turnResult?.latestAssistantText) {
       await deliverOobStructuredResponse({
         structuredResponse: turnResult.latestAssistantText,
+        aborted: turnResult.aborted,
         respondTo,
         childSessionId,
         ext,
