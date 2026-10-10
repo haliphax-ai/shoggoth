@@ -8,7 +8,7 @@ import Database from "better-sqlite3";
 import { createAgentToAgentBus, createInboundMessage } from "@shoggoth/messaging";
 import { discordCapabilityDescriptor } from "../src/capabilities";
 import { ModelHttpError } from "@shoggoth/models";
-import { defaultConfig } from "@shoggoth/shared";
+import { defaultConfig, resolveStatusBarConfig } from "@shoggoth/shared";
 import type { ShoggothMcpServerEntry } from "@shoggoth/shared";
 import { createHitlDiscordNoticeRegistry } from "../src/hitl/notice-registry";
 import {
@@ -26,6 +26,7 @@ import {
 } from "@shoggoth/daemon/lib";
 import { formatErrorUserText } from "@shoggoth/daemon/lib";
 import {
+  buildStatusBarDep,
   formatDiscordPlatformDegradedPrefix,
   formatDiscordPlatformModelTagFooter,
   startDiscordPlatform,
@@ -2572,8 +2573,10 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
     await closeTestDb(db, tmp);
   });
 
-  /** Seed session_stats for the session: sequence from turn_count, compactions from compaction_count,
-   *  context from the latest per-call input_tokens (input_tokens column). */
+  /** Seed session_stats for the session: sequence from turn_count, compactions from
+   *  compaction_count, window from context_window_tokens. input_tokens is a cumulative
+   *  running sum (incrementTokenUsage adds every per-call value); the bar must ignore
+   *  it, so it is only seeded to pin that behavior down. */
   function seedStats(
     sessionUrn: string,
     overrides: Partial<{
@@ -2593,6 +2596,16 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
       it: overrides.input_tokens ?? 31_421,
       cwt: overrides.context_window_tokens ?? 100_000,
     });
+  }
+
+  /** Seed a transcript message in the session's current context segment — the bar's
+   *  context fill is the estimated token total of that segment's transcript. */
+  function seedSegmentTranscript(sessionUrn: string, content: string) {
+    const segmentId = createSessionStore(db).getById(sessionUrn)!.contextSegmentId;
+    db.prepare(
+      `INSERT INTO transcript_messages (session_id, context_segment_id, seq, role, content)
+       VALUES (@sid, @seg, 0, 'user', @content)`,
+    ).run({ sid: sessionUrn, seg: segmentId, content });
   }
 
   function baseRuntime(sessionUrn: string, capture: { body: string }[]): DiscordMessagingRuntime {
@@ -2698,6 +2711,8 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
       input_tokens: 31_421,
       context_window_tokens: 100_000,
     });
+    // 40_000 chars ≈ 10_000 estimated tokens → 10.0% of the 100_000 window.
+    seedSegmentTranscript(sessionUrn, "x".repeat(40_000));
 
     const capture: { body: string }[] = [];
     let finalBody: string | undefined;
@@ -2766,8 +2781,8 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
       `terminal bar must carry compactions 2 from session_stats.compaction_count, got: ${terminalLine}`,
     );
     assert.ok(
-      terminalLine!.includes("31.4%/100K"),
-      `terminal bar must carry the latest per-call input tokens as context, got: ${terminalLine}`,
+      terminalLine!.includes("10.0%/100K"),
+      `terminal bar must carry the segment-estimate context fill, got: ${terminalLine}`,
     );
 
     // The body that lands on the final setFullContent is the formatted reply; with the
@@ -2784,6 +2799,8 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
       input_tokens: 31_421,
       context_window_tokens: 100_000,
     });
+    // 40_000 chars ≈ 10_000 estimated tokens → 10.0% of the 100_000 window.
+    seedSegmentTranscript(sessionUrn, "x".repeat(40_000));
 
     const capture: { body: string }[] = [];
     const platform = await startDiscordPlatform({
@@ -2831,8 +2848,84 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
       `final sendBody must carry compactions 2 from session_stats.compaction_count, got: ${last}`,
     );
     assert.ok(
-      last.includes("31.4%/100K"),
-      `final sendBody must carry the latest per-call input tokens as context, got: ${last}`,
+      last.includes("10.0%/100K"),
+      `final sendBody must carry the segment-estimate context fill, got: ${last}`,
+    );
+  });
+
+  it("context fill comes from the segment transcript estimate, not the cumulative input_tokens column", async () => {
+    const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
+    createSessionStore(db).create({ id: sessionUrn, workspacePath: tmp });
+    // input_tokens is a cumulative running sum across every model call of the
+    // segment; a long session can far exceed the window (the ~2000% bug). The
+    // bar must derive fill from the current segment's transcript estimate.
+    seedStats(sessionUrn, {
+      turn_count: 7,
+      compaction_count: 2,
+      input_tokens: 2_000_000,
+      context_window_tokens: 1_000_000,
+    });
+    seedSegmentTranscript(sessionUrn, "x".repeat(4_000)); // ≈1_000 estimated tokens
+
+    // Live-bar seeding (dep.stats): the numerator is the segment estimate.
+    const depCfg = resolveStatusBarConfig({
+      ...defaultConfig(tmp),
+      platforms: { statusBar: { enabled: true } },
+    });
+    const stats = buildStatusBarDep(db, depCfg).stats(sessionUrn);
+    assert.ok(stats.context !== undefined, "bar context must be present for a non-empty segment");
+    assert.strictEqual(
+      stats.context!.currentTokens,
+      1_000,
+      "fill must be the segment transcript estimate, not the cumulative column",
+    );
+    assert.strictEqual(
+      stats.context!.totalTokens,
+      1_000_000,
+      "window must come from session_stats.context_window_tokens",
+    );
+
+    // Terminal bar end-to-end: the rendered percentage must derive from the
+    // estimate (0.1%/1M) and never exceed 100% from the cumulative column.
+    const capture: { body: string }[] = [];
+    const platform = await startDiscordPlatform({
+      db,
+      config: {
+        ...defaultConfig(tmp),
+        platforms: { statusBar: { enabled: true } },
+      },
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord: baseRuntime(sessionUrn, capture),
+      deps: {
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            return {
+              content: "regression reply",
+              toolCalls: [],
+              usedModel: "m1",
+              usedProviderId: "p1",
+            };
+          },
+        }),
+      },
+    });
+
+    await platform.runSessionModelTurn({
+      sessionId: sessionUrn,
+      userContent: "hi",
+      delivery: { kind: "messaging_surface", userId: "u-1" },
+    });
+    await platform.stop();
+
+    assert.ok(capture.length > 0, "the at-once path must deliver the reply via sendBody");
+    const last = capture[capture.length - 1]!.body;
+    assert.ok(
+      last.includes("0.1%/1M"),
+      `bar must show the segment-estimate fill (0.1%/1M), got: ${last}`,
+    );
+    assert.ok(
+      !last.includes("200.0%"),
+      `bar must never report the cumulative input_tokens as fill, got: ${last}`,
     );
   });
 });
