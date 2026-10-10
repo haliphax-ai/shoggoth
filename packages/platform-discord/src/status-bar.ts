@@ -62,7 +62,7 @@ export function renderDiscordStatusBar(
     sections.push(`🗑️ \`${snap.compactions}\``);
   }
 
-  return sections.join(" ｜ ");
+  return `> ${sections.join(" ｜ ")}`;
 }
 
 function formatToolSection(snap: StatusBarSnapshot): string | undefined {
