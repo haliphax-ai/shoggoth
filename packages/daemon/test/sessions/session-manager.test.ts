@@ -12,7 +12,11 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { describe, it } from "vitest";
 import { SHOGGOTH_AGENT_TOKEN_ENV } from "@shoggoth/authn";
-import { formatAgentSessionUrn, parseAgentSessionUrn } from "@shoggoth/shared";
+import {
+  formatAgentSessionUrn,
+  mintSubagentSessionUrnFromParent,
+  parseAgentSessionUrn,
+} from "@shoggoth/shared";
 import type { ShoggothAgentsConfig } from "@shoggoth/shared";
 import { migrate, defaultMigrationsDir } from "../../src/db/migrate";
 import { createSqliteAgentTokenStore } from "../../src/auth/sqlite-agent-tokens";
@@ -171,5 +175,125 @@ describe("createSessionManager", () => {
     // Spawn for a different agent — should resolve platform from that agent's bindings
     const out = await mgr.spawn({ agentId: "secondary" });
     assert.ok(out.sessionId.includes(":slack:"), `expected slack in URN: ${out.sessionId}`);
+  });
+});
+
+describe("createSessionManager kill descendant cascade", () => {
+  function setupManager() {
+    const db = new Database(":memory:");
+    migrate(db, defaultMigrationsDir());
+    const sessions = createSessionStore(db);
+    const agentTokens = createSqliteAgentTokenStore(db);
+    const workspacesRoot = mkdtempSync(join(tmpdir(), "shoggoth-ws-"));
+    const mgr = createSessionManager({
+      db,
+      sessions,
+      agentTokens,
+      workspacesRoot,
+      agentId: "main",
+      mintToken: () => "tok",
+    });
+    return { sessions, agentTokens, mgr };
+  }
+
+  function topLevelUrn(leaf: string): string {
+    return formatAgentSessionUrn("main", "discord", "channel", leaf);
+  }
+
+  it("kill terminates all descendants transitively and revokes their tokens", () => {
+    const { sessions, agentTokens, mgr } = setupManager();
+    const parent = topLevelUrn("10000000-0000-4000-8000-000000000001");
+    const child = mintSubagentSessionUrnFromParent(parent);
+    const grandchild = mintSubagentSessionUrnFromParent(child);
+    const unrelated = topLevelUrn("10000000-0000-4000-8000-000000000002");
+    for (const id of [parent, child, grandchild, unrelated]) {
+      sessions.create({ id, workspacePath: "/w", status: "active" });
+      agentTokens.register(id, `tok-${id}`);
+    }
+    sessions.update(child, { parentSessionId: parent });
+    sessions.update(grandchild, { parentSessionId: child });
+
+    mgr.kill(parent);
+
+    assert.equal(sessions.getById(parent)?.status, "terminated");
+    assert.equal(sessions.getById(child)?.status, "terminated");
+    assert.equal(sessions.getById(grandchild)?.status, "terminated");
+    assert.equal(agentTokens.validate(`tok-${parent}`, parent), false);
+    assert.equal(agentTokens.validate(`tok-${child}`, child), false);
+    assert.equal(agentTokens.validate(`tok-${grandchild}`, grandchild), false);
+    // An unrelated top-level session must not be touched by the cascade.
+    assert.equal(sessions.getById(unrelated)?.status, "active");
+    assert.equal(agentTokens.validate(`tok-${unrelated}`, unrelated), true);
+  });
+
+  it("killing a subagent terminates its subtree but leaves the parent active", () => {
+    const { sessions, agentTokens, mgr } = setupManager();
+    const parent = topLevelUrn("20000000-0000-4000-8000-000000000001");
+    const child = mintSubagentSessionUrnFromParent(parent);
+    const grandchild = mintSubagentSessionUrnFromParent(child);
+    for (const id of [parent, child, grandchild]) {
+      sessions.create({ id, workspacePath: "/w", status: "active" });
+      agentTokens.register(id, `tok-${id}`);
+    }
+    sessions.update(child, { parentSessionId: parent });
+    sessions.update(grandchild, { parentSessionId: child });
+
+    mgr.kill(child);
+
+    // The parent survives its child's death; the child's own subtree does not.
+    assert.equal(sessions.getById(parent)?.status, "active");
+    assert.equal(agentTokens.validate(`tok-${parent}`, parent), true);
+    assert.equal(sessions.getById(child)?.status, "terminated");
+    assert.equal(sessions.getById(grandchild)?.status, "terminated");
+  });
+
+  it("reaps active descendants beneath an already-terminated intermediate session", () => {
+    const { sessions, mgr } = setupManager();
+    const parent = topLevelUrn("30000000-0000-4000-8000-000000000001");
+    const child = mintSubagentSessionUrnFromParent(parent);
+    const grandchild = mintSubagentSessionUrnFromParent(child);
+    for (const id of [parent, child, grandchild]) {
+      sessions.create({ id, workspacePath: "/w", status: "active" });
+    }
+    sessions.update(child, { parentSessionId: parent });
+    sessions.update(grandchild, { parentSessionId: child });
+    // Simulate the pre-cascade bug: the intermediate child died first and its
+    // own child was orphaned, still active, beneath the terminated row.
+    sessions.update(child, { status: "terminated" });
+
+    mgr.kill(parent);
+
+    assert.equal(sessions.getById(parent)?.status, "terminated");
+    assert.equal(sessions.getById(grandchild)?.status, "terminated");
+  });
+
+  it("terminates both sides of a cyclic parent chain without hanging", () => {
+    const { sessions, mgr } = setupManager();
+    const a = topLevelUrn("40000000-0000-4000-8000-000000000001");
+    const b = topLevelUrn("40000000-0000-4000-8000-000000000002");
+    sessions.create({ id: a, workspacePath: "/w", status: "active" });
+    sessions.create({ id: b, workspacePath: "/w", status: "active" });
+    sessions.update(a, { parentSessionId: b });
+    sessions.update(b, { parentSessionId: a });
+
+    mgr.kill(a);
+
+    assert.equal(sessions.getById(a)?.status, "terminated");
+    assert.equal(sessions.getById(b)?.status, "terminated");
+  });
+
+  it("kill is idempotent on an already-terminated tree", () => {
+    const { sessions, mgr } = setupManager();
+    const parent = topLevelUrn("50000000-0000-4000-8000-000000000001");
+    const child = mintSubagentSessionUrnFromParent(parent);
+    sessions.create({ id: parent, workspacePath: "/w", status: "active" });
+    sessions.create({ id: child, workspacePath: "/w", status: "active" });
+    sessions.update(child, { parentSessionId: parent });
+
+    mgr.kill(parent);
+    mgr.kill(parent); // second kill must be a harmless no-op
+
+    assert.equal(sessions.getById(parent)?.status, "terminated");
+    assert.equal(sessions.getById(child)?.status, "terminated");
   });
 });
