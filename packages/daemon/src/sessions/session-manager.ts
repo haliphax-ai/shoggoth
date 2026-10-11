@@ -18,6 +18,8 @@ import { ensureAgentWorkspaceLayout } from "../workspaces/agent-workspace-layout
 import { resolveAgentCreds } from "../agent-creds";
 import type { SessionStore } from "./session-store";
 import { getTimerScheduler } from "./builtin-handlers/timer-handler";
+import { requestSessionTurnAbort } from "./session-turn-abort";
+import { disposeSubagentRuntime } from "../subagent/subagent-disposables";
 
 export type SpawnSessionResult = {
   sessionId: string;
@@ -77,6 +79,12 @@ export interface SessionManager {
   spawn(input: SpawnSessionInput): Promise<SpawnSessionResult>;
   /** Mint a new raw agent token for an existing non-terminated session (revokes prior hashes). */
   rotateAgentToken(sessionId: string): SpawnSessionResult;
+  /**
+   * Terminates the session and, transitively, every descendant session: agent
+   * tokens revoked, status set to `terminated`, in-flight turns aborted, subagent
+   * runtime handles disposed, and anchored timers canceled. Top-level sessions
+   * have no parent and are never terminated by this cascade.
+   */
   kill(sessionId: string): void;
   attachPromptStack(sessionId: string, stack: readonly string[]): void;
   setLightContext(sessionId: string, value: boolean): void;
@@ -183,9 +191,32 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
     },
 
     kill(sessionId) {
-      options.agentTokens.revoke(sessionId);
-      options.sessions.update(sessionId, { status: "terminated" });
-      getTimerScheduler()?.cancelByAnchorSession(sessionId);
+      const sid = sessionId.trim();
+      // Terminate the session and, transitively, every descendant session.
+      // Top-level agent sessions have no parent, so the cascade never reaches
+      // them: their durability comes from being bound to a platform channel,
+      // not from any exclusion in this rule. Rows that are already terminated
+      // are still walked through so active descendants orphaned beneath them
+      // are reaped too; the visited set guards against cyclic parent chains.
+      const targets: string[] = [sid];
+      const seen = new Set<string>([sid]);
+      for (let i = 0; i < targets.length; i++) {
+        for (const child of options.sessions.list({ parentSessionId: targets[i]! })) {
+          if (seen.has(child.id)) continue;
+          seen.add(child.id);
+          targets.push(child.id);
+        }
+      }
+      for (const id of targets) {
+        // Abort any in-flight turn and drop runtime handles (thread binding,
+        // bus subscription, inactivity timer) so nothing keeps running for a
+        // session that no longer exists.
+        requestSessionTurnAbort(id);
+        disposeSubagentRuntime(id);
+        options.agentTokens.revoke(id);
+        options.sessions.update(id, { status: "terminated" });
+        getTimerScheduler()?.cancelByAnchorSession(id);
+      }
     },
 
     attachPromptStack(sessionId, stack) {
