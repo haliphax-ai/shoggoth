@@ -226,6 +226,14 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           logger,
           config: configRef.current,
           botToken: state.getToken(),
+          // Thread-binding rejection needs a liveness probe: a thread may be
+          // rebound only when its current holder is terminated (stale claim).
+          isSessionActive: (sessionId) => {
+            const row = (db as Database.Database)
+              .prepare("SELECT status FROM sessions WHERE id = ?")
+              .get(sessionId.trim()) as { status: string } | undefined;
+            return row !== undefined && row.status !== "terminated";
+          },
           noticeResolver,
           slashCommandRegistrationRef: state.slashCommandRegistrationRef,
           onThreadCreate: processThreadCreate,

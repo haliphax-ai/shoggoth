@@ -33,6 +33,11 @@ export interface StartDaemonDiscordMessagingOptions {
   readonly onInteractionCreate?: (ev: DiscordInteractionEvent) => void;
   /** Gateway `THREAD_CREATE` — forwarded verbatim; the daemon core decides what to do. */
   readonly onThreadCreate?: (ev: DiscordThreadCreateEvent) => void;
+  /**
+   * Liveness probe for thread-binding rejection (see
+   * `StartDiscordMessagingOptions.isSessionActive`).
+   */
+  readonly isSessionActive?: (sessionId: string) => boolean;
   readonly reactionBotUserIdRef?: { current: string | undefined };
   /** Daemon's notice resolver — wired into platform-discord's `setNoticeResolver` at startup. */
   readonly noticeResolver?: NoticeResolver;
@@ -78,6 +83,7 @@ export async function startDaemonDiscordMessaging(
     onInteractionCreate: opts.onInteractionCreate,
     onThreadCreate: opts.onThreadCreate,
     reactionBotUserIdRef: opts.reactionBotUserIdRef,
+    isSessionActive: opts.isSessionActive,
   });
 
   if (runtime && opts.registerSlashCommands !== false && runtime.discordBotUserId) {

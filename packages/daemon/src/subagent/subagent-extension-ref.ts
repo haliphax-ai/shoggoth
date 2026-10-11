@@ -20,7 +20,11 @@ export type SubagentRuntimeExtension = {
     readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
   }) => Promise<SessionAgentTurnResult>;
   readonly subscribeSubagentSession: (sessionId: string) => () => void;
-  /** Register a platform thread ↔ session binding. Returns an idempotent unregister function. */
+  /**
+   * Register a platform thread ↔ session binding. Returns an idempotent
+   * unregister function. Throws when the thread is already bound to a
+   * different live session (stale terminated holders are reclaimed).
+   */
   readonly registerPlatformThreadBinding: (
     threadChannelId: string,
     sessionId: string,

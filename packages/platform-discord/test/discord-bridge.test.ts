@@ -220,4 +220,66 @@ describe("discord-bridge", () => {
 
     await runtime!.stop();
   });
+
+  it("rejects binding a thread that a live session already holds, reclaims stale holders", async () => {
+    const runtime = await startDiscordMessagingIfConfigured({
+      logger: stubLogger(),
+      botToken: "token",
+      routes: [{ guildId: "g", channelId: "ch", sessionId: u1 }],
+      routeGuard: { resolvedAgentId: "test" },
+      // No liveness probe: any conflicting registration is refused (strict).
+      deps: {
+        connectGateway: async () => ({
+          stop: async () => {},
+          getBotUserId: () => "bot-1",
+        }),
+      },
+    });
+    assert.ok(runtime);
+
+    runtime!.registerPlatformThreadBinding("thread-race", "session-a");
+    // Re-registering the SAME session is idempotent, not a conflict.
+    runtime!.registerPlatformThreadBinding("thread-race", "session-a");
+    // A different session is refused outright: one live holder per thread.
+    assert.throws(
+      () => runtime!.registerPlatformThreadBinding("thread-race", "session-b"),
+      /already bound to session session-a/,
+    );
+    // The original binding is untouched by the failed attempt.
+    assert.equal(runtime!.resolveSessionId("thread-race"), "session-a");
+
+    await runtime!.stop();
+  });
+
+  it("reclaims a thread whose holder is no longer live (isSessionActive=false)", async () => {
+    const runtime = await startDiscordMessagingIfConfigured({
+      logger: stubLogger(),
+      botToken: "token",
+      routes: [{ guildId: "g", channelId: "ch", sessionId: u1 }],
+      routeGuard: { resolvedAgentId: "test" },
+      isSessionActive: (sessionId) => sessionId === "session-live",
+      deps: {
+        connectGateway: async () => ({
+          stop: async () => {},
+          getBotUserId: () => "bot-1",
+        }),
+      },
+    });
+    assert.ok(runtime);
+
+    runtime!.registerPlatformThreadBinding("thread-race", "session-dead");
+    // Dead holder: the binding is replaced, not refused.
+    const unregister = runtime!.registerPlatformThreadBinding("thread-race", "session-live");
+    assert.equal(runtime!.resolveSessionId("thread-race"), "session-live");
+    // Live holder: refused.
+    assert.throws(
+      () => runtime!.registerPlatformThreadBinding("thread-race", "session-other"),
+      /already bound to session session-live/,
+    );
+    // The stale unregister must not drop the reclaimed binding.
+    unregister();
+    assert.equal(runtime!.resolveSessionId("thread-race"), undefined);
+
+    await runtime!.stop();
+  });
 });
