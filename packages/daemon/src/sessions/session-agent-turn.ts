@@ -431,7 +431,14 @@ export async function executeSessionAgentTurn(
     onThinkingDelta: input.events?.onThinkingDelta,
     onCompaction: input.events?.onCompaction,
     onUsageDelta: (delta) => {
-      incrementTokenUsage(input.db, input.sessionId, delta);
+      // Provider-reported actuals: this call's total input+output is the best
+      // available gauge of current context fill once the turn's final message
+      // lands in the transcript (it includes system prompt and tool schema
+      // overhead that transcript heuristics cannot see).
+      incrementTokenUsage(input.db, input.sessionId, {
+        ...delta,
+        contextFillTokens: delta.inputTokens + delta.outputTokens,
+      });
     },
     compaction: ctxWindowTokens
       ? {
@@ -609,12 +616,11 @@ export async function executeSessionAgentTurn(
       onToolCallEvent: input.events?.onToolCall,
       toolCallTimeoutMs: resolveToolCallTimeoutMs(input.config, input.sessionId),
       onStatsUpdate: (update) => {
-        if (update.estimatedInputTokens) {
-          incrementTokenUsage(input.db, input.sessionId, {
-            inputTokens: update.estimatedInputTokens,
-            outputTokens: 0,
-          });
-        }
+        // `estimatedInputTokens` (char heuristics for tool args/results) is
+        // intentionally NOT added to session_stats.input_tokens: tool content
+        // is billed inside the next model call's provider-reported prompt
+        // tokens, so persisting estimates here would double-count against
+        // provider actuals.
         if (update.transcriptMessageCount != null) {
           updateTranscriptMessageCount(input.db, input.sessionId, update.transcriptMessageCount);
         }

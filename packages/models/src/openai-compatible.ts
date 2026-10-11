@@ -51,12 +51,43 @@ function buildSyntheticTool(responseSchema: ResponseSchema): OpenAIToolFunctionD
   }));
 }
 
-/** Extract usage metadata from an OpenAI chat completions response. */
+/**
+ * Extract usage metadata from an OpenAI-style response. Understands both the
+ * Chat Completions shape (`prompt_tokens` / `completion_tokens` /
+ * `prompt_tokens_details.cached_tokens` — used by OpenAI, OpenRouter, and
+ * local gateways like Ollama) and the Responses API shape (`input_tokens` /
+ * `output_tokens` / `input_tokens_details.cached_tokens`).
+ */
 function extractOpenAIUsage(json: unknown): ModelUsage | undefined {
-  const u = (json as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage;
-  if (!u || typeof u.prompt_tokens !== "number" || typeof u.completion_tokens !== "number")
-    return undefined;
-  return { inputTokens: u.prompt_tokens, outputTokens: u.completion_tokens };
+  const u = (
+    json as {
+      usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        prompt_tokens_details?: { cached_tokens?: number | null } | null;
+        input_tokens?: number;
+        output_tokens?: number;
+        input_tokens_details?: {
+          cached_tokens?: number | null;
+          cache_write_tokens?: number | null;
+        } | null;
+      };
+    }
+  ).usage;
+  if (!u) return undefined;
+  const inputTokens = typeof u.prompt_tokens === "number" ? u.prompt_tokens : u.input_tokens;
+  const outputTokens =
+    typeof u.completion_tokens === "number" ? u.completion_tokens : u.output_tokens;
+  if (typeof inputTokens !== "number" || typeof outputTokens !== "number") return undefined;
+  const cachedTokens =
+    u.prompt_tokens_details?.cached_tokens ?? u.input_tokens_details?.cached_tokens;
+  const cacheWriteTokens = u.input_tokens_details?.cache_write_tokens;
+  return {
+    inputTokens,
+    outputTokens,
+    ...(typeof cachedTokens === "number" ? { cachedInputTokens: cachedTokens } : {}),
+    ...(typeof cacheWriteTokens === "number" ? { cacheWriteInputTokens: cacheWriteTokens } : {}),
+  };
 }
 
 export type FetchLike = (url: string | URL, init?: RequestInit) => Promise<Response>;
@@ -198,13 +229,8 @@ async function consumeOpenAIChatCompletionStream(
     if (data === "[DONE]") return;
     const json = safeJsonParse(data, "malformed SSE chunk");
 
-    const u = (json as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage;
-    if (u && typeof u.prompt_tokens === "number" && typeof u.completion_tokens === "number") {
-      usage = {
-        inputTokens: u.prompt_tokens,
-        outputTokens: u.completion_tokens,
-      };
-    }
+    const parsedUsage = extractOpenAIUsage(json);
+    if (parsedUsage) usage = parsedUsage;
 
     const choices = (json as { choices?: unknown }).choices;
     if (!Array.isArray(choices) || choices.length === 0) return;

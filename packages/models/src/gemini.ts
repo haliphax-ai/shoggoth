@@ -46,14 +46,30 @@ import type {
 
 import type { FetchLike } from "./openai-compatible";
 
-/** Extract usage metadata from a Gemini generateContent response. */
+/**
+ * Extract usage metadata from a Gemini generateContent response.
+ * `cachedContentTokenCount` (prompt tokens served from the implicit context
+ * cache) is included in `promptTokenCount`, so it is reported as a subset.
+ */
 function extractGeminiUsage(json: unknown): ModelUsage | undefined {
   const u = (
-    json as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }
+    json as {
+      usageMetadata?: {
+        promptTokenCount?: number;
+        candidatesTokenCount?: number;
+        cachedContentTokenCount?: number;
+      };
+    }
   ).usageMetadata;
   if (!u || typeof u.promptTokenCount !== "number" || typeof u.candidatesTokenCount !== "number")
     return undefined;
-  return { inputTokens: u.promptTokenCount, outputTokens: u.candidatesTokenCount };
+  return {
+    inputTokens: u.promptTokenCount,
+    outputTokens: u.candidatesTokenCount,
+    ...(typeof u.cachedContentTokenCount === "number"
+      ? { cachedInputTokens: u.cachedContentTokenCount }
+      : {}),
+  };
 }
 
 export interface GeminiProviderOptions {

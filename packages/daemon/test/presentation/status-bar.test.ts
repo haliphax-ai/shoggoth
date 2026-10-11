@@ -442,6 +442,18 @@ describe("getStatusBarStats", () => {
     });
   });
 
+  it("prefers the provider-reported context-fill gauge over the segment estimate", () => {
+    seedStats("s3", { turn_count: 4, context_window_tokens: 128_000 });
+    seedSegmentTranscript("s3", "x".repeat(128_000)); // ≈32_000 estimated tokens
+    db.prepare("UPDATE session_stats SET context_fill_tokens = 41000 WHERE session_id = ?").run(
+      "s3",
+    );
+    expect(getStatusBarStats(db, "s3").context).toEqual({
+      currentTokens: 41_000,
+      totalTokens: 128_000,
+    });
+  });
+
   it("defaults to zeroed stats for an unknown session", () => {
     expect(getStatusBarStats(db, "missing")).toEqual({ sequence: 0, compactions: 0 });
   });

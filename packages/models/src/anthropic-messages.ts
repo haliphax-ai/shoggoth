@@ -43,12 +43,38 @@ import type { FetchLike } from "./openai-compatible";
 
 export type AnthropicMessagesAuthStyle = "x-api-key" | "bearer";
 
-/** Extract usage metadata from an Anthropic Messages API response. */
-function extractAnthropicUsage(json: unknown): ModelUsage | undefined {
-  const u = (json as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
+/** Raw `usage` object from an Anthropic Messages API response or stream event. */
+interface AnthropicUsageFields {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+
+/**
+ * Build a ModelUsage from Anthropic usage fields. Anthropic's `input_tokens`
+ * excludes cache reads/writes, so the reported total input includes them to
+ * match the "total prompt tokens" semantics other providers report natively.
+ */
+function toAnthropicModelUsage(u: AnthropicUsageFields | undefined): ModelUsage | undefined {
   if (!u || typeof u.input_tokens !== "number" || typeof u.output_tokens !== "number")
     return undefined;
-  return { inputTokens: u.input_tokens, outputTokens: u.output_tokens };
+  return {
+    inputTokens:
+      u.input_tokens + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
+    outputTokens: u.output_tokens,
+    ...(typeof u.cache_read_input_tokens === "number"
+      ? { cachedInputTokens: u.cache_read_input_tokens }
+      : {}),
+    ...(typeof u.cache_creation_input_tokens === "number"
+      ? { cacheWriteInputTokens: u.cache_creation_input_tokens }
+      : {}),
+  };
+}
+
+/** Extract usage metadata from an Anthropic Messages API response. */
+function extractAnthropicUsage(json: unknown): ModelUsage | undefined {
+  return toAnthropicModelUsage((json as { usage?: AnthropicUsageFields }).usage);
 }
 
 export interface AnthropicMessagesProviderOptions {
@@ -435,8 +461,7 @@ export async function consumeAnthropicMessagesStream(
   /** Observed tool_use while `accumulateTools` is false (`complete` streaming). */
   let forbiddenToolUse = false;
   let accumulatedAssistantText = "";
-  let usageInputTokens: number | undefined;
-  let usageOutputTokens: number | undefined;
+  let usageFields: AnthropicUsageFields | undefined;
   const blocks = new Map<number, AnthropicBlockState>();
   const toolCallsByIndex: { index: number; call: ChatToolCall }[] = [];
   const thinkNorm =
@@ -484,20 +509,21 @@ export async function consumeAnthropicMessagesStream(
 
     if (t === "message_start") {
       sawMessageStart = true;
-      // Capture input token usage from message_start event.
+      // Capture input/cache token usage from message_start event.
       const msg = o.message as Record<string, unknown> | undefined;
-      const u = msg?.usage as { input_tokens?: number } | undefined;
+      const u = msg?.usage as AnthropicUsageFields | undefined;
       if (u && typeof u.input_tokens === "number") {
-        usageInputTokens = u.input_tokens;
+        usageFields = { ...u };
       }
       return;
     }
     if (t === "ping" || t === "message_delta") {
-      // Capture output token usage from message_delta event.
+      // Merge cumulative usage from message_delta (output tokens; some
+      // gateways also repeat the input/cache fields here).
       if (t === "message_delta") {
-        const u = o.usage as { output_tokens?: number } | undefined;
+        const u = o.usage as AnthropicUsageFields | undefined;
         if (u && typeof u.output_tokens === "number") {
-          usageOutputTokens = u.output_tokens;
+          usageFields = { ...usageFields, ...u };
         }
       }
       return;
@@ -725,10 +751,7 @@ export async function consumeAnthropicMessagesStream(
   toolCallsByIndex.sort((a, b) => a.index - b.index);
   const toolCalls = toolCallsByIndex.map((x) => x.call);
 
-  const usage: ModelUsage | undefined =
-    typeof usageInputTokens === "number" && typeof usageOutputTokens === "number"
-      ? { inputTokens: usageInputTokens, outputTokens: usageOutputTokens }
-      : undefined;
+  const usage: ModelUsage | undefined = toAnthropicModelUsage(usageFields);
 
   const reasoningContent = thinkingParts.length > 0 ? thinkingParts.join("\n\n") : undefined;
   return { content, toolCalls, usage, reasoningContent };

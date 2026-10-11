@@ -670,3 +670,133 @@ describe("reasoning delta streaming (onReasoningDelta)", () => {
     assert.deepEqual(reasoningDeltas, []);
   });
 });
+describe("provider-reported usage", () => {
+  it("parses chat completions usage with cached prompt tokens", async () => {
+    const fetchImpl = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { role: "assistant", content: "hi" } }],
+          usage: {
+            prompt_tokens: 1200,
+            completion_tokens: 40,
+            prompt_tokens_details: { cached_tokens: 1024 },
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+    const p = createOpenAICompatibleProvider({
+      id: "p1",
+      baseUrl: "https://api.example/v1",
+      fetchImpl,
+    });
+
+    const out = await p.complete({
+      model: "m",
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    assert.ok(out.usage);
+    assert.equal(out.usage?.inputTokens, 1200);
+    assert.equal(out.usage?.outputTokens, 40);
+    assert.equal(out.usage?.cachedInputTokens, 1024);
+  });
+
+  it("parses Responses API usage shape with cache write tokens", async () => {
+    const fetchImpl = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { role: "assistant", content: "hi" } }],
+          usage: {
+            input_tokens: 4000,
+            output_tokens: 500,
+            input_tokens_details: { cached_tokens: 3072, cache_write_tokens: 1024 },
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+    const p = createOpenAICompatibleProvider({
+      id: "p1",
+      baseUrl: "https://api.example/v1",
+      fetchImpl,
+    });
+
+    const out = await p.complete({
+      model: "m",
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    assert.ok(out.usage);
+    assert.equal(out.usage?.inputTokens, 4000);
+    assert.equal(out.usage?.outputTokens, 500);
+    assert.equal(out.usage?.cachedInputTokens, 3072);
+    assert.equal(out.usage?.cacheWriteInputTokens, 1024);
+  });
+
+  it("tolerates null usage details objects", async () => {
+    const fetchImpl = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { role: "assistant", content: "hi" } }],
+          usage: {
+            prompt_tokens: 12,
+            completion_tokens: 3,
+            prompt_tokens_details: null,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+    const p = createOpenAICompatibleProvider({
+      id: "p1",
+      baseUrl: "https://api.example/v1",
+      fetchImpl,
+    });
+
+    const out = await p.complete({
+      model: "m",
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    assert.ok(out.usage);
+    assert.equal(out.usage?.inputTokens, 12);
+    assert.equal(out.usage?.outputTokens, 3);
+    assert.equal(out.usage?.cachedInputTokens, undefined);
+  });
+
+  it("stream include_usage chunk populates usage with cached split", async () => {
+    const fetchImpl = async () =>
+      sseResponse([
+        'data: {"choices":[{"delta":{"content":"Hi"}}]}',
+        "data: " +
+          JSON.stringify({
+            choices: [],
+            usage: {
+              prompt_tokens: 10,
+              completion_tokens: 1,
+              prompt_tokens_details: { cached_tokens: 8 },
+            },
+          }),
+        "data: [DONE]",
+      ]);
+
+    const p = createOpenAICompatibleProvider({
+      id: "p1",
+      baseUrl: "https://api.example/v1",
+      fetchImpl,
+    });
+
+    const out = await p.complete({
+      model: "m",
+      messages: [{ role: "user", content: "hi" }],
+      stream: true,
+    });
+
+    assert.equal(out.content, "Hi");
+    assert.ok(out.usage);
+    assert.equal(out.usage?.inputTokens, 10);
+    assert.equal(out.usage?.outputTokens, 1);
+    assert.equal(out.usage?.cachedInputTokens, 8);
+  });
+});

@@ -92,6 +92,8 @@ export function createSessionToolLoopModelClient(input: {
   let degradedAny = false;
   let accumulatedInputTokens = 0;
   let accumulatedOutputTokens = 0;
+  let accumulatedCachedInputTokens = 0;
+  let accumulatedCacheWriteInputTokens = 0;
   let lastContextWindowTokens: number | undefined;
   let hasUsage = false;
   /** Model reply text from earlier `complete()` rounds that returned tool calls (for streaming display). */
@@ -110,6 +112,12 @@ export function createSessionToolLoopModelClient(input: {
       return {
         inputTokens: accumulatedInputTokens,
         outputTokens: accumulatedOutputTokens,
+        ...(accumulatedCachedInputTokens > 0
+          ? { cachedInputTokens: accumulatedCachedInputTokens }
+          : {}),
+        ...(accumulatedCacheWriteInputTokens > 0
+          ? { cacheWriteInputTokens: accumulatedCacheWriteInputTokens }
+          : {}),
         ...(lastContextWindowTokens != null
           ? { contextWindowTokens: lastContextWindowTokens }
           : {}),
@@ -256,12 +264,24 @@ export function createSessionToolLoopModelClient(input: {
         hasUsage = true;
         accumulatedInputTokens += out.usage.inputTokens;
         accumulatedOutputTokens += out.usage.outputTokens;
+        if (out.usage.cachedInputTokens != null) {
+          accumulatedCachedInputTokens += out.usage.cachedInputTokens;
+        }
+        if (out.usage.cacheWriteInputTokens != null) {
+          accumulatedCacheWriteInputTokens += out.usage.cacheWriteInputTokens;
+        }
         if (out.usage.contextWindowTokens != null) {
           lastContextWindowTokens = out.usage.contextWindowTokens;
         }
         input.onUsageDelta?.({
           inputTokens: out.usage.inputTokens,
           outputTokens: out.usage.outputTokens,
+          ...(out.usage.cachedInputTokens != null
+            ? { cachedInputTokens: out.usage.cachedInputTokens }
+            : {}),
+          ...(out.usage.cacheWriteInputTokens != null
+            ? { cacheWriteInputTokens: out.usage.cacheWriteInputTokens }
+            : {}),
           ...(out.usage.contextWindowTokens != null
             ? { contextWindowTokens: out.usage.contextWindowTokens }
             : {}),
