@@ -256,11 +256,14 @@ describe("runInboundSessionTurn status bar", () => {
     expect(sendAssistantBody).not.toHaveBeenCalled();
     expect(deliveredBodies.length).toBeGreaterThan(0);
 
-    // (a) The active in-flight bar was cleared (setStatusBar(null)) BEFORE the
-    // final setFullContent delivery call.
+    // (a) The final flush still carries the active terminal bar (bar visible up
+    // to the last moment), then the clear (setStatusBar(null), state-only) lands
+    // between the flush and the final setFullContent delivery edit.
+    const flushedAt = events.lastIndexOf("pushUpdate");
     const clearedAt = events.indexOf("setStatusBar(null)");
     const deliveredAt = events.lastIndexOf("setFullContent");
-    expect(clearedAt).toBeGreaterThanOrEqual(0);
+    expect(flushedAt).toBeGreaterThanOrEqual(0);
+    expect(flushedAt).toBeLessThan(clearedAt);
     expect(clearedAt).toBeLessThan(deliveredAt);
 
     // (b) The delivered body carries exactly ONE bar line — no doubling.
