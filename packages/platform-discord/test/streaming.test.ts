@@ -552,3 +552,43 @@ describe("DiscordStreamingOutbound status bar", () => {
     expect(editCalls[editCalls.length - 1][2].content.endsWith("\n\n" + bar)).toBe(true);
   });
 });
+
+describe("DiscordStreamingOutbound concurrency", () => {
+  it("serializes concurrent renders so racing reconciles never duplicate overflow messages", async () => {
+    const transport = createMockTransport();
+    const caps = discordCapabilityDescriptor();
+    const maxLen = 200;
+
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: caps,
+      channelId: "ch-1",
+      maxContentLength: maxLen,
+    });
+
+    const handle = await streaming.start();
+    vi.mocked(transport.createMessage).mockClear();
+
+    // Delay message creation to widen the race window between concurrent
+    // renders: without the per-handle mutex, each racing reconcile pass sees
+    // "no overflow message yet" for the same chunk index and creates its own
+    // copy — orphans no later pass ever edits or deletes.
+    let created = 0;
+    vi.mocked(transport.createMessage).mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      return { id: `msg-${++created}` };
+    });
+
+    // A body that always splits into two chunks at this budget.
+    const body = "a".repeat(150) + "\n" + "b".repeat(150);
+    await Promise.all([
+      handle.pushUpdate(body),
+      handle.setStatusBar("> ✅"),
+      handle.pushUpdate(body),
+      handle.setFullContent(body),
+    ]);
+
+    // Exactly one overflow message for the single extra chunk.
+    expect(vi.mocked(transport.createMessage).mock.calls.length).toBe(1);
+  });
+});
