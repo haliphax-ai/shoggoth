@@ -487,4 +487,167 @@ describe("runToolLoop policy tiers and unresolvable tool calls", () => {
     assert.deepStrictEqual(executed2, ["builtin-exec"]);
     db.close();
   });
+
+  it("deny-glob entry hard-blocks immediately: no HITL entry, no delay, no approval request", async () => {
+    const sessionId = "s-policy-deny-glob";
+    const { db, policy, audit, stack, toolRuns } = setup(sessionId, {
+      allow: ["*"],
+      deny: ["builtin-wri*"],
+      review: [],
+    });
+
+    const pushed: { toolCallId: string; content: string }[] = [];
+    let hops = 0;
+    const model: ModelClient = {
+      async complete() {
+        hops += 1;
+        if (hops === 1) {
+          return {
+            content: null,
+            toolCalls: [{ id: "c1", name: "builtin-write", argsJson: "{}" }],
+          };
+        }
+        return { content: "after-deny-glob", toolCalls: [] };
+      },
+      pushToolMessage(msg) {
+        pushed.push(msg);
+      },
+    };
+    const executed: string[] = [];
+    const notified: string[] = [];
+    let waitedForResolution = 0;
+
+    const t0 = Date.now();
+    await runToolLoop({
+      db,
+      sessionId,
+      runId: "run-policy-deny-glob",
+      principalId: sessionId,
+      policy,
+      audit,
+      model,
+      tools: [{ name: "builtin-write" }],
+      executor: {
+        execute: async ({ name }) => {
+          executed.push(name);
+          return { resultJson: "{}" };
+        },
+      },
+      toolRuns,
+      hitl: {
+        config: DEFAULT_HITL_CONFIG,
+        bypassUpTo: "safe",
+        pending: stack.pending,
+        clock: { nowMs: () => Date.now() },
+        newPendingId: () => randomUUID(),
+        waitForHitlResolution: async (pendingId) => {
+          waitedForResolution += 1;
+          return stack.waitForHitlResolution(pendingId);
+        },
+        hitlNotifier: {
+          onQueued(row) {
+            notified.push(row.toolName);
+          },
+        },
+      },
+    });
+    const elapsed = Date.now() - t0;
+
+    // Immediate hard block: error result into the loop, turn completes.
+    assert.deepStrictEqual(executed, []);
+    assert.equal(pushed.length, 1);
+    assert.ok(pushed[0]!.content.includes("policy_denied"));
+    assert.ok(pushed[0]!.content.includes("deny-listed"));
+    // Approval machinery untouched: no queue entry, no notifier, no wait.
+    assert.equal(pendingCount(db, sessionId), 0);
+    assert.deepStrictEqual(notified, []);
+    assert.equal(waitedForResolution, 0);
+    // No HITL latency (a queued call would block until approval/timeout).
+    assert.ok(elapsed < 2000, `expected fast rejection, took ${elapsed}ms`);
+
+    const row = db
+      .prepare(`SELECT status FROM tool_runs WHERE id = 'run-policy-deny-glob'`)
+      .get() as {
+      status: string;
+    };
+    assert.equal(row.status, "completed");
+    db.close();
+  });
+
+  it("review-glob entry queues HITL for human sign-off", async () => {
+    const sessionId = "s-policy-review-glob";
+    const { db, policy, audit, stack, toolRuns } = setup(sessionId, {
+      allow: ["*"],
+      deny: [],
+      review: ["builtin-wri*"],
+    });
+
+    const pushed: { toolCallId: string; content: string }[] = [];
+    let hops = 0;
+    const model: ModelClient = {
+      async complete() {
+        hops += 1;
+        if (hops === 1) {
+          return {
+            content: null,
+            toolCalls: [{ id: "c1", name: "builtin-write", argsJson: "{}" }],
+          };
+        }
+        return { content: "after-review-glob", toolCalls: [] };
+      },
+      pushToolMessage(msg) {
+        pushed.push(msg);
+      },
+    };
+    const executed: string[] = [];
+    const queued: { id: string; toolName: string }[] = [];
+
+    await runToolLoop({
+      db,
+      sessionId,
+      runId: "run-policy-review-glob",
+      principalId: sessionId,
+      policy,
+      audit,
+      model,
+      tools: [{ name: "builtin-write" }],
+      executor: {
+        execute: async ({ name }) => {
+          executed.push(name);
+          return { resultJson: "{}" };
+        },
+      },
+      toolRuns,
+      hitl: {
+        config: DEFAULT_HITL_CONFIG,
+        bypassUpTo: "safe",
+        pending: stack.pending,
+        clock: { nowMs: () => Date.now() },
+        newPendingId: () => randomUUID(),
+        waitForHitlResolution: stack.waitForHitlResolution,
+        hitlNotifier: {
+          onQueued(row) {
+            queued.push({ id: row.id, toolName: row.toolName });
+            const ok = stack.pending.approve(row.id, "test-operator");
+            assert.equal(ok, true);
+          },
+        },
+      },
+    });
+
+    // The review glob queued exactly one HITL row, then executed on approval.
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0]!.toolName, "builtin-write");
+    assert.deepStrictEqual(executed, ["builtin-write"]);
+    // The executed tool result (not an error) was fed back to the model.
+    assert.equal(pushed.length, 1);
+    assert.equal(pushed[0]!.content, "{}");
+    const row = db
+      .prepare(`SELECT status FROM tool_runs WHERE id = 'run-policy-review-glob'`)
+      .get() as {
+      status: string;
+    };
+    assert.equal(row.status, "completed");
+    db.close();
+  });
 });

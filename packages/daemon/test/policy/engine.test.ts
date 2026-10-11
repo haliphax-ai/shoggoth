@@ -285,6 +285,146 @@ describe("evaluateRules – review list", () => {
   });
 });
 
+describe("evaluateRules – deny/review glob patterns", () => {
+  it("deny glob matches the namespaced tool id and beats allow regardless of ordering", () => {
+    // MCP tool ids are flat and hyphen-namespaced (`kanban-get_cards`, see the
+    // `namespaced()` helper in mcp-integration/aggregate.ts), so `kanban-*`
+    // matches them the same way it matches in tool-enable globs elsewhere.
+    assert.deepStrictEqual(
+      evaluateRules("kanban-get_cards", {
+        allow: ["*"],
+        deny: ["kanban-*"],
+        review: [],
+      }),
+      { allow: false, reason: "explicit_deny" },
+    );
+    // Deny beats allow even when allow names the exact resource.
+    assert.deepStrictEqual(
+      evaluateRules("kanban-get_cards", {
+        allow: ["kanban-get_cards"],
+        deny: ["kanban-*"],
+        review: [],
+      }),
+      { allow: false, reason: "explicit_deny" },
+    );
+  });
+
+  it("deny glob does not match other tools", () => {
+    assert.deepStrictEqual(evaluateRules("git", { allow: ["*"], deny: ["kanban-*"], review: [] }), {
+      allow: true,
+    });
+    assert.deepStrictEqual(
+      evaluateRules("builtin-read", { allow: ["*"], deny: ["kanban-*"], review: [] }),
+      { allow: true },
+    );
+  });
+
+  it("deny glob matches compound tool:sub resources", () => {
+    // `tool:sub` compounds only arise for tools with sub-resource extractors
+    // (builtin-exec today); a glob over the full compound resource covers them.
+    assert.deepStrictEqual(
+      evaluateRules("builtin-exec:curl", { allow: ["*"], deny: ["builtin-exec:c*"], review: [] }),
+      { allow: false, reason: "explicit_deny" },
+    );
+    assert.deepStrictEqual(
+      evaluateRules("builtin-exec:ls", { allow: ["*"], deny: ["builtin-exec:c*"], review: [] }),
+      { allow: true },
+    );
+  });
+
+  it("deny glob beats review glob", () => {
+    assert.deepStrictEqual(
+      evaluateRules("kanban-get_cards", {
+        allow: ["*"],
+        deny: ["kanban-*"],
+        review: ["kanban-*"],
+      }),
+      { allow: false, reason: "explicit_deny" },
+    );
+  });
+
+  it("review glob queues even when allow matches", () => {
+    assert.deepStrictEqual(
+      evaluateRules("kanban-get_cards", {
+        allow: ["*"],
+        deny: [],
+        review: ["kanban-*"],
+      }),
+      { allow: false, reason: "requires_review" },
+    );
+    assert.deepStrictEqual(evaluateRules("git", { allow: ["*"], deny: [], review: ["kanban-*"] }), {
+      allow: true,
+    });
+  });
+
+  it("? wildcard matches exactly one character", () => {
+    assert.deepStrictEqual(
+      evaluateRules("exec:x", { allow: ["*"], deny: ["exec:?"], review: [] }),
+      {
+        allow: false,
+        reason: "explicit_deny",
+      },
+    );
+    assert.deepStrictEqual(
+      evaluateRules("exec:curl", { allow: ["*"], deny: ["exec:?"], review: [] }),
+      { allow: true },
+    );
+  });
+
+  it("exact, prefix, bare, and * deny entries are unchanged", () => {
+    // exact
+    assert.deepStrictEqual(
+      evaluateRules("exec:curl", { allow: ["*"], deny: ["exec:curl"], review: [] }),
+      { allow: false, reason: "explicit_deny" },
+    );
+    // tool:* prefix
+    assert.deepStrictEqual(
+      evaluateRules("exec:curl", { allow: ["*"], deny: ["exec:*"], review: [] }),
+      {
+        allow: false,
+        reason: "explicit_deny",
+      },
+    );
+    // bare tool (backward compat)
+    assert.deepStrictEqual(
+      evaluateRules("exec:curl", { allow: ["*"], deny: ["exec"], review: [] }),
+      {
+        allow: false,
+        reason: "explicit_deny",
+      },
+    );
+    // * blocks all
+    assert.deepStrictEqual(evaluateRules("git", { allow: ["*"], deny: ["*"], review: [] }), {
+      allow: false,
+      reason: "explicit_deny",
+    });
+  });
+
+  it("missing deny/review lists stay safe alongside glob entries", () => {
+    const denyMissing = {
+      allow: ["*"],
+      deny: undefined as unknown as string[],
+      review: ["kanban-*"],
+    };
+    assert.deepStrictEqual(evaluateRules("kanban-get_cards", denyMissing), {
+      allow: false,
+      reason: "requires_review",
+    });
+    assert.deepStrictEqual(
+      evaluateRules("kanban-get_cards", {
+        allow: ["*"],
+        deny: ["kanban-*"],
+        review: undefined as unknown as string[],
+      }),
+      { allow: false, reason: "explicit_deny" },
+    );
+    // Glob entries that match nothing must not change the decision.
+    assert.deepStrictEqual(evaluateRules("git", { allow: ["*"], deny: ["kanban-*"], review: [] }), {
+      allow: true,
+    });
+  });
+});
+
 describe("redactToolArgsJson", () => {
   it("redacts dot paths", () => {
     const out = redactToolArgsJson(JSON.stringify({ password: "x", nested: { token: "y" } }), [
