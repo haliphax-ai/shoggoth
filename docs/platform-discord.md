@@ -9,7 +9,7 @@ Shoggoth's Discord integration package (`@shoggoth/platform-discord`) connects a
 The package is organized into these layers:
 
 1. **Gateway Client** — WebSocket connection to Discord's Gateway (v10, JSON encoding) with heartbeat, resume, and exponential-backoff reconnection.
-2. **REST Transport** — Typed HTTP client for Discord REST v10 with automatic rate-limit retry (429/503), jitter, and budget caps.
+2. **REST Transport** — Typed HTTP client for Discord REST v10, backed by a centralized rate-limit-aware client (`rest-client.ts`): proactive bucket metering from response headers, per-bucket priority queues, latest-wins edit coalescing, one backoff mechanism (whole-client pause on global 429s), and typed errors.
 3. **Adapter** — Maps raw Discord `MESSAGE_CREATE` events to platform-agnostic `InternalMessage` objects, resolving the target Shoggoth session via configured routes.
 4. **Bridge** — Orchestrates gateway + adapter + outbound sender + agent-to-agent bus. The central runtime object (`DiscordMessagingRuntime`).
 5. **Platform** — Wires the bridge into the daemon: session stores, transcript, tool execution, HITL, MCP, policy engine, streaming, and turn queuing.
@@ -116,11 +116,27 @@ The Message Content intent is privileged and must be enabled in the Discord Deve
 
 ### Rate Limit Handling
 
-- Up to 6 retry attempts on HTTP 429 (and 503 with `Retry-After`).
-- Respects `retry_after` from JSON body or `Retry-After` header.
-- Adds random jitter (0–250ms) after each suggested wait.
-- Total wait budget capped at 90 seconds.
-- Falls back to 1s delay when 429 has no `retry_after`.
+All REST traffic flows through one process-wide client (`rest-client.ts`):
+
+- **Proactive bucket metering** — every response's `X-RateLimit-Bucket`,
+  `X-RateLimit-Remaining`, and `X-RateLimit-Reset-After` headers populate a
+  bucket registry; requests wait for the advertised reset instead of eating a 429. Routes learn their shared bucket hash, so sibling routes on the same
+  channel/guild meter together.
+- **Per-bucket queues with priority lanes** — user-facing sends outrank
+  background probes (history reads, search, reactions); scheduling is
+  per-bucket, not a global lock, so throughput is preserved.
+- **Edit coalescing** — concurrent `editMessage` calls for the same message
+  (streaming updates vs. workflow status ticks) collapse to one in-flight
+  request plus the newest queued body; superseded edits settle with the
+  survivor, and stale queued edits are dropped after a deadline.
+- **Single backoff mechanism** — 429/503 retries (up to 6 attempts, 90s total
+  budget, 0–250ms jitter) are folded into the client; `global: true` rate
+  limits pause the whole client, not just one bucket.
+- **Typed errors** — `RateLimitedError`, `NotFoundError`,
+  `MissingPermissionsError`, `ServerError`, `QueueTimeoutError`, and
+  `NetworkError` all extend `DiscordRestError` (with `kind`, `status`,
+  `body`, `operation`), so callers distinguish transient from permanent
+  failures without matching on error strings.
 
 ---
 

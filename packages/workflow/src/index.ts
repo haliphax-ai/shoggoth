@@ -70,7 +70,11 @@ export { formatDuration } from "./format.js";
 
 // Status messaging
 export { formatStatusMessage, formatSummaryMessage } from "./status-message.js";
-export type { MessageAdapter } from "./message-adapter.js";
+export type {
+  EditMessageFailureReason,
+  EditMessageResult,
+  MessageAdapter,
+} from "./message-adapter.js";
 export { StatusManager, type StatusManagerOptions } from "./status-manager.js";
 
 // Message posting
