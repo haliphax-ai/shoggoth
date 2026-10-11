@@ -234,8 +234,34 @@ Determined by `isFailoverEligibleError()` in `classify.ts`:
 - `models.providers[]` — array of provider definitions (`kind`, `id`, `baseUrl`, `apiKey`/`apiKeyEnv`, etc.) — see [Shared — Configuration Schema](shared.md#configuration-schema) for the full Zod schema
 - `models.failoverChain[]` — array of `"providerId/modelName"` strings.
 - `models.providers[].models[]` — per-model overrides (`thinkingFormat`, `contextWindowTokens`).
+- `models.requestTimeoutMs` — top-level request timeout (ms) applied to all provider API requests.
+- `models.providers[].requestTimeoutMs` — per-provider request timeout (ms); overrides the top-level value for that provider only.
 
 When `failoverChain` is empty or absent, a single-hop provider is created from environment variables.
+
+### Request Timeout
+
+By default, provider API requests inherit Node's internal `fetch` timeouts (undici's ~300 s idle limits for receiving response headers and for gaps between body chunks). To tune this — for example to allow a slower local provider such as a LAN Ollama instance more time — set a timeout in configuration:
+
+```jsonc
+{
+  "models": {
+    // Applies to every provider…
+    "requestTimeoutMs": 600000,
+    "providers": [
+      {
+        "id": "ollama",
+        "kind": "openai-compatible",
+        "baseUrl": "http://192.168.1.10:11434/v1",
+        // …except this one, which overrides it.
+        "requestTimeoutMs": 1800000,
+      },
+    ],
+  },
+}
+```
+
+The timeout is enforced as an idle timeout per phase (response headers, then between body chunks) via an undici `Agent` dispatcher, so long-running but actively streaming responses are not cut off — only stalled requests are. A provider-level `requestTimeoutMs` always wins over the top-level `models.requestTimeoutMs`; when neither is set, Node's built-in defaults apply.
 
 ### Environment Variable Fallback
 

@@ -100,6 +100,8 @@ export interface OpenAICompatibleProviderOptions {
   readonly fetchImpl?: FetchLike;
   /** Optional resilience gate instance; falls back to the global singleton when omitted. */
   readonly resilienceGate?: ModelResilienceGate;
+  /** Request timeout (ms) overriding Node's internal fetch timeouts; see `CreateResilientFetcherOptions`. */
+  readonly requestTimeoutMs?: number;
 }
 
 function applyOpenAICompatibleRequestExtensions(
@@ -332,6 +334,7 @@ export function createOpenAICompatibleProvider(
     gate,
     fetchImpl,
     providerType: "openai-compatible",
+    requestTimeoutMs: options.requestTimeoutMs,
   });
 
   async function withEmptyResponseRetry<T>(fn: () => Promise<T>): Promise<T> {

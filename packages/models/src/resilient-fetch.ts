@@ -1,6 +1,7 @@
 import { ModelHttpError } from "./errors";
 import { headersToRecord } from "./headers-to-record";
 import { parseRateLimitHeaders, type ModelResilienceGate } from "./resilience";
+import { Agent } from "undici";
 import { getLogger } from "@shoggoth/shared";
 import type { FetchLike } from "./openai-compatible";
 
@@ -16,6 +17,14 @@ export interface CreateResilientFetcherOptions {
   readonly fetchImpl: FetchLike;
   /** Provider type string for rate-limit header parsing (e.g. "openai-compatible", "anthropic", "gemini"). */
   readonly providerType: string;
+  /**
+   * Request timeout in milliseconds. Overrides Node's internal fetch timeouts
+   * (undici's default 300 s `headersTimeout`/`bodyTimeout` idle limits). When
+   * omitted, Node's defaults apply. The timeout is applied as an idle timeout
+   * per phase (headers, then between body chunks), so long-running but active
+   * streams are not cut off — only stalled requests are.
+   */
+  readonly requestTimeoutMs?: number;
   /**
    * Format the error response body text before including in ModelHttpError.
    * Default: raw `text.slice(0, 500)`.
@@ -39,10 +48,27 @@ export function createResilientFetcher(
   const { id, gate, fetchImpl, providerType } = options;
   const formatBody = options.formatErrorBody ?? ((text: string) => text.slice(0, 500));
 
+  // Undici dispatcher that overrides Node's internal fetch timeouts when a
+  // request timeout is configured. Built once and reused across calls so the
+  // underlying connection pool is shared. Skipped when no timeout is set so
+  // Node's defaults remain in effect and no extra sockets are opened.
+  const timeoutDispatcher =
+    options.requestTimeoutMs !== undefined
+      ? new Agent({
+          headersTimeout: options.requestTimeoutMs,
+          bodyTimeout: options.requestTimeoutMs,
+        })
+      : undefined;
+
   return async function resilientFetch(targetUrl: string, init: RequestInit): Promise<Response> {
     try {
       return await gate.executeWithResilience(id, async () => {
-        const res = await fetchImpl(targetUrl, init);
+        // `dispatcher` is an undici extension to RequestInit honored by
+        // globalThis.fetch; it carries the configured request timeouts.
+        const initWithTimeout = timeoutDispatcher
+          ? ({ ...init, dispatcher: timeoutDispatcher } as RequestInit)
+          : init;
+        const res = await fetchImpl(targetUrl, initWithTimeout);
         try {
           const parsed = parseRateLimitHeaders(id, headersToRecord(res.headers), providerType);
           gate.getOrCreateManager(id).updateCapacity(parsed);
@@ -101,11 +127,7 @@ export async function assertResponseOk(
   if (!res.ok) {
     const errText = await res.text();
     const formatted = formatErrorBody ? formatErrorBody(errText) : errText.slice(0, 500);
-    throw new ModelHttpError(
-      res.status,
-      res.statusText || `HTTP ${res.status}`,
-      formatted,
-    );
+    throw new ModelHttpError(res.status, res.statusText || `HTTP ${res.status}`, formatted);
   }
 }
 
@@ -121,9 +143,7 @@ export function assertResponseBody(
   streamLabel?: string,
 ): ReadableStream<Uint8Array> {
   if (!res.body) {
-    const msg = streamLabel
-      ? `missing response body for ${streamLabel}`
-      : "missing response body";
+    const msg = streamLabel ? `missing response body for ${streamLabel}` : "missing response body";
     throw new ModelHttpError(502, msg, undefined);
   }
   return res.body;

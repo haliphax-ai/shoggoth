@@ -32,9 +32,12 @@ function modelProvidersById(
   env: NodeJS.ProcessEnv,
   fetchImpl?: FetchLike,
   resilienceGate?: ModelResilienceGate,
+  requestTimeoutMs?: number,
 ): Map<string, ModelProvider> {
   const byId = new Map<string, ModelProvider>();
   for (const p of providers ?? []) {
+    // Provider-level timeout overrides the top-level `models.requestTimeoutMs`.
+    const providerTimeoutMs = p.requestTimeoutMs ?? requestTimeoutMs;
     if (p.kind === "openai-compatible") {
       const apiKey = p.apiKey ?? (p.apiKeyEnv ? env[p.apiKeyEnv] : undefined);
       byId.set(
@@ -45,6 +48,7 @@ function modelProvidersById(
           apiKey,
           fetchImpl,
           resilienceGate,
+          requestTimeoutMs: providerTimeoutMs,
         }),
       );
     } else if (p.kind === "anthropic-messages") {
@@ -59,6 +63,7 @@ function modelProvidersById(
           auth: p.auth,
           fetchImpl,
           resilienceGate,
+          requestTimeoutMs: providerTimeoutMs,
         }),
       );
     } else if (p.kind === "gemini") {
@@ -72,6 +77,7 @@ function modelProvidersById(
           apiVersion: p.apiVersion,
           fetchImpl,
           resilienceGate,
+          requestTimeoutMs: providerTimeoutMs,
         }),
       );
     }
@@ -87,6 +93,7 @@ function singleHopFromEnv(
   env: NodeJS.ProcessEnv,
   fetchImpl?: FetchLike,
   resilienceGate?: ModelResilienceGate,
+  requestTimeoutMs?: number,
 ): { provider: ModelProvider; model: string } {
   const anthropicOrigin = env.ANTHROPIC_BASE_URL?.trim();
   if (anthropicOrigin) {
@@ -98,6 +105,7 @@ function singleHopFromEnv(
       auth: env.ANTHROPIC_AUTH?.trim().toLowerCase() === "bearer" ? "bearer" : undefined,
       fetchImpl,
       resilienceGate,
+      requestTimeoutMs,
     });
     const model = env.SHOGGOTH_MODEL?.trim();
     if (!model) {
@@ -115,6 +123,7 @@ function singleHopFromEnv(
       baseUrl: env.GEMINI_BASE_URL,
       fetchImpl,
       resilienceGate,
+      requestTimeoutMs,
     });
     const model = env.SHOGGOTH_MODEL?.trim();
     if (!model) {
@@ -132,6 +141,7 @@ function singleHopFromEnv(
     apiKey: env.OPENAI_API_KEY,
     fetchImpl,
     resilienceGate,
+    requestTimeoutMs,
   });
   const model = env.SHOGGOTH_MODEL?.trim();
   if (!model) {
@@ -150,8 +160,9 @@ function envBackedFailover(
   fetchImpl?: FetchLike,
   hooks?: FailoverHooks,
   resilienceGate?: ModelResilienceGate,
+  requestTimeoutMs?: number,
 ): FailoverModelClient {
-  const { provider, model } = singleHopFromEnv(env, fetchImpl, resilienceGate);
+  const { provider, model } = singleHopFromEnv(env, fetchImpl, resilienceGate, requestTimeoutMs);
   return createFailoverModelClient([{ provider, model }], hooks);
 }
 
@@ -193,12 +204,25 @@ export function createFailoverClientFromModelsConfig(
   const env = options.env ?? process.env;
   const chain = models?.failoverChain;
   const providers = models?.providers;
+  const requestTimeoutMs = models?.requestTimeoutMs;
 
   if (!chain?.length) {
-    return envBackedFailover(env, options.fetchImpl, options.hooks, options.resilienceGate);
+    return envBackedFailover(
+      env,
+      options.fetchImpl,
+      options.hooks,
+      options.resilienceGate,
+      requestTimeoutMs,
+    );
   }
 
-  const byId = modelProvidersById(providers, env, options.fetchImpl, options.resilienceGate);
+  const byId = modelProvidersById(
+    providers,
+    env,
+    options.fetchImpl,
+    options.resilienceGate,
+    requestTimeoutMs,
+  );
   const entries = buildFailoverChainFromConfig(chain, providers, byId);
 
   return createFailoverModelClient(entries, options.hooks);
@@ -211,13 +235,25 @@ export function createFailoverToolCallingClientFromModelsConfig(
   const env = options.env ?? process.env;
   const chain = models?.failoverChain;
   const providers = models?.providers;
+  const requestTimeoutMs = models?.requestTimeoutMs;
 
   if (!chain?.length) {
-    const { provider, model } = singleHopFromEnv(env, options.fetchImpl, options.resilienceGate);
+    const { provider, model } = singleHopFromEnv(
+      env,
+      options.fetchImpl,
+      options.resilienceGate,
+      requestTimeoutMs,
+    );
     return createFailoverToolCallingClient([{ provider, model }], options.hooks);
   }
 
-  const byId = modelProvidersById(providers, env, options.fetchImpl, options.resilienceGate);
+  const byId = modelProvidersById(
+    providers,
+    env,
+    options.fetchImpl,
+    options.resilienceGate,
+    requestTimeoutMs,
+  );
   const entries = buildFailoverChainFromConfig(chain, providers, byId);
 
   return createFailoverToolCallingClient(entries, options.hooks);

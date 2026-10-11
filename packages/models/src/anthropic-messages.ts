@@ -89,6 +89,8 @@ export interface AnthropicMessagesProviderOptions {
   readonly auth?: AnthropicMessagesAuthStyle;
   /** Optional resilience gate instance; falls back to the global singleton when omitted. */
   readonly resilienceGate?: ModelResilienceGate;
+  /** Request timeout (ms) overriding Node's internal fetch timeouts; see `CreateResilientFetcherOptions`. */
+  readonly requestTimeoutMs?: number;
 }
 
 const DEFAULT_ANTHROPIC_VERSION = "2023-06-01";
@@ -772,6 +774,7 @@ export function createAnthropicMessagesProvider(
     fetchImpl,
     providerType: "anthropic",
     formatErrorBody: parseApiErrorBody,
+    requestTimeoutMs: options.requestTimeoutMs,
   });
 
   return {
