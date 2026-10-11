@@ -1565,9 +1565,25 @@ export async function handleIntegrationControlOp(
         subagentDeliveryMode: deliveryMode,
         subagentRespondTo: respondTo,
       });
-      const unregisterThread = platformThreadId
-        ? ext.registerPlatformThreadBinding(platformThreadId, childId)
-        : () => {};
+      let unregisterThread: () => void;
+      try {
+        unregisterThread = platformThreadId
+          ? ext.registerPlatformThreadBinding(platformThreadId, childId)
+          : () => {};
+      } catch (bindErr) {
+        // The thread is already bound to another live session: the binding is
+        // rejected, not reassigned. Terminate this child so no orphan session
+        // lingers, then surface the conflict to the caller.
+        try {
+          sessionManager.kill(childId);
+        } catch {
+          /* best-effort cleanup */
+        }
+        throw new IntegrationOpError(
+          "ERR_INVALID_PAYLOAD",
+          `thread ${platformThreadId} is already bound to another active session; terminate it before binding a new subagent (${String(bindErr)})`,
+        );
+      }
       const unsubscribeBus = ext.subscribeSubagentSession(childId);
       // Arm the shared inactivity clock (persists subagentExpiresAtMs, reset on each
       // delivered response). Applies uniformly to thread-bound and threadless spawns.

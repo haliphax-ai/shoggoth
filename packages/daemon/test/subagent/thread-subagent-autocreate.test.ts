@@ -106,6 +106,44 @@ describe("handlePlatformThreadCreate", { concurrency: false }, () => {
     clearAllPersistentSubagentInactivityTimers();
   });
 
+  it("rejects a lost binding race: kills the child and reports binding_rejected", async () => {
+    const {
+      sessionId: parentSessionId,
+      sessions,
+      sessionManager,
+    } = await createTopLevelSession(db, tmp);
+    const bindings = new Map<string, string>([["chan-1", parentSessionId]]);
+    const statusBodies: Array<{ sessionId: string; body: string }> = [];
+    // Simulate a concurrent flow (e.g. an explicit subagent spawn) winning the
+    // thread between the durable guards and the registration: the register
+    // call throws.
+    const platform: ThreadSubagentPlatformDeps = {
+      ...makePlatformDeps(bindings, statusBodies),
+      registerPlatformThreadBinding: () => {
+        throw new Error("Discord thread thread-race already bound to session session-a");
+      },
+    };
+
+    const result = await handlePlatformThreadCreate({
+      db,
+      config: baseConfig(),
+      sessionManager,
+      sessions,
+      threadId: "thread-race",
+      parentChannelId: "chan-1",
+      platform,
+    });
+
+    assert.equal(result.created, false);
+    assert.equal(result.reason, "binding_rejected");
+    // The just-spawned child must not linger as an unbound shadow session.
+    const child = sessions.list().find((s) => s.parentSessionId === parentSessionId);
+    assert.ok(child);
+    assert.equal(child!.status, "terminated");
+    // No status message for a rejected binding.
+    assert.equal(statusBodies.length, 0);
+  });
+
   it("creates a thread-bound subagent session and posts a status message", async () => {
     const {
       sessionId: parentSessionId,

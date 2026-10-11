@@ -16,7 +16,11 @@ const log = getLogger("thread-subagent-autocreate");
 export interface ThreadSubagentPlatformDeps {
   /** Resolve the session currently bound to a channel (static routes + dynamic thread bindings). */
   readonly resolveSessionForChannel: (channelId: string, guildId?: string) => string | undefined;
-  /** Register the thread ↔ session binding for inbound routing + outbound delivery. */
+  /**
+   * Register the thread ↔ session binding for inbound routing + outbound
+   * delivery. Throws when the thread is already bound to a different live
+   * session; callers must treat that as a lost race and clean up.
+   */
   readonly registerPlatformThreadBinding: (threadId: string, sessionId: string) => () => void;
   /** Subscribe the platform's inbound dispatch to the new session. */
   readonly subscribeSubagentSession: (sessionId: string) => () => void;
@@ -120,7 +124,28 @@ export async function handlePlatformThreadCreate(
     subagentPlatformThreadId: threadId,
   });
 
-  const unregisterThread = input.platform.registerPlatformThreadBinding(threadId, childId);
+  let unregisterThread: () => void;
+  try {
+    unregisterThread = input.platform.registerPlatformThreadBinding(threadId, childId);
+  } catch (bindErr) {
+    // A concurrent flow (e.g. an explicit subagent spawn racing this create
+    // event) won the thread: the binding is rejected, not reassigned. Clean up
+    // the just-spawned child so no orphan session lingers.
+    l.warn("thread_subagent.binding_rejected", {
+      sessionId: childId,
+      threadId,
+      err: String(bindErr),
+    });
+    try {
+      input.sessionManager.kill(childId);
+    } catch (killErr) {
+      l.warn("thread_subagent.binding_rejected_cleanup_failed", {
+        sessionId: childId,
+        err: String(killErr),
+      });
+    }
+    return { created: false, reason: "binding_rejected" };
+  }
   const unsubscribeBus = input.platform.subscribeSubagentSession(childId);
   // Arm the shared inactivity clock (default window, reset on each delivered response)
   // instead of a far-future lifetime; the expiry is persisted for restart reconcile.

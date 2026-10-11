@@ -124,6 +124,14 @@ export interface StartDiscordMessagingOptions {
   readonly routeGuard?: DiscordMessagingRouteGuard;
   /** Operator Discord user snowflake; marks inbound `extensions.platform.discord.isOwner` (metadata / approver context). */
   readonly ownerUserId?: string;
+  /**
+   * Liveness check for thread-binding rejection: given a session id, is that
+   * session still active? When a thread maps to a different session that this
+   * reports active, `registerPlatformThreadBinding` refuses the registration
+   * instead of silently shadowing the live binding. When omitted, any
+   * conflicting registration is refused (strict).
+   */
+  readonly isSessionActive?: (sessionId: string) => boolean;
   /** Gateway `MESSAGE_REACTION_ADD` (e.g. HITL notice buttons). */
   readonly onMessageReactionAdd?: (ev: DiscordReactionAddEvent) => void;
   /** Gateway `INTERACTION_CREATE` (e.g. slash commands). */
@@ -157,7 +165,9 @@ export interface DiscordMessagingRuntime {
   readonly discordBotUserId: string | undefined;
   /**
    * Bind a Discord thread (or thread channel snowflake) to a session for inbound routing and outbound delivery.
-   * Returns an unregister function (idempotent).
+   * Returns an unregister function (idempotent). Throws when the thread is already
+   * bound to a different session that `isSessionActive` reports live; a stale
+   * (terminated) holder is reclaimed instead.
    */
   readonly registerPlatformThreadBinding: (
     threadChannelId: string,
@@ -368,6 +378,20 @@ export async function startDiscordMessagingIfConfigured(
       const t = threadChannelId.trim();
       const s = sessionId.trim();
       if (!t || !s) return () => {};
+      const current = discordDynamicSessionByChannel.get(t);
+      if (current !== undefined && current !== s) {
+        // A thread binds to at most one live session: refuse to shadow an
+        // active binding (e.g. an explicit subagent spawn racing the
+        // thread-create autocreate). A stale binding — terminated holder — is
+        // reclaimed so the thread is not wedged forever.
+        if (!opts.isSessionActive || opts.isSessionActive(current)) {
+          throw new Error(`Discord thread ${t} already bound to session ${current}`);
+        }
+        opts.logger.debug("discord.thread_binding.reclaim_stale", {
+          threadId: t,
+          sessionId: current,
+        });
+      }
       discordDynamicSessionByChannel.set(t, s);
       discordOutboundChannelBySession.set(s, t);
       return () => {
