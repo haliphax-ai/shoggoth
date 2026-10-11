@@ -1,12 +1,12 @@
-# builtin-session
+# Session tools (builtin-session-query, builtin-subagent, builtin-session-list, builtin-session-send)
 
-Tools for querying transcripts, spawning/managing subagents, listing sessions, and sending messages to sessions.
+Four independent builtin tools for querying transcripts, spawning and managing subagents, listing sessions, and sending messages between sessions. Each is a separate, independently-callable tool (registered call names shown per section) — there is no single `builtin-session` tool.
 
 ---
 
-## session-query
+## builtin-session-query
 
-Search and paginate transcript messages across your agent's sessions.
+Registered as `session-query`. Search and paginate transcript messages across your agent's sessions.
 
 ### Parameters
 
@@ -53,9 +53,9 @@ Search and paginate transcript messages across your agent's sessions.
 
 ---
 
-## subagent
+## builtin-subagent
 
-Spawn and manage subagent sessions. Only available to top-level (non-subagent) sessions.
+Registered as `subagent`. Spawn and manage subagent sessions. Availability follows the `maxSpawnDepth` nesting gate: top-level sessions may spawn; a subagent session sees this tool only while its lineage depth is below `maxSpawnDepth` (default 1).
 
 ### Parameters
 
@@ -201,9 +201,9 @@ No additional parameters. Returns info about the current session.
 
 ---
 
-## session-list
+## builtin-session-list
 
-List active sessions, optionally filtered by status or agent.
+Registered as `session-list`. List active sessions, optionally filtered by status or agent.
 
 ### Parameters
 
@@ -228,9 +228,9 @@ List active sessions, optionally filtered by status or agent.
 
 ---
 
-## session-send
+## builtin-session-send
 
-Send a message to a session or agent.
+Registered as `session-send`. Send a message to a session or agent.
 
 ### Parameters
 

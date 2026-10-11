@@ -29,8 +29,7 @@ const ALL_TOOLS: readonly AggregatedTool[] = [
   tool("builtin-workflow"),
   tool("builtin-session-list"),
   tool("builtin-session-send"),
-  tool("builtin-session-history"),
-  tool("builtin-session-spawn"),
+  tool("builtin-web-search"),
   tool("builtin-poll"),
   tool("builtin-skills"),
   tool("external-fetch", "external"),
@@ -68,10 +67,9 @@ describe("filterToolsByContextLevel", () => {
 
   describe("level: minimal", () => {
     const MINIMAL_EXCLUDED = [
-      "builtin-session-history",
-      "builtin-session-spawn",
       "builtin-session-list",
       "builtin-subagent",
+      "builtin-web-search",
       "builtin-workflow",
     ];
 
@@ -202,7 +200,7 @@ describe("filterToolsByContextLevel", () => {
 
     it("applies only defaults at minimal without config", () => {
       const result = filterToolsByContextLevel(ALL_TOOLS, "minimal");
-      assert.strictEqual(result.length, ALL_TOOLS.length - 5);
+      assert.strictEqual(result.length, ALL_TOOLS.length - 4);
     });
   });
 
