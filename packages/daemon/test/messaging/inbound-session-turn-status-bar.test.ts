@@ -328,9 +328,39 @@ describe("runInboundSessionTurn status bar", () => {
     expect(clearedAt).toBeGreaterThanOrEqual(0);
     expect(clearedAt).toBeLessThan(deliveredAt);
 
-    // The error body carries exactly one bar line, and no stale bar remains.
     expect(errorBody.split(BAR_LINE).length - 1).toBe(1);
     expect(errorBody.endsWith(BAR_LINE)).toBe(true);
     expect(activeBar).toBeNull();
+  });
+
+  it("(g) prose forwarding: stream text deltas reach tracker.onProse (💬 phase)", async () => {
+    const setFullContent = vi.fn().mockResolvedValue(undefined);
+    const pushUpdate = vi.fn().mockResolvedValue(undefined);
+    const streamStart = vi.fn().mockResolvedValue({ setFullContent, pushUpdate });
+
+    const onProse = vi.fn();
+    const finish = vi.fn().mockResolvedValue("✅ bar");
+    const create = vi.fn().mockResolvedValue({
+      setStatusBar: vi.fn().mockResolvedValue(undefined),
+      finish,
+      onProse,
+    });
+
+    await runInboundSessionTurn({
+      buildTurn: defaultBuildTurn,
+      streaming: { minIntervalMs: 0, start: streamStart },
+      statusBar: { enabled: true, create },
+      sliceDisplayText: (t) => t,
+      formatAssistantReply: (text) => text,
+      formatErrorReply: (err) => String(err),
+      sendAssistantBody: vi.fn().mockResolvedValue(undefined),
+      sendErrorBody: vi.fn().mockResolvedValue(undefined),
+    });
+
+    // The mocked engine pushes 10 text deltas ("a"×30 … "a"×300); every raw
+    // delta must reach the tracker so the live bar can flip to 💬 prose.
+    expect(onProse).toHaveBeenCalledTimes(10);
+    expect(onProse.mock.calls[0]?.[0]).toBe("a".repeat(30));
+    expect(onProse.mock.calls.at(-1)?.[0]).toBe("a".repeat(300));
   });
 });

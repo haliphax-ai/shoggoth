@@ -4,10 +4,10 @@ import type { ImageBlockCodec, ChatContentPart } from "@shoggoth/models";
 import type { SessionToolLoopFailoverState } from "../sessions/session-tool-loop-model-client.js";
 import type { PlatformAdapter, StreamHandle, OutboundAttachment } from "./platform-adapter.js";
 import {
-  createTurnStatusBar,
+  createStatusBarTurnTracker,
   type StatusBarRenderer,
   type StatusBarSink,
-  type StatusBarSnapshot,
+  type TurnStatusBarTracker,
 } from "./status-bar.js";
 import type { ResolvedStatusBarConfig } from "@shoggoth/shared";
 import type { InboundSessionTurnInput } from "../messaging/inbound-session-turn.js";
@@ -249,20 +249,25 @@ export class PresentationTurnOrchestrator {
         input.formatAttachmentMetadata,
         input.imageUrlPassthrough,
       );
-      // Adapt the platform statusBar dep ({config, render, attachSink, stats})
     };
 
     // Adapt the platform statusBar dep ({config, render, attachSink, stats})
-    // direct pass-through left `enabled` undefined at runtime, so inbound
-    // turns silently skipped the bar.
-    let liveSetStatusBar: ((line: string | null) => Promise<void>) | undefined;
+    // through ONE turn tracker: the tracker's snapshots rendered by the
+    // platform renderer are the live bar, and finish() returns the terminal
+    // line for delivery — no second composition path. Direct pass-through
+    // left `enabled` undefined at runtime, so inbound turns silently skipped
+    // the bar.
+    let tracker: TurnStatusBarTracker | undefined;
     const statusBarDep = this.deps.statusBar;
     const statusBarOption: RunInboundSessionTurnOptions["statusBar"] = statusBarDep
       ? {
           enabled: statusBarDep.config.enabled,
           attachSink: (h) => {
             const sink = statusBarDep.attachSink(h);
-            liveSetStatusBar = (line) => sink.setStatusBar(line);
+            // Wire the tracker's live target; the tracker flushes its captured
+            // (⏳ starting) line to the sink immediately, so the in-flight
+            // placeholder carries the bar from turn start.
+            tracker?.attachSink(sink);
             return h;
           },
           create: async () => {
@@ -272,50 +277,22 @@ export class PresentationTurnOrchestrator {
               compactions: 0,
               context: undefined,
             };
-            let localCompactions = stats.compactions;
-            let lastLine: string | undefined;
-            const captureSink: StatusBarSink = {
-              setStatusBar: async (line) => {
-                if (line === null) {
-                  await liveSetStatusBar?.(null);
-                  return;
-                }
-                // The engine forwards snapshots cast to string; render the
-                // platform line for terminal delivery and live application.
-                lastLine = statusBarDep.render(
-                  line as unknown as StatusBarSnapshot,
-                  statusBarDep.config,
-                );
-                await liveSetStatusBar?.(lastLine);
-              },
-            };
-            const engine = createTurnStatusBar({
+            tracker = createStatusBarTurnTracker({
               cfg: statusBarDep.config,
-              sink: captureSink,
               render: statusBarDep.render,
-            });
-            await engine.start({
-              sequence: stats.sequence,
-              compactions: stats.compactions,
-              ...(stats.context ? { context: stats.context } : {}),
+              stats,
             });
             return {
-              setStatusBar: async (line: string | null) => {
-                await liveSetStatusBar?.(line);
-              },
-              finish: async (outcome: string) => {
-                await engine.finish(
+              setStatusBar: (line: string | null) => tracker!.setStatusBar(line),
+              finish: (outcome: string) =>
+                tracker!.finish(
                   outcome === "aborted" || outcome === "failed" ? outcome : "finished",
-                );
-                return lastLine;
-              },
-              onThinkingDelta: () => engine.markThinking(),
-              onToolCall: (ev) => {
-                if (ev.phase === "start") engine.toolStarted({ name: ev.name });
-                else engine.toolFinished();
-              },
-              onHitlQueued: (call) => engine.markPaused({ name: call.name }),
-              onCompaction: () => engine.setCompactions(++localCompactions),
+                ),
+              onProse: (accumulated: string) => tracker?.onProse?.(accumulated),
+              onThinkingDelta: (accumulated: string) => tracker?.onThinkingDelta?.(accumulated),
+              onToolCall: (ev) => tracker?.onToolCall?.(ev),
+              onHitlQueued: (call) => tracker?.onHitlQueued?.(call),
+              onCompaction: () => tracker?.onCompaction?.(),
             };
           },
         }

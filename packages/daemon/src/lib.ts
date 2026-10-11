@@ -248,10 +248,11 @@ export {
 export { setNoticeResolver as setPresentationNoticeResolver } from "./presentation/notices";
 export {
   createTurnStatusBar,
+  createStatusBarTurnTracker,
   getStatusBarStats,
-  renderStatusBarTerminalBar,
   formatTokens,
   type TurnStatusBar,
+  type TurnStatusBarTracker,
   type TurnStatusPhase,
   type StatusBarToolCall,
   type StatusBarSnapshot,

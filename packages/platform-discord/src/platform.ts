@@ -27,7 +27,7 @@ import {
   defaultPlatformAssistantDeps,
   getTurnQueue,
   getStatusBarStats,
-  renderStatusBarTerminalBar,
+  createStatusBarTurnTracker,
   formatAssistantReply,
   routeReaction,
   formatGlobalReactionEventContext,
@@ -41,6 +41,7 @@ import {
   type SessionAgentTurnResult,
   type SessionModelTurnDelivery,
   type StatusBarSnapshot,
+  type TurnStatusBarTracker,
   type StreamHandle,
   type PlatformAssistantDeps,
   resolveModel,
@@ -625,6 +626,11 @@ export async function startDiscordPlatform(
               })
           : undefined;
 
+      // One tracker for the messaging_surface turn: the live bar AND the
+      // terminal bar are its snapshots rendered by the same renderer (the only
+      // live/terminal difference is the phase emoji). Captures until the stream
+      // handle exists; attachSink flushes the ⏳ line onto the placeholder.
+      let surfaceTracker: TurnStatusBarTracker | undefined;
       const executeTurn = (
         afterHitlQueued?: (row: PendingActionRow) => void | Promise<void>,
         streamOverride?: ExecuteSessionAgentTurnInput["stream"],
@@ -658,10 +664,34 @@ export async function startDiscordPlatform(
           createToolCallingClient: createToolClient,
           resolveMcpContext: mcpRuntime.resolveContext,
           ...(streamOverride ? { stream: streamOverride } : {}),
+          // Forward turn events into the tracker so the live bar re-renders
+          // mid-turn (thinking / tool count / HITL pause / compaction).
+          ...(surfaceTracker
+            ? {
+                events: {
+                  onThinkingDelta: (accumulated: string) =>
+                    surfaceTracker?.onThinkingDelta?.(accumulated),
+                  onToolCall: (ev) => surfaceTracker?.onToolCall?.(ev),
+                  onHitlQueued: (call) => surfaceTracker?.onHitlQueued?.(call),
+                  onCompaction: () => surfaceTracker?.onCompaction?.(),
+                },
+              }
+            : {}),
         });
 
       if (input.delivery.kind === "messaging_surface") {
         const delivery = input.delivery;
+
+        // Snapshot stats BEFORE the turn runs: executing the turn increments
+        // session_stats.turn_count, and the bar must report the sequence of
+        // the very turn it belongs to (not the next one).
+        if (statusBarDep.config.enabled) {
+          surfaceTracker = createStatusBarTurnTracker({
+            cfg: statusBarDep.config,
+            render: statusBarDep.render,
+            stats: getStatusBarStats(opts.db, sid),
+          });
+        }
 
         // When streaming is enabled, post the placeholder ("…") BEFORE starting
         // the typing indicator — Discord cancels typing when a bot posts a
@@ -686,6 +716,15 @@ export async function startDiscordPlatform(
                   ? { setStatusBar: (line: string | null) => raw.setStatusBar!(line) }
                   : {}),
               };
+              // Wire the tracker's live target; the tracker flushes its
+              // captured ⏳ line so the placeholder carries the bar from turn
+              // start (capture-fallback until this handle exists).
+              surfaceTracker?.attachSink({
+                setStatusBar: (line: string | null) =>
+                  surfaceStreamHandle?.setStatusBar
+                    ? surfaceStreamHandle.setStatusBar(line)
+                    : Promise.resolve(),
+              });
             } catch (e) {
               opts.logger.warn("discord.platform.stream_start_failed", {
                 err: String(e),
@@ -699,18 +738,16 @@ export async function startDiscordPlatform(
           : undefined;
 
         await adapter.withTypingIndicator(sid, async () => {
-          // Snapshot stats BEFORE the turn runs: executing the turn increments
-          // session_stats.turn_count, and the bar must report the sequence of
-          // the very turn it belongs to (not the next one).
-          const statsAtTurnStart = statusBarDep.config.enabled
-            ? getStatusBarStats(opts.db, sid)
-            : undefined;
           turnResult = await executeTurn(
             buildAfterHitlQueued(delivery),
             surfaceStreamPusher
               ? {
                   streamModel: true,
-                  onModelTextDelta: (t: string) => surfaceStreamPusher.push(t.trim() ? t : "…"),
+                  onModelTextDelta: (t: string) => {
+                    surfaceStreamPusher.push(t.trim() ? t : "…");
+                    // Prose phase (💬) on the live bar.
+                    surfaceTracker?.onProse?.(t);
+                  },
                 }
               : streamEnabled()
                 ? { streamModel: true }
@@ -724,33 +761,42 @@ export async function startDiscordPlatform(
             turnResult.latestAssistantText,
             turnResult.failoverMeta,
           );
-          // Terminal bar for this turn, rendered from the turn-start stats
-          // snapshot (sequence, compactions, context window fill) through the
-          // same StatusBarRenderer the live bar uses, so both share one format.
-          // The messaging_surface terminal bar has always rendered the finished
-          // (✅) phase regardless of how the turn ended; keep "finished".
-          const terminalBar =
-            statsAtTurnStart === undefined
-              ? undefined
-              : renderStatusBarTerminalBar(
-                  statsAtTurnStart,
-                  "finished",
-                  statusBarDep.config,
-                  renderDiscordStatusBar,
-                );
+          // ONE terminal composition: the tracker's finish() renders the
+          // frozen bar (✅/🛑/❌) through the same renderer as the live bar and
+          // returns the line for delivery — the terminal snapshot carries this
+          // turn's real tool-call count (the tracker, not a stats-derived
+          // parallel composition, is the source).
+          const outcome =
+            turnResult.outcome === "aborted" || turnResult.outcome === "failed"
+              ? turnResult.outcome
+              : "finished";
+          const barLine = surfaceTracker ? await surfaceTracker.finish(outcome) : undefined;
+          // finish()'s terminal render flowed through the sink into the
+          // in-flight handle's setStatusBar (active-bar state). Clear it BEFORE
+          // final delivery: the delivery body carries barLine itself, and a
+          // still-active bar would stack a second copy. Never block delivery.
+          if (barLine && surfaceStreamHandle?.setStatusBar) {
+            try {
+              await surfaceStreamHandle.setStatusBar(null);
+            } catch (e) {
+              opts.logger.warn("discord.platform.status_bar_clear_failed", {
+                err: String(e),
+                sessionId: sid,
+              });
+            }
+          }
           if (surfaceStreamPusher && surfaceStreamHandle) {
             await surfaceStreamPusher.flush();
-            if (terminalBar && surfaceStreamHandle.setStatusBar) {
-              await surfaceStreamHandle.setStatusBar(terminalBar);
-            }
-            await surfaceStreamHandle.setFullContent(fullBody);
+            await surfaceStreamHandle.setFullContent(
+              barLine ? `${fullBody}\n\n${barLine}` : fullBody,
+            );
             // Stream edits can't carry file attachments — send as follow-up.
             const attachments = turnResult.showAttachments;
             if (attachments?.length) {
               await adapter.sendBody(sid, "", { attachments: [...attachments] });
             }
           } else {
-            await adapter.sendBody(sid, terminalBar ? `${fullBody}\n\n${terminalBar}` : fullBody, {
+            await adapter.sendBody(sid, barLine ? `${fullBody}\n\n${barLine}` : fullBody, {
               replyTo: delivery.replyToMessageId,
             });
           }

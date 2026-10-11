@@ -2762,12 +2762,19 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
     });
     await platform.stop();
 
-    // The terminal bar (> ✅ ｜ 🔢 `7` ｜ 🪟 ... ｜ 🗑️ `2` — the live renderer's
-    // blockquote format and section order) must land on the final stream
-    // delivery. The tracker renders it and passes it through the sink that
-    // wraps the stream pusher; with the no-op attachSink the handle never receives
-    // the bar, so this FAILS until the real sink applies the line.
-    const terminalLine = barLines.at(-1);
+    // The starting bar (⏳) must reach the in-flight placeholder: the tracker
+    // captures the engine's initial render and attachSink flushes it (the old
+    // bug: the initial render pre-dated the sink, so ⏳ never showed).
+    assert.ok(barLines.length > 0, "the tracker must apply live bars to the stream handle");
+    assert.ok(
+      barLines[0] !== null && barLines[0]!.includes("⏳"),
+      `the ⏳ starting bar must be flushed to the placeholder, got: ${barLines[0]}`,
+    );
+
+    // The in-flight bar is cleared (null) before final delivery — the ONE
+    // terminal line comes back from tracker.finish() and lands on the body.
+    const nonNullBars = barLines.filter((l): l is string => l !== null);
+    const terminalLine = nonNullBars.at(-1);
     assert.ok(
       terminalLine !== undefined,
       "the terminal bar must be applied to the in-flight stream message",
@@ -2798,9 +2805,17 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
       `terminal bar must order the context section before compactions, got: ${terminalLine}`,
     );
 
-    // The body that lands on the final setFullContent is the formatted reply; with the
-    // real sink the bar is appended to it (body ends with the bar).
+    // Single pipeline: the delivered body carries the SAME tracker-rendered
+    // terminal line the sink saw — appended exactly once, at the end.
     assert.ok(finalBody !== undefined, "final setFullContent must be called");
+    assert.ok(
+      finalBody!.split(terminalLine!).length - 1 === 1,
+      `final body must carry the terminal bar exactly once, got: ${finalBody}`,
+    );
+    assert.ok(
+      finalBody!.endsWith(terminalLine!),
+      `final body must end with the terminal bar line, got: ${finalBody}`,
+    );
   });
 
   it("runSessionModelTurn messaging_surface at-once: terminal bar lands on the final sendBody", async () => {
