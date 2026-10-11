@@ -35,8 +35,9 @@ export interface StatusBarSnapshot {
       readonly runtimeMs?: number;
     };
   };
-  /** Absent until first usage data. current = latest per-call input tokens. */
-  readonly context?: { readonly currentTokens: number; readonly totalTokens: number };
+  /** Absent until first usage data. current = latest per-call input tokens;
+   *  totalTokens = the known window, omitted when the window is unknown. */
+  readonly context?: { readonly currentTokens: number; readonly totalTokens?: number };
   readonly compactions: number;
 }
 
@@ -52,7 +53,7 @@ export interface TurnStatusBar {
   /** Called once when the turn begins; sets phase ⏳ and performs the first render. */
   start(input: {
     sequence: number;
-    context?: { currentTokens: number; totalTokens: number };
+    context?: { currentTokens: number; totalTokens?: number };
     compactions: number;
   }): Promise<void>;
   markThinking(): void; // 🧠
@@ -95,7 +96,7 @@ export function createTurnStatusBar(opts: {
   let phase: TurnStatusPhase = "starting";
   let sequence = 0;
   let compactions = 0;
-  let context: { currentTokens: number; totalTokens: number } | undefined;
+  let context: { currentTokens: number; totalTokens?: number } | undefined;
   let totalTools = 0;
   let last:
     | {
@@ -205,14 +206,12 @@ export function createTurnStatusBar(opts: {
 
     updateContext(currentTokens, totalTokens) {
       if (finished) return;
-      if (totalTokens !== undefined || context === undefined) {
-        context = {
-          currentTokens,
-          totalTokens: totalTokens ?? context?.totalTokens ?? currentTokens,
-        };
-      } else {
-        context = { ...context, currentTokens };
-      }
+      // Never fake the window from the fill: an unknown total stays unknown
+      // (the renderer shows the fill without a percent) until a known window
+      // arrives.
+      const knownTotal = totalTokens ?? context?.totalTokens;
+      context =
+        knownTotal !== undefined ? { currentTokens, totalTokens: knownTotal } : { currentTokens };
       scheduleRender();
     },
 
@@ -254,7 +253,7 @@ export function createTurnStatusBar(opts: {
 export interface StatusBarStats {
   readonly sequence: number;
   readonly compactions: number;
-  readonly context?: { readonly currentTokens: number; readonly totalTokens: number };
+  readonly context?: { readonly currentTokens: number; readonly totalTokens?: number };
 }
 
 /** `<10K` → plain integer with thousands separators; `≥10K` → one-decimal K; `≥1M` → one-decimal M. */
@@ -289,8 +288,8 @@ function getModelMetadataContextWindow(modelSelection: unknown): number {
  *  must never be treated as current context-window fill). `context` is omitted
  *  when the fill is 0; `totalTokens` comes from the session's known context
  *  window (session_stats.context_window_tokens, then model metadata for the
- *  session's selected model) and falls back to the fill when neither is
- *  known. */
+ *  session's selected model) and is omitted when neither is known — never
+ *  faked from the fill, which the renderer would display as a bogus 100%. */
 export function getStatusBarStats(db: Database.Database, sessionId: string): StatusBarStats {
   const row = db
     .prepare(
@@ -312,13 +311,13 @@ export function getStatusBarStats(db: Database.Database, sessionId: string): Sta
   const compactions = row?.compaction_count ?? 0;
   if (currentTokens <= 0) return { sequence, compactions };
   // Known context window: the session_stats gauge first, then model metadata
-  // for the session's selected model; the fill itself only when neither is known.
+  // for the session's selected model; unknown (omitted) when neither knows.
   let windowTokens = row?.context_window_tokens ?? 0;
   if (windowTokens <= 0) windowTokens = getModelMetadataContextWindow(sessionRow?.modelSelection);
   return {
     sequence,
     compactions,
-    context: { currentTokens, totalTokens: windowTokens > 0 ? windowTokens : currentTokens },
+    context: windowTokens > 0 ? { currentTokens, totalTokens: windowTokens } : { currentTokens },
   };
 }
 

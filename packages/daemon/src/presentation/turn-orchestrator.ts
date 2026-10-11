@@ -108,7 +108,7 @@ export interface PresentationTurnOrchestratorDeps {
     readonly stats?: (sessionId: string) => {
       readonly sequence: number;
       readonly compactions: number;
-      readonly context?: { readonly currentTokens: number; readonly totalTokens: number };
+      readonly context?: { readonly currentTokens: number; readonly totalTokens?: number };
     };
   };
 }

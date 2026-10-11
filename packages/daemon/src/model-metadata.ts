@@ -27,7 +27,8 @@ export function createModelMetadataStore(): ModelMetadataStore {
 const defaultStore: ModelMetadataStore = createModelMetadataStore();
 
 /**
- * Initialize the store from the failover chain config.
+ * Initialize the store from the models config: every provider model with a
+ * configured context window, plus failover-chain entries.
  * Call once at startup after config is loaded.
  */
 export function initModelMetadataFromConfig(
@@ -38,6 +39,19 @@ export function initModelMetadataFromConfig(
   }>,
   store: ModelMetadataStore = defaultStore,
 ): void {
+  // Register every configured model definition, not only failover-chain
+  // entries: a session may select any configured model, and window lookups
+  // (status bar, session stats) are keyed by providerId + model name.
+  for (const provider of providers ?? []) {
+    for (const model of provider.models ?? []) {
+      if (model.contextWindowTokens != null) {
+        store.set(makeKey(provider.id, model.name), {
+          contextWindowTokens: model.contextWindowTokens,
+          source: "config",
+        });
+      }
+    }
+  }
   for (const entry of failoverChain) {
     const slash = entry.indexOf("/");
     if (slash < 1) continue;

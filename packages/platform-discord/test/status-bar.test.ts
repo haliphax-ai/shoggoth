@@ -171,6 +171,15 @@ describe("renderDiscordStatusBar", () => {
     expect(line).toContain("10.3%/100K");
   });
 
+  it("renders the fill without a percent when the window is unknown", () => {
+    // An unknown window must never render as `100%/...` (the fill divided by
+    // itself); show the abbreviated fill only.
+    const line = renderDiscordStatusBar(snap({ context: { currentTokens: 22_500 } }), defaultCfg);
+    expect(line).toContain("🪟");
+    expect(line).toContain("~22.5K");
+    expect(line).not.toContain("%");
+  });
+
   it("formats compactions with the compactions emoji", () => {
     const line = renderDiscordStatusBar(snap({ compactions: 4 }), defaultCfg);
     expect(line).toContain("🗑️");

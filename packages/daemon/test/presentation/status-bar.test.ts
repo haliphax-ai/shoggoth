@@ -215,6 +215,17 @@ describe("createTurnStatusBar", () => {
     expect(last.context).toEqual({ currentTokens: 12_345, totalTokens: 100_000 });
   });
 
+  it("updateContext with an unknown window never fakes the total from the fill", async () => {
+    const { bar, sink } = createBar();
+    await bar.start({ sequence: 15, compactions: 0 });
+    bar.updateContext(22_500);
+    await vi.advanceTimersByTimeAsync(1000);
+    const last = sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot;
+    // The fill must not masquerade as the window (`total = fill` rendered as
+    // a bogus 100%); an unknown window stays absent until one is known.
+    expect(last.context).toEqual({ currentTokens: 22_500 });
+  });
+
   it("setCompactions updates the compaction count", async () => {
     const { bar, sink } = createBar();
     await bar.start({ sequence: 12, compactions: 0 });
@@ -471,6 +482,19 @@ describe("getStatusBarStats", () => {
       currentTokens: 1_000,
       totalTokens: 128_000,
     });
+  });
+
+  it("omits the window (never faked from the fill) when no context window is known", () => {
+    createSessionStore(db).create({
+      id: "s6",
+      workspacePath: tmp,
+      modelSelection: { model: "unknown-pro/unknown-model" },
+    });
+    seedStats("s6", { turn_count: 2 });
+    seedSegmentTranscript("s6", "x".repeat(4_000)); // ≈1_000 estimated tokens
+    // Without a known window the snapshot carries the fill only — the
+    // renderer drops the percent instead of dividing the fill by itself.
+    expect(getStatusBarStats(db, "s6").context).toEqual({ currentTokens: 1_000 });
   });
 
   it("defaults to zeroed stats for an unknown session", () => {

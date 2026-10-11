@@ -73,7 +73,7 @@ export function buildStatusBarDep(
   stats: (sessionId: string) => {
     sequence: number;
     compactions: number;
-    context?: { currentTokens: number; totalTokens: number };
+    context?: { currentTokens: number; totalTokens?: number };
   };
 } {
   return {
