@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
 import {
   createTurnStatusBar,
+  createStatusBarTurnTracker,
   getStatusBarStats,
-  renderStatusBarTerminalBar,
 } from "../../src/presentation/status-bar";
 import type { StatusBarStats } from "../../src/presentation/status-bar";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
@@ -447,61 +447,107 @@ describe("getStatusBarStats", () => {
   });
 });
 
-describe("renderStatusBarTerminalBar", () => {
+describe("createStatusBarTurnTracker", () => {
   const stats: StatusBarStats = {
     sequence: 7,
     compactions: 2,
     context: { currentTokens: 1_000, totalTokens: 1_000_000 },
   };
 
-  it("builds a snapshot from the stats and hands it to the injected renderer with cfg", () => {
-    const render = vi.fn((_snap: StatusBarSnapshot, _cfg: ResolvedStatusBarConfig) => "> ✅");
-    expect(renderStatusBarTerminalBar(stats, "finished", defaultCfg, render)).toBe("> ✅");
-    expect(render).toHaveBeenCalledTimes(1);
-    const [snap, cfg] = render.mock.calls[0]!;
-    expect(snap).toEqual({
-      phase: "finished",
-      sequence: 7,
-      toolCalls: { total: 0 },
-      context: { currentTokens: 1_000, totalTokens: 1_000_000 },
-      compactions: 2,
+  function createTracker(
+    overrides: {
+      cfg?: ResolvedStatusBarConfig;
+      render?: StatusBarRenderer;
+      stats?: StatusBarStats;
+    } = {},
+  ) {
+    const render = overrides.render ?? makeRender();
+    const tracker = createStatusBarTurnTracker({
+      cfg: overrides.cfg ?? defaultCfg,
+      render,
+      stats: overrides.stats ?? stats,
     });
-    expect(cfg).toBe(defaultCfg);
+    const sink = makeSink();
+    return { tracker, sink, render };
+  }
+
+  it("captures the ⏳ starting line synchronously; attachSink flushes it to the live sink", () => {
+    const { tracker, sink } = createTracker();
+    // The engine's initial render pre-dates the sink (the old bug: the
+    // starting bar never reached the in-flight placeholder). The factory
+    // captures it and flushes it the moment a sink attaches.
+    tracker.attachSink(sink);
+    expect(sink.setStatusBar).toHaveBeenCalledTimes(1);
+    expect(sink.setStatusBar.mock.calls[0]![0]).toBe("starting#7");
   });
 
-  it("maps every turn outcome to the matching snapshot phase", () => {
-    const render = vi.fn((_snap: StatusBarSnapshot, _cfg: ResolvedStatusBarConfig) => "x");
+  it("events drive the snapshot: thinking → tool count → prose → pause → compaction", async () => {
+    const lines: string[] = [];
+    const render = (snap: StatusBarSnapshot) => {
+      const line = `${snap.phase}#t${snap.toolCalls.total}#c${snap.compactions}`;
+      lines.push(line);
+      return line;
+    };
+    const { tracker } = createTracker({ render });
+
+    tracker.onThinkingDelta?.("…");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(lines.at(-1)).toBe("thinking#t0#c2");
+
+    tracker.onToolCall?.({ phase: "start", name: "builtin-exec", argsJson: "{}" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(lines.at(-1)).toBe("tool#t1#c2");
+
+    tracker.onToolCall?.({ phase: "end", name: "builtin-exec", argsJson: "{}", runtimeMs: 5 });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(lines.at(-1)).toBe("tool#t1#c2");
+
+    tracker.onProse?.("hello");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(lines.at(-1)).toBe("prose#t1#c2");
+
+    tracker.onHitlQueued?.({ name: "builtin-exec", argsJson: "{}" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(lines.at(-1)).toBe("paused#t1#c2");
+
+    tracker.onCompaction?.();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(lines.at(-1)).toBe("paused#t1#c3");
+  });
+
+  it("finish renders via the injected renderer, returns the line; only the phase differs from live", async () => {
+    const { tracker, sink } = createTracker();
+    tracker.attachSink(sink);
+    const starting = sink.setStatusBar.mock.calls[0]![0] as string;
+    tracker.onProse?.("hi");
+    await vi.advanceTimersByTimeAsync(1_000);
+    const prose = sink.setStatusBar.mock.calls.at(-1)![0] as string;
+
+    const returned = await tracker.finish("finished");
+    const terminal = sink.setStatusBar.mock.calls.at(-1)![0] as string;
+    expect(returned).toBe(terminal);
+    expect(terminal).toBe("finished#7");
+    // ONE renderer: the live and terminal lines are the same composition —
+    // only the phase (emoji) segment switches with the outcome.
+    expect(starting.replace("starting", "phase")).toBe(terminal.replace("finished", "phase"));
+    expect(prose.replace("prose", "phase")).toBe(terminal.replace("finished", "phase"));
+  });
+
+  it("maps every turn outcome to the matching terminal phase", async () => {
     for (const outcome of ["finished", "aborted", "failed"] as const) {
-      renderStatusBarTerminalBar(stats, outcome, defaultCfg, render);
+      const { tracker } = createTracker();
+      expect(await tracker.finish(outcome)).toBe(`${outcome}#7`);
     }
-    expect(render.mock.calls.map(([snap]) => snap.phase)).toEqual([
-      "finished",
-      "aborted",
-      "failed",
-    ]);
   });
 
-  it("reports zero tool calls (the renderer omits the section when empty)", () => {
-    const render = vi.fn((_snap: StatusBarSnapshot, _cfg: ResolvedStatusBarConfig) => "x");
-    renderStatusBarTerminalBar(stats, "finished", defaultCfg, render);
-    expect(render.mock.calls[0]![0].toolCalls).toEqual({ total: 0 });
+  it("returns undefined from finish when every section is disabled (sink saw null)", async () => {
+    const { tracker } = createTracker({
+      cfg: { ...DEFAULT_STATUS_BAR_CONFIG, enabled: false },
+    });
+    expect(await tracker.finish("finished")).toBeUndefined();
   });
 
-  it("omits the context field from the snapshot when stats carry no context", () => {
-    const render = vi.fn((_snap: StatusBarSnapshot, _cfg: ResolvedStatusBarConfig) => "x");
-    renderStatusBarTerminalBar({ sequence: 0, compactions: 0 }, "finished", defaultCfg, render);
-    const [snap] = render.mock.calls[0]!;
-    expect(snap.context).toBeUndefined();
-    expect(snap.sequence).toBe(0);
-    expect(snap.compactions).toBe(0);
-  });
-
-  it("returns undefined when the renderer yields an empty line", () => {
-    const render = vi.fn((_snap: StatusBarSnapshot, _cfg: ResolvedStatusBarConfig) => "");
-    expect(renderStatusBarTerminalBar(stats, "finished", defaultCfg, render)).toBeUndefined();
-  });
-
-  it("round-trips getStatusBarStats output for the same session", () => {
+  it("round-trips getStatusBarStats output for the same session", async () => {
     const tmp = mkdtempSync(join(tmpdir(), "shoggoth-sb-rt-"));
     const db = new Database(join(tmp, "s.db"));
     db.pragma("foreign_keys = ON");
@@ -521,10 +567,17 @@ describe("renderStatusBarTerminalBar", () => {
       ).run("rt1", segmentId, "x".repeat(4_000)); // ≈1_000 estimated tokens
       // Same regression shape as the platform e2e test: the snapshot must
       // carry the segment-estimate fill (0.1%/1M), never the cumulative
-      // input_tokens column.
+      // input_tokens column — and it reaches delivery via the tracker's
+      // finish() (the ONE terminal composition).
       const render = vi.fn((_snap: StatusBarSnapshot, _cfg: ResolvedStatusBarConfig) => "x");
-      renderStatusBarTerminalBar(getStatusBarStats(db, "rt1"), "finished", defaultCfg, render);
-      const [snap] = render.mock.calls[0]!;
+      const tracker = createStatusBarTurnTracker({
+        cfg: defaultCfg,
+        render,
+        stats: getStatusBarStats(db, "rt1"),
+      });
+      await tracker.finish("finished");
+      const [snap] = render.mock.calls.at(-1)!;
+      expect(snap.phase).toBe("finished");
       expect(snap.sequence).toBe(3);
       expect(snap.compactions).toBe(1);
       expect(snap.context).toEqual({ currentTokens: 1_000, totalTokens: 1_000_000 });

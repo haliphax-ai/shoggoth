@@ -201,13 +201,52 @@ describe("PresentationTurnOrchestrator", () => {
     expect(attachSink).toHaveBeenCalledWith(fakeHandle);
 
     // create() resolves a tracker whose terminal finish() renders a bar line.
+    // create() resolves a tracker whose terminal finish() renders a bar line.
     const tracker = await call.statusBar?.create?.();
     expect(tracker).toBeDefined();
+    // The tracker exposes the full event surface (prose / thinking / tool /
+    // hitl / compaction) so the inbound path can drive live phase updates.
+    expect(typeof tracker?.onProse).toBe("function");
+    expect(typeof tracker?.onThinkingDelta).toBe("function");
+    expect(typeof tracker?.onToolCall).toBe("function");
+    expect(typeof tracker?.onHitlQueued).toBe("function");
+    expect(typeof tracker?.onCompaction).toBe("function");
+    tracker?.onProse?.("delta");
     const barLine = await tracker?.finish?.("completed");
     expect(typeof barLine).toBe("string");
     expect(barLine?.length ?? 0).toBeGreaterThan(0);
   });
 
+  it("create() then attachSink wires the live sink and flushes the captured starting line", async () => {
+    const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn.js");
+    const config = { ...DEFAULT_STATUS_BAR_CONFIG, enabled: true } as ResolvedStatusBarConfig;
+    const render = vi.fn().mockReturnValue("⏳ ｜ 🔢 `3`");
+    const sink = { setStatusBar: vi.fn().mockResolvedValue(undefined) };
+    const attachSink = vi.fn().mockReturnValue(sink);
+    const adapter = createMockAdapter();
+    const orch = new PresentationTurnOrchestrator({
+      config: {} as ShoggothConfig,
+      adapter,
+      statusBar: { config, render, attachSink },
+    });
+
+    await orch.orchestrateInboundTurn({
+      sessionId: "s1",
+      buildTurn: vi.fn().mockResolvedValue({}),
+    });
+
+    const call = vi.mocked(runInboundSessionTurn).mock.calls.at(-1)?.[0];
+    await call.statusBar?.create?.();
+    const fakeHandle: StreamHandle = {
+      setFullContent: vi.fn().mockResolvedValue(undefined),
+      pushUpdate: vi.fn().mockResolvedValue(undefined),
+    };
+    call.statusBar?.attachSink?.(fakeHandle);
+    expect(attachSink).toHaveBeenCalledWith(fakeHandle);
+    // attachSink must flush the tracker's captured starting line so the
+    // in-flight placeholder carries the bar from turn start (⏳ regression).
+    expect(sink.setStatusBar).toHaveBeenCalledWith("⏳ ｜ 🔢 `3`");
+  });
   it("wraps stream handles with attachSink so handle.setStatusBar applies", async () => {
     const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn.js");
     const config = { ...DEFAULT_STATUS_BAR_CONFIG } as ResolvedStatusBarConfig;

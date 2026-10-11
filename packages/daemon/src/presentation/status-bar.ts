@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import type { ResolvedStatusBarConfig } from "@shoggoth/shared";
 import { createSessionStore } from "../sessions/session-store";
 import { estimateCurrentContextFill } from "../sessions/session-stats-store";
+import type { ToolCallEvent } from "../sessions/tool-loop";
 
 export type TurnStatusPhase =
   | "starting"
@@ -299,27 +300,100 @@ export function getStatusBarStats(db: Database.Database, sessionId: string): Sta
   };
 }
 
-/** Terminal status-bar line for the messaging_surface, routed through the
- *  platform-supplied renderer so the terminal bar shares the live bar's
- *  format (blockquote prefix, section order, config toggles). Builds a
- *  StatusBarSnapshot from the pre-turn stats — phase from the outcome (the
- *  renderer's PHASE_EMOJI maps it), toolCalls `{ total: 0 }` (the renderer
- *  omits the tool section when there's nothing to show), context omitted
- *  when stats carry none. Returns undefined when the renderer yields an
- *  empty line (e.g. every section disabled). */
-export function renderStatusBarTerminalBar(
-  stats: StatusBarStats,
-  outcome: "finished" | "aborted" | "failed",
-  cfg: ResolvedStatusBarConfig,
-  render: StatusBarRenderer,
-): string | undefined {
-  const snapshot: StatusBarSnapshot = {
-    phase: outcome,
-    sequence: stats.sequence,
-    toolCalls: { total: 0 },
-    ...(stats.context ? { context: stats.context } : {}),
-    compactions: stats.compactions,
+/** One tracker per turn: the live bar and the terminal bar are the same
+ *  tracker's snapshots rendered by the same injected renderer — the only
+ *  difference between live and terminal is the phase (emoji). The engine
+ *  (createTurnStatusBar) renders into an internal capture sink; the captured
+ *  line is forwarded to the attached platform sink while the turn runs and
+ *  returned from finish() for terminal delivery. There is NO second
+ *  composition path. */
+export interface TurnStatusBarTracker {
+  /** Engine sink entry: renders the snapshot and forwards the line to the
+   *  attached sink (captured until one attaches). */
+  setStatusBar(line: string | null): Promise<void>;
+  /** Wire the live target AND flush the currently captured line to it
+   *  immediately (the initial ⏳ render may predate the sink existing). */
+  attachSink(sink: StatusBarSink): void;
+  /** Terminal render (✅/🛑/❌) via the injected renderer; returns the
+   *  rendered line for final delivery (the ONE terminal composition). */
+  finish(outcome: "finished" | "aborted" | "failed"): Promise<string | undefined>;
+  /** Abandon without a terminal render. */
+  dispose(): void;
+  /** Assistant prose is streaming from the model (💬). */
+  onProse?: (accumulated: string) => void;
+  /** Reasoning/thinking content is streaming from the model (🧠). */
+  onThinkingDelta?: (accumulated: string) => void;
+  /** A tool call started/ended (⚡ + tool-call count). */
+  onToolCall?: (ev: ToolCallEvent) => void;
+  /** A HITL approval row was queued for a tool call (⏸️). */
+  onHitlQueued?: (call: { name: string; argsJson: string }) => void;
+  /** A mid-turn compaction completed. */
+  onCompaction?: () => void;
+}
+
+/** Factory wiring the engine turn status bar to a capture-then-forward sink.
+ *  Starts immediately from the pre-turn stats (the initial ⏳ render is
+ *  captured synchronously, so a sink attached afterwards still receives it). */
+export function createStatusBarTurnTracker(opts: {
+  cfg: ResolvedStatusBarConfig;
+  render: StatusBarRenderer;
+  stats: StatusBarStats;
+  minIntervalMs?: number;
+}): TurnStatusBarTracker {
+  let liveSink: StatusBarSink | undefined;
+  let capturedLine: string | undefined;
+  let compactions = opts.stats.compactions;
+
+  // Engine sink: render the platform line for every snapshot, remember it as
+  // the current line (capture until a live sink attaches), and forward.
+  const captureSink: StatusBarSink = {
+    setStatusBar: async (line) => {
+      if (line === null) {
+        capturedLine = undefined;
+        await liveSink?.setStatusBar(null);
+        return;
+      }
+      capturedLine = opts.render(line as unknown as StatusBarSnapshot, opts.cfg);
+      await liveSink?.setStatusBar(capturedLine);
+    },
   };
-  const line = render(snapshot, cfg);
-  return line.trim().length > 0 ? line : undefined;
+
+  const engine = createTurnStatusBar({
+    cfg: opts.cfg,
+    sink: captureSink,
+    render: opts.render,
+    ...(opts.minIntervalMs !== undefined ? { minIntervalMs: opts.minIntervalMs } : {}),
+  });
+
+  void engine.start({
+    sequence: opts.stats.sequence,
+    compactions: opts.stats.compactions,
+    ...(opts.stats.context ? { context: opts.stats.context } : {}),
+  });
+
+  return {
+    setStatusBar: (line) => captureSink.setStatusBar(line),
+    attachSink(sink) {
+      liveSink = sink;
+      // Flush the captured (⏳ starting) line so the in-flight placeholder
+      // carries the bar even though the initial render predated the sink.
+      if (capturedLine !== undefined) void sink.setStatusBar(capturedLine);
+    },
+    async finish(outcome) {
+      await engine.finish(outcome);
+      return capturedLine;
+    },
+    dispose() {
+      engine.dispose();
+      liveSink = undefined;
+    },
+    onProse: () => engine.markProse(),
+    onThinkingDelta: () => engine.markThinking(),
+    onToolCall: (ev) => {
+      if (ev.phase === "start") engine.toolStarted({ name: ev.name });
+      else engine.toolFinished();
+    },
+    onHitlQueued: (call) => engine.markPaused({ name: call.name }),
+    onCompaction: () => engine.setCompactions(++compactions),
+  };
 }

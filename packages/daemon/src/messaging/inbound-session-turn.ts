@@ -111,6 +111,8 @@ export interface RunInboundSessionTurnOptions {
           readonly setStatusBar: (line: string | null) => Promise<void>;
           /** Terminal render (✅/🛑/❌); returns the rendered bar line for delivery. */
           readonly finish: (outcome: string) => Promise<string | undefined>;
+          /** Assistant prose is streaming from the model (💬). */
+          readonly onProse?: (accumulated: string) => void;
           /** Reasoning/thinking content is streaming from the model. */
           readonly onThinkingDelta?: (accumulated: string) => void;
           readonly onToolCall?: (ev: ToolCallEvent) => void;
@@ -154,6 +156,7 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
     | {
         setStatusBar: (line: string | null) => Promise<void>;
         finish: (outcome: string) => Promise<string | undefined>;
+        onProse?: (accumulated: string) => void;
         onThinkingDelta?: (accumulated: string) => void;
         onToolCall?: (ev: ToolCallEvent) => void;
         onHitlQueued?: (call: { name: string; argsJson: string }) => void;
@@ -227,6 +230,8 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
               return (t: string) => {
                 const vis = t.trim() ? t : "…";
                 streamPusher!.push(vis);
+                // Prose phase (💬): the tracker renders live from text deltas.
+                statusBar?.onProse?.(t);
               };
             })(),
           }
