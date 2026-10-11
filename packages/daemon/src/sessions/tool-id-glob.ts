@@ -6,6 +6,10 @@ const REGEX_SPECIALS = /[.+^${}()|[\]\\]/g;
 
 /** True when a pattern contains `*` or `?` wildcards. */
 export function isGlobPattern(pattern: string): boolean {
+  // Defensive: a malformed config/registry entry (undefined/null) must not
+  // crash the caller with `Cannot read properties of undefined` — treat it
+  // as a non-glob so exact-match logic decides.
+  if (typeof pattern !== "string") return false;
   return pattern.includes("*") || pattern.includes("?");
 }
 

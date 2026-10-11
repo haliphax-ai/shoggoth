@@ -28,6 +28,20 @@ describe("policy engine", () => {
     });
   });
 
+  it("treats missing rule lists as empty instead of crashing", () => {
+    // A partial policy config (e.g. hot-reloaded fragment missing a tier)
+    // must not throw `Cannot read properties of undefined (reading 'includes')`.
+    const partial = {
+      allow: undefined as unknown as string[],
+      deny: undefined as unknown as string[],
+      review: undefined as unknown as string[],
+    };
+    assert.deepStrictEqual(evaluateRules("read", partial), {
+      allow: false,
+      reason: "default_deny",
+    });
+  });
+
   it("deny * blocks all", () => {
     assert.deepStrictEqual(evaluateRules("ping", { allow: ["ping"], deny: ["*"] }), {
       allow: false,
