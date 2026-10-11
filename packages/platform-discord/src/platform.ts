@@ -771,22 +771,23 @@ export async function startDiscordPlatform(
               ? turnResult.outcome
               : "finished";
           const barLine = surfaceTracker ? await surfaceTracker.finish(outcome) : undefined;
-          // finish()'s terminal render flowed through the sink into the
-          // in-flight handle's setStatusBar (active-bar state). Clear it BEFORE
-          // final delivery: the delivery body carries barLine itself, and a
-          // still-active bar would stack a second copy. Never block delivery.
-          if (barLine && surfaceStreamHandle?.setStatusBar) {
-            try {
-              await surfaceStreamHandle.setStatusBar(null);
-            } catch (e) {
-              opts.logger.warn("discord.platform.status_bar_clear_failed", {
-                err: String(e),
-                sessionId: sid,
-              });
-            }
-          }
           if (surfaceStreamPusher && surfaceStreamHandle) {
+            // Flush first: its renders still carry the active terminal bar, so
+            // the bar stays visible right up to the final edit. Then clear the
+            // in-flight handle's active-bar state — a state-only operation that
+            // makes no edit — so the delivery edit below (whose body already
+            // carries barLine) lands the bar exactly once. Never block delivery.
             await surfaceStreamPusher.flush();
+            if (barLine && surfaceStreamHandle.setStatusBar) {
+              try {
+                await surfaceStreamHandle.setStatusBar(null);
+              } catch (e) {
+                opts.logger.warn("discord.platform.status_bar_clear_failed", {
+                  err: String(e),
+                  sessionId: sid,
+                });
+              }
+            }
             await surfaceStreamHandle.setFullContent(
               barLine ? `${fullBody}\n\n${barLine}` : fullBody,
             );
