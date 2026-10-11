@@ -11,6 +11,7 @@ import {
 import type { StatusBarStats } from "../../src/presentation/status-bar";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
 import { createSessionStore } from "../../src/sessions/session-store";
+import { setModelMetadataFromProvider } from "../../src/model-metadata";
 import type {
   StatusBarSnapshot,
   StatusBarSink,
@@ -454,6 +455,24 @@ describe("getStatusBarStats", () => {
     });
   });
 
+  it("falls back to model metadata for the window when session_stats has none", () => {
+    // The session's selected model has a known window in model metadata
+    // (config / provider-reported / known defaults) even though the provider
+    // never reported one into session_stats.
+    setModelMetadataFromProvider("sbmeta-pro", "sbmeta-model", 128_000);
+    createSessionStore(db).create({
+      id: "s5",
+      workspacePath: tmp,
+      modelSelection: { model: "sbmeta-pro/sbmeta-model" },
+    });
+    seedStats("s5", { turn_count: 2 });
+    seedSegmentTranscript("s5", "x".repeat(4_000)); // ≈1_000 estimated tokens
+    expect(getStatusBarStats(db, "s5").context).toEqual({
+      currentTokens: 1_000,
+      totalTokens: 128_000,
+    });
+  });
+
   it("defaults to zeroed stats for an unknown session", () => {
     expect(getStatusBarStats(db, "missing")).toEqual({ sequence: 0, compactions: 0 });
   });
@@ -525,6 +544,32 @@ describe("createStatusBarTurnTracker", () => {
     tracker.onCompaction?.();
     await vi.advanceTimersByTimeAsync(1_000);
     expect(lines.at(-1)).toBe("paused#t1#c3");
+  });
+
+  it("onContextUpdate feeds provider-reported fill into the live bar mid-turn (first turn)", async () => {
+    // First-turn seed shape: no pre-turn context (empty transcript, no
+    // provider gauge yet). The first usage delta is what makes the context
+    // section appear — it must reach the live sink on the next render.
+    const render = vi.fn((snap: StatusBarSnapshot) => `${snap.phase}#${snap.sequence}`);
+    const { tracker, sink } = createTracker({ render, stats: { sequence: 1, compactions: 0 } });
+    tracker.attachSink(sink);
+    const startingSnap = render.mock.calls.at(-1)![0] as StatusBarSnapshot;
+    expect(startingSnap.context).toBeUndefined();
+
+    tracker.onContextUpdate?.({ currentTokens: 31_400, totalTokens: 200_000 });
+    await vi.advanceTimersByTimeAsync(1_000);
+    const lastSnap = render.mock.calls.at(-1)![0] as StatusBarSnapshot;
+    expect(lastSnap.context).toEqual({ currentTokens: 31_400, totalTokens: 200_000 });
+    expect(sink.setStatusBar).toHaveBeenLastCalledWith("starting#1");
+  });
+
+  it("an onContextUpdate without totalTokens keeps the seeded window", async () => {
+    const render = vi.fn((snap: StatusBarSnapshot) => `${snap.phase}#${snap.sequence}`);
+    const { tracker } = createTracker({ render });
+    tracker.onContextUpdate?.({ currentTokens: 31_400 });
+    await vi.advanceTimersByTimeAsync(1_000);
+    const lastSnap = render.mock.calls.at(-1)![0] as StatusBarSnapshot;
+    expect(lastSnap.context).toEqual({ currentTokens: 31_400, totalTokens: 1_000_000 });
   });
 
   it("finish renders via the injected renderer, returns the line; only the phase differs from live", async () => {

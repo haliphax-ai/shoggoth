@@ -293,6 +293,7 @@ export class PresentationTurnOrchestrator {
               onToolCall: (ev) => tracker?.onToolCall?.(ev),
               onHitlQueued: (call) => tracker?.onHitlQueued?.(call),
               onCompaction: () => tracker?.onCompaction?.(),
+              onContextUpdate: (update) => tracker?.onContextUpdate?.(update),
             };
           },
         }

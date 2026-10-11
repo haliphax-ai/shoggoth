@@ -665,7 +665,8 @@ export async function startDiscordPlatform(
           resolveMcpContext: mcpRuntime.resolveContext,
           ...(streamOverride ? { stream: streamOverride } : {}),
           // Forward turn events into the tracker so the live bar re-renders
-          // mid-turn (thinking / tool count / HITL pause / compaction).
+          // mid-turn (thinking / tool count / HITL pause / compaction /
+          // context fill).
           ...(surfaceTracker
             ? {
                 events: {
@@ -674,6 +675,7 @@ export async function startDiscordPlatform(
                   onToolCall: (ev) => surfaceTracker?.onToolCall?.(ev),
                   onHitlQueued: (call) => surfaceTracker?.onHitlQueued?.(call),
                   onCompaction: () => surfaceTracker?.onCompaction?.(),
+                  onContextUpdate: (update) => surfaceTracker?.onContextUpdate?.(update),
                 },
               }
             : {}),
