@@ -2762,8 +2762,9 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
     });
     await platform.stop();
 
-    // The terminal bar (✅ ｜ 🔢 `7` ｜ 🗑️ `2` ｜ 🪟 ...) must land on the final
-    // stream delivery. The tracker renders it and passes it through the sink that
+    // The terminal bar (> ✅ ｜ 🔢 `7` ｜ 🪟 ... ｜ 🗑️ `2` — the live renderer's
+    // blockquote format and section order) must land on the final stream
+    // delivery. The tracker renders it and passes it through the sink that
     // wraps the stream pusher; with the no-op attachSink the handle never receives
     // the bar, so this FAILS until the real sink applies the line.
     const terminalLine = barLines.at(-1);
@@ -2783,6 +2784,18 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
     assert.ok(
       terminalLine!.includes("10.0%/100K"),
       `terminal bar must carry the segment-estimate context fill, got: ${terminalLine}`,
+    );
+    assert.ok(
+      terminalLine!.startsWith("> "),
+      `terminal bar must use the renderer's blockquote format, got: ${terminalLine}`,
+    );
+    // The live renderer's section order is status, sequence, tools-if-any,
+    // context, compactions — the context section must precede compactions.
+    const ctxIdx = terminalLine!.indexOf("🪟");
+    const compactionsIdx = terminalLine!.indexOf("🗑️");
+    assert.ok(
+      ctxIdx !== -1 && compactionsIdx !== -1 && ctxIdx < compactionsIdx,
+      `terminal bar must order the context section before compactions, got: ${terminalLine}`,
     );
 
     // The body that lands on the final setFullContent is the formatted reply; with the
@@ -2839,6 +2852,10 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
     );
     const last = capture[capture.length - 1]!.body;
     assert.ok(last.includes("✅"), `final sendBody must carry the terminal ✅ bar, got: ${last}`);
+    assert.ok(
+      last.includes("\n\n> ✅"),
+      `terminal bar must be appended as the renderer's blockquote line, got: ${last}`,
+    );
     assert.ok(
       last.includes("`7`"),
       `final sendBody must carry sequence 7 from session_stats.turn_count, got: ${last}`,

@@ -1,5 +1,8 @@
+import { formatTokens } from "@shoggoth/daemon/lib";
 import type { StatusBarSnapshot, TurnStatusPhase } from "@shoggoth/daemon/lib";
 import type { ResolvedStatusBarConfig } from "@shoggoth/shared";
+
+export { formatTokens };
 
 const PHASE_EMOJI: Record<TurnStatusPhase, string> = {
   starting: "⏳",
@@ -11,17 +14,6 @@ const PHASE_EMOJI: Record<TurnStatusPhase, string> = {
   aborted: "🛑",
   failed: "❌",
 };
-
-/** `<10K` → plain integer with thousands separators; `≥10K` → one-decimal K; `≥1M` → one-decimal M. */
-export function formatTokens(value: number): string {
-  if (value < 10_000) return value.toLocaleString("en-US");
-  if (value < 1_000_000) return trimTrailingZero((value / 1_000).toFixed(1)) + "K";
-  return trimTrailingZero((value / 1_000_000).toFixed(1)) + "M";
-}
-
-function trimTrailingZero(formatted: string): string {
-  return formatted.endsWith(".0") ? formatted.slice(0, -2) : formatted;
-}
 
 /**
  * Render the turn status bar as a Discord blockquote line.
