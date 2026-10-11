@@ -55,7 +55,7 @@ Registered as `session-query`. Search and paginate transcript messages across yo
 
 ## builtin-subagent
 
-Registered as `subagent`. Spawn and manage subagent sessions. Only available to top-level (non-subagent) sessions.
+Registered as `subagent`. Spawn and manage subagent sessions. Availability follows the `maxSpawnDepth` nesting gate: top-level sessions may spawn; a subagent session sees this tool only while its lineage depth is below `maxSpawnDepth` (default 1).
 
 ### Parameters
 

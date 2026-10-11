@@ -29,6 +29,7 @@ import {
   createContextLevelToolFinalizer,
   createMcpServerRulesFinalizer,
   createMediaGenerateToolFinalizer,
+  createSubagentToolStripFinalizer,
   createVaultToolFinalizer,
   createWebSearchToolFinalizer,
   type SessionMcpToolContext,
@@ -166,6 +167,8 @@ export async function createSessionMcpRuntime(
     return finalizers.reduce((c, fn) => fn(c, sessionId), ctx);
   }
 
+  // Depth-aware subagent tool strip — mirrors the maxSpawnDepth nesting gate.
+  finalizers.push(createSubagentToolStripFinalizer(opts.db, opts.config));
   // Register MCP server rules finalizer.
   finalizers.push(createMcpServerRulesFinalizer(opts.config));
   // Register context-level tool filtering finalizer (config-aware).

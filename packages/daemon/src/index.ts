@@ -101,10 +101,7 @@ import type { PlatformAdapter } from "./presentation/platform-adapter";
 const platformAdapterRef: { current?: PlatformAdapter } = {
   current: undefined,
 };
-import {
-  messageToolFinalizer,
-  subagentToolStripFinalizer,
-} from "./sessions/session-mcp-tool-context";
+import { messageToolFinalizer } from "./sessions/session-mcp-tool-context";
 import { initWorkflow } from "./workflow-singleton";
 import { TieredTurnQueue } from "./sessions/session-turn-queue";
 import { setTurnQueue, getTurnQueue } from "./sessions/session-turn-queue-singleton";
@@ -168,7 +165,6 @@ import { vaultServiceRef } from "./vault/vault-ref";
 // ============================================================
 
 registerContextFinalizer(messageToolFinalizer);
-registerContextFinalizer(subagentToolStripFinalizer);
 
 const configDir = process.env.SHOGGOTH_CONFIG_DIR ?? LAYOUT.configDir;
 const config = await loadLayeredConfigAsync(configDir);

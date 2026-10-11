@@ -1,4 +1,5 @@
 import type { OpenAIToolFunctionDefinition } from "@shoggoth/models";
+import type Database from "better-sqlite3";
 import type {
   AggregateMcpCatalogResult,
   AggregatedTool,
@@ -10,9 +11,12 @@ import {
   createAggregateMcpCatalogResult,
 } from "@shoggoth/mcp-integration";
 import {
+  effectiveMaxSpawnDepth,
   evaluateMcpServerRules,
   isSubagentSessionUrn,
+  maySpawnSubagentAtDepth,
   parseAgentSessionUrn,
+  resolveAgentIdFromSessionId,
   resolveContextLevel,
   resolveEffectiveMcpServerRules,
   type ContextLevel,
@@ -26,6 +30,8 @@ import {
   mcpToolsForToolLoop,
   type ExternalMcpInvoke,
 } from "../mcp/tool-loop-mcp";
+import type { SessionMcpContextFinalizer } from "./session-mcp-runtime";
+import { computeSessionDepthFromStore, createSessionStore } from "./session-store";
 
 export type SessionMcpToolContext = {
   readonly aggregated: AggregateMcpCatalogResult;
@@ -190,13 +196,15 @@ export function buildBuiltinOnlySessionMcpToolContext(): SessionMcpToolContext {
 }
 
 /**
- * `builtin-subagent` is only for top-level sessions; subagent runs must not recurse via tool list.
+ * Strips `builtin-subagent` from the tool catalog when the session is not
+ * permitted to spawn subagents. Pure filter — the depth-aware factory
+ * finalizer resolves the maxSpawnDepth decision; no DB access here.
  */
-export function omitBuiltinSubagentToolForSubagentSession(
+function stripSubagentToolWhenSpawnDenied(
   ctx: SessionMcpToolContext,
-  sessionId: string,
+  maySpawn: boolean,
 ): SessionMcpToolContext {
-  if (!isSubagentSessionUrn(sessionId)) return ctx;
+  if (maySpawn) return ctx;
   const tools = ctx.aggregated.tools.filter(
     (t) => !(t.sourceId === "builtin" && t.originalName === "subagent"),
   );
@@ -222,13 +230,32 @@ export function messageToolFinalizer(
 }
 
 /**
- * Standalone finalizer: strips `builtin-subagent` for subagent session URNs.
+ * Factory finalizer: mirrors the `maxSpawnDepth` nesting gate enforced by the
+ * `subagent` tool handler and the `subagent_spawn` control op. For subagent
+ * session URNs, `builtin-subagent` is stripped only when spawning would be
+ * denied at the session's lineage depth — with `maxSpawnDepth >= 2` a depth-1
+ * subagent keeps the tool so it can spawn its own children. Unresolvable
+ * lineage (missing session row or cycle) strips the tool, matching the
+ * handler's deny-by-default. Top-level sessions are never stripped; the
+ * handler gate still applies at call time.
  */
-export function subagentToolStripFinalizer(
-  ctx: SessionMcpToolContext,
-  sessionId: string,
-): SessionMcpToolContext {
-  return omitBuiltinSubagentToolForSubagentSession(ctx, sessionId);
+export function createSubagentToolStripFinalizer(
+  db: Database.Database,
+  config: ShoggothConfig,
+): SessionMcpContextFinalizer {
+  return (ctx, sessionId) => {
+    if (!isSubagentSessionUrn(sessionId)) return ctx;
+    let maySpawn: boolean;
+    try {
+      const depth = computeSessionDepthFromStore(createSessionStore(db), sessionId);
+      const agentId = resolveAgentIdFromSessionId(sessionId);
+      maySpawn = maySpawnSubagentAtDepth(depth, effectiveMaxSpawnDepth(config, agentId));
+    } catch {
+      // DB unavailable (e.g. during test teardown) — mirror the deny default.
+      maySpawn = false;
+    }
+    return stripSubagentToolWhenSpawnDenied(ctx, maySpawn);
+  };
 }
 
 // ---------------------------------------------------------------------------
