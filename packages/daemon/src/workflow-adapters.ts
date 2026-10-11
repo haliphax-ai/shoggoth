@@ -12,6 +12,7 @@ import type {
   PollAdapter,
   PollResult,
   KillAdapter,
+  EditMessageResult,
   MessageAdapter,
   MessagePoster,
   NotifyAdapter,
@@ -372,7 +373,7 @@ export function createDaemonMessageAdapter(deps: DaemonMessageAdapterDeps): Mess
       }
     },
 
-    async editMessage(messageId: string, content: string): Promise<boolean> {
+    async editMessage(messageId: string, content: string): Promise<EditMessageResult> {
       const ctx = deps.getMessageContext();
       const channelId = deps.resolveChannelId();
       log.debug("editMessage", {
@@ -382,7 +383,7 @@ export function createDaemonMessageAdapter(deps: DaemonMessageAdapterDeps): Mess
       });
       if (!ctx) {
         log.error("editMessage: no message context available");
-        return false;
+        return { ok: false, reason: "transient" };
       }
 
       try {
@@ -393,21 +394,33 @@ export function createDaemonMessageAdapter(deps: DaemonMessageAdapterDeps): Mess
           ...(channelId ? { target: channelId } : {}),
         });
 
-        const res = result as { ok?: boolean; error?: string };
+        const res = result as {
+          ok?: boolean;
+          error?: string;
+          http_status?: number;
+          code?: string;
+        };
         if (res.ok === false) {
           log.error("editMessage failed", {
             error: res.error,
+            httpStatus: res.http_status ?? null,
             messageId,
             sessionId: deps.sessionId,
           });
-          return false;
+          // Classify from the message-tool result: 404 means the message is
+          // genuinely gone (repost is safe); the unsupported code means the
+          // platform cannot edit; everything else is transient — never treat
+          // a rate limit or 5xx as "message gone" and repost an orphan.
+          if (res.http_status === 404) return { ok: false, reason: "not_found" };
+          if (res.code === "edit_unsupported") return { ok: false, reason: "unsupported" };
+          return { ok: false, reason: "transient" };
         }
 
         log.debug("editMessage sent", { messageId });
-        return true;
+        return { ok: true };
       } catch (e) {
         log.error("editMessage threw", { err: String(e), messageId });
-        return false;
+        return { ok: false, reason: "transient" };
       }
     },
 
