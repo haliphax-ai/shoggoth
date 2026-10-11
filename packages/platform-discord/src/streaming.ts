@@ -219,9 +219,13 @@ export function createDiscordStreamingOutbound(
           // State changes stay synchronous so operations already queued see the
           // latest line; only the render is serialized with the other mutations.
           _statusBarLine = line;
+          // A null line is a state-only clear: no re-render. Delivery clears the
+          // bar immediately before its final edit (which carries its own bar
+          // line), so re-editing here would visibly strip the bar — and force a
+          // full-budget re-split — for the duration of the delivery gap.
+          if (line === null || lastPushedText === null) return;
           // Re-render the in-flight message from the last pushed/full content so
-          // the bar appears (or disappears) without waiting for the next push.
-          if (lastPushedText === null) return;
+          // the bar appears without waiting for the next push.
           await enqueue(async () => {
             const budget = splitBudget(_statusBarLine);
             const chunks = splitDiscordMessage(lastPushedText!, budget);

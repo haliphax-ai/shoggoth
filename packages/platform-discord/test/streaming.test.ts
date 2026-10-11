@@ -473,10 +473,16 @@ describe("DiscordStreamingOutbound status bar", () => {
     const laterCalls = vi.mocked(transport.editMessage).mock.calls;
     expect(laterCalls[laterCalls.length - 1][2].content).toBe("second update\n\n> 🧠 ｜ 🔢 `2`");
 
-    // Clearing the bar strips it from the last pushed content
+    // Clearing the bar is a state-only operation: it makes no edit (delivery
+    // carries its own final edit that strips the bar along with the body).
+    vi.mocked(transport.editMessage).mockClear();
     await handle.setStatusBar!(null);
+    expect(transport.editMessage).not.toHaveBeenCalled();
+
+    // ...and the clear takes effect on the next render: the bar is gone.
+    await handle.pushUpdate("third update");
     const finalCalls = vi.mocked(transport.editMessage).mock.calls;
-    expect(finalCalls[finalCalls.length - 1][2].content).toBe("second update");
+    expect(finalCalls[finalCalls.length - 1][2].content).toBe("third update");
   });
 
   it("reserves the bar line in the split budget so the 2000-char limit holds while a bar is active", async () => {

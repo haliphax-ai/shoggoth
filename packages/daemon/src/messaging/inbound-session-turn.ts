@@ -299,27 +299,25 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       }
     }
 
-    // The tracker's finish() terminal render flowed through the sink into the
-    // in-flight handle's setStatusBar, which remembers the bar as active state
-    // and re-applies it on every subsequent setFullContent. Clear that state
-    // BEFORE final delivery: the delivery body already appends barLine itself,
-    // and the still-active bar would stack a second copy on top of it. A sink
-    // failure must never block delivery.
-    if (barLine && streamSink?.setStatusBar) {
-      try {
-        await streamSink.setStatusBar(null);
-      } catch (clearErr) {
-        log.warn("inbound_session_turn.status_bar_clear_failed", {
-          ...ctx,
-          err: String(clearErr),
-        });
-      }
-    }
-
     const bodyWithBar = barLine ? `${rawBody}\n\n${barLine}` : rawBody;
 
     if (streamPusher && streamSink) {
+      // Flush first: its renders still carry the active terminal bar, so the
+      // bar stays visible right up to the final edit. Then clear the in-flight
+      // handle's active-bar state — a state-only operation that makes no edit —
+      // so the delivery edit below (whose body already appends barLine itself)
+      // lands the bar exactly once. A sink failure must never block delivery.
       await streamPusher.flush();
+      if (barLine && streamSink.setStatusBar) {
+        try {
+          await streamSink.setStatusBar(null);
+        } catch (clearErr) {
+          log.warn("inbound_session_turn.status_bar_clear_failed", {
+            ...ctx,
+            err: String(clearErr),
+          });
+        }
+      }
       // Pass the full body — setFullContent handles its own message splitting.
       await streamSink.setFullContent(bodyWithBar);
       // Streaming edits can't carry file attachments — send as follow-up.
@@ -355,8 +353,9 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
     }
     // finish()'s terminal render flowed through the sink into the in-flight
     // handle's setStatusBar, which keeps the bar as active state and re-applies
-    // it on future renders. Clear that state so a stale bar is never re-applied;
-    // a sink failure must never block error delivery.
+    // it on future renders. Clear that state — a state-only operation that makes
+    // no edit, so the in-flight message keeps its terminal ❌ bar until the
+    // error body lands as a separate message — and never block error delivery.
     if (barLine && streamSink?.setStatusBar) {
       try {
         await streamSink.setStatusBar(null);
