@@ -597,3 +597,73 @@ describe("mapChatMessagesToAnthropicPayload with ChatContentPart[]", () => {
     assert.equal(user.content, "hello");
   });
 });
+
+describe("provider-reported usage", () => {
+  it("complete totals input tokens including cache read/write and exposes the split", async () => {
+    const fetchImpl = async () =>
+      new Response(
+        JSON.stringify({
+          id: "msg_1",
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "hello" }],
+          usage: {
+            input_tokens: 2048,
+            output_tokens: 503,
+            cache_read_input_tokens: 1800,
+            cache_creation_input_tokens: 248,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+    const p = createAnthropicMessagesProvider({
+      id: "anth",
+      baseUrl: "https://api.example",
+      apiKey: "sk-ant",
+      fetchImpl,
+    });
+
+    const out = await p.complete({
+      model: "claude-test",
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    assert.equal(out.content, "hello");
+    assert.ok(out.usage);
+    assert.equal(out.usage?.inputTokens, 2048 + 1800 + 248);
+    assert.equal(out.usage?.outputTokens, 503);
+    assert.equal(out.usage?.cachedInputTokens, 1800);
+    assert.equal(out.usage?.cacheWriteInputTokens, 248);
+  });
+
+  it("stream merges cache fields from message_start with output tokens from message_delta", async () => {
+    const lines = [
+      "event: message_start",
+      'data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-test","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":12,"output_tokens":0,"cache_read_input_tokens":1800,"cache_creation_input_tokens":248}}}',
+      "",
+      "event: content_block_start",
+      'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+      "event: content_block_delta",
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}',
+      "",
+      "event: message_delta",
+      'data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":7}}',
+      "",
+      "event: message_stop",
+      'data: {"type":"message_stop"}',
+      "",
+    ];
+    const body = anthropicSseResponse(lines).body;
+    assert.ok(body);
+
+    const out = await consumeAnthropicMessagesStream(body, { accumulateTools: false });
+
+    assert.equal(out.content, "Hi");
+    assert.ok(out.usage);
+    assert.equal(out.usage?.inputTokens, 12 + 1800 + 248);
+    assert.equal(out.usage?.outputTokens, 7);
+    assert.equal(out.usage?.cachedInputTokens, 1800);
+    assert.equal(out.usage?.cacheWriteInputTokens, 248);
+  });
+});

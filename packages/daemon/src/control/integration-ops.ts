@@ -60,7 +60,7 @@ import type { ModelInvocationParams } from "@shoggoth/models";
 import { compactSessionTranscript } from "../transcript-compact";
 import {
   getSessionStats,
-  estimateCurrentContextFill,
+  getContextFill,
   buildFormattedStats,
 } from "../sessions/session-stats-store";
 import { dispatchMcpHttpCancelRequest } from "../mcp/mcp-http-cancel-registry";
@@ -2007,12 +2007,13 @@ export async function handleIntegrationControlOp(
           }
         : null;
       const statsData = getSessionStats(ctx.stateDb, sessionId);
-      // Calculate current context fill from transcript
+      // Context fill: provider-reported gauge when available, transcript
+      // heuristic otherwise.
       let formattedStats: ReturnType<typeof buildFormattedStats> | null = null;
       if (statsData && row) {
         formattedStats = buildFormattedStats(
           statsData,
-          estimateCurrentContextFill(ctx.stateDb, sessionId, row.contextSegmentId.trim()),
+          getContextFill(ctx.stateDb, sessionId, row.contextSegmentId.trim()),
         );
       }
       let modelData: {
