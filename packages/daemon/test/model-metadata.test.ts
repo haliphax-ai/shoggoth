@@ -73,7 +73,10 @@ describe("model-metadata", () => {
       expect(store.size).toBe(0);
     });
 
-    it("skips providers not found in the failover chain", () => {
+    it("registers configured models even when absent from the failover chain", () => {
+      // A session may select any configured model, not just failover-chain
+      // entries; window lookups (status bar, session stats) must resolve for
+      // those too.
       const store = createModelMetadataStore();
       initModelMetadataFromConfig(
         ["prov1/gpt-4o"],
@@ -86,7 +89,7 @@ describe("model-metadata", () => {
         store,
       );
 
-      expect(store.size).toBe(0);
+      expect(getModelContextWindowTokens("provOther", "x", store)).toBe(999);
     });
 
     it("works without providers array", () => {

@@ -41,13 +41,16 @@ export function renderDiscordStatusBar(
   }
 
   if (cfg.contextWindowEnabled && snap.context) {
-    const total = formatTokens(snap.context.totalTokens);
-    const percent =
-      snap.context.totalTokens > 0
-        ? ((snap.context.currentTokens / snap.context.totalTokens) * 100).toFixed(1)
-        : "0.0";
-    // Compact display: `31.4%/100K` (percent of window over abbreviated total).
-    sections.push(`🪟 \`${percent}%/${total}\``);
+    const { currentTokens, totalTokens } = snap.context;
+    if (totalTokens != null && totalTokens > 0) {
+      const percent = ((currentTokens / totalTokens) * 100).toFixed(1);
+      // Compact display: `31.4%/100K` (percent of window over abbreviated total).
+      sections.push(`🪟 \`${percent}%/${formatTokens(totalTokens)}\``);
+    } else {
+      // Window unknown: show the fill only — never a bogus percent from
+      // dividing the fill by itself.
+      sections.push(`🪟 \`~${formatTokens(currentTokens)}\``);
+    }
   }
 
   if (cfg.compactionsEnabled) {
