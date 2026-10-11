@@ -92,7 +92,7 @@ Migrations live in `shoggoth/migrations/` as numbered SQL files (e.g. `0001_init
 `createSessionManager()` handles:
 
 - `spawn(input)` — mints a session URN, creates the workspace layout, inserts the session row, registers an agent token. Subagent sessions inherit the parent's working directory.
-- `kill(sessionId)` — revokes the agent token and sets status to `terminated`.
+- `kill(sessionId)` — revokes the agent token, sets status to `terminated`, and cascades to every descendant session: their tokens are revoked, their status set to `terminated`, in-flight turns aborted, subagent runtime handles disposed, and anchored timers canceled. Top-level sessions (no parent) are never terminated by the cascade — their durability comes from being bound to a platform channel.
 - `rotateAgentToken(sessionId)` — mints a new token for an existing session.
 - `attachPromptStack` / `setLightContext` — update session metadata.
 
