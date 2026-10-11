@@ -59,7 +59,7 @@ export {
   applySessionContextSegmentNew,
   applySessionContextSegmentReset,
 } from "./sessions/session-context-segment";
-export { estimateCurrentContextFill } from "./sessions/session-stats-store";
+export { estimateCurrentContextFill, getContextFill } from "./sessions/session-stats-store";
 export {
   parseSessionSegmentInlineCommand,
   sessionSegmentStartupUserContent,

@@ -141,9 +141,22 @@ export interface ModelToolCompleteInput extends ModelInvocationParams {
 }
 
 /** Token usage metadata returned by model providers (when available). */
+/**
+ * Token usage metadata returned by model providers (when available).
+ *
+ * `inputTokens` is the call's **total** prompt tokens as the provider counts
+ * them (including cached and cache-written portions where the provider
+ * separates them, e.g. Anthropic). `cachedInputTokens` / `cacheWriteInputTokens`
+ * split that total into cache reads and cache writes when the provider reports
+ * a prompt cache; they are subsets of `inputTokens`, not additions.
+ */
 export interface ModelUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
+  /** Prompt tokens served from the provider's prompt cache (cache reads/hits). */
+  readonly cachedInputTokens?: number;
+  /** Prompt tokens written to the provider's prompt cache during this call. */
+  readonly cacheWriteInputTokens?: number;
   /** Model's maximum context window size (when reported by the provider). */
   readonly contextWindowTokens?: number;
 }

@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import type { ResolvedStatusBarConfig } from "@shoggoth/shared";
 import { createSessionStore } from "../sessions/session-store";
-import { estimateCurrentContextFill } from "../sessions/session-stats-store";
+import { getContextFill } from "../sessions/session-stats-store";
 import type { ToolCallEvent } from "../sessions/tool-loop";
 
 export type TurnStatusPhase =
@@ -244,10 +244,11 @@ export function createTurnStatusBar(opts: {
 }
 
 /** Pre-turn stats for the turn status bar: sequence (session_stats.turn_count),
- *  compactions (compaction_count), and current context-window fill estimated
- *  from the session's current context segment. `session_stats.input_tokens` is
- *  a cumulative running sum across every model call and must NEVER be treated
- *  as current context-window fill. */
+ *  compactions (compaction_count), and current context-window fill from the
+ *  provider-reported gauge (`session_stats.context_fill_tokens`), falling back
+ *  to a transcript heuristic for the session's current context segment.
+ *  `session_stats.input_tokens` is a cumulative running sum across every model
+ *  call and must NEVER be treated as current context-window fill. */
 export interface StatusBarStats {
   readonly sequence: number;
   readonly compactions: number;
@@ -266,11 +267,13 @@ function trimTrailingZero(formatted: string): string {
 }
 
 /** Sequence from session_stats.turn_count, compactions from compaction_count,
- *  context fill estimated from the current context segment's transcript
- *  (session_stats.input_tokens is a cumulative running sum and must never be
- *  treated as current context-window fill). `context` is omitted when the
- *  segment estimate is 0; `totalTokens` falls back to the estimate when the
- *  session has no known context window. */
+ *  context fill from the provider-reported gauge (last call's total
+ *  input+output in session_stats.context_fill_tokens), falling back to the
+ *  current context segment's transcript heuristic when the provider has not
+ *  reported usage (session_stats.input_tokens is a cumulative running sum and
+ *  must never be treated as current context-window fill). `context` is omitted
+ *  when the fill is 0; `totalTokens` falls back to the fill when the session
+ *  has no known context window. */
 export function getStatusBarStats(db: Database.Database, sessionId: string): StatusBarStats {
   const row = db
     .prepare(
@@ -286,9 +289,7 @@ export function getStatusBarStats(db: Database.Database, sessionId: string): Sta
     | undefined;
   const segmentId = createSessionStore(db).getById(sessionId)?.contextSegmentId;
   const currentTokens =
-    segmentId !== undefined && segmentId.length > 0
-      ? estimateCurrentContextFill(db, sessionId, segmentId)
-      : 0;
+    segmentId !== undefined && segmentId.length > 0 ? getContextFill(db, sessionId, segmentId) : 0;
   const sequence = row?.turn_count ?? 0;
   const compactions = row?.compaction_count ?? 0;
   if (currentTokens <= 0) return { sequence, compactions };

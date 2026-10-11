@@ -8,7 +8,14 @@ interface SessionStats {
   readonly compactionCount: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
+  /** Cumulative prompt tokens served from the provider's prompt cache (cache reads). */
+  readonly cachedInputTokens: number;
+  /** Cumulative prompt tokens written to the provider's prompt cache. */
+  readonly cacheWriteInputTokens: number;
   readonly contextWindowTokens: number | null;
+  /** Total input+output tokens of the most recent provider-reported model
+   *  call (gauge, not cumulative); null until provider usage is recorded. */
+  readonly contextFillTokens: number | null;
   readonly firstTurnAt: string | null;
   readonly lastTurnAt: string | null;
   readonly lastCompactedAt: string | null;
@@ -22,7 +29,10 @@ interface SessionStatsRow {
   compaction_count: number;
   input_tokens: number;
   output_tokens: number;
+  cached_input_tokens: number;
+  cache_write_input_tokens: number;
   context_window_tokens: number | null;
+  context_fill_tokens: number | null;
   first_turn_at: string | null;
   last_turn_at: string | null;
   last_compacted_at: string | null;
@@ -37,7 +47,10 @@ function rowToStats(r: SessionStatsRow): SessionStats {
     compactionCount: r.compaction_count,
     inputTokens: r.input_tokens,
     outputTokens: r.output_tokens,
+    cachedInputTokens: r.cached_input_tokens,
+    cacheWriteInputTokens: r.cache_write_input_tokens,
     contextWindowTokens: r.context_window_tokens,
+    contextFillTokens: r.context_fill_tokens,
     firstTurnAt: r.first_turn_at,
     lastTurnAt: r.last_turn_at,
     lastCompactedAt: r.last_compacted_at,
@@ -51,7 +64,8 @@ export function getSessionStats(db: Database.Database, sessionId: string): Sessi
   const row = db
     .prepare(
       `SELECT session_id, turn_count, compaction_count, input_tokens, output_tokens,
-              context_window_tokens, first_turn_at, last_turn_at, last_compacted_at,
+              cached_input_tokens, cache_write_input_tokens, context_window_tokens,
+              context_fill_tokens, first_turn_at, last_turn_at, last_compacted_at,
               transcript_message_count, updated_at
        FROM session_stats WHERE session_id = @sessionId`,
     )
@@ -79,6 +93,9 @@ export function recordCompaction(
        compaction_count = compaction_count + 1,
        last_compacted_at = datetime('now'),
        transcript_message_count = @transcriptMessageCount,
+       -- compaction replaced the live context; the provider-reported gauge is
+       -- stale until the next model call re-establishes it
+       context_fill_tokens = NULL,
        updated_at = datetime('now')`,
   ).run({
     sessionId,
@@ -94,8 +111,11 @@ export function resetSegmentStats(db: Database.Database, sessionId: string): voi
        compaction_count = 0,
        input_tokens = 0,
        output_tokens = 0,
+       cached_input_tokens = 0,
+       cache_write_input_tokens = 0,
        transcript_message_count = 0,
        last_compacted_at = NULL,
+       context_fill_tokens = NULL,
        updated_at = datetime('now')
      WHERE session_id = @sessionId`,
   ).run({ sessionId });
@@ -174,30 +194,71 @@ export function buildFormattedStats(
   };
 }
 
-/** Increment input/output token totals (and optionally context_window_tokens) without touching turn_count. */
+/**
+ * Increment cumulative input/output token totals (and optionally the
+ * provider-reported cache split and context_window_tokens) without touching
+ * turn_count. When `contextFillTokens` is provided (provider-reported total
+ * input+output of the most recent call) it replaces the context-fill gauge;
+ * heuristic estimates must NOT pass it.
+ */
 export function incrementTokenUsage(
   db: Database.Database,
   sessionId: string,
   input: {
     inputTokens: number;
     outputTokens: number;
+    cachedInputTokens?: number;
+    cacheWriteInputTokens?: number;
     contextWindowTokens?: number;
+    /** Provider-reported context fill gauge (last call's total input+output). */
+    contextFillTokens?: number;
   },
 ): void {
   db.prepare(
-    `INSERT INTO session_stats (session_id, input_tokens, output_tokens, context_window_tokens, updated_at)
-     VALUES (@sessionId, @inputTokens, @outputTokens, @contextWindowTokens, datetime('now'))
+    `INSERT INTO session_stats (
+       session_id, input_tokens, output_tokens, cached_input_tokens,
+       cache_write_input_tokens, context_window_tokens, context_fill_tokens, updated_at
+     ) VALUES (
+       @sessionId, @inputTokens, @outputTokens, @cachedInputTokens,
+       @cacheWriteInputTokens, @contextWindowTokens, @contextFillTokens, datetime('now')
+     )
      ON CONFLICT(session_id) DO UPDATE SET
        input_tokens = input_tokens + @inputTokens,
        output_tokens = output_tokens + @outputTokens,
+       cached_input_tokens = cached_input_tokens + @cachedInputTokens,
+       cache_write_input_tokens = cache_write_input_tokens + @cacheWriteInputTokens,
        context_window_tokens = COALESCE(@contextWindowTokens, context_window_tokens),
+       context_fill_tokens = COALESCE(@contextFillTokens, context_fill_tokens),
        updated_at = datetime('now')`,
   ).run({
     sessionId,
     inputTokens: input.inputTokens,
     outputTokens: input.outputTokens,
+    cachedInputTokens: input.cachedInputTokens ?? 0,
+    cacheWriteInputTokens: input.cacheWriteInputTokens ?? 0,
     contextWindowTokens: input.contextWindowTokens ?? null,
+    contextFillTokens: input.contextFillTokens ?? null,
   });
+}
+
+/**
+ * Current context fill in tokens. Prefers the provider-reported gauge (total
+ * input+output of the most recent model call in the current segment, which
+ * includes system prompt and tool schema overhead the transcript heuristic
+ * cannot see) and falls back to the transcript character heuristic when the
+ * provider has reported no usage yet.
+ */
+export function getContextFill(
+  db: Database.Database,
+  sessionId: string,
+  contextSegmentId: string,
+): number {
+  const row = db
+    .prepare(`SELECT context_fill_tokens FROM session_stats WHERE session_id = @sessionId`)
+    .get({ sessionId }) as { context_fill_tokens: number | null } | undefined;
+  const gauge = row?.context_fill_tokens;
+  if (typeof gauge === "number" && gauge > 0) return gauge;
+  return estimateCurrentContextFill(db, sessionId, contextSegmentId);
 }
 
 /** Set transcript_message_count to an absolute value. */

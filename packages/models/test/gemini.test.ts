@@ -1009,3 +1009,52 @@ describe("mapChatMessagesToGeminiPayload with ChatContentPart[]", () => {
     });
   });
 });
+describe("provider-reported usage", () => {
+  it("reports cachedContentTokenCount as cachedInputTokens subset", async () => {
+    const fetchImpl = async () =>
+      new Response(
+        JSON.stringify({
+          candidates: [{ content: { parts: [{ text: "hi" }], role: "model" } }],
+          usageMetadata: {
+            promptTokenCount: 2000,
+            candidatesTokenCount: 30,
+            cachedContentTokenCount: 1500,
+          },
+        }),
+        { status: 200 },
+      );
+
+    const p = createGeminiProvider({ id: "g", fetchImpl });
+    const out = await p.complete({
+      model: "gemini-pro",
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    assert.equal(out.content, "hi");
+    assert.ok(out.usage);
+    assert.equal(out.usage?.inputTokens, 2000);
+    assert.equal(out.usage?.outputTokens, 30);
+    assert.equal(out.usage?.cachedInputTokens, 1500);
+  });
+
+  it("omits cachedInputTokens when cachedContentTokenCount is absent", async () => {
+    const fetchImpl = async () =>
+      new Response(
+        JSON.stringify({
+          candidates: [{ content: { parts: [{ text: "hi" }], role: "model" } }],
+          usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 10 },
+        }),
+        { status: 200 },
+      );
+
+    const p = createGeminiProvider({ id: "g", fetchImpl });
+    const out = await p.complete({
+      model: "gemini-pro",
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    assert.ok(out.usage);
+    assert.equal(out.usage?.inputTokens, 100);
+    assert.equal(out.usage?.cachedInputTokens, undefined);
+  });
+});

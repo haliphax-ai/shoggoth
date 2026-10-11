@@ -286,14 +286,20 @@ function buildSessionStatsSection(
   const stats = getSessionStats(stateDb, sessionId);
   if (!stats) return undefined;
 
-  // Current context window fill: system prompt + transcript (what the model sees this turn).
+  // Current context window fill: prefer the provider-reported gauge (actual
+  // input+output of the most recent model call); fall back to a heuristic over
+  // the assembled system prompt + transcript (what the model sees this turn).
   let contextFillTokens = 0;
-  if (assembledPromptLength) {
-    contextFillTokens += Math.ceil(assembledPromptLength / 4);
-  }
-  if (transcriptMessages) {
-    for (const m of transcriptMessages) {
-      contextFillTokens += estimateTokens(m.content);
+  if (stats.contextFillTokens != null && stats.contextFillTokens > 0) {
+    contextFillTokens = stats.contextFillTokens;
+  } else {
+    if (assembledPromptLength) {
+      contextFillTokens += Math.ceil(assembledPromptLength / 4);
+    }
+    if (transcriptMessages) {
+      for (const m of transcriptMessages) {
+        contextFillTokens += estimateTokens(m.content);
+      }
     }
   }
 
