@@ -125,6 +125,12 @@ export interface ExecuteSessionAgentTurnInput {
     readonly onHitlQueued?: (call: { name: string; argsJson: string }) => void;
     /** A mid-turn compaction completed. */
     readonly onCompaction?: () => void;
+    /** A model call reported provider usage: the call's input tokens are the
+     *  best mid-turn gauge of current context-window fill. */
+    readonly onContextUpdate?: (update: {
+      readonly currentTokens: number;
+      readonly totalTokens?: number;
+    }) => void;
   };
 }
 
@@ -438,6 +444,14 @@ export async function executeSessionAgentTurn(
       incrementTokenUsage(input.db, input.sessionId, {
         ...delta,
         contextFillTokens: delta.inputTokens + delta.outputTokens,
+      });
+      // Tap the same delta for the live status bar (provider actuals, no DB
+      // re-read): the call's input tokens are the best mid-turn gauge of
+      // context fill; the window is provider-reported when available, else
+      // the turn's resolved model metadata.
+      input.events?.onContextUpdate?.({
+        currentTokens: delta.inputTokens,
+        totalTokens: delta.contextWindowTokens ?? ctxWindowTokens,
       });
     },
     compaction: ctxWindowTokens

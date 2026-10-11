@@ -98,6 +98,129 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
     assert.equal(result.failoverMeta?.degraded, false);
   });
 
+  it("forwards provider usage deltas to events.onContextUpdate (live status bar)", async () => {
+    const config = defaultConfig(tmp);
+    const sessions = createSessionStore(db);
+    const session = sessions.getById("sess-core");
+    assert.ok(session);
+    const transcript = createTranscriptStore(db);
+    const toolRuns = createToolRunStore(db);
+    const hitlStack = createHitlPendingResolutionStack(db);
+    const builtin = buildBuiltinOnlySessionMcpToolContext();
+    const onContextUpdate = vi.fn();
+
+    const result = await executeSessionAgentTurn({
+      db,
+      sessionId: "sess-core",
+      session: session!,
+      transcript,
+      toolRuns,
+      userContent: "usage delta forwarding test",
+      userMetadata: undefined,
+      env: process.env,
+      config,
+      policyEngine: createPolicyEngine(config.policy),
+      getHitlConfig: () => ({ ...DEFAULT_HITL_CONFIG, ...config.hitl }),
+      hitl: {
+        bypassUpTo: "safe",
+        pending: hitlStack.pending,
+        clock: { nowMs: () => Date.now() },
+        newPendingId: () => randomUUID(),
+        waitForHitlResolution: hitlStack.waitForHitlResolution,
+      },
+      events: { onContextUpdate },
+      loopImpl: runToolLoop,
+      createToolCallingClient: () => ({
+        async completeWithTools() {
+          return {
+            content: "USAGE_REPLY",
+            toolCalls: [],
+            usedModel: "stub",
+            usedProviderId: "stub",
+            degraded: false,
+            usage: { inputTokens: 31_400, outputTokens: 600, contextWindowTokens: 200_000 },
+          };
+        },
+      }),
+      resolveMcpContext: async () => builtin,
+    } as any);
+
+    assert.equal(result.latestAssistantText, "USAGE_REPLY");
+    // The call's input tokens are the mid-turn context-fill gauge; the window
+    // is the provider-reported one.
+    assert.equal(onContextUpdate.mock.calls.length, 1);
+    assert.deepEqual(onContextUpdate.mock.calls[0]![0], {
+      currentTokens: 31_400,
+      totalTokens: 200_000,
+    });
+  });
+
+  it("onContextUpdate falls back to the resolved model's window when the provider omits it", async () => {
+    const config = defaultConfig(tmp);
+    config.models = {
+      providers: [
+        {
+          id: "win",
+          kind: "openai-compatible" as const,
+          baseUrl: "http://localhost:1/v1",
+          apiKey: "fake",
+          models: [{ name: "m", contextWindowTokens: 128_000 }],
+        },
+      ],
+      failoverChain: ["win/m"],
+    };
+    const sessions = createSessionStore(db);
+    const session = sessions.getById("sess-core");
+    assert.ok(session);
+    const transcript = createTranscriptStore(db);
+    const toolRuns = createToolRunStore(db);
+    const hitlStack = createHitlPendingResolutionStack(db);
+    const builtin = buildBuiltinOnlySessionMcpToolContext();
+    const onContextUpdate = vi.fn();
+
+    await executeSessionAgentTurn({
+      db,
+      sessionId: "sess-core",
+      session: session!,
+      transcript,
+      toolRuns,
+      userContent: "window fallback test",
+      userMetadata: undefined,
+      env: process.env,
+      config,
+      policyEngine: createPolicyEngine(config.policy),
+      getHitlConfig: () => ({ ...DEFAULT_HITL_CONFIG, ...config.hitl }),
+      hitl: {
+        bypassUpTo: "safe",
+        pending: hitlStack.pending,
+        clock: { nowMs: () => Date.now() },
+        newPendingId: () => randomUUID(),
+        waitForHitlResolution: hitlStack.waitForHitlResolution,
+      },
+      events: { onContextUpdate },
+      loopImpl: runToolLoop,
+      createToolCallingClient: () => ({
+        async completeWithTools() {
+          return {
+            content: "WINDOW_REPLY",
+            toolCalls: [],
+            usedModel: "m",
+            usedProviderId: "win",
+            degraded: false,
+            usage: { inputTokens: 4_200, outputTokens: 300 },
+          };
+        },
+      }),
+      resolveMcpContext: async () => builtin,
+    } as any);
+
+    assert.equal(onContextUpdate.mock.calls.length, 1);
+    assert.deepEqual(onContextUpdate.mock.calls[0]![0], {
+      currentTokens: 4_200,
+      totalTokens: 128_000,
+    });
+  });
+
   it("proceeds normally when mid-turn compaction fails (e.g. no real model)", async () => {
     const config = defaultConfig(tmp);
     // Configure a model with a tiny context window so the threshold is exceeded.

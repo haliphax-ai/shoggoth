@@ -120,6 +120,11 @@ export interface RunInboundSessionTurnOptions {
           readonly onHitlQueued?: (call: { name: string; argsJson: string }) => void;
           /** A mid-turn compaction completed. */
           readonly onCompaction?: () => void;
+          /** A model call reported usage: live context-window fill update. */
+          readonly onContextUpdate?: (update: {
+            readonly currentTokens: number;
+            readonly totalTokens?: number;
+          }) => void;
         }
       | undefined
     >;
@@ -161,6 +166,7 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
         onToolCall?: (ev: ToolCallEvent) => void;
         onHitlQueued?: (call: { name: string; argsJson: string }) => void;
         onCompaction?: () => void;
+        onContextUpdate?: (update: { currentTokens: number; totalTokens?: number }) => void;
       }
     | undefined;
 
@@ -236,14 +242,16 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
             })(),
           }
         : undefined,
-      // Forward status bar events (thinking / tool / hitl / compaction) into the
-      // turn so the tracker can re-render live while the turn executes.
+      // Forward status bar events (thinking / tool / hitl / compaction /
+      // context fill) into the turn so the tracker can re-render live while
+      // the turn executes.
       events: statusBar
         ? {
             onThinkingDelta: (accumulated) => statusBar?.onThinkingDelta?.(accumulated),
             onToolCall: (ev) => statusBar?.onToolCall?.(ev),
             onHitlQueued: (call) => statusBar?.onHitlQueued?.(call),
             onCompaction: () => statusBar?.onCompaction?.(),
+            onContextUpdate: (update) => statusBar?.onContextUpdate?.(update),
           }
         : undefined,
     });

@@ -2,6 +2,8 @@ import type Database from "better-sqlite3";
 import type { ResolvedStatusBarConfig } from "@shoggoth/shared";
 import { createSessionStore } from "../sessions/session-store";
 import { getContextFill } from "../sessions/session-stats-store";
+import { getSessionPrimaryModelRef } from "../sessions/model-resolution";
+import { getModelContextWindowTokens } from "../model-metadata";
 import type { ToolCallEvent } from "../sessions/tool-loop";
 
 export type TurnStatusPhase =
@@ -266,14 +268,29 @@ function trimTrailingZero(formatted: string): string {
   return formatted.endsWith(".0") ? formatted.slice(0, -2) : formatted;
 }
 
+/** Context window for the session's selected model (`providerId/modelName`)
+ *  from model metadata (config / provider-reported / known defaults), or 0
+ *  when the model or its window is unknown. */
+function getModelMetadataContextWindow(modelSelection: unknown): number {
+  const modelRef = getSessionPrimaryModelRef(modelSelection);
+  if (!modelRef) return 0;
+  const slashIdx = modelRef.indexOf("/");
+  if (slashIdx <= 0) return 0;
+  return (
+    getModelContextWindowTokens(modelRef.slice(0, slashIdx), modelRef.slice(slashIdx + 1)) ?? 0
+  );
+}
+
 /** Sequence from session_stats.turn_count, compactions from compaction_count,
  *  context fill from the provider-reported gauge (last call's total
  *  input+output in session_stats.context_fill_tokens), falling back to the
  *  current context segment's transcript heuristic when the provider has not
  *  reported usage (session_stats.input_tokens is a cumulative running sum and
  *  must never be treated as current context-window fill). `context` is omitted
- *  when the fill is 0; `totalTokens` falls back to the fill when the session
- *  has no known context window. */
+ *  when the fill is 0; `totalTokens` comes from the session's known context
+ *  window (session_stats.context_window_tokens, then model metadata for the
+ *  session's selected model) and falls back to the fill when neither is
+ *  known. */
 export function getStatusBarStats(db: Database.Database, sessionId: string): StatusBarStats {
   const row = db
     .prepare(
@@ -287,13 +304,17 @@ export function getStatusBarStats(db: Database.Database, sessionId: string): Sta
         context_window_tokens: number | null;
       }
     | undefined;
-  const segmentId = createSessionStore(db).getById(sessionId)?.contextSegmentId;
+  const sessionRow = createSessionStore(db).getById(sessionId);
+  const segmentId = sessionRow?.contextSegmentId;
   const currentTokens =
     segmentId !== undefined && segmentId.length > 0 ? getContextFill(db, sessionId, segmentId) : 0;
   const sequence = row?.turn_count ?? 0;
   const compactions = row?.compaction_count ?? 0;
   if (currentTokens <= 0) return { sequence, compactions };
-  const windowTokens = row?.context_window_tokens ?? 0;
+  // Known context window: the session_stats gauge first, then model metadata
+  // for the session's selected model; the fill itself only when neither is known.
+  let windowTokens = row?.context_window_tokens ?? 0;
+  if (windowTokens <= 0) windowTokens = getModelMetadataContextWindow(sessionRow?.modelSelection);
   return {
     sequence,
     compactions,
@@ -330,6 +351,10 @@ export interface TurnStatusBarTracker {
   onHitlQueued?: (call: { name: string; argsJson: string }) => void;
   /** A mid-turn compaction completed. */
   onCompaction?: () => void;
+  /** A model call reported provider usage: currentTokens is that call's
+   *  input tokens (the best mid-turn gauge of context-window fill);
+   *  totalTokens is the known/reported window, when available. */
+  onContextUpdate?: (update: { currentTokens: number; totalTokens?: number }) => void;
 }
 
 /** Factory wiring the engine turn status bar to a capture-then-forward sink.
@@ -396,5 +421,6 @@ export function createStatusBarTurnTracker(opts: {
     },
     onHitlQueued: (call) => engine.markPaused({ name: call.name }),
     onCompaction: () => engine.setCompactions(++compactions),
+    onContextUpdate: (update) => engine.updateContext(update.currentTokens, update.totalTokens),
   };
 }
