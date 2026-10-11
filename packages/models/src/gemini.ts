@@ -66,6 +66,8 @@ export interface GeminiProviderOptions {
   readonly fetchImpl?: FetchLike;
   /** Optional resilience gate instance; falls back to the global singleton when omitted. */
   readonly resilienceGate?: ModelResilienceGate;
+  /** Request timeout (ms) overriding Node's internal fetch timeouts; see `CreateResilientFetcherOptions`. */
+  readonly requestTimeoutMs?: number;
 }
 
 const DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com";
@@ -550,6 +552,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
     fetchImpl,
     providerType: "gemini",
     formatErrorBody: parseApiErrorBody,
+    requestTimeoutMs: options.requestTimeoutMs,
   });
 
   const providerCapabilities: ModelCapabilities = {

@@ -1,4 +1,4 @@
-import { describe, it } from "vitest";
+import { describe, it, expect } from "vitest";
 import assert from "node:assert";
 import {
   createFailoverClientFromModelsConfig,
@@ -260,6 +260,84 @@ describe("createFailoverClientFromModelsConfig", () => {
     });
     assert.match(url, /\/v1\/messages$/);
     assert.equal(out.content, "ok");
+  });
+});
+
+describe("requestTimeoutMs resolution", () => {
+  it("applies top-level models.requestTimeoutMs to every provider", async () => {
+    const cfg: ShoggothModelsConfig = {
+      providers: [
+        { id: "a", kind: "openai-compatible", baseUrl: "https://a.example/v1" },
+        { id: "b", kind: "anthropic-messages", baseUrl: "https://b.example" },
+      ],
+      failoverChain: ["a/m1", "b/m2"],
+      requestTimeoutMs: 9_000,
+    };
+    const seen: (boolean | undefined)[] = [];
+    const c = createFailoverClientFromModelsConfig(cfg, {
+      fetchImpl: async (_u, init) => {
+        seen.push((init as { dispatcher?: unknown } | undefined)?.dispatcher !== undefined);
+        // First hop throws a network error so failover proceeds to the second.
+        if (seen.length === 1) throw new TypeError("fetch failed");
+        return new Response(
+          JSON.stringify({
+            role: "assistant",
+            content: [{ type: "text", text: "ok" }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    });
+    await c.complete({ messages: [{ role: "user", content: "x" }] });
+    expect(seen.length).toBeGreaterThanOrEqual(2);
+    expect(seen[0]).toBe(true);
+    expect(seen[1]).toBe(true);
+  });
+
+  it("provider-level requestTimeoutMs overrides the top-level value", async () => {
+    const cfg: ShoggothModelsConfig = {
+      providers: [
+        {
+          id: "a",
+          kind: "openai-compatible",
+          baseUrl: "https://a.example/v1",
+          requestTimeoutMs: 5_000,
+        },
+      ],
+      failoverChain: ["a/m1"],
+      requestTimeoutMs: 9_000,
+    };
+    let dispatcherSeen = false;
+    const c = createFailoverClientFromModelsConfig(cfg, {
+      fetchImpl: async (_u, init) => {
+        dispatcherSeen = (init as { dispatcher?: unknown } | undefined)?.dispatcher !== undefined;
+        return new Response(
+          JSON.stringify({ choices: [{ message: { role: "assistant", content: "ok" } }] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    });
+    await c.complete({ messages: [{ role: "user", content: "x" }] });
+    expect(dispatcherSeen).toBe(true);
+  });
+
+  it("attaches no dispatcher when neither top-level nor provider timeout is set", async () => {
+    const cfg: ShoggothModelsConfig = {
+      providers: [{ id: "a", kind: "openai-compatible", baseUrl: "https://a.example/v1" }],
+      failoverChain: ["a/m1"],
+    };
+    let dispatcherSeen = true;
+    const c = createFailoverClientFromModelsConfig(cfg, {
+      fetchImpl: async (_u, init) => {
+        dispatcherSeen = (init as { dispatcher?: unknown } | undefined)?.dispatcher !== undefined;
+        return new Response(
+          JSON.stringify({ choices: [{ message: { role: "assistant", content: "ok" } }] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    });
+    await c.complete({ messages: [{ role: "user", content: "x" }] });
+    expect(dispatcherSeen).toBe(false);
   });
 });
 

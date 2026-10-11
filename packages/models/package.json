@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@shoggoth/shared": "*",
-    "ajv": "^8.17.1"
+    "ajv": "^8.17.1",
+    "undici": "^6.29.0"
   }
 }

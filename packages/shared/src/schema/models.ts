@@ -1,9 +1,5 @@
 import { z } from "zod";
-import {
-  providerRetryFields,
-  responseSchemaSchema,
-  structuredOutputModeSchema,
-} from "./common";
+import { providerRetryFields, responseSchemaSchema, structuredOutputModeSchema } from "./common";
 
 export const shoggothOpenAiCompatibleProviderSchema = z
   .object({
@@ -12,6 +8,8 @@ export const shoggothOpenAiCompatibleProviderSchema = z
     baseUrl: z.string().min(1),
     apiKey: z.string().min(1).optional(),
     apiKeyEnv: z.string().min(1).optional(),
+    /** Per-request timeout (ms) for this provider's API calls; overrides the top-level `models.requestTimeoutMs`. */
+    requestTimeoutMs: z.number().int().positive().optional(),
     /** When true, pass image URLs directly to the provider instead of fetching and base64-encoding. Only effective when the provider supports URL-based image sources. Default false. */
     imageUrlPassthrough: z.boolean().optional(),
     ...providerRetryFields,
@@ -26,6 +24,8 @@ export const shoggothAnthropicMessagesProviderSchema = z
     baseUrl: z.string().min(1),
     apiKey: z.string().min(1).optional(),
     apiKeyEnv: z.string().min(1).optional(),
+    /** Per-request timeout (ms) for this provider's API calls; overrides the top-level `models.requestTimeoutMs`. */
+    requestTimeoutMs: z.number().int().positive().optional(),
     anthropicVersion: z.string().min(1).optional(),
     /** Default `x-api-key`; `bearer` sets `Authorization: Bearer`. */
     auth: z.enum(["x-api-key", "bearer"]).optional(),
@@ -43,6 +43,8 @@ export const shoggothGeminiProviderSchema = z
     baseUrl: z.string().min(1).optional(),
     apiKey: z.string().min(1).optional(),
     apiKeyEnv: z.string().min(1).optional(),
+    /** Per-request timeout (ms) for this provider's API calls; overrides the top-level `models.requestTimeoutMs`. */
+    requestTimeoutMs: z.number().int().positive().optional(),
     /** API version path segment (default "v1beta"). */
     apiVersion: z.string().min(1).optional(),
     ...providerRetryFields,
@@ -153,6 +155,8 @@ export const shoggothModelsConfigSchema = z
     compaction: shoggothModelsCompactionSchema.optional(),
     /** Global retry / failure configuration for model resolution. */
     retry: modelsRetrySchema.optional(),
+    /** Timeout (ms) applied to all provider API requests; individual providers may override via their own `requestTimeoutMs`. */
+    requestTimeoutMs: z.number().int().positive().optional(),
   })
   .strict();
 
