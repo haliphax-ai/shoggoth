@@ -65,6 +65,20 @@ export function createDiscordStreamingOutbound(
       });
       const messageId = created.id;
       const overflowMessages = new Map<number, OverflowMessage>();
+      /**
+       * Per-handle operation mutex. pushUpdate (chain-serialized by the
+       * coalescing pusher), setFullContent, and setStatusBar (tracker render
+       * timer) can otherwise interleave: concurrent reconcile passes would each
+       * see "no overflow message yet" for an index and create duplicate
+       * overflow messages with the same chunk — orphans no later pass ever
+       * edits or deletes. Every mutating operation runs through this chain.
+       */
+      let opChain: Promise<unknown> = Promise.resolve();
+      const enqueue = <T>(op: () => Promise<T>): Promise<T> => {
+        const run = opChain.then(op, op);
+        opChain = run.catch(() => {});
+        return run;
+      };
       /** Rendered status bar line while a bar is active; null when no bar is set. */
       let _statusBarLine: string | null = null;
       /** Most recently pushed/full body text (formatted, bar excluded). */
@@ -154,58 +168,67 @@ export function createDiscordStreamingOutbound(
       return {
         messageId,
         async setFullContent(text: string): Promise<void> {
-          let formattedText = text;
-          if (thinkingDisplay) {
-            formattedText = formatMessageWithThinking(text, thinkingDisplay);
-          }
-          formattedText = mdTableToAscii(formattedText);
-          lastPushedText = formattedText;
+          await enqueue(async () => {
+            let formattedText = text;
+            if (thinkingDisplay) {
+              formattedText = formatMessageWithThinking(text, thinkingDisplay);
+            }
+            formattedText = mdTableToAscii(formattedText);
+            lastPushedText = formattedText;
 
-          const budget = splitBudget(_statusBarLine);
-          const chunks = splitDiscordMessage(formattedText, budget);
-          const finalChunks =
-            _statusBarLine === null ? chunks : applyStatusBar(chunks, _statusBarLine);
-          await reconcileOverflow(finalChunks);
+            const budget = splitBudget(_statusBarLine);
+            const chunks = splitDiscordMessage(formattedText, budget);
+            const finalChunks =
+              _statusBarLine === null ? chunks : applyStatusBar(chunks, _statusBarLine);
+            await reconcileOverflow(finalChunks);
+          });
         },
         async pushUpdate(text: string): Promise<void> {
-          let formattedText = text;
-          if (thinkingDisplay) {
-            formattedText = formatMessageWithThinking(text, thinkingDisplay);
-          }
-          formattedText = mdTableToAscii(formattedText);
-          lastPushedText = formattedText;
-
-          const budget = splitBudget(_statusBarLine);
-          const chunks = splitDiscordMessage(formattedText, budget);
-          const finalChunks =
-            _statusBarLine === null ? chunks : applyStatusBar(chunks, _statusBarLine);
-
-          if (finalChunks.length === 1) {
-            // Simple case: update original message only
-            await transport.editMessage(channelId, messageId, { content: finalChunks[0] });
-            // Delete all overflow messages. Each deletion is retried with
-            // backoff a finite number of times; a failure on one message must
-            // never abort cleanup of the remaining ones. Entries that still
-            // fail after the final attempt are dropped (already logged).
-            for (const [index, overflow] of overflowMessages) {
-              // Success removes the message; give-up (already logged inside
-              // the helper) drops the entry so it is not retried forever.
-              await deleteOverflowWithRetry(overflow.messageId);
-              overflowMessages.delete(index);
+          await enqueue(async () => {
+            let formattedText = text;
+            if (thinkingDisplay) {
+              formattedText = formatMessageWithThinking(text, thinkingDisplay);
             }
-          } else {
-            await reconcileOverflow(finalChunks);
-          }
+            formattedText = mdTableToAscii(formattedText);
+            lastPushedText = formattedText;
+
+            const budget = splitBudget(_statusBarLine);
+            const chunks = splitDiscordMessage(formattedText, budget);
+            const finalChunks =
+              _statusBarLine === null ? chunks : applyStatusBar(chunks, _statusBarLine);
+
+            if (finalChunks.length === 1) {
+              // Simple case: update original message only
+              await transport.editMessage(channelId, messageId, { content: finalChunks[0] });
+              // Delete all overflow messages. Each deletion is retried with
+              // backoff a finite number of times; a failure on one message must
+              // never abort cleanup of the remaining ones. Entries that still
+              // fail after the final attempt are dropped (already logged).
+              for (const [index, overflow] of overflowMessages) {
+                // Success removes the message; give-up (already logged inside
+                // the helper) drops the entry so it is not retried forever.
+                await deleteOverflowWithRetry(overflow.messageId);
+                overflowMessages.delete(index);
+              }
+            } else {
+              await reconcileOverflow(finalChunks);
+            }
+          });
         },
         async setStatusBar(line: string | null): Promise<void> {
+          // State changes stay synchronous so operations already queued see the
+          // latest line; only the render is serialized with the other mutations.
           _statusBarLine = line;
           // Re-render the in-flight message from the last pushed/full content so
           // the bar appears (or disappears) without waiting for the next push.
           if (lastPushedText === null) return;
-          const budget = splitBudget(line);
-          const chunks = splitDiscordMessage(lastPushedText, budget);
-          const finalChunks = line === null ? chunks : applyStatusBar(chunks, line);
-          await reconcileOverflow(finalChunks);
+          await enqueue(async () => {
+            const budget = splitBudget(_statusBarLine);
+            const chunks = splitDiscordMessage(lastPushedText!, budget);
+            const finalChunks =
+              _statusBarLine === null ? chunks : applyStatusBar(chunks, _statusBarLine!);
+            await reconcileOverflow(finalChunks);
+          });
         },
       };
     },
