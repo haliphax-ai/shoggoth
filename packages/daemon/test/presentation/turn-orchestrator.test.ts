@@ -165,11 +165,13 @@ describe("PresentationTurnOrchestrator", () => {
     expect(call.sliceDisplayText("short")).toBe("short");
   });
 
-  it("passes the statusBar dep through to runInboundSessionTurn", async () => {
+  it("adapts the statusBar dep into an enabled inbound-turn option with a live tracker", async () => {
     const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn.js");
-    const config = { ...DEFAULT_STATUS_BAR_CONFIG } as ResolvedStatusBarConfig;
-    const render = vi.fn();
-    const attachSink = vi.fn();
+    const config = { ...DEFAULT_STATUS_BAR_CONFIG, enabled: true } as ResolvedStatusBarConfig;
+    const render = vi.fn().mockReturnValue("✅ ｜ 🔢 `3`");
+    const attachSink = vi.fn().mockReturnValue({
+      setStatusBar: vi.fn().mockResolvedValue(undefined),
+    });
     const adapter = createMockAdapter();
     const orch = new PresentationTurnOrchestrator({
       config: {} as ShoggothConfig,
@@ -184,9 +186,26 @@ describe("PresentationTurnOrchestrator", () => {
 
     const call = vi.mocked(runInboundSessionTurn).mock.calls.at(-1)?.[0];
     expect(call.statusBar).toBeDefined();
-    expect(call.statusBar.config).toBe(config);
-    expect(call.statusBar.render).toBe(render);
-    expect(call.statusBar.attachSink).toBe(attachSink);
+    // Regression guard: the dep must be ADAPTED into the option shape. The old
+    // pass-through cast left `enabled` undefined at runtime, so inbound turns
+    // silently skipped the bar.
+    expect(call.statusBar?.enabled).toBe(true);
+    expect(call.statusBar?.create).toBeInstanceOf(Function);
+
+    // attachSink delegates to the dep's attachSink (live mid-turn wiring).
+    const fakeHandle: StreamHandle = {
+      setFullContent: vi.fn().mockResolvedValue(undefined),
+      pushUpdate: vi.fn().mockResolvedValue(undefined),
+    };
+    call.statusBar?.attachSink?.(fakeHandle);
+    expect(attachSink).toHaveBeenCalledWith(fakeHandle);
+
+    // create() resolves a tracker whose terminal finish() renders a bar line.
+    const tracker = await call.statusBar?.create?.();
+    expect(tracker).toBeDefined();
+    const barLine = await tracker?.finish?.("completed");
+    expect(typeof barLine).toBe("string");
+    expect(barLine?.length ?? 0).toBeGreaterThan(0);
   });
 
   it("wraps stream handles with attachSink so handle.setStatusBar applies", async () => {

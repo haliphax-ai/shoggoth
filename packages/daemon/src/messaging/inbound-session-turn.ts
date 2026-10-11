@@ -8,7 +8,7 @@ import {
   type ExecuteSessionAgentTurnInput,
 } from "../sessions/session-agent-turn";
 import type { ToolCallEvent } from "../sessions/tool-loop";
-import type { OutboundAttachment } from "../presentation/platform-adapter";
+import type { OutboundAttachment, StreamHandle } from "../presentation/platform-adapter";
 import { getLogger } from "../logging";
 
 const log = getLogger("inbound-session-turn");
@@ -96,10 +96,16 @@ export interface RunInboundSessionTurnOptions {
   /**
    * Optional status bar factory; wired at turn start when the platform surface supports it.
    * `create` returns the tracker sink for this turn's delivery, or `undefined` to skip (e.g.
+    readonly enabled: boolean;
    * non-messaging-surface delivery where no in-flight message can carry a bar).
    */
   readonly statusBar?: {
     readonly enabled: boolean;
+    /**
+     * Wraps the streaming handle right after start so the in-flight message
+     * carries `setStatusBar` (live mid-turn bar). Returns the augmented handle.
+     */
+    readonly attachSink?: (h: StreamHandle) => StreamHandle;
     readonly create: () => Promise<
       | {
           readonly setStatusBar: (line: string | null) => Promise<void>;
@@ -139,6 +145,8 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
     | {
         setFullContent: (body: string) => Promise<void>;
         pushUpdate: (body: string) => Promise<void>;
+        /** Present when the platform augments the handle (attachSink) with a live bar sink. */
+        setStatusBar?: (line: string | null) => Promise<void>;
       }
     | undefined;
   let streamPusher: ReturnType<typeof createCoalescingStreamPusher> | undefined;
@@ -167,10 +175,12 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       statusBar = undefined;
     }
   }
-
   if (streaming) {
     try {
       streamSink = await streaming.start();
+      // Live mid-turn bar: let the status bar option wrap the handle so its
+      // sink can apply renders to the in-flight message while the turn runs.
+      streamSink = options.statusBar?.attachSink?.(streamSink) ?? streamSink;
       streamPusher = createCoalescingStreamPusher(
         (s) => streamSink!.pushUpdate(s),
         streaming.minIntervalMs,
@@ -284,6 +294,23 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       }
     }
 
+    // The tracker's finish() terminal render flowed through the sink into the
+    // in-flight handle's setStatusBar, which remembers the bar as active state
+    // and re-applies it on every subsequent setFullContent. Clear that state
+    // BEFORE final delivery: the delivery body already appends barLine itself,
+    // and the still-active bar would stack a second copy on top of it. A sink
+    // failure must never block delivery.
+    if (barLine && streamSink?.setStatusBar) {
+      try {
+        await streamSink.setStatusBar(null);
+      } catch (clearErr) {
+        log.warn("inbound_session_turn.status_bar_clear_failed", {
+          ...ctx,
+          err: String(clearErr),
+        });
+      }
+    }
+
     const bodyWithBar = barLine ? `${rawBody}\n\n${barLine}` : rawBody;
 
     if (streamPusher && streamSink) {
@@ -318,6 +345,20 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
         log.warn("inbound_session_turn.status_bar_finish_failed", {
           ...ctx,
           err: String(barErr),
+        });
+      }
+    }
+    // finish()'s terminal render flowed through the sink into the in-flight
+    // handle's setStatusBar, which keeps the bar as active state and re-applies
+    // it on future renders. Clear that state so a stale bar is never re-applied;
+    // a sink failure must never block error delivery.
+    if (barLine && streamSink?.setStatusBar) {
+      try {
+        await streamSink.setStatusBar(null);
+      } catch (clearErr) {
+        log.warn("inbound_session_turn.status_bar_clear_failed", {
+          ...ctx,
+          err: String(clearErr),
         });
       }
     }

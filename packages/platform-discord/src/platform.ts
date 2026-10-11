@@ -26,6 +26,8 @@ import {
   createSessionMcpRuntime,
   defaultPlatformAssistantDeps,
   getTurnQueue,
+  getStatusBarStats,
+  renderStatusBarTerminalBar,
   formatAssistantReply,
   routeReaction,
   formatGlobalReactionEventContext,
@@ -49,7 +51,6 @@ import { daemonNotice } from "./notices";
 import type { DiscordMessagingRuntime } from "./bridge";
 import { mergeOrchestratorEnv, resolveDiscordOwnerUserId } from "./config";
 import { registerDiscordHitlNoticeAndAddReactions } from "./hitl/reaction-wiring";
-import { formatTokens } from "./status-bar";
 import type { HitlDiscordNoticeRegistry } from "./hitl/notice-registry";
 import { buildHitlQueuedNoticeLines, createDiscordHitlNotifier } from "./hitl/notifier";
 import { sliceDiscordPlatformMessageBody } from "./errors";
@@ -59,11 +60,20 @@ import { resolveStatusBarConfig, type ResolvedStatusBarConfig } from "@shoggoth/
 import { renderDiscordStatusBar } from "./status-bar";
 
 /** Minimal status-bar dep: config from resolveStatusBarConfig, render from renderDiscordStatusBar,
- *  and a no-op attachSink; passed to the presentation orchestrator when status is enabled. */
-function buildStatusBarDep(cfg: ResolvedStatusBarConfig): {
+ *  attachSink for live-bar stream wrapping, and stats seeded from session_stats (turn.db is
+ *  unavailable when the orchestrator creates the tracker); passed to the presentation orchestrator. */
+export function buildStatusBarDep(
+  db: Database.Database,
+  cfg: ResolvedStatusBarConfig,
+): {
   config: ResolvedStatusBarConfig;
   render: (snap: StatusBarSnapshot, c: ResolvedStatusBarConfig) => string;
   attachSink: (h: StreamHandle) => { setStatusBar(line: string | null): Promise<void> };
+  stats: (sessionId: string) => {
+    sequence: number;
+    compactions: number;
+    context?: { currentTokens: number; totalTokens: number };
+  };
 } {
   return {
     config: cfg,
@@ -81,53 +91,10 @@ function buildStatusBarDep(cfg: ResolvedStatusBarConfig): {
       h.setStatusBar = (line: string | null) => sink.setStatusBar(line);
       return h as StreamHandle & typeof sink;
     },
+    // Pre-turn stats for seeding the bar (sequence / compactions / context
+    // window fill) — sourced daemon-side; the platform only wires them in.
+    stats: (sessionId: string) => getStatusBarStats(db, sessionId),
   };
-}
-
-interface StatusBarTurnStats {
-  readonly sequence: number;
-  readonly compactions: number;
-  readonly inputTokens: number;
-  readonly windowTokens: number | null;
-}
-
-/** Sequence from session_stats.turn_count, compactions from compaction_count,
- *  context from the latest per-call input tokens (input_tokens column). */
-function readStatusBarStats(db: Database.Database, sessionId: string): StatusBarTurnStats {
-  const row = db
-    .prepare(
-      `SELECT turn_count, compaction_count, input_tokens, context_window_tokens
-       FROM session_stats WHERE session_id = ?`,
-    )
-    .get(sessionId) as
-    | {
-        turn_count: number;
-        compaction_count: number;
-        input_tokens: number;
-        context_window_tokens: number | null;
-      }
-    | undefined;
-  return {
-    sequence: row?.turn_count ?? 0,
-    compactions: row?.compaction_count ?? 0,
-    inputTokens: row?.input_tokens ?? 0,
-    windowTokens: row?.context_window_tokens ?? null,
-  };
-}
-
-/** Terminal Discord status bar line (✅ ｜ 🔢 `n` ｜ 🗑️ `n` ｜ 🪟 `p%/y`). */
-function renderStatusBarTerminalLine(s: StatusBarTurnStats): string {
-  const sections = ["✅", `🔢 \`${s.sequence}\``, `🗑️ \`${s.compactions}\``];
-  if (s.inputTokens > 0) {
-    const hasWindow = s.windowTokens !== null && s.windowTokens > 0;
-    const percent = hasWindow
-      ? `${((s.inputTokens / s.windowTokens!) * 100).toFixed(1)}%`
-      : undefined;
-    const total = hasWindow ? `/${formatTokens(s.windowTokens!)}` : "";
-    // Compact display: `31.4%/100K`; without a known window, just `31.4K`.
-    sections.push(`🪟 \`${percent ? `${percent}${total}` : formatTokens(s.inputTokens)}\``);
-  }
-  return sections.join(" ｜ ");
 }
 
 function pickDiscordAssistantDeps(
@@ -222,6 +189,7 @@ export async function startDiscordPlatform(
     opts.hitlConfigRef ? opts.hitlConfigRef.value : { ...DEFAULT_HITL_CONFIG, ...opts.config.hitl };
 
   const statusBarDep = buildStatusBarDep(
+    opts.db,
     resolveStatusBarConfig(opts.configRef?.current ?? opts.config),
   );
 
@@ -501,9 +469,19 @@ export async function startDiscordPlatform(
           if (streamingOutbound) {
             try {
               const raw = await streamingOutbound.start();
+              // Wrap the raw stream handle with the status-bar sink so the bar
+              // can be applied to the in-flight message (mirrors the
+              // messaging_surface path below). Delegates to any native
+              // setStatusBar on the handle.
+              if (statusBarDep.config.enabled) {
+                statusBarDep.attachSink(raw as unknown as StreamHandle);
+              }
               preStartedStreamHandle = {
                 setFullContent: (text: string) => raw.setFullContent(text),
                 pushUpdate: (text: string) => raw.pushUpdate(text),
+                ...(raw.setStatusBar
+                  ? { setStatusBar: (line: string | null) => raw.setStatusBar!(line) }
+                  : {}),
               };
             } catch (e) {
               opts.logger.warn("discord.platform.stream_start_failed", {
@@ -725,7 +703,7 @@ export async function startDiscordPlatform(
           // session_stats.turn_count, and the bar must report the sequence of
           // the very turn it belongs to (not the next one).
           const statsAtTurnStart = statusBarDep.config.enabled
-            ? readStatusBarStats(opts.db, sid)
+            ? getStatusBarStats(opts.db, sid)
             : undefined;
           turnResult = await executeTurn(
             buildAfterHitlQueued(delivery),
@@ -747,11 +725,19 @@ export async function startDiscordPlatform(
             turnResult.failoverMeta,
           );
           // Terminal bar for this turn, rendered from the turn-start stats
-          // snapshot (sequence, compactions, context window fill).
+          // snapshot (sequence, compactions, context window fill) through the
+          // same StatusBarRenderer the live bar uses, so both share one format.
+          // The messaging_surface terminal bar has always rendered the finished
+          // (✅) phase regardless of how the turn ended; keep "finished".
           const terminalBar =
             statsAtTurnStart === undefined
               ? undefined
-              : renderStatusBarTerminalLine(statsAtTurnStart);
+              : renderStatusBarTerminalBar(
+                  statsAtTurnStart,
+                  "finished",
+                  statusBarDep.config,
+                  renderDiscordStatusBar,
+                );
           if (surfaceStreamPusher && surfaceStreamHandle) {
             await surfaceStreamPusher.flush();
             if (terminalBar && surfaceStreamHandle.setStatusBar) {

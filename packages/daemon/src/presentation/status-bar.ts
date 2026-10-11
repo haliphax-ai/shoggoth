@@ -1,4 +1,7 @@
+import type Database from "better-sqlite3";
 import type { ResolvedStatusBarConfig } from "@shoggoth/shared";
+import { createSessionStore } from "../sessions/session-store";
+import { estimateCurrentContextFill } from "../sessions/session-stats-store";
 
 export type TurnStatusPhase =
   | "starting"
@@ -237,4 +240,86 @@ export function createTurnStatusBar(opts: {
       }
     },
   };
+}
+
+/** Pre-turn stats for the turn status bar: sequence (session_stats.turn_count),
+ *  compactions (compaction_count), and current context-window fill estimated
+ *  from the session's current context segment. `session_stats.input_tokens` is
+ *  a cumulative running sum across every model call and must NEVER be treated
+ *  as current context-window fill. */
+export interface StatusBarStats {
+  readonly sequence: number;
+  readonly compactions: number;
+  readonly context?: { readonly currentTokens: number; readonly totalTokens: number };
+}
+
+/** `<10K` → plain integer with thousands separators; `≥10K` → one-decimal K; `≥1M` → one-decimal M. */
+export function formatTokens(value: number): string {
+  if (value < 10_000) return value.toLocaleString("en-US");
+  if (value < 1_000_000) return trimTrailingZero((value / 1_000).toFixed(1)) + "K";
+  return trimTrailingZero((value / 1_000_000).toFixed(1)) + "M";
+}
+
+function trimTrailingZero(formatted: string): string {
+  return formatted.endsWith(".0") ? formatted.slice(0, -2) : formatted;
+}
+
+/** Sequence from session_stats.turn_count, compactions from compaction_count,
+ *  context fill estimated from the current context segment's transcript
+ *  (session_stats.input_tokens is a cumulative running sum and must never be
+ *  treated as current context-window fill). `context` is omitted when the
+ *  segment estimate is 0; `totalTokens` falls back to the estimate when the
+ *  session has no known context window. */
+export function getStatusBarStats(db: Database.Database, sessionId: string): StatusBarStats {
+  const row = db
+    .prepare(
+      `SELECT turn_count, compaction_count, context_window_tokens
+       FROM session_stats WHERE session_id = ?`,
+    )
+    .get(sessionId) as
+    | {
+        turn_count: number;
+        compaction_count: number;
+        context_window_tokens: number | null;
+      }
+    | undefined;
+  const segmentId = createSessionStore(db).getById(sessionId)?.contextSegmentId;
+  const currentTokens =
+    segmentId !== undefined && segmentId.length > 0
+      ? estimateCurrentContextFill(db, sessionId, segmentId)
+      : 0;
+  const sequence = row?.turn_count ?? 0;
+  const compactions = row?.compaction_count ?? 0;
+  if (currentTokens <= 0) return { sequence, compactions };
+  const windowTokens = row?.context_window_tokens ?? 0;
+  return {
+    sequence,
+    compactions,
+    context: { currentTokens, totalTokens: windowTokens > 0 ? windowTokens : currentTokens },
+  };
+}
+
+/** Terminal status-bar line for the messaging_surface, routed through the
+ *  platform-supplied renderer so the terminal bar shares the live bar's
+ *  format (blockquote prefix, section order, config toggles). Builds a
+ *  StatusBarSnapshot from the pre-turn stats — phase from the outcome (the
+ *  renderer's PHASE_EMOJI maps it), toolCalls `{ total: 0 }` (the renderer
+ *  omits the tool section when there's nothing to show), context omitted
+ *  when stats carry none. Returns undefined when the renderer yields an
+ *  empty line (e.g. every section disabled). */
+export function renderStatusBarTerminalBar(
+  stats: StatusBarStats,
+  outcome: "finished" | "aborted" | "failed",
+  cfg: ResolvedStatusBarConfig,
+  render: StatusBarRenderer,
+): string | undefined {
+  const snapshot: StatusBarSnapshot = {
+    phase: outcome,
+    sequence: stats.sequence,
+    toolCalls: { total: 0 },
+    ...(stats.context ? { context: stats.context } : {}),
+    compactions: stats.compactions,
+  };
+  const line = render(snapshot, cfg);
+  return line.trim().length > 0 ? line : undefined;
 }

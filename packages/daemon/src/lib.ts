@@ -59,6 +59,7 @@ export {
   applySessionContextSegmentNew,
   applySessionContextSegmentReset,
 } from "./sessions/session-context-segment";
+export { estimateCurrentContextFill } from "./sessions/session-stats-store";
 export {
   parseSessionSegmentInlineCommand,
   sessionSegmentStartupUserContent,
@@ -247,10 +248,14 @@ export {
 export { setNoticeResolver as setPresentationNoticeResolver } from "./presentation/notices";
 export {
   createTurnStatusBar,
+  getStatusBarStats,
+  renderStatusBarTerminalBar,
+  formatTokens,
   type TurnStatusBar,
   type TurnStatusPhase,
   type StatusBarToolCall,
   type StatusBarSnapshot,
+  type StatusBarStats,
   type StatusBarSink,
   type StatusBarRenderer,
 } from "./presentation/status-bar";
