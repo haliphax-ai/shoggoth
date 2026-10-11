@@ -5,6 +5,7 @@ import type {
   ShoggothToolRules,
 } from "@shoggoth/shared";
 import { resolveAgentIdFromSessionId } from "@shoggoth/shared";
+import { isGlobPattern, toolIdGlobMatches } from "../sessions/tool-id-glob";
 
 export type PolicyAction = "control.invoke" | "tool.invoke";
 
@@ -112,19 +113,37 @@ function matchesAllow(resource: string, allow: readonly string[] | undefined): b
   return matchesRule(resource, allow);
 }
 
+/**
+ * Glob pass for the deny/review tiers (operator ruling): entries containing
+ * `*`/`?` are matched against the full compound resource with the shared
+ * tool-id glob matcher (`packages/daemon/src/sessions/tool-id-glob.ts`).
+ * Exact/`tool:*`/bare/`*` entries are unaffected — this pass only adds
+ * matches for wildcard entries that `matchesRule` misses. Non-matching or
+ * missing lists return false (fail toward allow, like `matchesRule`).
+ */
+function matchesGlobRule(resource: string, rules: readonly string[] | undefined): boolean {
+  if (!rules) return false;
+  for (const rule of rules) {
+    if (isGlobPattern(rule) && toolIdGlobMatches(rule, resource)) return true;
+  }
+  return false;
+}
+
 function matchesDeny(resource: string, deny: readonly string[] | undefined): boolean {
-  return matchesRule(resource, deny);
+  return matchesRule(resource, deny) || matchesGlobRule(resource, deny);
 }
 
 function matchesReview(resource: string, review: readonly string[] | undefined): boolean {
   if (!review || review.length === 0) return false;
-  return matchesRule(resource, review);
+  return matchesRule(resource, review) || matchesGlobRule(resource, review);
 }
 
 /**
  * Default-deny: allowed only if an allow rule matches and no deny rule matches.
  * Evaluation order: deny → review → allow → default_deny.
  * `*` in allow permits any resource not explicitly denied; `*` in deny blocks all.
+ * Deny and review entries may also be globs (`*`/`?`, e.g. `kanban-*`) matched
+ * against the full compound resource via the shared tool-id glob matcher.
  */
 export function evaluateRules(resource: string, rules: ShoggothToolRules): PolicyDecision {
   if (matchesDeny(resource, rules.deny)) {
