@@ -245,8 +245,6 @@ const DEFAULT_EXCLUSIONS_BY_LEVEL: Record<ContextLevel, ReadonlySet<string>> = {
     "builtin-workflow",
     "builtin-subagent",
     "builtin-session-list",
-    "builtin-session-history",
-    "builtin-session-spawn",
     "builtin-web-search",
   ]),
   light: new Set(),
