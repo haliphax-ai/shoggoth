@@ -87,7 +87,11 @@ export function isDefinedControlOp(op: string): op is DefinedControlOp {
  *   - `exec:curl` does NOT match bare `exec` (specific sub-resource rule doesn't cover the whole tool)
  *   - `*`         matches everything
  */
-function matchesRule(resource: string, rules: readonly string[]): boolean {
+function matchesRule(resource: string, rules: readonly string[] | undefined): boolean {
+  // Defensive: a partial policy config (e.g. hot-reloaded fragment missing a
+  // tier list) must not crash the turn with `Cannot read properties of
+  // undefined (reading 'includes')` — treat a missing list as empty.
+  if (!rules) return false;
   if (rules.includes("*")) return true;
   if (rules.includes(resource)) return true;
 
@@ -104,11 +108,11 @@ function matchesRule(resource: string, rules: readonly string[]): boolean {
   return false;
 }
 
-function matchesAllow(resource: string, allow: readonly string[]): boolean {
+function matchesAllow(resource: string, allow: readonly string[] | undefined): boolean {
   return matchesRule(resource, allow);
 }
 
-function matchesDeny(resource: string, deny: readonly string[]): boolean {
+function matchesDeny(resource: string, deny: readonly string[] | undefined): boolean {
   return matchesRule(resource, deny);
 }
 

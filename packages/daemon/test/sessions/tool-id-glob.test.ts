@@ -9,6 +9,14 @@ describe("tool-id-glob", () => {
       assert.equal(isGlobPattern("lsp-?"), true);
       assert.equal(isGlobPattern("builtin-read"), false);
     });
+
+    it("treats a non-string entry as a non-glob instead of throwing", () => {
+      // A malformed config/registry entry (undefined/null) must not crash
+      // callers with `Cannot read properties of undefined (reading 'includes')`.
+      assert.equal(isGlobPattern(undefined as unknown as string), false);
+      assert.equal(isGlobPattern(null as unknown as string), false);
+      assert.equal(toolIdGlobMatches(undefined as unknown as string, "builtin-read"), false);
+    });
   });
 
   describe("toolIdGlobMatches", () => {

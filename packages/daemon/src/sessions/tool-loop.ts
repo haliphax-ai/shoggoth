@@ -413,9 +413,9 @@ async function processSingleToolCall(
   // ---- Stage 1: name / thinking-leak / unknown-tool validation ----
 
   const VALID_TOOL_NAME = /^[a-zA-Z0-9_\-:.]{1,128}$/;
-  if (!VALID_TOOL_NAME.test(tc.name)) {
+  if (typeof tc.name !== "string" || !VALID_TOOL_NAME.test(tc.name)) {
     log.warn("invalid tool name", {
-      toolName: tc.name.slice(0, 80),
+      toolName: typeof tc.name === "string" ? tc.name.slice(0, 80) : "<missing>",
       toolCallId: tc.id,
       sessionId: options.sessionId,
     });
@@ -564,6 +564,9 @@ async function processSingleToolCall(
 
   const requiresReview = !decision.allow && decision.reason === "requires_review";
 
+  // Deny is a HARD BLOCK (operator ruling): an immediate error result back
+  // into the tool loop — NO HITL queue entry, no approval latency. Only the
+  // review tier queues human sign-off; risk-tier HITL below is unchanged.
   if (!decision.allow && !requiresReview) {
     log.warn("tool call policy denied", {
       toolName: compoundResource,
@@ -574,7 +577,10 @@ async function processSingleToolCall(
     const errBody = JSON.stringify({
       error: "policy_denied",
       tool: compoundResource,
-      message: `Tool call denied by policy: ${decision.reason}`,
+      message:
+        decision.reason === "explicit_deny"
+          ? `policy_denied: tool '${compoundResource}' is deny-listed`
+          : `Tool call denied by policy: ${decision.reason}`,
     });
     options.audit.record({
       phase: "policy_denied",
@@ -979,6 +985,18 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
       // Sanitize malformed argsJson before transcript storage.
       const badArgIds = new Set<string>();
       const sanitizedToolCalls = turn.toolCalls.map((tc) => {
+        if (typeof tc.argsJson !== "string") {
+          // Malformed tool call (provider omitted `arguments`): treat as bad
+          // args so the model receives a structured tool error and the turn
+          // completes — never crash the loop inside args sanitization.
+          log.warn("tool call args missing", {
+            toolName: typeof tc.name === "string" ? tc.name : "<missing>",
+            toolCallId: tc.id,
+            sessionId: options.sessionId,
+          });
+          badArgIds.add(tc.id);
+          return { ...tc, argsJson: "{}" };
+        }
         const fixedArgs = sanitizeJsonEscapes(tc.argsJson);
         try {
           JSON.parse(fixedArgs);
