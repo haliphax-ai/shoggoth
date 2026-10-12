@@ -4,7 +4,7 @@ import type { WireRequest } from "@shoggoth/authn";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
-import type { ShoggothConfig } from "@shoggoth/shared";
+import type { ShoggothConfig, SystemContext } from "@shoggoth/shared";
 import { getLogger } from "../logging";
 import { resolveConfiguredSubagentModel } from "../config/effective-runtime";
 const ioLog = getLogger("integration-ops");
@@ -88,6 +88,7 @@ import { pushSystemContext } from "../sessions/system-context-buffer";
 import { pushSteer } from "../sessions/steer-channel";
 import { getTurnQueue } from "../sessions/session-turn-queue-singleton";
 import {
+  formatOobFailureNotice,
   OOB_NUDGE_NO_SENDER,
   OOB_NUDGE_WITH_SENDER,
   OOB_SCHEMA_NO_SENDER,
@@ -434,6 +435,12 @@ export async function deliverOobStructuredResponse(opts: {
   subLog: ReturnType<typeof getLogger>;
   maxChars?: number;
   hasSender: boolean;
+  /**
+   * The OOB system context of the turn being repaired. Replay it on the nudge
+   * turn so the nudge reads as a *continuation* of the failed OOB turn rather
+   * than an unrelated prompt.
+   */
+  systemContext?: SystemContext;
 }): Promise<void> {
   const {
     structuredResponse,
@@ -443,6 +450,7 @@ export async function deliverOobStructuredResponse(opts: {
     subLog,
     maxChars = 8000,
     hasSender,
+    systemContext,
   } = opts;
 
   const announceAbort = async (): Promise<void> => {
@@ -475,10 +483,15 @@ export async function deliverOobStructuredResponse(opts: {
     const nudgeGuidance = hasSender ? OOB_NUDGE_WITH_SENDER : OOB_NUDGE_NO_SENDER;
 
     try {
+      // The nudge turn is a continuation of the failed OOB turn: it replays the
+      // same OOB system context, runs on the same session with the same tool
+      // set, and — via `responseSchema` — is presented with the synthetic
+      // `__structured_output__` tool so the model can actually recover.
       const nudgeResult = await ext.runSessionModelTurn({
         sessionId: respondTo,
         userContent: nudgeGuidance,
         delivery: { kind: "internal" },
+        ...(systemContext ? { systemContext } : {}),
         modelInvocationOverride: {
           responseSchema: { schema: nudgeSchema },
           structuredOutputMode: "best-effort",
@@ -501,10 +514,7 @@ export async function deliverOobStructuredResponse(opts: {
           });
           await ext.postToOperator?.({
             sessionId: respondTo,
-            userContent:
-              "⚠️ **Error**: An out-of-band message could not be processed. " +
-              "The model did not respond with valid structured output after a follow-up attempt. " +
-              "Please check the session logs for details.",
+            userContent: formatOobFailureNotice(nudgeResult.latestAssistantText, maxChars),
           });
           return;
         }
@@ -513,10 +523,7 @@ export async function deliverOobStructuredResponse(opts: {
         subLog.error("oob nudge produced no response", { respondTo });
         await ext.postToOperator?.({
           sessionId: respondTo,
-          userContent:
-            "⚠️ **Error**: An out-of-band message could not be processed. " +
-            "The model did not respond with valid structured output and the follow-up attempt produced no response. " +
-            "Please check the session logs for details.",
+          userContent: formatOobFailureNotice(structuredResponse, maxChars),
         });
         return;
       }
@@ -525,10 +532,7 @@ export async function deliverOobStructuredResponse(opts: {
       subLog.error("oob nudge turn failed", { respondTo, error: String(nudgeErr) });
       await ext.postToOperator?.({
         sessionId: respondTo,
-        userContent:
-          "⚠️ **Error**: An out-of-band message could not be processed. " +
-          "The model did not respond with valid structured output and the follow-up attempt also failed. " +
-          "Please check the session logs for details.",
+        userContent: formatOobFailureNotice(structuredResponse, maxChars),
       });
       return;
     }
@@ -634,6 +638,18 @@ export async function deliverSubagentResult(
     return;
   }
 
+  // OOB system context for the delivery turn. It is replayed by the nudge turn
+  // inside deliverOobStructuredResponse so that a format-failure nudge reads as
+  // a continuation of this same OOB turn rather than an unrelated prompt.
+  const oobSystemContext: SystemContext = {
+    kind: "subagent.result",
+    summary: `Result delivered from subagent ${childSessionId}.`,
+    data: {
+      child_session_id: childSessionId,
+      mode,
+    },
+  };
+
   try {
     const turnResult = await ext.runSessionModelTurn({
       sessionId: respondTo,
@@ -643,14 +659,7 @@ export async function deliverSubagentResult(
         child_session_id: childSessionId,
         mode,
       },
-      systemContext: {
-        kind: "subagent.result",
-        summary: `Result delivered from subagent ${childSessionId}.`,
-        data: {
-          child_session_id: childSessionId,
-          mode,
-        },
-      },
+      systemContext: oobSystemContext,
       delivery: { kind: "internal" },
       modelInvocationOverride: {
         // OOB structured output is the default for the parent delivery turn; a
@@ -671,6 +680,7 @@ export async function deliverSubagentResult(
         subLog,
         maxChars,
         hasSender: true,
+        systemContext: oobSystemContext,
       });
     }
     subLog.info("subagent result delivered to respond_to session", {

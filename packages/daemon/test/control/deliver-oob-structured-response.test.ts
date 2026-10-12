@@ -414,4 +414,150 @@ describe("deliverOobStructuredResponse", () => {
     expect(steers[0]).toContain("sender sees this");
     handle.unregister();
   });
+
+  it("replays the OOB system context on the nudge turn so it is a continuation", async () => {
+    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+
+    const runTurn = vi.fn().mockResolvedValue({
+      latestAssistantText: JSON.stringify({ to_operator: "ok", to_sender: null }),
+    });
+    const systemContext = {
+      kind: "subagent.result",
+      summary: "Result delivered from subagent child-oob.",
+      data: { child_session_id: "child-oob", mode: "persistent" },
+    };
+
+    await deliverOobStructuredResponse({
+      ...opts({
+        ext: { postToOperator: mockPostToOperator, runSessionModelTurn: runTurn } as never,
+      }),
+      structuredResponse: "not valid json",
+      hasSender: true,
+      systemContext,
+    });
+
+    expect(runTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        systemContext,
+      }),
+    );
+  });
+
+  it("omits systemContext on the nudge turn when the original turn had none", async () => {
+    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+
+    const runTurn = vi.fn().mockResolvedValue({
+      latestAssistantText: JSON.stringify({ to_operator: "ok", to_sender: null }),
+    });
+
+    await deliverOobStructuredResponse({
+      ...opts({
+        ext: { postToOperator: mockPostToOperator, runSessionModelTurn: runTurn } as never,
+      }),
+      structuredResponse: "not valid json",
+      hasSender: true,
+    });
+
+    expect(runTurn).toHaveBeenCalledWith(
+      expect.not.objectContaining({ systemContext: expect.anything() }),
+    );
+  });
+
+  it("nudge text frames the retry as a continuation that still has the structured output tool", async () => {
+    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+
+    const runTurn = vi.fn().mockResolvedValue({
+      latestAssistantText: JSON.stringify({ to_operator: "ok", to_sender: null }),
+    });
+
+    await deliverOobStructuredResponse({
+      ...opts({
+        ext: { postToOperator: mockPostToOperator, runSessionModelTurn: runTurn } as never,
+      }),
+      structuredResponse: "not valid json",
+      hasSender: true,
+    });
+
+    const nudge = (runTurn.mock.calls[0][0] as { userContent: string }).userContent;
+    expect(nudge).toMatch(/continuation/i);
+    expect(nudge).toContain("__structured_output__");
+  });
+
+  it("surfaces the model's raw output after the warning when the nudge is also invalid", async () => {
+    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+
+    const runTurn = vi
+      .fn()
+      .mockResolvedValue({ latestAssistantText: "Sorry, here is prose instead" });
+
+    await deliverOobStructuredResponse({
+      ...opts({
+        ext: { postToOperator: mockPostToOperator, runSessionModelTurn: runTurn } as never,
+      }),
+      structuredResponse: "original failure text",
+      hasSender: true,
+    });
+
+    const last = mockPostToOperator.mock.calls.at(-1)?.[0] as { userContent: string };
+    const notice = last.userContent;
+    expect(notice).toContain("Error");
+    // Warning is a prefix of the model's raw output, not a replacement for it.
+    expect(notice.indexOf("Error")).toBeLessThan(notice.indexOf("Sorry, here is prose instead"));
+    expect(notice).toContain("Sorry, here is prose instead");
+  });
+
+  it("surfaces the original OOB output after the warning when the nudge turn throws", async () => {
+    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+
+    const runTurn = vi.fn().mockRejectedValue(new Error("model unavailable"));
+
+    await deliverOobStructuredResponse({
+      ...opts({
+        ext: { postToOperator: mockPostToOperator, runSessionModelTurn: runTurn } as never,
+      }),
+      structuredResponse: "the original unstructured answer",
+      hasSender: false,
+    });
+
+    const last = mockPostToOperator.mock.calls.at(-1)?.[0] as { userContent: string };
+    expect(last.userContent).toContain("Error");
+    expect(last.userContent).toContain("the original unstructured answer");
+  });
+
+  it("surfaces the original OOB output after the warning when the nudge produces no response", async () => {
+    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+
+    const runTurn = vi.fn().mockResolvedValue(undefined);
+
+    await deliverOobStructuredResponse({
+      ...opts({
+        ext: { postToOperator: mockPostToOperator, runSessionModelTurn: runTurn } as never,
+      }),
+      structuredResponse: "the original unstructured answer",
+      hasSender: false,
+    });
+
+    const last = mockPostToOperator.mock.calls.at(-1)?.[0] as { userContent: string };
+    expect(last.userContent).toContain("Error");
+    expect(last.userContent).toContain("the original unstructured answer");
+  });
+
+  it("clips a very long raw output to maxChars in the failure notice", async () => {
+    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+
+    const runTurn = vi.fn().mockResolvedValue({ latestAssistantText: "y".repeat(10_000) });
+
+    await deliverOobStructuredResponse({
+      ...opts({
+        maxChars: 100,
+        ext: { postToOperator: mockPostToOperator, runSessionModelTurn: runTurn } as never,
+      }),
+      structuredResponse: "not valid json",
+      hasSender: false,
+    });
+
+    const last = mockPostToOperator.mock.calls.at(-1)?.[0] as { userContent: string };
+    expect(last.userContent).toContain("y".repeat(100));
+    expect(last.userContent).not.toContain("y".repeat(101));
+  });
 });

@@ -1,6 +1,7 @@
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
 import { deliverOobStructuredResponse } from "../control/integration-ops";
 import { OOB_NO_SENDER_GUIDANCE, OOB_SCHEMA_NO_SENDER } from "../messaging/oob-response-schemas";
+import type { SystemContext } from "@shoggoth/shared";
 import { getLogger } from "../logging";
 
 /** Deliver a timer through the same cancellation-aware OOB boundary as subagent results. */
@@ -12,16 +13,20 @@ export async function deliverTimerMessage(sessionId: string, message: string): P
     });
     return;
   }
+  // OOB system context for the timer turn. Replayed by the nudge turn inside
+  // deliverOobStructuredResponse so a format-failure nudge reads as a
+  // continuation of this same OOB turn rather than an unrelated prompt.
+  const oobSystemContext: SystemContext = {
+    kind: "timer.fire",
+    summary: "This turn was triggered by a deferred timer.",
+    guidance: OOB_NO_SENDER_GUIDANCE,
+  };
   const turn = await ext.runSessionModelTurn({
     sessionId,
     userContent: message,
     userMetadata: { timer_fire: true },
     delivery: { kind: "internal" },
-    systemContext: {
-      kind: "timer.fire",
-      summary: "This turn was triggered by a deferred timer.",
-      guidance: OOB_NO_SENDER_GUIDANCE,
-    },
+    systemContext: oobSystemContext,
     modelInvocationOverride: {
       responseSchema: { schema: OOB_SCHEMA_NO_SENDER },
       structuredOutputMode: "best-effort",
@@ -35,6 +40,7 @@ export async function deliverTimerMessage(sessionId: string, message: string): P
       ext,
       subLog: getLogger("timer"),
       hasSender: false,
+      systemContext: oobSystemContext,
     });
   }
 }

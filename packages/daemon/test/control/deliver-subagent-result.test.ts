@@ -318,4 +318,76 @@ describe("deliverSubagentResult", () => {
       expect(content).not.toMatch(/discord|slack|telegram|teams/i);
     });
   });
+
+  describe("OOB format-failure nudge is a continuation of the delivery turn", () => {
+    it("replays the delivery turn's system context and schema on the nudge turn", async () => {
+      mockRunSessionModelTurn.mockReset();
+      mockRunSessionModelTurn
+        .mockResolvedValueOnce({ latestAssistantText: "not json at all" })
+        .mockResolvedValueOnce({
+          latestAssistantText: JSON.stringify({ to_operator: "recovered", to_sender: null }),
+        })
+        .mockResolvedValue({});
+      const postToOperator = vi.fn();
+      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+
+      await deliverSubagentResult(
+        { runSessionModelTurn: mockRunSessionModelTurn, postToOperator } as never,
+        {
+          childSessionId: "child-nudge",
+          respondTo: "parent-nudge",
+          internalDelivery: true,
+          mode: "persistent",
+          deliveryMode: "queue",
+          assistantText: "subagent result",
+          subLog: { info: vi.fn(), warn: vi.fn() } as never,
+        },
+      );
+
+      // Call 0 = the OOB delivery turn; call 1 = the format-failure nudge turn.
+      const deliveryTurn = mockRunSessionModelTurn.mock.calls[0][0];
+      const nudgeTurn = mockRunSessionModelTurn.mock.calls[1][0];
+
+      expect(deliveryTurn.systemContext).toEqual({
+        kind: "subagent.result",
+        summary: expect.stringContaining("child-nudge"),
+        data: { child_session_id: "child-nudge", mode: "persistent" },
+      });
+      // Same OOB system context and the same structured output schema.
+      expect(nudgeTurn.systemContext).toEqual(deliveryTurn.systemContext);
+      expect(nudgeTurn.modelInvocationOverride.responseSchema).toEqual(
+        deliveryTurn.modelInvocationOverride.responseSchema,
+      );
+      // Recovery routed to the operator surface.
+      expect(postToOperator).toHaveBeenCalledWith(
+        expect.objectContaining({ userContent: expect.stringContaining("recovered") }),
+      );
+    });
+
+    it("surfaces the failed turn's raw output alongside the warning when repair fails", async () => {
+      mockRunSessionModelTurn.mockReset();
+      mockRunSessionModelTurn
+        .mockResolvedValueOnce({ latestAssistantText: "original prose answer" })
+        .mockResolvedValue({ latestAssistantText: "still prose" });
+      const postToOperator = vi.fn();
+      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+
+      await deliverSubagentResult(
+        { runSessionModelTurn: mockRunSessionModelTurn, postToOperator } as never,
+        {
+          childSessionId: "child-fail",
+          respondTo: "parent-fail",
+          internalDelivery: true,
+          mode: "persistent",
+          deliveryMode: "queue",
+          assistantText: "subagent result",
+          subLog: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never,
+        },
+      );
+
+      const notice = postToOperator.mock.calls.at(-1)?.[0] as { userContent: string };
+      expect(notice.userContent).toContain("Error");
+      expect(notice.userContent).toContain("still prose");
+    });
+  });
 });
