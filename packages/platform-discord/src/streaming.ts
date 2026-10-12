@@ -223,14 +223,20 @@ export function createDiscordStreamingOutbound(
           // bar immediately before its final edit (which carries its own bar
           // line), so re-editing here would visibly strip the bar — and force a
           // full-budget re-split — for the duration of the delivery gap.
-          if (line === null || lastPushedText === null) return;
-          // Re-render the in-flight message from the last pushed/full content so
-          // the bar appears without waiting for the next push.
+          if (line === null) return;
+          // Re-render the in-flight message so the bar appears without waiting
+          // for the next push. Before the first push there is no body text yet,
+          // so the bar renders against the "…" placeholder created by start();
+          // the turn-start ⏳ flush depends on this to be visible.
+          // The enqueued render re-reads state at run time: prose pushed in the
+          // meantime wins as the base content, and a clear in the meantime
+          // suppresses the bar (never clobbers the newer state).
           await enqueue(async () => {
-            const budget = splitBudget(_statusBarLine);
-            const chunks = splitDiscordMessage(lastPushedText!, budget);
-            const finalChunks =
-              _statusBarLine === null ? chunks : applyStatusBar(chunks, _statusBarLine!);
+            const activeLine = _statusBarLine;
+            if (activeLine === null) return;
+            const budget = splitBudget(activeLine);
+            const chunks = splitDiscordMessage(lastPushedText ?? "…", budget);
+            const finalChunks = applyStatusBar(chunks, activeLine);
             await reconcileOverflow(finalChunks);
           });
         },

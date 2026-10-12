@@ -557,6 +557,79 @@ describe("DiscordStreamingOutbound status bar", () => {
     // The single bar edit is the last chunk, blank-line-separated blockquote
     expect(editCalls[editCalls.length - 1][2].content.endsWith("\n\n" + bar)).toBe(true);
   });
+
+  it("setStatusBar before any prose push edits the placeholder message with the bar", async () => {
+    const transport = createMockTransport();
+    const caps = discordCapabilityDescriptor();
+
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: caps,
+      channelId: "ch-1",
+      maxContentLength: 2000,
+    });
+
+    const handle = await streaming.start();
+    vi.mocked(transport.createMessage).mockClear();
+
+    // Turn start: the tracker flushes the ⏳ line before any prose has been
+    // pushed. The bar must land on the "…" placeholder right away.
+    await handle.setStatusBar!("> ⏳ waiting on model");
+
+    const editCalls = vi.mocked(transport.editMessage).mock.calls;
+    expect(editCalls).toHaveLength(1);
+    expect(editCalls[0][0]).toBe("ch-1");
+    expect(editCalls[0][1]).toBe("msg-1");
+    expect(editCalls[0][2].content).toBe("…\n\n> ⏳ waiting on model");
+    // The pre-prose bar render never creates messages of its own.
+    expect(vi.mocked(transport.createMessage).mock.calls).toHaveLength(0);
+  });
+
+  it("pushUpdate after a pre-prose bar render still lands content and bar correctly", async () => {
+    const transport = createMockTransport();
+    const caps = discordCapabilityDescriptor();
+
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: caps,
+      channelId: "ch-1",
+      maxContentLength: 2000,
+    });
+
+    const handle = await streaming.start();
+    vi.mocked(transport.createMessage).mockClear();
+
+    // Bar rendered against the placeholder, then the first prose push arrives.
+    await handle.setStatusBar!("> ⏳ waiting on model");
+    await handle.pushUpdate("hello world");
+
+    const editCalls = vi.mocked(transport.editMessage).mock.calls;
+    expect(editCalls[editCalls.length - 1][2].content).toBe("hello world\n\n> ⏳ waiting on model");
+
+    // Later bar renders re-base on the pushed prose, not the placeholder.
+    await handle.setStatusBar!("> 💬 prose");
+    const laterCalls = vi.mocked(transport.editMessage).mock.calls;
+    expect(laterCalls[laterCalls.length - 1][2].content).toBe("hello world\n\n> 💬 prose");
+  });
+
+  it("setStatusBar(null) before any prose push performs no edit", async () => {
+    const transport = createMockTransport();
+    const caps = discordCapabilityDescriptor();
+
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: caps,
+      channelId: "ch-1",
+      maxContentLength: 2000,
+    });
+
+    const handle = await streaming.start();
+    vi.mocked(transport.editMessage).mockClear();
+
+    // A clear is always a state-only operation — on the placeholder too.
+    await handle.setStatusBar!(null);
+    expect(transport.editMessage).not.toHaveBeenCalled();
+  });
 });
 
 describe("DiscordStreamingOutbound concurrency", () => {
