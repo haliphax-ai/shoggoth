@@ -40,7 +40,7 @@ export function renderDiscordStatusBar(
     if (toolSection !== undefined) sections.push(toolSection);
   }
 
-  if (cfg.subagentsEnabled && snap.subagents) {
+  if (cfg.subagentsEnabled && snap.subagents && snap.subagents.total > 0) {
     const { total, persistent } = snap.subagents;
     sections.push(`🕵️ \`${total} (${persistent})\``);
   }

@@ -200,6 +200,14 @@ describe("renderDiscordStatusBar", () => {
     expect(line).not.toContain("🕵️");
   });
 
+  it("omits the subagent section when the count is zero", () => {
+    const line = renderDiscordStatusBar(
+      snap({ subagents: { total: 0, persistent: 0 } }),
+      defaultCfg,
+    );
+    expect(line).not.toContain("🕵️");
+  });
+
   it("honors the subagentsEnabled toggle to omit the section", () => {
     const cfg: ResolvedStatusBarConfig = { ...defaultCfg, subagentsEnabled: false };
     const line = renderDiscordStatusBar(snap({ subagents: { total: 3, persistent: 0 } }), cfg);
