@@ -7,6 +7,7 @@ import {
   createTurnStatusBar,
   createStatusBarTurnTracker,
   getStatusBarStats,
+  getSessionSubagentCounts,
 } from "../../src/presentation/status-bar";
 import type { StatusBarStats } from "../../src/presentation/status-bar";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
@@ -392,6 +393,22 @@ describe("getStatusBarStats", () => {
     ).run(sessionId, segmentId, content);
   }
 
+  /** Create a subagent session bound to `parent` with the given mode/thread/status. */
+  function seedSubagent(
+    id: string,
+    parent: string,
+    opts: { mode?: "one_shot" | "persistent"; threadId?: string | null; status?: string } = {},
+  ): void {
+    const sessions = createSessionStore(db);
+    sessions.create({ id, workspacePath: tmp });
+    sessions.update(id, {
+      parentSessionId: parent,
+      ...(opts.mode ? { subagentMode: opts.mode } : {}),
+      ...(opts.threadId !== undefined ? { subagentPlatformThreadId: opts.threadId } : {}),
+      ...(opts.status ? { status: opts.status } : {}),
+    });
+  }
+
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "shoggoth-sb-stats-"));
     db = new Database(join(tmp, "s.db"));
@@ -498,7 +515,18 @@ describe("getStatusBarStats", () => {
   });
 
   it("defaults to zeroed stats for an unknown session", () => {
-    expect(getStatusBarStats(db, "missing")).toEqual({ sequence: 0, compactions: 0 });
+    expect(getStatusBarStats(db, "missing")).toEqual({
+      sequence: 0,
+      compactions: 0,
+      subagents: { total: 0, persistent: 0 },
+    });
+  });
+
+  it("includes the active (non-thread) subagent counts", () => {
+    createSessionStore(db).create({ id: "p1", workspacePath: tmp });
+    seedSubagent("p1-bg", "p1", { mode: "one_shot" });
+    seedSubagent("p1-thr", "p1", { mode: "persistent", threadId: "thread-1" });
+    expect(getStatusBarStats(db, "p1").subagents).toEqual({ total: 1, persistent: 0 });
   });
 });
 
@@ -666,5 +694,79 @@ describe("createStatusBarTurnTracker", () => {
       db.close();
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+describe("getSessionSubagentCounts", () => {
+  let tmp: string;
+  let db: Database.Database;
+
+  function seedSubagent(
+    id: string,
+    parent: string,
+    opts: { mode?: "one_shot" | "persistent"; threadId?: string | null; status?: string } = {},
+  ): void {
+    const sessions = createSessionStore(db);
+    sessions.create({ id, workspacePath: tmp });
+    sessions.update(id, {
+      parentSessionId: parent,
+      ...(opts.mode ? { subagentMode: opts.mode } : {}),
+      ...(opts.threadId !== undefined ? { subagentPlatformThreadId: opts.threadId } : {}),
+      ...(opts.status ? { status: opts.status } : {}),
+    });
+  }
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "shoggoth-sb-sub-"));
+    db = new Database(join(tmp, "s.db"));
+    db.pragma("foreign_keys = ON");
+    migrate(db, defaultMigrationsDir());
+    createSessionStore(db).create({ id: "root", workspacePath: tmp });
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("returns zero counts for a session with no subagents (or a missing session)", () => {
+    expect(getSessionSubagentCounts(db, "root")).toEqual({ total: 0, persistent: 0 });
+    expect(getSessionSubagentCounts(db, "missing")).toEqual({ total: 0, persistent: 0 });
+  });
+
+  it("counts the entire descendant tree of background subagents", () => {
+    seedSubagent("a", "root", { mode: "one_shot" });
+    seedSubagent("b", "root", { mode: "one_shot" });
+    seedSubagent("a1", "a", { mode: "one_shot" });
+    seedSubagent("a1x", "a1", { mode: "one_shot" });
+    expect(getSessionSubagentCounts(db, "root")).toEqual({ total: 4, persistent: 0 });
+  });
+
+  it("counts persistent background subagents in the persistent total", () => {
+    seedSubagent("p", "root", { mode: "persistent" });
+    seedSubagent("o", "root", { mode: "one_shot" });
+    expect(getSessionSubagentCounts(db, "root")).toEqual({ total: 2, persistent: 1 });
+  });
+
+  it("excludes terminated subagents", () => {
+    seedSubagent("live", "root", { mode: "one_shot" });
+    seedSubagent("dead", "root", { mode: "one_shot", status: "terminated" });
+    expect(getSessionSubagentCounts(db, "root")).toEqual({ total: 1, persistent: 0 });
+  });
+
+  it("prunes thread subagent branches (thread subagent and its whole subtree)", () => {
+    seedSubagent("bg", "root", { mode: "one_shot" });
+    seedSubagent("thr", "root", { mode: "persistent", threadId: "thread-1" });
+    seedSubagent("thr-child", "thr", { mode: "one_shot" });
+    seedSubagent("thr-child2", "thr-child", { mode: "persistent" });
+    // Only the direct background subagent counts; the whole thread subtree is
+    // pruned (matching the issue example: 1 of 7 displayed).
+    expect(getSessionSubagentCounts(db, "root")).toEqual({ total: 1, persistent: 0 });
+  });
+
+  it("a persistent background subagent's own background children still count", () => {
+    seedSubagent("pp", "root", { mode: "persistent" });
+    seedSubagent("pp-child", "pp", { mode: "one_shot" });
+    expect(getSessionSubagentCounts(db, "root")).toEqual({ total: 2, persistent: 1 });
   });
 });

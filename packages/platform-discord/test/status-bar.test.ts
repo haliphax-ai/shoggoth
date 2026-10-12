@@ -186,6 +186,37 @@ describe("renderDiscordStatusBar", () => {
     expect(line).toContain("4");
   });
 
+  it("renders the subagent count with the persistent count in parentheses", () => {
+    const line = renderDiscordStatusBar(
+      snap({ subagents: { total: 2, persistent: 1 } }),
+      defaultCfg,
+    );
+    expect(line).toContain("🕵️");
+    expect(line).toContain("`2 (1)`");
+  });
+
+  it("omits the subagent section when the snapshot has no counts", () => {
+    const line = renderDiscordStatusBar(snap(), defaultCfg);
+    expect(line).not.toContain("🕵️");
+  });
+
+  it("honors the subagentsEnabled toggle to omit the section", () => {
+    const cfg: ResolvedStatusBarConfig = { ...defaultCfg, subagentsEnabled: false };
+    const line = renderDiscordStatusBar(snap({ subagents: { total: 3, persistent: 0 } }), cfg);
+    expect(line).not.toContain("🕵️");
+  });
+
+  it("places the subagent section before the context section", () => {
+    const line = renderDiscordStatusBar(
+      snap({
+        subagents: { total: 2, persistent: 1 },
+        context: { currentTokens: 8_200, totalTokens: 1_000_000 },
+      }),
+      defaultCfg,
+    );
+    expect(line.indexOf("🕵️")).toBeLessThan(line.indexOf("🪟"));
+  });
+
   it("honors per-section config toggles to omit sections", () => {
     const cfg: ResolvedStatusBarConfig = {
       ...defaultCfg,

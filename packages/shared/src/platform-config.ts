@@ -9,6 +9,7 @@ export interface ResolvedStatusBarConfig {
   readonly statusEnabled: boolean;
   readonly sequenceEnabled: boolean;
   readonly toolCallsEnabled: boolean;
+  readonly subagentsEnabled: boolean;
   readonly contextWindowEnabled: boolean;
   readonly compactionsEnabled: boolean;
 }
@@ -19,6 +20,7 @@ export const DEFAULT_STATUS_BAR_CONFIG: ResolvedStatusBarConfig = {
   statusEnabled: true,
   sequenceEnabled: true,
   toolCallsEnabled: true,
+  subagentsEnabled: true,
   contextWindowEnabled: true,
   compactionsEnabled: true,
 };
@@ -34,6 +36,7 @@ export function resolveStatusBarConfig(cfg: ShoggothConfig): ResolvedStatusBarCo
     statusEnabled: block?.statusEnabled ?? DEFAULT_STATUS_BAR_CONFIG.statusEnabled,
     sequenceEnabled: block?.sequenceEnabled ?? DEFAULT_STATUS_BAR_CONFIG.sequenceEnabled,
     toolCallsEnabled: block?.toolCallsEnabled ?? DEFAULT_STATUS_BAR_CONFIG.toolCallsEnabled,
+    subagentsEnabled: block?.subagentsEnabled ?? DEFAULT_STATUS_BAR_CONFIG.subagentsEnabled,
     contextWindowEnabled:
       block?.contextWindowEnabled ?? DEFAULT_STATUS_BAR_CONFIG.contextWindowEnabled,
     compactionsEnabled: block?.compactionsEnabled ?? DEFAULT_STATUS_BAR_CONFIG.compactionsEnabled,

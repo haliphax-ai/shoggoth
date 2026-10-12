@@ -39,6 +39,10 @@ export interface StatusBarSnapshot {
    *  totalTokens = the known window, omitted when the window is unknown. */
   readonly context?: { readonly currentTokens: number; readonly totalTokens?: number };
   readonly compactions: number;
+  /** Active (non-thread) subagent count for the session, whole descendant tree
+   *  included but thread subagent branches pruned. `persistent` counts the
+   *  subset spawned with mode "persistent". Absent when never seeded. */
+  readonly subagents?: { readonly total: number; readonly persistent: number };
 }
 
 /** Platform-supplied sink: applies the rendered bar line to the in-flight message. */
@@ -55,6 +59,7 @@ export interface TurnStatusBar {
     sequence: number;
     context?: { currentTokens: number; totalTokens?: number };
     compactions: number;
+    subagents?: { total: number; persistent: number };
   }): Promise<void>;
   markThinking(): void; // 🧠
   markProse(): void; // 💬
@@ -89,6 +94,7 @@ export function createTurnStatusBar(opts: {
     (!cfg.statusEnabled &&
       !cfg.sequenceEnabled &&
       !cfg.toolCallsEnabled &&
+      !cfg.subagentsEnabled &&
       !cfg.contextWindowEnabled &&
       !cfg.compactionsEnabled);
 
@@ -97,6 +103,7 @@ export function createTurnStatusBar(opts: {
   let sequence = 0;
   let compactions = 0;
   let context: { currentTokens: number; totalTokens?: number } | undefined;
+  let subagents: { total: number; persistent: number } | undefined;
   let totalTools = 0;
   let last:
     | {
@@ -120,6 +127,7 @@ export function createTurnStatusBar(opts: {
       },
       ...(context ? { context } : {}),
       compactions,
+      ...(subagents ? { subagents } : {}),
     };
   }
 
@@ -155,6 +163,7 @@ export function createTurnStatusBar(opts: {
       sequence = input.sequence;
       compactions = input.compactions;
       context = input.context;
+      subagents = input.subagents;
       totalTools = 0;
       last = undefined;
       phase = "starting";
@@ -254,6 +263,10 @@ export interface StatusBarStats {
   readonly sequence: number;
   readonly compactions: number;
   readonly context?: { readonly currentTokens: number; readonly totalTokens?: number };
+  /** Active (non-thread) subagent count for the session (whole descendant
+   *  tree, thread subagent branches pruned); `persistent` counts the subset
+   *  spawned with mode "persistent". */
+  readonly subagents?: { readonly total: number; readonly persistent: number };
 }
 
 /** `<10K` → plain integer with thousands separators; `≥10K` → one-decimal K; `≥1M` → one-decimal M. */
@@ -309,7 +322,8 @@ export function getStatusBarStats(db: Database.Database, sessionId: string): Sta
     segmentId !== undefined && segmentId.length > 0 ? getContextFill(db, sessionId, segmentId) : 0;
   const sequence = row?.turn_count ?? 0;
   const compactions = row?.compaction_count ?? 0;
-  if (currentTokens <= 0) return { sequence, compactions };
+  const subagents = getSessionSubagentCounts(db, sessionId);
+  if (currentTokens <= 0) return { sequence, compactions, subagents };
   // Known context window: the session_stats gauge first, then model metadata
   // for the session's selected model; unknown (omitted) when neither knows.
   let windowTokens = row?.context_window_tokens ?? 0;
@@ -317,8 +331,34 @@ export function getStatusBarStats(db: Database.Database, sessionId: string): Sta
   return {
     sequence,
     compactions,
+    subagents,
     context: windowTokens > 0 ? { currentTokens, totalTokens: windowTokens } : { currentTokens },
   };
+}
+
+/** Active (non-terminated) subagents belonging to `sessionId`, counting the entire
+ *  descendant tree but pruning at thread subagents: a thread-bound subagent and its
+ *  whole subtree are excluded from both the total and the persistent count.
+ *  `persistent` counts the included subagents spawned with mode "persistent". */
+export function getSessionSubagentCounts(
+  db: Database.Database,
+  sessionId: string,
+): { total: number; persistent: number } {
+  const store = createSessionStore(db);
+  let total = 0;
+  let persistent = 0;
+  const walk = (parentId: string): void => {
+    for (const child of store.list({ parentSessionId: parentId })) {
+      if (child.status === "terminated") continue;
+      // Thread-bound subagent: excluded along with its entire subtree.
+      if (child.subagentPlatformThreadId) continue;
+      total += 1;
+      if (child.subagentMode === "persistent") persistent += 1;
+      walk(child.id);
+    }
+  };
+  walk(sessionId);
+  return { total, persistent };
 }
 
 /** One tracker per turn: the live bar and the terminal bar are the same
@@ -394,6 +434,7 @@ export function createStatusBarTurnTracker(opts: {
     sequence: opts.stats.sequence,
     compactions: opts.stats.compactions,
     ...(opts.stats.context ? { context: opts.stats.context } : {}),
+    ...(opts.stats.subagents ? { subagents: opts.stats.subagents } : {}),
   });
 
   return {
