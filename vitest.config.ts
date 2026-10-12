@@ -20,7 +20,11 @@ export default defineConfig({
         const pkg = rel.split("/")[1];
         return [`packages/${pkg}/test/**/*.test.ts`];
       }
-      return ["packages/*/test/**/*.test.ts", "packages/*/packages/*/test/**/*.test.ts"];
+      return [
+        "packages/*/test/**/*.test.ts",
+        "packages/*/packages/*/test/**/*.test.ts",
+        "docker/test/**/*.test.ts",
+      ];
     })(),
     onConsoleLog: () => false,
     pool: "forks",

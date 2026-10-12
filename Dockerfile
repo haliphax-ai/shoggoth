@@ -62,11 +62,14 @@ RUN chmod -R a+rX /app
 
 COPY docker/entrypoint.sh /usr/local/bin/shoggoth-entrypoint.sh
 COPY docker/shoggoth-wrapper.sh /usr/local/bin/shoggoth
+COPY docker/config-merge.sh /usr/local/bin/shoggoth-config-merge
 
 # shoggoth wrapper is operator-only: root:shoggoth 0750 so agent (UID 900) cannot execute it
 RUN chown root:shoggoth /usr/local/bin/shoggoth \
   && chown root:shoggoth /usr/local/bin/shoggoth-entrypoint.sh \
+  && chown root:shoggoth /usr/local/bin/shoggoth-config-merge \
   && chmod 0755 /usr/local/bin/shoggoth-entrypoint.sh \
+  && chmod 0755 /usr/local/bin/shoggoth-config-merge \
   && chmod 0750 /usr/local/bin/shoggoth \
   && mkdir -p /var/lib/shoggoth/skills \
   && chown shoggoth:shoggoth /var/lib/shoggoth/skills \
