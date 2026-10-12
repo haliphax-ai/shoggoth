@@ -51,6 +51,36 @@ export interface ThreadCreateHandlingResult {
 }
 
 /**
+ * Compose the thread subagent creation banner (session URN + current model).
+ * Shared by the automatic thread-create path and the manual `subagent_spawn`
+ * control op so both post the same banner, in the same wording, before the
+ * session's first model turn.
+ */
+export function buildThreadSubagentCreatedBanner(input: {
+  readonly db: Database.Database;
+  readonly config: ShoggothConfig;
+  readonly sessionId: string;
+  readonly logger?: Logger;
+}): string {
+  const l = input.logger ?? log;
+  let resolvedModel: ReturnType<typeof resolveModel> = null;
+  try {
+    resolvedModel = resolveModel(input.db, input.config, { sessionId: input.sessionId });
+  } catch (e) {
+    l.warn("thread_subagent.model_resolution_failed", {
+      sessionId: input.sessionId,
+      err: String(e),
+    });
+  }
+  const modelLabel = resolvedModel ? resolvedModel.ref : "default (agent default)";
+  return [
+    "> 🧵 Thread subagent session created.",
+    `> 🎯 **Session:** \`${input.sessionId}\``,
+    `> 🥸 **Model:** \`${modelLabel}\``,
+  ].join("\n");
+}
+
+/**
  * Core entry point for platform thread-create events: decides whether an automatic
  * thread-based subagent session should be created and performs the creation when it
  * should. Platforms stay thin — they parse the gateway event, resolve channel→session,
@@ -165,21 +195,12 @@ export async function handlePlatformThreadCreate(
 
   // Status message: session URN + current model, posted to the thread immediately
   // regardless of whether any turn has fired.
-  let resolvedModel: ReturnType<typeof resolveModel> = null;
-  try {
-    resolvedModel = resolveModel(input.db, input.config, { sessionId: childId });
-  } catch (e) {
-    l.warn("thread_subagent.model_resolution_failed", {
-      sessionId: childId,
-      err: String(e),
-    });
-  }
-  const modelLabel = resolvedModel ? resolvedModel.ref : "default (agent default)";
-  const statusBody = [
-    "🧵 Thread subagent session created.",
-    `🎯 **Session:** \`${childId}\``,
-    `🥸 **Model:** \`${modelLabel}\``,
-  ].join("\n");
+  const statusBody = buildThreadSubagentCreatedBanner({
+    db: input.db,
+    config: input.config,
+    sessionId: childId,
+    logger: l,
+  });
   try {
     await input.platform.sendStatusMessage(childId, statusBody);
   } catch (e) {
