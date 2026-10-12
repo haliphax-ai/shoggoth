@@ -40,6 +40,14 @@ export const shoggothMcpStdioServerSchema = z
     cwd: z.string().min(1).optional(),
     env: z.record(z.string()).optional(),
     poolScope: shoggothMcpServerPoolScopeSchema.optional(),
+    /**
+     * When true, wildcard/`*` allow patterns do not match this server; an agent
+     * may only use it when its id is explicitly listed in that agent's effective
+     * `allow` rules. Lets a globally-defined server stay private to the handful
+     * of agents that name it, without per-agent server entries or extra `deny`
+     * rules on every other agent.
+     */
+    explicit: z.boolean().optional(),
   })
   .strict();
 
@@ -50,6 +58,14 @@ export const shoggothMcpTcpServerSchema = z
     host: z.string().min(1),
     port: z.number().int().positive(),
     poolScope: shoggothMcpServerPoolScopeSchema.optional(),
+    /**
+     * When true, wildcard/`*` allow patterns do not match this server; an agent
+     * may only use it when its id is explicitly listed in that agent's effective
+     * `allow` rules. Lets a globally-defined server stay private to the handful
+     * of agents that name it, without per-agent server entries or extra `deny`
+     * rules on every other agent.
+     */
+    explicit: z.boolean().optional(),
   })
   .strict();
 
@@ -61,6 +77,14 @@ export const shoggothMcpHttpServerSchema = z
     url: z.string().url(),
     headers: z.record(z.string()).optional(),
     poolScope: shoggothMcpServerPoolScopeSchema.optional(),
+    /**
+     * When true, wildcard/`*` allow patterns do not match this server; an agent
+     * may only use it when its id is explicitly listed in that agent's effective
+     * `allow` rules. Lets a globally-defined server stay private to the handful
+     * of agents that name it, without per-agent server entries or extra `deny`
+     * rules on every other agent.
+     */
+    explicit: z.boolean().optional(),
   })
   .strict();
 
