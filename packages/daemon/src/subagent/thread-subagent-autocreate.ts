@@ -74,9 +74,9 @@ export function buildThreadSubagentCreatedBanner(input: {
   }
   const modelLabel = resolvedModel ? resolvedModel.ref : "default (agent default)";
   return [
-    "🧵 Thread subagent session created.",
-    `🎯 **Session:** \`${input.sessionId}\``,
-    `🥸 **Model:** \`${modelLabel}\``,
+    "> 🧵 Thread subagent session created.",
+    `> 🎯 **Session:** \`${input.sessionId}\``,
+    `> 🥸 **Model:** \`${modelLabel}\``,
   ].join("\n");
 }
 
