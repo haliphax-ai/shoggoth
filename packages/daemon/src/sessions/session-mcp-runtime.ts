@@ -515,7 +515,9 @@ export async function createSessionMcpRuntime(
           const topRules = resolveEffectiveMcpServerRules(opts.config, agentId, false);
           const subRules = resolveEffectiveMcpServerRules(opts.config, agentId, true);
           const allowedServers = perAgentServers.filter(
-            (s) => evaluateMcpServerRules(s.id, topRules) && evaluateMcpServerRules(s.id, subRules),
+            (s) =>
+              evaluateMcpServerRules(s.id, topRules, s.explicit) &&
+              evaluateMcpServerRules(s.id, subRules, s.explicit),
           );
           const { pool, external, statuses } = await connectMcpPool(allowedServers, connectOpts);
           logMcpConnectStatuses(statuses, { poolScope: "per_agent", agentId });
@@ -644,7 +646,7 @@ export async function createSessionMcpRuntime(
             isSubagent,
           );
           const allowedPerSessionServers = perSessionServers.filter((s) =>
-            evaluateMcpServerRules(s.id, sessionRules),
+            evaluateMcpServerRules(s.id, sessionRules, s.explicit),
           );
           const { pool, external, statuses } = await connectMcpPool(
             allowedPerSessionServers,

@@ -185,11 +185,17 @@ const DEFAULT_MCP_SERVER_RULES: McpServerRules = { allow: ["*"], deny: [] };
  * Evaluate whether a server id is allowed by the given rules.
  * Deny wins, then allow check, then default-deny.
  */
-export function evaluateMcpServerRules(serverId: string, rules: McpServerRules): boolean {
+export function evaluateMcpServerRules(
+  serverId: string,
+  rules: McpServerRules,
+  explicit = false,
+): boolean {
   // 1. Deny wins
   if (rules.deny.includes(serverId) || rules.deny.includes("*")) return false;
-  // 2. Allow check
-  if (rules.allow.includes(serverId) || rules.allow.includes("*")) return true;
+  // 2. Allow check — an `explicit` server is never matched by a wildcard/`*`
+  //    pattern; it must be named exactly in the allow list.
+  if (rules.allow.includes(serverId)) return true;
+  if (!explicit && rules.allow.includes("*")) return true;
   // 3. Default-deny
   return false;
 }
