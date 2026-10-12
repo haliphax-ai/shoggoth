@@ -65,14 +65,24 @@ import {
 } from "../sessions/session-stats-store";
 import { dispatchMcpHttpCancelRequest } from "../mcp/mcp-http-cancel-registry";
 import { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES } from "../subagent/subagent-constants";
-import { armPersistentSubagentInactivityTimer } from "../subagent/persistent-subagent-timers";
+import {
+  armPersistentSubagentInactivityTimer,
+  clearPersistentSubagentInactivityTimer,
+} from "../subagent/persistent-subagent-timers";
 import { enableToolsForSession } from "../sessions/session-tool-discovery";
 import { requestSessionTurnAbort } from "../sessions/session-turn-abort";
 import { validateModelRefExists } from "../sessions/model-resolution";
-import { rememberSubagentHandles } from "../subagent/subagent-disposables";
+import { getSubagentHandles, rememberSubagentHandles } from "../subagent/subagent-disposables";
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
 import { terminatePersistentSubagentSession } from "../subagent/subagent-kill";
-import { buildThreadSubagentCreatedBanner } from "../subagent/thread-subagent-autocreate";
+import {
+  buildThreadSubagentCreatedBanner,
+  findAdoptableThreadSubagentSession,
+} from "../subagent/thread-subagent-autocreate";
+import {
+  claimPendingThreadCreationForSpawn,
+  claimPlatformThreadIdForSpawn,
+} from "../subagent/thread-subagent-claims";
 import { extractLatestTranscriptAssistantText } from "../sessions/transcript-to-chat";
 import { pushSystemContext } from "../sessions/system-context-buffer";
 import { pushSteer } from "../sessions/steer-channel";
@@ -1339,6 +1349,75 @@ export async function handleIntegrationControlOp(
       // Spawn-time tool enables: exact tool IDs or glob patterns (e.g. "kanban-*"),
       // merged into the child session's tool state alongside configured defaults.
       const enableTools = optionalStringArray(pl, "enable_tools");
+      // Persistent-mode thread target: resolve (and for the `"0"` sentinel, create) the
+      // platform thread BEFORE the child session exists, so a resolution failure never
+      // strands a spawned session, and claim the target so the platform's thread-create
+      // event cannot race this op for the binding (see thread-subagent-claims).
+      let platformThreadId: string | undefined;
+      let releaseThreadClaim: () => void = () => {};
+      if (modeRaw === "persistent") {
+        const platformThreadIdRaw = pl.platform_thread_id;
+        const rawTrimmed =
+          typeof platformThreadIdRaw === "string" && platformThreadIdRaw.trim()
+            ? platformThreadIdRaw.trim()
+            : undefined;
+        if (rawTrimmed === "0") {
+          // Sentinel: auto-create a standalone thread in the parent session's channel.
+          const parentChannelId = ext.resolveOutboundChannelIdForSession?.(parentSessionId);
+          if (!parentChannelId) {
+            throw new IntegrationOpError(
+              "ERR_INVALID_PAYLOAD",
+              "cannot create thread: parent session has no bound channel",
+            );
+          }
+          const threadNameRaw = pl.thread_name;
+          const threadName =
+            typeof threadNameRaw === "string" && threadNameRaw.trim()
+              ? threadNameRaw.trim()
+              : prompt.slice(0, 100);
+          if (!ext.createThread) {
+            throw new IntegrationOpError(
+              "ERR_SUBAGENT_RUNTIME_UNAVAILABLE",
+              "createThread not available on subagent runtime extension",
+            );
+          }
+          // Claim the pending creation by channel: the id does not exist until the REST
+          // call returns, but the gateway THREAD_CREATE event may be dispatched before it
+          // does — the autocreate routine checks this claim and skips.
+          releaseThreadClaim = claimPendingThreadCreationForSpawn(parentChannelId);
+          let created: { readonly id: string };
+          try {
+            created = await ext.createThread(parentChannelId, { name: threadName, type: 11 });
+          } catch (e) {
+            releaseThreadClaim();
+            throw e;
+          }
+          platformThreadId = created.id;
+          try {
+            releaseThreadClaim();
+            releaseThreadClaim = claimPlatformThreadIdForSpawn(platformThreadId);
+          } catch (e) {
+            releaseThreadClaim();
+            throw new IntegrationOpError(
+              "ERR_INVALID_PAYLOAD",
+              `thread ${platformThreadId} is already claimed by an in-flight spawn (${String(e)})`,
+            );
+          }
+        } else {
+          platformThreadId = rawTrimmed;
+          if (platformThreadId) {
+            try {
+              releaseThreadClaim = claimPlatformThreadIdForSpawn(platformThreadId);
+            } catch (e) {
+              releaseThreadClaim();
+              throw new IntegrationOpError(
+                "ERR_INVALID_PAYLOAD",
+                `thread ${platformThreadId} is already claimed by an in-flight spawn (${String(e)})`,
+              );
+            }
+          }
+        }
+      }
 
       let childId: string;
       try {
@@ -1348,6 +1427,9 @@ export async function handleIntegrationControlOp(
           ...(modelSelection !== undefined ? { modelSelection } : {}),
         }));
       } catch (e) {
+        // Spawn failed after a thread claim may already be held: release it so a failed
+        // spawn never leaves a poisoned claim behind.
+        releaseThreadClaim();
         if (e instanceof SessionManagerError) {
           throw new IntegrationOpError(e.code, e.message);
         }
@@ -1512,37 +1594,6 @@ export async function handleIntegrationControlOp(
           delivery_mode: deliveryMode,
         };
       }
-      const platformThreadIdRaw = pl.platform_thread_id;
-      let platformThreadId: string | undefined;
-      const rawTrimmed =
-        typeof platformThreadIdRaw === "string" && platformThreadIdRaw.trim()
-          ? platformThreadIdRaw.trim()
-          : undefined;
-      if (rawTrimmed === "0") {
-        // Sentinel: auto-create a standalone thread in the parent session's channel.
-        const parentChannelId = ext.resolveOutboundChannelIdForSession?.(parentSessionId);
-        if (!parentChannelId) {
-          throw new IntegrationOpError(
-            "ERR_INVALID_PAYLOAD",
-            "cannot create thread: parent session has no bound channel",
-          );
-        }
-        const threadNameRaw = pl.thread_name;
-        const threadName =
-          typeof threadNameRaw === "string" && threadNameRaw.trim()
-            ? threadNameRaw.trim()
-            : prompt.slice(0, 100);
-        if (!ext.createThread) {
-          throw new IntegrationOpError(
-            "ERR_SUBAGENT_RUNTIME_UNAVAILABLE",
-            "createThread not available on subagent runtime extension",
-          );
-        }
-        const created = await ext.createThread(parentChannelId, { name: threadName, type: 11 });
-        platformThreadId = created.id;
-      } else {
-        platformThreadId = rawTrimmed;
-      }
       // `inactivity_minutes` (if provided) is the inactivity window: the session is
       // terminated after this long without a delivered assistant response. The clock
       // resets on every delivered response (touchPersistentSubagentInactivityTimer),
@@ -1567,47 +1618,122 @@ export async function handleIntegrationControlOp(
         subagentRespondTo: respondTo,
       });
       let unregisterThread: () => void;
+      let adoptedSessionId: string | undefined;
       try {
         unregisterThread = platformThreadId
           ? ext.registerPlatformThreadBinding(platformThreadId, childId)
           : () => {};
       } catch (bindErr) {
-        // The thread is already bound to another live session: the binding is
-        // rejected, not reassigned. Terminate this child so no orphan session
-        // lingers, then surface the conflict to the caller.
+        // The thread is already bound: normally a conflict with a concurrent flow, so
+        // terminate this child and surface it to the caller. But the platform's
+        // thread-create autocreate routine may have won the thread in the window between
+        // this op's claim and its bind (or before the claim for auto-created threads):
+        // when the holder is a freshly autocreated, zero-turn banner-only session under
+        // this parent, ADOPT it — deliver the spawn prompt as its first turn instead of
+        // failing the spawn and leaving a banner-only zombie behind.
+        const adoptable =
+          platformThreadId && ctx.stateDb
+            ? findAdoptableThreadSubagentSession({
+                sessions,
+                db: ctx.stateDb,
+                threadId: platformThreadId,
+                parentSessionId,
+                excludeSessionId: childId,
+              })
+            : undefined;
+        if (adoptable) {
+          adoptedSessionId = adoptable.id;
+          // The adoptee won the race, so its runtime handles are registered: reuse its
+          // live thread binding for this spawn.
+          unregisterThread = getSubagentHandles(adoptable.id)?.unregisterThread ?? (() => {});
+          // The spawn's own child must not linger as an orphan claiming the thread.
+          sessions.update(childId, { subagentPlatformThreadId: null, subagentExpiresAtMs: null });
+          getLogger("subagent").info("thread_subagent.spawn_adopted_autocreated", {
+            childId,
+            adoptedSessionId: adoptable.id,
+            platformThreadId,
+          });
+        } else {
+          // No adoptable session: this thread genuinely belongs to another active
+          // session. Release the claim and terminate this child so no orphan session
+          // lingers, then surface the conflict to the caller.
+          releaseThreadClaim();
+          try {
+            sessionManager.kill(childId);
+          } catch {
+            /* best-effort cleanup */
+          }
+          throw new IntegrationOpError(
+            "ERR_INVALID_PAYLOAD",
+            `thread ${platformThreadId} is already bound to another active session; terminate it before binding a new subagent (${String(bindErr)})`,
+          );
+        }
+      }
+      const subLog = getLogger("subagent");
+      let expiresAtMs: number;
+      if (adoptedSessionId) {
+        // Take over the adoptee's runtime: it was fully wired by the autocreate routine
+        // (binding, bus subscription, inactivity clock). Refresh the clock against this
+        // spawn's window, keep its live handles, then discard the spawn's own child so it
+        // cannot linger as an orphan.
+        const adoptedHandles = getSubagentHandles(adoptedSessionId);
+        clearPersistentSubagentInactivityTimer(adoptedSessionId);
+        const adoptedTtl = armPersistentSubagentInactivityTimer(
+          {
+            sessions,
+            onTimeout: (sid) => {
+              terminatePersistentSubagentSession(
+                sessionManager,
+                sid,
+                "ttl_expired",
+                ctx.hitlClear?.autoApproveGate,
+              );
+            },
+          },
+          adoptedSessionId,
+          { timeoutMs: inactivityMinutes * 60_000 },
+        );
+        rememberSubagentHandles(adoptedSessionId, {
+          unregisterThread,
+          unsubscribeBus: adoptedHandles?.unsubscribeBus ?? (() => {}),
+          clearTtl: adoptedTtl.dispose,
+        });
+        expiresAtMs = adoptedTtl.expiresAtMs;
         try {
           sessionManager.kill(childId);
         } catch {
           /* best-effort cleanup */
         }
-        throw new IntegrationOpError(
-          "ERR_INVALID_PAYLOAD",
-          `thread ${platformThreadId} is already bound to another active session; terminate it before binding a new subagent (${String(bindErr)})`,
-        );
-      }
-      const unsubscribeBus = ext.subscribeSubagentSession(childId);
-      // Arm the shared inactivity clock (persists subagentExpiresAtMs, reset on each
-      // delivered response). Applies uniformly to thread-bound and threadless spawns.
-      const { expiresAtMs, dispose: clearTtl } = armPersistentSubagentInactivityTimer(
-        {
-          sessions,
-          onTimeout: (sid) => {
-            terminatePersistentSubagentSession(
-              sessionManager,
-              sid,
-              "ttl_expired",
-              ctx.hitlClear?.autoApproveGate,
-            );
+      } else {
+        const unsubscribeBus = ext.subscribeSubagentSession(childId);
+        // Arm the shared inactivity clock (persists subagentExpiresAtMs, reset on each
+        // delivered response). Applies uniformly to thread-bound and threadless spawns.
+        const armed = armPersistentSubagentInactivityTimer(
+          {
+            sessions,
+            onTimeout: (sid) => {
+              terminatePersistentSubagentSession(
+                sessionManager,
+                sid,
+                "ttl_expired",
+                ctx.hitlClear?.autoApproveGate,
+              );
+            },
           },
-        },
-        childId,
-        { timeoutMs: inactivityMinutes * 60_000 },
-      );
-      rememberSubagentHandles(childId, {
-        unregisterThread,
-        unsubscribeBus,
-        clearTtl,
-      });
+          childId,
+          { timeoutMs: inactivityMinutes * 60_000 },
+        );
+        expiresAtMs = armed.expiresAtMs;
+        rememberSubagentHandles(childId, {
+          unregisterThread,
+          unsubscribeBus,
+          clearTtl: armed.dispose,
+        });
+      }
+      // The claim protects the thread only until this op owns the binding (or adoption
+      // completes); released on every exit path, including thrown errors above.
+      releaseThreadClaim();
+      const turnSessionId = adoptedSessionId ?? childId;
       const delivery = platformThreadId
         ? (() => {
             // Thread-bound subagent: platform resolves channel from thread binding,
@@ -1620,11 +1746,11 @@ export async function handleIntegrationControlOp(
           })()
         : ({ kind: "internal" } as const);
       // Fire the first model turn asynchronously so the parent is not blocked.
-      const subLog = getLogger("subagent");
       // Creation banner: thread-bound spawns post it BEFORE the first model turn
       // so the thread reads creation → response, matching the automatic
-      // thread-create path. Best-effort: a failed banner never blocks the spawn.
-      if (platformThreadId && ext.sendStatusMessage && ctx.stateDb) {
+      // thread-create path. Skipped for an adopted session — the autocreate routine
+      // already posted its creation banner. Best-effort: a failed banner never blocks the spawn.
+      if (platformThreadId && !adoptedSessionId && ext.sendStatusMessage && ctx.stateDb) {
         try {
           await ext.sendStatusMessage(
             childId,
@@ -1645,7 +1771,7 @@ export async function handleIntegrationControlOp(
       }
       ext
         .runSessionModelTurn({
-          sessionId: childId,
+          sessionId: turnSessionId,
           userContent: prompt,
           userMetadata: {
             subagent_persistent: true,
@@ -1671,7 +1797,7 @@ export async function handleIntegrationControlOp(
           if (!platformThreadId) {
             return deliverSubagentResult(ext, {
               deliveryMode,
-              childSessionId: childId,
+              childSessionId: turnSessionId,
               respondTo,
               internalDelivery,
               mode: "persistent",
@@ -1682,27 +1808,31 @@ export async function handleIntegrationControlOp(
         })
         .catch((err) => {
           subLog.warn("persistent subagent first turn failed", {
-            childId,
+            childId: turnSessionId,
             error: String(err),
           });
         });
       ctx.recordIntegrationAudit({
         action: "subagent.spawn_persistent",
-        resource: childId,
+        resource: turnSessionId,
         outcome: "ok",
         argsRedactedJson: JSON.stringify({
           parent_session_id: parentSessionId,
           platform_thread_id: platformThreadId ?? null,
+          adopted_session_id: adoptedSessionId ?? null,
           expires_at_ms: expiresAtMs,
         }),
       });
       return {
-        session_id: childId,
+        // On adoption the banner-only autocreated session is the thread's session of
+        // record: it keeps the binding and receives the spawn prompt as its first turn.
+        session_id: turnSessionId,
         mode: "persistent",
         platform_thread_id: platformThreadId ?? null,
         expires_at_ms: expiresAtMs,
         respond_to: respondTo,
         internal: internalDelivery,
+        ...(adoptedSessionId ? { adopted_session_id: adoptedSessionId } : {}),
       };
     }
 
