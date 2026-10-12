@@ -2708,13 +2708,17 @@ export async function handleIntegrationControlOp(
         throw new IntegrationOpError("ERR_QUEUE_UNAVAILABLE", "turn queue not initialized");
       }
 
+      // Queue indexes are 1-based on the wire: `list` numbers entries from 1
+      // and `remove` accepts 1-based index/start/end bounds. Markdown
+      // renderers (e.g. Discord) always start numbered lists at 1, so 0-based
+      // output would desync from what the operator actually sees.
       if (action === "list") {
         const entries = queue.listQueued(sessionId, priority).map((e, i) => ({
           id: e.id,
           priority: e.priority,
           label: e.label,
           enqueuedAt: e.enqueuedAt,
-          index: i,
+          index: i + 1,
         }));
         return { entries };
       }
@@ -2728,25 +2732,32 @@ export async function handleIntegrationControlOp(
         const by = pl.by;
         if (by === "index") {
           const idx = pl.index;
-          if (typeof idx !== "number" || !Number.isFinite(idx)) {
+          if (typeof idx !== "number" || !Number.isFinite(idx) || idx < 1) {
             throw new IntegrationOpError(
               "ERR_INVALID_PAYLOAD",
-              "payload.index must be a finite number",
+              "payload.index must be a number >= 1 (1-based, matching list output)",
             );
           }
-          const removed = queue.removeByRange(sessionId, priorityOrAll, idx, idx);
+          const removed = queue.removeByRange(sessionId, priorityOrAll, idx - 1, idx - 1);
           return { removed };
         }
         if (by === "range") {
           const start = pl.start;
           const end = pl.end;
-          if (typeof start !== "number" || typeof end !== "number") {
+          if (
+            typeof start !== "number" ||
+            typeof end !== "number" ||
+            !Number.isFinite(start) ||
+            !Number.isFinite(end) ||
+            start < 1 ||
+            end < 1
+          ) {
             throw new IntegrationOpError(
               "ERR_INVALID_PAYLOAD",
-              "payload.start and payload.end required",
+              "payload.start and payload.end must be numbers >= 1 (1-based, matching list output)",
             );
           }
-          const removed = queue.removeByRange(sessionId, priorityOrAll, start, end);
+          const removed = queue.removeByRange(sessionId, priorityOrAll, start - 1, end - 1);
           return { removed };
         }
         if (by === "count") {

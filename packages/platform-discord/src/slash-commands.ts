@@ -174,13 +174,13 @@ const GLOBAL_SLASH_COMMANDS = [
       {
         name: "index",
         type: 4,
-        description: "Index to remove",
+        description: "1-based index to remove (as shown by list)",
         required: false,
       },
       {
         name: "range",
         type: 3,
-        description: "Range to remove (e.g. 0-4)",
+        description: "1-based inclusive range to remove (e.g. 1-4)",
         required: false,
       },
       {

@@ -19,7 +19,9 @@ function printQueueHelp(): void {
 Usage:
   shoggoth queue list [--session <id>] [--priority system|user|all]
   shoggoth queue remove [--session <id>] [--priority system|user|all] [--index N] [--range N-M] [--count N]
-  shoggoth queue clear [--session <id>] [--priority system|user|all]`);
+  shoggoth queue clear [--session <id>] [--priority system|user|all]
+
+Index and range values are 1-based, matching the Index column of the list output.`);
 }
 
 function parseArgs(argv: string[]): Record<string, string> {

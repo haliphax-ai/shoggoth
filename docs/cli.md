@@ -251,7 +251,7 @@ shoggoth queue remove --session <id> [--priority system|user|all] --range N-M
 shoggoth queue remove --session <id> [--priority system|user|all] --count N
 ```
 
-Remove by single index, inclusive range, or count from the front.
+Remove by single index, inclusive range, or count from the front. `--index` and `--range` are 1-based, matching the `Index` column shown by `queue list`.
 
 #### Clear queue
 
