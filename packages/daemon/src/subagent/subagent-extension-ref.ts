@@ -37,6 +37,12 @@ export type SubagentRuntimeExtension = {
     readonly sessionId: string;
     readonly reason: PersistentSubagentSessionEndReason;
   }) => void;
+  /**
+   * Post a status/banner message to the session's bound platform surface
+   * (e.g. the bound thread). Used to announce thread-bound subagent creation
+   * before the first model turn fires.
+   */
+  readonly sendStatusMessage?: (sessionId: string, body: string) => Promise<void>;
   /** Create a standalone thread in a channel. Used when thread_id sentinel "0" is passed. */
   readonly createThread?: (
     channelId: string,

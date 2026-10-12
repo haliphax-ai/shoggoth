@@ -1888,6 +1888,117 @@ describe("control plane (unix socket + JSONL)", () => {
     db.close();
   });
 
+  it("subagent_spawn persistent thread-bound posts creation banner before first turn", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-sub-persist-banner-"));
+    const sock = join(dir, "c.sock");
+    const dbPath = join(dir, "state.db");
+    const db = new Database(dbPath);
+    migrate(db, defaultMigrationsDir());
+    const parentId = formatAgentSessionUrn(
+      "par",
+      "discord",
+      "channel",
+      SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID,
+    );
+    createSessionStore(db).create({
+      id: parentId,
+      workspacePath: "/tmp/w",
+      status: "active",
+      modelSelection: { model: "gpt-parent", temperature: 0.1 },
+    });
+
+    // Ordered log of extension calls: the banner must land before the first turn.
+    const events: string[] = [];
+    const banners: Array<{ sessionId: string; body: string }> = [];
+    let resolveThreadTurnSettled!: () => void;
+    const threadTurnSettled = new Promise<void>((r) => {
+      resolveThreadTurnSettled = r;
+    });
+
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: async (input) => {
+        events.push(`turn:${input.sessionId}`);
+        if (input.userMetadata?.platform_thread_id) resolveThreadTurnSettled();
+        return {
+          latestAssistantText: "FIRST_TURN_RESULT",
+          failoverMeta: undefined,
+        };
+      },
+      subscribeSubagentSession: () => () => {},
+      registerPlatformThreadBinding: () => () => {},
+      sendStatusMessage: async (sessionId, body) => {
+        events.push(`banner:${sessionId}`);
+        banners.push({ sessionId, body });
+      },
+    });
+    try {
+      await withControlPlaneSession(
+        {
+          stateDb: db,
+          config: minimalConfig(sock),
+        },
+        async (send) => {
+          const opAuth = {
+            kind: "operator_token",
+            token: "test-op-token",
+          } as const;
+          // Thread-bound persistent spawn: banner first, then the first turn.
+          const line = await send({
+            v: WIRE_VERSION,
+            id: "persist-banner1",
+            op: "subagent_spawn",
+            auth: opAuth,
+            payload: {
+              parent_session_id: parentId,
+              prompt: "thread-bound banner task",
+              mode: "persistent",
+              platform_thread_id: "thread-banner",
+              platform_user_id: "user-456",
+            },
+          });
+          const res = parseResponseLine(line);
+          assert.equal(res.ok, true);
+          const r = res.result as { session_id: string };
+
+          await threadTurnSettled;
+          await flushAsyncWork();
+
+          assert.equal(banners.length, 1);
+          assert.equal(banners[0].sessionId, r.session_id);
+          assert.ok(banners[0].body.includes("Thread subagent session created."));
+          assert.ok(banners[0].body.includes(r.session_id));
+          assert.deepEqual(
+            events,
+            [`banner:${r.session_id}`, `turn:${r.session_id}`],
+            "creation banner must be posted before the first model turn",
+          );
+
+          // Threadless persistent spawn: no banner (no surface to post to).
+          const line2 = await send({
+            v: WIRE_VERSION,
+            id: "persist-banner2",
+            op: "subagent_spawn",
+            auth: opAuth,
+            payload: {
+              parent_session_id: parentId,
+              prompt: "threadless banner task",
+              mode: "persistent",
+            },
+          });
+          const res2 = parseResponseLine(line2);
+          assert.equal(res2.ok, true);
+          await flushAsyncWork();
+          assert.equal(banners.length, 1, "threadless spawns must not post a banner");
+        },
+      );
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
+    db.close();
+  });
+
   it("subagent_spawn denied for agent when maxSpawnDepth is 0", async () => {
     if (process.platform !== "linux") return;
 
