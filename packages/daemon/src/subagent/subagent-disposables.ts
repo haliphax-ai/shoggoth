@@ -2,7 +2,7 @@
 
 import { clearPersistentSubagentInactivityTimer } from "./persistent-subagent-timers";
 
-type SubagentRuntimeHandles = {
+export type SubagentRuntimeHandles = {
   readonly unregisterThread: () => void;
   readonly unsubscribeBus: () => void;
   readonly clearTtl: () => void;
@@ -12,6 +12,15 @@ const bySession = new Map<string, SubagentRuntimeHandles>();
 
 export function rememberSubagentHandles(sessionId: string, handles: SubagentRuntimeHandles): void {
   bySession.set(sessionId.trim(), handles);
+}
+
+/**
+ * Read back the handles a flow registered for a session (e.g. a control-plane spawn
+ * adopting a session the thread-create autocreate routine already wired up), so the
+ * adopter reuses the live thread binding and bus subscription instead of duplicating them.
+ */
+export function getSubagentHandles(sessionId: string): SubagentRuntimeHandles | undefined {
+  return bySession.get(sessionId.trim());
 }
 
 export function disposeSubagentRuntime(sessionId: string): void {
