@@ -109,6 +109,7 @@ export interface PresentationTurnOrchestratorDeps {
       readonly sequence: number;
       readonly compactions: number;
       readonly context?: { readonly currentTokens: number; readonly totalTokens?: number };
+      readonly subagents?: { readonly total: number; readonly persistent: number };
     };
   };
 }

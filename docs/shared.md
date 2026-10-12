@@ -66,7 +66,7 @@ Defines the entire Shoggoth configuration surface as Zod schemas. Every config k
 | `ShoggothRetentionConfig`          | Data lifecycle: `inboundMediaMaxAgeDays`, `inboundMediaMaxTotalBytes`, `transcriptMessageMaxAgeDays`, `transcriptMaxMessagesPerSession`, `kvMaxEntries`. See [Daemon — Retention](daemon.md#retention).                                                                                                        |
 | `AttachmentHandlingMode`           | `"download"` \| `"inline"` \| `"hybrid"` — how inbound platform attachments are processed. Default: `"download"`.                                                                                                                                                                                              |
 | `AttachmentHandlingConfig`         | `{ mode?: AttachmentHandlingMode }` — optional block under `platforms.attachmentHandling` (global) and `agents.list.<id>.platforms.attachmentHandling` (per-agent). Per-agent takes precedence over global; default `"download"`.                                                                              |
-| `StatusBarConfig`                  | `{ enabled?, statusEnabled?, sequenceEnabled?, toolCallsEnabled?, contextWindowEnabled?, compactionsEnabled? }` — optional block under `platforms.statusBar`. Defaults: every section enabled; `SHOGGOTH_STATUS_BAR=0` disables entirely.                                                                      |
+| `StatusBarConfig`                  | `{ enabled?, statusEnabled?, sequenceEnabled?, toolCallsEnabled?, subagentsEnabled?, contextWindowEnabled?, compactionsEnabled? }` — optional block under `platforms.statusBar`. Defaults: every section enabled; `SHOGGOTH_STATUS_BAR=0` disables entirely.                                                   |
 | `ShoggothRuntimeConfig`            | Daemon timers, feature flags, resilience settings. Includes `agentId`, `toolCallTimeoutMs`, `modelResilience`, `turnQueue`, `minimalContext`, etc.                                                                                                                                                             |
 | `ShoggothAgentsConfig`             | Global agent defaults: `contextLevel`, `subagentContextLevel`, `internalStreaming`, `subagentModel`, `subagentMcp`. Contains `list` map of per-agent entries.                                                                                                                                                  |
 | `ShoggothAgentEntry`               | Per-agent overrides: `displayName`, `emoji`, `models`, `platforms`, `memory`, `agentToAgent`, `subagentSpawnAllow`, `maxSpawnDepth`, `sessionQuery`, `policy`, `hitl`, `contextLevel`, `subagentContextLevel`, `toolDiscovery`, `thinkingDisplay`, `subagentModel`, `mcp`, `subagentMcp`, `toolCallTimeoutMs`. |
@@ -401,14 +401,15 @@ Controls the per-turn status bar rendered at the end of platform messages (e.g. 
 
 ### Fields
 
-| Field                  | Description                                                |
-| ---------------------- | ---------------------------------------------------------- |
-| `enabled`              | Master toggle for the status bar. Default: `true`.         |
-| `statusEnabled`        | Show the status line (✅ / 🛑 / ❌ / ⏸️). Default: `true`. |
-| `sequenceEnabled`      | Show the turn sequence number. Default: `true`.            |
-| `toolCallsEnabled`     | Show the tool call line. Default: `true`.                  |
-| `contextWindowEnabled` | Show the context window usage. Default: `true`.            |
-| `compactionsEnabled`   | Show the compaction counter. Default: `true`.              |
+| Field                  | Description                                                                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`              | Master toggle for the status bar. Default: `true`.                                                                                    |
+| `statusEnabled`        | Show the status line (✅ / 🛑 / ❌ / ⏸️). Default: `true`.                                                                            |
+| `sequenceEnabled`      | Show the turn sequence number. Default: `true`.                                                                                       |
+| `toolCallsEnabled`     | Show the tool call line. Default: `true`.                                                                                             |
+| `subagentsEnabled`     | Show the active (non-thread) subagent count with the persistent count in parentheses; hidden when the count is zero. Default: `true`. |
+| `contextWindowEnabled` | Show the context window usage. Default: `true`.                                                                                       |
+| `compactionsEnabled`   | Show the compaction counter. Default: `true`.                                                                                         |
 
 ### Config Example
 

@@ -11,6 +11,7 @@ describe("statusBarConfigSchema", () => {
       statusEnabled: true,
       sequenceEnabled: true,
       toolCallsEnabled: true,
+      subagentsEnabled: true,
       contextWindowEnabled: true,
       compactionsEnabled: true,
     });
@@ -73,6 +74,7 @@ describe("resolveStatusBarConfig", () => {
       statusEnabled: true,
       sequenceEnabled: true,
       toolCallsEnabled: true,
+      subagentsEnabled: true,
       contextWindowEnabled: false,
       compactionsEnabled: true,
     });

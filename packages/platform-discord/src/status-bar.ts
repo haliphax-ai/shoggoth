@@ -40,6 +40,11 @@ export function renderDiscordStatusBar(
     if (toolSection !== undefined) sections.push(toolSection);
   }
 
+  if (cfg.subagentsEnabled && snap.subagents && snap.subagents.total > 0) {
+    const { total, persistent } = snap.subagents;
+    sections.push(`🕵️ \`${total} (${persistent})\``);
+  }
+
   if (cfg.contextWindowEnabled && snap.context) {
     const { currentTokens, totalTokens } = snap.context;
     if (totalTokens != null && totalTokens > 0) {

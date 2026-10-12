@@ -250,6 +250,7 @@ export {
   createTurnStatusBar,
   createStatusBarTurnTracker,
   getStatusBarStats,
+  getSessionSubagentCounts,
   formatTokens,
   type TurnStatusBar,
   type TurnStatusBarTracker,
