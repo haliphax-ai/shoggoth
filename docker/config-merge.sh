@@ -106,10 +106,21 @@ fi
 cp -R "$BASE_DIR"/. "$REPO"/
 
 git -C "$REPO" init -q -b main
-git -C "$REPO" config user.name "shoggoth-config-merge"
-git -C "$REPO" config user.email "config-merge@shoggoth.local"
-git -C "$REPO" config commit.gpgSign false
+# Identity comes from the environment, never from `git config`, because config writes
+# resolve against the invoking checkout — the repo-local config inside a worktree, or the
+# operator's global ~/.gitconfig when run from the repo root. Hermetic git settings keep the
+# throwaway repo from reading or writing any caller config and from triggering caller hooks.
+GIT_AUTHOR_NAME="shoggoth-config-merge"
+GIT_AUTHOR_EMAIL="config-merge@shoggoth.local"
+GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+GIT_CONFIG_NOSYSTEM=1
+GIT_CONFIG_GLOBAL=/dev/null
+GIT_CONFIG_SYSTEM=/dev/null
+export GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
+export GIT_CONFIG_NOSYSTEM GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
 git -C "$REPO" config core.hooksPath /dev/null
+git -C "$REPO" config commit.gpgSign false
 git -C "$REPO" add -A
 git -C "$REPO" commit -q --allow-empty -m "base configuration (untouched)"
 BASE_SHA=$(git -C "$REPO" rev-parse HEAD)
