@@ -2,6 +2,7 @@ import assert from "node:assert";
 import { describe, it } from "vitest";
 import {
   mcpServerRulesSchema,
+  shoggothMcpServerEntrySchema,
   evaluateMcpServerRules,
   resolveEffectiveMcpServerRules,
   type McpServerRules,
@@ -52,6 +53,53 @@ describe("mcpServerRulesSchema", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 1b. Server entry `explicit` toggle (schema)
+// ---------------------------------------------------------------------------
+
+describe("shoggothMcpServerEntrySchema explicit", () => {
+  it("accepts explicit: true on a stdio server", () => {
+    const result = shoggothMcpServerEntrySchema.safeParse({
+      id: "priv",
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "server"],
+      explicit: true,
+    });
+    assert.ok(result.success);
+  });
+
+  it("accepts explicit: true on an http server", () => {
+    const result = shoggothMcpServerEntrySchema.safeParse({
+      id: "priv",
+      transport: "http",
+      url: "https://example.com/mcp",
+      explicit: true,
+    });
+    assert.ok(result.success);
+  });
+
+  it("treats explicit as optional (omitted → undefined)", () => {
+    const result = shoggothMcpServerEntrySchema.safeParse({
+      id: "pub",
+      transport: "stdio",
+      command: "npx",
+    });
+    assert.ok(result.success);
+    assert.strictEqual(result.success && result.data.explicit, undefined);
+  });
+
+  it("rejects non-boolean explicit", () => {
+    const result = shoggothMcpServerEntrySchema.safeParse({
+      id: "priv",
+      transport: "stdio",
+      command: "npx",
+      explicit: "yes",
+    });
+    assert.ok(!result.success);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 2. evaluateMcpServerRules — deny-wins, wildcard, default-deny
 // ---------------------------------------------------------------------------
 
@@ -88,6 +136,41 @@ describe("evaluateMcpServerRules", () => {
   it("allow wildcard with no deny → everything included", () => {
     const rules: McpServerRules = { allow: ["*"], deny: [] };
     assert.strictEqual(evaluateMcpServerRules("anything", rules), true);
+  });
+
+  it("explicit server is NOT matched by allow wildcard", () => {
+    const rules: McpServerRules = { allow: ["*"], deny: [] };
+    assert.strictEqual(evaluateMcpServerRules("priv", rules, true), false);
+  });
+
+  it("explicit server IS allowed when named exactly in allow list", () => {
+    const rules: McpServerRules = { allow: ["priv", "pub"], deny: [] };
+    assert.strictEqual(evaluateMcpServerRules("priv", rules, true), true);
+    // A non-explicit server still matches the same rules normally
+    assert.strictEqual(evaluateMcpServerRules("pub", rules), true);
+  });
+
+  it("explicit server not in allow list → default-deny", () => {
+    const rules: McpServerRules = { allow: ["pub"], deny: [] };
+    assert.strictEqual(evaluateMcpServerRules("priv", rules, true), false);
+  });
+
+  it("explicit server is still denied by deny wildcard", () => {
+    const rules: McpServerRules = { allow: ["priv"], deny: ["*"] };
+    assert.strictEqual(evaluateMcpServerRules("priv", rules, true), false);
+  });
+
+  it("explicit server is still denied by deny exact id", () => {
+    const rules: McpServerRules = { allow: ["priv"], deny: ["priv"] };
+    assert.strictEqual(evaluateMcpServerRules("priv", rules, true), false);
+  });
+
+  it("explicit server allowed by exact id even when allow also has wildcard", () => {
+    const rules: McpServerRules = { allow: ["*", "priv"], deny: [] };
+    // Exact match covers the explicit server; the wildcard covers the rest
+    assert.strictEqual(evaluateMcpServerRules("priv", rules, true), true);
+    assert.strictEqual(evaluateMcpServerRules("other", rules, true), false);
+    assert.strictEqual(evaluateMcpServerRules("other", rules), true);
   });
 });
 

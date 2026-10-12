@@ -249,16 +249,16 @@ Resolves per-session effective configuration by merging global config with per-a
 
 ### Functions
 
-| Function                                                          | Description                                                                                                     |
-| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `resolveAgentIdFromSessionId(sessionId)`                          | Extracts the logical agent id from a session URN.                                                               |
-| `resolveEffectiveModelsConfig(cfg, sessionId)`                    | Merges global `models` with per-agent `models` overrides (failover chain, invocation, compaction).              |
-| `resolveEffectiveMemoryForSession(cfg, sessionId)`                | Global `memory.paths` + per-agent `memory.paths` (deduped).                                                     |
-| `resolveEffectiveSessionQueryAllowedAgentIds(cfg, callerAgentId)` | Set of agent ids the caller may query transcripts for (own id always included).                                 |
-| `resolveEffectiveThinkingDisplay(cfg, sessionId)`                 | Per-agent `thinkingDisplay` or default `"none"`.                                                                |
-| `formatAgentIdentityPrefix(cfg, sessionId)`                       | Returns `**<emoji> <displayName>:**\n` for platform messages. Emoji defaults to 🦑.                             |
-| `evaluateMcpServerRules(serverId, rules)`                         | Evaluates allow/deny for a single MCP server id. Deny wins → allow check → default-deny.                        |
-| `resolveEffectiveMcpServerRules(config, agentId, isSubagent)`     | 4-level merge cascade: global MCP rules → global subagent rules → per-agent rules. Per-field replace semantics. |
+| Function                                                          | Description                                                                                                                                                                                                 |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `resolveAgentIdFromSessionId(sessionId)`                          | Extracts the logical agent id from a session URN.                                                                                                                                                           |
+| `resolveEffectiveModelsConfig(cfg, sessionId)`                    | Merges global `models` with per-agent `models` overrides (failover chain, invocation, compaction).                                                                                                          |
+| `resolveEffectiveMemoryForSession(cfg, sessionId)`                | Global `memory.paths` + per-agent `memory.paths` (deduped).                                                                                                                                                 |
+| `resolveEffectiveSessionQueryAllowedAgentIds(cfg, callerAgentId)` | Set of agent ids the caller may query transcripts for (own id always included).                                                                                                                             |
+| `resolveEffectiveThinkingDisplay(cfg, sessionId)`                 | Per-agent `thinkingDisplay` or default `"none"`.                                                                                                                                                            |
+| `formatAgentIdentityPrefix(cfg, sessionId)`                       | Returns `**<emoji> <displayName>:**\n` for platform messages. Emoji defaults to 🦑.                                                                                                                         |
+| `evaluateMcpServerRules(serverId, rules, explicit?)`              | Evaluates allow/deny for a single MCP server id. Deny wins → allow check → default-deny. With `explicit: true`, a `*` allow pattern will not match the server — it must be named exactly in the allow list. |
+| `resolveEffectiveMcpServerRules(config, agentId, isSubagent)`     | 4-level merge cascade: global MCP rules → global subagent rules → per-agent rules. Per-field replace semantics.                                                                                             |
 
 ### Constants
 

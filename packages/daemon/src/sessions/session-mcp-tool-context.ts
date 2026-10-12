@@ -372,6 +372,12 @@ export function createMcpServerRulesFinalizer(
     const isSubagent = isSubagentSessionUrn(sessionId);
     const rules = resolveEffectiveMcpServerRules(config, agentId, isSubagent);
 
+    // Server ids flagged `explicit` are never matched by wildcard/`*` allow
+    // patterns — they must be named exactly in the effective allow list.
+    const explicitServerIds = new Set(
+      config.mcp?.servers?.filter((s) => s.explicit).map((s) => s.id) ?? [],
+    );
+
     // Determine which external sourceIds are denied
     const externalSourceIds = new Set(
       ctx.aggregated.tools.filter((t) => t.sourceId !== "builtin").map((t) => t.sourceId),
@@ -380,7 +386,7 @@ export function createMcpServerRulesFinalizer(
     // Check if any source is actually denied — skip work if all are allowed
     const deniedSources = new Set<string>();
     for (const sid of externalSourceIds) {
-      if (!evaluateMcpServerRules(sid, rules)) {
+      if (!evaluateMcpServerRules(sid, rules, explicitServerIds.has(sid))) {
         deniedSources.add(sid);
       }
     }
