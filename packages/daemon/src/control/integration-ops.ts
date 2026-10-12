@@ -72,6 +72,7 @@ import { validateModelRefExists } from "../sessions/model-resolution";
 import { rememberSubagentHandles } from "../subagent/subagent-disposables";
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
 import { terminatePersistentSubagentSession } from "../subagent/subagent-kill";
+import { buildThreadSubagentCreatedBanner } from "../subagent/thread-subagent-autocreate";
 import { extractLatestTranscriptAssistantText } from "../sessions/transcript-to-chat";
 import { pushSystemContext } from "../sessions/system-context-buffer";
 import { pushSteer } from "../sessions/steer-channel";
@@ -1620,6 +1621,28 @@ export async function handleIntegrationControlOp(
         : ({ kind: "internal" } as const);
       // Fire the first model turn asynchronously so the parent is not blocked.
       const subLog = getLogger("subagent");
+      // Creation banner: thread-bound spawns post it BEFORE the first model turn
+      // so the thread reads creation → response, matching the automatic
+      // thread-create path. Best-effort: a failed banner never blocks the spawn.
+      if (platformThreadId && ext.sendStatusMessage && ctx.stateDb) {
+        try {
+          await ext.sendStatusMessage(
+            childId,
+            buildThreadSubagentCreatedBanner({
+              db: ctx.stateDb,
+              config: ctx.config,
+              sessionId: childId,
+              logger: subLog,
+            }),
+          );
+        } catch (e) {
+          subLog.warn("thread_subagent.status_send_failed", {
+            sessionId: childId,
+            platformThreadId,
+            err: String(e),
+          });
+        }
+      }
       ext
         .runSessionModelTurn({
           sessionId: childId,

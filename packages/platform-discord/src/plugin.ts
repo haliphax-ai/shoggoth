@@ -452,6 +452,8 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           resolveOutboundChannelIdForSession: (sessionId: string) =>
             discordMessaging.resolveOutboundChannelIdForSession?.(sessionId),
           pinMessage: discordPlatform.pinMessage,
+          sendStatusMessage: (sessionId: string, body: string) =>
+            discordPlatform.adapter.sendBody(sessionId, body),
           postToOperator: async (input: {
             readonly sessionId: string;
             readonly userContent: string;

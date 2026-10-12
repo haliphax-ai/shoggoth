@@ -77,6 +77,8 @@ export interface SubagentRuntimeExtension {
   subscribeSubagentSession?(input: unknown): unknown;
   registerPlatformThreadBinding?(input: unknown): unknown;
   announcePersistentSubagentSessionEnded?(input: unknown): unknown;
+  /** Post a status/banner message to the session's bound platform surface. */
+  sendStatusMessage?(sessionId: string, body: string): Promise<void>;
 }
 
 /**
