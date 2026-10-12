@@ -1,6 +1,6 @@
 ---
 date: 2026-10-10
-completed: 2026-10-11
+completed: never
 ---
 
 # Hashline (Content-Addressed) File Editing Mode
