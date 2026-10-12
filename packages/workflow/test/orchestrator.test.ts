@@ -12,6 +12,7 @@ import type {
 } from "../src/orchestrator.js";
 import type { TaskList } from "../src/types.js";
 import type { AgentTaskDef } from "../src/types.js";
+import { loadWorkflow } from "../src/state.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -382,5 +383,107 @@ describe("Orchestrator unique task ID validation", () => {
     } catch (err) {
       expect((err as Error).message).not.toMatch(/Duplicate task IDs/);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Orchestrator — waitForIdle() drains in-flight background work
+// ---------------------------------------------------------------------------
+
+describe("Orchestrator waitForIdle()", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "shoggoth-orch-idle-"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function makeOpts(): OrchestratorOptions {
+    return {
+      stateDir: tempDir,
+      currentDepth: 0,
+      maxDepth: 3,
+      replyTo: "agent:test",
+      pollingIntervalMs: 50,
+      runtimeLimitMs: 60000,
+    };
+  }
+
+  function inProgressTask(): AgentTaskDef {
+    return {
+      kind: "agent",
+      id: 1,
+      prompt: "do the thing",
+      failureBehavior: "continue",
+      failureNotification: "silent",
+    };
+  }
+
+  it("resolves immediately when no background work is in flight", async () => {
+    const orch = new Orchestrator({
+      spawner: makeSpawner([]),
+      poller: makePoller(new Map()),
+      notifier: makeNotifier(),
+    });
+    await orch.start([inProgressTask()], "1", makeOpts());
+
+    // start() is fully awaited — nothing pending — must not hang.
+    await orch.waitForIdle();
+  });
+
+  it("waits for an in-flight polling tick fired by fake timers before resolving", async () => {
+    vi.useFakeTimers();
+
+    // Poller gated on a manually released promise: once the fake clock fires
+    // the polling loop, the tick blocks here with its state persistence
+    // still ahead of it — exactly the straggler that used to race rmSync.
+    let releasePoll!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releasePoll = resolve;
+    });
+    const poller: PollAdapter = {
+      async poll() {
+        await gate;
+        return { status: "done" as const, output: "ok" };
+      },
+    };
+
+    const orch = new Orchestrator({
+      spawner: makeSpawner([]),
+      poller,
+      notifier: makeNotifier(),
+    });
+    const wfId = await orch.start([inProgressTask()], "1", makeOpts());
+    orch.startPolling();
+
+    // Fire the polling-loop timer WITHOUT awaiting the async callback —
+    // same semantics as a straggler tick under load.
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Tear down like the fixed test harness does: cancel future firings,
+    // then drain.
+    orch.stopPolling();
+    let drained = false;
+    const idle = orch.waitForIdle().then(() => {
+      drained = true;
+    });
+
+    // Flush microtasks: the tick is blocked on the gate, so the drain
+    // cannot have completed.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(drained).toBe(false);
+
+    releasePoll();
+    await idle;
+    expect(drained).toBe(true);
+
+    // The drained tick's saveWorkflow landed: the poll result is persisted.
+    const persisted = await loadWorkflow(tempDir, wfId);
+    expect(persisted?.tasks[0]?.status).toBe("done");
+    expect(persisted?.tasks[0]?.output).toBe("ok");
   });
 });

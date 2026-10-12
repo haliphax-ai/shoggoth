@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { initWorkflow, resetWorkflowSingleton } from "../src/workflow-singleton";
+import { initWorkflow, resetWorkflowSingleton, getWorkflowServer } from "../src/workflow-singleton";
 import type { WorkflowSingletonOptions } from "../src/workflow-singleton";
 import type { MessagePoster } from "@shoggoth/workflow";
 
@@ -15,8 +15,12 @@ describe("Workflow Integration", () => {
     resetWorkflowSingleton();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.useRealTimers();
+    // A test that started workflows leaves live polling loops behind; stop
+    // and drain them before deleting the state directory so an in-flight
+    // tick's saveWorkflow cannot race rmSync (ENOTEMPTY).
+    await getWorkflowServer()?.stopAll();
     rmSync(tempDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
@@ -177,5 +181,11 @@ describe("Workflow Integration", () => {
     expect(status).toBeDefined();
     expect(postedMessages.length).toBe(1);
     expect(postedMessages[0].message).toBe("Hello from workflow");
+
+    // Stop and drain the workflow under real timers while the fake clock is
+    // still installed, mirroring production shutdown: no straggler tick may
+    // persist state after the test tears the state directory down.
+    vi.useRealTimers();
+    await server.stopAll();
   });
 });
