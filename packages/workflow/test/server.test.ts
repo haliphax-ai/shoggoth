@@ -10,7 +10,7 @@ import type {
   NotifyAdapter,
   OrchestratorOptions,
 } from "../src/orchestrator.js";
-import { WorkflowServer } from "../src/server.js";
+import { WorkflowServer, type WorkflowServerOptions } from "../src/server.js";
 
 function makeTmpDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workflow-server-test-"));
@@ -88,9 +88,22 @@ describe("WorkflowServer", () => {
     baseDir = makeTmpDir();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    for (const server of servers) await server.stopAll();
+    servers.length = 0;
     fs.rmSync(baseDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
+
+  // Every server.start() spins up a live polling loop, so each test must
+  // register its server here: the shared teardown stops polling and drains
+  // in-flight ticks before the state directory is deleted (an undrained
+  // tick's saveWorkflow would otherwise race rmSync with ENOTEMPTY).
+  const servers: WorkflowServer[] = [];
+  function trackServer(opts: WorkflowServerOptions): WorkflowServer {
+    const s = new WorkflowServer(opts);
+    servers.push(s);
+    return s;
+  }
 
   describe("createToolExecutor factory", () => {
     it("calls createToolExecutor factory with sessionId when provided", async () => {
@@ -101,7 +114,7 @@ describe("WorkflowServer", () => {
         },
       };
 
-      const server = new WorkflowServer({
+      const server = trackServer({
         stateDir: baseDir,
         spawner: mockSpawnAdapter(),
         poller: mockPollAdapter(),
@@ -132,7 +145,7 @@ describe("WorkflowServer", () => {
       };
 
       let capturedExecutor: ToolExecutor | undefined;
-      const server = new WorkflowServer({
+      const server = trackServer({
         stateDir: baseDir,
         spawner: mockSpawnAdapter(),
         poller: mockPollAdapter(),
@@ -162,7 +175,7 @@ describe("WorkflowServer", () => {
         },
       };
 
-      const server = new WorkflowServer({
+      const server = trackServer({
         stateDir: baseDir,
         spawner: mockSpawnAdapter(),
         poller: mockPollAdapter(),
@@ -193,7 +206,7 @@ describe("WorkflowServer", () => {
 
     it("does not call factory if createToolExecutor is not provided", async () => {
       const factoryCalled = false;
-      const server = new WorkflowServer({
+      const server = trackServer({
         stateDir: baseDir,
         spawner: mockSpawnAdapter(),
         poller: mockPollAdapter(),
@@ -218,7 +231,7 @@ describe("WorkflowServer", () => {
         },
       };
 
-      const server = new WorkflowServer({
+      const server = trackServer({
         stateDir: baseDir,
         spawner: mockSpawnAdapter(),
         poller: mockPollAdapter(),
@@ -247,7 +260,7 @@ describe("WorkflowServer", () => {
         },
       };
 
-      const server = new WorkflowServer({
+      const server = trackServer({
         stateDir: baseDir,
         spawner: mockSpawnAdapter(),
         poller: mockPollAdapter(),

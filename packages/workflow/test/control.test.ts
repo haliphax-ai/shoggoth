@@ -565,8 +565,12 @@ describe("ControlPlane", () => {
   describe("retry", () => {
     const activeOrchestrators: Orchestrator[] = [];
 
-    afterEach(() => {
+    afterEach(async () => {
+      // cp.retry() restarts the polling loop, so these orchestrators can have
+      // background ticks in flight: stop the timers, then drain before the
+      // file-level teardown removes the state directory.
       for (const orch of activeOrchestrators) orch.stopPolling();
+      for (const orch of activeOrchestrators) await orch.waitForIdle();
       activeOrchestrators.length = 0;
       vi.useRealTimers();
     });

@@ -232,6 +232,7 @@ export class Orchestrator {
   private statusTimer: ReturnType<typeof setInterval> | null = null;
   private dirty = false;
   private templateApplied = new Set<number>();
+  private pendingWork = new Set<Promise<unknown>>();
 
   constructor(config: OrchestratorConfig) {
     this.spawner = config.spawner;
@@ -406,16 +407,26 @@ export class Orchestrator {
         });
         return;
       }
-      this.pollingTimer = setTimeout(async () => {
-        try {
-          await this.tick();
-        } catch (err) {
-          log.error("tick failed", {
-            workflowId: this.workflow?.id,
-            error: String(err),
-          });
-        }
-        if (this.pollingTimer !== null) scheduleNext();
+      this.pollingTimer = setTimeout(() => {
+        // Track the tick so waitForIdle() can await stragglers that outlive
+        // this timer (stopPolling() can cancel the timer but cannot await an
+        // in-flight tick — awaiting it here is what keeps state persistence
+        // from racing downstream cleanup).
+        const tick = this.track(
+          (async () => {
+            try {
+              await this.tick();
+            } catch (err) {
+              log.error("tick failed", {
+                workflowId: this.workflow?.id,
+                error: String(err),
+              });
+            }
+          })(),
+        );
+        tick.then(() => {
+          if (this.pollingTimer !== null) scheduleNext();
+        });
       }, this.opts.pollingIntervalMs);
     };
     scheduleNext();
@@ -449,6 +460,34 @@ export class Orchestrator {
       clearInterval(this.statusTimer);
       this.statusTimer = null;
     }
+  }
+
+  /**
+   * Resolve once all in-flight async work this orchestrator has started
+   * (polling-loop ticks and state persistence) has settled.
+   *
+   * stopPolling() cancels future timer firings but cannot await a tick that
+   * is already mid-flight; callers that tear down state directories or shut
+   * down the process should await this first so late state writes cannot
+   * race cleanup.
+   */
+  async waitForIdle(): Promise<void> {
+    while (this.pendingWork.size > 0) {
+      await Promise.allSettled(this.pendingWork);
+    }
+  }
+
+  /** Register async work for waitForIdle(); always fulfills, never rejects. */
+  private track(work: Promise<unknown>): Promise<void> {
+    const settled = work.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.pendingWork.add(settled);
+    void settled.then(() => {
+      this.pendingWork.delete(settled);
+    });
+    return settled;
   }
 
   /** Whether the polling timer is active. */

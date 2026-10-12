@@ -110,10 +110,20 @@ export class WorkflowServer {
     return this.orchestrators;
   }
 
-  /** Stop all active orchestrators. */
+  /**
+   * Stop all active orchestrators and wait for their in-flight work
+   * (polling ticks, state persistence) to settle before returning.
+   *
+   * Stop all timers first so no new ticks are scheduled, then drain: awaiting
+   * each orchestrator in lockstep would let orchestrator A's still-running
+   * tick schedule new work while B is being drained.
+   */
   async stopAll(): Promise<void> {
     for (const orch of this.orchestrators.values()) {
       orch.stopPolling();
+    }
+    for (const orch of this.orchestrators.values()) {
+      await orch.waitForIdle();
     }
     this.orchestrators.clear();
   }

@@ -185,6 +185,10 @@ async function setup(
   const orchestrators = new Map<string, Orchestrator>();
   orchestrators.set(wfId, orch);
 
+  // Register with the shared teardown so the polling loop is stopped and
+  // drained before the test's state directory is removed.
+  liveSetups.push({ orchestrators });
+
   const cp = new ControlPlane({
     orchestrators,
     stateDir: baseDir,
@@ -208,18 +212,36 @@ async function setup(
   };
 }
 
+// --- Shared test lifecycle ---
+//
+// File-level hooks shared by every describe below. Teardown stops polling on
+// every orchestrator a test created and then waits for in-flight ticks to
+// settle before deleting the state directory: a tick that is still inside
+// saveWorkflow (real mkdir + write, reachable when fake timers fired the
+// polling loop) would otherwise recreate baseDir while rmSync is walking it
+// and fail with ENOTEMPTY. rmSync retries stay as defense-in-depth.
+
+let baseDir: string;
+const liveSetups: { orchestrators: Map<string, Orchestrator> }[] = [];
+
+beforeEach(() => {
+  baseDir = makeTmpDir();
+});
+
+afterEach(async () => {
+  for (const s of liveSetups) {
+    for (const orch of s.orchestrators.values()) orch.stopPolling();
+  }
+  for (const s of liveSetups) {
+    for (const orch of s.orchestrators.values()) await orch.waitForIdle();
+  }
+  liveSetups.length = 0;
+  fs.rmSync(baseDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+});
+
 // --- Integration Tests ---
 
 describe("Integration: happy path", () => {
-  let baseDir: string;
-
-  beforeEach(() => {
-    baseDir = makeTmpDir();
-  });
-  afterEach(() => {
-    fs.rmSync(baseDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-  });
-
   it("executes tasks in dependency order and posts summary on completion", async () => {
     // Graph: 1 → 2 → 3 (sequential chain)
     const s = await setup(baseDir, [makeTask(1), makeTask(2), makeTask(3)], "1>2>3");
@@ -293,15 +315,6 @@ describe("Integration: happy path", () => {
 });
 
 describe("Integration: failure + retry", () => {
-  let baseDir: string;
-
-  beforeEach(() => {
-    baseDir = makeTmpDir();
-  });
-  afterEach(() => {
-    fs.rmSync(baseDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-  });
-
   it("fails a task, retries it, and completes the workflow", async () => {
     const s = await setup(
       baseDir,
@@ -350,15 +363,6 @@ describe("Integration: failure + retry", () => {
 });
 
 describe("Integration: failure + abort", () => {
-  let baseDir: string;
-
-  beforeEach(() => {
-    baseDir = makeTmpDir();
-  });
-  afterEach(() => {
-    fs.rmSync(baseDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-  });
-
   it("aborts the workflow when a task fails with abort behavior", async () => {
     const s = await setup(
       baseDir,
@@ -408,15 +412,6 @@ describe("Integration: failure + abort", () => {
 });
 
 describe("Integration: pause + resume", () => {
-  let baseDir: string;
-
-  beforeEach(() => {
-    baseDir = makeTmpDir();
-  });
-  afterEach(() => {
-    fs.rmSync(baseDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-  });
-
   it("pauses, lets in-flight finish, resumes, and completes remaining tasks", async () => {
     const s = await setup(baseDir, [makeTask(1), makeTask(2), makeTask(3)], "1>2>3");
 
@@ -458,15 +453,6 @@ describe("Integration: pause + resume", () => {
 });
 
 describe("Integration: edit", () => {
-  let baseDir: string;
-
-  beforeEach(() => {
-    baseDir = makeTmpDir();
-  });
-  afterEach(() => {
-    fs.rmSync(baseDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-  });
-
   it("edits a pending task prompt, then uses the edited prompt when spawned", async () => {
     const s = await setup(baseDir, [makeTask(1), makeTask(2, "original prompt")], "1>2");
 
@@ -503,15 +489,6 @@ describe("Integration: edit", () => {
 });
 
 describe("Integration: retention via control plane", () => {
-  let baseDir: string;
-
-  beforeEach(() => {
-    baseDir = makeTmpDir();
-  });
-  afterEach(() => {
-    fs.rmSync(baseDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-  });
-
   it("prunes old completed workflows via control plane retention", async () => {
     const now = Date.now();
     const oldTime = now - COMPLETED_MAX_AGE_MS - 1_000;
@@ -577,15 +554,6 @@ describe("Integration: retention via control plane", () => {
 });
 
 describe("Integration: status message lifecycle", () => {
-  let baseDir: string;
-
-  beforeEach(() => {
-    baseDir = makeTmpDir();
-  });
-  afterEach(() => {
-    fs.rmSync(baseDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-  });
-
   it("updates status post for in_progress tasks even when dirty is false", async () => {
     vi.useFakeTimers();
     try {
