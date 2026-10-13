@@ -542,6 +542,116 @@ describe("deliverOobStructuredResponse", () => {
     expect(last.userContent).toContain("the original unstructured answer");
   });
 
+  it("forwards banner statusBar to finish on the success path", async () => {
+    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+
+    const finish = vi.fn();
+    const handle = { sessionId: "parent-oob", setStatusBar: vi.fn() };
+    const terminal = (outcome: string) => `> terminal ${outcome}`;
+
+    await deliverOobStructuredResponse({
+      ...opts({
+        ext: {
+          postToOperator: mockPostToOperator,
+          runSessionModelTurn: vi.fn(),
+          oobTurnBanner: { begin: vi.fn(), finish },
+        } as never,
+      }),
+      structuredResponse: JSON.stringify({ to_operator: "hello", to_sender: null }),
+      hasSender: false,
+      banner: { handle, terminal: terminal as never, statusBar: "✅ done · #7" },
+    });
+
+    expect(finish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        terminal: "> terminal finished",
+        statusBar: "✅ done · #7",
+      }),
+    );
+  });
+
+  it("omits statusBar on the success path when the banner had no tracker", async () => {
+    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+
+    const finish = vi.fn();
+    const handle = { sessionId: "parent-oob", setStatusBar: vi.fn() };
+    const terminal = (outcome: string) => `> terminal ${outcome}`;
+
+    await deliverOobStructuredResponse({
+      ...opts({
+        ext: {
+          postToOperator: mockPostToOperator,
+          runSessionModelTurn: vi.fn(),
+          oobTurnBanner: { begin: vi.fn(), finish },
+        } as never,
+      }),
+      structuredResponse: JSON.stringify({ to_operator: "hello", to_sender: null }),
+      hasSender: false,
+      banner: { handle, terminal: terminal as never },
+    });
+
+    expect(finish).toHaveBeenCalledWith(
+      expect.not.objectContaining({ statusBar: expect.anything() }),
+    );
+  });
+
+  it("forwards banner statusBar to finish on the abort path", async () => {
+    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+
+    const finish = vi.fn();
+    const handle = { sessionId: "parent-oob", setStatusBar: vi.fn() };
+    const terminal = (outcome: string) => `> terminal ${outcome}`;
+
+    await deliverOobStructuredResponse({
+      ...opts({
+        ext: {
+          postToOperator: mockPostToOperator,
+          runSessionModelTurn: vi.fn(),
+          oobTurnBanner: { begin: vi.fn(), finish },
+        } as never,
+      }),
+      structuredResponse: "ignored",
+      aborted: true,
+      hasSender: false,
+      banner: { handle, terminal: terminal as never, statusBar: "🛑 aborted · #3" },
+    });
+
+    expect(finish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        terminal: "> terminal aborted",
+        statusBar: "🛑 aborted · #3",
+      }),
+    );
+  });
+
+  it("forwards banner statusBar to finish on the failure (nudge) path", async () => {
+    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+
+    const finish = vi.fn();
+    const handle = { sessionId: "parent-oob", setStatusBar: vi.fn() };
+    const terminal = (outcome: string) => `> terminal ${outcome}`;
+
+    await deliverOobStructuredResponse({
+      ...opts({
+        ext: {
+          postToOperator: mockPostToOperator,
+          runSessionModelTurn: vi.fn().mockResolvedValue(undefined),
+          oobTurnBanner: { begin: vi.fn(), finish },
+        } as never,
+      }),
+      structuredResponse: "not valid json",
+      hasSender: false,
+      banner: { handle, terminal: terminal as never, statusBar: "❌ failed · #1" },
+    });
+
+    expect(finish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        terminal: "> terminal failed",
+        statusBar: "❌ failed · #1",
+      }),
+    );
+  });
+
   it("clips a very long raw output to maxChars in the failure notice", async () => {
     const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
 

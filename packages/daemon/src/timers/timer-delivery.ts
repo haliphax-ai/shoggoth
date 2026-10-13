@@ -55,7 +55,15 @@ export async function deliverTimerMessage(entry: TimerEntry): Promise<void> {
       subLog: getLogger("timer"),
       hasSender: false,
       systemContext: oobSystemContext,
-      ...(bannerHandle ? { banner: { handle: bannerHandle, terminal: bannerText.terminal } } : {}),
+      ...(bannerHandle
+        ? {
+            banner: {
+              handle: bannerHandle,
+              terminal: bannerText.terminal,
+              ...(turn.statusBarLine ? { statusBar: turn.statusBarLine } : {}),
+            },
+          }
+        : {}),
     });
   }
 }

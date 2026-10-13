@@ -620,7 +620,7 @@ async function initWorkflowServer(
             sessionId,
             processing: bannerText.processing,
           });
-          await ext.runSessionModelTurn({
+          const turn = await ext.runSessionModelTurn({
             sessionId,
             userContent: message,
             ...(bannerHandle ? { statusBarSink: bannerHandle } : {}),
@@ -642,6 +642,7 @@ async function initWorkflowServer(
             await ext.oobTurnBanner?.finish({
               handle: bannerHandle,
               terminal: bannerText.terminal(success ? "finished" : "failed"),
+              ...(turn?.statusBarLine ? { statusBar: turn.statusBarLine } : {}),
             });
           }
           getLogger("daemon").debug("workflow notify: delivered");
