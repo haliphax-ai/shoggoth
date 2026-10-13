@@ -497,6 +497,14 @@ export interface DiscordInteractionHandlerDeps {
     "interactionCallback" | "editOriginalInteractionResponse"
   >;
   readonly applicationId: string;
+  /**
+   * Guild IDs this instance owns (the same set slash commands are registered
+   * in). Interactions from any other guild are dropped before any branch runs —
+   * with NO interaction callback — so that when multiple daemons share one bot
+   * token, only the owning instance answers its guild's interactions.
+   * Absent or empty disables the guard (DM-only deployments).
+   */
+  readonly ownedGuildIds?: readonly string[];
   readonly logger: {
     readonly info: (msg: string, fields?: Record<string, unknown>) => void;
     readonly warn: (msg: string, fields?: Record<string, unknown>) => void;
@@ -545,6 +553,27 @@ async function handleInteraction(
   deps: DiscordInteractionHandlerDeps,
   ev: DiscordInteractionEvent,
 ): Promise<void> {
+  // Guild-ownership guard: multiple daemons sharing one bot token all receive
+  // every INTERACTION_CREATE, so an instance must only answer interactions
+  // from its own guilds. Drop foreign-guild interactions WITHOUT acknowledging
+  // them: the interaction callback token is single-use, so any response here
+  // would race (and can beat) the owning instance's response. Guild-less
+  // interactions (DMs) pass through; an absent/empty ownedGuildIds disables
+  // the guard entirely (DM-only deployments).
+  if (
+    ev.guildId !== undefined &&
+    deps.ownedGuildIds !== undefined &&
+    deps.ownedGuildIds.length > 0 &&
+    !deps.ownedGuildIds.includes(ev.guildId)
+  ) {
+    deps.logger.debug("discord.interaction.foreign_guild_ignored", {
+      type: ev.type,
+      id: ev.id,
+      guildId: ev.guildId,
+    });
+    return;
+  }
+
   // Handle component interactions (type 3) and modal submits (type 5)
   if (ev.type === 3) {
     // MESSAGE_COMPONENT interaction
