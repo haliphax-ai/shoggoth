@@ -10,11 +10,14 @@ export type PersistentSubagentSessionEndReason = "ttl_expired" | "killed";
  * Live handle to a posted OOB "processing" banner (issue #363). The platform
  * returns this from `oobTurnBanner.begin`; callers pass it straight back to
  * `finish`. `setStatusBar` streams a live bar render into the banner message
- * while the turn executes (editing-capable platforms only).
+ * while the turn executes (editing-capable platforms only). `setBody` is a
+ * platform-internal escape hatch used by `oobTurnBanner.finish` to edit the
+ * banner message in place instead of posting a second message.
  */
 export interface OobTurnBannerHandle {
   readonly sessionId: string;
   readonly setStatusBar: (line: string | null) => Promise<void>;
+  readonly setBody?: (text: string) => Promise<void>;
 }
 
 /**

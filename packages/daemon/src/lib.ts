@@ -135,6 +135,7 @@ export {
 } from "./hitl/pending-actions-store";
 export { invokeControlRequest, type InvokeControlRequestInput } from "./control/control-client";
 export { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES } from "./subagent/subagent-constants";
+export type { OobTurnBannerHandle } from "./subagent/subagent-extension-ref";
 export {
   handlePlatformThreadCreate,
   shouldSkipThreadSessionSentinel,

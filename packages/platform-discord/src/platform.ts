@@ -43,6 +43,7 @@ import {
   type StatusBarSnapshot,
   type TurnStatusBarTracker,
   type StreamHandle,
+  type OobTurnBannerHandle,
   type PlatformAssistantDeps,
   resolveModel,
   shouldSkipThreadSessionSentinel,
@@ -141,6 +142,17 @@ export interface DiscordPlatformHandle {
     readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
     readonly statusBarSink?: { setStatusBar: (line: string | null) => Promise<void> };
   }) => Promise<SessionAgentTurnResult>;
+  readonly oobTurnBanner: {
+    begin: (input: {
+      readonly sessionId: string;
+      readonly processing: string;
+    }) => Promise<OobTurnBannerHandle | undefined>;
+    finish: (input: {
+      readonly handle: OobTurnBannerHandle;
+      readonly terminal: string;
+      readonly content?: string;
+    }) => Promise<void>;
+  };
   readonly subscribeSubagentSession: (sessionId: string) => () => void;
   readonly announcePersistentSubagentSessionEnded: (input: {
     readonly sessionId: string;
@@ -824,6 +836,20 @@ export async function startDiscordPlatform(
         }
       }
 
+      // OOB banner surface (issue #363): when the caller passed a status-bar
+      // sink, create the same tracker used for messaging_surface turns so the
+      // live bar (starting / thinking / prose / tools) streams into the banner
+      // message while this out-of-band turn executes. Stats are snapshotted
+      // BEFORE the turn so the bar reports this turn's sequence.
+      if (input.statusBarSink && statusBarDep.config.enabled) {
+        surfaceTracker = createStatusBarTurnTracker({
+          cfg: statusBarDep.config,
+          render: statusBarDep.render,
+          stats: getStatusBarStats(opts.db, sid),
+        });
+        surfaceTracker.attachSink(input.statusBarSink);
+      }
+
       opts.logger.debug("platform.executeTurn_calling", {
         sessionId: sid,
         delivery: input.delivery.kind,
@@ -833,6 +859,24 @@ export async function startDiscordPlatform(
       turnResult = await executeTurn(internalAfterHitlQueued, {
         streamModel: internalStreamModel,
       });
+
+      // Freeze the bar at its terminal render (✅/🛑/❌) so the banner's final
+      // edit carries the same terminal bar a normal turn would. The caller's
+      // `oobTurnBanner.finish` clears the sink and edits the body afterwards.
+      if (surfaceTracker) {
+        const outcome =
+          turnResult.outcome === "aborted" || turnResult.outcome === "failed"
+            ? turnResult.outcome
+            : "finished";
+        try {
+          await surfaceTracker.finish(outcome);
+        } catch (e) {
+          opts.logger.warn("discord.platform.oob_status_bar_finish_failed", {
+            sessionId: sid,
+            err: String(e),
+          });
+        }
+      }
     });
     return turnResult;
   }
@@ -946,6 +990,75 @@ export async function startDiscordPlatform(
       });
     }
   }
+
+  /**
+   * OOB turn banner surface (issue #363). `begin` posts a "processing" banner as
+   * an editable message via the session's streaming outbound. That returns
+   * `undefined` when the session isn't surface-bound or the platform can't edit
+   * messages, in which case callers fall back to plain delivery. `finish` edits
+   * the banner message in place with the terminal banner plus optional
+   * `to_operator` content, clearing the live bar first so it isn't rendered
+   * twice.
+   */
+  const oobTurnBanner = {
+    async begin(input: {
+      readonly sessionId: string;
+      readonly processing: string;
+    }): Promise<OobTurnBannerHandle | undefined> {
+      const streamingOutbound = opts.discord.streamingForSession(input.sessionId);
+      if (!streamingOutbound) return undefined;
+      try {
+        const handle = await streamingOutbound.start();
+        await handle.setFullContent(input.processing);
+        return {
+          sessionId: input.sessionId,
+          setBody: async (text: string) => {
+            await handle.setFullContent(text);
+          },
+          setStatusBar: async (line: string | null) => {
+            if (handle.setStatusBar) await handle.setStatusBar(line);
+          },
+        };
+      } catch (e) {
+        opts.logger.warn("discord.oob_banner.begin_failed", {
+          sessionId: input.sessionId,
+          err: String(e),
+        });
+        return undefined;
+      }
+    },
+    async finish(input: {
+      readonly handle: OobTurnBannerHandle;
+      readonly terminal: string;
+      readonly content?: string;
+    }): Promise<void> {
+      // Clear the live bar (a state-only operation that makes no edit) so the
+      // terminal body edit below lands the bar exactly once, mirroring the
+      // messaging_surface delivery pattern.
+      try {
+        await input.handle.setStatusBar(null);
+      } catch (e) {
+        opts.logger.warn("discord.oob_banner.status_bar_clear_failed", {
+          sessionId: input.handle.sessionId,
+          err: String(e),
+        });
+      }
+      // Edit the banner message in place via the handle captured at `begin`.
+      // A missing `setBody` means the platform cannot edit messages, so there
+      // is nothing to append to and we leave the processing banner as-is.
+      if (!input.handle.setBody) return;
+      try {
+        const body = input.content ? `${input.terminal}\n\n${input.content}` : input.terminal;
+        await input.handle.setBody(body);
+      } catch (e) {
+        opts.logger.warn("discord.oob_banner.finish_failed", {
+          sessionId: input.handle.sessionId,
+          err: String(e),
+        });
+      }
+    },
+  };
+
   return {
     stop: async () => {
       for (const u of unsubs) u();
@@ -957,6 +1070,7 @@ export async function startDiscordPlatform(
       await mcpRuntime.shutdown();
     },
     runSessionModelTurn,
+    oobTurnBanner,
     subscribeSubagentSession,
     announcePersistentSubagentSessionEnded,
     handleReactionPassthrough,

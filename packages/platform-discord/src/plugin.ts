@@ -466,6 +466,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
             // Posts to the operator's bound surface (resolved platform channel for the session).
             await discordPlatform.adapter.sendBody(input.sessionId, input.userContent);
           },
+          oobTurnBanner: discordPlatform.oobTurnBanner,
         };
         setSubagentRuntimeExtension(subagentExt as any);
 
