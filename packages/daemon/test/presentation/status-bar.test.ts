@@ -237,6 +237,38 @@ describe("createTurnStatusBar", () => {
     expect(last.compactions).toBe(3);
   });
 
+  it("setSubagents updates the subagent counts mid-turn", async () => {
+    const { bar, sink } = createBar();
+    await bar.start({
+      sequence: 21,
+      compactions: 0,
+      subagents: { total: 0, persistent: 0 },
+    });
+    bar.setSubagents({ total: 2, persistent: 1 });
+    await vi.advanceTimersByTimeAsync(1000);
+    const last = sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot;
+    expect(last.subagents).toEqual({ total: 2, persistent: 1 });
+  });
+
+  it("setSubagents seeds the section when it was never seeded at start", async () => {
+    const { bar, sink } = createBar();
+    await bar.start({ sequence: 22, compactions: 0 });
+    bar.setSubagents({ total: 1, persistent: 1 });
+    await vi.advanceTimersByTimeAsync(1000);
+    const last = sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot;
+    expect(last.subagents).toEqual({ total: 1, persistent: 1 });
+  });
+
+  it("setSubagents is a no-op after finish()", async () => {
+    const { bar, sink } = createBar();
+    await bar.start({ sequence: 23, compactions: 0, subagents: { total: 1, persistent: 0 } });
+    await bar.finish("finished");
+    const callsAfterFinish = sink.setStatusBar.mock.calls.length;
+    bar.setSubagents({ total: 5, persistent: 2 });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(sink.setStatusBar.mock.calls.length).toBe(callsAfterFinish);
+  });
+
   it("carries the seeded timer count into the snapshot", async () => {
     const { bar, sink } = createBar();
     await bar.start({ sequence: 19, compactions: 0, timers: 2 });
@@ -361,6 +393,7 @@ describe("TurnStatusBar contract types", () => {
       toolFinished: bar.toolFinished,
       updateContext: bar.updateContext,
       setCompactions: bar.setCompactions,
+      setSubagents: bar.setSubagents,
       finish: bar.finish,
       dispose: bar.dispose,
     };
@@ -372,6 +405,7 @@ describe("TurnStatusBar contract types", () => {
     expect(typeof surface.toolFinished).toBe("function");
     expect(typeof surface.updateContext).toBe("function");
     expect(typeof surface.setCompactions).toBe("function");
+    expect(typeof surface.setSubagents).toBe("function");
     expect(typeof surface.finish).toBe("function");
     expect(typeof surface.dispose).toBe("function");
   });
@@ -653,6 +687,25 @@ describe("createStatusBarTurnTracker", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     const lastSnap = render.mock.calls.at(-1)![0] as StatusBarSnapshot;
     expect(lastSnap.context).toEqual({ currentTokens: 31_400, totalTokens: 1_000_000 });
+  });
+
+  it("onSubagentsChanged feeds a mid-turn spawn into the live bar", async () => {
+    // The subagent was spawned AFTER the bar was seeded from pre-turn stats,
+    // so the fresh counts must reach the live snapshot during the same turn —
+    // not wait for the next turn's pre-turn stats.
+    const render = vi.fn((snap: StatusBarSnapshot) => `${snap.phase}#${snap.sequence}`);
+    const { tracker, sink } = createTracker({
+      render,
+      stats: { sequence: 1, compactions: 0, subagents: { total: 0, persistent: 0 } },
+    });
+    tracker.attachSink(sink);
+    const startingSnap = render.mock.calls.at(-1)![0] as StatusBarSnapshot;
+    expect(startingSnap.subagents).toEqual({ total: 0, persistent: 0 });
+
+    tracker.onSubagentsChanged?.({ total: 2, persistent: 1 });
+    await vi.advanceTimersByTimeAsync(1_000);
+    const lastSnap = render.mock.calls.at(-1)![0] as StatusBarSnapshot;
+    expect(lastSnap.subagents).toEqual({ total: 2, persistent: 1 });
   });
 
   it("finish renders via the injected renderer, returns the line; only the phase differs from live", async () => {

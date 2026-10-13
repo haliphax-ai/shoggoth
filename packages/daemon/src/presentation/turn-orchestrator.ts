@@ -295,6 +295,7 @@ export class PresentationTurnOrchestrator {
               onHitlQueued: (call) => tracker?.onHitlQueued?.(call),
               onCompaction: () => tracker?.onCompaction?.(),
               onContextUpdate: (update) => tracker?.onContextUpdate?.(update),
+              onSubagentsChanged: (counts) => tracker?.onSubagentsChanged?.(counts),
             };
           },
         }
