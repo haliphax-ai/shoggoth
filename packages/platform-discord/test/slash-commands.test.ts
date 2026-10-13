@@ -1085,3 +1085,174 @@ describe("cleanupLegacyGlobalCommands", () => {
     assert.strictEqual(calls.filter((c) => c.method === "deleteGlobalCommand").length, 0);
   });
 });
+describe("interaction guild-ownership guard", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  it("silently drops a slash command from a foreign guild without claiming the interaction", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const abortCalls: Array<string | undefined> = [];
+    const transport = stubTransport(calls);
+    const handler = createDiscordInteractionHandler({
+      transport,
+      applicationId: "app-123",
+      logger: stubLogger(),
+      abortSession: async (sid) => {
+        abortCalls.push(sid);
+        return true;
+      },
+      ownedGuildIds: ["g-ours"],
+    });
+
+    const ev: DiscordInteractionEvent = {
+      kind: "interaction_create",
+      id: "int-foreign",
+      token: "tok-foreign",
+      type: 2,
+      channelId: "ch-9",
+      guildId: "g-theirs",
+      userId: "u-1",
+      data: { name: "abort" },
+    };
+
+    handler(ev);
+    await vi.advanceTimersByTimeAsync(50);
+
+    // No callback at all: any response would race the instance that owns the guild.
+    assert.strictEqual(calls.length, 0, "must not respond to foreign-guild interactions");
+    assert.strictEqual(abortCalls.length, 0, "must not run the op for foreign guilds");
+  });
+
+  it("drops component interactions from a foreign guild without resolving a session", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const resolveCalls: Array<string> = [];
+    const transport = stubTransport(calls);
+    const handler = createDiscordInteractionHandler({
+      transport,
+      applicationId: "app-123",
+      logger: stubLogger(),
+      abortSession: async () => true,
+      resolveSessionForChannel: (channelId) => {
+        resolveCalls.push(channelId);
+        return "agent:main:discord:channel:ch-9";
+      },
+      ownedGuildIds: ["g-ours"],
+    });
+
+    const ev: DiscordInteractionEvent = {
+      kind: "interaction_create",
+      id: "int-foreign-comp",
+      token: "tok-foreign-comp",
+      type: 3,
+      channelId: "ch-9",
+      guildId: "g-theirs",
+      userId: "u-1",
+      data: { custom_id: "prompt_select|some-slug", values: ["some-slug"] },
+    };
+
+    handler(ev);
+    await vi.advanceTimersByTimeAsync(50);
+
+    assert.strictEqual(calls.length, 0, "must not respond to foreign-guild components");
+    assert.strictEqual(resolveCalls.length, 0, "must not resolve sessions for foreign guilds");
+  });
+
+  it("still handles interactions from an owned guild", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransport(calls);
+    const handler = createDiscordInteractionHandler({
+      transport,
+      applicationId: "app-123",
+      logger: stubLogger(),
+      abortSession: async () => true,
+      ownedGuildIds: ["g-ours"],
+    });
+
+    const ev: DiscordInteractionEvent = {
+      kind: "interaction_create",
+      id: "int-owned",
+      token: "tok-owned",
+      type: 2,
+      channelId: "ch-1",
+      guildId: "g-ours",
+      userId: "u-1",
+      data: { name: "abort" },
+    };
+
+    handler(ev);
+    await vi.advanceTimersByTimeAsync(50);
+
+    assert.strictEqual(calls.length, 1);
+    const [, , body] = calls[0]!.args as [
+      string,
+      string,
+      { type: number; data: { content: string } },
+    ];
+    assert.ok(body.data.content.includes("abort initiated"));
+  });
+
+  it("still handles DM interactions (no guild) when guild scoping is configured", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransport(calls);
+    const handler = createDiscordInteractionHandler({
+      transport,
+      applicationId: "app-123",
+      logger: stubLogger(),
+      abortSession: async () => true,
+      ownedGuildIds: ["g-ours"],
+    });
+
+    const ev: DiscordInteractionEvent = {
+      kind: "interaction_create",
+      id: "int-dm",
+      token: "tok-dm",
+      type: 2,
+      channelId: "ch-dm",
+      userId: "u-1",
+      data: { name: "abort" },
+    };
+
+    handler(ev);
+    await vi.advanceTimersByTimeAsync(50);
+
+    assert.strictEqual(calls.length, 1);
+  });
+
+  it("applies no guard when ownedGuildIds is empty or absent", async () => {
+    for (const owned of [[], undefined] as const) {
+      const calls: Array<{ method: string; args: unknown[] }> = [];
+      const transport = stubTransport(calls);
+      const handler = createDiscordInteractionHandler({
+        transport,
+        applicationId: "app-123",
+        logger: stubLogger(),
+        abortSession: async () => true,
+        ownedGuildIds: owned,
+      });
+
+      const ev: DiscordInteractionEvent = {
+        kind: "interaction_create",
+        id: "int-any",
+        token: "tok-any",
+        type: 2,
+        channelId: "ch-1",
+        guildId: "g-any",
+        userId: "u-1",
+        data: { name: "abort" },
+      };
+
+      handler(ev);
+      await vi.advanceTimersByTimeAsync(50);
+
+      assert.strictEqual(
+        calls.length,
+        1,
+        `expected handler active when ownedGuildIds=${String(owned)}`,
+      );
+    }
+  });
+});

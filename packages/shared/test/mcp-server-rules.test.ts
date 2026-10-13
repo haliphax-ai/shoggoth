@@ -327,3 +327,119 @@ describe("resolveEffectiveMcpServerRules", () => {
     assert.deepStrictEqual(rules.allow, ["global-only"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 4. Subagent cascade — subagents inherit the agent's top-level rules
+// ---------------------------------------------------------------------------
+
+describe("resolveEffectiveMcpServerRules — subagent top-level inheritance", () => {
+  /** Minimal valid ShoggothConfig for testing. */
+  const base: ShoggothConfig = {
+    logLevel: "info",
+    stateDbPath: "/tmp/s.db",
+    socketPath: "/tmp/s.sock",
+    workspacesRoot: "/w",
+    secretsDirectory: "/s",
+    inboundMediaRoot: "/m",
+    operatorDirectory: "/o",
+    configDirectory: "/c",
+    hitl: { defaultApprovalTimeoutMs: 1, toolRisk: {}, bypassUpTo: "safe" },
+    memory: { paths: [], embeddings: { enabled: false } },
+    skills: { scanRoots: [], disabledIds: [] },
+    plugins: [],
+    mcp: { servers: [], poolScope: "global" },
+    policy: {
+      operator: {
+        controlOps: { allow: ["*"], deny: [] },
+        tools: { allow: ["*"], deny: [] },
+      },
+      agent: {
+        controlOps: { allow: ["*"], deny: [] },
+        tools: { allow: ["*"], deny: [] },
+      },
+      auditRedaction: { jsonPaths: [] },
+    },
+  };
+
+  it("subagent inherits the agent's top-level mcp.serverRules when no subagentMcp is configured", () => {
+    const cfg: ShoggothConfig = {
+      ...base,
+      agents: {
+        list: {
+          myagent: {
+            mcp: { serverRules: { allow: ["*", "priv"], deny: ["blocked"] } },
+          },
+        },
+      },
+    };
+    const rules = resolveEffectiveMcpServerRules(cfg, "myagent", true);
+    assert.deepStrictEqual(rules, { allow: ["*", "priv"], deny: ["blocked"] });
+  });
+
+  it("explicit server named in the agent's allow list is allowed for subagents", () => {
+    const cfg: ShoggothConfig = {
+      ...base,
+      agents: {
+        list: {
+          myagent: {
+            mcp: { serverRules: { allow: ["*", "priv"], deny: [] } },
+          },
+        },
+      },
+    };
+    const rules = resolveEffectiveMcpServerRules(cfg, "myagent", true);
+    // `priv` is explicit — only the exact entry from the inherited allow list
+    // covers it; the wildcard still covers implicit servers.
+    assert.strictEqual(evaluateMcpServerRules("priv", rules, true), true);
+    assert.strictEqual(evaluateMcpServerRules("other", rules), true);
+  });
+
+  it("explicit server stays denied for subagents when the agent's allow list does not name it", () => {
+    const cfg: ShoggothConfig = {
+      ...base,
+      agents: {
+        list: {
+          myagent: {
+            mcp: { serverRules: { allow: ["*"], deny: [] } },
+          },
+        },
+      },
+    };
+    const rules = resolveEffectiveMcpServerRules(cfg, "myagent", true);
+    assert.strictEqual(evaluateMcpServerRules("priv", rules, true), false);
+    assert.strictEqual(evaluateMcpServerRules("pub", rules), true);
+  });
+
+  it("per-agent subagentMcp replaces the inherited allow while unset fields stay inherited (field-level)", () => {
+    const cfg: ShoggothConfig = {
+      ...base,
+      agents: {
+        list: {
+          myagent: {
+            mcp: { serverRules: { allow: ["*", "priv"], deny: ["blocked"] } },
+            subagentMcp: { serverRules: { allow: ["sandbox"] } },
+          },
+        },
+      },
+    };
+    const rules = resolveEffectiveMcpServerRules(cfg, "myagent", true);
+    // `allow` overridden by the narrower subagentMcp scope; `deny` inherited
+    // from the agent's top-level rules.
+    assert.deepStrictEqual(rules, { allow: ["sandbox"], deny: ["blocked"] });
+  });
+
+  it("top-level sessions are unaffected by the subagent inheritance level", () => {
+    const cfg: ShoggothConfig = {
+      ...base,
+      agents: {
+        list: {
+          myagent: {
+            mcp: { serverRules: { allow: ["*", "priv"], deny: [] } },
+          },
+        },
+      },
+    };
+    const rules = resolveEffectiveMcpServerRules(cfg, "myagent", false);
+    assert.deepStrictEqual(rules, { allow: ["*", "priv"], deny: [] });
+  });
+});
