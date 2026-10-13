@@ -125,6 +125,11 @@ export interface RunInboundSessionTurnOptions {
             readonly currentTokens: number;
             readonly totalTokens?: number;
           }) => void;
+          /** A subagent spawn succeeded mid-turn: fresh active counts. */
+          readonly onSubagentsChanged?: (counts: {
+            readonly total: number;
+            readonly persistent: number;
+          }) => void;
         }
       | undefined
     >;
@@ -167,6 +172,7 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
         onHitlQueued?: (call: { name: string; argsJson: string }) => void;
         onCompaction?: () => void;
         onContextUpdate?: (update: { currentTokens: number; totalTokens?: number }) => void;
+        onSubagentsChanged?: (counts: { total: number; persistent: number }) => void;
       }
     | undefined;
 
@@ -252,6 +258,7 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
             onHitlQueued: (call) => statusBar?.onHitlQueued?.(call),
             onCompaction: () => statusBar?.onCompaction?.(),
             onContextUpdate: (update) => statusBar?.onContextUpdate?.(update),
+            onSubagentsChanged: (counts) => statusBar?.onSubagentsChanged?.(counts),
           }
         : undefined,
     });

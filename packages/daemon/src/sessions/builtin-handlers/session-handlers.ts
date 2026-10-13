@@ -15,6 +15,7 @@ import {
   type SessionStore,
 } from "../session-store";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
+import { getSessionSubagentCounts } from "../../presentation/status-bar";
 import { getLogger } from "../../logging";
 
 const log = getLogger("subagent");
@@ -456,6 +457,13 @@ async function subagentHandler(
       childId,
       parentSessionId: ctx.sessionId,
     });
+    // Successful spawn: refresh the live subagent counts so the in-flight
+    // turn status bar shows the new subagent immediately (not next turn).
+    // Inline one-shots are already terminated when their op returns, so
+    // they leave the counts unchanged.
+    if (childId) {
+      ctx.onSubagentsChanged?.(getSessionSubagentCounts(ctx.db, ctx.sessionId));
+    }
   }
   return result;
 }
