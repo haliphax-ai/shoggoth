@@ -497,6 +497,39 @@ const MEDIA_GENERATE_TOOL_DESCRIPTOR: AggregatedTool = {
   },
 };
 
+const DECISION_TOOL_DESCRIPTOR: AggregatedTool = {
+  namespacedName: "builtin-decision",
+  sourceId: "builtin",
+  originalName: "decision",
+  name: "decision",
+  description:
+    "Query a decision (classifier) model. Evaluates a state against typed questions (noul: yes/no probability, choice: pick one option, score: rate against ordered levels) and returns structured answers with probabilities.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      model: {
+        type: "string",
+        description: "Decision model name (e.g. jev-latest, jev-1.13.0)",
+      },
+      state: {
+        description:
+          "The content to evaluate: a plain string, or structured data (object/array) such as chat logs or the current state of your application.",
+      },
+      questions: {
+        type: "object",
+        description:
+          "Map of typed question id -> question. Each question has a type (noul | choice | score), instructions (string | object | array), and type-specific criteria: noul takes optional {true, false} descriptions, choice takes a map of option -> rubric (max 255 options), score takes an ordered array of 2-10 level descriptions.",
+        additionalProperties: true,
+      },
+      timeout_ms: {
+        type: "number",
+        description: "Optional request timeout in milliseconds",
+      },
+    },
+    required: ["model", "state", "questions"],
+  },
+};
+
 const WEB_SEARCH_TOOL_DESCRIPTOR: AggregatedTool = {
   namespacedName: "builtin-web-search",
   sourceId: "builtin",
@@ -573,6 +606,38 @@ export function createMediaGenerateToolFinalizer(
     const aggregated = createAggregateMcpCatalogResult([
       ...ctx.aggregated.tools,
       MEDIA_GENERATE_TOOL_DESCRIPTOR,
+    ]);
+    return {
+      aggregated,
+      toolsOpenAi: openAiToolsFromCatalog(aggregated),
+      toolsLoop: mcpToolsForToolLoop(aggregated),
+      external: ctx.external,
+    };
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Decision tool (TypeSafe System One classifiers) — conditionally injected
+// via finalizer when a decision provider with models is configured
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a context finalizer that appends `builtin-decision` when a decision
+ * provider with at least one model is configured.
+ */
+export function createDecisionToolFinalizer(
+  config: ShoggothConfig,
+): (ctx: SessionMcpToolContext, sessionId: string) => SessionMcpToolContext {
+  const hasDecisionConfig = ((config as any).decision?.providers ?? []).some(
+    (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
+  );
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  return (ctx, _sessionId) => {
+    if (!hasDecisionConfig) return ctx;
+    if (ctx.aggregated.tools.some((t) => t.namespacedName === "builtin-decision")) return ctx;
+    const aggregated = createAggregateMcpCatalogResult([
+      ...ctx.aggregated.tools,
+      DECISION_TOOL_DESCRIPTOR,
     ]);
     return {
       aggregated,
