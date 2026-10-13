@@ -29,6 +29,16 @@ function stubTransport(calls: Array<{ method: string; args: unknown[] }>): Disco
     async registerGlobalCommands(appId, commands) {
       calls.push({ method: "registerGlobalCommands", args: [appId, commands] });
     },
+    async registerGuildCommands(appId, guildId, commands) {
+      calls.push({ method: "registerGuildCommands", args: [appId, guildId, commands] });
+    },
+    async listGlobalCommands(appId) {
+      calls.push({ method: "listGlobalCommands", args: [appId] });
+      return [];
+    },
+    async deleteGlobalCommand(appId, commandId) {
+      calls.push({ method: "deleteGlobalCommand", args: [appId, commandId] });
+    },
     async editOriginalInteractionResponse(applicationId, token, body) {
       calls.push({ method: "editOriginalInteractionResponse", args: [applicationId, token, body] });
     },
