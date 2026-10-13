@@ -331,12 +331,11 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           interactionTransportRef.current = discordMessaging.discordRestTransport;
           // De-register slash commands (if this instance registered them) before the
           // transport stops, so an offline instance leaves no stale commands behind.
+          // Slash commands stay registered at shutdown (durable command IDs) —
+          // the drain only stops the transport.
           registerDrain(
             "discord-messaging",
             createDiscordMessagingShutdownDrain({
-              registrationRef: state.slashCommandRegistrationRef,
-              transport: discordMessaging.discordRestTransport,
-              logger,
               stop: () => discordMessaging.stop(),
             }),
           );
