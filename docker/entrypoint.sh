@@ -30,7 +30,7 @@ fix_dir /var/lib/shoggoth/daemon 0700 shoggoth shoggoth
 fix_dir /var/lib/shoggoth/state 0700 shoggoth shoggoth
 
 # Workspaces root: setgid (2…) so new session dirs inherit group `agent`; agent UID matches group perms.
-fix_dir /var/lib/shoggoth/workspaces 0770 agent agent
+fix_dir /var/lib/shoggoth/workspaces 0770 shoggoth agent
 fix_dir /var/lib/shoggoth/operator 0700 shoggoth shoggoth
 fix_dir /var/lib/shoggoth/skills 0755 shoggoth shoggoth
 fix_dir /var/lib/shoggoth/media/inbound 0750 shoggoth shoggoth
