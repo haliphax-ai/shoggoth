@@ -77,8 +77,21 @@ describe("parseDecisionEvaluateArgs", () => {
     });
   });
 
-  it("requires --model", () => {
+  it("model is optional (config default applies)", () => {
     const result = parseDecisionEvaluateArgs([
+      "--state",
+      "s",
+      "--questions",
+      '{"q":{"type":"noul","instructions":"ok?"}}',
+    ]);
+    assert.ok(result.ok);
+    assert.strictEqual(result.payload.model, undefined);
+  });
+
+  it("rejects an empty --model", () => {
+    const result = parseDecisionEvaluateArgs([
+      "--model",
+      "",
       "--state",
       "s",
       "--questions",
@@ -211,6 +224,29 @@ describe("runDecisionCli evaluate", () => {
     });
   });
 
+  it("omits model from the payload when --model is not given", async () => {
+    mockInvoke.mockResolvedValue({
+      ok: true,
+      result: { status: "complete", model: "jev-latest", answers: {} },
+    });
+
+    await runDecisionCli([
+      "evaluate",
+      "--state",
+      "s",
+      "--questions",
+      '{"q":{"type":"noul","instructions":"ok?"}}',
+    ]);
+
+    assert.strictEqual(mockInvoke.mock.calls.length, 1);
+    const call = mockInvoke.mock.calls[0]![0] as {
+      op: string;
+      payload: Record<string, unknown>;
+    };
+    assert.strictEqual(call.op, "decision_evaluate");
+    assert.strictEqual("model" in call.payload, false);
+  });
+
   it("displays answers on success", async () => {
     mockInvoke.mockResolvedValue({
       ok: true,
@@ -284,10 +320,11 @@ describe("runDecisionCli evaluate", () => {
 // ---------------------------------------------------------------------------
 
 describe("runDecisionCli models", () => {
-  it("lists configured models from decision providers", async () => {
+  it("lists configured models from decision providers, marking the default", async () => {
     mockLoadLayeredConfig.mockReturnValue({
       socketPath: "/tmp/test.sock",
       decision: {
+        defaultModel: "jev-latest",
         providers: [
           {
             id: "typesafe-main",
@@ -305,6 +342,7 @@ describe("runDecisionCli models", () => {
     assert.ok(output.includes("jev-latest"), `Expected model in output: ${output}`);
     assert.ok(output.includes("jev-1.13.0"), `Expected model in output: ${output}`);
     assert.ok(output.includes("typesafe-main"), `Expected provider id in output: ${output}`);
+    assert.ok(output.includes("(default)"), `Expected default marker in output: ${output}`);
     assert.strictEqual(mockInvoke.mock.calls.length, 0);
   });
 

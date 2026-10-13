@@ -21,7 +21,8 @@ export interface DecisionProviderConfig {
 }
 
 export interface DecisionEvaluateRequest {
-  model: string;
+  /** Model name; falls back to the configured `defaultModel` when omitted. */
+  model?: string;
   /** Plain string, object, or array — the content to evaluate. */
   state: unknown;
   /** Map of typed questions: `noul`, `choice`, or `score`. */
@@ -40,9 +41,11 @@ export type DecisionEvaluateResult =
 
 export class DecisionService {
   private readonly providers: DecisionProviderConfig[];
+  private readonly defaultModel?: string;
 
-  constructor(config: { providers: DecisionProviderConfig[] }) {
+  constructor(config: { providers: DecisionProviderConfig[]; defaultModel?: string }) {
     this.providers = config.providers;
+    this.defaultModel = config.defaultModel;
   }
 
   static fromConfig(config: ShoggothDecisionConfig): DecisionService {
@@ -54,7 +57,7 @@ export class DecisionService {
       models: (p.models ?? []).map((m) => ({ name: m.name })),
     }));
 
-    return new DecisionService({ providers });
+    return new DecisionService({ providers, defaultModel: config.defaultModel });
   }
 
   /** Resolve a model name to the provider that serves it. */
@@ -68,11 +71,19 @@ export class DecisionService {
   }
 
   async evaluate(req: DecisionEvaluateRequest): Promise<DecisionEvaluateResult> {
-    const provider = this.resolveModel(req.model);
+    const model = req.model ?? this.defaultModel;
+    if (!model) {
+      return {
+        status: "error",
+        error: "model is required: no model given and no default model is configured",
+      };
+    }
+
+    const provider = this.resolveModel(model);
     if (!provider) {
       return {
         status: "error",
-        error: `No provider found for model: ${req.model}`,
+        error: `No provider found for model: ${model}`,
       };
     }
 
@@ -87,7 +98,7 @@ export class DecisionService {
         },
         body: JSON.stringify({
           state: req.state,
-          model: req.model,
+          model,
           questions: req.questions,
         }),
         ...(req.timeout_ms != null ? { signal: AbortSignal.timeout(req.timeout_ms) } : {}),
@@ -109,13 +120,13 @@ export class DecisionService {
 
       return {
         status: "complete",
-        model: json.model ?? req.model,
+        model: json.model ?? model,
         answers: json.answers ?? {},
         ...(json.usage ? { usage: json.usage } : {}),
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log.warn("decision_service_evaluate_failed", { error: msg, model: req.model });
+      log.warn("decision_service_evaluate_failed", { error: msg, model });
       return { status: "error", error: msg };
     }
   }

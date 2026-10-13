@@ -17,9 +17,10 @@ async function socketPathFromEnv(configPath: string): Promise<string> {
 function printDecisionHelp(): void {
   console.log(`shoggoth ${VERSION}
 Usage:
-  shoggoth decision evaluate --model <model> --state <state> --questions <json> [--timeout <ms>]
+  shoggoth decision evaluate [--model <model>] --state <state> --questions <json> [--timeout <ms>]
   shoggoth decision models    List configured decision models
 
+--model      Optional; falls back to the configured decision defaultModel.
 --state      A plain string, or JSON (object/array) when valid JSON.
 --questions  JSON map of typed questions (noul | choice | score), e.g.
              '{"is_urgent":{"type":"noul","instructions":"Is this urgent?"}}'`);
@@ -34,7 +35,7 @@ type ParseErr = { ok: false; error: string };
 
 export function parseDecisionEvaluateArgs(args: string[]):
   | ParseOk<{
-      model: string;
+      model?: string;
       state: unknown;
       questions: Record<string, unknown>;
       timeout_ms?: number;
@@ -48,7 +49,9 @@ export function parseDecisionEvaluateArgs(args: string[]):
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
     if (a === "--model") {
-      model = args[++i];
+      const v = args[++i];
+      if (!v) return { ok: false, error: "--model must not be empty" };
+      model = v;
     } else if (a === "--state") {
       state = args[++i];
     } else if (a === "--questions") {
@@ -62,7 +65,6 @@ export function parseDecisionEvaluateArgs(args: string[]):
     }
   }
 
-  if (!model) return { ok: false, error: "--model is required" };
   if (state === undefined) return { ok: false, error: "--state is required" };
   if (!questionsRaw) return { ok: false, error: "--questions is required" };
 
@@ -91,11 +93,12 @@ export function parseDecisionEvaluateArgs(args: string[]):
   }
 
   const payload: {
-    model: string;
+    model?: string;
     state: unknown;
     questions: Record<string, unknown>;
     timeout_ms?: number;
-  } = { model, state: parsedState, questions: questions as Record<string, unknown> };
+  } = { state: parsedState, questions: questions as Record<string, unknown> };
+  if (model) payload.model = model;
   if (timeout_ms != null) payload.timeout_ms = timeout_ms;
   return { ok: true, payload };
 }
@@ -122,6 +125,7 @@ export async function runDecisionCli(argv: string[]): Promise<void> {
       return;
     }
     const lines: string[] = [];
+    const defaultModel = (config.decision as { defaultModel?: string } | undefined)?.defaultModel;
     for (const provider of providers) {
       const p = provider as {
         id: string;
@@ -129,7 +133,8 @@ export async function runDecisionCli(argv: string[]): Promise<void> {
         models?: { name: string }[];
       };
       for (const model of p.models ?? []) {
-        lines.push(`${model.name}  →  ${p.kind}  [${p.id}]`);
+        const marker = model.name === defaultModel ? "  (default)" : "";
+        lines.push(`${model.name}${marker}  →  ${p.kind}  [${p.id}]`);
       }
     }
     console.log(lines.join("\n"));
@@ -142,7 +147,7 @@ export async function runDecisionCli(argv: string[]): Promise<void> {
     if (!parsed.ok) {
       console.error(parsed.error);
       console.error(
-        "usage: shoggoth decision evaluate --model <model> --state <state> --questions <json> [--timeout <ms>]",
+        "usage: shoggoth decision evaluate [--model <model>] --state <state> --questions <json> [--timeout <ms>]",
       );
       process.exitCode = 1;
       return;

@@ -3091,10 +3091,19 @@ export async function handleIntegrationControlOp(
         throw new IntegrationOpError("ERR_FORBIDDEN", "decision_evaluate requires agent principal");
       }
       const pl = payloadObject(req);
-      const model = pl.model;
-      if (typeof model !== "string" || !model) {
-        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "decision_evaluate requires model");
+      // model is optional — falls back to the configured decision defaultModel
+      const modelRaw = pl.model;
+      if (
+        modelRaw !== undefined &&
+        modelRaw !== null &&
+        (typeof modelRaw !== "string" || !modelRaw)
+      ) {
+        throw new IntegrationOpError(
+          "ERR_INVALID_PAYLOAD",
+          "decision_evaluate model must be a non-empty string",
+        );
       }
+      const model = typeof modelRaw === "string" && modelRaw ? modelRaw : undefined;
       if (pl.state === undefined || pl.state === null) {
         throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "decision_evaluate requires state");
       }

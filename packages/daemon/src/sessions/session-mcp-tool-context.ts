@@ -497,38 +497,70 @@ const MEDIA_GENERATE_TOOL_DESCRIPTOR: AggregatedTool = {
   },
 };
 
-const DECISION_TOOL_DESCRIPTOR: AggregatedTool = {
-  namespacedName: "builtin-decision",
-  sourceId: "builtin",
-  originalName: "decision",
-  name: "decision",
-  description:
-    "Query a decision (classifier) model. Evaluates a state against typed questions (noul: yes/no probability, choice: pick one option, score: rate against ordered levels) and returns structured answers with probabilities.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      model: {
-        type: "string",
-        description: "Decision model name (e.g. jev-latest, jev-1.13.0)",
+/**
+ * Build the `builtin-decision` tool descriptor from config. When a
+ * `defaultModel` is configured, the `model` input becomes optional and the
+ * descriptions name the default model/provider combo so the agent knows
+ * exactly which model will handle an omitted-model call.
+ */
+function decisionToolDescriptor(config: ShoggothConfig): AggregatedTool {
+  const decision = (config as any).decision;
+  const providers: { id?: string; models?: { name: string }[] }[] = decision?.providers ?? [];
+  const defaultModel: string | undefined = decision?.defaultModel;
+  const defaultProviderId = defaultModel
+    ? providers.find((p) => (p.models ?? []).some((m) => m.name === defaultModel))?.id
+    : undefined;
+  const defaultModelLabel =
+    defaultModel != null
+      ? `'${defaultModel}'${defaultProviderId ? ` (provider '${defaultProviderId}')` : ""}`
+      : undefined;
+
+  const description =
+    `Query a decision (classifier) model. Evaluates a state against typed questions ` +
+    `(noul: yes/no probability, choice: pick one option, score: rate against ordered levels) ` +
+    `and returns structured answers with probabilities.` +
+    (defaultModelLabel
+      ? ` Uses the default configured model ${defaultModelLabel} when model is omitted.`
+      : ` No default model is configured, so model is required.`);
+
+  const modelDescription = defaultModelLabel
+    ? `Optional. Decision model name (e.g. jev-latest, jev-1.13.0). ` +
+      `Defaults to the configured default model ${defaultModelLabel} when omitted.`
+    : `Required. Decision model name (e.g. jev-latest, jev-1.13.0). ` +
+      `No default model is configured, so this must be given.`;
+
+  return {
+    namespacedName: "builtin-decision",
+    sourceId: "builtin",
+    originalName: "decision",
+    name: "decision",
+    description,
+    inputSchema: {
+      type: "object",
+      properties: {
+        model: {
+          type: "string",
+          description: modelDescription,
+        },
+        state: {
+          description:
+            "The content to evaluate: a plain string, or structured data (object/array) such as chat logs or the current state of your application.",
+        },
+        questions: {
+          type: "object",
+          description:
+            "Map of typed question id -> question. Each question has a type (noul | choice | score), instructions (string | object | array), and type-specific criteria: noul takes optional {true, false} descriptions, choice takes a map of option -> rubric (max 255 options), score takes an ordered array of 2-10 level descriptions.",
+          additionalProperties: true,
+        },
+        timeout_ms: {
+          type: "number",
+          description: "Optional request timeout in milliseconds",
+        },
       },
-      state: {
-        description:
-          "The content to evaluate: a plain string, or structured data (object/array) such as chat logs or the current state of your application.",
-      },
-      questions: {
-        type: "object",
-        description:
-          "Map of typed question id -> question. Each question has a type (noul | choice | score), instructions (string | object | array), and type-specific criteria: noul takes optional {true, false} descriptions, choice takes a map of option -> rubric (max 255 options), score takes an ordered array of 2-10 level descriptions.",
-        additionalProperties: true,
-      },
-      timeout_ms: {
-        type: "number",
-        description: "Optional request timeout in milliseconds",
-      },
+      required: defaultModel ? ["state", "questions"] : ["model", "state", "questions"],
     },
-    required: ["model", "state", "questions"],
-  },
-};
+  };
+}
 
 const WEB_SEARCH_TOOL_DESCRIPTOR: AggregatedTool = {
   namespacedName: "builtin-web-search",
@@ -637,7 +669,7 @@ export function createDecisionToolFinalizer(
     if (ctx.aggregated.tools.some((t) => t.namespacedName === "builtin-decision")) return ctx;
     const aggregated = createAggregateMcpCatalogResult([
       ...ctx.aggregated.tools,
-      DECISION_TOOL_DESCRIPTOR,
+      decisionToolDescriptor(config),
     ]);
     return {
       aggregated,

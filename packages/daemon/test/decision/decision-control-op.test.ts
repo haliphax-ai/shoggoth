@@ -132,17 +132,15 @@ describe("decision_evaluate control op", () => {
   });
 
   describe("payload validation", () => {
-    it("rejects missing model", async () => {
+    it("allows missing model (config default applies downstream)", async () => {
+      mockEvaluate.mockResolvedValueOnce({ status: "complete", model: "jev-latest", answers: {} });
+
       const req = makeReq(validPayload());
       delete (req.payload as Record<string, unknown>).model;
-      await assert.rejects(
-        () => handleIntegrationControlOp(req, agentPrincipal(), makeCtx()),
-        (err: IntegrationOpError) => {
-          assert.equal(err.code, "ERR_INVALID_PAYLOAD");
-          assert.ok(err.message.includes("model"));
-          return true;
-        },
-      );
+      await handleIntegrationControlOp(req, agentPrincipal(), makeCtx());
+
+      assert.equal(mockEvaluate.mock.calls.length, 1);
+      assert.equal(mockEvaluate.mock.calls[0]![0].model, undefined);
     });
 
     it("rejects empty string model", async () => {
@@ -368,5 +366,64 @@ describe("decision config schema", () => {
     if (parsed.success) {
       assert.deepStrictEqual(parsed.data.providers, []);
     }
+  });
+
+  it("accepts a defaultModel matching a configured model", () => {
+    const fragment = {
+      decision: {
+        defaultModel: "jev-latest",
+        providers: [
+          {
+            id: "typesafe-main",
+            kind: "typesafe",
+            baseUrl: "https://api.typesafe.ai",
+            models: [{ name: "jev-latest" }],
+          },
+        ],
+      },
+    };
+    const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
+    assert.ok(parsed.success, JSON.stringify(parsed.error?.issues));
+  });
+
+  it("rejects a defaultModel that matches no configured model", () => {
+    const fragment = {
+      decision: {
+        defaultModel: "jev-typo",
+        providers: [
+          {
+            id: "typesafe-main",
+            kind: "typesafe",
+            baseUrl: "https://api.typesafe.ai",
+            models: [{ name: "jev-latest" }],
+          },
+        ],
+      },
+    };
+    const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
+    assert.ok(!parsed.success);
+  });
+
+  it("rejects a defaultModel when no providers are configured", () => {
+    const fragment = { decision: { defaultModel: "jev-latest", providers: [] } };
+    const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
+    assert.ok(!parsed.success);
+  });
+
+  it("accepts decision without a defaultModel", () => {
+    const fragment = {
+      decision: {
+        providers: [
+          {
+            id: "typesafe-main",
+            kind: "typesafe",
+            baseUrl: "https://api.typesafe.ai",
+            models: [{ name: "jev-latest" }],
+          },
+        ],
+      },
+    };
+    const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
+    assert.ok(parsed.success, JSON.stringify(parsed.error?.issues));
   });
 });

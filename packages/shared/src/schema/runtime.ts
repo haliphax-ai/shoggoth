@@ -114,8 +114,25 @@ const decisionProviderSchema = z.object({
   models: z.array(decisionModelSchema).optional().default([]),
 });
 export const shoggothDecisionConfigSchema = z
-  .object({ providers: z.array(decisionProviderSchema).optional().default([]) })
-  .strict();
+  .object({
+    /** Model used when a request omits `model`. Must match a configured provider model. */
+    defaultModel: z.string().min(1).optional(),
+    providers: z.array(decisionProviderSchema).optional().default([]),
+  })
+  .strict()
+  .superRefine((cfg, ctx) => {
+    if (!cfg.defaultModel) return;
+    const known = (cfg.providers ?? []).some((p) =>
+      (p.models ?? []).some((m) => m.name === cfg.defaultModel),
+    );
+    if (!known) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["defaultModel"],
+        message: `defaultModel "${cfg.defaultModel}" does not match any configured provider model`,
+      });
+    }
+  });
 export type ShoggothDecisionConfig = z.infer<typeof shoggothDecisionConfigSchema>;
 
 export const shoggothRuntimeConfigSchema = z

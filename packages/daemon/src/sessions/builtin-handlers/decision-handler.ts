@@ -25,7 +25,10 @@ async function decisionHandler(
   const state = args.state;
   const questions = args.questions as Record<string, unknown> | undefined;
 
-  if (!model) return { resultJson: JSON.stringify({ error: "model is required" }) };
+  // model is optional — falls back to the configured decision defaultModel
+  if (model !== undefined && (typeof model !== "string" || !model)) {
+    return { resultJson: JSON.stringify({ error: "model must be a non-empty string" }) };
+  }
   if (state === undefined || state === null) {
     return { resultJson: JSON.stringify({ error: "state is required" }) };
   }
@@ -64,7 +67,7 @@ async function decisionHandler(
   let result: Record<string, unknown>;
   try {
     result = (await invoker(ctx.sessionId, "decision_evaluate", {
-      model,
+      ...(model ? { model } : {}),
       state,
       questions,
       ...(timeoutMs != null ? { timeout_ms: timeoutMs } : {}),

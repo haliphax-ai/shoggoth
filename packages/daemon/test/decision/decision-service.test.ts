@@ -237,4 +237,56 @@ describe("DecisionService", () => {
       assert.deepStrictEqual(body.questions, questions);
     });
   });
+
+  describe("default model", () => {
+    const defaultConfig: ShoggothDecisionConfig = {
+      ...baseConfig,
+      defaultModel: "jev-latest",
+    };
+
+    it("uses the configured default model when model is omitted", async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({
+          model: "jev-latest",
+          answers: {},
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+      );
+
+      const svc = DecisionService.fromConfig(defaultConfig);
+      const result = await svc.evaluate({ state: "s", questions: noulQuestions });
+
+      assert.equal(fetchMock.mock.calls.length, 1);
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit & Record<string, any>];
+      assert.equal(JSON.parse(init.body as string).model, "jev-latest");
+      assert.equal(result.status, "complete");
+    });
+
+    it("explicit model overrides the default", async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({
+          model: "jev-1.13.0",
+          answers: {},
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+      );
+
+      const svc = DecisionService.fromConfig(defaultConfig);
+      await svc.evaluate({ model: "jev-1.13.0", state: "s", questions: noulQuestions });
+
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit & Record<string, any>];
+      assert.equal(JSON.parse(init.body as string).model, "jev-1.13.0");
+    });
+
+    it("returns error when model is omitted and no default is configured", async () => {
+      const svc = DecisionService.fromConfig(baseConfig);
+      const result = await svc.evaluate({ state: "s", questions: noulQuestions });
+
+      assert.equal(result.status, "error");
+      if (result.status === "error") {
+        assert.ok(result.error.includes("model"), result.error);
+      }
+      assert.equal(fetchMock.mock.calls.length, 0);
+    });
+  });
 });

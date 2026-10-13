@@ -59,9 +59,23 @@ describe("decision-handler", () => {
     mockEvaluate.mockReset();
   });
 
-  it("returns error when model is missing", async () => {
+  it("allows omitted model (config default applies downstream)", async () => {
+    const invoker = vi.fn().mockResolvedValue({ status: "complete", answers: {} });
+    const ctx = makeCtx(makeConfig(configuredDecision), invoker);
+
+    const { model: _omitted, ...argsWithoutModel } = validArgs;
+    const result = await registry.execute("decision", argsWithoutModel, ctx);
+
+    expect(invoker.mock.calls.length).toBe(1);
+    const [, op, payload] = invoker.mock.calls[0] as [string, string, any];
+    expect(op).toBe("decision_evaluate");
+    expect("model" in payload).toBe(false);
+    expect(JSON.parse(result.resultJson).status).toBe("complete");
+  });
+
+  it("rejects a non-string model", async () => {
     const ctx = makeCtx(makeConfig(configuredDecision));
-    const result = await registry.execute("decision", { ...validArgs, model: undefined }, ctx);
+    const result = await registry.execute("decision", { ...validArgs, model: 42 }, ctx);
     expect(JSON.parse(result.resultJson).error).toContain("model");
   });
 

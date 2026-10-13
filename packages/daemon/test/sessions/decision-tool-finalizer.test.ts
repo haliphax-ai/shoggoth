@@ -45,6 +45,7 @@ function makeConfig(overrides?: Partial<{ decision: ShoggothConfig["decision"] }
 }
 
 const decisionConfigWithModels = {
+  defaultModel: "jev-latest",
   providers: [
     {
       id: "typesafe-main",
@@ -163,7 +164,37 @@ describe("createDecisionToolFinalizer", () => {
         "state",
         "timeout_ms",
       ]);
+      // model is optional when a default model is configured
+      expect(schema.required.sort()).toEqual(["questions", "state"]);
+    });
+
+    it("names the default model and provider in the description", () => {
+      const tool = getDescriptor();
+      expect(tool.description).toContain("jev-latest");
+      expect(tool.description).toContain("typesafe-main");
+      expect(tool.description).toContain("default");
+    });
+
+    it("describes the model input as optional when a default is configured", () => {
+      const tool = getDescriptor();
+      const schema = tool.inputSchema as { properties: Record<string, { description?: string }> };
+      const desc = schema.properties.model?.description ?? "";
+      expect(desc).toContain("jev-latest");
+      expect(desc).toContain("typesafe-main");
+      expect(desc.toLowerCase()).toContain("optional");
+    });
+
+    it("requires model and flags it in descriptions when no default is configured", () => {
+      const { defaultModel: _omitted, ...noDefault } = decisionConfigWithModels;
+      const tool = getDescriptor(makeConfig({ decision: noDefault }));
+
+      const schema = tool.inputSchema as {
+        properties: Record<string, { description?: string }>;
+        required: string[];
+      };
       expect(schema.required.sort()).toEqual(["model", "questions", "state"]);
+      expect(schema.properties.model?.description).toContain("Required");
+      expect(tool.description).not.toContain("typesafe-main");
     });
 
     it("appears in the OpenAI tool catalog", () => {
