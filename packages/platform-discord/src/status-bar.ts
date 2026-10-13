@@ -45,6 +45,10 @@ export function renderDiscordStatusBar(
     sections.push(`🕵️ \`${total} (${persistent})\``);
   }
 
+  if (cfg.timersEnabled && snap.timers && snap.timers > 0) {
+    sections.push(`⏰ \`${snap.timers}\``);
+  }
+
   if (cfg.contextWindowEnabled && snap.context) {
     const { currentTokens, totalTokens } = snap.context;
     if (totalTokens != null && totalTokens > 0) {
