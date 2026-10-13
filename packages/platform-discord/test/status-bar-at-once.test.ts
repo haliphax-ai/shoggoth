@@ -25,7 +25,6 @@ function createStubTransport(): DiscordRestTransport {
     searchMessages: async () => ({ messages: [], total_results: 0 }),
     triggerTypingIndicator: async () => {},
     interactionCallback: async () => {},
-    registerGlobalCommands: async () => {},
     editOriginalInteractionResponse: async () => {},
   } as unknown as DiscordRestTransport;
 }

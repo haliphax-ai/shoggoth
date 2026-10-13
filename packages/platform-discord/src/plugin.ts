@@ -11,11 +11,7 @@ import {
 } from "@shoggoth/plugins";
 import { discordPlatformRegistration } from "./platform-registration";
 import { createDiscordProbe } from "./probe";
-import {
-  startDaemonDiscordMessaging,
-  createDiscordMessagingShutdownDrain,
-  type DiscordMessagingRuntime,
-} from "./bootstrap";
+import { startDaemonDiscordMessaging, type DiscordMessagingRuntime } from "./bootstrap";
 import { createHitlDiscordNoticeRegistry } from "./hitl/notice-registry";
 import {
   startDiscordPlatform,
@@ -58,7 +54,6 @@ interface DiscordPluginState {
     current: ((ev: ReactionAddEvent) => void) | undefined;
   };
   /** Set when this instance registered the global slash commands; cleared when de-registered. */
-  slashCommandRegistrationRef: { current: string | undefined };
   getToken: () => string | undefined;
   /** THREAD_CREATE events received before the platform handle exists (gateway connects first). */
   pendingThreadCreates: DiscordThreadCreateEvent[];
@@ -110,7 +105,6 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
   const state: DiscordPluginState = {
     reactionBotUserIdRef: { current: undefined },
     reactionPassthroughRef: { current: undefined },
-    slashCommandRegistrationRef: { current: undefined },
     getToken: () => undefined,
     pendingThreadCreates: [],
   };
@@ -235,7 +229,6 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
             return row !== undefined && row.status !== "terminated";
           },
           noticeResolver,
-          slashCommandRegistrationRef: state.slashCommandRegistrationRef,
           onThreadCreate: processThreadCreate,
           onInteractionCreate: createDiscordInteractionHandler({
             transport: {
@@ -331,15 +324,9 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           interactionTransportRef.current = discordMessaging.discordRestTransport;
           // De-register slash commands (if this instance registered them) before the
           // transport stops, so an offline instance leaves no stale commands behind.
-          registerDrain(
-            "discord-messaging",
-            createDiscordMessagingShutdownDrain({
-              registrationRef: state.slashCommandRegistrationRef,
-              transport: discordMessaging.discordRestTransport,
-              logger,
-              stop: () => discordMessaging.stop(),
-            }),
-          );
+          // Slash commands stay registered at shutdown (durable command IDs):
+          // nothing tears the command list down when messaging stops.
+          registerDrain("discord-messaging", () => discordMessaging.stop());
         }
 
         if (!discordMessaging || !db) {

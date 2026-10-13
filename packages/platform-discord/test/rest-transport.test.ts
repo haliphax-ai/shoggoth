@@ -369,3 +369,71 @@ describe("Discord REST transport", () => {
     assert.match(calls[0]!.url, /\/channels\/ch1\/pins\/m1$/);
   });
 });
+
+describe("Discord REST transport — application commands", () => {
+  it("registerGuildCommands PUTs the guild command bulk-overwrite endpoint", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const fetchFn: typeof fetch = async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify([]), { status: 200 });
+    };
+    const t = createDiscordRestTransport({
+      botToken: "tok",
+      fetchFn,
+      apiBase: "https://example.com/v10",
+    });
+    const commands = [{ name: "abort", description: "Abort the current session turn" }];
+    await t.registerGuildCommands("app-1", "guild-9", commands);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]!.init.method, "PUT");
+    assert.match(calls[0]!.url, /\/applications\/app-1\/guilds\/guild-9\/commands$/);
+    const body = JSON.parse(String(calls[0]!.init.body)) as unknown[];
+    assert.deepStrictEqual(body, commands);
+    const h = calls[0]!.init.headers as Headers;
+    assert.equal(h.get("Authorization"), "Bot tok");
+  });
+
+  it("listGlobalCommands GETs the global command list and returns it", async () => {
+    const calls: { url: string; method: string }[] = [];
+    const fetchFn: typeof fetch = async (url, init) => {
+      calls.push({ url: String(url), method: (init?.method as string) ?? "GET" });
+      return new Response(
+        JSON.stringify([
+          { id: "111", name: "abort" },
+          { id: "222", name: "someone-elses" },
+        ]),
+        { status: 200 },
+      );
+    };
+    const t = createDiscordRestTransport({
+      botToken: "tok",
+      fetchFn,
+      apiBase: "https://example.com/v10",
+    });
+    const list = await t.listGlobalCommands("app-1");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]!.method, "GET");
+    assert.match(calls[0]!.url, /\/applications\/app-1\/commands$/);
+    assert.deepStrictEqual(list, [
+      { id: "111", name: "abort" },
+      { id: "222", name: "someone-elses" },
+    ]);
+  });
+
+  it("deleteGlobalCommand DELETEs a single global command by id", async () => {
+    const calls: { url: string; method: string }[] = [];
+    const fetchFn: typeof fetch = async (url, init) => {
+      calls.push({ url: String(url), method: (init?.method as string) ?? "GET" });
+      return new Response(null, { status: 204 });
+    };
+    const t = createDiscordRestTransport({
+      botToken: "tok",
+      fetchFn,
+      apiBase: "https://example.com/v10",
+    });
+    await t.deleteGlobalCommand("app-1", "111");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]!.method, "DELETE");
+    assert.match(calls[0]!.url, /\/applications\/app-1\/commands\/111$/);
+  });
+});

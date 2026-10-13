@@ -13,8 +13,8 @@ import {
   decodeModelSelectCustomId,
 } from "./model-select";
 
-/** The set of global slash commands to register. */
-const GLOBAL_SLASH_COMMANDS = [
+/** The set of slash commands Shoggoth registers (guild-scoped). */
+const SLASH_COMMANDS = [
   {
     name: "elevate",
     description: "Grant or revoke elevated privileges for a session",
@@ -216,31 +216,52 @@ const GLOBAL_SLASH_COMMANDS = [
     ],
   },
 ] as const;
-
 /**
- * Register global slash commands with Discord. The application ID equals the bot user ID
- * for bot applications.
+ * Register slash commands for each configured guild via bulk overwrite.
+ *
+ * Discord matches existing commands by name during a bulk overwrite: same-named
+ * commands are updated in place (their snowflake IDs are preserved), missing
+ * ones are created, and unknown leftovers are pruned. Startup registration is
+ * therefore a convergent sync — command IDs stay stable across restarts as
+ * long as nothing tears the list down.
+ *
+ * The application ID equals the bot user ID for bot applications. Performs no
+ * transport calls when `guildIds` is empty (guild commands cannot exist
+ * without a guild).
  */
 export async function registerDiscordSlashCommands(opts: {
   readonly transport: DiscordRestTransport;
   readonly applicationId: string;
+  readonly guildIds: readonly string[];
 }): Promise<void> {
-  await opts.transport.registerGlobalCommands(
-    opts.applicationId,
-    GLOBAL_SLASH_COMMANDS as unknown as Record<string, unknown>[],
-  );
+  for (const guildId of opts.guildIds) {
+    await opts.transport.registerGuildCommands(
+      opts.applicationId,
+      guildId,
+      SLASH_COMMANDS as unknown as Record<string, unknown>[],
+    );
+  }
 }
 
+/** Names of the Shoggoth-registered slash commands (for legacy cleanup matching). */
+const SLASH_COMMAND_NAMES = new Set<string>(SLASH_COMMANDS.map((c) => c.name));
+
 /**
- * De-register global slash commands by bulk-overwriting the application's command list
- * with an empty array (Discord's `PUT` replaces the whole list). Called on clean shutdown
- * so an offline instance does not leave stale commands in the list.
+ * Migration helper for the switch from global to guild-scoped registration:
+ * delete globally-registered commands whose names match Shoggoth commands so
+ * they don't linger as duplicates alongside the guild-scoped ones. Foreign
+ * global commands (other tooling under the same application) are left alone.
  */
-export async function deregisterDiscordSlashCommands(opts: {
+export async function cleanupLegacyGlobalCommands(opts: {
   readonly transport: DiscordRestTransport;
   readonly applicationId: string;
 }): Promise<void> {
-  await opts.transport.registerGlobalCommands(opts.applicationId, []);
+  const existing = await opts.transport.listGlobalCommands(opts.applicationId);
+  for (const cmd of existing) {
+    if (SLASH_COMMAND_NAMES.has(cmd.name)) {
+      await opts.transport.deleteGlobalCommand(opts.applicationId, cmd.id);
+    }
+  }
 }
 
 /** Interaction response type 4 = CHANNEL_MESSAGE_WITH_SOURCE. */
