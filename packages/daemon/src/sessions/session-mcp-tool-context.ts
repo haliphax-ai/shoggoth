@@ -507,26 +507,27 @@ function decisionToolDescriptor(config: ShoggothConfig): AggregatedTool {
   const decision = (config as any).decision;
   const providers: { id?: string; models?: { name: string }[] }[] = decision?.providers ?? [];
   const defaultModel: string | undefined = decision?.defaultModel;
-  const defaultProviderId = defaultModel
-    ? providers.find((p) => (p.models ?? []).some((m) => m.name === defaultModel))?.id
-    : undefined;
-  const defaultModelLabel =
-    defaultModel != null
-      ? `'${defaultModel}'${defaultProviderId ? ` (provider '${defaultProviderId}')` : ""}`
-      : undefined;
+  // defaultModel is already in provider-id/model-name format; the provider
+  // prefix names the combo explicitly, so no separate provider lookup is needed
+  const defaultModelLabel = defaultModel != null ? `'${defaultModel}'` : undefined;
+  const exampleRef =
+    providers[0]?.id != null && providers[0]?.models?.[0]?.name != null
+      ? `${providers[0].id}/${providers[0].models[0].name}`
+      : `provider-id/model-name`;
 
   const description =
     `Query a decision (classifier) model. Evaluates a state against typed questions ` +
     `(noul: yes/no probability, choice: pick one option, score: rate against ordered levels) ` +
-    `and returns structured answers with probabilities.` +
+    `and returns structured answers with probabilities. Models are referenced as ` +
+    `provider-id/model-name.` +
     (defaultModelLabel
       ? ` Uses the default configured model ${defaultModelLabel} when model is omitted.`
       : ` No default model is configured, so model is required.`);
 
   const modelDescription = defaultModelLabel
-    ? `Optional. Decision model name (e.g. jev-latest, jev-1.13.0). ` +
+    ? `Optional. Model in provider-id/model-name format (e.g. ${exampleRef}). ` +
       `Defaults to the configured default model ${defaultModelLabel} when omitted.`
-    : `Required. Decision model name (e.g. jev-latest, jev-1.13.0). ` +
+    : `Required. Model in provider-id/model-name format (e.g. ${exampleRef}). ` +
       `No default model is configured, so this must be given.`;
 
   return {

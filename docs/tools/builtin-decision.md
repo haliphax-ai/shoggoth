@@ -4,12 +4,12 @@ Query a decision (classifier) model — evaluates a state against typed question
 
 ## Parameters
 
-| Param        | Type   | Required | Notes                                                                                           |
-| ------------ | ------ | -------- | ----------------------------------------------------------------------------------------------- |
-| `model`      | string | no¹      | Decision model name (e.g. `jev-latest`, `jev-1.13.0`). Omit to use the configured default model |
-| `state`      | any    | yes      | The content to evaluate: a plain string, object, or array (e.g. chat logs, app state)           |
-| `questions`  | object | yes      | Map of question id → typed question (see below)                                                 |
-| `timeout_ms` | number | no       | Request timeout in milliseconds                                                                 |
+| Param        | Type   | Required | Notes                                                                                                                |
+| ------------ | ------ | -------- | -------------------------------------------------------------------------------------------------------------------- |
+| `model`      | string | no¹      | Model in `provider-id/model-name` format (e.g. `typesafe-main/jev-latest`). Omit to use the configured default model |
+| `state`      | any    | yes      | The content to evaluate: a plain string, object, or array (e.g. chat logs, app state)                                |
+| `questions`  | object | yes      | Map of question id → typed question (see below)                                                                      |
+| `timeout_ms` | number | no       | Request timeout in milliseconds                                                                                      |
 
 ¹ Falls back to the `decision.defaultModel` configured model. When no default is configured, `model` is required.
 
@@ -53,7 +53,7 @@ Rates the state along an ordered rubric. Returns a probability-weighted score, a
 
 ```json
 {
-  "model": "jev-latest",
+  "model": "typesafe-main/jev-latest",
   "state": "Help! My payouts have been failing for 3 days.",
   "questions": {
     "is_urgent": { "type": "noul", "instructions": "Does this convey urgency?" }
@@ -65,7 +65,7 @@ Rates the state along an ordered rubric. Returns a probability-weighted score, a
 
 ```json
 {
-  "model": "jev-latest",
+  "model": "typesafe-main/jev-latest",
   "state": "Help! My payouts have been failing for 3 days.",
   "questions": {
     "department": {
@@ -85,7 +85,7 @@ Rates the state along an ordered rubric. Returns a probability-weighted score, a
 
 ```json
 {
-  "model": "jev-latest",
+  "model": "typesafe-main/jev-latest",
   "state": "Help! My payouts have been failing for 3 days.",
   "questions": {
     "frustration": {
@@ -117,7 +117,7 @@ Answers come back under the same question ids, with `usage` token counts:
 ```json
 {
   "decision": {
-    "defaultModel": "jev-latest",
+    "defaultModel": "typesafe-main/jev-latest",
     "providers": [
       {
         "id": "typesafe-main",
@@ -131,16 +131,16 @@ Answers come back under the same question ids, with `usage` token counts:
 }
 ```
 
-`defaultModel` must match a model listed under a configured provider; the config schema rejects it otherwise. When set, the tool descriptor tells the agent which model/provider combo serves as the default.
+Models are referenced everywhere (tool, control op, CLI, `defaultModel`) in `provider-id/model-name` format — the provider prefix is Shoggoth's routing concern and is stripped before the request goes over the wire; the remote API only ever sees the raw model name. `defaultModel` must reference a model listed under a configured provider in that format; the config schema rejects it otherwise. When set, the tool descriptor names the default model/provider combo explicitly.
 
 ## CLI
 
 ```
 shoggoth decision evaluate --state "Is this urgent?" \
   --questions '{"is_urgent":{"type":"noul","instructions":"Does this convey urgency?"}}'
-shoggoth decision evaluate --model jev-1.13.0 --state "Is this urgent?" \
+shoggoth decision evaluate --model typesafe-main/jev-1.13.0 --state "Is this urgent?" \
   --questions '{"is_urgent":{"type":"noul","instructions":"Does this convey urgency?"}}'
 shoggoth decision models
 ```
 
-`--model` is optional and falls back to `decision.defaultModel`. `decision models` marks the default with `(default)`.
+`--model` is optional (in `provider-id/model-name` format) and falls back to `decision.defaultModel`. `decision models` lists models in `provider-id/model-name` format and marks the default with `(default)`.

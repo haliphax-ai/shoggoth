@@ -418,10 +418,10 @@ describe("decision config schema", () => {
     }
   });
 
-  it("accepts a defaultModel matching a configured model", () => {
+  it("accepts a defaultModel in provider/model-id format matching a configured model", () => {
     const fragment = {
       decision: {
-        defaultModel: "jev-latest",
+        defaultModel: "typesafe-main/jev-latest",
         providers: [
           {
             id: "typesafe-main",
@@ -439,7 +439,7 @@ describe("decision config schema", () => {
   it("rejects a defaultModel that matches no configured model", () => {
     const fragment = {
       decision: {
-        defaultModel: "jev-typo",
+        defaultModel: "typesafe-main/jev-typo",
         providers: [
           {
             id: "typesafe-main",
@@ -455,7 +455,43 @@ describe("decision config schema", () => {
   });
 
   it("rejects a defaultModel when no providers are configured", () => {
-    const fragment = { decision: { defaultModel: "jev-latest", providers: [] } };
+    const fragment = { decision: { defaultModel: "typesafe-main/jev-latest", providers: [] } };
+    const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
+    assert.ok(!parsed.success);
+  });
+
+  it("rejects a raw defaultModel without the provider/model-id format", () => {
+    const fragment = {
+      decision: {
+        defaultModel: "jev-latest",
+        providers: [
+          {
+            id: "typesafe-main",
+            kind: "typesafe",
+            baseUrl: "https://api.typesafe.ai",
+            models: [{ name: "jev-latest" }],
+          },
+        ],
+      },
+    };
+    const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
+    assert.ok(!parsed.success);
+  });
+
+  it("rejects a defaultModel whose provider prefix does not match", () => {
+    const fragment = {
+      decision: {
+        defaultModel: "wrong-provider/jev-latest",
+        providers: [
+          {
+            id: "typesafe-main",
+            kind: "typesafe",
+            baseUrl: "https://api.typesafe.ai",
+            models: [{ name: "jev-latest" }],
+          },
+        ],
+      },
+    };
     const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
     assert.ok(!parsed.success);
   });

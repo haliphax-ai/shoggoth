@@ -45,7 +45,7 @@ function makeConfig(overrides?: Partial<{ decision: ShoggothConfig["decision"] }
 }
 
 const decisionConfigWithModels = {
-  defaultModel: "jev-latest",
+  defaultModel: "typesafe-main/jev-latest",
   providers: [
     {
       id: "typesafe-main",

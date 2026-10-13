@@ -53,8 +53,10 @@ describe("DecisionService", () => {
       );
 
       const svc = DecisionService.fromConfig(baseConfig);
+      // model is given in provider/model-id format; the wire body sends the
+      // raw model name (the remote API does not know provider ids)
       const result = await svc.evaluate({
-        model: "jev-latest",
+        model: "typesafe-main/jev-latest",
         state: "Help! My payouts have been failing for 3 days.",
         questions: noulQuestions,
       });
@@ -92,7 +94,7 @@ describe("DecisionService", () => {
 
       const svc = DecisionService.fromConfig(baseConfig);
       await svc.evaluate({
-        model: "jev-latest",
+        model: "typesafe-main/jev-latest",
         state: { messages: [{ role: "user", content: "hello" }] },
         questions: noulQuestions,
       });
@@ -119,7 +121,11 @@ describe("DecisionService", () => {
           },
         ],
       });
-      await svc.evaluate({ model: "jev-latest", state: "s", questions: noulQuestions });
+      await svc.evaluate({
+        model: "typesafe-main/jev-latest",
+        state: "s",
+        questions: noulQuestions,
+      });
 
       const [url] = fetchMock.mock.calls[0] as [string];
       assert.equal(url, "https://api.typesafe.ai/v1/systemone");
@@ -147,7 +153,11 @@ describe("DecisionService", () => {
             },
           ],
         });
-        await svc.evaluate({ model: "jev-latest", state: "s", questions: noulQuestions });
+        await svc.evaluate({
+          model: "typesafe-env/jev-latest",
+          state: "s",
+          questions: noulQuestions,
+        });
       } finally {
         delete process.env.TEST_DECISION_API_KEY;
       }
@@ -171,6 +181,46 @@ describe("DecisionService", () => {
       assert.equal(fetchMock.mock.calls.length, 0);
     });
 
+    it("rejects a raw model name without a provider prefix", async () => {
+      const svc = DecisionService.fromConfig(baseConfig);
+      // "jev-latest" exists, but only as "typesafe-main/jev-latest"
+      const result = await svc.evaluate({
+        model: "jev-latest",
+        state: "s",
+        questions: noulQuestions,
+      });
+
+      assert.equal(result.status, "error");
+      assert.equal(fetchMock.mock.calls.length, 0);
+    });
+
+    it("rejects an unknown provider prefix", async () => {
+      const svc = DecisionService.fromConfig(baseConfig);
+      const result = await svc.evaluate({
+        model: "other-provider/jev-latest",
+        state: "s",
+        questions: noulQuestions,
+      });
+
+      assert.equal(result.status, "error");
+      if (result.status === "error") {
+        assert.ok(result.error.includes("other-provider/jev-latest"), result.error);
+      }
+      assert.equal(fetchMock.mock.calls.length, 0);
+    });
+
+    it("rejects a model that is not listed under the prefixed provider", async () => {
+      const svc = DecisionService.fromConfig(baseConfig);
+      const result = await svc.evaluate({
+        model: "typesafe-main/not-a-real-model",
+        state: "s",
+        questions: noulQuestions,
+      });
+
+      assert.equal(result.status, "error");
+      assert.equal(fetchMock.mock.calls.length, 0);
+    });
+
     it("returns error on non-ok HTTP response", async () => {
       fetchMock.mockResolvedValueOnce(
         new Response("The request body failed validation", { status: 422 }),
@@ -178,7 +228,7 @@ describe("DecisionService", () => {
 
       const svc = DecisionService.fromConfig(baseConfig);
       const result = await svc.evaluate({
-        model: "jev-latest",
+        model: "typesafe-main/jev-latest",
         state: "s",
         questions: noulQuestions,
       });
@@ -195,7 +245,7 @@ describe("DecisionService", () => {
 
       const svc = DecisionService.fromConfig(baseConfig);
       const result = await svc.evaluate({
-        model: "jev-latest",
+        model: "typesafe-main/jev-latest",
         state: "s",
         questions: noulQuestions,
       });
@@ -230,7 +280,7 @@ describe("DecisionService", () => {
       };
 
       const svc = DecisionService.fromConfig(baseConfig);
-      await svc.evaluate({ model: "jev-latest", state: "s", questions });
+      await svc.evaluate({ model: "typesafe-main/jev-latest", state: "s", questions });
 
       const [, init] = fetchMock.mock.calls[0] as [string, RequestInit & Record<string, any>];
       const body = JSON.parse(init.body as string);
@@ -241,7 +291,7 @@ describe("DecisionService", () => {
   describe("default model", () => {
     const defaultConfig: ShoggothDecisionConfig = {
       ...baseConfig,
-      defaultModel: "jev-latest",
+      defaultModel: "typesafe-main/jev-latest",
     };
 
     it("uses the configured default model when model is omitted", async () => {
@@ -272,7 +322,11 @@ describe("DecisionService", () => {
       );
 
       const svc = DecisionService.fromConfig(defaultConfig);
-      await svc.evaluate({ model: "jev-1.13.0", state: "s", questions: noulQuestions });
+      await svc.evaluate({
+        model: "typesafe-main/jev-1.13.0",
+        state: "s",
+        questions: noulQuestions,
+      });
 
       const [, init] = fetchMock.mock.calls[0] as [string, RequestInit & Record<string, any>];
       assert.equal(JSON.parse(init.body as string).model, "jev-1.13.0");

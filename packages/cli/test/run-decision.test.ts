@@ -19,7 +19,7 @@ function configuredDecisionConfig() {
   return {
     socketPath: "/tmp/test.sock",
     decision: {
-      defaultModel: "jev-latest",
+      defaultModel: "typesafe-main/jev-latest",
       providers: [
         {
           id: "typesafe-main",
@@ -71,14 +71,14 @@ describe("parseDecisionEvaluateArgs", () => {
   it("parses --model, --state (string), and --questions (JSON)", () => {
     const result = parseDecisionEvaluateArgs([
       "--model",
-      "jev-latest",
+      "typesafe-main/jev-latest",
       "--state",
       "Help! My payouts are failing.",
       "--questions",
       '{"is_urgent":{"type":"noul","instructions":"Urgent?"}}',
     ]);
     assert.ok(result.ok);
-    assert.strictEqual(result.payload.model, "jev-latest");
+    assert.strictEqual(result.payload.model, "typesafe-main/jev-latest");
     assert.strictEqual(result.payload.state, "Help! My payouts are failing.");
     assert.deepStrictEqual(result.payload.questions, {
       is_urgent: { type: "noul", instructions: "Urgent?" },
@@ -88,7 +88,7 @@ describe("parseDecisionEvaluateArgs", () => {
   it("parses --state as JSON when valid JSON", () => {
     const result = parseDecisionEvaluateArgs([
       "--model",
-      "jev-latest",
+      "typesafe-main/jev-latest",
       "--state",
       '{"messages":[{"role":"user","content":"hi"}]}',
       "--questions",
@@ -126,7 +126,7 @@ describe("parseDecisionEvaluateArgs", () => {
   it("requires --state", () => {
     const result = parseDecisionEvaluateArgs([
       "--model",
-      "jev-latest",
+      "typesafe-main/jev-latest",
       "--questions",
       '{"q":{"type":"noul","instructions":"ok?"}}',
     ]);
@@ -141,7 +141,7 @@ describe("parseDecisionEvaluateArgs", () => {
   it("rejects invalid --questions JSON", () => {
     const result = parseDecisionEvaluateArgs([
       "--model",
-      "jev-latest",
+      "typesafe-main/jev-latest",
       "--state",
       "s",
       "--questions",
@@ -156,7 +156,7 @@ describe("parseDecisionEvaluateArgs", () => {
   it("rejects non-object --questions JSON", () => {
     const result = parseDecisionEvaluateArgs([
       "--model",
-      "jev-latest",
+      "typesafe-main/jev-latest",
       "--state",
       "s",
       "--questions",
@@ -168,7 +168,7 @@ describe("parseDecisionEvaluateArgs", () => {
   it("timeout is optional", () => {
     const result = parseDecisionEvaluateArgs([
       "--model",
-      "jev-latest",
+      "typesafe-main/jev-latest",
       "--state",
       "s",
       "--questions",
@@ -181,7 +181,7 @@ describe("parseDecisionEvaluateArgs", () => {
   it("parses --timeout", () => {
     const result = parseDecisionEvaluateArgs([
       "--model",
-      "jev-latest",
+      "typesafe-main/jev-latest",
       "--state",
       "s",
       "--questions",
@@ -196,7 +196,7 @@ describe("parseDecisionEvaluateArgs", () => {
   it("rejects non-numeric --timeout", () => {
     const result = parseDecisionEvaluateArgs([
       "--model",
-      "jev-latest",
+      "typesafe-main/jev-latest",
       "--state",
       "s",
       "--questions",
@@ -227,7 +227,7 @@ describe("runDecisionCli evaluate", () => {
     await runDecisionCli([
       "evaluate",
       "--model",
-      "jev-latest",
+      "typesafe-main/jev-latest",
       "--state",
       "Help! My payouts are failing.",
       "--questions",
@@ -240,7 +240,7 @@ describe("runDecisionCli evaluate", () => {
       payload: Record<string, unknown>;
     };
     assert.strictEqual(call.op, "decision_evaluate");
-    assert.strictEqual(call.payload.model, "jev-latest");
+    assert.strictEqual(call.payload.model, "typesafe-main/jev-latest");
     assert.strictEqual(call.payload.state, "Help! My payouts are failing.");
     assert.deepStrictEqual(call.payload.questions, {
       is_urgent: { type: "noul", instructions: "Urgent?" },
@@ -283,7 +283,7 @@ describe("runDecisionCli evaluate", () => {
     await runDecisionCli([
       "evaluate",
       "--model",
-      "jev-latest",
+      "typesafe-main/jev-latest",
       "--state",
       "s",
       "--questions",
@@ -303,7 +303,7 @@ describe("runDecisionCli evaluate", () => {
     await runDecisionCli([
       "evaluate",
       "--model",
-      "jev-latest",
+      "typesafe-main/jev-latest",
       "--state",
       "s",
       "--questions",
@@ -321,7 +321,7 @@ describe("runDecisionCli evaluate", () => {
     await runDecisionCli([
       "evaluate",
       "--model",
-      "jev-latest",
+      "typesafe-main/jev-latest",
       "--state",
       "s",
       "--questions",
@@ -332,7 +332,7 @@ describe("runDecisionCli evaluate", () => {
   });
 
   it("sets exit code on missing required args without invoking control op", async () => {
-    await runDecisionCli(["evaluate", "--model", "jev-latest"]);
+    await runDecisionCli(["evaluate", "--model", "typesafe-main/jev-latest"]);
     assert.strictEqual(process.exitCode, 1);
     assert.strictEqual(mockInvoke.mock.calls.length, 0);
   });
@@ -343,11 +343,11 @@ describe("runDecisionCli evaluate", () => {
 // ---------------------------------------------------------------------------
 
 describe("runDecisionCli models", () => {
-  it("lists configured models from decision providers, marking the default", async () => {
+  it("lists configured models in provider/model-id format, marking the default", async () => {
     mockLoadLayeredConfig.mockReturnValue({
       socketPath: "/tmp/test.sock",
       decision: {
-        defaultModel: "jev-latest",
+        defaultModel: "typesafe-main/jev-latest",
         providers: [
           {
             id: "typesafe-main",
@@ -362,9 +362,14 @@ describe("runDecisionCli models", () => {
     await runDecisionCli(["models"]);
 
     const output = logged.join("\n");
-    assert.ok(output.includes("jev-latest"), `Expected model in output: ${output}`);
-    assert.ok(output.includes("jev-1.13.0"), `Expected model in output: ${output}`);
-    assert.ok(output.includes("typesafe-main"), `Expected provider id in output: ${output}`);
+    assert.ok(
+      output.includes("typesafe-main/jev-latest"),
+      `Expected qualified model in output: ${output}`,
+    );
+    assert.ok(
+      output.includes("typesafe-main/jev-1.13.0"),
+      `Expected qualified model in output: ${output}`,
+    );
     assert.ok(output.includes("(default)"), `Expected default marker in output: ${output}`);
     assert.strictEqual(mockInvoke.mock.calls.length, 0);
   });

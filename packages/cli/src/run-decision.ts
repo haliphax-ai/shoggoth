@@ -17,10 +17,11 @@ async function socketPathFromEnv(configPath: string): Promise<string> {
 function printDecisionHelp(): void {
   console.log(`shoggoth ${VERSION}
 Usage:
-  shoggoth decision evaluate [--model <model>] --state <state> --questions <json> [--timeout <ms>]
+  shoggoth decision evaluate [--model <provider/model>] --state <state> --questions <json> [--timeout <ms>]
   shoggoth decision models    List configured decision models
 
---model      Optional; falls back to the configured decision defaultModel.
+--model      Optional, in provider-id/model-name format (e.g. typesafe-main/jev-latest).
+             Falls back to the configured decision defaultModel.
 --state      A plain string, or JSON (object/array) when valid JSON.
 --questions  JSON map of typed questions (noul | choice | score), e.g.
              '{"is_urgent":{"type":"noul","instructions":"Is this urgent?"}}'`);
@@ -142,8 +143,9 @@ export async function runDecisionCli(argv: string[]): Promise<void> {
         models?: { name: string }[];
       };
       for (const model of p.models ?? []) {
-        const marker = model.name === defaultModel ? "  (default)" : "";
-        lines.push(`${model.name}${marker}  →  ${p.kind}  [${p.id}]`);
+        const ref = `${p.id}/${model.name}`;
+        const marker = ref === defaultModel ? "  (default)" : "";
+        lines.push(`${ref}${marker}  →  ${p.kind}`);
       }
     }
     console.log(lines.join("\n"));
@@ -156,7 +158,7 @@ export async function runDecisionCli(argv: string[]): Promise<void> {
     if (!parsed.ok) {
       console.error(parsed.error);
       console.error(
-        "usage: shoggoth decision evaluate [--model <model>] --state <state> --questions <json> [--timeout <ms>]",
+        "usage: shoggoth decision evaluate [--model <provider/model>] --state <state> --questions <json> [--timeout <ms>]",
       );
       process.exitCode = 1;
       return;

@@ -45,7 +45,7 @@ function makeCtx(
 }
 
 const validArgs = {
-  model: "jev-latest",
+  model: "typesafe-main/jev-latest",
   state: "Help! My payouts have been failing for 3 days.",
   questions: { is_urgent: { type: "noul", instructions: "Does this convey urgency?" } },
 };
@@ -141,7 +141,7 @@ describe("decision-handler", () => {
     const [sessionId, op, payload] = invoker.mock.calls[0] as [string, string, any];
     expect(sessionId).toBe("agent:test:discord:channel:123");
     expect(op).toBe("decision_evaluate");
-    expect(payload.model).toBe("jev-latest");
+    expect(payload.model).toBe("typesafe-main/jev-latest");
     expect(payload.state).toBe(validArgs.state);
     expect(payload.questions).toEqual(validArgs.questions);
     expect(payload.timeout_ms).toBeUndefined();

@@ -115,21 +115,23 @@ const decisionProviderSchema = z.object({
 });
 export const shoggothDecisionConfigSchema = z
   .object({
-    /** Model used when a request omits `model`. Must match a configured provider model. */
+    /** Model used when a request omits `model`, in `provider-id/model-name`
+     * format. Must match a configured provider model. */
     defaultModel: z.string().min(1).optional(),
     providers: z.array(decisionProviderSchema).optional().default([]),
   })
   .strict()
   .superRefine((cfg, ctx) => {
     if (!cfg.defaultModel) return;
+    // must reference a configured model in provider-id/model-name format
     const known = (cfg.providers ?? []).some((p) =>
-      (p.models ?? []).some((m) => m.name === cfg.defaultModel),
+      (p.models ?? []).some((m) => `${p.id}/${m.name}` === cfg.defaultModel),
     );
     if (!known) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["defaultModel"],
-        message: `defaultModel "${cfg.defaultModel}" does not match any configured provider model`,
+        message: `defaultModel "${cfg.defaultModel}" must be a configured model in provider-id/model-name format`,
       });
     }
   });
