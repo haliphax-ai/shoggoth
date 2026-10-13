@@ -97,6 +97,7 @@ import {
 } from "../messaging/oob-response-schemas";
 // import type { SubagentRuntimeExtension } from "../subagent/subagent-extension-ref";
 import { MediaGenerationService } from "../media/media-generation-service";
+import { DecisionService } from "../decision/decision-service";
 import {
   handleVaultSet,
   handleVaultGet,
@@ -3082,6 +3083,57 @@ export async function handleIntegrationControlOp(
         provider_id: providerId,
         operation_id: operationId,
         output_path: typeof pl.output_path === "string" ? pl.output_path : undefined,
+      });
+    }
+
+    case "decision_evaluate": {
+      // Feature gating: with no decision provider that has models, the op is
+      // indistinguishable from a nonexistent one (undefined → ERR_UNKNOWN_OP).
+      const decisionConfig = (ctx.config as any).decision;
+      const decisionEnabled = (decisionConfig?.providers ?? []).some(
+        (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
+      );
+      if (!decisionEnabled) {
+        return undefined;
+      }
+      if (principal.kind !== "agent") {
+        throw new IntegrationOpError("ERR_FORBIDDEN", "decision_evaluate requires agent principal");
+      }
+      const pl = payloadObject(req);
+      // model is optional — falls back to the configured decision defaultModel
+      const modelRaw = pl.model;
+      if (
+        modelRaw !== undefined &&
+        modelRaw !== null &&
+        (typeof modelRaw !== "string" || !modelRaw)
+      ) {
+        throw new IntegrationOpError(
+          "ERR_INVALID_PAYLOAD",
+          "decision_evaluate model must be a non-empty string",
+        );
+      }
+      const model = typeof modelRaw === "string" && modelRaw ? modelRaw : undefined;
+      if (pl.state === undefined || pl.state === null) {
+        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "decision_evaluate requires state");
+      }
+      const questions = pl.questions;
+      if (
+        !questions ||
+        typeof questions !== "object" ||
+        Array.isArray(questions) ||
+        Object.keys(questions as object).length === 0
+      ) {
+        throw new IntegrationOpError(
+          "ERR_INVALID_PAYLOAD",
+          "decision_evaluate requires a non-empty questions object",
+        );
+      }
+      const svc = DecisionService.fromConfig(decisionConfig);
+      return svc.evaluate({
+        model: model,
+        state: pl.state,
+        questions: questions as Record<string, unknown>,
+        timeout_ms: typeof pl.timeout_ms === "number" ? pl.timeout_ms : undefined,
       });
     }
 

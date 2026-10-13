@@ -29,6 +29,7 @@ import {
   createContextLevelToolFinalizer,
   createMcpServerRulesFinalizer,
   createMediaGenerateToolFinalizer,
+  createDecisionToolFinalizer,
   createSubagentToolStripFinalizer,
   createVaultToolFinalizer,
   createWebSearchToolFinalizer,
@@ -177,6 +178,8 @@ export async function createSessionMcpRuntime(
   finalizers.push(createWebSearchToolFinalizer(opts.config));
   // Register media-generate tool finalizer (adds builtin-media-generate when a gemini provider exists).
   finalizers.push(createMediaGenerateToolFinalizer(opts.config));
+  // Register decision tool finalizer (adds builtin-decision when a decision provider with models exists).
+  finalizers.push(createDecisionToolFinalizer(opts.config));
   // Register vault tool finalizer (adds builtin-vault when vault service is initialized).
   finalizers.push(createVaultToolFinalizer());
   // Register elevation tool finalizer (conditionally injects builtin-elevate when grant is active).
