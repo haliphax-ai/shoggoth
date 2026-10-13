@@ -54,6 +54,8 @@ export interface PlatformCapabilities {
     addReaction(channelId: string, messageId: string, emoji: string): Promise<void>;
     removeReaction(channelId: string, messageId: string, emoji: string): Promise<void>;
   };
+  /** `sendBody` honors `replyTo`: the reply is threaded under the target message. */
+  replies?: boolean;
   threads?: boolean;
   embeds?: boolean;
   typing?: {

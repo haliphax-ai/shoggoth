@@ -25,6 +25,7 @@ import {
   executeSessionAgentTurn,
   createSessionMcpRuntime,
   defaultPlatformAssistantDeps,
+  createQueuedMessageIndicator,
   getTurnQueue,
   getStatusBarStats,
   createStatusBarTurnTracker,
@@ -437,6 +438,42 @@ export async function startDiscordPlatform(
       return;
     }
 
+    // Queued-message indicator (issue #399): a ⏳ reaction on the operator's
+    // message while it waits behind an in-flight turn (reply/post fallback for
+    // platforms without reactions), removed when the queued turn starts or the
+    // entry is dropped.
+    const queuedIndicator = createQueuedMessageIndicator({
+      sessionId: msg.sessionId,
+      messageId: msg.id,
+      capabilities: adapter.capabilities,
+      logger: opts.logger,
+      resolveChannelId: (sid) => opts.discord.resolveOutboundChannelIdForSession?.(sid),
+      sendReply: async (body) => {
+        await opts.discord.outbound.sendDiscord(
+          createOutboundMessage({
+            id: randomUUID(),
+            sessionId: msg.sessionId,
+            userId: msg.userId,
+            createdAt: new Date().toISOString(),
+            body: sliceDiscordPlatformMessageBody(body),
+            extensions: { replyToMessageId: msg.id },
+          }),
+        );
+      },
+      sendPost: async (body) => {
+        await opts.discord.outbound.sendDiscord(
+          createOutboundMessage({
+            id: randomUUID(),
+            sessionId: msg.sessionId,
+            userId: msg.userId,
+            createdAt: new Date().toISOString(),
+            body: sliceDiscordPlatformMessageBody(body),
+            extensions: {},
+          }),
+        );
+      },
+    });
+
     // Fire-and-forget: push to the turn queue (synchronous) and return immediately.
     // Create a label with truncated message content for display in queue
     const maxLabelLength = 100;
@@ -446,154 +483,165 @@ export async function startDiscordPlatform(
         : userContent;
 
     void turnQueue
-      .enqueue(msg.sessionId, "user", userMessageLabel, async () => {
-        const hitlReplyInSession = env.SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION !== "0";
+      .enqueue(
+        msg.sessionId,
+        "user",
+        userMessageLabel,
+        async () => {
+          const hitlReplyInSession = env.SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION !== "0";
 
-        const mcpLifecycle = mcpRuntime.trackInstanceIdle
-          ? {
-              onTurnBegin: () => {
-                mcpRuntime.notifyTurnBegin(msg.sessionId);
-              },
-              onTurnEnd: () => {
-                mcpRuntime.notifyTurnEnd(msg.sessionId);
-              },
-            }
-          : undefined;
-
-        const d = msg.extensions.platform?.discord;
-        const userMetadata: Record<string, unknown> = {
-          ...extraUserMetadata,
-          discordMessageId: msg.id,
-          ...(d
+          const mcpLifecycle = mcpRuntime.trackInstanceIdle
             ? {
-                discordAuthorId: d.authorId,
-                discordAuthorIsBot: d.authorIsBot,
-                discordIsSelf: d.isSelf,
-                discordIsOwner: d.isOwner,
+                onTurnBegin: () => {
+                  mcpRuntime.notifyTurnBegin(msg.sessionId);
+                },
+                onTurnEnd: () => {
+                  mcpRuntime.notifyTurnEnd(msg.sessionId);
+                },
               }
-            : {}),
-        };
+            : undefined;
 
-        // If streaming is enabled, post the placeholder ("…") BEFORE starting the
-        // typing indicator. Discord cancels typing when a bot posts a message, so
-        // posting the placeholder inside withTypingIndicator would kill the indicator.
-        let preStartedStreamHandle: import("@shoggoth/daemon/lib").StreamHandle | undefined;
-        if (streamEnabled()) {
-          const streamingOutbound = opts.discord.streamingForSession(msg.sessionId);
-          if (streamingOutbound) {
-            try {
-              const raw = await streamingOutbound.start();
-              // Wrap the raw stream handle with the status-bar sink so the bar
-              // can be applied to the in-flight message (mirrors the
-              // messaging_surface path below). Delegates to any native
-              // setStatusBar on the handle.
-              if (statusBarDep.config.enabled) {
-                statusBarDep.attachSink(raw as unknown as StreamHandle);
+          const d = msg.extensions.platform?.discord;
+          const userMetadata: Record<string, unknown> = {
+            ...extraUserMetadata,
+            discordMessageId: msg.id,
+            ...(d
+              ? {
+                  discordAuthorId: d.authorId,
+                  discordAuthorIsBot: d.authorIsBot,
+                  discordIsSelf: d.isSelf,
+                  discordIsOwner: d.isOwner,
+                }
+              : {}),
+          };
+
+          // If streaming is enabled, post the placeholder ("…") BEFORE starting the
+          // typing indicator. Discord cancels typing when a bot posts a message, so
+          // posting the placeholder inside withTypingIndicator would kill the indicator.
+          let preStartedStreamHandle: import("@shoggoth/daemon/lib").StreamHandle | undefined;
+          if (streamEnabled()) {
+            const streamingOutbound = opts.discord.streamingForSession(msg.sessionId);
+            if (streamingOutbound) {
+              try {
+                const raw = await streamingOutbound.start();
+                // Wrap the raw stream handle with the status-bar sink so the bar
+                // can be applied to the in-flight message (mirrors the
+                // messaging_surface path below). Delegates to any native
+                // setStatusBar on the handle.
+                if (statusBarDep.config.enabled) {
+                  statusBarDep.attachSink(raw as unknown as StreamHandle);
+                }
+                preStartedStreamHandle = {
+                  setFullContent: (text: string) => raw.setFullContent(text),
+                  pushUpdate: (text: string) => raw.pushUpdate(text),
+                  ...(raw.setStatusBar
+                    ? { setStatusBar: (line: string | null) => raw.setStatusBar!(line) }
+                    : {}),
+                };
+              } catch (e) {
+                opts.logger.warn("discord.platform.stream_start_failed", {
+                  err: String(e),
+                });
               }
-              preStartedStreamHandle = {
-                setFullContent: (text: string) => raw.setFullContent(text),
-                pushUpdate: (text: string) => raw.pushUpdate(text),
-                ...(raw.setStatusBar
-                  ? { setStatusBar: (line: string | null) => raw.setStatusBar!(line) }
-                  : {}),
-              };
-            } catch (e) {
-              opts.logger.warn("discord.platform.stream_start_failed", {
-                err: String(e),
-              });
             }
           }
-        }
 
-        // Resolve the model once per inbound turn; both image options below
-        // are derived from it.
-        const turnCfg = opts.configRef?.current ?? opts.config;
-        const turnModel = resolveModel(opts.db, turnCfg, {
-          sessionId: msg.sessionId,
-        });
-
-        await adapter.withTypingIndicator(msg.sessionId, async () => {
-          await orchestrator.orchestrateInboundTurn({
+          // Resolve the model once per inbound turn; both image options below
+          // are derived from it.
+          const turnCfg = opts.configRef?.current ?? opts.config;
+          const turnModel = resolveModel(opts.db, turnCfg, {
             sessionId: msg.sessionId,
-            replyToMessageId: msg.id,
-            preStartedStreamHandle,
-            onStreamStartFailed: (errMsg) => {
-              opts.logger.warn("discord.platform.stream_start_failed", {
-                err: errMsg,
-              });
-            },
-            mcpLifecycle,
-            logContext: { sessionId: msg.sessionId },
-            onTurnExecutionFailed: (e) => {
-              opts.logger.warn("discord.platform.turn_failed", {
-                err: String(e),
-                sessionId: msg.sessionId,
-              });
-            },
-            attachments,
-            imageBlockCodec: (() => {
-              const kind = turnModel?.provider?.kind;
-              if (
-                kind === "openai-compatible" ||
-                kind === "anthropic-messages" ||
-                kind === "gemini"
-              ) {
-                return getImageBlockCodec(kind);
-              }
-              return undefined;
-            })(),
-            imageUrlPassthrough:
-              turnModel !== null &&
-              turnModel.provider.kind !== "gemini" &&
-              turnModel.provider.imageUrlPassthrough === true,
-            formatAttachmentMetadata,
-            workspacePath: session.workspacePath,
-            messageId: msg.id,
-            ...(session.runtimeUid !== undefined && session.runtimeGid !== undefined
-              ? { creds: { uid: session.runtimeUid, gid: session.runtimeGid } }
-              : {}),
-            buildTurn: async () => {
-              const _mcpCtx = await mcpRuntime.resolveContext(msg.sessionId);
-              return {
-                db: opts.db,
-                sessionId: msg.sessionId,
-                session,
-                transcript,
-                toolRuns,
-                userContent,
-                userMetadata,
-
-                env,
-                config: opts.config,
-                policyEngine: engine,
-                getHitlConfig,
-                hitl: {
-                  bypassUpTo: resolveSessionBypassUpTo(msg.sessionId, opts.config),
-                  pending,
-                  clock: { nowMs: () => Date.now() },
-                  newPendingId: () => randomUUID(),
-                  waitForHitlResolution,
-                  hitlNotifier,
-                  autoApprove: opts.hitlAutoApproveGate,
-                  ...(hitlReplyInSession
-                    ? {
-                        afterHitlQueued: (row: PendingActionRow) =>
-                          sendHitlQueuedNotice(row, {
-                            sessionId: msg.sessionId,
-                            userId: msg.userId,
-                            replyToMessageId: msg.id,
-                          }),
-                      }
-                    : {}),
-                },
-                loopImpl,
-                createToolCallingClient: createToolClient,
-                resolveMcpContext: mcpRuntime.resolveContext,
-              };
-            },
           });
-        });
-      })
+
+          await adapter.withTypingIndicator(msg.sessionId, async () => {
+            await orchestrator.orchestrateInboundTurn({
+              sessionId: msg.sessionId,
+              replyToMessageId: msg.id,
+              preStartedStreamHandle,
+              onStreamStartFailed: (errMsg) => {
+                opts.logger.warn("discord.platform.stream_start_failed", {
+                  err: errMsg,
+                });
+              },
+              mcpLifecycle,
+              logContext: { sessionId: msg.sessionId },
+              onTurnExecutionFailed: (e) => {
+                opts.logger.warn("discord.platform.turn_failed", {
+                  err: String(e),
+                  sessionId: msg.sessionId,
+                });
+              },
+              attachments,
+              imageBlockCodec: (() => {
+                const kind = turnModel?.provider?.kind;
+                if (
+                  kind === "openai-compatible" ||
+                  kind === "anthropic-messages" ||
+                  kind === "gemini"
+                ) {
+                  return getImageBlockCodec(kind);
+                }
+                return undefined;
+              })(),
+              imageUrlPassthrough:
+                turnModel !== null &&
+                turnModel.provider.kind !== "gemini" &&
+                turnModel.provider.imageUrlPassthrough === true,
+              formatAttachmentMetadata,
+              workspacePath: session.workspacePath,
+              messageId: msg.id,
+              ...(session.runtimeUid !== undefined && session.runtimeGid !== undefined
+                ? { creds: { uid: session.runtimeUid, gid: session.runtimeGid } }
+                : {}),
+              buildTurn: async () => {
+                const _mcpCtx = await mcpRuntime.resolveContext(msg.sessionId);
+                return {
+                  db: opts.db,
+                  sessionId: msg.sessionId,
+                  session,
+                  transcript,
+                  toolRuns,
+                  userContent,
+                  userMetadata,
+
+                  env,
+                  config: opts.config,
+                  policyEngine: engine,
+                  getHitlConfig,
+                  hitl: {
+                    bypassUpTo: resolveSessionBypassUpTo(msg.sessionId, opts.config),
+                    pending,
+                    clock: { nowMs: () => Date.now() },
+                    newPendingId: () => randomUUID(),
+                    waitForHitlResolution,
+                    hitlNotifier,
+                    autoApprove: opts.hitlAutoApproveGate,
+                    ...(hitlReplyInSession
+                      ? {
+                          afterHitlQueued: (row: PendingActionRow) =>
+                            sendHitlQueuedNotice(row, {
+                              sessionId: msg.sessionId,
+                              userId: msg.userId,
+                              replyToMessageId: msg.id,
+                            }),
+                        }
+                      : {}),
+                  },
+                  loopImpl,
+                  createToolCallingClient: createToolClient,
+                  resolveMcpContext: mcpRuntime.resolveContext,
+                };
+              },
+            });
+          });
+        },
+        {
+          onQueued: () => queuedIndicator.markQueued(),
+          onDequeued: () => {
+            void queuedIndicator.clear();
+          },
+        },
+      )
       .catch((e) => {
         opts.logger.warn("discord.platform.user_turn_failed", {
           err: String(e),

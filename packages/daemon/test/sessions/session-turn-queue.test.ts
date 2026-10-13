@@ -544,4 +544,172 @@ describe("TieredTurnQueue", () => {
       expect(defaultQ.starvationThreshold).toBe(2);
     });
   });
+
+  describe("queued entry hooks", () => {
+    it("fires onDequeued but not onQueued when the entry starts immediately", async () => {
+      const events: string[] = [];
+      await q.enqueue(
+        "s1",
+        "user",
+        "msg",
+        async () => {
+          events.push("run");
+        },
+        {
+          onQueued: () => events.push("queued"),
+          onDequeued: () => events.push("dequeued"),
+        },
+      );
+      expect(events).toEqual(["dequeued", "run"]);
+    });
+
+    it("fires onQueued when the session is busy and onDequeued before the entry runs", async () => {
+      const events: string[] = [];
+      let resolveFirst!: () => void;
+      const gate = new Promise<void>((r) => {
+        resolveFirst = r;
+      });
+
+      const p0 = q.enqueue("s1", "user", "blocker", async () => {
+        await gate;
+      });
+      const p1 = q.enqueue(
+        "s1",
+        "user",
+        "queued msg",
+        async () => {
+          events.push("run");
+        },
+        {
+          onQueued: () => events.push("queued"),
+          onDequeued: () => events.push("dequeued"),
+        },
+      );
+
+      expect(events).toEqual(["queued"]);
+      resolveFirst();
+      await p0;
+      await p1;
+      expect(events).toEqual(["queued", "dequeued", "run"]);
+    });
+
+    it("fires onDequeued exactly once when the entry's turn fails", async () => {
+      let dequeued = 0;
+      let resolveFirst!: () => void;
+      const gate = new Promise<void>((r) => {
+        resolveFirst = r;
+      });
+
+      const p0 = q.enqueue("s1", "user", "blocker", async () => {
+        await gate;
+      });
+      const p1 = q.enqueue(
+        "s1",
+        "user",
+        "bad",
+        async () => {
+          throw new Error("boom");
+        },
+        { onDequeued: () => dequeued++ },
+      );
+
+      resolveFirst();
+      await p0;
+      await expect(p1).rejects.toThrow("boom");
+      expect(dequeued).toBe(1);
+    });
+
+    it("fires onDequeued when the entry is dropped by clear()", async () => {
+      const events: string[] = [];
+      let resolveFirst!: () => void;
+      const gate = new Promise<void>((r) => {
+        resolveFirst = r;
+      });
+
+      const p0 = q.enqueue("s1", "user", "blocker", async () => {
+        await gate;
+      });
+      const pU = q.enqueue("s1", "user", "usr", async () => {}, {
+        onQueued: () => events.push("queued"),
+        onDequeued: () => events.push("dequeued"),
+      });
+
+      expect(q.clear("s1", "user")).toBe(1);
+      await expect(pU).rejects.toThrow(TurnDroppedError);
+      expect(events).toEqual(["queued", "dequeued"]);
+
+      resolveFirst();
+      await p0;
+    });
+
+    it("fires onDequeued when the entry is removed by removeById()", async () => {
+      let dequeued = 0;
+      let resolveFirst!: () => void;
+      const gate = new Promise<void>((r) => {
+        resolveFirst = r;
+      });
+
+      const p0 = q.enqueue("s1", "user", "blocker", async () => {
+        await gate;
+      });
+      const pU = q.enqueue("s1", "user", "usr", async () => {}, { onDequeued: () => dequeued++ });
+
+      const [entry] = q.listQueued("s1", "user");
+      expect(q.removeById("s1", [entry!.id])).toBe(1);
+      await expect(pU).rejects.toThrow(TurnDroppedError);
+      expect(dequeued).toBe(1);
+
+      resolveFirst();
+      await p0;
+    });
+
+    it("fires onDequeued when the entry is removed by removeByRange()", async () => {
+      let dequeued = 0;
+      let resolveFirst!: () => void;
+      const gate = new Promise<void>((r) => {
+        resolveFirst = r;
+      });
+
+      const p0 = q.enqueue("s1", "user", "blocker", async () => {
+        await gate;
+      });
+      const pU = q.enqueue("s1", "user", "usr", async () => {}, { onDequeued: () => dequeued++ });
+
+      expect(q.removeByRange("s1", "user", 0, 0)).toBe(1);
+      await expect(pU).rejects.toThrow(TurnDroppedError);
+      expect(dequeued).toBe(1);
+
+      resolveFirst();
+      await p0;
+    });
+
+    it("keeps processing queued entries when a hook throws", async () => {
+      let resolveFirst!: () => void;
+      const gate = new Promise<void>((r) => {
+        resolveFirst = r;
+      });
+      let ran = false;
+
+      const p0 = q.enqueue("s1", "user", "blocker", async () => {
+        await gate;
+      });
+      const p1 = q.enqueue("s1", "user", "hook-throws", async () => {}, {
+        onQueued: () => {
+          throw new Error("hook boom");
+        },
+        onDequeued: () => {
+          throw new Error("hook boom");
+        },
+      });
+      const p2 = q.enqueue("s1", "user", "after", async () => {
+        ran = true;
+      });
+
+      resolveFirst();
+      await p0;
+      await p1.catch(() => {});
+      await p2;
+      expect(ran).toBe(true);
+    });
+  });
 });

@@ -29,6 +29,18 @@ export class TurnQueueFullError extends Error {
   }
 }
 
+/**
+ * Optional lifecycle hooks for a queued entry. `onQueued` fires when the entry
+ * is enqueued while the session is busy (it waits in the queue); `onDequeued`
+ * fires exactly once when the entry leaves the queue — either because its turn
+ * started or because it was dropped (clear/remove*). Hook errors are logged and
+ * never break queue processing.
+ */
+export interface TurnQueueEntryHooks {
+  readonly onQueued?: () => void;
+  readonly onDequeued?: () => void;
+}
+
 interface QueueEntry {
   readonly id: string;
   readonly priority: TurnPriority;
@@ -37,6 +49,8 @@ interface QueueEntry {
   readonly execute: () => Promise<void>;
   readonly resolve: () => void;
   readonly reject: (err: Error) => void;
+  readonly hooks?: TurnQueueEntryHooks;
+  dequeued: boolean;
 }
 
 interface SessionQueue {
@@ -73,6 +87,7 @@ export class TieredTurnQueue {
     priority: TurnPriority,
     label: string,
     fn: () => Promise<void>,
+    hooks?: TurnQueueEntryHooks,
   ): Promise<void> {
     const sq = this.getOrCreate(sessionId);
     const arr = priority === "system" ? sq.high : sq.normal;
@@ -88,11 +103,18 @@ export class TieredTurnQueue {
         execute: fn,
         resolve,
         reject,
+        hooks,
+        dequeued: false,
       };
       if (priority === "system") {
         sq.high.push(entry);
       } else {
         sq.normal.push(entry);
+      }
+      // The session was already running a turn when this entry arrived, so it
+      // waits in the queue — announce the queued state to the caller.
+      if (hooks?.onQueued && sq.running) {
+        this.safeHook(hooks.onQueued, "onQueued", entry.id);
       }
       log.debug("turn_queue.enqueued", {
         sessionId,
@@ -156,6 +178,7 @@ export class TieredTurnQueue {
       const arr = priority === "system" ? sq.high : sq.normal;
       const slice = arr.slice(start, end + 1);
       for (const e of slice) {
+        this.markDequeued(e);
         e.reject(new TurnDroppedError(e.id));
       }
       if (priority === "system") {
@@ -178,12 +201,18 @@ export class TieredTurnQueue {
     if (!sq) return 0;
     let removed = 0;
     if (!priority || priority === "system") {
-      for (const e of sq.high) e.reject(new TurnDroppedError(e.id));
+      for (const e of sq.high) {
+        this.markDequeued(e);
+        e.reject(new TurnDroppedError(e.id));
+      }
       removed += sq.high.length;
       sq.high = [];
     }
     if (!priority || priority === "user") {
-      for (const e of sq.normal) e.reject(new TurnDroppedError(e.id));
+      for (const e of sq.normal) {
+        this.markDequeued(e);
+        e.reject(new TurnDroppedError(e.id));
+      }
       removed += sq.normal.length;
       sq.normal = [];
     }
@@ -224,6 +253,8 @@ export class TieredTurnQueue {
       label: next.label,
       id: next.id,
     });
+    // The entry is leaving the queue to run now (fires onDequeued exactly once).
+    this.markDequeued(next);
     next
       .execute()
       .then(() => next.resolve())
@@ -269,12 +300,29 @@ export class TieredTurnQueue {
     let removed = 0;
     for (let i = arr.length - 1; i >= 0; i--) {
       if (pred(arr[i])) {
+        this.markDequeued(arr[i]);
         arr[i].reject(new TurnDroppedError(arr[i].id));
         arr.splice(i, 1);
         removed++;
       }
     }
     return removed;
+  }
+
+  /** Fire an entry's onDequeued hook exactly once (start or drop), shielding the queue from hook errors. */
+  private markDequeued(entry: QueueEntry): void {
+    if (entry.dequeued) return;
+    entry.dequeued = true;
+    const cb = entry.hooks?.onDequeued;
+    if (cb) this.safeHook(cb, "onDequeued", entry.id);
+  }
+
+  private safeHook(cb: () => void, hook: string, id: string): void {
+    try {
+      cb();
+    } catch (err) {
+      log.warn("turn_queue.hook_failed", { id, hook, err: String(err) });
+    }
   }
 
   private cleanup(sessionId: string, sq: SessionQueue): void {
