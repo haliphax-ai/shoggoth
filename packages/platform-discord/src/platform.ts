@@ -139,6 +139,7 @@ export interface DiscordPlatformHandle {
     readonly systemContext?: SystemContext;
     readonly delivery: SessionModelTurnDelivery;
     readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
+    readonly statusBarSink?: { setStatusBar: (line: string | null) => Promise<void> };
   }) => Promise<SessionAgentTurnResult>;
   readonly subscribeSubagentSession: (sessionId: string) => () => void;
   readonly announcePersistentSubagentSessionEnded: (input: {
@@ -596,6 +597,7 @@ export async function startDiscordPlatform(
     readonly systemContext?: SystemContext;
     readonly delivery: SessionModelTurnDelivery;
     readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
+    readonly statusBarSink?: { setStatusBar: (line: string | null) => Promise<void> };
   }): Promise<SessionAgentTurnResult> {
     const sid = input.sessionId.trim();
     const sessionRow = sessions.getById(sid);

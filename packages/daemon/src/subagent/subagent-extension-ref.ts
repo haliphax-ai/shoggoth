@@ -7,6 +7,17 @@ import type { SystemContext } from "@shoggoth/shared";
 export type PersistentSubagentSessionEndReason = "ttl_expired" | "killed";
 
 /**
+ * Live handle to a posted OOB "processing" banner (issue #363). The platform
+ * returns this from `oobTurnBanner.begin`; callers pass it straight back to
+ * `finish`. `setStatusBar` streams a live bar render into the banner message
+ * while the turn executes (editing-capable platforms only).
+ */
+export interface OobTurnBannerHandle {
+  readonly sessionId: string;
+  readonly setStatusBar: (line: string | null) => Promise<void>;
+}
+
+/**
  * Filled from `index.ts` after a platform starts. Control-plane subagent ops consult this ref.
  */
 export type SubagentRuntimeExtension = {
@@ -18,6 +29,13 @@ export type SubagentRuntimeExtension = {
     readonly delivery: SessionModelTurnDelivery;
     /** Optional override merged into the session's model invocation params (e.g. responseSchema for structured output). */
     readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
+    /**
+     * Optional live status-bar sink for the turn. When present, the platform
+     * creates a tracker wired to this sink and streams thinking/tool/prose
+     * renders into it (used by the OOB banner surface so an out-of-band turn's
+     * bar lands in the banner message, issue #363).
+     */
+    readonly statusBarSink?: { setStatusBar: (line: string | null) => Promise<void> };
   }) => Promise<SessionAgentTurnResult>;
   readonly subscribeSubagentSession: (sessionId: string) => () => void;
   /**
@@ -55,6 +73,25 @@ export type SubagentRuntimeExtension = {
     readonly sessionId: string;
     readonly userContent: string;
   }) => Promise<void>;
+  /**
+   * OOB turn banner surface (issue #363). `begin` posts the "processing"
+   * banner and returns a handle whose `setStatusBar` streams live bar renders
+   * into that message; `finish` appends the terminal banner (plus optional
+   * `to_operator` content) and finalizes the bar. Resolves `undefined` from
+   * `begin` when the session is not bound to a message surface or the platform
+   * cannot edit messages, in which case callers fall back to plain delivery.
+   */
+  readonly oobTurnBanner?: {
+    begin: (input: {
+      readonly sessionId: string;
+      readonly processing: string;
+    }) => Promise<OobTurnBannerHandle | undefined>;
+    finish: (input: {
+      readonly handle: OobTurnBannerHandle;
+      readonly terminal: string;
+      readonly content?: string;
+    }) => Promise<void>;
+  };
   /** Pin a message in the resolved channel for a session. Optional platform capability. */
   readonly pinMessage?: (input: {
     readonly channelId: string;
