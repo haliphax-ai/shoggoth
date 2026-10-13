@@ -35,6 +35,7 @@ export const DEFAULT_HITL_CONFIG: ShoggothHitlConfig = {
     "builtin-config-request": "never",
     "builtin-media-generate": "caution",
     "builtin-decision": "caution",
+    "builtin-rerank": "caution",
     "builtin-vault": "caution",
     "builtin-logs": "critical",
   },

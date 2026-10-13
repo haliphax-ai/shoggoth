@@ -18,6 +18,7 @@ export function register(registry: BuiltinToolRegistry): void {
         memory: ctx.memoryConfig,
         env: ctx.orchestratorEnv,
         runtimeOpenaiBaseUrl: ctx.runtimeOpenaiBaseUrl,
+        rerank: ctx.config.rerank,
       });
     });
   }

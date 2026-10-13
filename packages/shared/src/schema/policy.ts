@@ -108,6 +108,7 @@ export const DEFAULT_POLICY_CONFIG: ShoggothPolicyConfig = {
         "media_generate",
         "media_generate_poll",
         "decision_evaluate",
+        "rerank_documents",
       ],
       deny: [],
       review: [],
