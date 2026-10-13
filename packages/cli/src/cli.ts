@@ -25,7 +25,11 @@ if (argv.includes("--version") || argv.includes("-V")) {
   process.exit(0);
 }
 
-function printTopLevelHelp(): void {
+function printTopLevelHelp(decisionEnabled = false): void {
+  // The decision command only appears when decision support is configured.
+  const decisionLine = decisionEnabled
+    ? "  shoggoth decision             Decision/classifier models (see: shoggoth decision --help)\n"
+    : "";
   console.log(`shoggoth ${VERSION}
 Usage:
   shoggoth --version | -V         Print version
@@ -44,15 +48,25 @@ Usage:
   shoggoth prompt               Run a canned prompt (see: shoggoth prompt --help)
   shoggoth elevation            Permission elevation (see: shoggoth elevation --help)
   shoggoth media                Media generation (see: shoggoth media --help)
-  shoggoth decision             Decision/classifier models (see: shoggoth decision --help)
-  shoggoth service               Service management (see: shoggoth service --help)
+${decisionLine}  shoggoth service               Service management (see: shoggoth service --help)
   shoggoth vault                Credential vault (see: shoggoth vault --help)
 
 Env: SHOGGOTH_CONTROL_SOCKET, SHOGGOTH_OPERATOR_TOKEN (non-Linux), SHOGGOTH_CONFIG_DIR`);
 }
 
 if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
-  printTopLevelHelp();
+  let decisionEnabled = false;
+  try {
+    const helpConfig = await loadLayeredConfigAsync(
+      process.env.SHOGGOTH_CONFIG_DIR ?? LAYOUT.configDir,
+    );
+    decisionEnabled = (helpConfig.decision?.providers ?? []).some(
+      (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
+    );
+  } catch {
+    decisionEnabled = false;
+  }
+  printTopLevelHelp(decisionEnabled);
   process.exit(0);
 }
 

@@ -110,6 +110,20 @@ export function parseDecisionEvaluateArgs(args: string[]):
 export async function runDecisionCli(argv: string[]): Promise<void> {
   const configDir = process.env.SHOGGOTH_CONFIG_DIR ?? LAYOUT.configDir;
 
+  // Feature gating: with no decision provider that has models, the command is
+  // inert on every subcommand (including help) — the feature does not exist.
+  const config = await loadLayeredConfigAsync(configDir);
+  const decisionEnabled = (config.decision?.providers ?? []).some(
+    (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
+  );
+  if (!decisionEnabled) {
+    console.error(
+      "shoggoth decision: decision support is not configured (no decision providers with models)",
+    );
+    process.exitCode = 1;
+    return;
+  }
+
   if (!argv.length || argv[0] === "--help" || argv[0] === "-h") {
     printDecisionHelp();
     return;
@@ -118,12 +132,7 @@ export async function runDecisionCli(argv: string[]): Promise<void> {
   const sub = argv[0];
 
   if (sub === "models") {
-    const config = await loadLayeredConfigAsync(configDir);
     const providers = config.decision?.providers ?? [];
-    if (!providers.length) {
-      console.log("No decision providers configured.");
-      return;
-    }
     const lines: string[] = [];
     const defaultModel = (config.decision as { defaultModel?: string } | undefined)?.defaultModel;
     for (const provider of providers) {

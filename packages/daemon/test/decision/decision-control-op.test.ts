@@ -251,16 +251,66 @@ describe("decision_evaluate control op", () => {
       assert.ok(String(result.error).includes("unknown-model"));
     });
 
-    it("returns error when decision config is absent", async () => {
+    it("is invisible (returns undefined) when decision config is absent", async () => {
       const req = makeReq(validPayload());
-      const result = (await handleIntegrationControlOp(
+      const result = await handleIntegrationControlOp(
         req,
         agentPrincipal(),
         makeCtx({ decision: undefined }),
-      )) as Record<string, unknown>;
+      );
 
-      assert.equal(result.status, "error");
+      assert.equal(result, undefined);
+      assert.equal(MockDecisionService.fromConfig.mock.calls.length, 0);
       assert.equal(mockEvaluate.mock.calls.length, 0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Feature gating: with no decision models configured at all, the op must be
+  // indistinguishable from a nonexistent op (ERR_UNKNOWN_OP downstream).
+  // ---------------------------------------------------------------------------
+
+  describe("feature gating (no models configured)", () => {
+    it("is invisible when providers exist but have no models", async () => {
+      const ctx = makeCtx({
+        decision: {
+          providers: [
+            {
+              id: "typesafe-main",
+              kind: "typesafe",
+              baseUrl: "https://api.typesafe.ai",
+              models: [],
+            },
+          ],
+        },
+      });
+      const req = makeReq(validPayload());
+      const result = await handleIntegrationControlOp(req, agentPrincipal(), ctx);
+
+      assert.equal(result, undefined);
+      assert.equal(MockDecisionService.fromConfig.mock.calls.length, 0);
+    });
+
+    it("is invisible to operators when unconfigured (no ERR_FORBIDDEN leak)", async () => {
+      const req = makeReq(validPayload());
+      const result = await handleIntegrationControlOp(
+        req,
+        operatorPrincipal(),
+        makeCtx({ decision: undefined }),
+      );
+
+      assert.equal(result, undefined);
+    });
+
+    it("is invisible with an invalid payload when unconfigured (no validation leak)", async () => {
+      const req = makeReq({});
+      const result = await handleIntegrationControlOp(
+        req,
+        agentPrincipal(),
+        makeCtx({ decision: undefined }),
+      );
+
+      assert.equal(result, undefined);
     });
   });
 });

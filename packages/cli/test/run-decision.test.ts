@@ -7,12 +7,35 @@ vi.mock("@shoggoth/daemon/lib", () => ({
   invokeControlRequest: (...args: unknown[]) => mockInvoke(...args),
 }));
 
-const mockLoadLayeredConfig = vi.fn().mockReturnValue({ socketPath: "/tmp/test.sock" });
+const mockLoadLayeredConfig = vi.fn();
 vi.mock("@shoggoth/shared", () => ({
   loadLayeredConfigAsync: (...args: unknown[]) => mockLoadLayeredConfig(...args),
   LAYOUT: { configDir: "/tmp/cfg" },
   VERSION: "0.0.0-test",
 }));
+
+/** Default: decision support configured (provider with models). */
+function configuredDecisionConfig() {
+  return {
+    socketPath: "/tmp/test.sock",
+    decision: {
+      defaultModel: "jev-latest",
+      providers: [
+        {
+          id: "typesafe-main",
+          kind: "typesafe",
+          baseUrl: "https://api.typesafe.ai",
+          models: [{ name: "jev-latest" }, { name: "jev-1.13.0" }],
+        },
+      ],
+    },
+  };
+}
+
+/** Decision support absent: no decision section at all. */
+function unconfiguredDecisionConfig() {
+  return { socketPath: "/tmp/test.sock" };
+}
 
 import { parseDecisionEvaluateArgs, runDecisionCli } from "../src/run-decision";
 
@@ -30,7 +53,7 @@ beforeEach(() => {
   process.env.SHOGGOTH_OPERATOR_TOKEN = "test-token";
   process.env.SHOGGOTH_CONTROL_SOCKET = "/tmp/test.sock";
   mockInvoke.mockReset();
-  mockLoadLayeredConfig.mockReset().mockReturnValue({ socketPath: "/tmp/test.sock" });
+  mockLoadLayeredConfig.mockReset().mockReturnValue(configuredDecisionConfig());
 });
 
 afterEach(() => {
@@ -346,12 +369,58 @@ describe("runDecisionCli models", () => {
     assert.strictEqual(mockInvoke.mock.calls.length, 0);
   });
 
-  it("reports when no decision providers are configured", async () => {
-    mockLoadLayeredConfig.mockReturnValue({ socketPath: "/tmp/test.sock" });
+  it("hides the listing when no decision models are configured", async () => {
+    mockLoadLayeredConfig.mockReturnValue(unconfiguredDecisionConfig());
 
     await runDecisionCli(["models"]);
 
+    assert.strictEqual(process.exitCode, 1);
     const output = logged.join("\n");
-    assert.ok(output.toLowerCase().includes("no decision"), `Expected notice: ${output}`);
+    assert.ok(!output.includes("jev"), `Expected no models in output: ${output}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature gating: with no decision models configured at all, the command is
+// inert on every subcommand (including --help).
+// ---------------------------------------------------------------------------
+
+describe("runDecisionCli — feature gating (no models configured)", () => {
+  it("is inert for evaluate and reports 'not configured'", async () => {
+    mockLoadLayeredConfig.mockReturnValue(unconfiguredDecisionConfig());
+
+    await runDecisionCli([
+      "evaluate",
+      "--state",
+      "s",
+      "--questions",
+      '{"q":{"type":"noul","instructions":"ok?"}}',
+    ]);
+
+    assert.strictEqual(process.exitCode, 1);
+    const allOutput = [...logged, ...errored].join("\n");
+    assert.ok(
+      allOutput.toLowerCase().includes("not configured"),
+      `Expected not-configured notice: ${allOutput}`,
+    );
+    assert.strictEqual(mockInvoke.mock.calls.length, 0);
+  });
+
+  it("is inert for --help when unconfigured (command does not appear)", async () => {
+    mockLoadLayeredConfig.mockReturnValue(unconfiguredDecisionConfig());
+
+    await runDecisionCli(["--help"]);
+
+    assert.strictEqual(process.exitCode, 1);
+    assert.strictEqual(logged.length, 0, `Expected no help output: ${logged.join("\n")}`);
+  });
+
+  it("is inert for an unknown subcommand when unconfigured", async () => {
+    mockLoadLayeredConfig.mockReturnValue(unconfiguredDecisionConfig());
+
+    await runDecisionCli(["bogus"]);
+
+    assert.strictEqual(process.exitCode, 1);
+    assert.strictEqual(logged.length, 0, `Expected no help output: ${logged.join("\n")}`);
   });
 });

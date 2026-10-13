@@ -1,6 +1,6 @@
 Query a decision (classifier) model — evaluates a state against typed questions and returns structured answers with probabilities. Backed by TypeSafe System One models (`POST /v1/systemone`, see <https://docs.typesafe.ai/api>).
 
-Requires a `decision` config section with at least one provider that has at least one model; otherwise the tool is not injected.
+**Feature gating:** the feature only exists when the `decision` config section has at least one provider with at least one model. When it does not, the `builtin-decision` tool is not injected, the `decision_evaluate` control op responds as an unknown op, and the `shoggoth decision` CLI command (including its help and its entry in `shoggoth --help`) is inert/hidden.
 
 ## Parameters
 

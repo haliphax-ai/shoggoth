@@ -3087,6 +3087,15 @@ export async function handleIntegrationControlOp(
     }
 
     case "decision_evaluate": {
+      // Feature gating: with no decision provider that has models, the op is
+      // indistinguishable from a nonexistent one (undefined → ERR_UNKNOWN_OP).
+      const decisionConfig = (ctx.config as any).decision;
+      const decisionEnabled = (decisionConfig?.providers ?? []).some(
+        (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
+      );
+      if (!decisionEnabled) {
+        return undefined;
+      }
       if (principal.kind !== "agent") {
         throw new IntegrationOpError("ERR_FORBIDDEN", "decision_evaluate requires agent principal");
       }
@@ -3118,10 +3127,6 @@ export async function handleIntegrationControlOp(
           "ERR_INVALID_PAYLOAD",
           "decision_evaluate requires a non-empty questions object",
         );
-      }
-      const decisionConfig = (ctx.config as any).decision;
-      if (!decisionConfig) {
-        return { status: "error", error: `No decision config found` };
       }
       const svc = DecisionService.fromConfig(decisionConfig);
       return svc.evaluate({
