@@ -35,7 +35,6 @@ Results come back ordered by descending `relevance_score`; each `index` maps to 
 {
   "rerank": {
     "defaultModel": "openrouter-cohere/cohere/rerank-v3.5",
-    "memorySearch": { "enabled": true },
     "providers": [
       {
         "id": "openrouter-cohere",
@@ -52,11 +51,11 @@ Results come back ordered by descending `relevance_score`; each `index` maps to 
 - `kind` is `cohere` for the Cohere-style wire protocol; `baseUrl` is the API root (`/v1/rerank` is appended).
 - `apiKey` or `apiKeyEnv` supplies the bearer token.
 - `defaultModel` must be a configured model in `provider-id/model-name` format.
-- `memorySearch.enabled` (default `false`) turns on automatic reranking of `memory-search` results; it requires `defaultModel` and gates only the memory-search integration.
+- `memorySearch.enabled` (default `true`) controls automatic reranking of `memory-search` results; it requires `defaultModel` and gates only the memory-search integration. Set it to `false` to opt out.
 
 ## RAG integration
 
-`memory-search` reranks its retrieved hits automatically when configured — there are no per-call rerank parameters. Set `rerank.memorySearch.enabled` to `true` and configure `rerank.defaultModel`: whenever both are set, each search re-scores and re-orders its candidates with the rerank model. The response indicates when reranking ran: it flags `"reranked": true`, names the model in `rerankModel`, and each reordered hit carries a `rerankScore`. With the flag off (the default), or when no default model is configured, searches return the normal retrieval order. Failures degrade gracefully to the original retrieval order with a `rerankNote` explaining why. The flag gates only this memory-search integration — the `builtin-rerank` tool and `rerank_documents` op remain available whenever a provider with models is configured. Workflow tool tasks can call `builtin-rerank` directly the same way the agent tool does.
+`memory-search` reranks its retrieved hits automatically — there are no per-call rerank parameters. As soon as `rerank.defaultModel` is configured, each search re-scores and re-orders its candidates with the rerank model; set `rerank.memorySearch.enabled` to `false` to opt out and keep plain retrieval order. The response indicates when reranking ran: it flags `"reranked": true`, names the model in `rerankModel`, and each reordered hit carries a `rerankScore`. When no default model is configured, or the flag is off, searches return the normal retrieval order. Failures degrade gracefully to the original retrieval order with a `rerankNote` explaining why. The flag gates only this memory-search integration — the `builtin-rerank` tool and `rerank_documents` op remain available whenever a provider with models is configured. Workflow tool tasks can call `builtin-rerank` directly the same way the agent tool does.
 
 ## CLI
 

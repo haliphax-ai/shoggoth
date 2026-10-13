@@ -108,7 +108,8 @@ export async function runMemoryBuiltin(input: {
   readonly fetchImpl?: FetchLike;
   readonly runtimeOpenaiBaseUrl?: string | undefined;
   /** Rerank config for memory-search; the automatic rerank step runs when
-   * rerank.memorySearch.enabled is on and rerank.defaultModel is configured. */
+   * rerank.memorySearch.enabled is not explicitly false and rerank.defaultModel
+   * is configured (reranking is on by default). */
   readonly rerank?: ShoggothRerankConfig;
 }): Promise<{ resultJson: string }> {
   const {
@@ -300,16 +301,21 @@ export async function runMemoryBuiltin(input: {
     });
 
     // --- Automatic rerank step (RAG integration) ---
-    // Config-driven: when rerank.memorySearch.enabled is on and
-    // rerank.defaultModel is configured, the retrieved candidates are
-    // re-scored and re-ordered by relevance. Any rerank failure degrades
-    // gracefully to the original retrieval order.
+    // Config-driven and on by default: unless rerank.memorySearch.enabled
+    // is explicitly false, a configured rerank.defaultModel makes the
+    // retrieved candidates re-scored and re-ordered by relevance. Any
+    // rerank failure degrades gracefully to the original retrieval order.
     let searchHits = hits;
     let reranked = false;
     let rerankNote: string | undefined;
     let rerankModel: string | undefined;
     let rerankScores: Map<number, number> | null = null;
-    if (rerank?.memorySearch?.enabled === true && rerank.defaultModel && hits.length > 0) {
+    if (
+      rerank &&
+      rerank.memorySearch?.enabled !== false &&
+      rerank.defaultModel &&
+      hits.length > 0
+    ) {
       const outcome = await RerankService.fromConfig(rerank).rerank({
         query,
         documents: hits.map((h) => h.body),

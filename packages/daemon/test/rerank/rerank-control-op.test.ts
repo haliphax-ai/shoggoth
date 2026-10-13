@@ -487,13 +487,20 @@ describe("shoggothRerankConfigSchema", () => {
     assert.ok(parsed.success);
   });
 
-  it("accepts memorySearch.enabled and treats it as off when absent", () => {
-    const enabled = shoggothRerankConfigSchema.safeParse({
-      memorySearch: { enabled: true },
+  it("accepts memorySearch.enabled; absent stanza stays absent, omitted enabled defaults true", () => {
+    const disabled = shoggothRerankConfigSchema.safeParse({
+      memorySearch: { enabled: false },
       providers: [validProvider],
     });
-    assert.ok(enabled.success);
-    assert.equal(enabled.success && enabled.data.memorySearch?.enabled, true);
+    assert.ok(disabled.success);
+    assert.equal(disabled.success && disabled.data.memorySearch?.enabled, false);
+
+    const defaulted = shoggothRerankConfigSchema.safeParse({
+      memorySearch: {},
+      providers: [validProvider],
+    });
+    assert.ok(defaulted.success);
+    assert.equal(defaulted.success && defaulted.data.memorySearch?.enabled, true);
 
     const absent = shoggothRerankConfigSchema.safeParse({ providers: [validProvider] });
     assert.ok(absent.success);

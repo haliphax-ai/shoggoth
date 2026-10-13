@@ -10,8 +10,9 @@ import type { FetchLike } from "@shoggoth/models";
 
 // ---------------------------------------------------------------------------
 // RAG integration: the automatic, config-driven rerank step of memory-search.
-// Reranking runs when rerank.memorySearch.enabled is on and rerank.defaultModel
-// is configured — there are no per-call rerank parameters.
+// Reranking runs by default when rerank.defaultModel is configured; setting
+// rerank.memorySearch.enabled to false opts out. There are no per-call
+// rerank parameters.
 // ---------------------------------------------------------------------------
 
 const rerankConfigBase = {
@@ -88,7 +89,7 @@ type SearchResponse = {
 };
 
 describe("memory-search rerank step (config-driven)", () => {
-  it("reranks automatically when the flag is on and a default model is configured", async () => {
+  it("reranks automatically when a default model is configured (no memorySearch stanza)", async () => {
     const { ws, db, memory } = await setup();
     const calls: unknown[] = [];
 
@@ -100,7 +101,7 @@ describe("memory-search rerank step (config-driven)", () => {
       memory,
       env: { ...process.env },
       fetchImpl: rerankFetch(calls),
-      rerank: rerankConfig,
+      rerank: rerankConfigBase,
     });
 
     const parsed = JSON.parse(sr.resultJson) as SearchResponse;
@@ -133,7 +134,7 @@ describe("memory-search rerank step (config-driven)", () => {
     db.close();
   });
 
-  it("returns plain retrieval order when the flag is off", async () => {
+  it("returns plain retrieval order when explicitly opted out (enabled: false)", async () => {
     const { ws, db, memory } = await setup();
     const calls: unknown[] = [];
 
@@ -159,7 +160,7 @@ describe("memory-search rerank step (config-driven)", () => {
     db.close();
   });
 
-  it("returns plain retrieval order when the flag is absent (default off)", async () => {
+  it("reranks automatically when the memorySearch stanza omits enabled (schema default true)", async () => {
     const { ws, db, memory } = await setup();
     const calls: unknown[] = [];
 
@@ -171,20 +172,20 @@ describe("memory-search rerank step (config-driven)", () => {
       memory,
       env: { ...process.env },
       fetchImpl: rerankFetch(calls),
-      rerank: rerankConfigBase,
+      rerank: { ...rerankConfigBase, memorySearch: {} },
     });
 
     const parsed = JSON.parse(sr.resultJson) as SearchResponse;
 
-    assert.equal(calls.length, 0);
-    assert.equal(parsed.reranked, undefined);
+    assert.equal(calls.length, 1);
+    assert.equal(parsed.reranked, true);
     assert.equal(parsed.rerankNote, undefined);
-    assert.deepEqual(parsed.hits.map((h) => h.title).sort(), ["Alpha", "Beta", "Gamma"]);
+    assert.equal(parsed.hits[0]!.rerankScore, 0.91);
 
     db.close();
   });
 
-  it("does not rerank when the flag is on but no default model is configured", async () => {
+  it("does not rerank when reranking is on by default but no default model is configured", async () => {
     const { ws, db, memory } = await setup();
     const calls: unknown[] = [];
 
@@ -196,7 +197,7 @@ describe("memory-search rerank step (config-driven)", () => {
       memory,
       env: { ...process.env },
       fetchImpl: rerankFetch(calls),
-      rerank: { providers: rerankConfigBase.providers, memorySearch: { enabled: true } },
+      rerank: { providers: rerankConfigBase.providers },
     });
 
     const parsed = JSON.parse(sr.resultJson) as SearchResponse;
