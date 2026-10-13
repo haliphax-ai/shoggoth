@@ -14,6 +14,7 @@ import { runPromptCli } from "./run-prompt";
 import { printConfigHelp, runConfigShow } from "./run-config";
 import { runElevationCli } from "./run-elevation";
 import { runMediaCli } from "./run-media";
+import { runDecisionCli } from "./run-decision";
 import { runServiceCli } from "./run-service";
 import { runVaultCli } from "./run-vault";
 
@@ -43,6 +44,7 @@ Usage:
   shoggoth prompt               Run a canned prompt (see: shoggoth prompt --help)
   shoggoth elevation            Permission elevation (see: shoggoth elevation --help)
   shoggoth media                Media generation (see: shoggoth media --help)
+  shoggoth decision             Decision/classifier models (see: shoggoth decision --help)
   shoggoth service               Service management (see: shoggoth service --help)
   shoggoth vault                Credential vault (see: shoggoth vault --help)
 
@@ -270,6 +272,16 @@ if (argv[0] === "vault") {
 if (argv[0] === "media") {
   try {
     await runMediaCli(argv.slice(1));
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  }
+  process.exit(process.exitCode ?? 0);
+}
+
+if (argv[0] === "decision") {
+  try {
+    await runDecisionCli(argv.slice(1));
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
     process.exit(1);
