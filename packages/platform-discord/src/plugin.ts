@@ -42,6 +42,7 @@ interface ReactionAddEvent {
   userId: string;
   channelId: string;
   messageId: string;
+  guildId?: string;
   emoji: { name?: string; id?: string };
 }
 
@@ -372,14 +373,9 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           const owner = resolveDiscordOwnerUserId(configRef.current)?.trim();
           if (!owner || ev.userId !== owner) return;
 
-          const sessionId = discordMessaging.resolveOutboundChannelIdForSession
-            ? (() => {
-                for (const r of discordMessaging.routes) {
-                  if (r.channelId === ev.channelId) return r.sessionId;
-                }
-                return undefined;
-              })()
-            : undefined;
+          // Same resolution order as inbound message routing and slash commands:
+          // dynamic thread bindings first, then static config routes (guild-aware).
+          const sessionId = discordMessaging.resolveSessionId(ev.channelId, ev.guildId);
 
           if (!sessionId) {
             logger.debug("reaction.passthrough.no_session", {
