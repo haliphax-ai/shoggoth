@@ -258,7 +258,7 @@ Resolves per-session effective configuration by merging global config with per-a
 | `resolveEffectiveThinkingDisplay(cfg, sessionId)`                 | Per-agent `thinkingDisplay` or default `"none"`.                                                                                                                                                            |
 | `formatAgentIdentityPrefix(cfg, sessionId)`                       | Returns `**<emoji> <displayName>:**\n` for platform messages. Emoji defaults to 🦑.                                                                                                                         |
 | `evaluateMcpServerRules(serverId, rules, explicit?)`              | Evaluates allow/deny for a single MCP server id. Deny wins → allow check → default-deny. With `explicit: true`, a `*` allow pattern will not match the server — it must be named exactly in the allow list. |
-| `resolveEffectiveMcpServerRules(config, agentId, isSubagent)`     | 4-level merge cascade: global MCP rules → global subagent rules → per-agent rules. Per-field replace semantics.                                                                                             |
+| `resolveEffectiveMcpServerRules(config, agentId, isSubagent)`     | Merge cascade: global MCP rules → per-agent MCP rules (subagent sessions first inherit the agent's top-level rules) → global subagent rules → per-agent subagent rules. Per-field replace semantics.        |
 
 ### Constants
 
