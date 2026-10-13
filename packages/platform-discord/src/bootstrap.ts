@@ -11,6 +11,7 @@ import type { NoticeResolver } from "./daemon-types";
 import { setNoticeResolver } from "./notices";
 import {
   resolveDiscordAllowBotMessages,
+  resolveDiscordCommandGuildIds,
   resolveDiscordIntents,
   resolveDiscordOwnerUserId,
   resolveEffectiveDiscordRoutes,
@@ -40,14 +41,8 @@ export interface StartDaemonDiscordMessagingOptions {
   readonly reactionBotUserIdRef?: { current: string | undefined };
   /** Daemon's notice resolver — wired into platform-discord's `setNoticeResolver` at startup. */
   readonly noticeResolver?: NoticeResolver;
-  /** When true, register global slash commands on startup (requires bot user id). */
+  /** When true, register guild slash commands on startup (requires bot user id). */
   readonly registerSlashCommands?: boolean;
-  /**
-   * Registration-state signal: set to the application ID when this instance successfully
-   * registered the global slash commands, and cleared when they are de-registered. Lets
-   * the shutdown drain de-register only what this instance registered.
-   */
-  readonly slashCommandRegistrationRef?: { current: string | undefined };
 }
 
 /**
@@ -86,14 +81,9 @@ export async function startDaemonDiscordMessaging(
   });
 
   if (runtime && opts.registerSlashCommands !== false && runtime.discordBotUserId) {
-    // Slash commands are guild-scoped: target the unique guilds across routes.
-    const guildIds = [
-      ...new Set(
-        resolveEffectiveDiscordRoutes(opts.config)
-          .map((r) => r.guildId)
-          .filter((g): g is string => typeof g === "string" && g.length > 0),
-      ),
-    ];
+    // Slash commands are guild-scoped: explicit platforms.discord.commandGuildIds
+    // wins, otherwise the unique guilds across routes.
+    const guildIds = resolveDiscordCommandGuildIds(opts.config);
     if (guildIds.length === 0) {
       opts.logger.warn("discord.slash_commands.no_guilds", {
         reason: "no guild IDs in Discord routes; guild-scoped commands cannot be registered",
@@ -109,9 +99,6 @@ export async function startDaemonDiscordMessaging(
           applicationId: runtime.discordBotUserId,
           guildIds,
         });
-        if (opts.slashCommandRegistrationRef) {
-          opts.slashCommandRegistrationRef.current = runtime.discordBotUserId;
-        }
         // Migration: drop legacy globally-registered Shoggoth commands so they
         // don't linger as duplicates next to the guild-scoped ones. Failure is
         // non-fatal — guild registration already succeeded.
@@ -134,21 +121,4 @@ export async function startDaemonDiscordMessaging(
   }
 
   return runtime;
-}
-
-/**
-/**
- * Shutdown drain for Discord messaging: stops the transport.
- *
- * Slash commands are intentionally NOT de-registered at shutdown — command
- * snowflake IDs must stay durable across restarts. Startup registration is a
- * convergent bulk overwrite (same-name commands keep their IDs), so anything
- * stale is pruned on the next startup instead of torn down here.
- */
-export function createDiscordMessagingShutdownDrain(opts: {
-  readonly stop: () => void | Promise<void>;
-}): () => Promise<void> {
-  return async () => {
-    await opts.stop();
-  };
 }

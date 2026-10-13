@@ -5,7 +5,6 @@ import {
   registerDiscordSlashCommands,
   cleanupLegacyGlobalCommands,
 } from "../src/slash-commands";
-import { createDiscordMessagingShutdownDrain } from "../src/bootstrap";
 import type { DiscordInteractionEvent } from "../src/interaction";
 import type { DiscordRestTransport } from "../src/transport";
 
@@ -1087,48 +1086,5 @@ describe("cleanupLegacyGlobalCommands", () => {
     });
 
     assert.strictEqual(calls.filter((c) => c.method === "deleteGlobalCommand").length, 0);
-  });
-});
-
-describe("createDiscordMessagingShutdownDrain", () => {
-  it("stops messaging without touching the command list", async () => {
-    let stopped = false;
-
-    const drain = createDiscordMessagingShutdownDrain({
-      stop: () => {
-        stopped = true;
-      },
-    });
-
-    await drain();
-
-    // The drain holds no transport and performs no REST calls: slash commands
-    // stay registered at shutdown so their IDs remain durable across restarts.
-    assert.strictEqual(stopped, true);
-  });
-
-  it("is safe to invoke repeatedly", async () => {
-    let stopCount = 0;
-
-    const drain = createDiscordMessagingShutdownDrain({
-      stop: () => {
-        stopCount++;
-      },
-    });
-
-    await drain();
-    await drain();
-
-    assert.strictEqual(stopCount, 2);
-  });
-
-  it("propagates a failing stop so shutdown errors surface", async () => {
-    const drain = createDiscordMessagingShutdownDrain({
-      stop: () => {
-        throw new Error("stop failed");
-      },
-    });
-
-    await assert.rejects(drain(), /stop failed/);
   });
 });
