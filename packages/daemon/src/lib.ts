@@ -166,6 +166,7 @@ export {
   type TurnPriority,
   type QueueDepth,
   type QueueEntryInfo,
+  type TurnQueueEntryHooks,
 } from "./sessions/session-turn-queue";
 export { getTurnQueue, setTurnQueue } from "./sessions/session-turn-queue-singleton";
 export {
@@ -284,3 +285,11 @@ export {
   type DownloadInboundAttachmentsOptions,
 } from "./presentation/attachment-download";
 export { ReactionQueue, type QueuedReaction } from "./presentation/reaction-queue";
+export {
+  createQueuedMessageIndicator,
+  QUEUED_MESSAGE_REACTION,
+  QUEUED_MESSAGE_NOTICE,
+  type QueuedMessageIndicator,
+  type QueuedMessageIndicatorInput,
+  type QueuedMessageIndicatorLogger,
+} from "./presentation/queued-message-indicator";

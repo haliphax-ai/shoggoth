@@ -217,6 +217,7 @@ function buildDiscordCapabilities(
       removeReaction: (channelId: string, messageId: string, emoji: string) =>
         transport.deleteMessageReaction(channelId, messageId, emoji),
     },
+    replies: true,
     threads: true,
     embeds: true,
     typing: {
