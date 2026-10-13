@@ -69,6 +69,7 @@ export const statusBarConfigSchema = z
     sequenceEnabled: z.boolean().optional(),
     toolCallsEnabled: z.boolean().optional(),
     subagentsEnabled: z.boolean().optional(),
+    timersEnabled: z.boolean().optional(),
     contextWindowEnabled: z.boolean().optional(),
     compactionsEnabled: z.boolean().optional(),
   })

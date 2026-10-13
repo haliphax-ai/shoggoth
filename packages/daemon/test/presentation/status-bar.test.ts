@@ -8,6 +8,7 @@ import {
   createStatusBarTurnTracker,
   getStatusBarStats,
   getSessionSubagentCounts,
+  getSessionActiveTimerCount,
 } from "../../src/presentation/status-bar";
 import type { StatusBarStats } from "../../src/presentation/status-bar";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
@@ -236,6 +237,20 @@ describe("createTurnStatusBar", () => {
     expect(last.compactions).toBe(3);
   });
 
+  it("carries the seeded timer count into the snapshot", async () => {
+    const { bar, sink } = createBar();
+    await bar.start({ sequence: 19, compactions: 0, timers: 2 });
+    const snap = sink.setStatusBar.mock.calls[0]![0] as StatusBarSnapshot;
+    expect(snap.timers).toBe(2);
+  });
+
+  it("omits timers from the snapshot when never seeded", async () => {
+    const { bar, sink } = createBar();
+    await bar.start({ sequence: 20, compactions: 0 });
+    const snap = sink.setStatusBar.mock.calls[0]![0] as StatusBarSnapshot;
+    expect(snap.timers).toBeUndefined();
+  });
+
   it("finish() renders immediately and then freezes", async () => {
     const { bar, sink } = createBar();
     await bar.start({ sequence: 13, compactions: 0 });
@@ -305,6 +320,8 @@ describe("all-sections-off config", () => {
       statusEnabled: false,
       sequenceEnabled: false,
       toolCallsEnabled: false,
+      subagentsEnabled: false,
+      timersEnabled: false,
       contextWindowEnabled: false,
       compactionsEnabled: false,
     };
@@ -319,6 +336,8 @@ describe("all-sections-off config", () => {
       statusEnabled: false,
       sequenceEnabled: false,
       toolCallsEnabled: false,
+      subagentsEnabled: false,
+      timersEnabled: false,
       contextWindowEnabled: false,
       compactionsEnabled: false,
     };
@@ -519,6 +538,7 @@ describe("getStatusBarStats", () => {
       sequence: 0,
       compactions: 0,
       subagents: { total: 0, persistent: 0 },
+      timers: 0,
     });
   });
 
@@ -527,6 +547,17 @@ describe("getStatusBarStats", () => {
     seedSubagent("p1-bg", "p1", { mode: "one_shot" });
     seedSubagent("p1-thr", "p1", { mode: "persistent", threadId: "thread-1" });
     expect(getStatusBarStats(db, "p1").subagents).toEqual({ total: 1, persistent: 0 });
+  });
+
+  it("includes the active (unfired) timer count for the session", () => {
+    createSessionStore(db).create({ id: "t1", workspacePath: tmp });
+    const insert = db.prepare(
+      "INSERT INTO timers (id, session_id, label, fire_at, message, fired) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    insert.run("tm-a", "t1", "a", "2030-01-01T00:00:00Z", "a", 0);
+    insert.run("tm-b", "t1", "b", "2030-01-01T00:00:00Z", "b", 0);
+    insert.run("tm-c", "t1", "c", "2030-01-01T00:00:00Z", "c", 1); // fired: not counted
+    expect(getStatusBarStats(db, "t1").timers).toBe(2);
   });
 });
 
@@ -665,6 +696,9 @@ describe("createStatusBarTurnTracker", () => {
       const sessions = createSessionStore(db);
       sessions.create({ id: "rt1", workspacePath: tmp });
       db.prepare(
+        "INSERT INTO timers (id, session_id, label, fire_at, message) VALUES (?, ?, ?, ?, ?)",
+      ).run("rt-timer", "rt1", "check-in", "2030-01-01T00:00:00Z", "check-in");
+      db.prepare(
         `INSERT INTO session_stats (session_id, turn_count, compaction_count, input_tokens,
                 context_window_tokens, updated_at)
          VALUES (?, ?, ?, ?, ?, datetime('now'))`,
@@ -690,6 +724,7 @@ describe("createStatusBarTurnTracker", () => {
       expect(snap.sequence).toBe(3);
       expect(snap.compactions).toBe(1);
       expect(snap.context).toEqual({ currentTokens: 1_000, totalTokens: 1_000_000 });
+      expect(snap.timers).toBe(1);
     } finally {
       db.close();
       rmSync(tmp, { recursive: true, force: true });
@@ -768,5 +803,47 @@ describe("getSessionSubagentCounts", () => {
     seedSubagent("pp", "root", { mode: "persistent" });
     seedSubagent("pp-child", "pp", { mode: "one_shot" });
     expect(getSessionSubagentCounts(db, "root")).toEqual({ total: 2, persistent: 1 });
+  });
+});
+
+describe("getSessionActiveTimerCount", () => {
+  let tmp: string;
+  let db: Database.Database;
+
+  function seedTimer(id: string, sessionId: string, fired = 0): void {
+    db.prepare(
+      "INSERT INTO timers (id, session_id, label, fire_at, message, fired) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(id, sessionId, id, "2030-01-01T00:00:00Z", id, fired);
+  }
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "shoggoth-sb-timers-"));
+    db = new Database(join(tmp, "s.db"));
+    db.pragma("foreign_keys = ON");
+    migrate(db, defaultMigrationsDir());
+    createSessionStore(db).create({ id: "root", workspacePath: tmp });
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("returns 0 for a session with no timers (or a missing session)", () => {
+    expect(getSessionActiveTimerCount(db, "root")).toBe(0);
+    expect(getSessionActiveTimerCount(db, "missing")).toBe(0);
+  });
+
+  it("counts only unfired timers for the session", () => {
+    seedTimer("t1", "root", 0);
+    seedTimer("t2", "root", 0);
+    seedTimer("t3", "root", 1);
+    expect(getSessionActiveTimerCount(db, "root")).toBe(2);
+  });
+
+  it("does not count other sessions' timers", () => {
+    createSessionStore(db).create({ id: "other", workspacePath: tmp });
+    seedTimer("t1", "other", 0);
+    expect(getSessionActiveTimerCount(db, "root")).toBe(0);
   });
 });
