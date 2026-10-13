@@ -17,7 +17,7 @@ interface TimerRecord {
   readonly sessionAnchor?: string | null;
 }
 
-type TimerDeliveryFn = (sessionId: string, message: string) => Promise<void>;
+type TimerDeliveryFn = (entry: TimerEntry) => Promise<void>;
 
 export class TimerScheduler {
   private readonly heap = new TimerHeap();
@@ -213,7 +213,7 @@ export class TimerScheduler {
   private async fireTimer(db: Database.Database, entry: TimerEntry): Promise<void> {
     try {
       db.prepare("UPDATE timers SET fired = 1 WHERE id = ?").run(entry.id);
-      await this.deliver(entry.sessionId, entry.message);
+      await this.deliver(entry);
       log.debug("timer fired", {
         id: entry.id,
         sessionId: entry.sessionId,
