@@ -210,8 +210,8 @@ describe("session.query tool handler", { concurrency: false }, () => {
   // Role filter tests
   // -----------------------------------------------------------------------
 
-  it("filters by single role string", async () => {
-    const { toolResult } = await runWithToolArgs({ role: "user" });
+  it("filters by single role via one-element array", async () => {
+    const { toolResult } = await runWithToolArgs({ role: ["user"] });
     assert.ok(toolResult);
     assert.ok(!toolResult.error, `unexpected error: ${toolResult?.error}`);
     // Seeded: 2 user messages + 1 "query test" user message from the turn itself
@@ -252,6 +252,15 @@ describe("session.query tool handler", { concurrency: false }, () => {
     }
   });
 
+  it("rejects a JSON-stringified role array instead of silently returning no rows", async () => {
+    // Some model providers JSON-encode array params. With the array-only schema
+    // this now surfaces a validation error rather than querying for a role
+    // literally named '["user","assistant"]' and returning nothing.
+    const { toolResult } = await runWithToolArgs({ role: '["user","assistant"]' });
+    assert.ok(toolResult);
+    assert.equal(toolResult.error, "invalid_arguments");
+  });
+
   // -----------------------------------------------------------------------
   // Substring search (query) tests
   // -----------------------------------------------------------------------
@@ -275,7 +284,7 @@ describe("session.query tool handler", { concurrency: false }, () => {
     // "hi there" is from assistant; searching "hi" should match it but not user messages
     const { toolResult } = await runWithToolArgs({
       query: "hi",
-      role: "assistant",
+      role: ["assistant"],
     });
     assert.ok(toolResult);
     assert.ok(!toolResult.error, `unexpected error: ${toolResult?.error}`);
@@ -378,7 +387,7 @@ describe("session.query tool handler", { concurrency: false }, () => {
   it("metadataOnly still respects role filter", async () => {
     const { toolResult } = await runWithToolArgs({
       metadataOnly: true,
-      role: "assistant",
+      role: ["assistant"],
     });
     assert.ok(toolResult);
     assert.ok(!toolResult.error, `unexpected error: ${toolResult?.error}`);
@@ -395,7 +404,7 @@ describe("session.query tool handler", { concurrency: false }, () => {
 
   it("combines role, query, and includeMetadata", async () => {
     const { toolResult } = await runWithToolArgs({
-      role: "user",
+      role: ["user"],
       query: "how",
       includeMetadata: true,
     });

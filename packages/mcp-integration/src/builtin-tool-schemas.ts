@@ -409,18 +409,13 @@ export const sessionQueryArgs = {
       minimum: 0,
     },
     role: {
-      oneOf: [
-        { type: "string", enum: ["user", "assistant", "system", "tool"] },
-        {
-          type: "array",
-          items: {
-            type: "string",
-            enum: ["user", "assistant", "system", "tool"],
-          },
-        },
-      ],
+      type: "array",
+      items: {
+        type: "string",
+        enum: ["user", "assistant", "system", "tool"],
+      },
       description:
-        "Filter to messages matching the given role(s). Accepts a single role string or an array. Empty array means no filter (all roles).",
+        "Filter to messages matching the given role(s). Pass a single-element array for one role. Empty or omitted = no filter (all roles).",
     },
     query: {
       type: "string",
