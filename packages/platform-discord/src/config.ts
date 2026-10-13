@@ -24,6 +24,11 @@ const discordExtensionSchema = z.object({
   hitlNotifyDmUserId: z.string().optional(),
   hitlNotifyChannelId: z.string().optional(),
   hitlNotifyWebhookUrl: z.string().optional(),
+  /**
+   * Explicit guild IDs to register slash commands in. Defaults to the unique
+   * guild IDs found across effective Discord routes.
+   */
+  commandGuildIds: z.array(z.string().min(1)).optional(),
 });
 
 registerPlatformConfigValidator("discord", (raw) => {
@@ -31,7 +36,6 @@ registerPlatformConfigValidator("discord", (raw) => {
   if (result.success) return { valid: true };
   return { valid: false, errors: result.error.issues.map((i) => i.message) };
 });
-
 // ---------------------------------------------------------------------------
 // Helpers — read from resolved platform config with backward compat
 // ---------------------------------------------------------------------------
@@ -91,8 +95,34 @@ export function resolveEffectiveDiscordRoutes(cfg: ShoggothConfig): DiscordSessi
       fromAgents.push(r);
     }
   }
-
   return fromAgents;
+}
+
+/**
+ * Resolve the guild IDs slash commands should be registered in.
+ *
+ * Explicit `platforms.discord.commandGuildIds` wins when it yields any usable
+ * entries (trimmed, blanks dropped, deduped, order preserved). Otherwise the
+ * unique guild IDs across effective Discord routes, in first-seen order.
+ * Empty array when neither produces a guild (e.g. DM-only deployments).
+ */
+export function resolveDiscordCommandGuildIds(cfg: ShoggothConfig): string[] {
+  const dc = resolveDiscordPlatformConfig(cfg);
+  const explicit = dc?.commandGuildIds;
+  if (Array.isArray(explicit)) {
+    const cleaned = explicit
+      .filter((g): g is string => typeof g === "string")
+      .map((g) => g.trim())
+      .filter((g) => g.length > 0);
+    if (cleaned.length > 0) return [...new Set(cleaned)];
+  }
+  return [
+    ...new Set(
+      resolveEffectiveDiscordRoutes(cfg)
+        .map((r) => r.guildId)
+        .filter((g): g is string => typeof g === "string" && g.length > 0),
+    ),
+  ];
 }
 
 export function resolveDiscordIntents(cfg: ShoggothConfig): number | undefined {

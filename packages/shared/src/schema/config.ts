@@ -32,6 +32,8 @@ import { processDeclarationSchema } from "./processes";
 import {
   shoggothRuntimeConfigSchema,
   shoggothMediaGenerationConfigSchema,
+  shoggothDecisionConfigSchema,
+  shoggothRerankConfigSchema,
   shoggothPluginEntrySchema,
   shoggothSkillsConfigSchema,
   shoggothAcpxConfigSchema,
@@ -152,6 +154,8 @@ const sharedConfigFields = {
   toolDiscovery: shoggothToolDiscoveryConfigSchema.optional(),
   thinkingDisplay: thinkingDisplaySchema.optional(),
   mediaGeneration: shoggothMediaGenerationConfigSchema.optional(),
+  decision: shoggothDecisionConfigSchema.optional(),
+  rerank: shoggothRerankConfigSchema.optional(),
   gateway: gatewayConfigSchema,
   retention: shoggothRetentionConfigSchema.optional(),
   vault: vaultConfigSchema,

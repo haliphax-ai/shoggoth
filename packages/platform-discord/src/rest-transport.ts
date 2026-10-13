@@ -43,7 +43,9 @@ const OPERATION_PRIORITY: Record<string, DiscordRestPriority> = {
   getMessageReactions: "background",
   searchMessages: "background",
   triggerTypingIndicator: "background",
-  registerGlobalCommands: "background",
+  registerGuildCommands: "background",
+  listGlobalCommands: "background",
+  deleteGlobalCommand: "background",
 };
 
 /**
@@ -330,13 +332,38 @@ export function createDiscordRestTransport(
       );
     },
 
-    async registerGlobalCommands(applicationId, commands) {
+    async registerGuildCommands(applicationId, guildId, commands) {
       await op(
-        "registerGlobalCommands",
+        "registerGuildCommands",
         "PUT",
-        `/applications/${encodeURIComponent(applicationId)}/commands`,
-        `PUT /applications/:id/commands`,
+        `/applications/${encodeURIComponent(applicationId)}/guilds/${encodeURIComponent(guildId)}/commands`,
+        `PUT /applications/:id/guilds/:guildId/commands`,
         JSON.stringify(commands),
+      );
+    },
+
+    async listGlobalCommands(applicationId) {
+      const res = await op(
+        "listGlobalCommands",
+        "GET",
+        `/applications/${encodeURIComponent(applicationId)}/commands`,
+        `GET /applications/:id/commands`,
+      );
+      const j = (await res.json()) as Array<{ id?: unknown; name?: unknown }>;
+      return (Array.isArray(j) ? j : [])
+        .filter(
+          (c): c is { id: string; name: string } =>
+            typeof c?.id === "string" && typeof c?.name === "string",
+        )
+        .map((c) => ({ id: c.id, name: c.name }));
+    },
+
+    async deleteGlobalCommand(applicationId, commandId) {
+      await op(
+        "deleteGlobalCommand",
+        "DELETE",
+        `/applications/${encodeURIComponent(applicationId)}/commands/${encodeURIComponent(commandId)}`,
+        `DELETE /applications/:id/commands/:commandId`,
       );
     },
 

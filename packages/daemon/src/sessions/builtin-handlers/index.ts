@@ -25,6 +25,8 @@ import { register as registerReplace } from "./replace-handler";
 import { register as registerCd } from "./cd-handler";
 import { register as registerElevate } from "./elevate-handler";
 import { register as registerMediaGenerate } from "./media-generate-handler";
+import { register as registerDecision } from "./decision-handler";
+import { register as registerRerank } from "./rerank-handler";
 import { register as registerVault } from "./vault-handler";
 
 /**
@@ -54,5 +56,7 @@ export function registerAllBuiltinHandlers(registry: BuiltinToolRegistry): void 
   registerCd(registry);
   registerElevate(registry);
   registerMediaGenerate(registry);
+  registerDecision(registry);
+  registerRerank(registry);
   registerVault(registry);
 }

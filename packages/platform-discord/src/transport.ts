@@ -122,12 +122,23 @@ export interface DiscordRestTransport {
       };
     },
   ): Promise<void>;
-  /** PUT `/applications/{appId}/commands` — register global slash commands. */
-  registerGlobalCommands(
+  /**
+   * PUT `/applications/{appId}/guilds/{guildId}/commands` — bulk-overwrite a
+   * guild's slash command list. Discord preserves the IDs of same-named
+   * commands across a bulk overwrite, so this is a convergent sync rather
+   * than a delete/recreate.
+   */
+  registerGuildCommands(
     applicationId: string,
+    guildId: string,
     commands: ReadonlyArray<Record<string, unknown>>,
   ): Promise<void>;
-  /** PATCH `/webhooks/{appId}/{token}/messages/@original` — edit a deferred interaction response. */
+  /** GET `/applications/{appId}/commands` — list the application's global commands. */
+  listGlobalCommands(
+    applicationId: string,
+  ): Promise<ReadonlyArray<{ readonly id: string; readonly name: string }>>;
+  /** DELETE `/applications/{appId}/commands/{commandId}` — remove one global command. */
+  deleteGlobalCommand(applicationId: string, commandId: string): Promise<void>;
   editOriginalInteractionResponse(
     applicationId: string,
     interactionToken: string,

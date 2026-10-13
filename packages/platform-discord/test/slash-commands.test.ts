@@ -3,9 +3,8 @@ import assert from "node:assert";
 import {
   createDiscordInteractionHandler,
   registerDiscordSlashCommands,
-  deregisterDiscordSlashCommands,
+  cleanupLegacyGlobalCommands,
 } from "../src/slash-commands";
-import { createDiscordMessagingShutdownDrain } from "../src/bootstrap";
 import type { DiscordInteractionEvent } from "../src/interaction";
 import type { DiscordRestTransport } from "../src/transport";
 
@@ -26,8 +25,15 @@ function stubTransport(calls: Array<{ method: string; args: unknown[] }>): Disco
     async interactionCallback(id, token, body) {
       calls.push({ method: "interactionCallback", args: [id, token, body] });
     },
-    async registerGlobalCommands(appId, commands) {
-      calls.push({ method: "registerGlobalCommands", args: [appId, commands] });
+    async registerGuildCommands(appId, guildId, commands) {
+      calls.push({ method: "registerGuildCommands", args: [appId, guildId, commands] });
+    },
+    async listGlobalCommands(appId) {
+      calls.push({ method: "listGlobalCommands", args: [appId] });
+      return [];
+    },
+    async deleteGlobalCommand(appId, commandId) {
+      calls.push({ method: "deleteGlobalCommand", args: [appId, commandId] });
     },
     async editOriginalInteractionResponse(applicationId, token, body) {
       calls.push({ method: "editOriginalInteractionResponse", args: [applicationId, token, body] });
@@ -905,19 +911,25 @@ describe("createDiscordInteractionHandler", () => {
 });
 
 describe("registerDiscordSlashCommands", () => {
-  it("calls registerGlobalCommands with abort command definition", async () => {
+  it("bulk-overwrites each guild's command list with the full command set", async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
     const transport = stubTransport(calls);
 
     await registerDiscordSlashCommands({
       transport,
       applicationId: "app-123",
+      guildIds: ["g-1"],
     });
 
     assert.strictEqual(calls.length, 1);
-    assert.strictEqual(calls[0]!.method, "registerGlobalCommands");
-    const [appId, commands] = calls[0]!.args as [string, Array<Record<string, unknown>>];
+    assert.strictEqual(calls[0]!.method, "registerGuildCommands");
+    const [appId, guildId, commands] = calls[0]!.args as [
+      string,
+      string,
+      Array<Record<string, unknown>>,
+    ];
     assert.strictEqual(appId, "app-123");
+    assert.strictEqual(guildId, "g-1");
     assert.strictEqual(commands.length, 10);
     assert.ok(commands.some((c) => c.name === "abort"));
     assert.ok(commands.some((c) => c.name === "steer"));
@@ -930,6 +942,19 @@ describe("registerDiscordSlashCommands", () => {
     assert.ok(commands.some((c) => c.name === "prompt"));
   });
 
+  it("performs no transport calls when the guild list is empty", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransport(calls);
+
+    await registerDiscordSlashCommands({
+      transport,
+      applicationId: "app-123",
+      guildIds: [],
+    });
+
+    assert.strictEqual(calls.length, 0);
+  });
+
   it("registers steer command with prompt, session_id, and delivery options", async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
     const transport = stubTransport(calls);
@@ -937,9 +962,10 @@ describe("registerDiscordSlashCommands", () => {
     await registerDiscordSlashCommands({
       transport,
       applicationId: "app-123",
+      guildIds: ["g-1"],
     });
 
-    const [, commands] = calls[0]!.args as [string, Array<Record<string, unknown>>];
+    const [, , commands] = calls[0]!.args as [string, string, Array<Record<string, unknown>>];
     const steerCmd = commands.find((c) => c.name === "steer");
     assert.ok(steerCmd, "Steer command should be registered");
     const options = steerCmd!.options as Array<Record<string, unknown>>;
@@ -969,9 +995,10 @@ describe("registerDiscordSlashCommands", () => {
     await registerDiscordSlashCommands({
       transport,
       applicationId: "app-123",
+      guildIds: ["g-1"],
     });
 
-    const [, commands] = calls[0]!.args as [string, Array<Record<string, unknown>>];
+    const [, , commands] = calls[0]!.args as [string, string, Array<Record<string, unknown>>];
     const modelCmd = commands.find((c) => c.name === "model");
     assert.ok(modelCmd, "Model command should be registered");
     const options = modelCmd!.options as Array<Record<string, unknown>> | undefined;
@@ -995,127 +1022,66 @@ describe("registerDiscordSlashCommands", () => {
   });
 });
 
-describe("deregisterDiscordSlashCommands", () => {
-  it("bulk-overwrites the global command list with an empty array", async () => {
-    const calls: Array<{ method: string; args: unknown[] }> = [];
-    const transport = stubTransport(calls);
+describe("cleanupLegacyGlobalCommands", () => {
+  function stubTransportWithGlobalList(
+    calls: Array<{ method: string; args: unknown[] }>,
+    list: Array<{ id: string; name: string }>,
+  ): DiscordRestTransport {
+    const t = stubTransport(calls);
+    return {
+      ...t,
+      async listGlobalCommands(appId) {
+        calls.push({ method: "listGlobalCommands", args: [appId] });
+        return list;
+      },
+    };
+  }
 
-    await deregisterDiscordSlashCommands({
+  it("deletes only global commands whose names match Shoggoth commands", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransportWithGlobalList(calls, [
+      { id: "111", name: "abort" },
+      { id: "222", name: "someone-elses-command" },
+      { id: "333", name: "status" },
+    ]);
+
+    await cleanupLegacyGlobalCommands({
       transport,
       applicationId: "app-123",
     });
 
-    assert.strictEqual(calls.length, 1);
-    assert.strictEqual(calls[0]!.method, "registerGlobalCommands");
-    const [appId, commands] = calls[0]!.args as [string, unknown[]];
-    assert.strictEqual(appId, "app-123");
-    assert.deepStrictEqual(commands, []);
-  });
-});
-
-describe("createDiscordMessagingShutdownDrain", () => {
-  it("de-registers slash commands before stopping when this instance registered them", async () => {
-    const calls: Array<{ method: string; args: unknown[] }> = [];
-    const transport = stubTransport(calls);
-    const registrationRef = { current: "app-123" };
-    let stopped = false;
-
-    const drain = createDiscordMessagingShutdownDrain({
-      registrationRef,
-      transport,
-      logger: stubLogger(),
-      stop: () => {
-        assert.strictEqual(
-          calls.length,
-          1,
-          "slash commands must be de-registered before the transport stops",
-        );
-        stopped = true;
-      },
-    });
-
-    await drain();
-
-    assert.strictEqual(stopped, true);
-    assert.strictEqual(calls.length, 1);
-    assert.strictEqual(calls[0]!.method, "registerGlobalCommands");
-    const [appId, commands] = calls[0]!.args as [string, unknown[]];
-    assert.strictEqual(appId, "app-123");
-    assert.deepStrictEqual(commands, []);
-    // The registration state is consumed, so a later stop path cannot repeat it.
-    assert.strictEqual(registrationRef.current, undefined);
+    const deletes = calls.filter((c) => c.method === "deleteGlobalCommand");
+    assert.strictEqual(deletes.length, 2, "only name-matched commands are deleted");
+    assert.deepStrictEqual(
+      deletes.map((c) => c.args),
+      [
+        ["app-123", "111"],
+        ["app-123", "333"],
+      ],
+    );
   });
 
-  it("does not de-register when this instance never registered (disabled or failed)", async () => {
+  it("performs no DELETE calls when the global list is empty", async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
-    const transport = stubTransport(calls);
-    const registrationRef = { current: undefined };
-    let stopped = false;
+    const transport = stubTransportWithGlobalList(calls, []);
 
-    const drain = createDiscordMessagingShutdownDrain({
-      registrationRef,
+    await cleanupLegacyGlobalCommands({
       transport,
-      logger: stubLogger(),
-      stop: () => {
-        stopped = true;
-      },
+      applicationId: "app-123",
     });
 
-    await drain();
-
-    assert.strictEqual(calls.length, 0, "must not touch the global command list");
-    assert.strictEqual(stopped, true);
+    assert.strictEqual(calls.filter((c) => c.method === "deleteGlobalCommand").length, 0);
   });
 
-  it("de-registers at most once across repeated drain invocations", async () => {
+  it("performs no DELETE calls when no global command names match", async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
-    const transport = stubTransport(calls);
-    const registrationRef = { current: "app-123" };
+    const transport = stubTransportWithGlobalList(calls, [{ id: "999", name: "unrelated" }]);
 
-    const drain = createDiscordMessagingShutdownDrain({
-      registrationRef,
+    await cleanupLegacyGlobalCommands({
       transport,
-      logger: stubLogger(),
-      stop: () => {},
+      applicationId: "app-123",
     });
 
-    await drain();
-    await drain();
-
-    assert.strictEqual(calls.length, 1);
-  });
-
-  it("still stops messaging and does not reject when the de-registration REST call fails", async () => {
-    const calls: Array<{ method: string; args: unknown[] }> = [];
-    const transport: DiscordRestTransport = {
-      ...stubTransport(calls),
-      registerGlobalCommands: async () => {
-        throw new Error("Discord REST 500");
-      },
-    };
-    const warns: string[] = [];
-    const logger = {
-      info: () => {},
-      warn: (msg: string) => {
-        warns.push(msg);
-      },
-    };
-    const registrationRef = { current: "app-123" };
-    let stopped = false;
-
-    const drain = createDiscordMessagingShutdownDrain({
-      registrationRef,
-      transport,
-      logger,
-      stop: () => {
-        stopped = true;
-      },
-    });
-
-    await drain();
-
-    assert.strictEqual(stopped, true, "messaging must still stop after a REST failure");
-    assert.deepStrictEqual(warns, ["discord.slash_commands.deregistration_failed"]);
-    assert.strictEqual(registrationRef.current, undefined);
+    assert.strictEqual(calls.filter((c) => c.method === "deleteGlobalCommand").length, 0);
   });
 });

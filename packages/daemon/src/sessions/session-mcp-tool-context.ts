@@ -497,6 +497,144 @@ const MEDIA_GENERATE_TOOL_DESCRIPTOR: AggregatedTool = {
   },
 };
 
+/**
+ * Build the `builtin-decision` tool descriptor from config. When a
+ * `defaultModel` is configured, the `model` input becomes optional and the
+ * descriptions name the default model/provider combo so the agent knows
+ * exactly which model will handle an omitted-model call.
+ */
+function decisionToolDescriptor(config: ShoggothConfig): AggregatedTool {
+  const decision = (config as any).decision;
+  const providers: { id?: string; models?: { name: string }[] }[] = decision?.providers ?? [];
+  const defaultModel: string | undefined = decision?.defaultModel;
+  // defaultModel is already in provider-id/model-name format; the provider
+  // prefix names the combo explicitly, so no separate provider lookup is needed
+  const defaultModelLabel = defaultModel != null ? `'${defaultModel}'` : undefined;
+  const exampleRef =
+    providers[0]?.id != null && providers[0]?.models?.[0]?.name != null
+      ? `${providers[0].id}/${providers[0].models[0].name}`
+      : `provider-id/model-name`;
+
+  const description =
+    `Query a decision (classifier) model. Evaluates a state against typed questions ` +
+    `(noul: yes/no probability, choice: pick one option, score: rate against ordered levels) ` +
+    `and returns structured answers with probabilities. Models are referenced as ` +
+    `provider-id/model-name.` +
+    (defaultModelLabel
+      ? ` Uses the default configured model ${defaultModelLabel} when model is omitted.`
+      : ` No default model is configured, so model is required.`);
+
+  const modelDescription = defaultModelLabel
+    ? `Optional. Model in provider-id/model-name format (e.g. ${exampleRef}). ` +
+      `Defaults to the configured default model ${defaultModelLabel} when omitted.`
+    : `Required. Model in provider-id/model-name format (e.g. ${exampleRef}). ` +
+      `No default model is configured, so this must be given.`;
+
+  return {
+    namespacedName: "builtin-decision",
+    sourceId: "builtin",
+    originalName: "decision",
+    name: "decision",
+    description,
+    inputSchema: {
+      type: "object",
+      properties: {
+        model: {
+          type: "string",
+          description: modelDescription,
+        },
+        state: {
+          description:
+            "The content to evaluate: a plain string, or structured data (object/array) such as chat logs or the current state of your application.",
+        },
+        questions: {
+          type: "object",
+          description:
+            "Map of typed question id -> question. Each question has a type (noul | choice | score), instructions (string | object | array), and type-specific criteria: noul takes optional {true, false} descriptions, choice takes a map of option -> rubric (max 255 options), score takes an ordered array of 2-10 level descriptions.",
+          additionalProperties: true,
+        },
+        timeout_ms: {
+          type: "number",
+          description: "Optional request timeout in milliseconds",
+        },
+      },
+      required: defaultModel ? ["state", "questions"] : ["model", "state", "questions"],
+    },
+  };
+}
+
+/**
+ * Build the `builtin-rerank` tool descriptor from config. When a
+ * `defaultModel` is configured, the `model` input becomes optional and the
+ * descriptions name the default model/provider combo so the agent knows
+ * exactly which model will handle an omitted-model call.
+ */
+function rerankToolDescriptor(config: ShoggothConfig): AggregatedTool {
+  const rerank = config.rerank;
+  const providers: { id?: string; models?: { name: string }[] }[] = rerank?.providers ?? [];
+  const defaultModel: string | undefined = rerank?.defaultModel;
+  // defaultModel is already in provider-id/model-name format; the provider
+  // prefix names the combo explicitly, so no separate provider lookup is needed
+  const defaultModelLabel = defaultModel != null ? `'${defaultModel}'` : undefined;
+  const exampleRef =
+    providers[0]?.id != null && providers[0]?.models?.[0]?.name != null
+      ? `${providers[0].id}/${providers[0].models[0].name}`
+      : `provider-id/model-name`;
+
+  const description =
+    `Score and order candidate documents against a query with a rerank model ` +
+    `(Cohere-style /v1/rerank API; also works with OpenRouter-compatible endpoints). ` +
+    `Returns results as {index, relevance_score} pairs ordered by relevance — ` +
+    "useful for RAG pipelines, search result ordering, and any task where " +
+    `candidate documents need relevance scoring. Models are referenced as ` +
+    `provider-id/model-name.` +
+    (defaultModelLabel
+      ? ` Uses the default configured model ${defaultModelLabel} when model is omitted.`
+      : ` No default model is configured, so model is required.`);
+
+  const modelDescription = defaultModelLabel
+    ? `Optional. Model in provider-id/model-name format (e.g. ${exampleRef}). ` +
+      `Defaults to the configured default model ${defaultModelLabel} when omitted.`
+    : `Required. Model in provider-id/model-name format (e.g. ${exampleRef}). ` +
+      `No default model is configured, so this must be given.`;
+
+  return {
+    namespacedName: "builtin-rerank",
+    sourceId: "builtin",
+    originalName: "rerank",
+    name: "rerank",
+    description,
+    inputSchema: {
+      type: "object",
+      properties: {
+        model: {
+          type: "string",
+          description: modelDescription,
+        },
+        query: {
+          type: "string",
+          description: "The query text used to score the relevance of each document.",
+        },
+        documents: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Candidate documents to score, as an array of strings. Results reference documents by position (index).",
+        },
+        top_n: {
+          type: "number",
+          description: "Optional. Return at most this many results (honored server-side).",
+        },
+        timeout_ms: {
+          type: "number",
+          description: "Optional request timeout in milliseconds",
+        },
+      },
+      required: defaultModel ? ["query", "documents"] : ["model", "query", "documents"],
+    },
+  };
+}
+
 const WEB_SEARCH_TOOL_DESCRIPTOR: AggregatedTool = {
   namespacedName: "builtin-web-search",
   sourceId: "builtin",
@@ -573,6 +711,69 @@ export function createMediaGenerateToolFinalizer(
     const aggregated = createAggregateMcpCatalogResult([
       ...ctx.aggregated.tools,
       MEDIA_GENERATE_TOOL_DESCRIPTOR,
+    ]);
+    return {
+      aggregated,
+      toolsOpenAi: openAiToolsFromCatalog(aggregated),
+      toolsLoop: mcpToolsForToolLoop(aggregated),
+      external: ctx.external,
+    };
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Decision tool (TypeSafe System One classifiers) — conditionally injected
+// via finalizer when a decision provider with models is configured
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a context finalizer that appends `builtin-decision` when a decision
+ * provider with at least one model is configured.
+ */
+export function createDecisionToolFinalizer(
+  config: ShoggothConfig,
+): (ctx: SessionMcpToolContext, sessionId: string) => SessionMcpToolContext {
+  const hasDecisionConfig = ((config as any).decision?.providers ?? []).some(
+    (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
+  );
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  return (ctx, _sessionId) => {
+    if (!hasDecisionConfig) return ctx;
+    if (ctx.aggregated.tools.some((t) => t.namespacedName === "builtin-decision")) return ctx;
+    const aggregated = createAggregateMcpCatalogResult([
+      ...ctx.aggregated.tools,
+      decisionToolDescriptor(config),
+    ]);
+
+    return {
+      aggregated,
+      toolsOpenAi: openAiToolsFromCatalog(aggregated),
+      toolsLoop: mcpToolsForToolLoop(aggregated),
+      external: ctx.external,
+    };
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Rerank tool (Cohere-style rerank models) — conditionally injected
+// via finalizer when a rerank provider with models is configured
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a context finalizer that appends `builtin-rerank` when a rerank
+ * provider with at least one model is configured.
+ */
+export function createRerankToolFinalizer(
+  config: ShoggothConfig,
+): (ctx: SessionMcpToolContext, sessionId: string) => SessionMcpToolContext {
+  const hasRerankConfig = (config.rerank?.providers ?? []).some((p) => (p.models?.length ?? 0) > 0);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  return (ctx, _sessionId) => {
+    if (!hasRerankConfig) return ctx;
+    if (ctx.aggregated.tools.some((t) => t.namespacedName === "builtin-rerank")) return ctx;
+    const aggregated = createAggregateMcpCatalogResult([
+      ...ctx.aggregated.tools,
+      rerankToolDescriptor(config),
     ]);
     return {
       aggregated,

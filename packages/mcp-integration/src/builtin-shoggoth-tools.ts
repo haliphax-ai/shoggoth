@@ -82,7 +82,7 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
       {
         name: "memory-search",
         description:
-          "Search indexed markdown memory (BM25; optional vector rank when memory.embeddings.enabled and embeddings API succeeds). Configure memory.paths; call memory-ingest after adding or changing .md files under those roots.",
+          "Search indexed markdown memory (BM25; optional vector rank when memory.embeddings.enabled and embeddings API succeeds; hits may be automatically reranked when rerank.memorySearch.enabled and a rerank default model are configured). Configure memory.paths; call memory-ingest after adding or changing .md files under those roots.",
         inputSchema: memorySearchArgs,
       },
       {

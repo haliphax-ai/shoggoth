@@ -122,6 +122,10 @@ export {
   DEFAULT_LOGGING_CONFIG,
   shoggothMediaGenerationConfigSchema,
   type ShoggothMediaGenerationConfig,
+  shoggothDecisionConfigSchema,
+  type ShoggothDecisionConfig,
+  shoggothRerankConfigSchema,
+  type ShoggothRerankConfig,
 } from "./schema";
 export {
   resolvePlatformConfig,
