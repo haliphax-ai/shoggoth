@@ -14,7 +14,7 @@ The package is organized into these layers:
 4. **Bridge** — Orchestrates gateway + adapter + outbound sender + agent-to-agent bus. The central runtime object (`DiscordMessagingRuntime`).
 5. **Platform** — Wires the bridge into the daemon: session stores, transcript, tool execution, HITL, MCP, policy engine, streaming, and turn queuing.
 6. **Platform Adapter** — Presentation-layer adapter (`DiscordPlatformAdapter`) that owns transport concerns: message splitting, typing indicators, streaming placeholders, HITL notice delivery.
-7. **Slash Commands & Interactions** — Registers global slash commands and handles `INTERACTION_CREATE` events as control operations.
+7. **Slash Commands & Interactions** — Registers guild-scoped slash commands and handles `INTERACTION_CREATE` events as control operations.
 8. **HITL Subsystem** — Reaction-based approval/denial on Discord notices, with a notice registry, notifier, and reaction handler.
 
 ---
@@ -94,25 +94,27 @@ The Message Content intent is privileged and must be enabled in the Discord Deve
 
 `createDiscordRestTransport({ botToken })` returns a `DiscordRestTransport` with these operations:
 
-| Method                            | Discord Endpoint                                  | Notes                                                    |
-| --------------------------------- | ------------------------------------------------- | -------------------------------------------------------- |
-| `createMessage`                   | `POST /channels/{id}/messages`                    | JSON body                                                |
-| `createMessageWithFiles`          | `POST /channels/{id}/messages`                    | `multipart/form-data` with `payload_json` + `files[n]`   |
-| `editMessage`                     | `PATCH /channels/{id}/messages/{id}`              |                                                          |
-| `deleteMessage`                   | `DELETE /channels/{id}/messages/{id}`             |                                                          |
-| `getMessage`                      | `GET /channels/{id}/messages/{id}`                |                                                          |
-| `getChannelMessages`              | `GET /channels/{id}/messages`                     | Supports `before`, `after`, `around`, `limit` (max 100)  |
-| `createThreadFromMessage`         | `POST /channels/{id}/messages/{id}/threads`       | Returns new thread channel ID                            |
-| `deleteChannel`                   | `DELETE /channels/{id}`                           | Also deletes threads                                     |
-| `createMessageReaction`           | `PUT .../reactions/{emoji}/@me`                   | Unicode or `name:id` for custom                          |
-| `deleteMessageReaction`           | `DELETE .../reactions/{emoji}/@me`                | Bot's own reaction only                                  |
-| `getMessageReactions`             | `GET .../reactions/{emoji}`                       |                                                          |
-| `searchMessages`                  | `GET /guilds/{id}/messages/search`                | `content`, `author_id`, `channel_id`, `min_id`, `max_id` |
-| `triggerTypingIndicator`          | `POST /channels/{id}/typing`                      | Lasts ~10s                                               |
-| `openDmChannel`                   | `POST /users/@me/channels`                        | Returns DM channel ID                                    |
-| `interactionCallback`             | `POST /interactions/{id}/{token}/callback`        | Slash command responses                                  |
-| `registerGlobalCommands`          | `PUT /applications/{id}/commands`                 | Bulk overwrite                                           |
-| `editOriginalInteractionResponse` | `PATCH /webhooks/{id}/{token}/messages/@original` | Deferred responses                                       |
+| Method                            | Discord Endpoint                                   | Notes                                                    |
+| --------------------------------- | -------------------------------------------------- | -------------------------------------------------------- |
+| `createMessage`                   | `POST /channels/{id}/messages`                     | JSON body                                                |
+| `createMessageWithFiles`          | `POST /channels/{id}/messages`                     | `multipart/form-data` with `payload_json` + `files[n]`   |
+| `editMessage`                     | `PATCH /channels/{id}/messages/{id}`               |                                                          |
+| `deleteMessage`                   | `DELETE /channels/{id}/messages/{id}`              |                                                          |
+| `getMessage`                      | `GET /channels/{id}/messages/{id}`                 |                                                          |
+| `getChannelMessages`              | `GET /channels/{id}/messages`                      | Supports `before`, `after`, `around`, `limit` (max 100)  |
+| `createThreadFromMessage`         | `POST /channels/{id}/messages/{id}/threads`        | Returns new thread channel ID                            |
+| `deleteChannel`                   | `DELETE /channels/{id}`                            | Also deletes threads                                     |
+| `createMessageReaction`           | `PUT .../reactions/{emoji}/@me`                    | Unicode or `name:id` for custom                          |
+| `deleteMessageReaction`           | `DELETE .../reactions/{emoji}/@me`                 | Bot's own reaction only                                  |
+| `getMessageReactions`             | `GET .../reactions/{emoji}`                        |                                                          |
+| `searchMessages`                  | `GET /guilds/{id}/messages/search`                 | `content`, `author_id`, `channel_id`, `min_id`, `max_id` |
+| `triggerTypingIndicator`          | `POST /channels/{id}/typing`                       | Lasts ~10s                                               |
+| `openDmChannel`                   | `POST /users/@me/channels`                         | Returns DM channel ID                                    |
+| `interactionCallback`             | `POST /interactions/{id}/{token}/callback`         | Slash command responses                                  |
+| `registerGuildCommands`           | `PUT /applications/{id}/guilds/{guildId}/commands` | Bulk overwrite (guild-scoped, ID-stable)                 |
+| `listGlobalCommands`              | `GET /applications/{id}/commands`                  | Legacy global cleanup read                               |
+| `deleteGlobalCommand`             | `DELETE /applications/{id}/commands/{commandId}`   | Legacy global cleanup delete                             |
+| `editOriginalInteractionResponse` | `PATCH /webhooks/{id}/{token}/messages/@original`  | Deferred responses                                       |
 
 ### Rate Limit Handling
 
@@ -220,7 +222,7 @@ Only active when the capability set includes `TYPING_NOTIFICATION`.
 
 ## Slash Commands
 
-Global slash commands are registered on startup via `PUT /applications/{id}/commands`. The registered commands:
+Guild-scoped slash commands are registered on startup via `PUT /applications/{id}/guilds/{guildId}/commands`, one bulk overwrite per configured guild. The guild set comes from `platforms.discord.commandGuildIds` when set, otherwise the unique guild IDs across the effective Discord routes (with a `discord.slash_commands.no_guilds` warning and no registration when neither yields a guild). Guild commands propagate instantly and are isolated per guild, so multiple Shoggoth instances sharing one application ID and bot token no longer collide. The registered commands:
 
 | Command    | Description                                                                                                                         |
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
@@ -236,15 +238,13 @@ Global slash commands are registered on startup via `PUT /applications/{id}/comm
 
 When `session_id` is omitted, the handler resolves the session from the channel where the command was invoked. `session_id` accepts a session URN or a bare agent id (resolved to that agent's bootstrap primary session).
 
-### De-Registration on Shutdown
+### Durable Command IDs
 
-On clean shutdown the daemon removes the commands it registered by bulk-overwriting the list with an empty array (the same `PUT /applications/{id}/commands` call with `[]`). This keeps the slash command list clean when, for example, a test instance of the bot goes offline in the same channel as the main instance.
+Nothing tears the command list down at shutdown. Discord preserves the snowflake IDs of same-named commands across a bulk overwrite, so startup registration is a convergent sync: command definitions update in place, stale entries are pruned, and IDs stay stable across restarts. This is what lets multiple instances share one application without fighting over the command list, and why a restart no longer invalidates the command set.
 
-- De-registration only happens when **this instance** successfully registered at startup (registration enabled and not failed).
-- The attempt is awaited inside the Discord messaging drain, before the transport stops, so the HTTP call completes before process exit.
-- A REST failure is logged as a warning and never blocks or fails shutdown.
+### Legacy Global Cleanup
 
-> **Note:** the bulk overwrite clears _all_ global commands for the Discord application, not just the ones Shoggoth added. If a shutting-down instance shares its bot application with a running instance, the shared command list is cleared until the running instance next starts (registration happens at startup only).
+Earlier versions registered commands globally (`PUT /applications/{id}/commands`), so upgrading leaves those behind as duplicates next to the new guild commands. On startup, after guild registration succeeds, the daemon fetches the global command list and deletes only the commands whose names match Shoggoth commands (`DELETE /applications/{id}/commands/{commandId}` each) — foreign global commands under the same application are untouched. Failure is logged as `discord.slash_commands.legacy_global_cleanup_failed` and never blocks startup; the guild registration is already in effect.
 
 ### Interaction Flow
 
@@ -372,7 +372,7 @@ Applied during both outbound message formatting and streaming edits.
    - Creates the adapter, agent-to-agent bus, REST transport, and outbound sender.
    - Connects the Gateway.
    - Resolves the bot user ID (from Gateway READY or REST fallback).
-5. Registers global slash commands (unless `registerSlashCommands: false`).
+5. Registers guild-scoped slash commands per configured guild and cleans up legacy global commands (unless `registerSlashCommands: false`).
 6. Returns the `DiscordMessagingRuntime`.
 
 Then `startDiscordPlatform(opts)` wires the runtime into the daemon:

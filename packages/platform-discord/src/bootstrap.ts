@@ -11,13 +11,13 @@ import type { NoticeResolver } from "./daemon-types";
 import { setNoticeResolver } from "./notices";
 import {
   resolveDiscordAllowBotMessages,
+  resolveDiscordCommandGuildIds,
   resolveDiscordIntents,
   resolveDiscordOwnerUserId,
   resolveEffectiveDiscordRoutes,
   resolveShoggothAgentId,
 } from "./config";
-import { registerDiscordSlashCommands, deregisterDiscordSlashCommands } from "./slash-commands";
-import type { DiscordRestTransport } from "./transport";
+import { registerDiscordSlashCommands, cleanupLegacyGlobalCommands } from "./slash-commands";
 
 export type { DiscordMessagingRuntime };
 
@@ -41,14 +41,8 @@ export interface StartDaemonDiscordMessagingOptions {
   readonly reactionBotUserIdRef?: { current: string | undefined };
   /** Daemon's notice resolver — wired into platform-discord's `setNoticeResolver` at startup. */
   readonly noticeResolver?: NoticeResolver;
-  /** When true, register global slash commands on startup (requires bot user id). */
+  /** When true, register guild slash commands on startup (requires bot user id). */
   readonly registerSlashCommands?: boolean;
-  /**
-   * Registration-state signal: set to the application ID when this instance successfully
-   * registered the global slash commands, and cleared when they are de-registered. Lets
-   * the shutdown drain de-register only what this instance registered.
-   */
-  readonly slashCommandRegistrationRef?: { current: string | undefined };
 }
 
 /**
@@ -87,65 +81,44 @@ export async function startDaemonDiscordMessaging(
   });
 
   if (runtime && opts.registerSlashCommands !== false && runtime.discordBotUserId) {
-    try {
-      await registerDiscordSlashCommands({
-        transport: runtime.discordRestTransport,
-        applicationId: runtime.discordBotUserId,
+    // Slash commands are guild-scoped: explicit platforms.discord.commandGuildIds
+    // wins, otherwise the unique guilds across routes.
+    const guildIds = resolveDiscordCommandGuildIds(opts.config);
+    if (guildIds.length === 0) {
+      opts.logger.warn("discord.slash_commands.no_guilds", {
+        reason: "no guild IDs in Discord routes; guild-scoped commands cannot be registered",
       });
-      opts.logger.info("discord.slash_commands.registered", {
-        applicationId: runtime.discordBotUserId,
-      });
-      if (opts.slashCommandRegistrationRef) {
-        opts.slashCommandRegistrationRef.current = runtime.discordBotUserId;
-      }
-    } catch (e) {
-      opts.logger.warn("discord.slash_commands.registration_failed", {
-        err: String(e),
-      });
-    }
-  }
-
-  return runtime;
-}
-
-/**
- * Shutdown drain for Discord messaging: de-registers the global slash commands this
- * instance registered (if any) *before* stopping the transport, so the command list is
- * cleaned up while the REST client is still usable.
- *
- * De-registration is skipped unless this instance registered at startup (registration
- * was enabled and succeeded), and runs at most once per instance. Failures are logged
- * and swallowed so shutdown never hangs or crashes on a REST error, but the attempt is
- * awaited so the HTTP call completes before process exit.
- */
-export function createDiscordMessagingShutdownDrain(opts: {
-  readonly registrationRef: { current: string | undefined };
-  readonly transport: DiscordRestTransport | undefined;
-  readonly logger: {
-    readonly info: (msg: string, fields?: Record<string, unknown>) => void;
-    readonly warn: (msg: string, fields?: Record<string, unknown>) => void;
-  };
-  readonly stop: () => void | Promise<void>;
-}): () => Promise<void> {
-  return async () => {
-    const applicationId = opts.registrationRef.current;
-    if (applicationId && opts.transport) {
-      // Consume the registration state first so de-registration happens at most once.
-      opts.registrationRef.current = undefined;
+    } else {
       try {
-        await deregisterDiscordSlashCommands({
-          transport: opts.transport,
-          applicationId,
+        await registerDiscordSlashCommands({
+          transport: runtime.discordRestTransport,
+          applicationId: runtime.discordBotUserId,
+          guildIds,
         });
-        opts.logger.info("discord.slash_commands.deregistered", {
-          applicationId,
+        opts.logger.info("discord.slash_commands.registered", {
+          applicationId: runtime.discordBotUserId,
+          guildIds,
         });
+        // Migration: drop legacy globally-registered Shoggoth commands so they
+        // don't linger as duplicates next to the guild-scoped ones. Failure is
+        // non-fatal — guild registration already succeeded.
+        try {
+          await cleanupLegacyGlobalCommands({
+            transport: runtime.discordRestTransport,
+            applicationId: runtime.discordBotUserId,
+          });
+        } catch (e) {
+          opts.logger.warn("discord.slash_commands.legacy_global_cleanup_failed", {
+            err: String(e),
+          });
+        }
       } catch (e) {
-        opts.logger.warn("discord.slash_commands.deregistration_failed", {
+        opts.logger.warn("discord.slash_commands.registration_failed", {
           err: String(e),
         });
       }
     }
-    await opts.stop();
-  };
+  }
+
+  return runtime;
 }
