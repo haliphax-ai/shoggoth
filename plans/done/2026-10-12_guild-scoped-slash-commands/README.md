@@ -1,6 +1,6 @@
 ---
 date: 2026-10-12
-completed: never
+completed: 2026-10-13
 ---
 
 # Guild-Scoped, Durable Discord Slash Commands
@@ -146,3 +146,20 @@ Operators who want registration in guilds without routes can set
 - [`implementation.md`](implementation.md) — phased implementation steps
 - Discord API: [Global Application Commands](https://discord.com/developers/docs/interactions/application-commands),
   [Guild Application Commands](https://discord.com/developers/docs/interactions/application-commands#get-guild-application-commands)
+
+## Addendum (post-implementation, 2026-10-13)
+
+- `registerGlobalCommands` removal moved from Phase 1 to the final cleanup
+  phase: it kept its callers (registration + shutdown de-registration) until
+  the registration rework landed, then was deleted alongside its last caller.
+  Its stub entries in the `component-interactions`, `prompt-command`, and
+  `status-bar-at-once` test transports were removed with it.
+- The drain factory (`createDiscordMessagingShutdownDrain`) and the
+  `slashCommandRegistrationRef` plumbing were removed in the wiring phase as
+  planned; `plugin.ts` registers `registerDrain("discord-messaging", () => stop())`
+  directly.
+- The new config tests needed two things the plan didn't call out: the
+  Discord platform registration must be active
+  (`registerPlatform(discordPlatformRegistration)`) and route leaves must be
+  snowflake- or UUID-shaped — `parseDiscordRoutesWithMeta` drops rows whose
+  tail segments are neither, which silently emptied the derived guild set.
