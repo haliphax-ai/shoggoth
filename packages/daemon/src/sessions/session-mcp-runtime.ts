@@ -407,6 +407,10 @@ export async function createSessionMcpRuntime(
   function evictPool(key: string, scope: "global" | "per_agent" | "per_session"): void {
     cancelIdleEviction(key, scope);
     log.info("session.mcp_pool.idle_evicted", { key, scope });
+    // Bump the catalog generation so cached per-session contexts that embed
+    // this pool's tools rebuild from live state (pruned) on their next
+    // resolveContext instead of advertising tools bound to a closed pool.
+    catalogEpoch += 1;
 
     if (scope === "global") {
       // Close the global pool; next resolveContext will reconnect.
@@ -432,6 +436,13 @@ export async function createSessionMcpRuntime(
           mcpShutdownGlobal = shutdownFn;
           globalPoolConnected = true;
         });
+      } else {
+        // No live pool (e.g. the last connect failed): clear the failure state
+        // and re-arm so the next resolveContext retries with a fresh budget.
+        globalConnectFailed = false;
+        globalReconnectReArm = true;
+        globalOnlyMcpCtx = buildGlobalOnlyCtx();
+        globalOnlyMcpCtxEpoch = catalogEpoch;
       }
     } else if (scope === "per_agent") {
       const close = perAgentMcpClose.get(key);
@@ -439,6 +450,15 @@ export async function createSessionMcpRuntime(
         // Optimistically clear state.
         perAgentMcpClose.delete(key);
         perAgentMcpCtx.delete(key);
+        // Per-session contexts for this agent's sessions embed this pool's
+        // catalogs and invoke by value — drop them too so the next
+        // resolveContext rebuilds against live state (lazily reconnecting).
+        const dependentSessions = [
+          ...new Set([...perSessionMcpCtx.keys(), ...perSessionMcpClose.keys()]),
+        ].filter((sid) => parseAgentSessionUrn(sid)?.agentId === key);
+        for (const sid of dependentSessions) {
+          evictPool(sid, "per_session");
+        }
         void close().catch((err) => {
           log.error("session.mcp_pool.eviction_close_failed", {
             key,
@@ -543,9 +563,12 @@ export async function createSessionMcpRuntime(
             err: String(e),
             agentId,
           });
-          const empty = { sources: [] as McpSourceCatalog[], external: undefined };
-          perAgentMcpCtx.set(agentId, empty);
-          return empty;
+          // Do NOT cache the failure: an empty entry with no close fn would
+          // survive idle-eviction sweeps (evictPool finds nothing to clear) and
+          // pin the agent to a manifest without its servers until restart. The
+          // empty result serves this call and its coalesced callers only; the
+          // next resolveContext retries the connect.
+          return { sources: [] as McpSourceCatalog[], external: undefined };
         }
       })();
       perAgentMcpConnect.set(agentId, inflight);
@@ -730,12 +753,12 @@ export async function createSessionMcpRuntime(
             );
           };
           const fallback = buildFallback();
-          perSessionMcpCtx.set(sessionId, {
-            ctx: fallback,
-            rebuild: buildFallback,
-            epoch: catalogEpoch,
-          });
-          trackSessionCacheEntry(sessionId);
+          // A FAILED per-session connect must not pin the session to a tool
+          // manifest missing its servers: a transient failure (or a server
+          // still down right after an idle eviction) would otherwise be
+          // served from cache on every subsequent resolve with no retry.
+          // The fallback serves this call and its coalesced callers only;
+          // nothing is cached, so the next resolveContext re-runs the connect.
           return fallback;
         }
       })();
@@ -764,7 +787,10 @@ export async function createSessionMcpRuntime(
     const parsed = parseAgentSessionUrn(sessionId);
     const agentId = parsed?.agentId ?? null;
 
-    if (globalServers.length > 0 && globalPoolConnected) {
+    // Arm the sweep even after a FAILED global connect: the eviction clears
+    // the failure state so the next activity reconnects with a fresh retry
+    // budget instead of the failure sticking until daemon restart.
+    if (globalServers.length > 0 && (globalPoolConnected || globalConnectFailed)) {
       scheduleIdleEviction("__global__", "global");
     }
     if (agentId && perAgentMcpCtx.has(agentId)) {

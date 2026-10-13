@@ -74,6 +74,9 @@ import { requestSessionTurnAbort } from "../sessions/session-turn-abort";
 import { validateModelRefExists } from "../sessions/model-resolution";
 import { getSubagentHandles, rememberSubagentHandles } from "../subagent/subagent-disposables";
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
+import type { OobTurnBannerHandle } from "../subagent/subagent-extension-ref";
+import { buildSessionMessageTurnBanner } from "../messaging/oob-turn-banner";
+import type { OobTurnOutcome } from "../messaging/oob-turn-banner";
 import { terminatePersistentSubagentSession } from "../subagent/subagent-kill";
 import {
   buildThreadSubagentCreatedBanner,
@@ -443,6 +446,15 @@ export async function deliverOobStructuredResponse(opts: {
    * than an unrelated prompt.
    */
   systemContext?: SystemContext;
+  /**
+   * Live OOB banner handle (issue #363). When present, the terminal banner and
+   * any `to_operator` content are folded into the banner message instead of
+   * being posted separately, and the banner is finalized (or aborted) here.
+   */
+  banner?: {
+    readonly handle: OobTurnBannerHandle;
+    readonly terminal: (outcome: OobTurnOutcome) => string;
+  };
 }): Promise<void> {
   const {
     structuredResponse,
@@ -453,10 +465,41 @@ export async function deliverOobStructuredResponse(opts: {
     maxChars = 8000,
     hasSender,
     systemContext,
+    banner,
   } = opts;
+
+  /** Finalize the banner (issue #363) with a failed terminal + notice body.
+   *  Returns true when a banner was finalized (caller should skip the plain
+   *  postToOperator fallback). */
+  const finishBannerFailed = async (notice: string): Promise<boolean> => {
+    if (!banner) return false;
+    try {
+      await ext.oobTurnBanner?.finish({
+        handle: banner.handle,
+        terminal: banner.terminal("failed"),
+        content: notice,
+      });
+    } catch (err) {
+      subLog.warn("failed to finalize oob banner on failure", { respondTo, error: String(err) });
+    }
+    return true;
+  };
 
   const announceAbort = async (): Promise<void> => {
     subLog.info("out-of-band turn aborted", { respondTo });
+    // Banner path (issue #363): finalize the banner with the aborted terminal
+    // instead of posting a separate abort notice.
+    if (banner) {
+      try {
+        await ext.oobTurnBanner?.finish({
+          handle: banner.handle,
+          terminal: banner.terminal("aborted"),
+        });
+      } catch (err) {
+        subLog.warn("failed to finalize oob banner on abort", { respondTo, error: String(err) });
+      }
+      return;
+    }
     try {
       if (!ext.resolveOutboundChannelIdForSession?.(respondTo)) return;
       await ext.postToOperator?.({
@@ -514,37 +557,54 @@ export async function deliverOobStructuredResponse(opts: {
             respondTo,
             structuredResponse: nudgeResult.latestAssistantText.slice(0, 200),
           });
-          await ext.postToOperator?.({
-            sessionId: respondTo,
-            userContent: formatOobFailureNotice(nudgeResult.latestAssistantText, maxChars),
-          });
+          const notice = formatOobFailureNotice(nudgeResult.latestAssistantText, maxChars);
+          if (!(await finishBannerFailed(notice))) {
+            await ext.postToOperator?.({ sessionId: respondTo, userContent: notice });
+          }
           return;
         }
       } else {
         // Nudge produced no response
         subLog.error("oob nudge produced no response", { respondTo });
-        await ext.postToOperator?.({
-          sessionId: respondTo,
-          userContent: formatOobFailureNotice(structuredResponse, maxChars),
-        });
+        const notice = formatOobFailureNotice(structuredResponse, maxChars);
+        if (!(await finishBannerFailed(notice))) {
+          await ext.postToOperator?.({ sessionId: respondTo, userContent: notice });
+        }
         return;
       }
     } catch (nudgeErr) {
       // Nudge turn itself failed
       subLog.error("oob nudge turn failed", { respondTo, error: String(nudgeErr) });
-      await ext.postToOperator?.({
-        sessionId: respondTo,
-        userContent: formatOobFailureNotice(structuredResponse, maxChars),
-      });
+      const notice = formatOobFailureNotice(structuredResponse, maxChars);
+      if (!(await finishBannerFailed(notice))) {
+        await ext.postToOperator?.({ sessionId: respondTo, userContent: notice });
+      }
       return;
     }
   }
 
   // Deliver to operator
   const toOperator = parsed.to_operator;
-  if (typeof toOperator === "string" && toOperator.length > 0) {
-    const truncated = toOperator.length > maxChars ? toOperator.slice(0, maxChars) : toOperator;
-    await ext.postToOperator?.({ sessionId: respondTo, userContent: truncated });
+  const toOperatorText =
+    typeof toOperator === "string" && toOperator.length > 0
+      ? toOperator.length > maxChars
+        ? toOperator.slice(0, maxChars)
+        : toOperator
+      : undefined;
+  if (banner) {
+    // Banner path (issue #363): fold the terminal banner and any to_operator
+    // content into the banner message, then finalize it.
+    try {
+      await ext.oobTurnBanner?.finish({
+        handle: banner.handle,
+        terminal: banner.terminal("finished"),
+        ...(toOperatorText ? { content: toOperatorText } : {}),
+      });
+    } catch (err) {
+      subLog.warn("failed to finalize oob banner", { respondTo, error: String(err) });
+    }
+  } else if (toOperatorText) {
+    await ext.postToOperator?.({ sessionId: respondTo, userContent: toOperatorText });
   }
 
   // Deliver to sender (subagent results only)
@@ -2328,9 +2388,18 @@ export async function handleIntegrationControlOp(
           })();
       const senderSessionId =
         principal.kind === "agent" ? principal.sessionId : `operator:${principal.operatorId}`;
+      const bannerText = buildSessionMessageTurnBanner({ senderSessionId });
+      const bannerHandle =
+        delivery.kind === "internal"
+          ? await ext.oobTurnBanner?.begin({
+              sessionId,
+              processing: bannerText.processing,
+            })
+          : undefined;
       const turn = await ext.runSessionModelTurn({
         sessionId,
         userContent: message,
+        ...(bannerHandle ? { statusBarSink: bannerHandle } : {}),
         userMetadata: { session_send: true },
         systemContext: {
           kind: "session.message",
@@ -2339,6 +2408,12 @@ export async function handleIntegrationControlOp(
         },
         delivery,
       });
+      if (bannerHandle) {
+        await ext.oobTurnBanner?.finish({
+          handle: bannerHandle,
+          terminal: bannerText.terminal("finished"),
+        });
+      }
       ctx.recordIntegrationAudit({
         action: "session.send",
         resource: sessionId,

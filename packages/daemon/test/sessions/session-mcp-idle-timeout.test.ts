@@ -11,7 +11,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSessionMcpRuntime } from "../../src/sessions/session-mcp-runtime";
-import { createAggregateMcpCatalogResult } from "@shoggoth/mcp-integration";
+import { createAggregateMcpCatalogResult, type McpSourceCatalog } from "@shoggoth/mcp-integration";
+import type { SessionMcpToolContext } from "../../src/sessions/session-mcp-tool-context";
 import { runInboundSessionTurn } from "../../src/messaging/inbound-session-turn";
 import type { McpServerPool } from "../../src/mcp/mcp-server-pool";
 import type { ShoggothConfig, ShoggothMcpServerEntry } from "@shoggoth/shared";
@@ -686,5 +687,179 @@ describe("unified MCP idle eviction — shutdown clears all timers", () => {
 
     // close called once by shutdown, not again by the timer
     expect(mockMcp.closeFns[0]).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. Reconnect on activity — failed connects and post-eviction manifest state
+// ---------------------------------------------------------------------------
+
+describe("reconnect on activity — failed connects and eviction", () => {
+  let tmp: string;
+  let db: Database.Database;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    tmp = mkdtempSync(join(tmpdir(), "shoggoth-mcp-idle-"));
+    const dbPath = join(tmp, "s.db");
+    db = new Database(dbPath);
+    db.pragma("foreign_keys = ON");
+    migrate(db, defaultMigrationsDir());
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await closeTestDb(db, tmp);
+  });
+
+  /**
+   * Mock connect that fails the first `failures` calls, then succeeds with a
+   * live catalog whose tool name encodes the connect attempt number — so tests
+   * can assert the served manifest reflects the CURRENT pool, not a snapshot.
+   */
+  function createFlakyConnect(failures: number) {
+    const connectShoggothMcpServers = vi.fn(async (servers: readonly ShoggothMcpServerEntry[]) => {
+      const attempt = connectShoggothMcpServers.mock.calls.length;
+      if (attempt <= failures) {
+        throw new Error("spawn failed (transient)");
+      }
+      const sources: McpSourceCatalog[] = servers.map((s) => ({
+        sourceId: s.id,
+        tools: [
+          {
+            name: `tool_attempt_${attempt}`,
+            description: "t",
+            inputSchema: { type: "object", properties: {} },
+          },
+        ],
+      }));
+      const pool: McpServerPool = {
+        externalSources: sources,
+        close: vi.fn(async () => {}),
+      };
+      return { pool, external: vi.fn(async () => ({ resultJson: "{}" })) };
+    });
+    return connectShoggothMcpServers;
+  }
+
+  function externalToolNames(ctx: SessionMcpToolContext): string[] {
+    return ctx.aggregated.tools
+      .filter((t) => t.sourceId !== "builtin")
+      .map((t) => t.namespacedName);
+  }
+
+  it("per-session: a failed connect is not cached — the next resolveContext retries and recovers", async () => {
+    const connect = createFlakyConnect(1);
+    const config = configWithPerSessionMcp(tmp, 5000);
+
+    const runtime = await createSessionMcpRuntime({
+      config,
+      env: process.env,
+      db,
+      deps: { connectShoggothMcpServers: connect },
+    });
+
+    // First resolve: connect fails → manifest is pruned (no session tools).
+    const ctx1 = await runtime.resolveContext("sess-flaky");
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(externalToolNames(ctx1)).toHaveLength(0);
+
+    // Second resolve: the connect is retried (not served from a cached
+    // failure) and succeeds → the tools are back.
+    const ctx2 = await runtime.resolveContext("sess-flaky");
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(externalToolNames(ctx2)).toEqual(["test-mcp-tool_attempt_2"]);
+
+    await runtime.shutdown();
+  });
+
+  it("per-agent: a failed connect is not cached — the next resolveContext retries and recovers", async () => {
+    const connect = createFlakyConnect(1);
+    const cfg = defaultConfig(tmp);
+    cfg.mcp = {
+      ...cfg.mcp,
+      servers: [
+        {
+          id: "agent-mcp",
+          transport: "stdio" as const,
+          command: "echo",
+          poolScope: "per_agent",
+        } as ShoggothMcpServerEntry,
+      ],
+      poolScope: "global" as const,
+      perInstanceIdleTimeoutMs: 5000,
+    };
+
+    const runtime = await createSessionMcpRuntime({
+      config: cfg,
+      env: process.env,
+      db,
+      deps: { connectShoggothMcpServers: connect },
+    });
+
+    const sessionId = "agent:myagent:discord:channel:aaaaaaaa-0000-4000-8000-000000000002";
+
+    const ctx1 = await runtime.resolveContext(sessionId);
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(externalToolNames(ctx1)).toHaveLength(0);
+
+    const ctx2 = await runtime.resolveContext(sessionId);
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(externalToolNames(ctx2)).toEqual(["agent-mcp-tool_attempt_2"]);
+
+    await runtime.shutdown();
+  });
+
+  it("global: a failed connect is retried on the next resolve after the idle sweep clears the failure", async () => {
+    const connect = createFlakyConnect(1);
+    const config = configWithGlobalMcp(tmp, 5000);
+
+    const runtime = await createSessionMcpRuntime({
+      config,
+      env: process.env,
+      db,
+      deps: { connectShoggothMcpServers: connect },
+    });
+
+    const ctx1 = await runtime.resolveContext("sess-global-flaky");
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(externalToolNames(ctx1)).toHaveLength(0);
+
+    // The idle sweep is armed even after a failed connect; when it fires it
+    // clears the failure state so the next activity reconnects.
+    runtime.notifyTurnEnd("sess-global-flaky");
+    vi.advanceTimersByTime(5100);
+
+    const ctx2 = await runtime.resolveContext("sess-global-flaky");
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(externalToolNames(ctx2)).toEqual(["global-mcp-tool_attempt_2"]);
+
+    await runtime.shutdown();
+  });
+
+  it("per-session: after idle eviction, the next resolveContext serves the freshly connected pool's manifest", async () => {
+    const connect = createFlakyConnect(0);
+    const config = configWithPerSessionMcp(tmp, 5000);
+
+    const runtime = await createSessionMcpRuntime({
+      config,
+      env: process.env,
+      db,
+      deps: { connectShoggothMcpServers: connect },
+    });
+
+    const ctx1 = await runtime.resolveContext("sess-evict-live");
+    expect(externalToolNames(ctx1)).toEqual(["test-mcp-tool_attempt_1"]);
+
+    runtime.notifyTurnEnd("sess-evict-live");
+    vi.advanceTimersByTime(5100);
+
+    // Eviction tore the pool down; the next activity reconnects and the
+    // manifest reflects the new pool, not the evicted snapshot.
+    const ctx2 = await runtime.resolveContext("sess-evict-live");
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(externalToolNames(ctx2)).toEqual(["test-mcp-tool_attempt_2"]);
+
+    await runtime.shutdown();
   });
 });

@@ -181,7 +181,13 @@ describe("OOB cancellation through the session core", () => {
   it.each([true, false])("stops an aborted timer turn (attached=%s)", async (attached) => {
     const { ext, completeWithTools } = harness("timer-session", attached, 1);
     setSubagentRuntimeExtension(ext);
-    await deliverTimerMessage("timer-session", "timer fired");
+    await deliverTimerMessage({
+      id: "timer-1",
+      sessionId: "timer-session",
+      label: "fired",
+      fireAt: new Date().toISOString(),
+      message: "timer fired",
+    });
     expect(completeWithTools).toHaveBeenCalledTimes(1);
     expect(ext.postToOperator).toHaveBeenCalledTimes(attached ? 1 : 0);
     expect(ext.runSessionModelTurn).toHaveBeenCalledWith(
@@ -196,13 +202,25 @@ describe("OOB cancellation through the session core", () => {
   it("stops a cancelled timer repair and successfully handles a later timer", async () => {
     const { ext, completeWithTools } = harness("timer-repair", true, 2);
     setSubagentRuntimeExtension(ext);
-    await deliverTimerMessage("timer-repair", "first timer");
+    await deliverTimerMessage({
+      id: "timer-first",
+      sessionId: "timer-repair",
+      label: "first",
+      fireAt: new Date().toISOString(),
+      message: "first timer",
+    });
     expect(completeWithTools).toHaveBeenCalledTimes(2);
     expect(ext.postToOperator).toHaveBeenCalledExactlyOnceWith({
       sessionId: "timer-repair",
       userContent: expect.stringMatching(/out-of-band.*aborted/i),
     });
-    await deliverTimerMessage("timer-repair", "second timer");
+    await deliverTimerMessage({
+      id: "timer-second",
+      sessionId: "timer-repair",
+      label: "second",
+      fireAt: new Date().toISOString(),
+      message: "second timer",
+    });
     expect(completeWithTools).toHaveBeenCalledTimes(3);
     expect(ext.postToOperator).toHaveBeenLastCalledWith({
       sessionId: "timer-repair",
@@ -263,7 +281,13 @@ describe("OOB cancellation through the session core", () => {
       aborted: true,
     });
     setSubagentRuntimeExtension(ext);
-    await deliverTimerMessage("empty-abort", "event");
+    await deliverTimerMessage({
+      id: "timer-empty",
+      sessionId: "empty-abort",
+      label: "event",
+      fireAt: new Date().toISOString(),
+      message: "event",
+    });
     expect(ext.runSessionModelTurn).toHaveBeenCalledTimes(1);
     expect(ext.postToOperator).toHaveBeenCalledExactlyOnceWith({
       sessionId: "empty-abort",

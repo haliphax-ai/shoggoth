@@ -118,6 +118,7 @@ import { createSqliteAgentTokenStore } from "./auth/sqlite-agent-tokens";
 import { resolveConfiguredSubagentModel, resolveShoggothAgentId } from "./config/effective-runtime";
 import { TimerScheduler } from "./timers/timer-scheduler";
 import { deliverTimerMessage } from "./timers/timer-delivery";
+import { buildWorkflowTurnBanner } from "./messaging/oob-turn-banner";
 import { setTimerScheduler } from "./sessions/builtin-handlers/timer-handler";
 import {
   ShoggothPluginSystem,
@@ -614,9 +615,15 @@ async function initWorkflowServer(
             sessionId,
             deliveryKind: delivery.kind,
           });
+          const bannerText = buildWorkflowTurnBanner({ workflowId });
+          const bannerHandle = await ext.oobTurnBanner?.begin({
+            sessionId,
+            processing: bannerText.processing,
+          });
           await ext.runSessionModelTurn({
             sessionId,
             userContent: message,
+            ...(bannerHandle ? { statusBarSink: bannerHandle } : {}),
             userMetadata: {
               workflow_notify: true,
               workflow_id: workflowId,
@@ -631,6 +638,12 @@ async function initWorkflowServer(
             },
             delivery,
           });
+          if (bannerHandle) {
+            await ext.oobTurnBanner?.finish({
+              handle: bannerHandle,
+              terminal: bannerText.terminal(success ? "finished" : "failed"),
+            });
+          }
           getLogger("daemon").debug("workflow notify: delivered");
         } catch (e) {
           getLogger("daemon").warn("workflow completion notification failed", {
