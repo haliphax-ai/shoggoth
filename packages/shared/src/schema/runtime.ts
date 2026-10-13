@@ -157,6 +157,17 @@ export const shoggothRerankConfigSchema = z
     /** Model used when a request omits `model`, in `provider-id/model-name`
      * format. Must match a configured provider model. */
     defaultModel: z.string().min(1).optional(),
+    /** Automatic rerank of memory-search hits (RAG integration). Gates only
+     * the memory-search rerank step — the builtin-rerank tool and the
+     * rerank_documents op stay gated on providers+models being configured. */
+    memorySearch: z
+      .object({
+        /** When true (and `defaultModel` is configured), memory-search
+         * re-scores and re-orders its retrieved hits automatically. */
+        enabled: z.boolean(),
+      })
+      .strict()
+      .optional(),
     providers: z.array(rerankProviderSchema).optional().default([]),
   })
   .strict()

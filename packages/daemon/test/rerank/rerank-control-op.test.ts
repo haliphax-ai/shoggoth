@@ -486,4 +486,33 @@ describe("shoggothRerankConfigSchema", () => {
     });
     assert.ok(parsed.success);
   });
+
+  it("accepts memorySearch.enabled and treats it as off when absent", () => {
+    const enabled = shoggothRerankConfigSchema.safeParse({
+      memorySearch: { enabled: true },
+      providers: [validProvider],
+    });
+    assert.ok(enabled.success);
+    assert.equal(enabled.success && enabled.data.memorySearch?.enabled, true);
+
+    const absent = shoggothRerankConfigSchema.safeParse({ providers: [validProvider] });
+    assert.ok(absent.success);
+    assert.equal(absent.success && absent.data.memorySearch, undefined);
+  });
+
+  it("rejects a non-boolean memorySearch.enabled", () => {
+    const parsed = shoggothRerankConfigSchema.safeParse({
+      memorySearch: { enabled: "yes" },
+      providers: [validProvider],
+    });
+    assert.ok(!parsed.success);
+  });
+
+  it("rejects unknown fields inside memorySearch (strict)", () => {
+    const parsed = shoggothRerankConfigSchema.safeParse({
+      memorySearch: { enabled: true, nope: true },
+      providers: [validProvider],
+    });
+    assert.ok(!parsed.success);
+  });
 });

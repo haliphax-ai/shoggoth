@@ -107,7 +107,8 @@ export async function runMemoryBuiltin(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly fetchImpl?: FetchLike;
   readonly runtimeOpenaiBaseUrl?: string | undefined;
-  /** Rerank config for the optional rerank step in memory-search (RAG). */
+  /** Rerank config for memory-search; the automatic rerank step runs when
+   * rerank.memorySearch.enabled is on and rerank.defaultModel is configured. */
   readonly rerank?: ShoggothRerankConfig;
 }): Promise<{ resultJson: string }> {
   const {
@@ -298,56 +299,44 @@ export async function runMemoryBuiltin(input: {
       filters,
     });
 
-    // --- Optional rerank step (RAG integration) ---
-    // When args.rerank is true and a rerank provider with models is configured,
-    // the retrieved candidates are re-scored and re-ordered by relevance. Any
-    // rerank failure degrades gracefully to the original retrieval order.
+    // --- Automatic rerank step (RAG integration) ---
+    // Config-driven: when rerank.memorySearch.enabled is on and
+    // rerank.defaultModel is configured, the retrieved candidates are
+    // re-scored and re-ordered by relevance. Any rerank failure degrades
+    // gracefully to the original retrieval order.
     let searchHits = hits;
     let reranked = false;
     let rerankNote: string | undefined;
+    let rerankModel: string | undefined;
     let rerankScores: Map<number, number> | null = null;
-    if (args.rerank === true && hits.length > 0) {
-      const rerankConfigured = (rerank?.providers ?? []).some((p) => (p.models?.length ?? 0) > 0);
-      if (!rerankConfigured) {
-        rerankNote = "rerank requested but rerank is not configured; returning original order";
-      } else {
-        const rerankModelArg =
-          typeof args.rerank_model === "string" && args.rerank_model.trim()
-            ? args.rerank_model.trim()
-            : undefined;
-        if (!rerankModelArg && !rerank?.defaultModel) {
-          rerankNote =
-            "rerank requires a model: pass rerank_model or configure rerank.defaultModel; returning original order";
-        } else {
-          const outcome = await RerankService.fromConfig(rerank!).rerank({
-            ...(rerankModelArg ? { model: rerankModelArg } : {}),
-            query,
-            documents: hits.map((h) => h.body),
-            ...(fetchImpl ? { fetchImpl } : {}),
-          });
-          if (outcome.status === "complete") {
-            const byIndex = hits.map((h, i) => ({ hit: h, origIndex: i }));
-            const chosen = new Set<number>();
-            const ordered: typeof byIndex = [];
-            const scores = new Map<number, number>();
-            for (const r of outcome.results) {
-              const entry = byIndex[r.index];
-              if (!entry || chosen.has(entry.origIndex)) continue;
-              chosen.add(entry.origIndex);
-              ordered.push(entry);
-              scores.set(entry.hit.id, r.relevance_score);
-            }
-            // keep hits the rerank service omitted, in their original order
-            for (const entry of byIndex) {
-              if (!chosen.has(entry.origIndex)) ordered.push(entry);
-            }
-            searchHits = ordered.map((e) => e.hit);
-            rerankScores = scores;
-            reranked = true;
-          } else {
-            rerankNote = `rerank failed: ${outcome.error}; returning original order`;
-          }
+    if (rerank?.memorySearch?.enabled === true && rerank.defaultModel && hits.length > 0) {
+      const outcome = await RerankService.fromConfig(rerank).rerank({
+        query,
+        documents: hits.map((h) => h.body),
+        ...(fetchImpl ? { fetchImpl } : {}),
+      });
+      if (outcome.status === "complete") {
+        const byIndex = hits.map((h, i) => ({ hit: h, origIndex: i }));
+        const chosen = new Set<number>();
+        const ordered: typeof byIndex = [];
+        const scores = new Map<number, number>();
+        for (const r of outcome.results) {
+          const entry = byIndex[r.index];
+          if (!entry || chosen.has(entry.origIndex)) continue;
+          chosen.add(entry.origIndex);
+          ordered.push(entry);
+          scores.set(entry.hit.id, r.relevance_score);
         }
+        // keep hits the rerank service omitted, in their original order
+        for (const entry of byIndex) {
+          if (!chosen.has(entry.origIndex)) ordered.push(entry);
+        }
+        searchHits = ordered.map((e) => e.hit);
+        rerankScores = scores;
+        rerankModel = outcome.model;
+        reranked = true;
+      } else {
+        rerankNote = `rerank failed: ${outcome.error}; returning original order`;
       }
     }
 
@@ -386,6 +375,7 @@ export async function runMemoryBuiltin(input: {
         query,
         hits: formattedHits,
         ...(reranked ? { reranked: true } : {}),
+        ...(rerankModel ? { rerankModel } : {}),
         ...(rerankNote ? { rerankNote } : {}),
       }),
     };

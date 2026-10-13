@@ -9,10 +9,12 @@ import { runMemoryBuiltin } from "../../src/memory/builtin-memory-tools";
 import type { FetchLike } from "@shoggoth/models";
 
 // ---------------------------------------------------------------------------
-// RAG integration: the optional rerank step of memory-search
+// RAG integration: the automatic, config-driven rerank step of memory-search.
+// Reranking runs when rerank.memorySearch.enabled is on and rerank.defaultModel
+// is configured — there are no per-call rerank parameters.
 // ---------------------------------------------------------------------------
 
-const rerankConfig = {
+const rerankConfigBase = {
   defaultModel: "openrouter-cohere/cohere/rerank-v3.5",
   providers: [
     {
@@ -24,6 +26,8 @@ const rerankConfig = {
     },
   ],
 };
+
+const rerankConfig = { ...rerankConfigBase, memorySearch: { enabled: true } };
 
 async function setup() {
   const ws = mkdtempSync(join(tmpdir(), "shog-mem-ws-"));
@@ -76,138 +80,15 @@ function titleOf(doc: string): string {
   return "Gamma";
 }
 
-describe("memory-search rerank step", () => {
-  it("reorders hits by relevance, attaches rerank scores, and flags reranked", async () => {
-    const { ws, db, memory } = await setup();
-    const calls: unknown[] = [];
+type SearchResponse = {
+  hits: { title: string; rerankScore?: number }[];
+  reranked?: boolean;
+  rerankModel?: string;
+  rerankNote?: string;
+};
 
-    const sr = await runMemoryBuiltin({
-      originalName: "memory-search",
-      argsJson: JSON.stringify({ query: "zanzibar", limit: 5, rerank: true }),
-      db,
-      workspacePath: ws,
-      memory,
-      env: { ...process.env },
-      fetchImpl: rerankFetch(calls),
-      rerank: rerankConfig,
-    });
-
-    const parsed = JSON.parse(sr.resultJson) as {
-      hits: { title: string; rerankScore?: number }[];
-      reranked?: boolean;
-      rerankNote?: string;
-    };
-
-    assert.equal(calls.length, 1);
-    const call = calls[0] as { url: string; init: { body: string } };
-    assert.equal(call.url, "https://openrouter.ai/api/v1/rerank");
-    const body = JSON.parse(call.init.body) as {
-      model: string;
-      query: string;
-      documents: string[];
-    };
-    assert.equal(body.model, "cohere/rerank-v3.5");
-    assert.equal(body.query, "zanzibar");
-    assert.equal(body.documents.length, 3);
-
-    assert.equal(parsed.reranked, true);
-    assert.equal(parsed.rerankNote, undefined);
-    // the stub reverses the order it was sent (indices 2, 0, 1)
-    assert.deepEqual(
-      parsed.hits.map((h) => h.title),
-      [titleOf(body.documents[2]!), titleOf(body.documents[0]!), titleOf(body.documents[1]!)],
-    );
-    assert.equal(parsed.hits[0]!.rerankScore, 0.91);
-    assert.equal(parsed.hits[1]!.rerankScore, 0.42);
-    assert.equal(parsed.hits[2]!.rerankScore, 0.13);
-
-    db.close();
-  });
-
-  it("forwards rerank_model as the raw wire model name", async () => {
-    const { ws, db, memory } = await setup();
-    const calls: unknown[] = [];
-
-    await runMemoryBuiltin({
-      originalName: "memory-search",
-      argsJson: JSON.stringify({
-        query: "zanzibar",
-        rerank: true,
-        rerank_model: "openrouter-cohere/other-rerank-model",
-      }),
-      db,
-      workspacePath: ws,
-      memory,
-      env: { ...process.env },
-      fetchImpl: rerankFetch(calls),
-      rerank: rerankConfig,
-    });
-
-    const call = calls[0] as { init: { body: string } };
-    assert.equal(JSON.parse(call.init.body).model, "other-rerank-model");
-
-    db.close();
-  });
-
-  it("degrades gracefully to retrieval order when the rerank call fails", async () => {
-    const { ws, db, memory } = await setup();
-    const failingFetch = (async () => new Response("upstream down", { status: 503 })) as FetchLike;
-
-    const sr = await runMemoryBuiltin({
-      originalName: "memory-search",
-      argsJson: JSON.stringify({ query: "zanzibar", rerank: true }),
-      db,
-      workspacePath: ws,
-      memory,
-      env: { ...process.env },
-      fetchImpl: failingFetch,
-      rerank: rerankConfig,
-    });
-
-    const parsed = JSON.parse(sr.resultJson) as {
-      hits: { title: string; rerankScore?: number }[];
-      reranked?: boolean;
-      rerankNote?: string;
-    };
-
-    assert.equal(parsed.reranked, undefined);
-    assert.ok(parsed.rerankNote?.includes("rerank failed"));
-    assert.deepEqual(parsed.hits.map((h) => h.title).sort(), ["Alpha", "Beta", "Gamma"]);
-    assert.equal(parsed.hits[0]!.rerankScore, undefined);
-
-    db.close();
-  });
-
-  it("notes but does not call out when rerank is requested but unconfigured", async () => {
-    const { ws, db, memory } = await setup();
-    const calls: unknown[] = [];
-
-    const sr = await runMemoryBuiltin({
-      originalName: "memory-search",
-      argsJson: JSON.stringify({ query: "zanzibar", rerank: true }),
-      db,
-      workspacePath: ws,
-      memory,
-      env: { ...process.env },
-      fetchImpl: rerankFetch(calls),
-      // no rerank config passed
-    });
-
-    const parsed = JSON.parse(sr.resultJson) as {
-      hits: { title: string }[];
-      reranked?: boolean;
-      rerankNote?: string;
-    };
-
-    assert.equal(calls.length, 0);
-    assert.equal(parsed.reranked, undefined);
-    assert.ok(parsed.rerankNote?.includes("not configured"));
-    assert.deepEqual(parsed.hits.map((h) => h.title).sort(), ["Alpha", "Beta", "Gamma"]);
-
-    db.close();
-  });
-
-  it("does not rerank (or call out) when the rerank arg is absent", async () => {
+describe("memory-search rerank step (config-driven)", () => {
+  it("reranks automatically when the flag is on and a default model is configured", async () => {
     const { ws, db, memory } = await setup();
     const calls: unknown[] = [];
 
@@ -222,14 +103,133 @@ describe("memory-search rerank step", () => {
       rerank: rerankConfig,
     });
 
-    const parsed = JSON.parse(sr.resultJson) as {
-      hits: { title: string }[];
-      reranked?: boolean;
+    const parsed = JSON.parse(sr.resultJson) as SearchResponse;
+
+    assert.equal(calls.length, 1);
+    const call = calls[0] as { url: string; init: { body: string } };
+    assert.equal(call.url, "https://openrouter.ai/api/v1/rerank");
+    const body = JSON.parse(call.init.body) as {
+      model: string;
+      query: string;
+      documents: string[];
     };
+    // the wire model is the raw name from the configured defaultModel
+    assert.equal(body.model, "cohere/rerank-v3.5");
+    assert.equal(body.query, "zanzibar");
+    assert.equal(body.documents.length, 3);
+
+    assert.equal(parsed.reranked, true);
+    assert.equal(parsed.rerankModel, "cohere/rerank-v3.5");
+    assert.equal(parsed.rerankNote, undefined);
+    // the stub reverses the order it was sent (indices 2, 0, 1)
+    assert.deepEqual(
+      parsed.hits.map((h) => h.title),
+      [titleOf(body.documents[2]!), titleOf(body.documents[0]!), titleOf(body.documents[1]!)],
+    );
+    assert.equal(parsed.hits[0]!.rerankScore, 0.91);
+    assert.equal(parsed.hits[1]!.rerankScore, 0.42);
+    assert.equal(parsed.hits[2]!.rerankScore, 0.13);
+
+    db.close();
+  });
+
+  it("returns plain retrieval order when the flag is off", async () => {
+    const { ws, db, memory } = await setup();
+    const calls: unknown[] = [];
+
+    const sr = await runMemoryBuiltin({
+      originalName: "memory-search",
+      argsJson: JSON.stringify({ query: "zanzibar", limit: 5 }),
+      db,
+      workspacePath: ws,
+      memory,
+      env: { ...process.env },
+      fetchImpl: rerankFetch(calls),
+      rerank: { ...rerankConfigBase, memorySearch: { enabled: false } },
+    });
+
+    const parsed = JSON.parse(sr.resultJson) as SearchResponse;
 
     assert.equal(calls.length, 0);
     assert.equal(parsed.reranked, undefined);
-    assert.equal(parsed.hits.length, 3);
+    assert.equal(parsed.rerankNote, undefined);
+    assert.deepEqual(parsed.hits.map((h) => h.title).sort(), ["Alpha", "Beta", "Gamma"]);
+    assert.equal(parsed.hits[0]!.rerankScore, undefined);
+
+    db.close();
+  });
+
+  it("returns plain retrieval order when the flag is absent (default off)", async () => {
+    const { ws, db, memory } = await setup();
+    const calls: unknown[] = [];
+
+    const sr = await runMemoryBuiltin({
+      originalName: "memory-search",
+      argsJson: JSON.stringify({ query: "zanzibar", limit: 5 }),
+      db,
+      workspacePath: ws,
+      memory,
+      env: { ...process.env },
+      fetchImpl: rerankFetch(calls),
+      rerank: rerankConfigBase,
+    });
+
+    const parsed = JSON.parse(sr.resultJson) as SearchResponse;
+
+    assert.equal(calls.length, 0);
+    assert.equal(parsed.reranked, undefined);
+    assert.equal(parsed.rerankNote, undefined);
+    assert.deepEqual(parsed.hits.map((h) => h.title).sort(), ["Alpha", "Beta", "Gamma"]);
+
+    db.close();
+  });
+
+  it("does not rerank when the flag is on but no default model is configured", async () => {
+    const { ws, db, memory } = await setup();
+    const calls: unknown[] = [];
+
+    const sr = await runMemoryBuiltin({
+      originalName: "memory-search",
+      argsJson: JSON.stringify({ query: "zanzibar", limit: 5 }),
+      db,
+      workspacePath: ws,
+      memory,
+      env: { ...process.env },
+      fetchImpl: rerankFetch(calls),
+      rerank: { providers: rerankConfigBase.providers, memorySearch: { enabled: true } },
+    });
+
+    const parsed = JSON.parse(sr.resultJson) as SearchResponse;
+
+    assert.equal(calls.length, 0);
+    assert.equal(parsed.reranked, undefined);
+    assert.equal(parsed.rerankNote, undefined);
+    assert.deepEqual(parsed.hits.map((h) => h.title).sort(), ["Alpha", "Beta", "Gamma"]);
+
+    db.close();
+  });
+
+  it("degrades gracefully to retrieval order when the rerank call fails", async () => {
+    const { ws, db, memory } = await setup();
+    const failingFetch = (async () => new Response("upstream down", { status: 503 })) as FetchLike;
+
+    const sr = await runMemoryBuiltin({
+      originalName: "memory-search",
+      argsJson: JSON.stringify({ query: "zanzibar" }),
+      db,
+      workspacePath: ws,
+      memory,
+      env: { ...process.env },
+      fetchImpl: failingFetch,
+      rerank: rerankConfig,
+    });
+
+    const parsed = JSON.parse(sr.resultJson) as SearchResponse;
+
+    assert.equal(parsed.reranked, undefined);
+    assert.ok(parsed.rerankNote?.includes("rerank failed"));
+    assert.deepEqual(parsed.hits.map((h) => h.title).sort(), ["Alpha", "Beta", "Gamma"]);
+    assert.equal(parsed.hits[0]!.rerankScore, undefined);
 
     db.close();
   });
