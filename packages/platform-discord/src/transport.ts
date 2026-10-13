@@ -122,11 +122,6 @@ export interface DiscordRestTransport {
       };
     },
   ): Promise<void>;
-  /** PUT `/applications/{appId}/commands` — register global slash commands. */
-  registerGlobalCommands(
-    applicationId: string,
-    commands: ReadonlyArray<Record<string, unknown>>,
-  ): Promise<void>;
   /**
    * PUT `/applications/{appId}/guilds/{guildId}/commands` — bulk-overwrite a
    * guild's slash command list. Discord preserves the IDs of same-named

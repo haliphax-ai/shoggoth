@@ -21,9 +21,6 @@ function stubTransport(calls: Array<{ method: string; args: unknown[] }>): Disco
     async interactionCallback(id, token, body) {
       calls.push({ method: "interactionCallback", args: [id, token, body] });
     },
-    async registerGlobalCommands(appId, commands) {
-      calls.push({ method: "registerGlobalCommands", args: [appId, commands] });
-    },
     async editOriginalInteractionResponse(applicationId, token, body) {
       calls.push({ method: "editOriginalInteractionResponse", args: [applicationId, token, body] });
     },

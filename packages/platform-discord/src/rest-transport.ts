@@ -43,7 +43,6 @@ const OPERATION_PRIORITY: Record<string, DiscordRestPriority> = {
   getMessageReactions: "background",
   searchMessages: "background",
   triggerTypingIndicator: "background",
-  registerGlobalCommands: "background",
   registerGuildCommands: "background",
   listGlobalCommands: "background",
   deleteGlobalCommand: "background",
@@ -330,16 +329,6 @@ export function createDiscordRestTransport(
         `/interactions/${encodeURIComponent(interactionId)}/${encodeURIComponent(interactionToken)}/callback`,
         `POST /interactions/:id/:token/callback`,
         JSON.stringify(body),
-      );
-    },
-
-    async registerGlobalCommands(applicationId, commands) {
-      await op(
-        "registerGlobalCommands",
-        "PUT",
-        `/applications/${encodeURIComponent(applicationId)}/commands`,
-        `PUT /applications/:id/commands`,
-        JSON.stringify(commands),
       );
     },
 
