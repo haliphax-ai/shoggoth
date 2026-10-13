@@ -15,6 +15,7 @@ import { printConfigHelp, runConfigShow } from "./run-config";
 import { runElevationCli } from "./run-elevation";
 import { runMediaCli } from "./run-media";
 import { runDecisionCli } from "./run-decision";
+import { runRerankCli } from "./run-rerank";
 import { runServiceCli } from "./run-service";
 import { runVaultCli } from "./run-vault";
 
@@ -25,10 +26,14 @@ if (argv.includes("--version") || argv.includes("-V")) {
   process.exit(0);
 }
 
-function printTopLevelHelp(decisionEnabled = false): void {
+function printTopLevelHelp(decisionEnabled = false, rerankEnabled = false): void {
   // The decision command only appears when decision support is configured.
   const decisionLine = decisionEnabled
     ? "  shoggoth decision             Decision/classifier models (see: shoggoth decision --help)\n"
+    : "";
+  // The rerank command only appears when rerank support is configured.
+  const rerankLine = rerankEnabled
+    ? "  shoggoth rerank               Document reranking (see: shoggoth rerank --help)\n"
     : "";
   console.log(`shoggoth ${VERSION}
 Usage:
@@ -48,7 +53,7 @@ Usage:
   shoggoth prompt               Run a canned prompt (see: shoggoth prompt --help)
   shoggoth elevation            Permission elevation (see: shoggoth elevation --help)
   shoggoth media                Media generation (see: shoggoth media --help)
-${decisionLine}  shoggoth service               Service management (see: shoggoth service --help)
+${rerankLine}${decisionLine}  shoggoth service               Service management (see: shoggoth service --help)
   shoggoth vault                Credential vault (see: shoggoth vault --help)
 
 Env: SHOGGOTH_CONTROL_SOCKET, SHOGGOTH_OPERATOR_TOKEN (non-Linux), SHOGGOTH_CONFIG_DIR`);
@@ -56,6 +61,7 @@ Env: SHOGGOTH_CONTROL_SOCKET, SHOGGOTH_OPERATOR_TOKEN (non-Linux), SHOGGOTH_CONF
 
 if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
   let decisionEnabled = false;
+  let rerankEnabled = false;
   try {
     const helpConfig = await loadLayeredConfigAsync(
       process.env.SHOGGOTH_CONFIG_DIR ?? LAYOUT.configDir,
@@ -63,10 +69,14 @@ if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
     decisionEnabled = (helpConfig.decision?.providers ?? []).some(
       (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
     );
+    rerankEnabled = (helpConfig.rerank?.providers ?? []).some(
+      (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
+    );
   } catch {
     decisionEnabled = false;
+    rerankEnabled = false;
   }
-  printTopLevelHelp(decisionEnabled);
+  printTopLevelHelp(decisionEnabled, rerankEnabled);
   process.exit(0);
 }
 
@@ -296,6 +306,16 @@ if (argv[0] === "media") {
 if (argv[0] === "decision") {
   try {
     await runDecisionCli(argv.slice(1));
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  }
+  process.exit(process.exitCode ?? 0);
+}
+
+if (argv[0] === "rerank") {
+  try {
+    await runRerankCli(argv.slice(1));
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
     process.exit(1);

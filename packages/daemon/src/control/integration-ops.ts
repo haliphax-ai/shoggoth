@@ -98,6 +98,7 @@ import {
 // import type { SubagentRuntimeExtension } from "../subagent/subagent-extension-ref";
 import { MediaGenerationService } from "../media/media-generation-service";
 import { DecisionService } from "../decision/decision-service";
+import { RerankService } from "../rerank/rerank-service";
 import {
   handleVaultSet,
   handleVaultGet,
@@ -3133,6 +3134,74 @@ export async function handleIntegrationControlOp(
         model: model,
         state: pl.state,
         questions: questions as Record<string, unknown>,
+        timeout_ms: typeof pl.timeout_ms === "number" ? pl.timeout_ms : undefined,
+      });
+    }
+
+    case "rerank_documents": {
+      // Feature gating: with no rerank provider that has models, the op is
+      // indistinguishable from a nonexistent one (undefined → ERR_UNKNOWN_OP).
+      const rerankConfig = ctx.config.rerank;
+      const rerankEnabled = (rerankConfig?.providers ?? []).some(
+        (p) => (p.models?.length ?? 0) > 0,
+      );
+      if (!rerankEnabled) {
+        return undefined;
+      }
+      if (principal.kind !== "agent") {
+        throw new IntegrationOpError("ERR_FORBIDDEN", "rerank_documents requires agent principal");
+      }
+      const pl = payloadObject(req);
+      // model is optional — falls back to the configured rerank defaultModel
+      const modelRaw = pl.model;
+      if (
+        modelRaw !== undefined &&
+        modelRaw !== null &&
+        (typeof modelRaw !== "string" || !modelRaw)
+      ) {
+        throw new IntegrationOpError(
+          "ERR_INVALID_PAYLOAD",
+          "rerank_documents model must be a non-empty string",
+        );
+      }
+      const model = typeof modelRaw === "string" && modelRaw ? modelRaw : undefined;
+      const queryRaw = pl.query;
+      if (typeof queryRaw !== "string" || !queryRaw.trim()) {
+        throw new IntegrationOpError(
+          "ERR_INVALID_PAYLOAD",
+          "rerank_documents requires a non-empty query string",
+        );
+      }
+      const docsRaw = pl.documents;
+      if (!Array.isArray(docsRaw) || docsRaw.length === 0) {
+        throw new IntegrationOpError(
+          "ERR_INVALID_PAYLOAD",
+          "rerank_documents requires a non-empty documents array",
+        );
+      }
+      if (!docsRaw.every((d) => typeof d === "string" && d.length > 0)) {
+        throw new IntegrationOpError(
+          "ERR_INVALID_PAYLOAD",
+          "rerank_documents documents must be non-empty strings",
+        );
+      }
+      const topNRaw = pl.top_n;
+      if (
+        topNRaw !== undefined &&
+        topNRaw !== null &&
+        (typeof topNRaw !== "number" || !Number.isFinite(topNRaw) || topNRaw < 1)
+      ) {
+        throw new IntegrationOpError(
+          "ERR_INVALID_PAYLOAD",
+          "rerank_documents top_n must be a positive number",
+        );
+      }
+      const svc = RerankService.fromConfig(rerankConfig!);
+      return svc.rerank({
+        model: model,
+        query: queryRaw,
+        documents: docsRaw as string[],
+        top_n: typeof topNRaw === "number" ? topNRaw : undefined,
         timeout_ms: typeof pl.timeout_ms === "number" ? pl.timeout_ms : undefined,
       });
     }

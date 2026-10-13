@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import type Database from "better-sqlite3";
 import type { FetchLike } from "@shoggoth/models";
-import type { ShoggothMemoryConfig } from "@shoggoth/shared";
+import type { ShoggothMemoryConfig, ShoggothRerankConfig } from "@shoggoth/shared";
 import {
   ingestMemoryRoots,
   searchMemoryWithOptionalEmbedding,
@@ -17,7 +17,7 @@ import {
   resolveMemoryEmbeddingModelId,
 } from "./memory-embeddings-resolve";
 import { fetchOpenAiCompatibleTextEmbedding } from "./openai-embeddings";
-
+import { RerankService } from "../rerank/rerank-service";
 const MAX_LIMIT = 25;
 const DEFAULT_LIMIT = 10;
 const MAX_BODY_CHARS = 1500;
@@ -107,6 +107,10 @@ export async function runMemoryBuiltin(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly fetchImpl?: FetchLike;
   readonly runtimeOpenaiBaseUrl?: string | undefined;
+  /** Rerank config for memory-search; the automatic rerank step runs when
+   * rerank.memorySearch.enabled is not explicitly false and rerank.defaultModel
+   * is configured (reranking is on by default). */
+  readonly rerank?: ShoggothRerankConfig;
 }): Promise<{ resultJson: string }> {
   const {
     originalName,
@@ -117,6 +121,7 @@ export async function runMemoryBuiltin(input: {
     env,
     fetchImpl,
     runtimeOpenaiBaseUrl,
+    rerank,
   } = input;
   let args: Record<string, unknown>;
   try {
@@ -295,7 +300,53 @@ export async function runMemoryBuiltin(input: {
       filters,
     });
 
-    const formattedHits = hits.map((hit) => {
+    // --- Automatic rerank step (RAG integration) ---
+    // Config-driven and on by default: unless rerank.memorySearch.enabled
+    // is explicitly false, a configured rerank.defaultModel makes the
+    // retrieved candidates re-scored and re-ordered by relevance. Any
+    // rerank failure degrades gracefully to the original retrieval order.
+    let searchHits = hits;
+    let reranked = false;
+    let rerankNote: string | undefined;
+    let rerankModel: string | undefined;
+    let rerankScores: Map<number, number> | null = null;
+    if (
+      rerank &&
+      rerank.memorySearch?.enabled !== false &&
+      rerank.defaultModel &&
+      hits.length > 0
+    ) {
+      const outcome = await RerankService.fromConfig(rerank).rerank({
+        query,
+        documents: hits.map((h) => h.body),
+        ...(fetchImpl ? { fetchImpl } : {}),
+      });
+      if (outcome.status === "complete") {
+        const byIndex = hits.map((h, i) => ({ hit: h, origIndex: i }));
+        const chosen = new Set<number>();
+        const ordered: typeof byIndex = [];
+        const scores = new Map<number, number>();
+        for (const r of outcome.results) {
+          const entry = byIndex[r.index];
+          if (!entry || chosen.has(entry.origIndex)) continue;
+          chosen.add(entry.origIndex);
+          ordered.push(entry);
+          scores.set(entry.hit.id, r.relevance_score);
+        }
+        // keep hits the rerank service omitted, in their original order
+        for (const entry of byIndex) {
+          if (!chosen.has(entry.origIndex)) ordered.push(entry);
+        }
+        searchHits = ordered.map((e) => e.hit);
+        rerankScores = scores;
+        rerankModel = outcome.model;
+        reranked = true;
+      } else {
+        rerankNote = `rerank failed: ${outcome.error}; returning original order`;
+      }
+    }
+
+    const formattedHits = searchHits.map((hit) => {
       const out: Record<string, unknown> = {
         id: hit.id,
         sourcePath: hit.sourcePath,
@@ -318,6 +369,10 @@ export async function runMemoryBuiltin(input: {
         out.score = hit.score ?? null;
       }
 
+      if (rerankScores?.has(hit.id)) {
+        out.rerankScore = rerankScores.get(hit.id) ?? null;
+      }
+
       return out;
     });
 
@@ -325,6 +380,9 @@ export async function runMemoryBuiltin(input: {
       resultJson: JSON.stringify({
         query,
         hits: formattedHits,
+        ...(reranked ? { reranked: true } : {}),
+        ...(rerankModel ? { rerankModel } : {}),
+        ...(rerankNote ? { rerankNote } : {}),
       }),
     };
   }

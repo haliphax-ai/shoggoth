@@ -124,6 +124,8 @@ export {
   type ShoggothMediaGenerationConfig,
   shoggothDecisionConfigSchema,
   type ShoggothDecisionConfig,
+  shoggothRerankConfigSchema,
+  type ShoggothRerankConfig,
 } from "./schema";
 export {
   resolvePlatformConfig,
