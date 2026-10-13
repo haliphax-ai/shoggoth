@@ -225,6 +225,36 @@ describe("renderDiscordStatusBar", () => {
     expect(line.indexOf("🕵️")).toBeLessThan(line.indexOf("🪟"));
   });
 
+  it("renders the timer count with the timer emoji", () => {
+    const line = renderDiscordStatusBar(snap({ timers: 2 }), defaultCfg);
+    expect(line).toContain("⏰");
+    expect(line).toContain("`2`");
+  });
+
+  it("omits the timer section when the snapshot has no count", () => {
+    const line = renderDiscordStatusBar(snap(), defaultCfg);
+    expect(line).not.toContain("⏰");
+  });
+
+  it("omits the timer section when the count is zero", () => {
+    const line = renderDiscordStatusBar(snap({ timers: 0 }), defaultCfg);
+    expect(line).not.toContain("⏰");
+  });
+
+  it("honors the timersEnabled toggle to omit the section", () => {
+    const cfg: ResolvedStatusBarConfig = { ...defaultCfg, timersEnabled: false };
+    const line = renderDiscordStatusBar(snap({ timers: 3 }), cfg);
+    expect(line).not.toContain("⏰");
+  });
+
+  it("places the timer section after the subagent section", () => {
+    const line = renderDiscordStatusBar(
+      snap({ subagents: { total: 2, persistent: 1 }, timers: 2 }),
+      defaultCfg,
+    );
+    expect(line.indexOf("🕵️")).toBeLessThan(line.indexOf("⏰"));
+  });
+
   it("honors per-section config toggles to omit sections", () => {
     const cfg: ResolvedStatusBarConfig = {
       ...defaultCfg,

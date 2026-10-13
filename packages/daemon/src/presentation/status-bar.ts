@@ -43,6 +43,8 @@ export interface StatusBarSnapshot {
    *  included but thread subagent branches pruned. `persistent` counts the
    *  subset spawned with mode "persistent". Absent when never seeded. */
   readonly subagents?: { readonly total: number; readonly persistent: number };
+  /** Active (unfired) timer count for the session. Absent when never seeded. */
+  readonly timers?: number;
 }
 
 /** Platform-supplied sink: applies the rendered bar line to the in-flight message. */
@@ -60,6 +62,7 @@ export interface TurnStatusBar {
     context?: { currentTokens: number; totalTokens?: number };
     compactions: number;
     subagents?: { total: number; persistent: number };
+    timers?: number;
   }): Promise<void>;
   markThinking(): void; // 🧠
   markProse(): void; // 💬
@@ -95,6 +98,7 @@ export function createTurnStatusBar(opts: {
       !cfg.sequenceEnabled &&
       !cfg.toolCallsEnabled &&
       !cfg.subagentsEnabled &&
+      !cfg.timersEnabled &&
       !cfg.contextWindowEnabled &&
       !cfg.compactionsEnabled);
 
@@ -104,6 +108,7 @@ export function createTurnStatusBar(opts: {
   let compactions = 0;
   let context: { currentTokens: number; totalTokens?: number } | undefined;
   let subagents: { total: number; persistent: number } | undefined;
+  let timers: number | undefined;
   let totalTools = 0;
   let last:
     | {
@@ -128,6 +133,7 @@ export function createTurnStatusBar(opts: {
       ...(context ? { context } : {}),
       compactions,
       ...(subagents ? { subagents } : {}),
+      ...(timers !== undefined ? { timers } : {}),
     };
   }
 
@@ -164,6 +170,7 @@ export function createTurnStatusBar(opts: {
       compactions = input.compactions;
       context = input.context;
       subagents = input.subagents;
+      timers = input.timers;
       totalTools = 0;
       last = undefined;
       phase = "starting";
@@ -267,6 +274,9 @@ export interface StatusBarStats {
    *  tree, thread subagent branches pruned); `persistent` counts the subset
    *  spawned with mode "persistent". */
   readonly subagents?: { readonly total: number; readonly persistent: number };
+  /** Active (unfired) timer count for the session (the `timers` table rows
+   *  with fired = 0 — the same state the builtin timer-list reads). */
+  readonly timers?: number;
 }
 
 /** `<10K` → plain integer with thousands separators; `≥10K` → one-decimal K; `≥1M` → one-decimal M. */
@@ -323,7 +333,8 @@ export function getStatusBarStats(db: Database.Database, sessionId: string): Sta
   const sequence = row?.turn_count ?? 0;
   const compactions = row?.compaction_count ?? 0;
   const subagents = getSessionSubagentCounts(db, sessionId);
-  if (currentTokens <= 0) return { sequence, compactions, subagents };
+  const timers = getSessionActiveTimerCount(db, sessionId);
+  if (currentTokens <= 0) return { sequence, compactions, subagents, timers };
   // Known context window: the session_stats gauge first, then model metadata
   // for the session's selected model; unknown (omitted) when neither knows.
   let windowTokens = row?.context_window_tokens ?? 0;
@@ -332,6 +343,7 @@ export function getStatusBarStats(db: Database.Database, sessionId: string): Sta
     sequence,
     compactions,
     subagents,
+    timers,
     context: windowTokens > 0 ? { currentTokens, totalTokens: windowTokens } : { currentTokens },
   };
 }
@@ -359,6 +371,15 @@ export function getSessionSubagentCounts(
   };
   walk(sessionId);
   return { total, persistent };
+}
+
+/** Active (unfired) timer count for the session — the same state the builtin
+ *  timer-list action reads (`timers` rows with fired = 0). */
+export function getSessionActiveTimerCount(db: Database.Database, sessionId: string): number {
+  const row = db
+    .prepare("SELECT COUNT(*) AS cnt FROM timers WHERE session_id = ? AND fired = 0")
+    .get(sessionId) as { cnt: number };
+  return row.cnt;
 }
 
 /** One tracker per turn: the live bar and the terminal bar are the same
@@ -435,6 +456,7 @@ export function createStatusBarTurnTracker(opts: {
     compactions: opts.stats.compactions,
     ...(opts.stats.context ? { context: opts.stats.context } : {}),
     ...(opts.stats.subagents ? { subagents: opts.stats.subagents } : {}),
+    ...(opts.stats.timers !== undefined ? { timers: opts.stats.timers } : {}),
   });
 
   return {

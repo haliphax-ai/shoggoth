@@ -12,6 +12,7 @@ describe("statusBarConfigSchema", () => {
       sequenceEnabled: true,
       toolCallsEnabled: true,
       subagentsEnabled: true,
+      timersEnabled: true,
       contextWindowEnabled: true,
       compactionsEnabled: true,
     });
@@ -75,9 +76,15 @@ describe("resolveStatusBarConfig", () => {
       sequenceEnabled: true,
       toolCallsEnabled: true,
       subagentsEnabled: true,
+      timersEnabled: true,
       contextWindowEnabled: false,
       compactionsEnabled: true,
     });
+  });
+
+  it("honors timersEnabled:false over the default", () => {
+    const r = resolveStatusBarConfig(cfgWith({ statusBar: { timersEnabled: false } }));
+    assert.equal(r.timersEnabled, false);
   });
 
   it("honors enabled:false from config", () => {
