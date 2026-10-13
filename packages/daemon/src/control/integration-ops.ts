@@ -75,6 +75,7 @@ import { validateModelRefExists } from "../sessions/model-resolution";
 import { getSubagentHandles, rememberSubagentHandles } from "../subagent/subagent-disposables";
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
 import type { OobTurnBannerHandle } from "../subagent/subagent-extension-ref";
+import { buildSessionMessageTurnBanner } from "../messaging/oob-turn-banner";
 import type { OobTurnOutcome } from "../messaging/oob-turn-banner";
 import { terminatePersistentSubagentSession } from "../subagent/subagent-kill";
 import {
@@ -2385,9 +2386,18 @@ export async function handleIntegrationControlOp(
           })();
       const senderSessionId =
         principal.kind === "agent" ? principal.sessionId : `operator:${principal.operatorId}`;
+      const bannerText = buildSessionMessageTurnBanner({ senderSessionId });
+      const bannerHandle =
+        delivery.kind === "internal"
+          ? await ext.oobTurnBanner?.begin({
+              sessionId,
+              processing: bannerText.processing,
+            })
+          : undefined;
       const turn = await ext.runSessionModelTurn({
         sessionId,
         userContent: message,
+        ...(bannerHandle ? { statusBarSink: bannerHandle } : {}),
         userMetadata: { session_send: true },
         systemContext: {
           kind: "session.message",
@@ -2396,6 +2406,12 @@ export async function handleIntegrationControlOp(
         },
         delivery,
       });
+      if (bannerHandle) {
+        await ext.oobTurnBanner?.finish({
+          handle: bannerHandle,
+          terminal: bannerText.terminal("finished"),
+        });
+      }
       ctx.recordIntegrationAudit({
         action: "session.send",
         resource: sessionId,
