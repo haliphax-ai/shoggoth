@@ -15,6 +15,7 @@ import {
   tokenMinterRef as svcTokenMinterRef,
 } from "./service-refs";
 import { routeMcpToolInvocation } from "@shoggoth/mcp-integration";
+import { validateRoutedToolArgs } from "./mcp/tool-loop-mcp";
 import { fileURLToPath } from "node:url";
 import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
@@ -693,6 +694,10 @@ async function initWorkflowServer(
         if (!ctx) throw new Error("no MCP context for session " + sessionId);
         const routed = routeMcpToolInvocation(ctx.aggregated, name);
         if ("error" in routed) throw new Error(routed.error);
+        // Universal argument validation (issue #435): this executor bypasses
+        // the session tool loop's Stage 2 checks, so validate here too.
+        const validationError = validateRoutedToolArgs(name, routed.tool.inputSchema, argsJson);
+        if (validationError) return { resultJson: validationError };
         if (routed.tool.sourceId === "builtin") {
           const registry = getBuiltinToolRegistry();
           const toolCtx = {

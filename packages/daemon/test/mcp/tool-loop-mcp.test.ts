@@ -94,6 +94,162 @@ describe("tool-loop MCP bridge", () => {
     db.close();
   });
 
+  // -------------------------------------------------------------------------
+  // Universal argument validation (issue #435): every dispatch path — session
+  // tool loop, workflow tool tasks, subagent runtime — must reject unknown
+  // arguments and missing required arguments before the tool runs.
+  // -------------------------------------------------------------------------
+  it("rejects unknown arguments before dispatching to the builtin delegate", async () => {
+    let calls = 0;
+    const ex = createMcpRoutingToolExecutor({
+      aggregated: buildAggregatedMcpCatalog(),
+      builtin: async () => {
+        calls++;
+        return { resultJson: "{}" };
+      },
+    });
+    const out = await ex.execute({
+      name: "builtin-read",
+      argsJson: '{"path":"a.txt","recusrive":true}',
+      toolCallId: "v1",
+    });
+    const body = JSON.parse(out.resultJson) as { error?: string; message?: string; tool?: string };
+    assert.equal(body.error, "invalid_arguments");
+    assert.equal(body.tool, "builtin-read");
+    assert.match(body.message ?? "", /recusrive/);
+    assert.equal(calls, 0, "builtin delegate must not run with invalid args");
+  });
+
+  it("rejects missing required arguments before dispatching to the builtin delegate", async () => {
+    let calls = 0;
+    const ex = createMcpRoutingToolExecutor({
+      aggregated: buildAggregatedMcpCatalog(),
+      builtin: async () => {
+        calls++;
+        return { resultJson: "{}" };
+      },
+    });
+    const out = await ex.execute({
+      name: "builtin-write",
+      argsJson: '{"path":"a.txt"}',
+      toolCallId: "v2",
+    });
+    const body = JSON.parse(out.resultJson) as { error?: string; message?: string };
+    assert.equal(body.error, "invalid_arguments");
+    assert.match(body.message ?? "", /content/);
+    assert.equal(calls, 0, "builtin delegate must not run with invalid args");
+  });
+
+  it("rejects unknown arguments before dispatching to an external MCP tool", async () => {
+    let calls = 0;
+    const aggregated = buildAggregatedMcpCatalog([
+      {
+        sourceId: "demo_ext",
+        tools: [
+          {
+            name: "greet",
+            inputSchema: {
+              type: "object",
+              properties: { name: { type: "string" } },
+              required: ["name"],
+            },
+          },
+        ],
+      },
+    ]);
+    const ex = createMcpRoutingToolExecutor({
+      aggregated,
+      builtin: async () => ({ resultJson: "{}" }),
+      external: async () => {
+        calls++;
+        return { resultJson: JSON.stringify({ ok: true }) };
+      },
+    });
+    const out = await ex.execute({
+      name: "demo_ext-greet",
+      argsJson: '{"name":"rook","tmeperature":0.2}',
+      toolCallId: "v3",
+    });
+    const body = JSON.parse(out.resultJson) as { error?: string; message?: string };
+    assert.equal(body.error, "invalid_arguments");
+    assert.match(body.message ?? "", /tmeperature/);
+    assert.equal(calls, 0, "external transport must not be invoked with invalid args");
+  });
+
+  it("returns invalid_arguments for malformed args JSON", async () => {
+    let calls = 0;
+    const ex = createMcpRoutingToolExecutor({
+      aggregated: buildAggregatedMcpCatalog(),
+      builtin: async () => {
+        calls++;
+        return { resultJson: "{}" };
+      },
+    });
+    const out = await ex.execute({
+      name: "builtin-read",
+      argsJson: "{not json",
+      toolCallId: "v6",
+    });
+    const body = JSON.parse(out.resultJson) as { error?: string; message?: string };
+    assert.equal(body.error, "invalid_arguments");
+    assert.match(body.message ?? "", /not valid JSON/);
+    assert.equal(calls, 0);
+  });
+
+  it("passes args through for open schemas (no properties declared)", async () => {
+    const aggregated = buildAggregatedMcpCatalog([
+      {
+        sourceId: "demo_ext",
+        tools: [{ name: "ping", inputSchema: { type: "object" } }],
+      },
+    ]);
+    const ex = createMcpRoutingToolExecutor({
+      aggregated,
+      builtin: async () => ({ resultJson: "{}" }),
+      external: async () => ({ resultJson: JSON.stringify({ pong: true }) }),
+    });
+    const out = await ex.execute({
+      name: "demo_ext-ping",
+      argsJson: '{"anything":"goes"}',
+      toolCallId: "v4",
+    });
+    assert.deepEqual(JSON.parse(out.resultJson), { pong: true });
+  });
+
+  it("allows extra args when the schema sets additionalProperties true", async () => {
+    let calls = 0;
+    const aggregated = buildAggregatedMcpCatalog([
+      {
+        sourceId: "demo_ext",
+        tools: [
+          {
+            name: "free",
+            inputSchema: {
+              type: "object",
+              properties: { a: { type: "string" } },
+              additionalProperties: true,
+            },
+          },
+        ],
+      },
+    ]);
+    const ex = createMcpRoutingToolExecutor({
+      aggregated,
+      builtin: async () => ({ resultJson: "{}" }),
+      external: async () => {
+        calls++;
+        return { resultJson: JSON.stringify({ ok: true }) };
+      },
+    });
+    const out = await ex.execute({
+      name: "demo_ext-free",
+      argsJson: '{"a":"x","extra":1}',
+      toolCallId: "v5",
+    });
+    assert.deepEqual(JSON.parse(out.resultJson), { ok: true });
+    assert.equal(calls, 1);
+  });
+
   it("returns structured stub when external MCP transport is not configured", async () => {
     const aggregated = buildAggregatedMcpCatalog([
       {
