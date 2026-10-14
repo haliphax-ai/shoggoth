@@ -196,3 +196,10 @@ Response includes rich attachment metadata:
   - EDID.txt (text/plain, 14.4 KB) → media/inbound/123456_EDID.txt
   ```
   The file is already in your workspace at the indicated path.
+- **Message delivery banner:** When a message is sent via `builtin-message` from a subagent (rather than directly by the agent), the message will include a provenance banner at the top:
+  ```
+  > 📨 Message delivery: `<sender session id>`
+  
+  <message content>
+  ```
+  This banner helps the operator distinguish between direct agent responses and tool-originated messages. The banner is automatically added for `post` and `choice` actions and is based on the sender session ID stored in the sessions table.

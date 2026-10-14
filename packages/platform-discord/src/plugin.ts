@@ -515,6 +515,17 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
               gid: row.runtime_gid,
             });
           },
+          getSessionSenderIdForProvenance: (sid) => {
+            try {
+              const row = (db as Database.Database)
+                .prepare("SELECT sender_session_id FROM sessions WHERE id = ?")
+                .get(sid) as { sender_session_id: string } | undefined;
+              return row?.sender_session_id;
+            } catch {
+              return undefined;
+            }
+          },
+
           downloadFile: async (url, destPath) => {
             const res = await fetch(url);
             if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
