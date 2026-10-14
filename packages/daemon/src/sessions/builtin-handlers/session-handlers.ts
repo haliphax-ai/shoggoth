@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import {
+  deriveThreadSubagentAgentId,
   effectiveMaxSpawnDepth,
   maySpawnSubagentAtDepth,
   resolveAgentIdFromSessionId,
@@ -295,6 +296,18 @@ async function subagentHandler(
     if (typeof respondTo === "string" && respondTo.trim()) {
       payload.respond_to = respondTo.trim();
     }
+    const suppliedAgentId = args.agent_id;
+    payload.agent_id =
+      typeof suppliedAgentId === "string" && suppliedAgentId.trim()
+        ? suppliedAgentId.trim()
+        : deriveThreadSubagentAgentId(
+            prompt,
+            (id) =>
+              Object.keys(ctx.config.agents?.list ?? {}).includes(id) ||
+              sessions
+                .list()
+                .some((row) => row.status !== "terminated" && row.subagentAgentId === id),
+          );
     if (args.internal === false) payload.internal = false;
     if (args.background === true) payload.background = true;
     const dm = args.delivery_mode;
@@ -329,6 +342,27 @@ async function subagentHandler(
     if (args.internal === false) payload.internal = false;
     const tn = args.thread_name;
     if (typeof tn === "string" && tn.trim()) payload.thread_name = tn.trim();
+    const requestedAgentId = args.agent_id;
+    payload.agent_id =
+      typeof requestedAgentId === "string" && requestedAgentId.trim()
+        ? requestedAgentId.trim()
+        : threadId === "0"
+          ? deriveThreadSubagentAgentId(
+              String(args.thread_name ?? prompt),
+              (id) =>
+                Object.keys(ctx.config.agents?.list ?? {}).includes(id) ||
+                sessions
+                  .list()
+                  .some((row) => row.status !== "terminated" && row.subagentAgentId === id),
+            )
+          : deriveThreadSubagentAgentId(
+              prompt,
+              (id) =>
+                Object.keys(ctx.config.agents?.list ?? {}).includes(id) ||
+                sessions
+                  .list()
+                  .some((row) => row.status !== "terminated" && row.subagentAgentId === id),
+            );
     const dm2 = args.delivery_mode;
     if (dm2 === "inline" || dm2 === "queue" || dm2 === "drop") payload.delivery_mode = dm2;
   } else if (action === "inspect") {
@@ -343,7 +377,9 @@ async function subagentHandler(
       };
     }
     if (!isDirectSubagentChild(sessions, ctx.sessionId, sid, false)) {
-      return { resultJson: JSON.stringify({ error: "subagent_target_not_child" }) };
+      return {
+        resultJson: JSON.stringify({ error: "subagent_target_not_child" }),
+      };
     }
     op = "session_steer";
     payload = { session_id: sid, prompt };
@@ -359,7 +395,9 @@ async function subagentHandler(
       return { resultJson: JSON.stringify({ error: "session_id required" }) };
     }
     if (!isDirectSubagentChild(sessions, ctx.sessionId, sid, true)) {
-      return { resultJson: JSON.stringify({ error: "subagent_target_not_child" }) };
+      return {
+        resultJson: JSON.stringify({ error: "subagent_target_not_child" }),
+      };
     }
     op = "session_abort";
     payload = { session_id: sid };
@@ -369,7 +407,9 @@ async function subagentHandler(
       return { resultJson: JSON.stringify({ error: "session_id required" }) };
     }
     if (!isDirectSubagentChild(sessions, ctx.sessionId, sid, false)) {
-      return { resultJson: JSON.stringify({ error: "subagent_target_not_child" }) };
+      return {
+        resultJson: JSON.stringify({ error: "subagent_target_not_child" }),
+      };
     }
     op = "session_kill";
     payload = { session_id: sid };

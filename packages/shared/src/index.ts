@@ -1,3 +1,8 @@
+export {
+  assertValidSubagentAgentId,
+  deriveThreadSubagentAgentId,
+  SHOGGOTH_SUBAGENT_AGENT_ID_MAX_LENGTH,
+} from "./agent-id";
 export { loadLayeredConfigAsync } from "./config";
 export { resolveContextLevel, validateContextLevel } from "./context-level";
 export {

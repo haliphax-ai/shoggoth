@@ -241,6 +241,7 @@ describe("handlePlatformThreadCreate", { concurrency: false }, () => {
     const { sessionId: subId } = await sessionManager.spawn({
       parentSessionId,
       parentWorkingDirectory: undefined,
+      subagentAgentId: "existing-subagent",
     });
     sessions.update(subId, {
       parentSessionId,
@@ -260,7 +261,10 @@ describe("handlePlatformThreadCreate", { concurrency: false }, () => {
       platform: makePlatformDeps(bindings, statusBodies),
     });
 
-    assert.deepEqual(result, { created: false, reason: "parent_not_top_level" });
+    assert.deepEqual(result, {
+      created: false,
+      reason: "parent_not_top_level",
+    });
     assert.equal(statusBodies.length, 0);
   });
 
@@ -355,18 +359,33 @@ describe("shouldSkipThreadSessionSentinel", { concurrency: false }, () => {
 
   it("skips a first message of exactly '.' for a fresh thread session", () => {
     assert.equal(
-      shouldSkipThreadSessionSentinel({ db, sessions, sessionId: childId, body: "." }),
+      shouldSkipThreadSessionSentinel({
+        db,
+        sessions,
+        sessionId: childId,
+        body: ".",
+      }),
       true,
     );
     assert.equal(
-      shouldSkipThreadSessionSentinel({ db, sessions, sessionId: childId, body: "  .  " }),
+      shouldSkipThreadSessionSentinel({
+        db,
+        sessions,
+        sessionId: childId,
+        body: "  .  ",
+      }),
       true,
     );
   });
 
   it("does not skip a non-'.' first message", () => {
     assert.equal(
-      shouldSkipThreadSessionSentinel({ db, sessions, sessionId: childId, body: "hello" }),
+      shouldSkipThreadSessionSentinel({
+        db,
+        sessions,
+        sessionId: childId,
+        body: "hello",
+      }),
       false,
     );
   });
@@ -380,7 +399,12 @@ describe("shouldSkipThreadSessionSentinel", { concurrency: false }, () => {
       content: "real prompt",
     });
     assert.equal(
-      shouldSkipThreadSessionSentinel({ db, sessions, sessionId: childId, body: "." }),
+      shouldSkipThreadSessionSentinel({
+        db,
+        sessions,
+        sessionId: childId,
+        body: ".",
+      }),
       false,
     );
   });
@@ -391,7 +415,12 @@ describe("shouldSkipThreadSessionSentinel", { concurrency: false }, () => {
       .list()
       .find((s) => !s.parentSessionId && s.subagentMode === undefined)!;
     assert.equal(
-      shouldSkipThreadSessionSentinel({ db, sessions, sessionId: parentRow.id, body: "." }),
+      shouldSkipThreadSessionSentinel({
+        db,
+        sessions,
+        sessionId: parentRow.id,
+        body: ".",
+      }),
       false,
     );
   });

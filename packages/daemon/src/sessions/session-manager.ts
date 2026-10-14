@@ -6,6 +6,8 @@ import {
 import {
   mintAgentSessionUrn,
   mintSubagentSessionUrnFromParent,
+  deriveThreadSubagentAgentId,
+  assertValidSubagentAgentId,
   parseAgentSessionUrn,
   resolveAgentWorkspacePath,
   resolveContextLevel,
@@ -57,6 +59,10 @@ export interface SpawnSessionInput {
   readonly resourceType?: string;
   /** When set, mints `agent:…:<parent-leaf-uuid>:<new uuid>` under the parent's agent + platform. */
   readonly parentSessionId?: string;
+  /** Optional short ID for a subagent session; omitted values are derived from parent context. */
+  readonly subagentAgentId?: string;
+  /** Configured top-level agent IDs that cannot be reused by subagents. */
+  readonly reservedAgentIds?: readonly string[];
   /** Parent's working directory, passed in to avoid a redundant DB read inside the spawn transaction. */
   readonly parentWorkingDirectory?: string;
   readonly modelSelection?: unknown;
@@ -109,7 +115,28 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
     async spawn(input) {
       let id: string;
       let dirAgentId: string;
+      let subagentAgentId = input.subagentAgentId;
+      if (input.parentSessionId && !subagentAgentId) {
+        const reserved = new Set(input.reservedAgentIds ?? Object.keys(agentsConfig?.list ?? {}));
+        for (const row of options.sessions.list()) {
+          if (row.status !== "terminated" && row.subagentAgentId) reserved.add(row.subagentAgentId);
+        }
+        subagentAgentId = deriveThreadSubagentAgentId(input.parentSessionId, (candidate) =>
+          reserved.has(candidate),
+        );
+      }
       if (input.parentSessionId) {
+        if (!subagentAgentId) {
+          throw new SessionManagerError(
+            "ERR_SUBAGENT_AGENT_ID_REQUIRED",
+            "subagentAgentId is required for child sessions",
+          );
+        }
+        try {
+          assertValidSubagentAgentId(subagentAgentId);
+        } catch (e) {
+          throw new SessionManagerError("ERR_INVALID_SUBAGENT_AGENT_ID", String(e));
+        }
         const p = parseAgentSessionUrn(input.parentSessionId);
         if (!p) {
           throw new SessionManagerError(
@@ -146,7 +173,20 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
         ? resolveContextLevel(config, dirAgentId, input.contextLevel, isSubagent)
         : input.contextLevel;
       const run = options.db.transaction(() => {
+        if (input.parentSessionId && subagentAgentId) {
+          const existing = options.sessions.list({ subagentAgentId });
+          const topLevelConflict = options.sessions
+            .list({ agentId: subagentAgentId })
+            .some((row) => row.status !== "terminated" && !row.parentSessionId);
+          if (topLevelConflict || existing.some((row) => row.status !== "terminated")) {
+            throw new SessionManagerError(
+              "ERR_SUBAGENT_AGENT_ID_CONFLICT",
+              `subagent ID ${subagentAgentId} is already active or belongs to a top-level agent`,
+            );
+          }
+        }
         options.sessions.create({
+          ...(input.parentSessionId && subagentAgentId ? { subagentId: subagentAgentId } : {}),
           id,
           workspacePath: wsPath,
           status: "active",
@@ -154,11 +194,8 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
           lightContext: input.lightContext,
           contextLevel: resolvedContextLevel,
         });
-        // Inherit parent's working directory when spawning a child session.
         if (input.parentWorkingDirectory) {
-          options.sessions.update(id, {
-            workingDirectory: input.parentWorkingDirectory,
-          });
+          options.sessions.update(id, { workingDirectory: input.parentWorkingDirectory });
         }
         options.agentTokens.register(id, agentToken);
       });
@@ -192,12 +229,6 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
 
     kill(sessionId) {
       const sid = sessionId.trim();
-      // Terminate the session and, transitively, every descendant session.
-      // Top-level agent sessions have no parent, so the cascade never reaches
-      // them: their durability comes from being bound to a platform channel,
-      // not from any exclusion in this rule. Rows that are already terminated
-      // are still walked through so active descendants orphaned beneath them
-      // are reaped too; the visited set guards against cyclic parent chains.
       const targets: string[] = [sid];
       const seen = new Set<string>([sid]);
       for (let i = 0; i < targets.length; i++) {
@@ -208,9 +239,6 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
         }
       }
       for (const id of targets) {
-        // Abort any in-flight turn and drop runtime handles (thread binding,
-        // bus subscription, inactivity timer) so nothing keeps running for a
-        // session that no longer exists.
         requestSessionTurnAbort(id);
         disposeSubagentRuntime(id);
         options.agentTokens.revoke(id);

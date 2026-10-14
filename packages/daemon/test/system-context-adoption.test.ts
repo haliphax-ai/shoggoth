@@ -194,6 +194,7 @@ describe("systemContext adoption: subagent_spawn one_shot", () => {
             payload: {
               parent_session_id: parentId,
               prompt: "do the thing",
+              agent_id: "task-one",
               mode: "one_shot",
               respond_to: "caller-session",
             },
@@ -209,6 +210,7 @@ describe("systemContext adoption: subagent_spawn one_shot", () => {
           assert.ok(sc.summary.includes("one-shot"), "summary should mention one-shot");
           assert.ok(sc.data, "data must be present");
           assert.equal(sc.data!.parent_session_id, parentId);
+          assert.equal(sc.data!.agent_id, "task-one");
           assert.equal(sc.data!.internal, true);
         },
       );
@@ -261,13 +263,13 @@ describe("systemContext adoption: subagent_spawn persistent", () => {
             payload: {
               parent_session_id: parentId,
               prompt: "persistent task",
+              agent_id: "task-persistent",
               mode: "persistent",
               respond_to: "caller-session",
             },
           });
           const res = parseResponseLine(line);
           assert.equal(res.ok, true);
-          // First call is the child's model turn; a second delivery call may follow asynchronously.
           assert.ok(calls.length >= 1);
 
           const sc = calls[0].systemContext;
@@ -277,6 +279,7 @@ describe("systemContext adoption: subagent_spawn persistent", () => {
           assert.ok(sc.summary.includes("persistent"), "summary should mention persistent");
           assert.ok(sc.data, "data must be present");
           assert.equal(sc.data!.parent_session_id, parentId);
+          assert.equal(sc.data!.agent_id, "task-persistent");
           assert.equal(sc.data!.internal, true);
         },
       );
