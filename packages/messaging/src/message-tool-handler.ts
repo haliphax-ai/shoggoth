@@ -39,14 +39,28 @@ export interface MessageToolCoreDeps {
  * them up front via {@link createActionToolDispatcher}, instead of
  * discovering a missing dep as a runtime null-check inside a handler.
  */
+/**
+ * Build the provenance banner for message tool posts from a sender session.
+ *
+ * Format:
+ * ```
+ * > 📨 Message delivery: `<sender session id>`
+ * 
+ * <message content>
+ * ```
+ */
+export function buildMessageDeliveryBanner(senderSessionId: string): string {
+  return `> 📨 Message delivery: \`${senderSessionId}\`\n\n`;
+}
+
 export interface MessageToolDeps extends MessageToolCoreDeps {
-  /** "search": resolves a session's guild scope. */
+  /** \"search\": resolves a session's guild scope. */
   readonly sessionToGuild?: (sessionId: string) => string | undefined;
-  /** "attachment-download": writes the downloaded bytes to disk. */
+  /** \"attachment-download\": writes the downloaded bytes to disk. */
   readonly downloadFile?: (url: string, destPath: string) => Promise<number>;
-  /** "attachment-download": workspace used to resolve relative destination paths. */
+  /** \"attachment-download\": workspace used to resolve relative destination paths. */
   readonly getSessionWorkspace?: (sessionId: string) => string | undefined;
-  /** "post": reads `attachments[].content_path` from the session workspace. */
+  /** \"post\": reads `attachments[].content_path` from the session workspace. */
   readonly readWorkspaceFile?: (sessionId: string, relativePath: string) => Promise<Buffer>;
   /**
    * Maximum attachment size in bytes, enforced for outbound uploads
@@ -54,6 +68,11 @@ export interface MessageToolDeps extends MessageToolCoreDeps {
    * Defaults to `DEFAULT_MAX_ATTACHMENT_BYTES` (25 MB).
    */
   readonly maxAttachmentBytes?: number;
+  /**
+   * For post/choice actions: resolves the sender session ID for provenance banner.
+   * Returns undefined when no sender exists (direct agent turns).
+   */
+  readonly getSessionSenderIdForProvenance?: (sessionId: string) => string | undefined;
 }
 
 /** Deps that fully support the "search" action: guild scope is always required. */
@@ -419,9 +438,18 @@ async function handlePostAction(
   if (!content && files.length === 0)
     return { ok: false, error: "post requires content and/or attachments" };
 
+  // Add provenance banner if the session has a sender
+  let finalContent = content;
+  if (deps.getSessionSenderIdForProvenance) {
+    const senderId = deps.getSessionSenderIdForProvenance(sid);
+    if (senderId) {
+      finalContent = buildMessageDeliveryBanner(senderId) + content;
+    }
+  }
+
   const body: CreateMessageBody = replyTo
-    ? { content, message_reference: { message_id: replyTo } }
-    : { content };
+    ? { content: finalContent, message_reference: { message_id: replyTo } }
+    : { content: finalContent };
 
   if (files.length > 0) {
     const { id } = await t.createMessageWithFiles(channelId, body, files);
@@ -570,7 +598,7 @@ async function handleChoiceAction(
   ctx: ChannelActionContext,
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const { deps, channelId } = ctx;
+  const { deps, sid, channelId } = ctx;
   const { capabilities: caps, transport: t } = deps;
   const x = caps.extensions;
   if (!x.react) return { ok: false, error: "choice not supported on this platform" };
@@ -601,8 +629,17 @@ async function handleChoiceAction(
   }
   const preamble = typeof args.content === "string" ? args.content.trim() : "";
   const legendLines = choices.map((c) => `${c.emoji} ${c.label}`);
-  const body = [...(preamble ? [preamble, ""] : []), "React to choose:", ...legendLines].join("\n");
-  const { id } = await t.createMessage(channelId, { content: body });
+
+  // Build the message body, optionally prepended with sender provenance banner
+  let bodyContent = [...(preamble ? [preamble, ""] : []), "React to choose:", ...legendLines].join("\n");
+  if (deps.getSessionSenderIdForProvenance) {
+    const senderId = deps.getSessionSenderIdForProvenance(sid);
+    if (senderId) {
+      bodyContent = buildMessageDeliveryBanner(senderId) + bodyContent;
+    }
+  }
+
+  const { id } = await t.createMessage(channelId, { content: bodyContent });
   const failedReactions: string[] = [];
   for (const c of choices) {
     try {
