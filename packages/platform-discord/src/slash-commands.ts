@@ -62,6 +62,18 @@ const SLASH_COMMANDS = [
     ],
   },
   {
+    name: "close",
+    description: "Kill a subagent session (defaults to this channel's session)",
+    options: [
+      {
+        name: "session_id",
+        type: 3, // STRING
+        description: "Session URN or agent ID (defaults to this channel's session)",
+        required: false,
+      },
+    ],
+  },
+  {
     name: "steer",
     description: "Steer a session with an operator prompt",
     options: [
@@ -1001,6 +1013,46 @@ async function handleInteraction(
     }
 
     const content = aborted ? "✅ Session abort initiated." : "⚠️ No active session turn to abort.";
+    await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+      type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+      data: { content },
+    });
+    return;
+  }
+
+  if (controlOp.op === "session_kill") {
+    // `/close`: reap a subagent session attached to this surface (or an
+    // explicit session_id). The `subagent_only` guard in the translated
+    // payload makes the daemon refuse top-level agent sessions, which is
+    // surfaced here as an operator-facing warning instead of a kill.
+    const payload = { ...controlOp.payload };
+    if (!payload.session_id && deps.resolveSessionForChannel) {
+      const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
+      if (resolved) payload.session_id = resolved;
+    }
+    if (!payload.session_id) {
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content: "⚠️ No session bound to this channel. Provide a session_id." },
+      });
+      return;
+    }
+    let content: string;
+    try {
+      const res = await deps.invokeControlOp("session_kill", payload);
+      if (res.ok) {
+        content = `✅ Closed session \`${payload.session_id}\`.`;
+      } else if (res.error && res.error.includes("top-level agent session")) {
+        content = `🔒 Close refused: \`${payload.session_id}\` is a top-level agent session. \`/close\` reaps subagent sessions only.`;
+      } else {
+        content = `⚠️ Close failed: ${res.error ?? "unknown error"}`;
+      }
+    } catch (err) {
+      const msg = String(err);
+      content = msg.includes("top-level agent session")
+        ? `🔒 Close refused: \`${payload.session_id}\` is a top-level agent session. \`/close\` reaps subagent sessions only.`
+        : `⚠️ Close failed: ${msg}`;
+    }
     await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
       type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
       data: { content },
