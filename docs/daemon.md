@@ -154,6 +154,8 @@ The system prompt also includes:
 
 The loop respects a `turnAbortSignal` for cancellation and marks tool runs as failed on error.
 
+Argument validation is universal: unknown arguments (not declared in the tool's schema) and missing required arguments are rejected with an `invalid_arguments` error instead of being silently dropped. The tool loop validates at Stage 2, and the MCP routing executor (`createMcpRoutingToolExecutor`) validates again before dispatching — covering the paths that bypass the loop (workflow tool tasks and the subagent runtime executor). Schemas that declare no `properties` (open schemas) or set `additionalProperties: true` pass args through unchanged.
+
 ### Tool Discovery
 
 When `toolDiscovery.enabled` is true, the daemon maintains a collapsible tool catalog:

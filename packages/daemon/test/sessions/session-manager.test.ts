@@ -138,7 +138,7 @@ describe("createSessionManager", () => {
       status: "active",
     });
     agentTokens.register(parent, "parent-raw");
-    const out = await mgr.spawn({ parentSessionId: parent });
+    const out = await mgr.spawn({ parentSessionId: parent, subagentAgentId: "child-task" });
     const parsed = parseAgentSessionUrn(out.sessionId);
     assert.ok(parsed);
     assert.equal(parsed!.uuidChain.length, 2);

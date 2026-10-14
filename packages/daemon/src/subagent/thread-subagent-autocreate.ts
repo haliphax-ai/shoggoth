@@ -1,15 +1,18 @@
 import type Database from "better-sqlite3";
-import type { ShoggothConfig } from "@shoggoth/shared";
+import { parseAgentSessionUrn, type ShoggothConfig } from "@shoggoth/shared";
 import type { Logger } from "../logging";
 import { getLogger } from "../logging";
 import { createSessionStore, type SessionRow, type SessionStore } from "../sessions/session-store";
 import { createTranscriptStore } from "../sessions/transcript-store";
 import type { SessionManager } from "../sessions/session-manager";
+import { mergeSubagentSpawnModelSelection } from "@shoggoth/models";
+import { resolveConfiguredSubagentModel } from "../config/effective-runtime";
 import { resolveModel } from "../sessions/model-resolution";
 import { rememberSubagentHandles } from "./subagent-disposables";
 import { armPersistentSubagentInactivityTimer } from "./persistent-subagent-timers";
 import { terminatePersistentSubagentSession } from "./subagent-kill";
 import { isThreadClaimedByControlPlaneSpawn } from "./thread-subagent-claims";
+import { deriveThreadSubagentAgentId } from "@shoggoth/shared";
 
 const log = getLogger("thread-subagent-autocreate");
 
@@ -36,6 +39,7 @@ export interface PlatformThreadCreateInput {
   readonly sessions?: SessionStore;
   /** Platform thread id (e.g. Discord thread snowflake). */
   readonly threadId: string;
+  readonly threadTitle?: string;
   /** Channel the thread was created in. */
   readonly parentChannelId: string;
   readonly guildId?: string;
@@ -46,6 +50,7 @@ export interface PlatformThreadCreateInput {
 export interface ThreadCreateHandlingResult {
   readonly created: boolean;
   readonly sessionId?: string;
+  readonly agentId?: string;
   readonly parentSessionId?: string;
   /** Why creation was skipped (when `created` is false). */
   readonly reason?: string;
@@ -61,6 +66,7 @@ export function buildThreadSubagentCreatedBanner(input: {
   readonly db: Database.Database;
   readonly config: ShoggothConfig;
   readonly sessionId: string;
+  readonly agentId?: string;
   readonly logger?: Logger;
 }): string {
   const l = input.logger ?? log;
@@ -74,9 +80,11 @@ export function buildThreadSubagentCreatedBanner(input: {
     });
   }
   const modelLabel = resolvedModel ? resolvedModel.ref : "default (agent default)";
+  const agentId =
+    input.agentId ?? createSessionStore(input.db).getById(input.sessionId)?.subagentAgentId;
   return [
     "> 🧵 Thread subagent session created.",
-    `> 🎯 **Session:** \`${input.sessionId}\``,
+    `> 🎯 **Session:** \`${input.sessionId}\` (${agentId ?? "unknown"})`,
     `> 🥸 **Model:** \`${modelLabel}\``,
   ].join("\n");
 }
@@ -196,11 +204,37 @@ export async function handlePlatformThreadCreate(
     return { created: false, reason: "parent_not_top_level" };
   }
 
+  // Derive a title-based ID, reserving configured agents and all active subagents.
+  const reservedAgentIds = new Set(Object.keys(input.config.agents?.list ?? {}));
+  for (const row of sessions.list()) {
+    if (row.status !== "terminated" && row.subagentAgentId)
+      reservedAgentIds.add(row.subagentAgentId);
+  }
+  const subagentAgentId = deriveThreadSubagentAgentId(input.threadTitle ?? threadId, (id) =>
+    reservedAgentIds.has(id),
+  );
+
+  // Stamp the configured subagent model (per-agent override > global
+  // agents.subagentModel) onto the child's model selection, mirroring the
+  // control-plane subagent_spawn op: the session row then carries a model from
+  // creation, so model-metadata lookups (e.g. the status bar's context-window
+  // total) resolve on the first turn. Unconfigured: inherit the parent's
+  // selection as-is.
+  const parentAgentId = parseAgentSessionUrn(parentSessionId)?.agentId;
+  const configSubagentModel = resolveConfiguredSubagentModel(input.config, parentAgentId);
+  const modelSelection = mergeSubagentSpawnModelSelection(
+    parent.modelSelection,
+    undefined,
+    configSubagentModel,
+  );
+
   // Same session-creation path as the subagent spawn system: URN minted under the
   // parent agent, workspace/agent profile inherited from the parent session.
   const { sessionId: childId } = await input.sessionManager.spawn({
     parentSessionId,
     parentWorkingDirectory: parent.workspacePath,
+    subagentAgentId,
+    modelSelection,
   });
   sessions.update(childId, {
     parentSessionId,
@@ -253,6 +287,7 @@ export async function handlePlatformThreadCreate(
     db: input.db,
     config: input.config,
     sessionId: childId,
+    agentId: subagentAgentId,
     logger: l,
   });
   try {
@@ -270,7 +305,7 @@ export async function handlePlatformThreadCreate(
     parentSessionId,
     threadId,
   });
-  return { created: true, sessionId: childId, parentSessionId };
+  return { created: true, sessionId: childId, agentId: subagentAgentId, parentSessionId };
 }
 
 /**

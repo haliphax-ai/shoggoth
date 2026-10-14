@@ -241,4 +241,43 @@ describe("translateCommandToControlOp", () => {
       },
     });
   });
+
+  it("translates close command to session_kill with subagent_only guard", () => {
+    const cmd: PlatformCommand = {
+      name: "close",
+      options: { session_id: "agent:main:discord:channel:abc:sub-1" },
+    };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "session_kill",
+      payload: {
+        session_id: "agent:main:discord:channel:abc:sub-1",
+        subagent_only: true,
+      },
+    });
+  });
+
+  it("translates close with no session_id (caller must resolve from channel)", () => {
+    const cmd: PlatformCommand = { name: "close", options: {} };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "session_kill",
+      payload: { subagent_only: true },
+    });
+  });
+
+  it("trims the close session_id", () => {
+    const cmd: PlatformCommand = {
+      name: "close",
+      options: { session_id: " agent:main:discord:channel:abc:sub-1 " },
+    };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "session_kill",
+      payload: {
+        session_id: "agent:main:discord:channel:abc:sub-1",
+        subagent_only: true,
+      },
+    });
+  });
 });

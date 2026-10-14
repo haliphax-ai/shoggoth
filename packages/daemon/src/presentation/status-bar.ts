@@ -43,7 +43,8 @@ export interface StatusBarSnapshot {
    *  included but thread subagent branches pruned. `persistent` counts the
    *  subset spawned with mode "persistent". Absent when never seeded. */
   readonly subagents?: { readonly total: number; readonly persistent: number };
-  /** Active (unfired) timer count for the session. Absent when never seeded. */
+  /** Unfired timer count for the session — queued and active timers as one
+   *  cumulative sum. Absent when never seeded. */
   readonly timers?: number;
 }
 
@@ -74,6 +75,8 @@ export interface TurnStatusBar {
   setCompactions(count: number): void;
   /** Live subagent count refresh (spawned/terminated mid-turn). */
   setSubagents(counts: { total: number; persistent: number }): void;
+  /** Live timer count refresh (timers queued/cancelled mid-turn). */
+  setTimers(count: number): void;
   /** Terminal render (✅/🛑/❌); after this the bar is frozen and timers cleared. */
   finish(outcome: "finished" | "aborted" | "failed"): Promise<void>;
   /** Abandon without a terminal render (e.g. turn dispatch failed before delivery). */
@@ -245,6 +248,12 @@ export function createTurnStatusBar(opts: {
       scheduleRender();
     },
 
+    setTimers(count) {
+      if (finished) return;
+      timers = count;
+      scheduleRender();
+    },
+
     async finish(outcome) {
       if (finished) return;
       finished = true;
@@ -282,8 +291,9 @@ export interface StatusBarStats {
    *  tree, thread subagent branches pruned); `persistent` counts the subset
    *  spawned with mode "persistent". */
   readonly subagents?: { readonly total: number; readonly persistent: number };
-  /** Active (unfired) timer count for the session (the `timers` table rows
-   *  with fired = 0 — the same state the builtin timer-list reads). */
+  /** Unfired timer count for the session (the `timers` table rows with
+   *  fired = 0 — queued and active timers as one cumulative sum, the same
+   *  state the builtin timer-list reads). */
   readonly timers?: number;
 }
 
@@ -381,8 +391,10 @@ export function getSessionSubagentCounts(
   return { total, persistent };
 }
 
-/** Active (unfired) timer count for the session — the same state the builtin
- *  timer-list action reads (`timers` rows with fired = 0). */
+/** Unfired timer count for the session — the same state the builtin
+ *  timer-list action reads (`timers` rows with fired = 0). A timer scheduled
+ *  mid-turn lands in the DB while it is still queued for the scheduler heap,
+ *  so this count is the cumulative sum of queued and active timers. */
 export function getSessionActiveTimerCount(db: Database.Database, sessionId: string): number {
   const row = db
     .prepare("SELECT COUNT(*) AS cnt FROM timers WHERE session_id = ? AND fired = 0")
@@ -419,6 +431,9 @@ export interface TurnStatusBarTracker {
   onHitlQueued?: (call: { name: string; argsJson: string }) => void;
   /** A subagent spawn succeeded mid-turn: fresh counts for the section. */
   onSubagentsChanged?: (counts: { readonly total: number; readonly persistent: number }) => void;
+  /** A timer was queued or cancelled mid-turn: fresh unfired count for the
+   *  section (queued and active timers as one cumulative sum). */
+  onTimersChanged?: (count: number) => void;
   /** A mid-turn compaction completed. */
   onCompaction?: () => void;
   /** A model call reported provider usage: currentTokens is that call's
@@ -493,6 +508,7 @@ export function createStatusBarTurnTracker(opts: {
     },
     onHitlQueued: (call) => engine.markPaused({ name: call.name }),
     onSubagentsChanged: (counts) => engine.setSubagents(counts),
+    onTimersChanged: (count) => engine.setTimers(count),
     onCompaction: () => engine.setCompactions(++compactions),
     onContextUpdate: (update) => engine.updateContext(update.currentTokens, update.totalTokens),
   };

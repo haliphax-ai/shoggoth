@@ -53,6 +53,17 @@ const COMMAND_TO_OP: Record<string, (opts: Readonly<Record<string, string>>) => 
       op: "session_abort",
       payload: opts.session_id ? { session_id: opts.session_id } : {},
     }),
+    // `/close` kills a session but only ever targets subagent sessions: the
+    // `subagent_only` guard makes the daemon refuse top-level agent sessions
+    // (which have no parent) so the command can never orphan an agent's main
+    // session from a messaging surface.
+    close: (opts) => ({
+      op: "session_kill",
+      payload: {
+        ...(opts.session_id?.trim() ? { session_id: opts.session_id.trim() } : {}),
+        subagent_only: true,
+      },
+    }),
     steer: (opts) => {
       const payload: Record<string, unknown> = {};
       const prompt = opts.prompt?.trim();
