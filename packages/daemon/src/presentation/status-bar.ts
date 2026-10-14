@@ -72,6 +72,8 @@ export interface TurnStatusBar {
   toolFinished(): void; // records runtime for the last call
   updateContext(currentTokens: number, totalTokens?: number): void;
   setCompactions(count: number): void;
+  /** Live subagent count refresh (spawned/terminated mid-turn). */
+  setSubagents(counts: { total: number; persistent: number }): void;
   /** Terminal render (✅/🛑/❌); after this the bar is frozen and timers cleared. */
   finish(outcome: "finished" | "aborted" | "failed"): Promise<void>;
   /** Abandon without a terminal render (e.g. turn dispatch failed before delivery). */
@@ -234,6 +236,12 @@ export function createTurnStatusBar(opts: {
     setCompactions(count) {
       if (finished) return;
       compactions = count;
+      scheduleRender();
+    },
+
+    setSubagents(counts) {
+      if (finished) return;
+      subagents = counts;
       scheduleRender();
     },
 
@@ -409,6 +417,8 @@ export interface TurnStatusBarTracker {
   onToolCall?: (ev: ToolCallEvent) => void;
   /** A HITL approval row was queued for a tool call (⏸️). */
   onHitlQueued?: (call: { name: string; argsJson: string }) => void;
+  /** A subagent spawn succeeded mid-turn: fresh counts for the section. */
+  onSubagentsChanged?: (counts: { readonly total: number; readonly persistent: number }) => void;
   /** A mid-turn compaction completed. */
   onCompaction?: () => void;
   /** A model call reported provider usage: currentTokens is that call's
@@ -482,6 +492,7 @@ export function createStatusBarTurnTracker(opts: {
       else engine.toolFinished();
     },
     onHitlQueued: (call) => engine.markPaused({ name: call.name }),
+    onSubagentsChanged: (counts) => engine.setSubagents(counts),
     onCompaction: () => engine.setCompactions(++compactions),
     onContextUpdate: (update) => engine.updateContext(update.currentTokens, update.totalTokens),
   };

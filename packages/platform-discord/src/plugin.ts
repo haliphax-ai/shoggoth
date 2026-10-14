@@ -22,6 +22,7 @@ import { createDiscordInteractionHandler } from "./slash-commands";
 import { handleDiscordHitlReactionAdd } from "./hitl/reaction-handler";
 import {
   resolveDiscordBotToken,
+  resolveDiscordCommandGuildIds,
   resolveEffectiveDiscordRoutes,
   resolveDiscordOwnerUserId,
 } from "./config";
@@ -251,6 +252,12 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
             },
             get applicationId() {
               return state.reactionBotUserIdRef.current ?? "";
+            },
+            // Live getter: config may hot-reload. Same guild set slash
+            // commands register in, so the guard's notion of "ours" always
+            // matches registration.
+            get ownedGuildIds() {
+              return resolveDiscordCommandGuildIds(configRef.current);
             },
             logger,
             abortSession: abortSession as any,

@@ -258,7 +258,7 @@ Resolves per-session effective configuration by merging global config with per-a
 | `resolveEffectiveThinkingDisplay(cfg, sessionId)`                 | Per-agent `thinkingDisplay` or default `"none"`.                                                                                                                                                            |
 | `formatAgentIdentityPrefix(cfg, sessionId)`                       | Returns `**<emoji> <displayName>:**\n` for platform messages. Emoji defaults to 🦑.                                                                                                                         |
 | `evaluateMcpServerRules(serverId, rules, explicit?)`              | Evaluates allow/deny for a single MCP server id. Deny wins → allow check → default-deny. With `explicit: true`, a `*` allow pattern will not match the server — it must be named exactly in the allow list. |
-| `resolveEffectiveMcpServerRules(config, agentId, isSubagent)`     | 4-level merge cascade: global MCP rules → global subagent rules → per-agent rules. Per-field replace semantics.                                                                                             |
+| `resolveEffectiveMcpServerRules(config, agentId, isSubagent)`     | Merge cascade: global MCP rules → per-agent MCP rules (subagent sessions first inherit the agent's top-level rules) → global subagent rules → per-agent subagent rules. Per-field replace semantics.        |
 
 ### Constants
 
@@ -401,16 +401,16 @@ Controls the per-turn status bar rendered at the end of platform messages (e.g. 
 
 ### Fields
 
-| Field                  | Description                                                                                                                           |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`              | Master toggle for the status bar. Default: `true`.                                                                                    |
-| `statusEnabled`        | Show the status line (✅ / 🛑 / ❌ / ⏸️). Default: `true`.                                                                            |
-| `sequenceEnabled`      | Show the turn sequence number. Default: `true`.                                                                                       |
-| `toolCallsEnabled`     | Show the tool call line. Default: `true`.                                                                                             |
-| `subagentsEnabled`     | Show the active (non-thread) subagent count with the persistent count in parentheses; hidden when the count is zero. Default: `true`. |
-| `timersEnabled`        | Show the active (unfired) timer count for the session; hidden when the count is zero. Default: `true`.                                |
-| `contextWindowEnabled` | Show the context window usage. Default: `true`.                                                                                       |
-| `compactionsEnabled`   | Show the compaction counter. Default: `true`.                                                                                         |
+| Field                  | Description                                                                                                                                               |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`              | Master toggle for the status bar. Default: `true`.                                                                                                        |
+| `statusEnabled`        | Show the status line (✅ / 🛑 / ❌ / ⏸️). Default: `true`.                                                                                                |
+| `sequenceEnabled`      | Show the turn sequence number. Default: `true`.                                                                                                           |
+| `toolCallsEnabled`     | Show the tool call line. Default: `true`.                                                                                                                 |
+| `subagentsEnabled`     | Show the active (non-thread) subagent count, with the persistent count in parentheses when it is nonzero; hidden when the total is zero. Default: `true`. |
+| `timersEnabled`        | Show the active (unfired) timer count for the session; hidden when the count is zero. Default: `true`.                                                    |
+| `contextWindowEnabled` | Show the context window usage. Default: `true`.                                                                                                           |
+| `compactionsEnabled`   | Show the compaction counter. Default: `true`.                                                                                                             |
 
 ### Config Example
 

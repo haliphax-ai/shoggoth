@@ -195,6 +195,16 @@ describe("renderDiscordStatusBar", () => {
     expect(line).toContain("`2 (1)`");
   });
 
+  it("omits the persistent parenthetical when no persistent subagents are active", () => {
+    const line = renderDiscordStatusBar(
+      snap({ subagents: { total: 2, persistent: 0 } }),
+      defaultCfg,
+    );
+    expect(line).toContain("🕵️");
+    expect(line).toContain("`2`");
+    expect(line).not.toContain("(0)");
+  });
+
   it("omits the subagent section when the snapshot has no counts", () => {
     const line = renderDiscordStatusBar(snap(), defaultCfg);
     expect(line).not.toContain("🕵️");

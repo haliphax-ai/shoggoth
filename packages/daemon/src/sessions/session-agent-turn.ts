@@ -131,6 +131,11 @@ export interface ExecuteSessionAgentTurnInput {
       readonly currentTokens: number;
       readonly totalTokens?: number;
     }) => void;
+    /** A subagent spawn succeeded mid-turn: fresh active counts (live bar). */
+    readonly onSubagentsChanged?: (counts: {
+      readonly total: number;
+      readonly persistent: number;
+    }) => void;
   };
 }
 
@@ -553,6 +558,7 @@ export async function executeSessionAgentTurn(
           memoryConfig: resolveEffectiveMemoryForSession(input.config, input.sessionId),
           runtimeOpenaiBaseUrl: input.config.runtime?.openaiBaseUrl,
           isSubagentSession: isSubagentSessionUrn(input.sessionId),
+          onSubagentsChanged: input.events?.onSubagentsChanged,
           imageBlockCodec,
           vault: vaultServiceRef.current,
         };

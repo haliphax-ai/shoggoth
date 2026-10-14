@@ -21,6 +21,7 @@ vi.mock("../../src/sessions/session-agent-turn.js", () => {
           }
         }
         input.events?.onContextUpdate?.({ currentTokens: 12_345, totalTokens: 100_000 });
+        input.events?.onSubagentsChanged?.({ total: 1, persistent: 1 });
         return {
           latestAssistantText: "a".repeat(300),
           failoverMeta: undefined,
@@ -397,5 +398,35 @@ describe("runInboundSessionTurn status bar", () => {
     // mid-turn without a DB re-read.
     expect(onContextUpdate).toHaveBeenCalledTimes(1);
     expect(onContextUpdate).toHaveBeenCalledWith({ currentTokens: 12_345, totalTokens: 100_000 });
+  });
+
+  it("(i) subagent count forwarding: events.onSubagentsChanged reaches the tracker hook", async () => {
+    const setFullContent = vi.fn().mockResolvedValue(undefined);
+    const pushUpdate = vi.fn().mockResolvedValue(undefined);
+    const streamStart = vi.fn().mockResolvedValue({ setFullContent, pushUpdate });
+
+    const onSubagentsChanged = vi.fn();
+    const finish = vi.fn().mockResolvedValue("✅ bar");
+    const create = vi.fn().mockResolvedValue({
+      setStatusBar: vi.fn().mockResolvedValue(undefined),
+      finish,
+      onSubagentsChanged,
+    });
+
+    await runInboundSessionTurn({
+      buildTurn: defaultBuildTurn,
+      streaming: { minIntervalMs: 0, start: streamStart },
+      statusBar: { enabled: true, create },
+      sliceDisplayText: (t) => t,
+      formatAssistantReply: (text) => text,
+      formatErrorReply: (err) => String(err),
+      sendAssistantBody: vi.fn().mockResolvedValue(undefined),
+      sendErrorBody: vi.fn().mockResolvedValue(undefined),
+    });
+
+    // The mocked turn spawned a subagent mid-turn; the fresh counts must
+    // reach the tracker's hook so the live bar updates in the SAME turn.
+    expect(onSubagentsChanged).toHaveBeenCalledTimes(1);
+    expect(onSubagentsChanged).toHaveBeenCalledWith({ total: 1, persistent: 1 });
   });
 });

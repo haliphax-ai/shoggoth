@@ -201,8 +201,18 @@ export function evaluateMcpServerRules(
 }
 
 /**
- * Resolve effective MCP server rules via 4-level merge cascade.
+ * Resolve effective MCP server rules via merge cascade.
  * Per-field replace: if the narrower scope provides `allow`, it replaces inherited `allow`; same for `deny`.
+ *
+ * Top-level sessions: global `mcp.serverRules` → per-agent `mcp.serverRules`.
+ * Subagent sessions: the same top-level cascade (so subagents inherit their
+ * agent's effective access), then global `agents.subagentMcp.serverRules` →
+ * per-agent `agents.subagentMcp.serverRules` override per-field on top.
+ *
+ * Inheriting the per-agent top-level level matters for `explicit` servers:
+ * the default wildcard `*` never matches them, so without it a server named
+ * in the agent's allow list would be denied to every subagent whenever no
+ * `subagentMcp` rules are configured.
  */
 export function resolveEffectiveMcpServerRules(
   config: ShoggothConfig,
@@ -218,6 +228,16 @@ export function resolveEffectiveMcpServerRules(
     : { ...DEFAULT_MCP_SERVER_RULES };
 
   if (isSubagent) {
+    // Inherit the agent's effective top-level rules first, so servers the
+    // agent is allowed (including `explicit` servers named exactly in its
+    // allow list) remain reachable for its subagents.
+    const perAgentTop = entry?.mcp?.serverRules;
+    if (perAgentTop) {
+      effective = {
+        allow: perAgentTop.allow !== undefined ? perAgentTop.allow : effective.allow,
+        deny: perAgentTop.deny !== undefined ? perAgentTop.deny : effective.deny,
+      };
+    }
     // Merge global subagent rules
     const globalSubagent = config.agents?.subagentMcp?.serverRules;
     if (globalSubagent) {

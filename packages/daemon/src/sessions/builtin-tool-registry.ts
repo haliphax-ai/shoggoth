@@ -59,6 +59,15 @@ export interface BuiltinToolContext {
    */
   readonly isSubagentSession: boolean;
 
+  /**
+   * Notified after a subagent spawn succeeds mid-turn with the recomputed
+   * active subagent counts for this session (drives the live turn status bar).
+   */
+  readonly onSubagentsChanged?: (counts: {
+    readonly total: number;
+    readonly persistent: number;
+  }) => void;
+
   /** Image block codec for the active model provider, or undefined when unsupported. */
   readonly imageBlockCodec?: ImageBlockCodec;
 
