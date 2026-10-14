@@ -54,13 +54,13 @@ export function buildMessageDeliveryBanner(senderSessionId: string): string {
 }
 
 export interface MessageToolDeps extends MessageToolCoreDeps {
-  /** \"search\": resolves a session's guild scope. */
+  /** "search": resolves a session's guild scope. */
   readonly sessionToGuild?: (sessionId: string) => string | undefined;
-  /** \"attachment-download\": writes the downloaded bytes to disk. */
+  /** "attachment-download": writes the downloaded bytes to disk. */
   readonly downloadFile?: (url: string, destPath: string) => Promise<number>;
-  /** \"attachment-download\": workspace used to resolve relative destination paths. */
+  /** "attachment-download": workspace used to resolve relative destination paths. */
   readonly getSessionWorkspace?: (sessionId: string) => string | undefined;
-  /** \"post\": reads `attachments[].content_path` from the session workspace. */
+  /** "post": reads `attachments[].content_path` from the session workspace. */
   readonly readWorkspaceFile?: (sessionId: string, relativePath: string) => Promise<Buffer>;
   /**
    * Maximum attachment size in bytes, enforced for outbound uploads
