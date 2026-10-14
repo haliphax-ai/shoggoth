@@ -7,6 +7,7 @@ import {
 } from "@shoggoth/mcp-integration";
 import type { ChatContentPart } from "@shoggoth/models";
 import type { ToolExecutor } from "../sessions/tool-loop";
+import { validateToolArgs } from "../sessions/validate-tool-args";
 import { getLogger } from "../logging";
 
 const log = getLogger("tool-loop-mcp");
@@ -57,6 +58,52 @@ export type ExternalMcpInvoke = (input: {
 }) => Promise<{ resultJson: string }>;
 
 /**
+ * Validates `argsJson` against a routed tool's `inputSchema` (issue #435:
+ * every dispatch path — session tool loop, workflow tool tasks, subagent
+ * runtime — must fail loudly on unknown or missing arguments instead of
+ * silently dropping them).
+ *
+ * Returns a structured `invalid_arguments` error body when validation fails,
+ * or `undefined` when the args are acceptable. Tools without a schema cannot
+ * be validated and pass through.
+ */
+export function validateRoutedToolArgs(
+  toolName: string,
+  inputSchema: unknown,
+  argsJson: string,
+): string | undefined {
+  if (!inputSchema || typeof inputSchema !== "object") return undefined;
+  let args: unknown;
+  try {
+    args = JSON.parse(argsJson);
+  } catch {
+    return JSON.stringify({
+      error: "invalid_arguments",
+      tool: toolName,
+      message: "Tool call arguments were not valid JSON.",
+    });
+  }
+  if (typeof args !== "object" || args === null || Array.isArray(args)) {
+    return JSON.stringify({
+      error: "invalid_arguments",
+      tool: toolName,
+      message: "arguments must be a JSON object",
+    });
+  }
+  const errors = validateToolArgs(
+    args as Record<string, unknown>,
+    inputSchema as Parameters<typeof validateToolArgs>[1],
+  );
+  if (errors.length === 0) return undefined;
+  const detail = errors.map((e) => `${e.field}: ${e.message}`).join("; ");
+  return JSON.stringify({
+    error: "invalid_arguments",
+    tool: toolName,
+    message: `Argument validation failed: ${detail}`,
+  });
+}
+
+/**
  * Single catalog for the session tool loop: built-in Shoggoth tools plus optional static
  * external descriptors (e.g. from config until live MCP `tools/list` is wired).
  */
@@ -105,6 +152,17 @@ export function createMcpRoutingToolExecutor(options: {
         throw new Error(routed.error);
       }
       const { tool } = routed;
+      // Universal argument validation (issue #435). The session tool loop
+      // validates at Stage 2, but workflow tool tasks and the subagent
+      // runtime dispatch through here directly — so every path checks.
+      const validationError = validateRoutedToolArgs(name, tool.inputSchema, argsJson);
+      if (validationError) {
+        log.warn("tool call args validation failed (routing executor)", {
+          tool: name,
+          toolCallId,
+        });
+        return { resultJson: validationError };
+      }
       if (tool.sourceId === "builtin") {
         return builtin({
           originalName: tool.originalName,
