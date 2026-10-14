@@ -930,8 +930,9 @@ describe("registerDiscordSlashCommands", () => {
     ];
     assert.strictEqual(appId, "app-123");
     assert.strictEqual(guildId, "g-1");
-    assert.strictEqual(commands.length, 10);
+    assert.strictEqual(commands.length, 11);
     assert.ok(commands.some((c) => c.name === "abort"));
+    assert.ok(commands.some((c) => c.name === "close"));
     assert.ok(commands.some((c) => c.name === "steer"));
     assert.ok(commands.some((c) => c.name === "new"));
     assert.ok(commands.some((c) => c.name === "reset"));
@@ -1254,5 +1255,230 @@ describe("interaction guild-ownership guard", () => {
         `expected handler active when ownedGuildIds=${String(owned)}`,
       );
     }
+  });
+
+  describe("/close command", () => {
+    const SUB = "agent:main:discord:channel:ch-1:11111111-2222-4333-8444-555555555555";
+
+    it("kills the channel's bound session when no session_id is provided", async () => {
+      const calls: Array<{ method: string; args: unknown[] }> = [];
+      const transport = stubTransport(calls);
+      const invokeOps: Array<{ op: string; payload: Record<string, unknown> }> = [];
+      const handler = createDiscordInteractionHandler({
+        transport,
+        applicationId: "app-123",
+        logger: stubLogger(),
+        abortSession: async () => true,
+        invokeControlOp: async (op, payload) => {
+          invokeOps.push({ op, payload });
+          return { ok: true };
+        },
+        resolveSessionForChannel: (channelId) => (channelId === "ch-1" ? SUB : undefined),
+      });
+
+      const ev: DiscordInteractionEvent = {
+        kind: "interaction_create",
+        id: "int-close-1",
+        token: "tok-close-1",
+        type: 2,
+        channelId: "ch-1",
+        guildId: "g-1",
+        userId: "u-1",
+        data: { name: "close" },
+      };
+
+      handler(ev);
+      await vi.advanceTimersByTimeAsync(50);
+
+      assert.strictEqual(invokeOps.length, 1);
+      assert.strictEqual(invokeOps[0]!.op, "session_kill");
+      assert.strictEqual(invokeOps[0]!.payload.session_id, SUB);
+      assert.strictEqual(invokeOps[0]!.payload.subagent_only, true);
+      assert.strictEqual(calls.length, 1);
+      const [, , body] = calls[0]!.args as [
+        string,
+        string,
+        { type: number; data: { content: string } },
+      ];
+      assert.ok(body.data.content.includes("Closed"));
+    });
+
+    it("prefers an explicit session_id over the channel binding", async () => {
+      const calls: Array<{ method: string; args: unknown[] }> = [];
+      const transport = stubTransport(calls);
+      const invokeOps: Array<{ op: string; payload: Record<string, unknown> }> = [];
+      let resolveCalls = 0;
+      const handler = createDiscordInteractionHandler({
+        transport,
+        applicationId: "app-123",
+        logger: stubLogger(),
+        abortSession: async () => true,
+        invokeControlOp: async (op, payload) => {
+          invokeOps.push({ op, payload });
+          return { ok: true };
+        },
+        resolveSessionForChannel: () => {
+          resolveCalls += 1;
+          return "agent:other:discord:channel:ch-9";
+        },
+      });
+
+      const ev: DiscordInteractionEvent = {
+        kind: "interaction_create",
+        id: "int-close-2",
+        token: "tok-close-2",
+        type: 2,
+        channelId: "ch-1",
+        guildId: "g-1",
+        userId: "u-1",
+        data: {
+          name: "close",
+          options: [{ name: "session_id", type: 3, value: SUB }],
+        },
+      };
+
+      handler(ev);
+      await vi.advanceTimersByTimeAsync(50);
+
+      assert.strictEqual(resolveCalls, 0, "must not resolve from channel");
+      assert.strictEqual(invokeOps.length, 1);
+      assert.strictEqual(invokeOps[0]!.op, "session_kill");
+      assert.strictEqual(invokeOps[0]!.payload.session_id, SUB);
+    });
+
+    it("warns when no session is bound and no session_id is provided", async () => {
+      const calls: Array<{ method: string; args: unknown[] }> = [];
+      const transport = stubTransport(calls);
+      const invokeOps: Array<{ op: string; payload: Record<string, unknown> }> = [];
+      const handler = createDiscordInteractionHandler({
+        transport,
+        applicationId: "app-123",
+        logger: stubLogger(),
+        abortSession: async () => true,
+        invokeControlOp: async (op, payload) => {
+          invokeOps.push({ op, payload });
+          return { ok: true };
+        },
+        resolveSessionForChannel: () => undefined,
+      });
+
+      const ev: DiscordInteractionEvent = {
+        kind: "interaction_create",
+        id: "int-close-3",
+        token: "tok-close-3",
+        type: 2,
+        channelId: "ch-1",
+        guildId: "g-1",
+        userId: "u-1",
+        data: { name: "close" },
+      };
+
+      handler(ev);
+      await vi.advanceTimersByTimeAsync(50);
+
+      assert.strictEqual(invokeOps.length, 0, "must not invoke the control op");
+      assert.strictEqual(calls.length, 1);
+      const [, , body] = calls[0]!.args as [
+        string,
+        string,
+        { type: number; data: { content: string } },
+      ];
+      assert.ok(body.data.content.includes("No session bound to this channel"));
+    });
+
+    it("surfaces the top-level-session guard refusal as a warning", async () => {
+      const calls: Array<{ method: string; args: unknown[] }> = [];
+      const transport = stubTransport(calls);
+      const handler = createDiscordInteractionHandler({
+        transport,
+        applicationId: "app-123",
+        logger: stubLogger(),
+        abortSession: async () => true,
+        invokeControlOp: async () => ({
+          ok: false,
+          error: "refusing to kill top-level agent session",
+        }),
+        resolveSessionForChannel: () => "agent:main:discord:channel:ch-1",
+      });
+
+      const ev: DiscordInteractionEvent = {
+        kind: "interaction_create",
+        id: "int-close-4",
+        token: "tok-close-4",
+        type: 2,
+        channelId: "ch-1",
+        guildId: "g-1",
+        userId: "u-1",
+        data: { name: "close" },
+      };
+
+      handler(ev);
+      await vi.advanceTimersByTimeAsync(50);
+
+      assert.strictEqual(calls.length, 1);
+      const [, , body] = calls[0]!.args as [
+        string,
+        string,
+        { type: number; data: { content: string } },
+      ];
+      assert.ok(body.data.content.includes("Close refused"));
+      assert.ok(body.data.content.includes("top-level agent session"));
+    });
+
+    it("surfaces other session_kill failures in the response", async () => {
+      const calls: Array<{ method: string; args: unknown[] }> = [];
+      const transport = stubTransport(calls);
+      const handler = createDiscordInteractionHandler({
+        transport,
+        applicationId: "app-123",
+        logger: stubLogger(),
+        abortSession: async () => true,
+        invokeControlOp: async () => ({ ok: false, error: "ERR_STATE_DB_REQUIRED" }),
+        resolveSessionForChannel: () => SUB,
+      });
+
+      const ev: DiscordInteractionEvent = {
+        kind: "interaction_create",
+        id: "int-close-5",
+        token: "tok-close-5",
+        type: 2,
+        channelId: "ch-1",
+        guildId: "g-1",
+        userId: "u-1",
+        data: { name: "close" },
+      };
+
+      handler(ev);
+      await vi.advanceTimersByTimeAsync(50);
+
+      assert.strictEqual(calls.length, 1);
+      const [, , body] = calls[0]!.args as [
+        string,
+        string,
+        { type: number; data: { content: string } },
+      ];
+      assert.ok(body.data.content.includes("Close failed"));
+      assert.ok(body.data.content.includes("ERR_STATE_DB_REQUIRED"));
+    });
+
+    it("is registered as a guild slash command with an optional session_id", async () => {
+      const calls: Array<{ method: string; args: unknown[] }> = [];
+      const transport = stubTransport(calls);
+      await registerDiscordSlashCommands({
+        transport,
+        applicationId: "app-123",
+        guildIds: ["g-1"],
+      });
+      const [, , commands] = calls[0]!.args as [
+        string,
+        string,
+        Array<{ name: string; options?: Array<{ name: string; required?: boolean }> }>,
+      ];
+      const close = commands.find((c) => c.name === "close");
+      assert.ok(close, "close command must be registered");
+      const sessionIdOpt = close.options?.find((o) => o.name === "session_id");
+      assert.ok(sessionIdOpt, "close must expose a session_id option");
+      assert.notStrictEqual(sessionIdOpt.required, true, "session_id must be optional");
+    });
   });
 });

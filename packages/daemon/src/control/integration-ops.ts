@@ -2708,6 +2708,17 @@ export async function handleIntegrationControlOp(
       const pl = payloadObject(req);
       const sessionId = requireSessionId(pl, ctx.config);
       const targetRow = sessions.getById(sessionId);
+      // Platform `/close` guard: the command may only reap subagent sessions.
+      // A known row without a parent is a top-level agent session (its
+      // durability comes from being bound to a platform channel) — killing it
+      // from a messaging surface would orphan the agent, so refuse with a
+      // warning instead. Unknown rows fall through to the idempotent kill.
+      if (pl.subagent_only === true && targetRow && !targetRow.parentSessionId) {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          `refusing to kill top-level agent session ${sessionId}: close targets subagent sessions only`,
+        );
+      }
       if (principal.kind === "agent") {
         assertAgentMayUseSubagentSessionOps(principal, ctx);
         if (!targetRow || targetRow.status === "terminated") {
