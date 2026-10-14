@@ -54,6 +54,11 @@ export interface MessageToolDeps extends MessageToolCoreDeps {
    * Defaults to `DEFAULT_MAX_ATTACHMENT_BYTES` (25 MB).
    */
   readonly maxAttachmentBytes?: number;
+  /**
+   * For post/choice actions: resolves the sender session ID for provenance banner.
+   * Returns undefined when no sender exists (direct agent turns).
+   */
+  readonly getSessionSenderIdForProvenance?: (sessionId: string) => string | undefined;
 }
 
 /** Deps that fully support the "search" action: guild scope is always required. */
@@ -353,6 +358,20 @@ async function handleGetAction(
   };
 }
 
+/**
+ * Build the provenance banner for message tool posts from a sender session.
+ *
+ * Format:
+ * ```
+ * > 📨 Message delivery: `<sender session id>`
+ * 
+ * <message content>
+ * ```
+ */
+export function buildMessageDeliveryBanner(senderSessionId: string): string {
+  return `> 📨 Message delivery: \`${senderSessionId}\`\n\n`;
+}
+
 async function handlePostAction(
   ctx: ChannelActionContext,
   args: Record<string, unknown>,
@@ -419,9 +438,18 @@ async function handlePostAction(
   if (!content && files.length === 0)
     return { ok: false, error: "post requires content and/or attachments" };
 
+  // Add provenance banner if the session has a sender
+  let finalContent = content;
+  if (deps.getSessionSenderIdForProvenance) {
+    const senderId = deps.getSessionSenderIdForProvenance(sid);
+    if (senderId) {
+      finalContent = buildMessageDeliveryBanner(senderId) + content;
+    }
+  }
+
   const body: CreateMessageBody = replyTo
-    ? { content, message_reference: { message_id: replyTo } }
-    : { content };
+    ? { content: finalContent, message_reference: { message_id: replyTo } }
+    : { content: finalContent };
 
   if (files.length > 0) {
     const { id } = await t.createMessageWithFiles(channelId, body, files);
@@ -570,7 +598,7 @@ async function handleChoiceAction(
   ctx: ChannelActionContext,
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const { deps, channelId } = ctx;
+  const { deps, sid, channelId } = ctx;
   const { capabilities: caps, transport: t } = deps;
   const x = caps.extensions;
   if (!x.react) return { ok: false, error: "choice not supported on this platform" };
@@ -601,8 +629,17 @@ async function handleChoiceAction(
   }
   const preamble = typeof args.content === "string" ? args.content.trim() : "";
   const legendLines = choices.map((c) => `${c.emoji} ${c.label}`);
-  const body = [...(preamble ? [preamble, ""] : []), "React to choose:", ...legendLines].join("\n");
-  const { id } = await t.createMessage(channelId, { content: body });
+
+  // Build the message body, optionally prepended with sender provenance banner
+  let bodyContent = [...(preamble ? [preamble, ""] : []), "React to choose:", ...legendLines].join("\n");
+  if (deps.getSessionSenderIdForProvenance) {
+    const senderId = deps.getSessionSenderIdForProvenance(sid);
+    if (senderId) {
+      bodyContent = buildMessageDeliveryBanner(senderId) + bodyContent;
+    }
+  }
+
+  const { id } = await t.createMessage(channelId, { content: bodyContent });
   const failedReactions: string[] = [];
   for (const c of choices) {
     try {
