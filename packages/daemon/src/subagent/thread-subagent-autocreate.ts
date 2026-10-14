@@ -1,10 +1,12 @@
 import type Database from "better-sqlite3";
-import type { ShoggothConfig } from "@shoggoth/shared";
+import { parseAgentSessionUrn, type ShoggothConfig } from "@shoggoth/shared";
 import type { Logger } from "../logging";
 import { getLogger } from "../logging";
 import { createSessionStore, type SessionRow, type SessionStore } from "../sessions/session-store";
 import { createTranscriptStore } from "../sessions/transcript-store";
 import type { SessionManager } from "../sessions/session-manager";
+import { mergeSubagentSpawnModelSelection } from "@shoggoth/models";
+import { resolveConfiguredSubagentModel } from "../config/effective-runtime";
 import { resolveModel } from "../sessions/model-resolution";
 import { rememberSubagentHandles } from "./subagent-disposables";
 import { armPersistentSubagentInactivityTimer } from "./persistent-subagent-timers";
@@ -211,10 +213,28 @@ export async function handlePlatformThreadCreate(
   const subagentAgentId = deriveThreadSubagentAgentId(input.threadTitle ?? threadId, (id) =>
     reservedAgentIds.has(id),
   );
+
+  // Stamp the configured subagent model (per-agent override > global
+  // agents.subagentModel) onto the child's model selection, mirroring the
+  // control-plane subagent_spawn op: the session row then carries a model from
+  // creation, so model-metadata lookups (e.g. the status bar's context-window
+  // total) resolve on the first turn. Unconfigured: inherit the parent's
+  // selection as-is.
+  const parentAgentId = parseAgentSessionUrn(parentSessionId)?.agentId;
+  const configSubagentModel = resolveConfiguredSubagentModel(input.config, parentAgentId);
+  const modelSelection = mergeSubagentSpawnModelSelection(
+    parent.modelSelection,
+    undefined,
+    configSubagentModel,
+  );
+
+  // Same session-creation path as the subagent spawn system: URN minted under the
+  // parent agent, workspace/agent profile inherited from the parent session.
   const { sessionId: childId } = await input.sessionManager.spawn({
     parentSessionId,
     parentWorkingDirectory: parent.workspacePath,
     subagentAgentId,
+    modelSelection,
   });
   sessions.update(childId, {
     parentSessionId,

@@ -327,6 +327,63 @@ describe("handlePlatformThreadCreate", { concurrency: false }, () => {
     assert.deepEqual(result, { created: false, reason: "binding_exists" });
     assert.equal(statusBodies.length, 0);
   });
+
+  it("stamps the configured subagent model onto the autocreated session", async () => {
+    const {
+      sessionId: parentSessionId,
+      sessions,
+      sessionManager,
+    } = await createTopLevelSession(db, tmp);
+    // The parent carries its own selection; the configured subagent model must win
+    // on the child, mirroring the control-plane spawn op.
+    sessions.update(parentSessionId, { modelSelection: { model: "prov/test-model" } });
+    const bindings = new Map<string, string>([["chan-1", parentSessionId]]);
+    const statusBodies: Array<{ sessionId: string; body: string }> = [];
+
+    const config = baseConfig();
+    (config.agents as { subagentModel?: string }).subagentModel = "prov/other-model";
+
+    const result = await handlePlatformThreadCreate({
+      db,
+      config,
+      sessionManager,
+      sessions,
+      threadId: "thread-1",
+      parentChannelId: "chan-1",
+      platform: makePlatformDeps(bindings, statusBodies),
+    });
+
+    assert.equal(result.created, true);
+    const child = sessions.getById(result.sessionId!)!;
+    const selection = child.modelSelection as { model?: unknown } | undefined;
+    assert.equal(selection?.model, "prov/other-model");
+  });
+
+  it("inherits the parent model selection as-is when no subagent model is configured", async () => {
+    const {
+      sessionId: parentSessionId,
+      sessions,
+      sessionManager,
+    } = await createTopLevelSession(db, tmp);
+    sessions.update(parentSessionId, { modelSelection: { model: "prov/test-model" } });
+    const bindings = new Map<string, string>([["chan-1", parentSessionId]]);
+    const statusBodies: Array<{ sessionId: string; body: string }> = [];
+
+    // baseConfig() has no agents.subagentModel and no per-agent override.
+    const result = await handlePlatformThreadCreate({
+      db,
+      config: baseConfig(),
+      sessionManager,
+      sessions,
+      threadId: "thread-1",
+      parentChannelId: "chan-1",
+      platform: makePlatformDeps(bindings, statusBodies),
+    });
+
+    assert.equal(result.created, true);
+    const child = sessions.getById(result.sessionId!)!;
+    assert.deepEqual(child.modelSelection, { model: "prov/test-model" });
+  });
 });
 
 describe("shouldSkipThreadSessionSentinel", { concurrency: false }, () => {
