@@ -289,6 +289,7 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
             // Thread the turn's model invocation override (e.g. responseSchema for
             // structured output) into the parent delivery turn when present.
             modelInvocationOverride: turn.modelInvocationOverride,
+            fallbackRespondTo: row.parentSessionId,
           });
         }
       }

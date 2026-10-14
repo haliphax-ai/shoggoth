@@ -176,6 +176,12 @@ describe("systemContext adoption: subagent_spawn one_shot", () => {
       workspacePath: "/tmp/w",
       status: "active",
     });
+    // Live caller session so the explicit respond_to passes spawn-time validation.
+    createSessionStore(db).create({
+      id: "caller-session",
+      workspacePath: "/tmp/w",
+      status: "active",
+    });
 
     const { ext, calls } = capturingSubagentRuntimeExtension();
     setSubagentRuntimeExtension(ext);
@@ -242,6 +248,12 @@ describe("systemContext adoption: subagent_spawn persistent", () => {
     );
     createSessionStore(db).create({
       id: parentId,
+      workspacePath: "/tmp/w",
+      status: "active",
+    });
+    // Live caller session so the explicit respond_to passes spawn-time validation.
+    createSessionStore(db).create({
+      id: "caller-session",
       workspacePath: "/tmp/w",
       status: "active",
     });
