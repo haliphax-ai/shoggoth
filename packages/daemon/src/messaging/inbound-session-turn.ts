@@ -130,6 +130,8 @@ export interface RunInboundSessionTurnOptions {
             readonly total: number;
             readonly persistent: number;
           }) => void;
+          /** A timer was queued or cancelled mid-turn: fresh unfired count. */
+          readonly onTimersChanged?: (count: number) => void;
         }
       | undefined
     >;
@@ -173,6 +175,7 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
         onCompaction?: () => void;
         onContextUpdate?: (update: { currentTokens: number; totalTokens?: number }) => void;
         onSubagentsChanged?: (counts: { total: number; persistent: number }) => void;
+        onTimersChanged?: (count: number) => void;
       }
     | undefined;
 
@@ -259,6 +262,7 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
             onCompaction: () => statusBar?.onCompaction?.(),
             onContextUpdate: (update) => statusBar?.onContextUpdate?.(update),
             onSubagentsChanged: (counts) => statusBar?.onSubagentsChanged?.(counts),
+            onTimersChanged: (count) => statusBar?.onTimersChanged?.(count),
           }
         : undefined,
     });

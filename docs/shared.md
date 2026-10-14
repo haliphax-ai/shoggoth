@@ -401,16 +401,16 @@ Controls the per-turn status bar rendered at the end of platform messages (e.g. 
 
 ### Fields
 
-| Field                  | Description                                                                                                                                               |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`              | Master toggle for the status bar. Default: `true`.                                                                                                        |
-| `statusEnabled`        | Show the status line (✅ / 🛑 / ❌ / ⏸️). Default: `true`.                                                                                                |
-| `sequenceEnabled`      | Show the turn sequence number. Default: `true`.                                                                                                           |
-| `toolCallsEnabled`     | Show the tool call line. Default: `true`.                                                                                                                 |
-| `subagentsEnabled`     | Show the active (non-thread) subagent count, with the persistent count in parentheses when it is nonzero; hidden when the total is zero. Default: `true`. |
-| `timersEnabled`        | Show the active (unfired) timer count for the session; hidden when the count is zero. Default: `true`.                                                    |
-| `contextWindowEnabled` | Show the context window usage. Default: `true`.                                                                                                           |
-| `compactionsEnabled`   | Show the compaction counter. Default: `true`.                                                                                                             |
+| Field                  | Description                                                                                                                                                                                              |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`              | Master toggle for the status bar. Default: `true`.                                                                                                                                                       |
+| `statusEnabled`        | Show the status line (✅ / 🛑 / ❌ / ⏸️). Default: `true`.                                                                                                                                               |
+| `sequenceEnabled`      | Show the turn sequence number. Default: `true`.                                                                                                                                                          |
+| `toolCallsEnabled`     | Show the tool call line. Default: `true`.                                                                                                                                                                |
+| `subagentsEnabled`     | Show the active (non-thread) subagent count, with the persistent count in parentheses when it is nonzero; hidden when the total is zero. Default: `true`.                                                |
+| `timersEnabled`        | Show the unfired timer count for the session (queued and active timers as one cumulative sum, refreshed live when timers are set or cancelled mid-turn); hidden when the count is zero. Default: `true`. |
+| `contextWindowEnabled` | Show the context window usage. Default: `true`.                                                                                                                                                          |
+| `compactionsEnabled`   | Show the compaction counter. Default: `true`.                                                                                                                                                            |
 
 ### Config Example
 
