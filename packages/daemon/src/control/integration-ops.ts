@@ -454,6 +454,10 @@ export async function deliverOobStructuredResponse(opts: {
   banner?: {
     readonly handle: OobTurnBannerHandle;
     readonly terminal: (outcome: OobTurnOutcome) => string;
+    /** Terminal status-bar line (✅/🛑/❌) rendered by the OOB turn's tracker;
+     *  forwarded to `finish` so the banner's final edit carries the bar like
+     *  every other turn surface. Omitted when the turn had no tracker. */
+    readonly statusBar?: string;
   };
 }): Promise<void> {
   const {
@@ -478,6 +482,7 @@ export async function deliverOobStructuredResponse(opts: {
         handle: banner.handle,
         terminal: banner.terminal("failed"),
         content: notice,
+        ...(banner.statusBar ? { statusBar: banner.statusBar } : {}),
       });
     } catch (err) {
       subLog.warn("failed to finalize oob banner on failure", { respondTo, error: String(err) });
@@ -494,6 +499,7 @@ export async function deliverOobStructuredResponse(opts: {
         await ext.oobTurnBanner?.finish({
           handle: banner.handle,
           terminal: banner.terminal("aborted"),
+          ...(banner.statusBar ? { statusBar: banner.statusBar } : {}),
         });
       } catch (err) {
         subLog.warn("failed to finalize oob banner on abort", { respondTo, error: String(err) });
@@ -599,6 +605,7 @@ export async function deliverOobStructuredResponse(opts: {
         handle: banner.handle,
         terminal: banner.terminal("finished"),
         ...(toOperatorText ? { content: toOperatorText } : {}),
+        ...(banner.statusBar ? { statusBar: banner.statusBar } : {}),
       });
     } catch (err) {
       subLog.warn("failed to finalize oob banner", { respondTo, error: String(err) });
@@ -2412,6 +2419,7 @@ export async function handleIntegrationControlOp(
         await ext.oobTurnBanner?.finish({
           handle: bannerHandle,
           terminal: bannerText.terminal("finished"),
+          ...(turn.statusBarLine ? { statusBar: turn.statusBarLine } : {}),
         });
       }
       ctx.recordIntegrationAudit({

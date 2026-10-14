@@ -229,7 +229,7 @@ describe("oobTurnBanner (issue #363)", { concurrency: false }, () => {
     assert.match(sent[0]!.content, /^> 🗨️ Processing incoming message/);
   });
 
-  it("finish clears the live bar so it is not duplicated in the terminal body", async () => {
+  it("finish folds the terminal status bar into the body exactly once, appended last", async () => {
     const { platform, sent } = await buildPlatform(true);
 
     const handle = await platform.oobTurnBanner.begin({
@@ -237,17 +237,45 @@ describe("oobTurnBanner (issue #363)", { concurrency: false }, () => {
       processing: "> ⚙️ Processing workflow notification `wf-1` …",
     });
     assert.ok(handle);
+    // Live bar render streamed mid-turn (stale by the time finish lands).
     await handle.setStatusBar("✅ done · #1");
 
     await platform.oobTurnBanner.finish({
       handle,
       terminal: "> ⚙️ ✅ Processed workflow notification from `wf-1`",
+      content: "Did the thing.",
+      statusBar: "✅ done · #2",
     });
 
-    // Exactly one occurrence of the terminal banner and no stale live bar.
+    // The SAME message was edited in place. The stale live bar was cleared
+    // and the terminal bar line lands exactly once, appended last.
     const body = sent[0]!.content;
     assert.equal(sent.length, 1);
     assert.match(body, /^> ⚙️ ✅ Processed workflow notification from `wf-1`/);
+    assert.match(body, /Did the thing\./);
+    assert.equal(body.split("✅ done · #2").length - 1, 1, "terminal bar must appear exactly once");
+    assert.ok(body.endsWith("✅ done · #2"), "terminal bar must be appended last");
+    assert.ok(!body.includes("✅ done · #1"), "stale live bar must be cleared");
+  });
+
+  it("finish without a statusBar omits the bar from the terminal body", async () => {
+    const { platform, sent } = await buildPlatform(true);
+
+    const handle = await platform.oobTurnBanner.begin({
+      sessionId: SESSION_URN,
+      processing: "> ⚙️ Processing workflow notification `wf-2` …",
+    });
+    assert.ok(handle);
+    await handle.setStatusBar("✅ done · #1");
+
+    await platform.oobTurnBanner.finish({
+      handle,
+      terminal: "> ⚙️ ✅ Processed workflow notification from `wf-2`",
+    });
+
+    const body = sent[0]!.content;
+    assert.equal(sent.length, 1);
+    assert.match(body, /^> ⚙️ ✅ Processed workflow notification from `wf-2`/);
     assert.ok(!body.includes("✅ done · #1"), "stale live bar must be cleared");
   });
 

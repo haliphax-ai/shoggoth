@@ -148,6 +148,10 @@ export interface SessionAgentTurnResult {
   readonly showAttachments?: readonly OutboundAttachment[];
   /** Maps to 🛑/❌/✅ in the status bar. */
   readonly outcome: "completed" | "aborted" | "failed";
+  /** Rendered terminal status-bar line (✅/🛑/❌), set only by the OOB banner
+   *  internal-delivery path when a tracker existed, so the banner's final
+   *  edit can carry the bar. Undefined on messaging_surface and inbound turns. */
+  readonly statusBarLine?: string;
 }
 
 function sessionCreds(uid?: number, gid?: number): AgentCredentials {

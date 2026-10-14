@@ -93,6 +93,10 @@ export type SubagentRuntimeExtension = {
       readonly handle: OobTurnBannerHandle;
       readonly terminal: string;
       readonly content?: string;
+      /** Terminal status-bar line (✅/🛑/❌) from the turn's tracker; appended
+       *  last in the final edit so the banner matches every other turn
+       *  surface. Omitted when the turn had no tracker. */
+      readonly statusBar?: string;
     }) => Promise<void>;
   };
   /** Pin a message in the resolved channel for a session. Optional platform capability. */

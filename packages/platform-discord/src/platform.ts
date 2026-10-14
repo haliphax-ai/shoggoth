@@ -917,7 +917,11 @@ export async function startDiscordPlatform(
             ? turnResult.outcome
             : "finished";
         try {
-          await surfaceTracker.finish(outcome);
+          // Capture the rendered terminal bar line (the ONE terminal
+          // composition) and attach it to the turn result so the caller can
+          // hand it back to `oobTurnBanner.finish` for the final edit.
+          const barLine = await surfaceTracker.finish(outcome);
+          if (barLine) turnResult = { ...turnResult, statusBarLine: barLine };
         } catch (e) {
           opts.logger.warn("discord.platform.oob_status_bar_finish_failed", {
             sessionId: sid,
@@ -1045,8 +1049,8 @@ export async function startDiscordPlatform(
    * `undefined` when the session isn't surface-bound or the platform can't edit
    * messages, in which case callers fall back to plain delivery. `finish` edits
    * the banner message in place with the terminal banner plus optional
-   * `to_operator` content, clearing the live bar first so it isn't rendered
-   * twice.
+   * `to_operator` content and the turn's terminal status-bar line, clearing
+   * the live bar first so it isn't rendered twice.
    */
   const oobTurnBanner = {
     async begin(input: {
@@ -1079,6 +1083,10 @@ export async function startDiscordPlatform(
       readonly handle: OobTurnBannerHandle;
       readonly terminal: string;
       readonly content?: string;
+      /** Terminal bar line (✅/🛑/❌) rendered by the turn's status-bar
+       *  tracker; appended last so the banner matches every other turn
+       *  surface. Omitted when the turn had no tracker. */
+      readonly statusBar?: string;
     }): Promise<void> {
       // Clear the live bar (a state-only operation that makes no edit) so the
       // terminal body edit below lands the bar exactly once, mirroring the
@@ -1096,7 +1104,10 @@ export async function startDiscordPlatform(
       // is nothing to append to and we leave the processing banner as-is.
       if (!input.handle.setBody) return;
       try {
-        const body = input.content ? `${input.terminal}\n\n${input.content}` : input.terminal;
+        // Compose terminal (+ optional content) then the terminal bar line
+        // LAST — the same append order the messaging_surface delivery uses.
+        const base = input.content ? `${input.terminal}\n\n${input.content}` : input.terminal;
+        const body = input.statusBar ? `${base}\n\n${input.statusBar}` : base;
         await input.handle.setBody(body);
       } catch (e) {
         opts.logger.warn("discord.oob_banner.finish_failed", {
