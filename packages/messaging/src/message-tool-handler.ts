@@ -39,20 +39,6 @@ export interface MessageToolCoreDeps {
  * them up front via {@link createActionToolDispatcher}, instead of
  * discovering a missing dep as a runtime null-check inside a handler.
  */
-/**
- * Build the provenance banner for message tool posts from a sender session.
- *
- * Format:
- * ```
- * > 📨 Message delivery: `<sender session id>`
- * 
- * <message content>
- * ```
- */
-export function buildMessageDeliveryBanner(senderSessionId: string): string {
-  return `> 📨 Message delivery: \`${senderSessionId}\`\n\n`;
-}
-
 export interface MessageToolDeps extends MessageToolCoreDeps {
   /** "search": resolves a session's guild scope. */
   readonly sessionToGuild?: (sessionId: string) => string | undefined;
@@ -370,6 +356,20 @@ async function handleGetAction(
     channel_id: targetChannel,
     messages: rows.map(summarizeApiMessage),
   };
+}
+
+/**
+ * Build the provenance banner for message tool posts from a sender session.
+ *
+ * Format:
+ * ```
+ * > 📨 Message delivery: `<sender session id>`
+ * 
+ * <message content>
+ * ```
+ */
+export function buildMessageDeliveryBanner(senderSessionId: string): string {
+  return `> 📨 Message delivery: \`${senderSessionId}\`\n\n`;
 }
 
 async function handlePostAction(
