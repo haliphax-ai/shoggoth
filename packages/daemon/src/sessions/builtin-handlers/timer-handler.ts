@@ -137,6 +137,11 @@ function timerSet(
     sessionAnchor,
   });
 
+  // Queued timer: refresh the live count so the in-flight turn status bar
+  // shows it in the same turn. The row is already in the DB from schedule(),
+  // so the recomputed count is the cumulative queued + active sum.
+  ctx.onTimersChanged?.(scheduler.countForSession(ctx.db, ctx.sessionId));
+
   const allTimers = scheduler.listForSession(ctx.db, ctx.sessionId);
   return {
     resultJson: JSON.stringify({
@@ -181,6 +186,9 @@ function timerCancel(
   }
 
   const cancelled = scheduler.cancel(ctx.db, id);
+  if (cancelled) {
+    ctx.onTimersChanged?.(scheduler.countForSession(ctx.db, ctx.sessionId));
+  }
   return { resultJson: JSON.stringify({ ok: true, id, cancelled }) };
 }
 
