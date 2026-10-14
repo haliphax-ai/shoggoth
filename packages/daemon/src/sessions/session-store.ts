@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import {
   assertValidAgentId,
+  assertValidSubagentAgentId,
   computeSessionDepth,
+  parseAgentSessionUrn,
   generateSystemContextToken,
   type ContextLevel,
 } from "@shoggoth/shared";
@@ -20,6 +22,8 @@ export type SubagentDeliveryMode = "inline" | "queue" | "drop";
 
 export interface SessionRow {
   readonly id: string;
+  readonly agentId: string;
+  readonly subagentAgentId: string | undefined;
   readonly agentProfileId: string | undefined;
   readonly workspacePath: string;
   readonly status: SessionStatus;
@@ -54,6 +58,7 @@ export interface CreateSessionInput {
   readonly id: string;
   readonly workspacePath: string;
   readonly status?: SessionStatus;
+  readonly subagentId?: string;
   readonly agentProfileId?: string;
   readonly modelSelection?: unknown;
   readonly lightContext?: boolean;
@@ -81,10 +86,12 @@ export interface UpdateSessionInput {
   readonly systemContextToken?: string;
   readonly contextLevel?: ContextLevel | null;
   readonly workingDirectory?: string | null;
+  readonly subagentId?: string | null;
 }
 
 function rowToSession(r: {
   id: string;
+  agent_id?: string | null;
   agent_profile_id: string | null;
   workspace_path: string;
   status: string;
@@ -136,6 +143,8 @@ function rowToSession(r: {
   const exp = r.subagent_expires_at_ms;
   return {
     id: r.id,
+    agentId: parseAgentSessionUrn(r.id)?.agentId ?? "unknown",
+    subagentAgentId: r.agent_id?.trim() || undefined,
     agentProfileId: r.agent_profile_id ?? undefined,
     workspacePath: r.workspace_path,
     status: r.status,
@@ -166,7 +175,10 @@ export type SessionSortBy = "created" | "lastActivity" | "name";
 export interface SessionListFilter {
   readonly status?: SessionStatus;
   readonly parentSessionId?: string;
+  /** Logical owner agent from the session URN. */
   readonly agentId?: string;
+  /** Shortened ID persisted for a subagent. */
+  readonly subagentAgentId?: string;
   /** Sort field (default: "created"). */
   readonly sortBy?: SessionSortBy;
   /** Sort direction (default: "desc"). */
@@ -213,14 +225,14 @@ export function getSessionContextSegmentId(db: Database.Database, sessionId: str
 export function createSessionStore(db: Database.Database): SessionStore {
   const insert = db.prepare(`
     INSERT INTO sessions (
-      id, agent_profile_id, workspace_path, status, context_segment_id,
+      id, agent_profile_id, workspace_path, status, context_segment_id, agent_id,
       model_selection_json, light_context, prompt_stack_json,
       runtime_uid, runtime_gid,
       parent_session_id, subagent_mode, subagent_platform_thread_id, subagent_expires_at_ms,
       subagent_delivery_mode, subagent_respond_to,
       system_context_token, context_level
     ) VALUES (
-      @id, @agent_profile_id, @workspace_path, @status, @context_segment_id,
+      @id, @agent_profile_id, @workspace_path, @status, @context_segment_id, @agent_id,
       @model_selection_json, @light_context, @prompt_stack_json,
       @runtime_uid, @runtime_gid,
       @parent_session_id, @subagent_mode, @subagent_platform_thread_id, @subagent_expires_at_ms,
@@ -230,7 +242,7 @@ export function createSessionStore(db: Database.Database): SessionStore {
   `);
 
   const selectOne = db.prepare(`
-    SELECT id, agent_profile_id, workspace_path, status, context_segment_id, model_selection_json,
+    SELECT id, agent_id, agent_profile_id, workspace_path, status, context_segment_id, model_selection_json,
            light_context, prompt_stack_json, runtime_uid, runtime_gid,
            parent_session_id, subagent_mode, subagent_platform_thread_id, subagent_expires_at_ms,
            subagent_delivery_mode, subagent_respond_to,
@@ -242,9 +254,17 @@ export function createSessionStore(db: Database.Database): SessionStore {
 
   return {
     create(input) {
+      if (input.subagentId !== undefined) {
+        assertValidSubagentAgentId(input.subagentId);
+        const parsed = parseAgentSessionUrn(input.id);
+        if (!parsed || parsed.agentId === input.subagentId) {
+          throw new Error("subagent shorthand must be distinct from its owning agent ID");
+        }
+      }
       const status = input.status ?? "starting";
       insert.run({
         id: input.id,
+        agent_id: input.subagentId ?? null,
         agent_profile_id: input.agentProfileId ?? null,
         workspace_path: input.workspacePath,
         status,
@@ -270,6 +290,7 @@ export function createSessionStore(db: Database.Database): SessionStore {
       const r = selectOne.get({ id }) as
         | {
             id: string;
+            agent_id: string | null;
             agent_profile_id: string | null;
             workspace_path: string;
             status: string;
@@ -323,7 +344,9 @@ export function createSessionStore(db: Database.Database): SessionStore {
         patch.workingDirectory === undefined
           ? (cur.workingDirectory ?? null)
           : patch.workingDirectory;
+      if (patch.subagentId) assertValidSubagentAgentId(patch.subagentId);
       const next = {
+        agent_id: patch.subagentId === undefined ? (cur.subagentAgentId ?? null) : patch.subagentId,
         agent_profile_id: patch.agentProfileId ?? cur.agentProfileId ?? null,
         workspace_path: cur.workspacePath,
         status: patch.status ?? cur.status,
@@ -361,6 +384,7 @@ export function createSessionStore(db: Database.Database): SessionStore {
       db.prepare(
         `
         UPDATE sessions SET
+          agent_id = @agent_id,
           agent_profile_id = @agent_profile_id,
           workspace_path = @workspace_path,
           status = @status,
@@ -391,7 +415,7 @@ export function createSessionStore(db: Database.Database): SessionStore {
 
     list(filter) {
       type R = Parameters<typeof rowToSession>[0];
-      const cols = `id, agent_profile_id, workspace_path, status, context_segment_id, model_selection_json,
+      const cols = `id, agent_id, agent_profile_id, workspace_path, status, context_segment_id, model_selection_json,
                  light_context, prompt_stack_json, runtime_uid, runtime_gid,
                  parent_session_id, subagent_mode, subagent_platform_thread_id, subagent_expires_at_ms,
                  subagent_delivery_mode, subagent_respond_to,
@@ -414,6 +438,12 @@ export function createSessionStore(db: Database.Database): SessionStore {
         clauses.push("status = @status");
         params.status = filter.status;
       }
+      if (filter?.subagentAgentId !== undefined) {
+        assertValidSubagentAgentId(filter.subagentAgentId);
+        clauses.push("agent_id = @subagentAgentId");
+        params.subagentAgentId = filter.subagentAgentId;
+      }
+
       if (filter?.activeSince) {
         clauses.push("updated_at >= @activeSince");
         params.activeSince = filter.activeSince;

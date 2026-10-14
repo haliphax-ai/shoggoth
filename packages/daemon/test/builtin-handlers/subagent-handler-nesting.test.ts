@@ -115,7 +115,11 @@ describe("subagent tool handler maxSpawnDepth gate", () => {
     sessionId: string,
     config: ShoggothConfig,
   ): Promise<Record<string, unknown>> {
-    return callTool({ action: "spawn_one_shot", prompt: "task" }, sessionId, config);
+    return callTool(
+      { action: "spawn_one_shot", prompt: "task", agent_id: "subtask-1" },
+      sessionId,
+      config,
+    );
   }
 
   it("default config: top-level session (depth 0) may spawn", async () => {

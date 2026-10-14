@@ -12,6 +12,8 @@ import { getProcessManager } from "../process-manager-singleton";
 import {
   agentMayInvokeSubagentSpawnByAllowlist,
   assertValidAgentId,
+  assertValidSubagentAgentId,
+  deriveThreadSubagentAgentId,
   crossAgentSessionSendAllowed,
   deepMerge,
   effectiveMaxSpawnDepth,
@@ -1356,6 +1358,39 @@ export async function handleIntegrationControlOp(
       const parentSessionId = requireString(pl, "parent_session_id");
       assertAgentMayUseSubagentSpawn(principal, parentSessionId, sessions, ctx.config);
       const prompt = requireString(pl, "prompt");
+      const agentIdRaw = pl.agent_id;
+      const threadNameRaw = pl.thread_name;
+      const threadName =
+        typeof threadNameRaw === "string" && threadNameRaw.trim()
+          ? threadNameRaw.trim()
+          : prompt.slice(0, 100);
+      const reservedAgentIds = new Set(Object.keys(ctx.config.agents?.list ?? {}));
+      const parentAgentIdForSubagent = parseAgentSessionUrn(parentSessionId)?.agentId;
+      if (parentAgentIdForSubagent) reservedAgentIds.add(parentAgentIdForSubagent);
+      for (const row of sessions.list())
+        if (row.status !== "terminated" && row.subagentAgentId)
+          reservedAgentIds.add(row.subagentAgentId);
+      let childAgentId: string;
+      if (typeof agentIdRaw === "string" && agentIdRaw.trim()) {
+        try {
+          assertValidSubagentAgentId(agentIdRaw);
+        } catch (e) {
+          throw new IntegrationOpError(
+            "ERR_INVALID_PAYLOAD",
+            e instanceof Error ? e.message : String(e),
+          );
+        }
+        childAgentId = agentIdRaw;
+        if (reservedAgentIds.has(childAgentId))
+          throw new IntegrationOpError(
+            "ERR_SUBAGENT_AGENT_ID_CONFLICT",
+            `subagent agent id ${JSON.stringify(childAgentId)} is already in use`,
+          );
+      } else {
+        childAgentId = deriveThreadSubagentAgentId(threadName, (candidate) =>
+          reservedAgentIds.has(candidate),
+        );
+      }
       const modeRaw = requireString(pl, "mode");
       if (modeRaw !== "one_shot" && modeRaw !== "persistent") {
         throw new IntegrationOpError(
@@ -1503,6 +1538,7 @@ export async function handleIntegrationControlOp(
         ({ sessionId: childId } = await sessionManager.spawn({
           parentSessionId,
           parentWorkingDirectory: parent.workingDirectory,
+          subagentAgentId: childAgentId,
           ...(modelSelection !== undefined ? { modelSelection } : {}),
         }));
       } catch (e) {
@@ -1541,6 +1577,7 @@ export async function handleIntegrationControlOp(
               userMetadata: {
                 subagent_one_shot: true,
                 parent_session_id: parentSessionId,
+                agent_id: childAgentId,
                 respond_to: respondTo,
                 internal: internalDelivery,
               },
@@ -1550,6 +1587,7 @@ export async function handleIntegrationControlOp(
                   "You are a one-shot subagent. Complete the following task and return the result.",
                 data: {
                   parent_session_id: parentSessionId,
+                  agent_id: childAgentId,
                   respond_to: respondTo,
                   internal: internalDelivery,
                 },
@@ -1591,6 +1629,7 @@ export async function handleIntegrationControlOp(
             outcome: "ok",
             argsRedactedJson: JSON.stringify({
               parent_session_id: parentSessionId,
+              agent_id: childAgentId,
               background: true,
             }),
           });
@@ -1610,6 +1649,7 @@ export async function handleIntegrationControlOp(
             userMetadata: {
               subagent_one_shot: true,
               parent_session_id: parentSessionId,
+              agent_id: childAgentId,
               respond_to: respondTo,
               internal: internalDelivery,
             },
@@ -1619,6 +1659,7 @@ export async function handleIntegrationControlOp(
                 "You are a one-shot subagent. Complete the following task and return the result.",
               data: {
                 parent_session_id: parentSessionId,
+                agent_id: childAgentId,
                 respond_to: respondTo,
                 internal: internalDelivery,
               },
@@ -1643,6 +1684,7 @@ export async function handleIntegrationControlOp(
           outcome: "ok",
           argsRedactedJson: JSON.stringify({
             parent_session_id: parentSessionId,
+            agent_id: childAgentId,
           }),
         });
         if (deliveryMode === "inline") {
@@ -1855,6 +1897,7 @@ export async function handleIntegrationControlOp(
           userMetadata: {
             subagent_persistent: true,
             parent_session_id: parentSessionId,
+            agent_id: childAgentId,
             platform_thread_id: platformThreadId ?? null,
             respond_to: respondTo,
             internal: internalDelivery,
@@ -1864,6 +1907,7 @@ export async function handleIntegrationControlOp(
             summary: "You are a persistent subagent session. Complete the following task.",
             data: {
               parent_session_id: parentSessionId,
+              agent_id: childAgentId,
               respond_to: respondTo,
               platform_thread_id: platformThreadId ?? null,
               internal: internalDelivery,
@@ -1897,6 +1941,7 @@ export async function handleIntegrationControlOp(
         outcome: "ok",
         argsRedactedJson: JSON.stringify({
           parent_session_id: parentSessionId,
+          agent_id: childAgentId,
           platform_thread_id: platformThreadId ?? null,
           adopted_session_id: adoptedSessionId ?? null,
           expires_at_ms: expiresAtMs,
