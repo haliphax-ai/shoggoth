@@ -224,17 +224,18 @@ Only active when the capability set includes `TYPING_NOTIFICATION`.
 
 Guild-scoped slash commands are registered on startup via `PUT /applications/{id}/guilds/{guildId}/commands`, one bulk overwrite per configured guild. The guild set comes from `platforms.discord.commandGuildIds` when set, otherwise the unique guild IDs across the effective Discord routes (with a `discord.slash_commands.no_guilds` warning and no registration when neither yields a guild). Guild commands propagate instantly and are isolated per guild, so multiple Shoggoth instances sharing one application ID and bot token no longer collide. The registered commands:
 
-| Command    | Description                                                                                                                         |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `/elevate` | Grant or revoke [elevated privileges](daemon.md#elevation). Options: `action` (grant/revoke), `session_id`, `duration`, `grant_id`. |
-| `/abort`   | Abort the current session turn. Option: `session_id`.                                                                               |
-| `/steer`   | Steer a session with an operator prompt. Options: `prompt` (required), `session_id`, `delivery` (surface/internal).                 |
-| `/new`     | Start a new context segment (preserves history).                                                                                    |
-| `/reset`   | Reset session context (clears transcript).                                                                                          |
-| `/compact` | Compact transcript via [model summarization](models.md#transcript-compaction) (deferred response).                                  |
-| `/status`  | Show session status: provider, model, context fill, turns, compactions, queue depth.                                                |
-| `/model`   | Get or set the session model selection. Options: `session_id`, `agent_id`, `model_selection`.                                       |
-| `/queue`   | Manage the turn queue. Options: `action` (list/remove/clear), `priority`, `index`, `range`, `count`. Indexes are 1-based.           |
+| Command    | Description                                                                                                                                                                     |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/elevate` | Grant or revoke [elevated privileges](daemon.md#elevation). Options: `action` (grant/revoke), `session_id`, `duration`, `grant_id`.                                             |
+| `/abort`   | Abort the current session turn. Option: `session_id`.                                                                                                                           |
+| `/close`   | Kill a [subagent session](daemon.md#subagents) (defaults to this channel's session). Option: `session_id`. Refuses top-level agent sessions, which stay bound to their channel. |
+| `/steer`   | Steer a session with an operator prompt. Options: `prompt` (required), `session_id`, `delivery` (surface/internal).                                                             |
+| `/new`     | Start a new context segment (preserves history).                                                                                                                                |
+| `/reset`   | Reset session context (clears transcript).                                                                                                                                      |
+| `/compact` | Compact transcript via [model summarization](models.md#transcript-compaction) (deferred response).                                                                              |
+| `/status`  | Show session status: provider, model, context fill, turns, compactions, queue depth.                                                                                            |
+| `/model`   | Get or set the session model selection. Options: `session_id`, `agent_id`, `model_selection`.                                                                                   |
+| `/queue`   | Manage the turn queue. Options: `action` (list/remove/clear), `priority`, `index`, `range`, `count`. Indexes are 1-based.                                                       |
 
 When `session_id` is omitted, the handler resolves the session from the channel where the command was invoked. `session_id` accepts a session URN or a bare agent id (resolved to that agent's bootstrap primary session).
 
