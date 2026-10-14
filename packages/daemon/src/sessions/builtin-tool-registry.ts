@@ -68,6 +68,13 @@ export interface BuiltinToolContext {
     readonly persistent: number;
   }) => void;
 
+  /**
+   * Notified after a timer is queued or cancelled mid-turn with the
+   * recomputed unfired timer count for this session (queued and active
+   * timers as one cumulative sum; drives the live turn status bar).
+   */
+  readonly onTimersChanged?: (count: number) => void;
+
   /** Image block codec for the active model provider, or undefined when unsupported. */
   readonly imageBlockCodec?: ImageBlockCodec;
 

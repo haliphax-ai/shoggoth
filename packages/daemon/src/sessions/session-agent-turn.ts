@@ -136,6 +136,8 @@ export interface ExecuteSessionAgentTurnInput {
       readonly total: number;
       readonly persistent: number;
     }) => void;
+    /** A timer was queued or cancelled mid-turn: fresh unfired count (live bar). */
+    readonly onTimersChanged?: (count: number) => void;
   };
 }
 
@@ -559,6 +561,7 @@ export async function executeSessionAgentTurn(
           runtimeOpenaiBaseUrl: input.config.runtime?.openaiBaseUrl,
           isSubagentSession: isSubagentSessionUrn(input.sessionId),
           onSubagentsChanged: input.events?.onSubagentsChanged,
+          onTimersChanged: input.events?.onTimersChanged,
           imageBlockCodec,
           vault: vaultServiceRef.current,
         };

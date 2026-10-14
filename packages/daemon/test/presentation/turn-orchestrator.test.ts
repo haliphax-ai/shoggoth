@@ -211,6 +211,7 @@ describe("PresentationTurnOrchestrator", () => {
     expect(typeof tracker?.onToolCall).toBe("function");
     expect(typeof tracker?.onHitlQueued).toBe("function");
     expect(typeof tracker?.onCompaction).toBe("function");
+    expect(typeof tracker?.onTimersChanged).toBe("function");
     tracker?.onProse?.("delta");
     const barLine = await tracker?.finish?.("completed");
     expect(typeof barLine).toBe("string");
