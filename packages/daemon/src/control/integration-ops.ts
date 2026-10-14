@@ -661,6 +661,13 @@ export async function deliverSubagentResult(
     subLog: ReturnType<typeof getLogger>;
     /** Optional override merged into the parent turn's model invocation params (e.g. responseSchema for structured output). */
     modelInvocationOverride?: Partial<ModelInvocationParams>;
+    /**
+     * Spawning session to fall back to when `respondTo` cannot receive the turn
+     * (missing or terminated at delivery time). Omit to drop on failure (logged).
+     */
+    fallbackRespondTo?: string;
+    /** Set internally on fallback delivery: the original `respond_to` that was unavailable. */
+    unavailableRespondTo?: string;
   },
 ): Promise<void> {
   const {
@@ -673,6 +680,8 @@ export async function deliverSubagentResult(
     subLog,
     maxChars = 8000,
     modelInvocationOverride,
+    fallbackRespondTo,
+    unavailableRespondTo,
   } = opts;
 
   // drop mode: do nothing
@@ -687,7 +696,10 @@ export async function deliverSubagentResult(
   // Truncate to maxChars
   const truncatedText =
     assistantText.length > maxChars ? assistantText.slice(0, maxChars) : assistantText;
-  const baseContent = `[Subagent completed] session_id: ${childSessionId}\n\n${truncatedText}`;
+  const completedTag = unavailableRespondTo
+    ? `[Subagent completed — respond_to ${unavailableRespondTo} unavailable]`
+    : "[Subagent completed]";
+  const baseContent = `${completedTag} session_id: ${childSessionId}\n\n${truncatedText}`;
 
   // Reminders appended to the delivery paths:
   // - baseReminder tells the parent its reply routes back to the subagent, not the operator.
@@ -721,8 +733,12 @@ export async function deliverSubagentResult(
     },
   };
 
+  // Only the turn dispatch is guarded for fallback: a throw here means the target
+  // session could not run a turn (missing/terminated), so the result has not been
+  // delivered anywhere yet and can safely be re-routed.
+  let turnResult: Awaited<ReturnType<typeof ext.runSessionModelTurn>>;
   try {
-    const turnResult = await ext.runSessionModelTurn({
+    turnResult = await ext.runSessionModelTurn({
       sessionId: respondTo,
       userContent: asyncContent,
       userMetadata: {
@@ -741,6 +757,37 @@ export async function deliverSubagentResult(
         ...modelInvocationOverride,
       },
     });
+  } catch (err) {
+    subLog.warn("failed to deliver subagent result to respond_to session", {
+      childSessionId,
+      respondTo,
+      mode,
+      error: String(err),
+    });
+    if (fallbackRespondTo && fallbackRespondTo !== respondTo && !unavailableRespondTo) {
+      subLog.info("re-routing subagent result to spawning session", {
+        childSessionId,
+        respondTo,
+        fallbackRespondTo,
+        mode,
+      });
+      return deliverSubagentResult(ext, {
+        ...opts,
+        respondTo: fallbackRespondTo,
+        fallbackRespondTo: undefined,
+        unavailableRespondTo: respondTo,
+      });
+    }
+    subLog.warn("subagent result dropped: no live delivery target", {
+      childSessionId,
+      respondTo,
+      fallbackRespondTo,
+      mode,
+    });
+    return;
+  }
+
+  try {
     if (turnResult?.aborted || turnResult?.latestAssistantText) {
       await deliverOobStructuredResponse({
         structuredResponse: turnResult.latestAssistantText,
@@ -761,7 +808,7 @@ export async function deliverSubagentResult(
       internal: internalDelivery,
     });
   } catch (err) {
-    subLog.warn("failed to deliver subagent result to respond_to session", {
+    subLog.warn("failed to finalize subagent result delivery", {
       childSessionId,
       respondTo,
       mode,
@@ -1451,10 +1498,20 @@ export async function handleIntegrationControlOp(
 
       // Optional response delivery routing (defaults: respondTo = parent, internal = true).
       const respondToRaw = pl.respond_to;
-      const respondTo =
-        typeof respondToRaw === "string" && respondToRaw.trim()
-          ? respondToRaw.trim()
-          : parentSessionId;
+      const explicitRespondTo =
+        typeof respondToRaw === "string" && respondToRaw.trim() ? respondToRaw.trim() : undefined;
+      const respondTo = explicitRespondTo ?? parentSessionId;
+      if (explicitRespondTo) {
+        // Fail fast on a dead delivery target: otherwise the completion result has
+        // nowhere to land and the loss only surfaces hours later (see #455).
+        const respondToRow = sessions.getById(explicitRespondTo);
+        if (!respondToRow || respondToRow.status === "terminated") {
+          throw new IntegrationOpError(
+            "ERR_INVALID_PAYLOAD",
+            `respond_to session is missing or terminated: ${explicitRespondTo}`,
+          );
+        }
+      }
       const internalDelivery = pl.internal !== false; // default true
       const deliveryModeRaw = pl.delivery_mode;
       const deliveryMode: "inline" | "queue" | "drop" =
@@ -1607,6 +1664,7 @@ export async function handleIntegrationControlOp(
                 mode: "one_shot",
                 assistantText: turn.latestAssistantText,
                 subLog,
+                fallbackRespondTo: parentSessionId,
               });
             })
             .catch((err) => {
@@ -1706,6 +1764,7 @@ export async function handleIntegrationControlOp(
           mode: "one_shot",
           assistantText: turn.latestAssistantText,
           subLog,
+          fallbackRespondTo: parentSessionId,
         });
         return {
           session_id: childId,
@@ -1926,6 +1985,7 @@ export async function handleIntegrationControlOp(
               mode: "persistent",
               assistantText: turn.latestAssistantText,
               subLog,
+              fallbackRespondTo: parentSessionId,
             });
           }
         })
