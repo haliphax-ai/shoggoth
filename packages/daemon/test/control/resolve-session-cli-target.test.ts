@@ -79,3 +79,43 @@ describe("resolveSessionTargetFromCliArg", () => {
     );
   });
 });
+
+describe("resolveSessionTargetFromCliArg active subagent shorthand", () => {
+  const cfg = {
+    ...defaultConfig("/tmp/cfg"),
+    agents: {
+      list: {
+        myagent: { platforms: { discord: { routes: [] } } },
+      },
+    },
+  } as ReturnType<typeof defaultConfig>;
+
+  const subagentUrn = "agent:myagent:subagent:sub-1";
+  type Row = { id: string; status: string; subagentAgentId?: string };
+  const fakeSessions = (rows: Row[]) =>
+    ({
+      list: (filter?: { subagentAgentId?: string }) =>
+        rows.filter((r) => r.subagentAgentId === filter?.subagentAgentId),
+    }) as unknown as Parameters<typeof resolveSessionTargetFromCliArg>[2];
+
+  it("resolves an active subagent shorthand to its session URN", () => {
+    const sessions = fakeSessions([
+      { id: subagentUrn, status: "active", subagentAgentId: "research-1" },
+    ]);
+    assert.equal(resolveSessionTargetFromCliArg("research-1", cfg, sessions), subagentUrn);
+  });
+
+  it("ignores terminated subagents and falls back to top-level resolution", () => {
+    const sessions = fakeSessions([
+      { id: subagentUrn, status: "terminated", subagentAgentId: "research-1" },
+    ]);
+    assert.throws(
+      () => resolveSessionTargetFromCliArg("research-1", cfg, sessions),
+      /no platform bindings configured/,
+    );
+  });
+
+  it("does not consult sessions when no store is provided", () => {
+    assert.throws(() => resolveSessionTargetFromCliArg("research-1", cfg), /no platform bindings/);
+  });
+});
