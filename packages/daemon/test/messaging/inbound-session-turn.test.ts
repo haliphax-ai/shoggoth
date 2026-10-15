@@ -10,6 +10,7 @@ vi.mock("../../src/sessions/session-agent-turn.js", () => ({
         input.stream.onModelTextDelta("a".repeat(i * 30));
       }
     }
+    input.events?.onThinkingDelta?.("private reasoning");
     return {
       latestAssistantText: "a".repeat(300),
       failoverMeta: undefined,
@@ -243,6 +244,75 @@ describe("runInboundSessionTurn streaming delta delivery", () => {
     // the total length will be more than the final content
     // The important thing is that setFullContent provides the final reconciliation
     expect(totalPushUpdateLength).toBeGreaterThan(300);
+  });
+});
+
+describe("runInboundSessionTurn thinking display", () => {
+  const buildTurn = () =>
+    Promise.resolve({
+      sessionId: "s1",
+      agentId: "main",
+      userContent: "hi",
+      messages: [],
+      tools: [],
+      systemPrompt: "",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      config: {} as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      stateDb: {} as any,
+    });
+
+  it("slipstreams thinking in streamed edits and includes it in final content", async () => {
+    const setFullContent = vi.fn().mockResolvedValue(undefined);
+    const pushUpdate = vi.fn().mockResolvedValue(undefined);
+    await runInboundSessionTurn({
+      buildTurn,
+      streaming: {
+        minIntervalMs: 0,
+        start: vi.fn().mockResolvedValue({ setFullContent, pushUpdate }),
+      },
+      sliceDisplayText: (text) => text,
+      showThinking: true,
+      formatAssistantReply: (text) => text,
+      formatErrorReply: String,
+      sendAssistantBody: vi.fn().mockResolvedValue(undefined),
+      sendErrorBody: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(pushUpdate.mock.calls.some(([text]) => text.includes("> 💭 private reasoning"))).toBe(
+      true,
+    );
+    expect(setFullContent).toHaveBeenLastCalledWith(`${"a".repeat(300)}\n\n> 💭 private reasoning`);
+  });
+
+  it("includes reasoning in the final at-once reply without streaming", async () => {
+    const sendAssistantBody = vi.fn().mockResolvedValue(undefined);
+    await runInboundSessionTurn({
+      buildTurn,
+      sliceDisplayText: (text) => text,
+      showThinking: true,
+      formatAssistantReply: (text) => text,
+      formatErrorReply: String,
+      sendAssistantBody,
+      sendErrorBody: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(sendAssistantBody).toHaveBeenCalledWith(
+      `> 💭 private reasoning\n\n${"a".repeat(300)}`,
+      undefined,
+    );
+  });
+
+  it("does not expose reasoning when disabled", async () => {
+    const sendAssistantBody = vi.fn().mockResolvedValue(undefined);
+    await runInboundSessionTurn({
+      buildTurn,
+      sliceDisplayText: (text) => text,
+      showThinking: false,
+      formatAssistantReply: (text) => text,
+      formatErrorReply: String,
+      sendAssistantBody,
+      sendErrorBody: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(sendAssistantBody).toHaveBeenCalledWith("a".repeat(300), undefined);
   });
 });
 

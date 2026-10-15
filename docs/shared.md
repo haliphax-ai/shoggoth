@@ -67,6 +67,7 @@ Defines the entire Shoggoth configuration surface as Zod schemas. Every config k
 | `AttachmentHandlingMode`           | `"download"` \| `"inline"` \| `"hybrid"` — how inbound platform attachments are processed. Default: `"download"`.                                                                                                                                                                                              |
 | `AttachmentHandlingConfig`         | `{ mode?: AttachmentHandlingMode }` — optional block under `platforms.attachmentHandling` (global) and `agents.list.<id>.platforms.attachmentHandling` (per-agent). Per-agent takes precedence over global; default `"download"`.                                                                              |
 | `StatusBarConfig`                  | `{ enabled?, statusEnabled?, sequenceEnabled?, toolCallsEnabled?, subagentsEnabled?, timersEnabled?, contextWindowEnabled?, compactionsEnabled? }` — optional block under `platforms.statusBar`. Defaults: every section enabled; `SHOGGOTH_STATUS_BAR=0` disables entirely.                                   |
+| `showThinking`                     | Boolean under `platforms`; defaults to `true`. When enabled, model reasoning is displayed inline in emoji-prefixed blockquotes.                                                                                                                                                                                |
 | `ShoggothRuntimeConfig`            | Daemon timers, feature flags, resilience settings. Includes `agentId`, `toolCallTimeoutMs`, `modelResilience`, `turnQueue`, `minimalContext`, etc.                                                                                                                                                             |
 | `ShoggothAgentsConfig`             | Global agent defaults: `contextLevel`, `subagentContextLevel`, `internalStreaming`, `subagentModel`, `subagentMcp`. Contains `list` map of per-agent entries.                                                                                                                                                  |
 | `ShoggothAgentEntry`               | Per-agent overrides: `displayName`, `emoji`, `models`, `platforms`, `memory`, `agentToAgent`, `subagentSpawnAllow`, `maxSpawnDepth`, `sessionQuery`, `policy`, `hitl`, `contextLevel`, `subagentContextLevel`, `toolDiscovery`, `thinkingDisplay`, `subagentModel`, `mcp`, `subagentMcp`, `toolCallTimeoutMs`. |
@@ -398,6 +399,10 @@ Controls how inbound platform attachments (images, files) are processed before b
 **Schema:** `statusBarConfigSchema` in `schema.ts`
 
 Controls the per-turn status bar rendered at the end of platform messages (e.g. the Discord turn status bar). Configurable globally under `platforms.statusBar`. Default: every section enabled.
+
+### `platforms.showThinking`
+
+When `true` (the default), model reasoning deltas are included inline in user-visible replies as blockquotes prefixed with `💭`. Set to `false` to suppress reasoning output. This setting applies to streamed edits and at-once replies.
 
 ### Fields
 

@@ -12,6 +12,7 @@ import {
 } from "@shoggoth/shared";
 import {
   createCoalescingStreamPusher,
+  createThinkingOutput,
   createHitlPendingResolutionStack,
   createPolicyEngine,
   createSessionStore,
@@ -693,6 +694,8 @@ export async function startDiscordPlatform(
       // live/terminal difference is the phase emoji). Captures until the stream
       // handle exists; attachSink flushes the ⏳ line onto the placeholder.
       let surfaceTracker: TurnStatusBarTracker | undefined;
+      let thinkingOutput: ReturnType<typeof createThinkingOutput> | undefined;
+      let surfaceStreamPusher: ReturnType<typeof createCoalescingStreamPusher> | undefined;
       const executeTurn = (
         afterHitlQueued?: (row: PendingActionRow) => void | Promise<void>,
         streamOverride?: ExecuteSessionAgentTurnInput["stream"],
@@ -729,11 +732,18 @@ export async function startDiscordPlatform(
           // Forward turn events into the tracker so the live bar re-renders
           // mid-turn (thinking / tool count / HITL pause / compaction /
           // context fill).
-          ...(surfaceTracker
+          ...(surfaceTracker || thinkingOutput
             ? {
                 events: {
-                  onThinkingDelta: (accumulated: string) =>
-                    surfaceTracker?.onThinkingDelta?.(accumulated),
+                  onThinkingDelta: (accumulated: string) => {
+                    if (thinkingOutput) {
+                      const display = thinkingOutput.onThinking(accumulated);
+                      if (surfaceStreamPusher) {
+                        surfaceStreamPusher.push(display.trim() ? display : "…");
+                      }
+                    }
+                    surfaceTracker?.onThinkingDelta?.(accumulated);
+                  },
                   onToolCall: (ev) => surfaceTracker?.onToolCall?.(ev),
                   onHitlQueued: (call) => surfaceTracker?.onHitlQueued?.(call),
                   onCompaction: () => surfaceTracker?.onCompaction?.(),
@@ -761,6 +771,10 @@ export async function startDiscordPlatform(
         // the typing indicator — Discord cancels typing when a bot posts a
         // message — and coalesce model text deltas into live edits of that
         // message, matching the standard inbound-turn pathway.
+        thinkingOutput =
+          (opts.configRef?.current ?? opts.config).platforms?.showThinking === false
+            ? undefined
+            : createThinkingOutput();
         let surfaceStreamHandle: StreamHandle | undefined;
         /**
          * Whether the raw stream handle natively renders a status bar line.
@@ -806,15 +820,17 @@ export async function startDiscordPlatform(
             }
           }
         }
-        const surfaceStreamPusher = surfaceStreamHandle
+        surfaceStreamPusher = surfaceStreamHandle
           ? createCoalescingStreamPusher((s) => surfaceStreamHandle!.pushUpdate(s), streamMinMs())
           : undefined;
         /**
-         * Last non-whitespace streamed body. The delta display accumulates every
-         * prose segment of the turn (pre-tools and post-tools) across tool
-         * rounds, so this — not the segment-scoped latestAssistantText — is the
-         * delivered text whenever the turn streamed any prose. Undefined when
-         * nothing text streamed (tool-only / aborted / failed turns).
+         * Last non-whitespace streamed display: the thinking output's rendered
+         * accumulation carrying every prose segment of the turn (pre-tools and
+         * post-tools) across tool rounds, interleaved with any streamed
+         * thinking quotes. This — not the segment-scoped latestAssistantText —
+         * is the delivered text whenever the turn streamed any prose.
+         * Undefined when nothing text streamed (tool-only / aborted / failed
+         * turns).
          */
         let streamedBody: string | undefined;
 
@@ -825,24 +841,26 @@ export async function startDiscordPlatform(
               ? {
                   streamModel: true,
                   onModelTextDelta: (t: string) => {
-                    if (t.trim()) streamedBody = t;
-                    surfaceStreamPusher.push(t.trim() ? t : "…");
+                    const display = thinkingOutput ? thinkingOutput.onText(t) : t;
+                    if (display.trim()) streamedBody = display;
+                    surfaceStreamPusher!.push(display.trim() ? display : "…");
                     // Prose phase (💬) on the live bar.
                     surfaceTracker?.onProse?.(t);
                   },
                 }
-              : streamEnabled()
+              : streamEnabled() || thinkingOutput
                 ? { streamModel: true }
                 : undefined,
           );
           const cfg = opts.configRef?.current ?? opts.config;
-          const fullBody = formatAssistantReply(
+          const formattedBody = formatAssistantReply(
             cfg,
             sid,
             env,
             turnResult.latestAssistantText,
             turnResult.failoverMeta,
           );
+          const fullBody = thinkingOutput?.render(formattedBody) ?? formattedBody;
           // ONE terminal composition: the tracker's finish() renders the
           // frozen bar (✅/🛑/❌) through the same renderer as the live bar and
           // returns the line for delivery — the terminal snapshot carries this
@@ -880,7 +898,8 @@ export async function startDiscordPlatform(
               // The flushed accumulation already carries every prose segment of
               // the turn and the tracker's finish() landed the terminal bar
               // through the sink — but this handle cannot render a bar itself,
-              // so append the terminal line to the streamed body explicitly.
+              // so append the terminal line to the streamed display (all
+              // prose segments plus rendered thinking quotes) explicitly.
               await surfaceStreamHandle.setFullContent(`${streamedBody}\n\n${barLine}`);
             }
             // Otherwise the delivered message is already final: the flushed
