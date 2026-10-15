@@ -735,6 +735,28 @@ describe("DiscordStreamingOutbound synthetic formatting close", () => {
     expect(editCalls[1][2].content).toBe("**also unclosed");
   });
 
+  it("closes a boundary single underscore but leaves snake_case prose untouched", async () => {
+    const transport = createMockTransport();
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: discordCapabilityDescriptor(),
+      channelId: "ch-1",
+      maxContentLength: 2000,
+    });
+    const handle = await streaming.start();
+    await handle.setStatusBar(BAR);
+
+    await handle.pushUpdate("pre _unclosed at beginning");
+    let editCalls = vi.mocked(transport.editMessage).mock.calls;
+    expect(editCalls[editCalls.length - 1][2].content).toBe(
+      `pre _unclosed at beginning_\n\n${BAR}`,
+    );
+
+    await handle.pushUpdate("the snake_case token here");
+    editCalls = vi.mocked(transport.editMessage).mock.calls;
+    expect(editCalls[editCalls.length - 1][2].content).toBe(`the snake_case token here\n\n${BAR}`);
+  });
+
   it("re-render via setStatusBar guards the last pushed text too", async () => {
     const transport = createMockTransport();
     const streaming = createDiscordStreamingOutbound({

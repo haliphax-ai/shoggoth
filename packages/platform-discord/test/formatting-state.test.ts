@@ -62,6 +62,57 @@ describe("computeOpenFormatting", () => {
     const state = computeOpenFormatting("run `npm i *` now");
     assert.deepStrictEqual(state.openInline, []);
   });
+
+  // Single "_" follows Discord's asymmetric word-boundary rule.
+  it("tracks a wrapped single underscore as balanced (T1)", () => {
+    const state = computeOpenFormatting("pre _wrapped italic_ post");
+    assert.deepStrictEqual(state.openInline, []);
+  });
+
+  it("tracks a wrapped single underscore at message start as balanced (T2)", () => {
+    const state = computeOpenFormatting("_wrapped italic_ at the very beginning");
+    assert.deepStrictEqual(state.openInline, []);
+  });
+
+  it("reports an unclosed boundary underscore after a space (T3)", () => {
+    const state = computeOpenFormatting("pre _unclosed at beginning, no closing tail");
+    assert.deepStrictEqual(state.openInline, ["_"]);
+  });
+
+  it("ignores a lone closer-side underscore (T4/T6)", () => {
+    // "word_" — a single _ preceded by a word char with no opener opens nothing.
+    const state = computeOpenFormatting("pre unopened at end only_ tail");
+    assert.deepStrictEqual(state.openInline, []);
+    assert.strictEqual(
+      computeOpenFormatting("message ends with an unclosed underscore at end of text_").openInline
+        .length,
+      0,
+    );
+  });
+
+  it("ignores intra-word single underscores, even an odd count (T5)", () => {
+    // snake_case_name has two _s (even) but snake_case has one (odd); neither formats.
+    assert.deepStrictEqual(
+      computeOpenFormatting("mid_word_underscore_inside_text here").openInline,
+      [],
+    );
+    assert.deepStrictEqual(computeOpenFormatting("the snake_case token here").openInline, []);
+  });
+
+  it("reports an unclosed boundary underscore at message start (T7)", () => {
+    const state = computeOpenFormatting("_underscore at the very beginning, unclosed here");
+    assert.deepStrictEqual(state.openInline, ["_"]);
+  });
+
+  it("closes a boundary underscore across lines", () => {
+    const state = computeOpenFormatting("_italic started here\nand closed here_ tail");
+    assert.deepStrictEqual(state.openInline, []);
+  });
+
+  it("does not let an intra-word _ close an open boundary _", () => {
+    const state = computeOpenFormatting("_start and snake_case token");
+    assert.deepStrictEqual(state.openInline, ["_"]);
+  });
 });
 
 describe("computeChunkClose", () => {
@@ -116,5 +167,24 @@ describe("appendSyntheticClose", () => {
   it("is idempotent", () => {
     const once = appendSyntheticClose("*unfinished");
     assert.strictEqual(appendSyntheticClose(once), once);
+  });
+
+  it("closes an unclosed boundary single underscore", () => {
+    assert.strictEqual(
+      appendSyntheticClose("pre _unclosed at beginning"),
+      "pre _unclosed at beginning_",
+    );
+  });
+
+  it("leaves snake_case prose untouched", () => {
+    assert.strictEqual(appendSyntheticClose("the snake_case token"), "the snake_case token");
+    assert.strictEqual(
+      appendSyntheticClose("mid_word_underscore_inside"),
+      "mid_word_underscore_inside",
+    );
+  });
+
+  it("leaves a lone closer-side underscore untouched", () => {
+    assert.strictEqual(appendSyntheticClose("ends with word_"), "ends with word_");
   });
 });

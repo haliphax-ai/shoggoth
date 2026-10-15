@@ -26,11 +26,27 @@ export interface OpenFormattingState {
 /** No formatting constructs open. */
 export const CLOSED_FORMATTING: OpenFormattingState = { openFence: "", openInline: [] };
 
+/** Word character for underscore boundary checks (letters, digits, underscore). */
+const WORD_CHAR_RE = /[\p{L}\p{N}_]/u;
+
+const isWordChar = (ch: string | undefined): boolean => ch !== undefined && WORD_CHAR_RE.test(ch);
+const isSpaceChar = (ch: string | undefined): boolean => ch === undefined || /\s/.test(ch);
+
 /**
- * Determine which inline markers are "open" (toggled an odd number of times)
- * at the end of `raw`, starting from `prevOpen` state.
+ * Determine which inline markers are "open" at the end of `raw`, starting
+ * from `prevOpen` state.
  *
  * Only counts markers that appear outside of fenced code blocks.
+ *
+ * `**`, `*`, `__`, `~~`, and `||` are counted by parity. A single `_` is
+ * tracked separately with Discord's asymmetric word-boundary rule: it OPENS
+ * only when preceded by a non-word boundary (or line start) and followed by
+ * non-whitespace, and CLOSES only when preceded by non-whitespace and
+ * followed by a non-word boundary (or line end). This keeps intra-word
+ * underscores (`snake_case_name`) from ever counting as formatting — even an
+ * odd count of them — while still closing `_italic` before it can bleed into
+ * a trailing status bar. A lone closer-side `_` (e.g. `word_`) opens nothing
+ * and is ignored, matching Discord's literal rendering.
  */
 export function computeOpenInlineMarkers(
   raw: string,
@@ -38,7 +54,10 @@ export function computeOpenInlineMarkers(
   prevOpenFence: string,
 ): string[] {
   const toggleCounts = new Map<string, number>();
-  for (const m of prevOpen) toggleCounts.set(m, 1);
+  for (const m of prevOpen) {
+    if (m !== "_") toggleCounts.set(m, 1);
+  }
+  let underscoreOpen = prevOpen.includes("_");
 
   let inFence = prevOpenFence !== "";
 
@@ -77,7 +96,21 @@ export function computeOpenInlineMarkers(
           break;
         }
       }
-      if (!matched) pos++;
+      if (matched) continue;
+
+      // Single "_" — boundary-aware, per the rule documented above.
+      if (line[pos] === "_") {
+        const prevCh = pos > 0 ? line[pos - 1] : undefined;
+        const nextCh = pos + 1 < line.length ? line[pos + 1] : undefined;
+        if (!underscoreOpen) {
+          // Opens only at a preceding word boundary with content after.
+          if (!isWordChar(prevCh) && !isSpaceChar(nextCh)) underscoreOpen = true;
+        } else {
+          // Closes only with content before and a following word boundary.
+          if (!isSpaceChar(prevCh) && !isWordChar(nextCh)) underscoreOpen = false;
+        }
+      }
+      pos++;
     }
   }
 
@@ -87,6 +120,7 @@ export function computeOpenInlineMarkers(
     const c = toggleCounts.get(marker) ?? 0;
     if (c % 2 === 1) open.push(marker);
   }
+  if (underscoreOpen) open.push("_");
   return open;
 }
 
@@ -161,9 +195,12 @@ export function buildReopenPrefix(state: OpenFormattingState): string {
  * synthetic markers so the rendered output cannot leak into whatever follows
  * it (e.g. the turn status bar).
  *
- * - Unclosed inline markers (`*`, `**`, `__`, `~~`, `||`) get their closing
- *   marker appended. When a later chunk completes the pair, the marker count
- *   becomes even again and the synthetic close disappears on its own.
+ * - Unclosed inline markers (`*`, `**`, `__`, `~~`, `||`, and boundary-aware
+ *   `_`) get their closing marker appended. When a later chunk completes the
+ *   pair, the marker count becomes even again and the synthetic close
+ *   disappears on its own. Single `_` only counts at word boundaries
+ *   (Discord's asymmetric rule), so intra-word underscores in prose such as
+ *   `snake_case_name` never trigger a synthetic close.
  * - An unclosed fenced block gets a closing ``` (the fence swallows everything
  *   after it, including the bar, until closed).
  * - Inside a fenced block, inline markers are literal text and are ignored,
