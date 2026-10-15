@@ -161,6 +161,7 @@ async function spawnAndGetModelSelection(
           parent_session_id: parentId,
           prompt: "test task",
           mode: "one_shot",
+          agent_id: "sm-agent",
           ...payload,
         },
       });
@@ -433,6 +434,7 @@ describe("subagentModel config resolution", () => {
             parent_session_id: parentId,
             prompt: "test task",
             mode: "one_shot",
+            agent_id: "sm-agent",
             model_options: { model: "nonexistent/model" },
           },
         });
@@ -517,6 +519,7 @@ describe("subagentModel config resolution", () => {
             parent_session_id: parentId,
             prompt: "test task",
             mode: "one_shot",
+            agent_id: "sm-agent",
             model_options: { model: "invalid-model-no-slash" },
           },
         });
@@ -600,6 +603,7 @@ describe("subagentModel config resolution", () => {
             parent_session_id: parentId,
             prompt: "test task",
             mode: "one_shot",
+            agent_id: "sm-agent",
           },
         });
         const res = parseResponseLine(line);
@@ -679,6 +683,7 @@ describe("subagentModel config resolution", () => {
             parent_session_id: parentId,
             prompt: "test task",
             mode: "one_shot",
+            agent_id: "sm-agent",
             model_options: { model: "openai/gpt-4o" },
           },
         });

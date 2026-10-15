@@ -1,10 +1,21 @@
 import type { ShoggothConfig } from "@shoggoth/shared";
 import {
   assertValidAgentId,
+  assertValidSubagentAgentId,
   parseAgentSessionUrn,
   resolveAgentDefaultPlatform,
 } from "@shoggoth/shared";
 import { resolveBootstrapPrimarySessionUrn } from "@shoggoth/messaging";
+import type { SessionStore } from "../sessions/session-store";
+
+function isSubagentAgentIdShape(t: string): boolean {
+  try {
+    assertValidSubagentAgentId(t);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * CLI/session tooling: if `raw` is a valid agent session URN, use it; otherwise treat `raw` as an
@@ -13,13 +24,21 @@ import { resolveBootstrapPrimarySessionUrn } from "@shoggoth/messaging";
  *
  * Platform is derived from the target agent's platform bindings in `agents.list.<agentId>.platforms`.
  */
-export function resolveSessionTargetFromCliArg(raw: string, cfg: ShoggothConfig): string {
+export function resolveSessionTargetFromCliArg(
+  raw: string,
+  cfg: ShoggothConfig,
+  sessions?: Pick<SessionStore, "list">,
+): string {
   const t = raw.trim();
   if (!t) {
     throw new Error("session or agent id must be non-empty");
   }
   if (parseAgentSessionUrn(t)) {
     return t;
+  }
+  if (sessions && isSubagentAgentIdShape(t)) {
+    const active = sessions.list({ subagentAgentId: t }).find((r) => r.status !== "terminated");
+    if (active) return active.id;
   }
   try {
     assertValidAgentId(t);

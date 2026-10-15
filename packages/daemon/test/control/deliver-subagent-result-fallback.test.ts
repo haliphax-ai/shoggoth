@@ -40,7 +40,7 @@ describe("deliverSubagentResult fallback", () => {
     expect(runSessionModelTurn.mock.calls[0][0].sessionId).toBe("dead-target");
     expect(runSessionModelTurn.mock.calls[1][0].sessionId).toBe("spawning-parent");
     expect(runSessionModelTurn.mock.calls[1][0].userContent).toContain(
-      "[Subagent completed — respond_to dead-target unavailable] session_id: child-f1",
+      "[Subagent completed — respond_to dead-target unavailable] session_id: `child-f1`",
     );
     expect(runSessionModelTurn.mock.calls[1][0].userContent).toContain("substantive report");
   });
@@ -105,7 +105,7 @@ describe("deliverSubagentResult fallback", () => {
 
     expect(runSessionModelTurn).toHaveBeenCalledTimes(1);
     expect(runSessionModelTurn.mock.calls[0][0].userContent).toContain(
-      "[Subagent completed] session_id: child-f4",
+      "[Subagent completed] session_id: `child-f4`",
     );
   });
 });

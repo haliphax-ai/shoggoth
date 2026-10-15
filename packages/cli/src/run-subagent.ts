@@ -34,13 +34,27 @@ function parseSubagentSpawnArgv(args: string[]): {
   positional: string[];
   modelOptions?: Record<string, unknown>;
   deliveryMode?: string;
+  agentId?: string;
   error?: string;
 } {
   const positional: string[] = [];
   let modelOptions: Record<string, unknown> | undefined;
   let deliveryMode: string | undefined;
+  let agentId: string | undefined;
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
+    if (a === "--agent-id") {
+      const raw = args[++i]?.trim();
+      if (!raw) return { positional: [], error: "missing value for --agent-id" };
+      agentId = raw;
+      continue;
+    }
+    if (a.startsWith("--agent-id=")) {
+      const raw = a.slice("--agent-id=".length).trim();
+      if (!raw) return { positional: [], error: "empty value for --agent-id=" };
+      agentId = raw;
+      continue;
+    }
     if (a === "--model-options") {
       const raw = args[++i];
       if (raw === undefined) return { positional: [], error: "missing value for --model-options" };
@@ -95,14 +109,17 @@ function parseSubagentSpawnArgv(args: string[]): {
     }
     positional.push(a);
   }
-  return { positional, modelOptions, deliveryMode };
+  return { positional, modelOptions, deliveryMode, agentId };
 }
 
 function printSubagentHelp(): void {
   console.log(`shoggoth ${VERSION}
 Usage:
-  shoggoth subagent spawn [--model-options <json>] one_shot <parentUrn|agentId> <prompt...>
-  shoggoth subagent spawn [--model-options <json>] persistent <parentUrn|agentId> [threadId] <prompt...>
+  shoggoth subagent spawn --agent-id <id> [--model-options <json>] one_shot <parentUrn|agentId> <prompt...>
+  shoggoth subagent spawn --agent-id <id> [--model-options <json>] persistent <parentUrn|agentId> [threadId] <prompt...>
+
+  --agent-id    Required. Terse human-readable subagent ID (1-20 alphanumeric or dash characters),
+                unique among active subagents and distinct from top-level agent IDs.
 
   one_shot      Internal one-shot child (operator).
   persistent    Persistent child: optional platform thread id for replies; A2A-only when omitted; operator.
@@ -113,8 +130,8 @@ Usage:
 }
 
 const SPAWN_USAGE =
-  "usage: shoggoth subagent spawn [--model-options <json>] one_shot <parentUrn|agentId> <prompt...>\n" +
-  "       shoggoth subagent spawn [--model-options <json>] persistent <parentUrn|agentId> [threadId] <prompt...>\n" +
+  "usage: shoggoth subagent spawn --agent-id <id> [--model-options <json>] one_shot <parentUrn|agentId> <prompt...>\n" +
+  "       shoggoth subagent spawn --agent-id <id> [--model-options <json>] persistent <parentUrn|agentId> [threadId] <prompt...>\n" +
   "       (see: shoggoth subagent --help)\n" +
   "       env: optional SHOGGOTH_SUBAGENT_INACTIVITY_MINUTES (persistent only; inactivity" +
   " window in minutes that resets on each delivered response, default " +
@@ -133,9 +150,16 @@ export async function runSubagentCli(argv: string[]): Promise<void> {
 
   const sub = argv[0];
   if (sub === "spawn") {
-    const { positional, modelOptions, deliveryMode, error } = parseSubagentSpawnArgv(argv.slice(1));
+    const { positional, modelOptions, deliveryMode, agentId, error } = parseSubagentSpawnArgv(
+      argv.slice(1),
+    );
     if (error) {
       console.error(error);
+      process.exitCode = 1;
+      return;
+    }
+    if (!agentId) {
+      console.error("--agent-id <id> is required (1-20 alphanumeric or dash characters)");
       process.exitCode = 1;
       return;
     }
@@ -202,6 +226,7 @@ export async function runSubagentCli(argv: string[]): Promise<void> {
         payload.inactivity_minutes = inactivityMinutes;
       }
     }
+    payload.agent_id = agentId;
     if (modelOptions !== undefined) {
       payload.model_options = modelOptions;
     }
