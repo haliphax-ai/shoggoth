@@ -1053,7 +1053,21 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
 
       // --- Mid-loop steer injection ---
       for (const s of drainSteers(options.sessionId)) {
+        log.info("steering message injected into active tool loop", {
+          sessionId: options.sessionId,
+          message: s,
+        });
         options.model.pushSteerMessage?.(s);
+        // Persist the steer in the transcript so it survives the turn and is
+        // available to context assembly on subsequent turns.
+        if (options.transcript) {
+          appendTx({
+            role: "user",
+            content: s,
+            metadata: { steer: true },
+          });
+          emitStats?.({ transcriptMessageCount: getTranscriptCount() });
+        }
       }
     }
 

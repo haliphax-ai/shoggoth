@@ -7,8 +7,10 @@ import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
 import { openStateDb } from "../../src/db/open";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
-import { createSessionStore } from "../../src/sessions/session-store";
+import { createSessionStore, getSessionContextSegmentId } from "../../src/sessions/session-store";
+import { createTranscriptStore } from "../../src/sessions/transcript-store";
 import { createToolRunStore } from "../../src/sessions/tool-run-store";
+import { createLogger, setRootLogger } from "../../src/logging";
 import { runToolLoop, type ModelClient } from "../../src/sessions/tool-loop";
 import { pushSteer, _resetAllChannels } from "../../src/sessions/steer-channel";
 
@@ -18,6 +20,25 @@ function openMigratedDb(): { db: Database.Database; dir: string } {
   const db = openStateDb(dbPath);
   migrate(db, defaultMigrationsDir());
   return { db, dir };
+}
+
+function stubLogger() {
+  const logs: Array<{
+    level: string;
+    msg: string;
+    fields?: Record<string, unknown>;
+  }> = [];
+  const log = (level: string) => (msg: string, fields?: Record<string, unknown>) => {
+    logs.push({ level, msg, fields });
+  };
+  const logger = {
+    debug: log("debug"),
+    info: log("info"),
+    warn: log("warn"),
+    error: log("error"),
+    child: () => logger,
+  };
+  return { logger, logs };
 }
 
 describe("runToolLoop steer injection", () => {
@@ -232,5 +253,105 @@ describe("runToolLoop steer injection", () => {
 
     const steerMsgs = pushed.filter((m) => m.role === "user");
     assert.equal(steerMsgs.length, 0);
+  });
+
+  it("appends steer messages to the transcript as user messages", async () => {
+    let step = 0;
+    const model: ModelClient = {
+      async complete() {
+        step += 1;
+        if (step === 1) {
+          return {
+            content: null,
+            toolCalls: [{ id: "c1", name: "read", argsJson: "{}" }],
+          };
+        }
+        return { content: "steered", toolCalls: [] };
+      },
+      pushToolMessage() {},
+      pushSteerMessage() {},
+    };
+    const toolRuns = createToolRunStore(db);
+    const tr = createTranscriptStore(db);
+    const seg = getSessionContextSegmentId(db, "sess");
+
+    const exec = vi.fn(async () => {
+      pushSteer("sess", "persist this steer");
+      return { resultJson: "{}" };
+    });
+
+    await runToolLoop({
+      db,
+      sessionId: "sess",
+      runId: "run-steer-tx",
+      principalId: "p",
+      policy: { check: () => ({ allow: true }) },
+      audit: { record: () => {} },
+      model,
+      tools: [{ name: "read" }],
+      executor: { execute: exec },
+      toolRuns,
+      transcript: tr,
+      contextSegmentId: seg,
+    });
+
+    const page = tr.listPage({ sessionId: "sess", contextSegmentId: seg, afterSeq: 0, limit: 100 });
+    const steerRow = page.messages.find(
+      (m) => m.role === "user" && (m.content ?? "").includes("persist this steer"),
+    );
+    assert.ok(steerRow, "steer message should be persisted in the transcript");
+    assert.equal((steerRow!.metadata as { steer?: boolean } | undefined)?.steer, true);
+  });
+
+  it("logs the steering message content when injected into an active loop", async () => {
+    const stub = stubLogger();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setRootLogger(stub.logger as any);
+    try {
+      let step = 0;
+      const model: ModelClient = {
+        async complete() {
+          step += 1;
+          if (step === 1) {
+            return {
+              content: null,
+              toolCalls: [{ id: "c1", name: "read", argsJson: "{}" }],
+            };
+          }
+          return { content: "steered", toolCalls: [] };
+        },
+        pushToolMessage() {},
+        pushSteerMessage() {},
+      };
+      const toolRuns = createToolRunStore(db);
+
+      const exec = vi.fn(async () => {
+        pushSteer("sess", "log this steer");
+        return { resultJson: "{}" };
+      });
+
+      await runToolLoop({
+        db,
+        sessionId: "sess",
+        runId: "run-steer-log",
+        principalId: "p",
+        policy: { check: () => ({ allow: true }) },
+        audit: { record: () => {} },
+        model,
+        tools: [{ name: "read" }],
+        executor: { execute: exec },
+        toolRuns,
+      });
+    } finally {
+      setRootLogger(createLogger({ component: "tool-loop-steer.test" }));
+    }
+
+    const entry = stub.logs.find(
+      (l) =>
+        l.msg.includes("steering message") &&
+        String(l.fields?.message ?? "").includes("log this steer"),
+    );
+    assert.ok(entry, "steer message content should appear in the daemon logs");
+    assert.equal(entry!.fields?.sessionId, "sess");
   });
 });
