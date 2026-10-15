@@ -1,15 +1,11 @@
 import { isSyntheticToolCall } from "./structured-output-utils";
-import {
-  validateResponseSchema,
-  StructuredOutputValidationError,
-} from "./response-validation";
+import { validateResponseSchema, StructuredOutputValidationError } from "./response-validation";
 import { stripXmlThinkingTags } from "./thinking-normalize";
 import { assertResponseOk, safeJsonParse } from "./resilient-fetch";
 import type { ChatMessage, ChatToolCall, ModelUsage, ResponseSchema } from "./types";
 
 /** Nudge message appended when forcing the model to use the structured output tool. */
-export const FOLLOW_UP_NUDGE =
-  "Please provide your response using the __structured_output__ tool.";
+export const FOLLOW_UP_NUDGE = "Please provide your response using the __structured_output__ tool.";
 
 /**
  * Build the follow-up messages array for a structured-output follow-up call.
@@ -47,19 +43,21 @@ export async function executeStructuredOutputApiCall(
   options?: {
     formatErrorBody?: (rawText: string) => string;
     jsonErrorMessage?: string;
+    /** Aborts the follow-up request (surfaces as `ModelRequestAbortedError`). */
+    signal?: AbortSignal;
   },
 ): Promise<unknown> {
   const res = await fetchFn(url, {
     method: "POST",
     headers,
     body: JSON.stringify(body),
+    signal: options?.signal,
   });
 
   await assertResponseOk(res, options?.formatErrorBody);
   const rawText = await res.text();
 
-  const text =
-    thinkingFormat === "xml-tags" ? stripXmlThinkingTags(rawText) : rawText;
+  const text = thinkingFormat === "xml-tags" ? stripXmlThinkingTags(rawText) : rawText;
 
   return safeJsonParse(text, options?.jsonErrorMessage ?? "invalid JSON from model endpoint");
 }
@@ -81,10 +79,7 @@ export function findAndValidateForcedToolCall(
 
   const structuredContent = forced.arguments;
   if (mode !== "strict") {
-    const result = validateResponseSchema(
-      structuredContent,
-      responseSchema.schema,
-    );
+    const result = validateResponseSchema(structuredContent, responseSchema.schema);
     if (!result.valid) {
       throw new StructuredOutputValidationError(
         result.error,
@@ -113,9 +108,7 @@ export interface StructuredOutputFollowUpOptions {
    * Receives the follow-up messages (original + assistant text + nudge).
    * Should return the parsed response JSON.
    */
-  readonly executeFollowUp: (
-    followUpMessages: ChatMessage[],
-  ) => Promise<unknown>;
+  readonly executeFollowUp: (followUpMessages: ChatMessage[]) => Promise<unknown>;
   /**
    * Provider-specific callback: extract tool calls from the parsed response JSON.
    */
@@ -139,10 +132,7 @@ export interface StructuredOutputFollowUpOptions {
 export async function structuredOutputFollowUp(
   options: StructuredOutputFollowUpOptions,
 ): Promise<{ content: string; usage: ModelUsage | undefined } | null> {
-  const followUpMessages = buildFollowUpMessages(
-    options.messages,
-    options.assistantText,
-  );
+  const followUpMessages = buildFollowUpMessages(options.messages, options.assistantText);
   const responseJson = await options.executeFollowUp(followUpMessages);
   const toolCalls = options.extractToolCalls(responseJson);
   const structuredContent = findAndValidateForcedToolCall(

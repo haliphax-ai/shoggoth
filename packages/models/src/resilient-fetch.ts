@@ -1,4 +1,4 @@
-import { ModelHttpError } from "./errors";
+import { ModelHttpError, ModelRequestAbortedError } from "./errors";
 import { headersToRecord } from "./headers-to-record";
 import { parseRateLimitHeaders, type ModelResilienceGate } from "./resilience";
 import { Agent } from "undici";
@@ -87,6 +87,12 @@ export function createResilientFetcher(
       });
     } catch (err: unknown) {
       if (err instanceof ModelHttpError) throw err;
+      if (err instanceof ModelRequestAbortedError) throw err;
+      if (init.signal?.aborted) {
+        // The caller aborted the request (e.g. turn abort). Surface a typed
+        // abort error quietly — no retry, no failover, no warn noise.
+        throw new ModelRequestAbortedError();
+      }
       log.warn("resilientFetch non-ModelHttpError, re-throwing", {
         modelId: id,
         error: err instanceof Error ? err.message : String(err),
