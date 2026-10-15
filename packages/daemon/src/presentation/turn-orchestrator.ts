@@ -306,6 +306,7 @@ export class PresentationTurnOrchestrator {
       buildTurn: wrappedBuildTurn,
       streaming,
       sliceDisplayText,
+      showThinking: config.platforms?.showThinking !== false,
       formatAssistantReply: (
         latestText: string,
         failoverMeta: SessionToolLoopFailoverState | undefined,

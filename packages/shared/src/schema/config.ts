@@ -134,7 +134,20 @@ const sharedConfigFields = {
       attachmentHandling: attachmentHandlingSchema,
       statusBar: statusBarConfigSchema,
     })
-    .catchall(platformCommonConfigSchema)
+    .catchall(
+      z.custom<Record<string, unknown>>(
+        (value) =>
+          typeof value === "boolean" || platformCommonConfigSchema.safeParse(value).success,
+      ),
+    )
+    .transform(
+      (platforms) =>
+        platforms as unknown as Record<string, unknown> & {
+          attachmentHandling?: AttachmentHandlingConfig;
+          statusBar?: StatusBarConfig;
+          showThinking?: boolean;
+        },
+    )
     .optional(),
   runtime: shoggothRuntimeConfigSchema.optional(),
   agents: shoggothAgentsConfigSchema.optional(),
@@ -269,7 +282,7 @@ export function defaultConfig(configDirectory: string): ShoggothConfig {
     mcp: { servers: [], poolScope: "global" },
     prompts: DEFAULT_PROMPTS_CONFIG,
     policy: DEFAULT_POLICY_CONFIG,
-    platforms: { discord: { enabled: true } },
+    platforms: { discord: { enabled: true }, showThinking: true },
     gates: DEFAULT_GATES_CONFIG,
     logging: DEFAULT_LOGGING_CONFIG,
     workflow: { pinStatusPost: true },
