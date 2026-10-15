@@ -138,6 +138,11 @@ export const subagentToolArgs = {
       type: "string",
       description: "spawn_one_shot, spawn_persistent, steer: task or steer text",
     },
+    agent_id: {
+      type: "string",
+      description:
+        "spawn_one_shot, spawn_persistent: optional agent id slug for the subagent (1-20 alphanumeric/dash chars). When omitted, a unique slug derived from your agent id is used automatically (e.g. developer-2). Explicit ids must not collide with configured agent ids or active subagent ids.",
+    },
     thread_id: {
       type: "string",
       description:

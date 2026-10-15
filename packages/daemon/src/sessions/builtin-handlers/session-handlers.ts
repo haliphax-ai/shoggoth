@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import {
+  deriveThreadSubagentAgentId,
   effectiveMaxSpawnDepth,
   maySpawnSubagentAtDepth,
   resolveAgentIdFromSessionId,
@@ -250,6 +251,31 @@ async function sessionQuery(
 // subagent (spawn_one_shot, spawn_persistent, inspect, steer, abort, kill, wait, result)
 // ---------------------------------------------------------------------------
 
+/**
+ * Agent id for a spawn from the builtin subagent tool. An explicit `agent_id`
+ * argument wins; otherwise derive a unique slug (e.g. `developer-2`) from the
+ * calling session's agent id. The reservation set mirrors the control-plane
+ * `subagent_spawn` op: configured top-level agent ids, the parent's own agent
+ * id, and every active subagent id. (#459 made `agent_id` required on spawn,
+ * but the builtin tool schema never exposed it, so callers could not supply
+ * one; deriving here restores tool spawns without weakening the control
+ * contract.)
+ */
+function resolveSpawnAgentId(
+  args: Record<string, unknown>,
+  ctx: BuiltinToolContext,
+  sessions: SessionStore,
+): string {
+  const supplied = typeof args.agent_id === "string" ? args.agent_id.trim() : "";
+  if (supplied) return supplied;
+  const parentId = resolveAgentIdFromSessionId(ctx.sessionId);
+  const reserved = new Set(Object.keys(ctx.config.agents?.list ?? {}));
+  if (parentId) reserved.add(parentId);
+  for (const row of sessions.list())
+    if (row.status !== "terminated" && row.subagentAgentId) reserved.add(row.subagentAgentId);
+  return deriveThreadSubagentAgentId(parentId || "subagent", (id) => reserved.has(id));
+}
+
 async function subagentHandler(
   args: Record<string, unknown>,
   ctx: BuiltinToolContext,
@@ -295,11 +321,7 @@ async function subagentHandler(
     if (typeof respondTo === "string" && respondTo.trim()) {
       payload.respond_to = respondTo.trim();
     }
-    const suppliedAgentId = args.agent_id;
-    if (typeof suppliedAgentId !== "string" || !suppliedAgentId.trim()) {
-      return { resultJson: JSON.stringify({ error: "agent_id required" }) };
-    }
-    payload.agent_id = suppliedAgentId.trim();
+    payload.agent_id = resolveSpawnAgentId(args, ctx, sessions);
     if (args.internal === false) payload.internal = false;
     if (args.background === true) payload.background = true;
     const dm = args.delivery_mode;
@@ -334,11 +356,7 @@ async function subagentHandler(
     if (args.internal === false) payload.internal = false;
     const tn = args.thread_name;
     if (typeof tn === "string" && tn.trim()) payload.thread_name = tn.trim();
-    const requestedAgentId = args.agent_id;
-    if (typeof requestedAgentId !== "string" || !requestedAgentId.trim()) {
-      return { resultJson: JSON.stringify({ error: "agent_id required" }) };
-    }
-    payload.agent_id = requestedAgentId.trim();
+    payload.agent_id = resolveSpawnAgentId(args, ctx, sessions);
     const dm2 = args.delivery_mode;
     if (dm2 === "inline" || dm2 === "queue" || dm2 === "drop") payload.delivery_mode = dm2;
   } else if (action === "inspect") {
