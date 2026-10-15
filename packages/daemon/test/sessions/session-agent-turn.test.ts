@@ -98,6 +98,71 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
     assert.equal(result.failoverMeta?.degraded, false);
   });
 
+  it("assistantTurnProse carries every prose segment of the turn across tool rounds", async () => {
+    const config = defaultConfig(tmp);
+    const sessions = createSessionStore(db);
+    const session = sessions.getById("sess-core");
+    assert.ok(session);
+    const transcript = createTranscriptStore(db);
+    const toolRuns = createToolRunStore(db);
+    const hitlStack = createHitlPendingResolutionStack(db);
+    const builtin = buildBuiltinOnlySessionMcpToolContext();
+
+    // One turn: prose → tool call → prose. The unknown tool resolves to an
+    // error tool result and the loop continues, so the turn completes with
+    // the last assistant text being ONLY the post-tools segment.
+    let round = 0;
+    const result = await executeSessionAgentTurn({
+      db,
+      sessionId: "sess-core",
+      session: session!,
+      transcript,
+      toolRuns,
+      userContent: "full turn prose test",
+      userMetadata: undefined,
+      env: process.env,
+      config,
+      policyEngine: createPolicyEngine(config.policy),
+      getHitlConfig: () => ({ ...DEFAULT_HITL_CONFIG, ...config.hitl }),
+      hitl: {
+        bypassUpTo: "safe",
+        pending: hitlStack.pending,
+        clock: { nowMs: () => Date.now() },
+        newPendingId: () => randomUUID(),
+        waitForHitlResolution: hitlStack.waitForHitlResolution,
+      },
+      loopImpl: runToolLoop,
+      createToolCallingClient: () => ({
+        async completeWithTools() {
+          round += 1;
+          if (round === 1) {
+            return {
+              content: "PRE_TOOLS_PROSE",
+              toolCalls: [{ id: "t1", name: "no-such-tool", arguments: "{}" }],
+              usedModel: "stub",
+              usedProviderId: "stub",
+              degraded: false,
+            };
+          }
+          return {
+            content: "POST_TOOLS_PROSE",
+            toolCalls: [],
+            usedModel: "stub",
+            usedProviderId: "stub",
+            degraded: false,
+          };
+        },
+      }),
+      resolveMcpContext: async () => builtin,
+    } as any);
+
+    // latestAssistantText stays segment-scoped (last prose segment only)…
+    assert.equal(result.latestAssistantText, "POST_TOOLS_PROSE");
+    // …while assistantTurnProse carries every prose segment of the turn,
+    // in order, and never the steer/user content.
+    assert.equal(result.assistantTurnProse, "PRE_TOOLS_PROSE\n\nPOST_TOOLS_PROSE");
+  });
+
   it("forwards provider usage deltas to events.onContextUpdate (live status bar)", async () => {
     const config = defaultConfig(tmp);
     const sessions = createSessionStore(db);
