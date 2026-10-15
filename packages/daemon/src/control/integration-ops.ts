@@ -3252,8 +3252,11 @@ export async function handleIntegrationControlOp(
       return handleServiceRotateKey(req, principal, ctx);
 
     case "media_generate": {
-      if (principal.kind !== "agent") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "media_generate requires agent principal");
+      if (principal.kind !== "agent" && principal.kind !== "operator") {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "media_generate requires agent or operator principal",
+        );
       }
       const pl = payloadObject(req);
       const model = pl.model;
@@ -3323,8 +3326,11 @@ export async function handleIntegrationControlOp(
       if (!decisionEnabled) {
         return undefined;
       }
-      if (principal.kind !== "agent") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "decision_evaluate requires agent principal");
+      if (principal.kind !== "agent" && principal.kind !== "operator") {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "decision_evaluate requires agent or operator principal",
+        );
       }
       const pl = payloadObject(req);
       // model is optional — falls back to the configured decision defaultModel
@@ -3374,8 +3380,11 @@ export async function handleIntegrationControlOp(
       if (!rerankEnabled) {
         return undefined;
       }
-      if (principal.kind !== "agent") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "rerank_documents requires agent principal");
+      if (principal.kind !== "agent" && principal.kind !== "operator") {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "rerank_documents requires agent or operator principal",
+        );
       }
       const pl = payloadObject(req);
       // model is optional — falls back to the configured rerank defaultModel

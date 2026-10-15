@@ -116,15 +116,15 @@ describe("rerank_documents control op", () => {
   });
 
   describe("principal gating", () => {
-    it("rejects operator principal", async () => {
-      await assert.rejects(
-        () => handleIntegrationControlOp(makeReq(validPayload()), operatorPrincipal(), makeCtx()),
-        (err: unknown) => {
-          assert.ok(err instanceof IntegrationOpError);
-          assert.equal(err.code, "ERR_FORBIDDEN");
-          return true;
-        },
+    it("allows operator principal (CLI surface)", async () => {
+      mockRerank.mockResolvedValueOnce({ status: "complete", model: "m", results: [] });
+      const result = await handleIntegrationControlOp(
+        makeReq(validPayload()),
+        operatorPrincipal(),
+        makeCtx(),
       );
+      assert.ok(result != null);
+      assert.equal(mockRerank.mock.calls.length, 1);
     });
   });
 
