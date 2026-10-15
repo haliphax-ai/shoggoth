@@ -84,7 +84,7 @@ export function buildThreadSubagentCreatedBanner(input: {
     input.agentId ?? createSessionStore(input.db).getById(input.sessionId)?.subagentAgentId;
   return [
     "> 🧵 Thread subagent session created.",
-    `> 🎯 **Session:** \`${input.sessionId}\` (${agentId ?? "unknown"})`,
+    `> 🎯 **Session:** \`${input.sessionId}\`${agentId ? ` (**${agentId}**)` : ""}`,
     `> 🥸 **Model:** \`${modelLabel}\``,
   ].join("\n");
 }
@@ -210,7 +210,9 @@ export async function handlePlatformThreadCreate(
     if (row.status !== "terminated" && row.subagentAgentId)
       reservedAgentIds.add(row.subagentAgentId);
   }
-  const subagentAgentId = deriveThreadSubagentAgentId(input.threadTitle ?? threadId, (id) =>
+  // A title-less thread must not use its numeric platform ID as the agent ID: that is not a
+  // human-readable slug. Fall back to a readable base instead.
+  const subagentAgentId = deriveThreadSubagentAgentId(input.threadTitle?.trim() || "thread", (id) =>
     reservedAgentIds.has(id),
   );
 

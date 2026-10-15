@@ -187,6 +187,34 @@ describe("handlePlatformThreadCreate", { concurrency: false }, () => {
     assert.ok(statusBodies[0].body.includes("prov/test-model"));
   });
 
+  it("derives the subagent agent ID from the thread title, never the platform thread ID", async () => {
+    const {
+      sessionId: parentSessionId,
+      sessions,
+      sessionManager,
+    } = await createTopLevelSession(db, tmp);
+    const bindings = new Map<string, string>([["chan-1", parentSessionId]]);
+    const statusBodies: Array<{ sessionId: string; body: string }> = [];
+
+    const result = await handlePlatformThreadCreate({
+      db,
+      config: baseConfig(),
+      sessionManager,
+      sessions,
+      threadId: "1234567890123456789",
+      threadTitle: "Fix API docs",
+      parentChannelId: "chan-1",
+      platform: makePlatformDeps(bindings, statusBodies),
+    });
+
+    assert.equal(result.created, true);
+    const child = sessions.getById(result.sessionId!)!;
+    assert.equal(child.subagentAgentId, "Fix-API-docs");
+    assert.equal(statusBodies.length, 1);
+    assert.ok(statusBodies[0].body.includes("(**Fix-API-docs**)"));
+    assert.ok(!statusBodies[0].body.includes("(**1234567890123456789**)"));
+  });
+
   it("no-op when disabled", async () => {
     const {
       sessionId: parentSessionId,

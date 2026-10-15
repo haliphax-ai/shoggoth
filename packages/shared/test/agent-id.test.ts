@@ -37,4 +37,11 @@ describe("subagent agent IDs", () => {
       `${"x".repeat(18)}-2`,
     );
   });
+
+  it("never yields a numeric platform ID as the agent ID for a title-less thread", () => {
+    // Title-less threads derive from the readable "thread" base, not the snowflake.
+    const id = deriveThreadSubagentAgentId("thread", () => false);
+    assert.equal(id, "thread");
+    assert.equal(/^\d+$/.test(id), false);
+  });
 });
