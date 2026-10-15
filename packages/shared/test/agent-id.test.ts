@@ -13,7 +13,7 @@ describe("subagent agent IDs", () => {
   it("derives a sanitized and bounded thread-title slug", () => {
     assert.equal(
       deriveThreadSubagentAgentId("  Fix: API docs!  ", () => false),
-      "Fix-API-docs",
+      "fix-api-docs",
     );
     assert.equal(
       deriveThreadSubagentAgentId("x".repeat(30), () => false),
@@ -26,15 +26,27 @@ describe("subagent agent IDs", () => {
   });
 
   it("adds collision counters while preserving the maximum length", () => {
-    const taken = new Set(["Review", "Review-2"]);
+    const taken = new Set(["review", "review-2"]);
     assert.equal(
       deriveThreadSubagentAgentId("Review", (id) => taken.has(id)),
-      "Review-3",
+      "review-3",
     );
     const longBase = "x".repeat(20);
     assert.equal(
       deriveThreadSubagentAgentId(longBase, (id) => id === longBase),
       `${"x".repeat(18)}-2`,
+    );
+  });
+
+  it("lowercases derived IDs so collisions are case-insensitive", () => {
+    assert.equal(
+      deriveThreadSubagentAgentId("MixedCASE Title", () => false),
+      "mixedcase-title",
+    );
+    // "Review" is lowercased to "review", so a taken "review" forces a counter.
+    assert.equal(
+      deriveThreadSubagentAgentId("REVIEW", (id) => id === "review"),
+      "review-2",
     );
   });
 

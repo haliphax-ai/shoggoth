@@ -209,9 +209,9 @@ describe("handlePlatformThreadCreate", { concurrency: false }, () => {
 
     assert.equal(result.created, true);
     const child = sessions.getById(result.sessionId!)!;
-    assert.equal(child.subagentAgentId, "Fix-API-docs");
+    assert.equal(child.subagentAgentId, "fix-api-docs");
     assert.equal(statusBodies.length, 1);
-    assert.ok(statusBodies[0].body.includes("(**Fix-API-docs**)"));
+    assert.ok(statusBodies[0].body.includes("(**fix-api-docs**)"));
     assert.ok(!statusBodies[0].body.includes("(**1234567890123456789**)"));
   });
 
