@@ -13,8 +13,10 @@ import {
   agentMayInvokeSubagentSpawnByAllowlist,
   assertValidAgentId,
   assertValidSubagentAgentId,
+  clampTtlMs,
   crossAgentSessionSendAllowed,
   deepMerge,
+  resolveMaxTtlMs,
   effectiveMaxSpawnDepth,
   loadLayeredConfigAsync,
   maySpawnSubagentAtDepth,
@@ -65,7 +67,6 @@ import {
   buildFormattedStats,
 } from "../sessions/session-stats-store";
 import { dispatchMcpHttpCancelRequest } from "../mcp/mcp-http-cancel-registry";
-import { SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES } from "../subagent/subagent-constants";
 import {
   armPersistentSubagentInactivityTimer,
   clearPersistentSubagentInactivityTimer,
@@ -1796,9 +1797,23 @@ export async function handleIntegrationControlOp(
       // terminated after this long without a delivered assistant response. The clock
       // resets on every delivered response (touchPersistentSubagentInactivityTimer),
       // and the computed expiry is persisted so restart reconcile re-arms it correctly.
-      const inactivityMinutes =
-        optionalFinitePositiveInt(pl, "inactivity_minutes") ??
-        SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES;
+      //
+      // The window is never "forever": when `inactivity_minutes` is absent it defaults
+      // to the configured max TTL, and a provided value is capped at that same max TTL
+      // (see #439). With the default max TTL (24h) this matches the prior 1440-minute
+      // default; an operator lowering `runtime.maxTtlMs` shrinks both the default and
+      // the ceiling together.
+      const maxTtlMs = resolveMaxTtlMs(ctx.config);
+      const providedMinutes = optionalFinitePositiveInt(pl, "inactivity_minutes");
+      const inactivityMinutes = Math.max(
+        1,
+        Math.round(
+          clampTtlMs(
+            providedMinutes !== undefined ? providedMinutes * 60_000 : undefined,
+            maxTtlMs,
+          ) / 60_000,
+        ),
+      );
       const platformUserIdRaw = pl.platform_user_id;
       const platformUserId =
         typeof platformUserIdRaw === "string" && platformUserIdRaw.trim()

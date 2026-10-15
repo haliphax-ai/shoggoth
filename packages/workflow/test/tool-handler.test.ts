@@ -98,6 +98,55 @@ describe("handleWorkflowToolCall", () => {
       assert.ok(captured);
     });
 
+    // max TTL cap (#439): an over-large runtime_limit_ms (workflow-level or per-task)
+    // is clamped to deps.maxTtlMs rather than stretching a task toward "forever".
+    it("caps workflow-level runtime_limit_ms at maxTtlMs", async () => {
+      let capturedOpts: { runtimeLimitMs: number } | undefined;
+      const server = mockServer({
+        start: async (_tasks, _graph, opts) => {
+          capturedOpts = opts as { runtimeLimitMs: number };
+          return "wf-cap";
+        },
+      });
+      const result = await handleWorkflowToolCall(
+        {
+          action: "start",
+          tasks: sampleTasks,
+          graph: "1>2",
+          reply_to: "session:parent",
+          runtime_limit_ms: 900_000_000,
+        },
+        makeDeps({ server, maxTtlMs: 3_600_000 }),
+      );
+      assert.equal(result.ok, true);
+      assert.equal(capturedOpts!.runtimeLimitMs, 3_600_000);
+    });
+
+    it("caps per-task runtime_limit_ms at maxTtlMs", async () => {
+      let capturedTasks: { runtimeLimitMs?: number }[] | undefined;
+      const server = mockServer({
+        start: async (tasks) => {
+          capturedTasks = tasks as { runtimeLimitMs?: number }[];
+          return "wf-cap-task";
+        },
+      });
+      const result = await handleWorkflowToolCall(
+        {
+          action: "start",
+          tasks: [
+            { id: 1, prompt: "a", runtime_limit_ms: 900_000_000 },
+            { id: 2, prompt: "b", runtime_limit_ms: 60_000 },
+          ],
+          graph: "1>2",
+          reply_to: "session:parent",
+        },
+        makeDeps({ server, maxTtlMs: 3_600_000 }),
+      );
+      assert.equal(result.ok, true);
+      assert.equal(capturedTasks![0].runtimeLimitMs, 3_600_000);
+      assert.equal(capturedTasks![1].runtimeLimitMs, 60_000);
+    });
+
     it("converts message task with message and channel", async () => {
       let capturedTasks: unknown;
       const server = mockServer({
@@ -704,6 +753,31 @@ describe("handleWorkflowToolCall", () => {
       assert.equal(result.ok, true);
       const args = capturedArgs as { wfId: string; timeoutMs: number };
       assert.equal(args.timeoutMs, 30000);
+    });
+
+    // max TTL cap (#439): an over-large wait_timeout_ms is clamped to deps.maxTtlMs.
+    it("caps wait_timeout_ms at maxTtlMs", async () => {
+      let capturedArgs: unknown;
+      const cp = mockControlPlane({
+        wait: async (wfId: string, timeoutMs?: number) => {
+          capturedArgs = { wfId, timeoutMs };
+          return {
+            id: "wf-wait-cap",
+            name: "waited-cap",
+            tasks: [],
+            graph: new Map(),
+            pollingIntervalMs: 5000,
+            createdAt: Date.now(),
+          } as TaskList;
+        },
+      });
+      const result = await handleWorkflowToolCall(
+        { action: "wait", workflow_id: "wf-wait-cap", wait_timeout_ms: 900_000_000 },
+        makeDeps({ controlPlane: cp as unknown as ControlPlane, maxTtlMs: 3_600_000 }),
+      );
+      assert.equal(result.ok, true);
+      const args = capturedArgs as { timeoutMs: number };
+      assert.equal(args.timeoutMs, 3_600_000);
     });
 
     it("returns error when workflow_id is missing", async () => {

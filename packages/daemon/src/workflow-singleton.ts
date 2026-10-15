@@ -105,6 +105,8 @@ export async function executeWorkflowToolCall(
     currentDepth: number;
     maxDepth: number;
     agentWorkspaceRoot?: string;
+    /** Max TTL (ms) enforced on workflow runtime limits and wait timeouts (#439). */
+    maxTtlMs?: number;
   },
 ): Promise<WorkflowToolResult> {
   if (!server || !controlPlane || !stateDir) {
@@ -120,6 +122,7 @@ export async function executeWorkflowToolCall(
     ...(sessionContext.agentWorkspaceRoot
       ? { agentWorkspaceRoot: sessionContext.agentWorkspaceRoot }
       : {}),
+    ...(sessionContext.maxTtlMs !== undefined ? { maxTtlMs: sessionContext.maxTtlMs } : {}),
   });
 }
 /** Reset the singleton state. For testing only. */

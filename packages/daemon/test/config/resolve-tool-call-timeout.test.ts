@@ -50,4 +50,28 @@ describe("resolveToolCallTimeoutMs", () => {
   it("returns default for unparseable session URN", () => {
     assert.equal(resolveToolCallTimeoutMs(base, "not-a-urn"), DEFAULT_TOOL_CALL_TIMEOUT_MS);
   });
+
+  // max TTL cap (#439): a provided tool-call TTL is never allowed to stretch toward
+  // "forever" — it is clamped to runtime.maxTtlMs (default 24h).
+  it("caps runtime.toolCallTimeoutMs at runtime.maxTtlMs", () => {
+    const cfg = {
+      ...base,
+      runtime: { toolCallTimeoutMs: 900_000_000, maxTtlMs: 3_600_000 },
+    };
+    assert.equal(resolveToolCallTimeoutMs(cfg, "agent:main:discord:channel:123"), 3_600_000);
+  });
+
+  it("caps a per-agent toolCallTimeoutMs at runtime.maxTtlMs", () => {
+    const cfg = {
+      ...base,
+      runtime: { maxTtlMs: 3_600_000 },
+      agents: { list: { main: { toolCallTimeoutMs: 900_000_000 } } },
+    };
+    assert.equal(resolveToolCallTimeoutMs(cfg, "agent:main:discord:channel:123"), 3_600_000);
+  });
+
+  it("leaves values below the max TTL untouched", () => {
+    const cfg = { ...base, runtime: { toolCallTimeoutMs: 30_000, maxTtlMs: 3_600_000 } };
+    assert.equal(resolveToolCallTimeoutMs(cfg, "agent:main:discord:channel:123"), 30_000);
+  });
 });
