@@ -3,6 +3,7 @@ import {
   resolveAgentIdFromSessionId,
   resolvePlatformConfig,
   DEFAULT_TOOL_CALL_TIMEOUT_MS,
+  resolveMaxTtlMs,
   type ShoggothConfig,
 } from "@shoggoth/shared";
 
@@ -157,16 +158,21 @@ export function mergeOrchestratorEnv(
 /**
  * Effective tool call timeout for a session: per-agent `agents.list.<id>.toolCallTimeoutMs` wins,
  * then env `SHOGGOTH_TOOL_CALL_TIMEOUT_MS`, then `runtime.toolCallTimeoutMs`, then default 10 min.
+ *
+ * The resolved timeout is capped at the configured max TTL (`runtime.maxTtlMs`, default 24h) so a
+ * provided value can never stretch a tool call toward "forever" (see #439).
  */
 export function resolveToolCallTimeoutMs(cfg: ShoggothConfig, sessionId: string): number {
+  const maxTtlMs = resolveMaxTtlMs(cfg);
   const agentId = resolveAgentIdFromSessionId(sessionId);
   if (agentId) {
     const entry = cfg.agents?.list?.[agentId];
-    if (entry?.toolCallTimeoutMs != null) return entry.toolCallTimeoutMs;
+    if (entry?.toolCallTimeoutMs != null) return Math.min(entry.toolCallTimeoutMs, maxTtlMs);
   }
-  return (
+  return Math.min(
     envPositiveInt("SHOGGOTH_TOOL_CALL_TIMEOUT_MS") ??
-    cfg.runtime?.toolCallTimeoutMs ??
-    DEFAULT_TOOL_CALL_TIMEOUT_MS
+      cfg.runtime?.toolCallTimeoutMs ??
+      DEFAULT_TOOL_CALL_TIMEOUT_MS,
+    maxTtlMs,
   );
 }

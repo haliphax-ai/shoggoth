@@ -2,6 +2,7 @@
 // workflow handler
 // ---------------------------------------------------------------------------
 
+import { resolveMaxTtlMs } from "@shoggoth/shared";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
 
 export function register(registry: BuiltinToolRegistry): void {
@@ -13,6 +14,7 @@ export function register(registry: BuiltinToolRegistry): void {
         currentDepth: 0,
         maxDepth: 2,
         agentWorkspaceRoot: ctx.workspacePath,
+        maxTtlMs: resolveMaxTtlMs(ctx.config),
       },
     );
     return { resultJson: JSON.stringify(result) };

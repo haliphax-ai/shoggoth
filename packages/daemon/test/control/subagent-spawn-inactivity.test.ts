@@ -254,6 +254,37 @@ describe("subagent_spawn persistent inactivity timeout", () => {
     db.close();
   });
 
+  // max TTL cap (#439): an over-large inactivity_minutes is clamped to runtime.maxTtlMs
+  // rather than stretching the window toward "forever"; the absent case defaults to it.
+  it("caps a large inactivity_minutes at runtime.maxTtlMs", async () => {
+    if (process.platform !== "linux") return;
+    const { db, config, parentId } = await setupDb();
+    const cappedConfig: ShoggothConfig = { ...config, runtime: { maxTtlMs: 300_000 } };
+
+    const before = Date.now();
+    const r = await spawnPersistent(db, cappedConfig, parentId, {
+      inactivity_minutes: 100_000,
+    });
+
+    // Capped to 300_000 ms = 5 minutes.
+    assert.ok(r.expires_at_ms >= before + 300_000);
+    assert.ok(r.expires_at_ms <= Date.now() + 300_000);
+    db.close();
+  });
+
+  it("defaults an absent inactivity_minutes to runtime.maxTtlMs when configured", async () => {
+    if (process.platform !== "linux") return;
+    const { db, config, parentId } = await setupDb();
+    const cappedConfig: ShoggothConfig = { ...config, runtime: { maxTtlMs: 300_000 } };
+
+    const before = Date.now();
+    const r = await spawnPersistent(db, cappedConfig, parentId, {});
+
+    assert.ok(r.expires_at_ms >= before + 300_000);
+    assert.ok(r.expires_at_ms <= Date.now() + 300_000);
+    db.close();
+  });
+
   it("a touch (delivered response) re-arms a full window and persists the new expiry", async () => {
     if (process.platform !== "linux") return;
     const { db, config, parentId } = await setupDb();
