@@ -1,10 +1,10 @@
 import { DISCORD_PLATFORM_MAX_MESSAGE_BODY_CHARS } from "./errors";
-
-/**
- * Paired inline formatting markers tracked across chunk boundaries.
- * Order matters: longer markers must come first so `**` is matched before `*`.
- */
-const INLINE_MARKERS = ["**", "__", "~~", "||", "*"] as const;
+import {
+  buildReopenPrefix,
+  computeChunkClose,
+  type OpenFormattingState,
+  CLOSED_FORMATTING,
+} from "./formatting-state";
 
 /**
  * Split a Discord message into chunks that each fit within `maxLength`.
@@ -18,6 +18,8 @@ const INLINE_MARKERS = ["**", "__", "~~", "||", "*"] as const;
  * Paired inline formatting markers (`**`, `*`, `__`, `~~`, `||`) that are opened
  * but not closed within a chunk are closed at the end and reopened at the start
  * of the next chunk.
+ *
+ * Formatting state is tracked via the shared helpers in `formatting-state.ts`.
  */
 export function splitDiscordMessage(
   text: string,
@@ -27,14 +29,11 @@ export function splitDiscordMessage(
 
   const chunks: string[] = [];
   let remaining = text;
-  /** Non-empty when we are inside a fenced code block; holds the full opening fence line (e.g. "```ts"). */
-  let openFence = "";
-  /** Inline markers that are currently "open" (toggled odd number of times). */
-  let openInline: string[] = [];
+  let openState: OpenFormattingState = CLOSED_FORMATTING;
 
   while (remaining.length > 0) {
     // Build a prefix that reopens any formatting state carried from the previous chunk.
-    const prefix = buildReopenPrefix(openFence, openInline);
+    const prefix = buildReopenPrefix(openState);
     const budget = maxLength - prefix.length;
 
     if (budget <= 0) {
@@ -53,7 +52,7 @@ export function splitDiscordMessage(
     let splitAt = findSplitPoint(remaining, budget);
 
     // Reserve room for a closing suffix (fence + inline markers).
-    const closeSuffix = buildCloseSuffix(remaining.slice(0, splitAt), openFence, openInline);
+    const closeSuffix = computeChunkClose(remaining.slice(0, splitAt), openState).suffix;
     if (splitAt + closeSuffix.length > budget) {
       // Recalculate with reduced budget.
       splitAt = findSplitPoint(remaining, budget - closeSuffix.length);
@@ -61,12 +60,11 @@ export function splitDiscordMessage(
 
     const raw = remaining.slice(0, splitAt);
     // Recalculate close suffix for the actual raw content (fence state may differ).
-    const { suffix, newOpenFence, newOpenInline } = computeChunkSuffix(raw, openFence, openInline);
+    const { suffix, state } = computeChunkClose(raw, openState);
 
     chunks.push(prefix + raw + suffix);
     remaining = remaining.slice(splitAt);
-    openFence = newOpenFence;
-    openInline = newOpenInline;
+    openState = state;
   }
 
   return chunks;
@@ -89,137 +87,4 @@ function findSplitPoint(text: string, budget: number): number {
 
   // Hard-cut.
   return budget;
-}
-
-const FENCE_OPEN_RE = /^(`{3,})(\S*)/;
-
-/**
- * Walk `raw` and determine what formatting state is open at the end.
- * Returns the suffix to append (closing markers) and the new open state
- * to carry into the next chunk.
- */
-function computeChunkSuffix(
-  raw: string,
-  prevOpenFence: string,
-  prevOpenInline: string[],
-): { suffix: string; newOpenFence: string; newOpenInline: string[] } {
-  let inFence = prevOpenFence !== "";
-  let fenceTag = prevOpenFence;
-
-  // Scan lines for fence toggles.
-  const lines = raw.split("\n");
-  for (const line of lines) {
-    const trimmed = line.trimStart();
-    if (inFence) {
-      // Check for closing fence.
-      if (trimmed.startsWith("```") && trimmed.replace(/`/g, "").trim() === "") {
-        inFence = false;
-        fenceTag = "";
-      }
-    } else {
-      const m = trimmed.match(FENCE_OPEN_RE);
-      if (m && m[1].length >= 3) {
-        inFence = true;
-        fenceTag = m[2] ? `\`\`\`${m[2]}` : "```";
-      }
-    }
-  }
-
-  // Inline markers — only relevant outside code fences for the trailing text.
-  // We track toggles across the entire raw chunk.
-  const openInline = inFence ? [] : computeOpenInlineMarkers(raw, prevOpenInline, prevOpenFence);
-
-  let suffix = "";
-  let newOpenFence = "";
-  const newOpenInline: string[] = [];
-
-  // Close open inline markers (reverse order).
-  if (openInline.length > 0) {
-    suffix += [...openInline].reverse().join("");
-    newOpenInline.push(...openInline);
-  }
-
-  // Close open fence.
-  if (inFence) {
-    suffix += (suffix || raw.endsWith("\n") ? "" : "\n") + "```";
-    newOpenFence = fenceTag;
-  }
-
-  return { suffix, newOpenFence, newOpenInline };
-}
-
-/**
- * Determine which inline markers are "open" (toggled an odd number of times)
- * at the end of `raw`, starting from `prevOpen` state.
- *
- * Only counts markers that appear outside of fenced code blocks.
- */
-function computeOpenInlineMarkers(
-  raw: string,
-  prevOpen: string[],
-  prevOpenFence: string,
-): string[] {
-  const toggleCounts = new Map<string, number>();
-  for (const m of prevOpen) toggleCounts.set(m, 1);
-
-  let inFence = prevOpenFence !== "";
-
-  const lines = raw.split("\n");
-  for (const line of lines) {
-    const trimmed = line.trimStart();
-    if (inFence) {
-      if (trimmed.startsWith("```") && trimmed.replace(/`/g, "").trim() === "") {
-        inFence = false;
-      }
-      continue;
-    }
-    const m = trimmed.match(FENCE_OPEN_RE);
-    if (m && m[1].length >= 3) {
-      inFence = true;
-      continue;
-    }
-
-    // Count inline marker occurrences in this line.
-    let pos = 0;
-    while (pos < line.length) {
-      // Skip inline code spans.
-      if (line[pos] === "`") {
-        pos++;
-        while (pos < line.length && line[pos] !== "`") pos++;
-        if (pos < line.length) pos++; // skip closing backtick
-        continue;
-      }
-
-      let matched = false;
-      for (const marker of INLINE_MARKERS) {
-        if (line.startsWith(marker, pos)) {
-          toggleCounts.set(marker, (toggleCounts.get(marker) ?? 0) + 1);
-          pos += marker.length;
-          matched = true;
-          break;
-        }
-      }
-      if (!matched) pos++;
-    }
-  }
-
-  // Markers with odd toggle count are "open".
-  const open: string[] = [];
-  for (const marker of INLINE_MARKERS) {
-    const c = toggleCounts.get(marker) ?? 0;
-    if (c % 2 === 1) open.push(marker);
-  }
-  return open;
-}
-
-function buildReopenPrefix(openFence: string, openInline: string[]): string {
-  let prefix = "";
-  if (openFence) prefix += openFence + "\n";
-  if (openInline.length > 0) prefix += openInline.join("");
-  return prefix;
-}
-
-function buildCloseSuffix(raw: string, prevOpenFence: string, prevOpenInline: string[]): string {
-  const { suffix } = computeChunkSuffix(raw, prevOpenFence, prevOpenInline);
-  return suffix;
 }

@@ -1,6 +1,7 @@
 import type { MessagingAdapterCapabilities } from "@shoggoth/messaging";
 import type { DiscordBridgeLogger } from "./bridge";
 import type { DiscordRestTransport } from "./transport";
+import { appendSyntheticClose } from "./formatting-state";
 import { splitDiscordMessage } from "./split-message";
 import { mdTableToAscii } from "./table-formatter.js";
 import { formatMessageWithThinking, type ThinkingDisplayMode } from "./thinking-formatter";
@@ -176,8 +177,21 @@ export function createDiscordStreamingOutbound(
             formattedText = mdTableToAscii(formattedText);
             lastPushedText = formattedText;
 
+            // Incomplete formatting only matters when a status bar will be
+            // appended to the rendered text: an open marker/fence would bleed
+            // into the bar line. Close it synthetically; the next chunk
+            // recomputes state from the raw text, so the close disappears as
+            // soon as the real pair completes. Deliberately NOT gated on
+            // tracker activity — the delivery-time bar arrives via the
+            // statusBar option without a preceding setStatusBar call, and a
+            // body left open there would corrupt the bar just the same.
+            const renderedText =
+              _statusBarLine === null || formattedText === ""
+                ? formattedText
+                : appendSyntheticClose(formattedText);
+
             const budget = splitBudget(_statusBarLine);
-            const chunks = splitDiscordMessage(formattedText, budget);
+            const chunks = splitDiscordMessage(renderedText, budget);
             const finalChunks =
               _statusBarLine === null ? chunks : applyStatusBar(chunks, _statusBarLine);
             await reconcileOverflow(finalChunks);
@@ -192,8 +206,21 @@ export function createDiscordStreamingOutbound(
             formattedText = mdTableToAscii(formattedText);
             lastPushedText = formattedText;
 
+            // Incomplete formatting only matters when a status bar will be
+            // appended to the rendered text: an open marker/fence would bleed
+            // into the bar line. Close it synthetically; the next chunk
+            // recomputes state from the raw text, so the close disappears as
+            // soon as the real pair completes. Deliberately NOT gated on
+            // tracker activity — the delivery-time bar arrives via the
+            // statusBar option without a preceding setStatusBar call, and a
+            // body left open there would corrupt the bar just the same.
+            const renderedText =
+              _statusBarLine === null || formattedText === ""
+                ? formattedText
+                : appendSyntheticClose(formattedText);
+
             const budget = splitBudget(_statusBarLine);
-            const chunks = splitDiscordMessage(formattedText, budget);
+            const chunks = splitDiscordMessage(renderedText, budget);
             const finalChunks =
               _statusBarLine === null ? chunks : applyStatusBar(chunks, _statusBarLine);
 
@@ -234,8 +261,14 @@ export function createDiscordStreamingOutbound(
           await enqueue(async () => {
             const activeLine = _statusBarLine;
             if (activeLine === null) return;
+            const baseText = lastPushedText ?? "…";
+            // Synthetic-close incomplete formatting so an open marker/fence
+            // cannot bleed into the appended bar (see setFullContent). The
+            // raw text stays unmodified in lastPushedText, so the synthetic
+            // markers vanish once the next chunk completes the pair.
+            const renderedText = baseText === "" ? baseText : appendSyntheticClose(baseText);
             const budget = splitBudget(activeLine);
-            const chunks = splitDiscordMessage(lastPushedText ?? "…", budget);
+            const chunks = splitDiscordMessage(renderedText, budget);
             const finalChunks = applyStatusBar(chunks, activeLine);
             await reconcileOverflow(finalChunks);
           });

@@ -22,6 +22,7 @@ import type {
 import type { DiscordMessagingRuntime } from "./bridge";
 import type { DiscordRestTransport } from "./transport";
 import { DISCORD_PLATFORM_MAX_MESSAGE_BODY_CHARS, sliceDiscordPlatformMessageBody } from "./errors";
+import { appendSyntheticClose } from "./formatting-state";
 import { splitDiscordMessage } from "./split-message";
 import { mdTableToAscii } from "./table-formatter.js";
 import type { HitlDiscordNoticeRegistry } from "./hitl/notice-registry";
@@ -67,8 +68,12 @@ export class DiscordPlatformAdapter implements PlatformAdapter {
 
     // Append the pre-rendered status bar to the body BEFORE splitting so the
     // bar stays intact at the end of the last chunk (blockquote on its own line).
+    // When a bar is present, any formatting marker left open at the end of the
+    // body is closed synthetically first so it cannot bleed into the bar line.
     const converted = mdTableToAscii(body);
-    const fullBody = opts?.statusBar ? `${converted}\n\n${opts.statusBar}` : converted;
+    const guarded =
+      opts?.statusBar && converted !== "" ? appendSyntheticClose(converted) : converted;
+    const fullBody = opts?.statusBar ? `${guarded}\n\n${opts.statusBar}` : guarded;
     const chunks = splitDiscordMessage(fullBody);
     for (let i = 0; i < chunks.length; i++) {
       // Attach files only to the first chunk.
