@@ -480,6 +480,307 @@ describe("mid-turn compaction in complete()", () => {
       "structural-heavy content at chars/2 should exceed budget",
     );
   });
+
+  it("triggers compaction from provider-reported input tokens when the heuristic stays under budget", async () => {
+    // Threshold: 100_000 - 10_000 = 90_000. The char heuristic for this tiny
+    // transcript is ~1 token, but the first call reports 95_000 input tokens —
+    // the provider actual must trip the next check on its own.
+    vi.mocked(compactSessionTranscript).mockResolvedValue({ compacted: false, messageCount: 2 });
+
+    let round = 0;
+    const toolClient = {
+      async completeWithTools() {
+        round += 1;
+        if (round === 1) {
+          return {
+            content: null,
+            toolCalls: [{ id: "c1", name: "t", arguments: "{}" }],
+            usedProviderId: "p",
+            usedModel: "m",
+            degraded: false,
+            usage: { inputTokens: 95_000, outputTokens: 10, contextWindowTokens: 100_000 },
+          };
+        }
+        return {
+          content: "done",
+          toolCalls: [],
+          usedProviderId: "p",
+          usedModel: "m",
+          degraded: false,
+        };
+      },
+    };
+
+    const model = createSessionToolLoopModelClient({
+      toolClient,
+      initialMessages: [
+        { role: "system", content: "sys" },
+        { role: "user", content: "hi" },
+      ],
+      tools: [],
+      compaction: {
+        db,
+        sessionId: "sess-1",
+        contextSegmentId: "default",
+        ctxWindowTokens: 100_000,
+        reserveTokens: 10_000,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        modelsConfig: undefined as any,
+        env: {},
+        systemPromptChars: 3,
+        toolSchemaChars: 0,
+        compactionAbortTimeoutMs: 60_000,
+      },
+    });
+
+    // First round: no usage reported yet → heuristic (~1 token) under budget.
+    const t1 = await model.complete();
+    assert.equal(t1.toolCalls.length, 1);
+    assert.equal(
+      vi.mocked(compactSessionTranscript).mock.calls.length,
+      0,
+      "no compaction before any provider actuals are seen",
+    );
+
+    // The tool result is tiny, but the last call reported 95k input tokens:
+    // the provider actual alone must trip compaction on the next check.
+    model.pushToolMessage!({ toolCallId: "c1", content: "ok" });
+    await model.complete();
+    assert.ok(
+      vi.mocked(compactSessionTranscript).mock.calls.length > 0,
+      "provider-reported input tokens above budget should trigger compaction",
+    );
+  });
+
+  it("prefers provider-reported input tokens over the heuristic on every check", async () => {
+    // Round 1 reports 10 input tokens (well under the 50-token budget). The
+    // tool result pushed afterwards makes the char heuristic exceed the
+    // budget, but the provider actual is present and takes precedence, so the
+    // next check must NOT compact.
+    vi.mocked(compactSessionTranscript).mockResolvedValue({ compacted: false, messageCount: 2 });
+
+    let round = 0;
+    const toolClient = {
+      async completeWithTools() {
+        round += 1;
+        if (round === 1) {
+          return {
+            content: null,
+            toolCalls: [{ id: "c1", name: "t", arguments: "{}" }],
+            usedProviderId: "p",
+            usedModel: "m",
+            degraded: false,
+            usage: { inputTokens: 10, outputTokens: 5 },
+          };
+        }
+        return {
+          content: "done",
+          toolCalls: [],
+          usedProviderId: "p",
+          usedModel: "m",
+          degraded: false,
+        };
+      },
+    };
+
+    const model = createSessionToolLoopModelClient({
+      toolClient,
+      initialMessages: [
+        { role: "system", content: "sys" },
+        { role: "user", content: "hi" },
+      ],
+      tools: [],
+      compaction: {
+        db,
+        sessionId: "sess-1",
+        contextSegmentId: "default",
+        ctxWindowTokens: 100,
+        reserveTokens: 50,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        modelsConfig: undefined as any,
+        env: {},
+        systemPromptChars: 0,
+        toolSchemaChars: 0,
+        compactionAbortTimeoutMs: 60_000,
+      },
+    });
+
+    await model.complete();
+    // 400 structural chars → heuristic estimate of ~200 tokens (> 50), but the
+    // provider actual from round 1 (10 tokens) is ground truth and wins.
+    model.pushToolMessage!({ toolCallId: "c1", content: "x".repeat(400) });
+    await model.complete();
+    assert.equal(
+      vi.mocked(compactSessionTranscript).mock.calls.length,
+      0,
+      "provider actual below budget must not be overridden by the heuristic",
+    );
+  });
+
+  it("includes reasoningContent in the token estimate", async () => {
+    // Budget: 100 - 40 = 60. The visible content is tiny (~0.5 tokens), but
+    // the user message carries 300 chars of reasoning (300/4 = 75 tokens) —
+    // that must push the estimate over the threshold.
+    vi.mocked(compactSessionTranscript).mockResolvedValue({ compacted: false, messageCount: 2 });
+
+    const toolClient = stubToolClient();
+    const model = createSessionToolLoopModelClient({
+      toolClient,
+      initialMessages: [
+        { role: "system", content: "" },
+        { role: "user", content: "hi", reasoningContent: "a".repeat(300) },
+      ],
+      tools: [],
+      compaction: {
+        db,
+        sessionId: "sess-1",
+        contextSegmentId: "default",
+        ctxWindowTokens: 100,
+        reserveTokens: 40,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        modelsConfig: undefined as any,
+        env: {},
+        systemPromptChars: 0,
+        toolSchemaChars: 0,
+        compactionAbortTimeoutMs: 60_000,
+      },
+    });
+
+    await model.complete();
+    assert.ok(
+      vi.mocked(compactSessionTranscript).mock.calls.length > 0,
+      "reasoningContent should count toward the token estimate",
+    );
+  });
+
+  it("thresholds against the smaller of the configured and provider-reported windows", async () => {
+    // Configured window is 100k, but the first call reports the serving
+    // model's window is only 1k. 960 input tokens exceed 1_000 - 50 = 950
+    // but stay far below the configured window's threshold, so only the
+    // min-window threshold can trip here.
+    vi.mocked(compactSessionTranscript).mockResolvedValue({ compacted: false, messageCount: 2 });
+
+    let round = 0;
+    const toolClient = {
+      async completeWithTools() {
+        round += 1;
+        if (round === 1) {
+          return {
+            content: null,
+            toolCalls: [{ id: "c1", name: "t", arguments: "{}" }],
+            usedProviderId: "p",
+            usedModel: "m",
+            degraded: false,
+            usage: { inputTokens: 960, outputTokens: 10, contextWindowTokens: 1_000 },
+          };
+        }
+        return {
+          content: "done",
+          toolCalls: [],
+          usedProviderId: "p",
+          usedModel: "m",
+          degraded: false,
+        };
+      },
+    };
+
+    const model = createSessionToolLoopModelClient({
+      toolClient,
+      initialMessages: [
+        { role: "system", content: "" },
+        { role: "user", content: "hi" },
+      ],
+      tools: [],
+      compaction: {
+        db,
+        sessionId: "sess-1",
+        contextSegmentId: "default",
+        ctxWindowTokens: 100_000,
+        reserveTokens: 50,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        modelsConfig: undefined as any,
+        env: {},
+        systemPromptChars: 0,
+        toolSchemaChars: 0,
+        compactionAbortTimeoutMs: 60_000,
+      },
+    });
+
+    const t1 = await model.complete();
+    assert.equal(t1.toolCalls.length, 1);
+    assert.equal(vi.mocked(compactSessionTranscript).mock.calls.length, 0);
+
+    model.pushToolMessage!({ toolCallId: "c1", content: "ok" });
+    await model.complete();
+    assert.ok(
+      vi.mocked(compactSessionTranscript).mock.calls.length > 0,
+      "a smaller provider-reported window should tighten the threshold",
+    );
+  });
+
+  it("ignores invalid provider-reported windows and keeps the configured threshold", async () => {
+    // Same numbers as the min-window test, but the provider reports a 0-token
+    // window (invalid) — the threshold must fall back to the configured
+    // window, so 960 tokens stay under 100_000 - 50.
+    vi.mocked(compactSessionTranscript).mockResolvedValue({ compacted: false, messageCount: 2 });
+
+    let round = 0;
+    const toolClient = {
+      async completeWithTools() {
+        round += 1;
+        if (round === 1) {
+          return {
+            content: null,
+            toolCalls: [{ id: "c1", name: "t", arguments: "{}" }],
+            usedProviderId: "p",
+            usedModel: "m",
+            degraded: false,
+            usage: { inputTokens: 960, outputTokens: 10, contextWindowTokens: 0 },
+          };
+        }
+        return {
+          content: "done",
+          toolCalls: [],
+          usedProviderId: "p",
+          usedModel: "m",
+          degraded: false,
+        };
+      },
+    };
+
+    const model = createSessionToolLoopModelClient({
+      toolClient,
+      initialMessages: [
+        { role: "system", content: "" },
+        { role: "user", content: "hi" },
+      ],
+      tools: [],
+      compaction: {
+        db,
+        sessionId: "sess-1",
+        contextSegmentId: "default",
+        ctxWindowTokens: 100_000,
+        reserveTokens: 50,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        modelsConfig: undefined as any,
+        env: {},
+        systemPromptChars: 0,
+        toolSchemaChars: 0,
+        compactionAbortTimeoutMs: 60_000,
+      },
+    });
+
+    const t1 = await model.complete();
+    assert.equal(t1.toolCalls.length, 1);
+
+    model.pushToolMessage!({ toolCallId: "c1", content: "ok" });
+    await model.complete();
+    assert.equal(
+      vi.mocked(compactSessionTranscript).mock.calls.length,
+      0,
+      "a 0-token provider window must not shrink the threshold",
+    );
+  });
 });
 
 describe("dedicated compaction model", () => {
