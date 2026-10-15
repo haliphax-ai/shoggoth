@@ -2539,10 +2539,13 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       "model text deltas should reach the stream handle as live updates",
     );
 
-    // …and the stream was finalized with the formatted reply.
+    // …and the streamed accumulation stands as the delivered body. This stub
+    // handle can't render a status bar itself, so the terminal edit still runs
+    // — but it must carry the FULL streamed text, never a segment-scoped
+    // replacement of the accumulation.
     assert.ok(
       finalBody?.includes(marker),
-      "stream should be finalized with the full formatted reply",
+      "terminal edit (if any) must carry the full streamed text",
     );
 
     // The reply must NOT also be posted at once via the outbound surface.
@@ -2959,5 +2962,189 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
       !last.includes("200.0%"),
       `bar must never report the cumulative input_tokens as fill, got: ${last}`,
     );
+  });
+
+  it("streamed turn with prose before and after a tool call delivers every text segment plus the terminal bar", async () => {
+    const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
+    createSessionStore(db).create({ id: sessionUrn, workspacePath: tmp });
+    seedStats(sessionUrn, { turn_count: 7 });
+
+    // Mock a Discord-like stream handle: setFullContent/pushUpdate replace the
+    // body; setStatusBar renders the bar appended to the current body — the
+    // composition the real streaming handle performs.
+    let delivered = "";
+    let bar: string | null = null;
+    let body = "…";
+    const render = () => {
+      delivered = bar === null ? body : `${body}\n\n${bar}`;
+    };
+    const runtime: DiscordMessagingRuntime = {
+      ...baseRuntime(sessionUrn, []),
+      streamingForSession: () => ({
+        start: async () => ({
+          setFullContent: async (text: string) => {
+            body = text;
+            render();
+          },
+          pushUpdate: async (text: string) => {
+            body = text;
+            render();
+          },
+          setStatusBar: async (line: string | null) => {
+            bar = line;
+            render();
+          },
+        }),
+      }),
+    };
+
+    // One turn: prose → tool call → prose. The unknown tool resolves to an
+    // error tool result and the loop continues, so the turn completes with the
+    // last assistant text being ONLY the post-tools segment.
+    let round = 0;
+    const platform = await startDiscordPlatform({
+      db,
+      config: {
+        ...defaultConfig(tmp),
+        platforms: { statusBar: { enabled: true } },
+      },
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord: runtime,
+      env: { SHOGGOTH_DISCORD_STREAM: "1" },
+      deps: {
+        createToolCallingClient: () => ({
+          async completeWithTools(input: {
+            onTextDelta?: (delta: string, accumulated: string) => void;
+          }) {
+            round += 1;
+            if (round === 1) {
+              input.onTextDelta?.("Checking ", "Checking ");
+              input.onTextDelta?.("the repo.", "Checking the repo.");
+              return {
+                content: "Checking the repo.",
+                toolCalls: [{ id: "t1", name: "no-such-tool", arguments: "{}" }],
+                usedModel: "m1",
+                usedProviderId: "p1",
+              };
+            }
+            input.onTextDelta?.("Done ", "Checking the repo.\n\nDone ");
+            input.onTextDelta?.("now.", "Checking the repo.\n\nDone now.");
+            return {
+              content: "Done now.",
+              toolCalls: [],
+              usedModel: "m1",
+              usedProviderId: "p1",
+            };
+          },
+        }),
+      },
+    });
+
+    const result = await platform.runSessionModelTurn({
+      sessionId: sessionUrn,
+      userContent: "hi",
+      delivery: { kind: "messaging_surface", userId: "u-1" },
+    });
+    await platform.stop();
+
+    // The segment-scoped source returns only the post-tools segment…
+    assert.ok(
+      result.latestAssistantText?.includes("Done now."),
+      `latestAssistantText must be the last (post-tools) segment, got: ${result.latestAssistantText}`,
+    );
+
+    // …but the delivered message must carry BOTH segments and the terminal bar.
+    assert.ok(
+      delivered.includes("Checking the repo."),
+      `pre-tools prose must survive into the delivered message, got: ${delivered}`,
+    );
+    assert.ok(
+      delivered.includes("Done now."),
+      `post-tools prose must be delivered too, got: ${delivered}`,
+    );
+    assert.ok(delivered.includes("✅"), `terminal bar must land, got: ${delivered}`);
+    assert.ok(delivered.includes("`7`"), `terminal bar must carry sequence 7, got: ${delivered}`);
+  });
+
+  it("streamed turn with no streamed prose falls back to the formatted reply body with the terminal bar", async () => {
+    const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
+    createSessionStore(db).create({ id: sessionUrn, workspacePath: tmp });
+    seedStats(sessionUrn, { turn_count: 7 });
+
+    let delivered = "";
+    let bar: string | null = null;
+    let body = "…";
+    const render = () => {
+      delivered = bar === null ? body : `${body}\n\n${bar}`;
+    };
+    const runtime: DiscordMessagingRuntime = {
+      ...baseRuntime(sessionUrn, []),
+      streamingForSession: () => ({
+        start: async () => ({
+          setFullContent: async (text: string) => {
+            body = text;
+            render();
+          },
+          pushUpdate: async (text: string) => {
+            body = text;
+            render();
+          },
+          setStatusBar: async (line: string | null) => {
+            bar = line;
+            render();
+          },
+        }),
+      }),
+    };
+
+    // Tool-only turn: the model never emits text deltas, so the placeholder
+    // still stands at terminal time — the formatted reply must be delivered as
+    // the body (previous behavior), never a blank message.
+    let round = 0;
+    const platform = await startDiscordPlatform({
+      db,
+      config: {
+        ...defaultConfig(tmp),
+        platforms: { statusBar: { enabled: true } },
+      },
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord: runtime,
+      env: { SHOGGOTH_DISCORD_STREAM: "1" },
+      deps: {
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            round += 1;
+            if (round === 1) {
+              return {
+                content: "",
+                toolCalls: [{ id: "t1", name: "no-such-tool", arguments: "{}" }],
+                usedModel: "m1",
+                usedProviderId: "p1",
+              };
+            }
+            return {
+              content: "tool-only reply",
+              toolCalls: [],
+              usedModel: "m1",
+              usedProviderId: "p1",
+            };
+          },
+        }),
+      },
+    });
+
+    await platform.runSessionModelTurn({
+      sessionId: sessionUrn,
+      userContent: "hi",
+      delivery: { kind: "messaging_surface", userId: "u-1" },
+    });
+    await platform.stop();
+
+    assert.ok(
+      delivered.includes("tool-only reply"),
+      `fallback must deliver the formatted reply body, got: ${delivered}`,
+    );
+    assert.ok(!delivered.startsWith("…"), `placeholder must be replaced, got: ${delivered}`);
+    assert.ok(delivered.includes("✅"), `terminal bar must land, got: ${delivered}`);
   });
 });
