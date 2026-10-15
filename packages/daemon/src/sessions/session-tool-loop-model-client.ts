@@ -95,6 +95,7 @@ export function createSessionToolLoopModelClient(input: {
   let accumulatedCachedInputTokens = 0;
   let accumulatedCacheWriteInputTokens = 0;
   let lastContextWindowTokens: number | undefined;
+  let lastInputTokens: number | undefined;
   let hasUsage = false;
   /** Model reply text from earlier `complete()` rounds that returned tool calls (for streaming display). */
   let priorRoundsStreamText = "";
@@ -136,17 +137,45 @@ export function createSessionToolLoopModelClient(input: {
             for (const p of m.content)
               if ("text" in p && typeof p.text === "string") allContent += p.text;
           }
+          if (typeof m.reasoningContent === "string") {
+            allContent += m.reasoningContent;
+          }
           if (m.toolCalls) {
             for (const tc of m.toolCalls) allContent += tc.arguments;
           }
         }
         const estimatedTokens =
           c.systemPromptChars / 4 + c.toolSchemaChars / 2 + estimateTokensFromContent(allContent);
-        if (estimatedTokens > c.ctxWindowTokens - c.reserveTokens) {
+        // Threshold against the smaller of the configured window and the
+        // serving model's provider-reported window (when finite and positive),
+        // so a failover model with a smaller window cannot overflow.
+        const servingWindowTokens =
+          lastContextWindowTokens != null &&
+          Number.isFinite(lastContextWindowTokens) &&
+          lastContextWindowTokens > 0
+            ? lastContextWindowTokens
+            : undefined;
+        const effectiveWindowTokens =
+          servingWindowTokens != null
+            ? Math.min(c.ctxWindowTokens, servingWindowTokens)
+            : c.ctxWindowTokens;
+        // Provider-reported input tokens are ground truth for what was really
+        // sent this turn (the char heuristic undercounts); use them directly
+        // whenever available and fall back to the heuristic only when the
+        // provider reported no usage yet.
+        const actualInputTokens =
+          lastInputTokens != null && Number.isFinite(lastInputTokens) && lastInputTokens > 0
+            ? lastInputTokens
+            : undefined;
+        const contextFillTokens = actualInputTokens ?? estimatedTokens;
+        if (contextFillTokens > effectiveWindowTokens - c.reserveTokens) {
           log.debug("mid-turn compaction triggered", {
             sessionId: c.sessionId,
             estimatedTokens: Math.round(estimatedTokens),
+            contextFillTokens: Math.round(contextFillTokens),
+            usedProviderActuals: actualInputTokens != null,
             ctxWindowTokens: c.ctxWindowTokens,
+            effectiveWindowTokens,
             reserveTokens: c.reserveTokens,
           });
           const compactionPromise = (async () => {
@@ -262,6 +291,7 @@ export function createSessionToolLoopModelClient(input: {
 
       if (out.usage) {
         hasUsage = true;
+        lastInputTokens = out.usage.inputTokens;
         accumulatedInputTokens += out.usage.inputTokens;
         accumulatedOutputTokens += out.usage.outputTokens;
         if (out.usage.cachedInputTokens != null) {
