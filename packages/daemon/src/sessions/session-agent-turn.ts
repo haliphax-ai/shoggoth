@@ -50,6 +50,7 @@ import type { ToolRunStore } from "./tool-run-store";
 import type { SessionRow } from "./session-store";
 import {
   extractLatestTranscriptAssistantText,
+  extractTurnTranscriptAssistantProse,
   loadSessionTranscriptAsModelChat,
   sanitizeTranscriptForProvider,
 } from "./transcript-to-chat";
@@ -144,6 +145,12 @@ export interface ExecuteSessionAgentTurnInput {
 export interface SessionAgentTurnResult {
   readonly failoverMeta: SessionToolLoopFailoverState | undefined;
   readonly latestAssistantText: string;
+  /** Every assistant text segment of THIS turn, concatenated in order
+   *  (pre-tools and post-tools prose, including prose emitted alongside a
+   *  tool-call round). Undefined when the turn produced no prose (tool-only
+   *  turns) — and on aborted/failed turns — so non-streaming delivery can
+   *  fall back to `latestAssistantText`. */
+  readonly assistantTurnProse?: string;
   /** Cancellation is separate from partial text, which may itself be valid JSON. */
   readonly aborted?: boolean;
   /** Outbound attachments extracted from `show` tool results in this turn. */
@@ -773,6 +780,18 @@ export async function executeSessionAgentTurn(
     });
   }
 
+  // Full prose of THIS turn: every assistant segment written since seqBefore,
+  // in order (tool-call rounds included — their pre-tools prose rides the
+  // same row). Non-streaming delivery paths compose their body from this so
+  // prose → tools → prose turns deliver ALL segments, not only the last one
+  // `latestAssistantText` carries.
+  const assistantTurnProse = extractTurnTranscriptAssistantProse(
+    input.db,
+    input.sessionId,
+    ctxSeg,
+    seqBefore,
+  );
+
   // --- Extract show tool attachments from this turn ---
   const showAttachments = await extractTurnShowAttachments(
     input.db,
@@ -787,6 +806,7 @@ export async function executeSessionAgentTurn(
       ? { ...failoverMeta, primaryModel: effectivePrimaryModel }
       : undefined,
     latestAssistantText,
+    assistantTurnProse,
     showAttachments: showAttachments.length > 0 ? showAttachments : undefined,
     outcome: "completed",
   };

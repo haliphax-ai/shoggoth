@@ -853,11 +853,18 @@ export async function startDiscordPlatform(
                 : undefined,
           );
           const cfg = opts.configRef?.current ?? opts.config;
+          // The at-once path has no streamed accumulation to deliver (the
+          // streaming branch above carries every segment via streamedBody):
+          // compose the body from the turn's full prose — every assistant
+          // text segment of this turn, in order — so prose → tools → prose
+          // turns deliver ALL segments, not only the last one that
+          // latestAssistantText carries.
+          const replyText = turnResult.assistantTurnProse ?? turnResult.latestAssistantText;
           const formattedBody = formatAssistantReply(
             cfg,
             sid,
             env,
-            turnResult.latestAssistantText,
+            replyText,
             turnResult.failoverMeta,
           );
           const fullBody = thinkingOutput?.render(formattedBody) ?? formattedBody;

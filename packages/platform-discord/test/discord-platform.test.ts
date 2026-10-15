@@ -2888,6 +2888,84 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
     );
   });
 
+  it("at-once turn with prose before and after a tool call delivers every segment plus the terminal bar", async () => {
+    const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
+    createSessionStore(db).create({ id: sessionUrn, workspacePath: tmp });
+    seedStats(sessionUrn, { turn_count: 7 });
+
+    // At-once path (no SHOGGOTH_DISCORD_STREAM, no streamingForSession):
+    // delivery is a single sendBody carrying the formatted reply + bar.
+    const capture: { body: string }[] = [];
+    let round = 0;
+    const platform = await startDiscordPlatform({
+      db,
+      config: {
+        ...defaultConfig(tmp),
+        platforms: { statusBar: { enabled: true } },
+      },
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord: baseRuntime(sessionUrn, capture),
+      deps: {
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            round += 1;
+            if (round === 1) {
+              return {
+                content: "Checking the repo.",
+                toolCalls: [{ id: "t1", name: "no-such-tool", arguments: "{}" }],
+                usedModel: "m1",
+                usedProviderId: "p1",
+              };
+            }
+            return {
+              content: "Done now.",
+              toolCalls: [],
+              usedModel: "m1",
+              usedProviderId: "p1",
+            };
+          },
+        }),
+      },
+    });
+
+    const result = await platform.runSessionModelTurn({
+      sessionId: sessionUrn,
+      userContent: "hi",
+      delivery: { kind: "messaging_surface", userId: "u-1" },
+    });
+    await platform.stop();
+
+    // The turn's transcript extraction is segment-scoped…
+    assert.ok(
+      result.latestAssistantText?.includes("Done now."),
+      `latestAssistantText must be the last (post-tools) segment, got: ${result.latestAssistantText}`,
+    );
+    assert.ok(
+      result.assistantTurnProse?.includes("Checking the repo.") &&
+        result.assistantTurnProse?.includes("Done now."),
+      `assistantTurnProse must carry every segment of the turn, got: ${result.assistantTurnProse}`,
+    );
+
+    // …but the at-once sendBody must carry BOTH segments in order, with the
+    // terminal bar appended exactly once at the end.
+    assert.ok(capture.length > 0, "the at-once path must deliver the reply via sendBody");
+    const last = capture[capture.length - 1]!.body;
+    const preIdx = last.indexOf("Checking the repo.");
+    const postIdx = last.indexOf("Done now.");
+    assert.ok(preIdx !== -1, `pre-tools prose must survive into the sendBody, got: ${last}`);
+    assert.ok(postIdx !== -1, `post-tools prose must be delivered too, got: ${last}`);
+    assert.ok(preIdx < postIdx, `prose segments must be delivered in turn order, got: ${last}`);
+    assert.ok(last.includes("✅"), `terminal bar must land on the sendBody, got: ${last}`);
+    assert.ok(
+      last.includes("\n\n> ✅"),
+      `terminal bar must be appended as the renderer's blockquote line, got: ${last}`,
+    );
+    assert.ok(
+      last.split("\n\n> ✅").length - 1 === 1,
+      `terminal bar must be appended exactly once, got: ${last}`,
+    );
+  });
+
   it("context fill comes from the segment transcript estimate, not the cumulative input_tokens column", async () => {
     const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
     createSessionStore(db).create({ id: sessionUrn, workspacePath: tmp });

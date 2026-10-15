@@ -170,6 +170,45 @@ export function extractLatestTranscriptAssistantText(
   return last;
 }
 
+/**
+ * Concatenates every assistant text segment written after `afterSeq` — i.e.
+ * the prose emitted during a single turn — in transcript order, joined by a
+ * blank line. Prose that rides along a tool-call round is included (the tool
+ * loop writes content and tool calls in one row, so the pre-tools segment
+ * would otherwise be lost); pure tool-call rows carry no content and are
+ * skipped naturally. Returns undefined when the turn produced no assistant
+ * prose (tool-only turns). Unlike `extractLatestTranscriptAssistantText`
+ * (which by design keeps only the LAST tool-call-free segment), this
+ * preserves every pre-tools and post-tools segment so prose → tools → prose
+ * turns can be delivered whole on non-streaming paths.
+ */
+export function extractTurnTranscriptAssistantProse(
+  db: Database.Database,
+  sessionId: string,
+  contextSegmentId: string,
+  afterSeq: number,
+): string | undefined {
+  const tr = createTranscriptStore(db);
+  let after = afterSeq;
+  const segments: string[] = [];
+  for (;;) {
+    const page = tr.listPage({
+      sessionId,
+      contextSegmentId,
+      afterSeq: after,
+      limit: 200,
+    });
+    for (const m of page.messages) {
+      if (m.role === "assistant" && m.content) {
+        segments.push(m.content);
+      }
+    }
+    if (!page.nextCursor) break;
+    after = page.nextCursor;
+  }
+  return segments.length > 0 ? segments.join("\n\n") : undefined;
+}
+
 // ---------------------------------------------------------------------------\
 // Provider capability gating — image block sanitization
 // ---------------------------------------------------------------------------
