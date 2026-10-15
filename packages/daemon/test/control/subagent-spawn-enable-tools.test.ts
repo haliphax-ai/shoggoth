@@ -160,6 +160,7 @@ describe("subagent_spawn enable_tools", () => {
             parent_session_id: parentId,
             prompt: "task",
             mode: "one_shot",
+            agent_id: "et-spawn",
             ...payload,
           },
         });
@@ -203,6 +204,7 @@ describe("subagent_spawn enable_tools", () => {
             parent_session_id: parentId,
             prompt: "task",
             mode: "one_shot",
+            agent_id: "et-reject",
             enable_tools: "kanban-*",
           },
         });

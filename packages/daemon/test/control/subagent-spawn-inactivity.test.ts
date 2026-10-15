@@ -166,6 +166,7 @@ async function spawnPersistent(
           parent_session_id: parentId,
           prompt: "monitor ci",
           mode: "persistent",
+          agent_id: "si-agent",
           ...payload,
         },
       });

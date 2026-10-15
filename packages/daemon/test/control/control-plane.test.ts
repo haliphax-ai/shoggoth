@@ -1444,6 +1444,7 @@ describe("control plane (unix socket + JSONL)", () => {
               parent_session_id: parentId,
               prompt: "do the thing",
               mode: "one_shot",
+              agent_id: "cp-oneshot",
             },
           });
           const res = parseResponseLine(line);
@@ -1472,6 +1473,7 @@ describe("control plane (unix socket + JSONL)", () => {
               parent_session_id: parentId,
               prompt: "overlay temp",
               mode: "one_shot",
+              agent_id: "cp-bg-retn",
               model_options: { temperature: 0.99 },
             },
           });
@@ -1558,6 +1560,7 @@ describe("control plane (unix socket + JSONL)", () => {
               parent_session_id: parentId,
               prompt: "background task",
               mode: "one_shot",
+              agent_id: "cp-bg-ret",
               background: true,
             },
           });
@@ -1671,6 +1674,7 @@ describe("control plane (unix socket + JSONL)", () => {
               parent_session_id: parentId,
               prompt: "background deliver task",
               mode: "one_shot",
+              agent_id: "cp-bg-deliver",
               background: true,
             },
           });
@@ -1775,6 +1779,7 @@ describe("control plane (unix socket + JSONL)", () => {
               parent_session_id: parentId,
               prompt: "persistent deliver task",
               mode: "persistent",
+              agent_id: "cp-persist",
             },
           });
           const res = parseResponseLine(line);
@@ -1866,6 +1871,7 @@ describe("control plane (unix socket + JSONL)", () => {
               parent_session_id: parentId,
               prompt: "thread-bound task",
               mode: "persistent",
+              agent_id: "cp-thread-a",
               platform_thread_id: "thread-123",
               platform_user_id: "user-456",
             },
@@ -1954,6 +1960,7 @@ describe("control plane (unix socket + JSONL)", () => {
               parent_session_id: parentId,
               prompt: "thread-bound banner task",
               mode: "persistent",
+              agent_id: "cp-thread-b",
               platform_thread_id: "thread-banner",
               platform_user_id: "user-456",
             },
@@ -1985,6 +1992,7 @@ describe("control plane (unix socket + JSONL)", () => {
               parent_session_id: parentId,
               prompt: "threadless banner task",
               mode: "persistent",
+              agent_id: "cp-banner",
             },
           });
           const res2 = parseResponseLine(line2);
@@ -2050,6 +2058,7 @@ describe("control plane (unix socket + JSONL)", () => {
               parent_session_id: parentId,
               prompt: "task",
               mode: "one_shot",
+              agent_id: "cp-spawn-off",
             },
           });
           const res = parseResponseLine(line);
@@ -2117,6 +2126,7 @@ describe("control plane (unix socket + JSONL)", () => {
               parent_session_id: parentId,
               prompt: "task",
               mode: "one_shot",
+              agent_id: "cp-allow-deny",
             },
           });
           const res = parseResponseLine(line);

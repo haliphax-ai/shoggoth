@@ -13,7 +13,6 @@ import {
   agentMayInvokeSubagentSpawnByAllowlist,
   assertValidAgentId,
   assertValidSubagentAgentId,
-  deriveThreadSubagentAgentId,
   crossAgentSessionSendAllowed,
   deepMerge,
   effectiveMaxSpawnDepth,
@@ -665,6 +664,8 @@ export async function deliverSubagentResult(
   ext: NonNullable<typeof subagentRuntimeExtensionRef.current>,
   opts: {
     childSessionId: string;
+    /** Subagent shorthand agent ID, used to label event messages and logs. */
+    childAgentId?: string;
     respondTo: string;
     internalDelivery: boolean;
     mode: "one_shot" | "persistent";
@@ -695,6 +696,7 @@ export async function deliverSubagentResult(
     modelInvocationOverride,
     fallbackRespondTo,
     unavailableRespondTo,
+    childAgentId,
   } = opts;
 
   // drop mode: do nothing
@@ -712,7 +714,10 @@ export async function deliverSubagentResult(
   const completedTag = unavailableRespondTo
     ? `[Subagent completed — respond_to ${unavailableRespondTo} unavailable]`
     : "[Subagent completed]";
-  const baseContent = `${completedTag} session_id: ${childSessionId}\n\n${truncatedText}`;
+  const childLabel = childAgentId
+    ? `\`${childSessionId}\` (**${childAgentId}**)`
+    : `\`${childSessionId}\``;
+  const baseContent = `${completedTag} session_id: ${childLabel}\n\n${truncatedText}`;
 
   // Reminders appended to the delivery paths:
   // - baseReminder tells the parent its reply routes back to the subagent, not the operator.
@@ -1419,11 +1424,6 @@ export async function handleIntegrationControlOp(
       assertAgentMayUseSubagentSpawn(principal, parentSessionId, sessions, ctx.config);
       const prompt = requireString(pl, "prompt");
       const agentIdRaw = pl.agent_id;
-      const threadNameRaw = pl.thread_name;
-      const threadName =
-        typeof threadNameRaw === "string" && threadNameRaw.trim()
-          ? threadNameRaw.trim()
-          : prompt.slice(0, 100);
       const reservedAgentIds = new Set(Object.keys(ctx.config.agents?.list ?? {}));
       const parentAgentIdForSubagent = parseAgentSessionUrn(parentSessionId)?.agentId;
       if (parentAgentIdForSubagent) reservedAgentIds.add(parentAgentIdForSubagent);
@@ -1447,8 +1447,9 @@ export async function handleIntegrationControlOp(
             `subagent agent id ${JSON.stringify(childAgentId)} is already in use`,
           );
       } else {
-        childAgentId = deriveThreadSubagentAgentId(threadName, (candidate) =>
-          reservedAgentIds.has(candidate),
+        throw new IntegrationOpError(
+          "ERR_SUBAGENT_AGENT_ID_REQUIRED",
+          "payload.agent_id is required for subagent_spawn",
         );
       }
       const modeRaw = requireString(pl, "mode");
@@ -1633,6 +1634,7 @@ export async function handleIntegrationControlOp(
         const subLog = getLogger("subagent");
         subLog.info("subagent one_shot model turn starting", {
           childId,
+          agentId: childAgentId,
           parentSessionId,
           promptLen: prompt.length,
         });
@@ -1672,6 +1674,7 @@ export async function handleIntegrationControlOp(
               return deliverSubagentResult(ext, {
                 deliveryMode,
                 childSessionId: childId,
+                childAgentId,
                 respondTo,
                 internalDelivery,
                 mode: "one_shot",
@@ -1706,6 +1709,7 @@ export async function handleIntegrationControlOp(
           });
           return {
             session_id: childId,
+            agent_id: childAgentId,
             mode: "one_shot",
             background: true,
             respond_to: respondTo,
@@ -1772,6 +1776,7 @@ export async function handleIntegrationControlOp(
         await deliverSubagentResult(ext, {
           deliveryMode,
           childSessionId: childId,
+          childAgentId,
           respondTo,
           internalDelivery,
           mode: "one_shot",
@@ -1957,6 +1962,7 @@ export async function handleIntegrationControlOp(
         } catch (e) {
           subLog.warn("thread_subagent.status_send_failed", {
             sessionId: childId,
+            agentId: childAgentId,
             platformThreadId,
             err: String(e),
           });
