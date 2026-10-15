@@ -10,6 +10,7 @@ import {
 import type { ToolCallEvent } from "../sessions/tool-loop";
 import type { OutboundAttachment, StreamHandle } from "../presentation/platform-adapter";
 import { getLogger } from "../logging";
+import { createThinkingOutput } from "./thinking-output";
 
 const log = getLogger("inbound-session-turn");
 
@@ -77,6 +78,8 @@ export interface RunInboundSessionTurnOptions {
   readonly streaming?: InboundSessionTurnStreaming;
   /** Transport limits / normalization applied to stream chunks and final bodies. */
   readonly sliceDisplayText: (text: string) => string;
+  /** Include model reasoning in user-visible output when enabled by the platform config. */
+  readonly showThinking?: boolean;
   readonly formatAssistantReply: (
     latestAssistantText: string,
     failoverMeta: SessionToolLoopFailoverState | undefined,
@@ -151,6 +154,7 @@ export interface RunInboundSessionTurnOptions {
  */
 export async function runInboundSessionTurn(options: RunInboundSessionTurnOptions): Promise<void> {
   const { streaming, sliceDisplayText, formatAssistantReply, formatErrorReply } = options;
+  const thinkingOutput = options.showThinking ? createThinkingOutput() : undefined;
   const ctx = options.logContext;
 
   options.mcpLifecycle?.onTurnBegin?.();
@@ -238,33 +242,47 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
 
     const turnResult = await executeSessionAgentTurn({
       ...turn,
-      stream: streamPusher
-        ? {
-            streamModel: true,
-            onModelTextDelta: (() => {
-              return (t: string) => {
-                const vis = t.trim() ? t : "…";
-                streamPusher!.push(vis);
-                // Prose phase (💬): the tracker renders live from text deltas.
-                statusBar?.onProse?.(t);
-              };
-            })(),
-          }
-        : undefined,
+      stream:
+        streamPusher || thinkingOutput
+          ? {
+              // Reasoning callbacks are only provided by model streaming APIs.
+              // Request model streaming even when the transport itself is posting
+              // at once so the final reply can include the collected reasoning.
+              streamModel: true,
+              ...(streamPusher
+                ? {
+                    onModelTextDelta: (t: string) => {
+                      const display = thinkingOutput ? thinkingOutput.onText(t) : t;
+                      const vis = display.trim() ? display : "…";
+                      streamPusher!.push(vis);
+                      // Prose phase (💬): the tracker renders live from text deltas.
+                      statusBar?.onProse?.(t);
+                    },
+                  }
+                : {}),
+            }
+          : undefined,
       // Forward status bar events (thinking / tool / hitl / compaction /
       // context fill) into the turn so the tracker can re-render live while
       // the turn executes.
-      events: statusBar
-        ? {
-            onThinkingDelta: (accumulated) => statusBar?.onThinkingDelta?.(accumulated),
-            onToolCall: (ev) => statusBar?.onToolCall?.(ev),
-            onHitlQueued: (call) => statusBar?.onHitlQueued?.(call),
-            onCompaction: () => statusBar?.onCompaction?.(),
-            onContextUpdate: (update) => statusBar?.onContextUpdate?.(update),
-            onSubagentsChanged: (counts) => statusBar?.onSubagentsChanged?.(counts),
-            onTimersChanged: (count) => statusBar?.onTimersChanged?.(count),
-          }
-        : undefined,
+      events:
+        statusBar || thinkingOutput
+          ? {
+              onThinkingDelta: (accumulated) => {
+                if (thinkingOutput) {
+                  const display = thinkingOutput.onThinking(accumulated);
+                  if (streamPusher) streamPusher.push(display.trim() ? display : "…");
+                }
+                statusBar?.onThinkingDelta?.(accumulated);
+              },
+              onToolCall: (ev) => statusBar?.onToolCall?.(ev),
+              onHitlQueued: (call) => statusBar?.onHitlQueued?.(call),
+              onCompaction: () => statusBar?.onCompaction?.(),
+              onContextUpdate: (update) => statusBar?.onContextUpdate?.(update),
+              onSubagentsChanged: (counts) => statusBar?.onSubagentsChanged?.(counts),
+              onTimersChanged: (count) => statusBar?.onTimersChanged?.(count),
+            }
+          : undefined,
     });
 
     // All-turn delivery for persistent subagents
@@ -300,7 +318,11 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       });
     }
 
-    const rawBody = formatAssistantReply(turnResult.latestAssistantText, turnResult.failoverMeta);
+    const formattedBody = formatAssistantReply(
+      turnResult.latestAssistantText,
+      turnResult.failoverMeta,
+    );
+    const rawBody = thinkingOutput?.render(formattedBody) ?? formattedBody;
 
     const attachments = turnResult.showAttachments;
 

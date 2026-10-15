@@ -422,7 +422,7 @@ describe("per-agent platforms.attachmentHandling", () => {
 // ---------------------------------------------------------------------------
 // End-to-end: platforms.attachmentHandling through full shoggothConfigSchema
 // ---------------------------------------------------------------------------
-describe("attachmentHandling — full shoggothConfigSchema end-to-end", () => {
+describe("attachmentHandling and showThinking — full shoggothConfigSchema end-to-end", () => {
   function fullConfigWith(overrides: Record<string, unknown>) {
     return { ...defaultConfig("/etc/shoggoth/config.d"), ...overrides };
   }
@@ -496,9 +496,24 @@ describe("attachmentHandling — full shoggothConfigSchema end-to-end", () => {
     assert.ok(!r.success);
   });
 
-  it("parses default config without attachmentHandling (optional)", () => {
-    const r = shoggothConfigSchema.safeParse(defaultConfig("/etc/shoggoth/config.d"));
+  it("parses default config with showThinking enabled by default", () => {
+    const cfg = defaultConfig("/etc/shoggoth/config.d");
+    assert.equal(cfg.platforms?.showThinking, true);
+    const r = shoggothConfigSchema.safeParse(cfg);
     assert.ok(r.success, JSON.stringify((r as any).error?.issues));
+  });
+
+  it("accepts disabling showThinking in global platform config", () => {
+    const r = shoggothConfigSchema.safeParse(
+      fullConfigWith({ platforms: { showThinking: false, discord: { enabled: true } } }),
+    );
+    assert.ok(r.success, JSON.stringify((r as any).error?.issues));
+    if (r.success) assert.equal(r.data.platforms?.showThinking, false);
+  });
+
+  it("rejects a non-boolean showThinking value", () => {
+    const r = shoggothConfigSchema.safeParse(fullConfigWith({ platforms: { showThinking: "no" } }));
+    assert.ok(!r.success);
   });
 });
 

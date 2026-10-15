@@ -12,6 +12,7 @@ import {
 } from "@shoggoth/shared";
 import {
   createCoalescingStreamPusher,
+  createThinkingOutput,
   createHitlPendingResolutionStack,
   createPolicyEngine,
   createSessionStore,
@@ -693,6 +694,8 @@ export async function startDiscordPlatform(
       // live/terminal difference is the phase emoji). Captures until the stream
       // handle exists; attachSink flushes the ⏳ line onto the placeholder.
       let surfaceTracker: TurnStatusBarTracker | undefined;
+      let thinkingOutput: ReturnType<typeof createThinkingOutput> | undefined;
+      let surfaceStreamPusher: ReturnType<typeof createCoalescingStreamPusher> | undefined;
       const executeTurn = (
         afterHitlQueued?: (row: PendingActionRow) => void | Promise<void>,
         streamOverride?: ExecuteSessionAgentTurnInput["stream"],
@@ -729,11 +732,18 @@ export async function startDiscordPlatform(
           // Forward turn events into the tracker so the live bar re-renders
           // mid-turn (thinking / tool count / HITL pause / compaction /
           // context fill).
-          ...(surfaceTracker
+          ...(surfaceTracker || thinkingOutput
             ? {
                 events: {
-                  onThinkingDelta: (accumulated: string) =>
-                    surfaceTracker?.onThinkingDelta?.(accumulated),
+                  onThinkingDelta: (accumulated: string) => {
+                    if (thinkingOutput) {
+                      const display = thinkingOutput.onThinking(accumulated);
+                      if (surfaceStreamPusher) {
+                        surfaceStreamPusher.push(display.trim() ? display : "…");
+                      }
+                    }
+                    surfaceTracker?.onThinkingDelta?.(accumulated);
+                  },
                   onToolCall: (ev) => surfaceTracker?.onToolCall?.(ev),
                   onHitlQueued: (call) => surfaceTracker?.onHitlQueued?.(call),
                   onCompaction: () => surfaceTracker?.onCompaction?.(),
@@ -761,6 +771,10 @@ export async function startDiscordPlatform(
         // the typing indicator — Discord cancels typing when a bot posts a
         // message — and coalesce model text deltas into live edits of that
         // message, matching the standard inbound-turn pathway.
+        thinkingOutput =
+          (opts.configRef?.current ?? opts.config).platforms?.showThinking === false
+            ? undefined
+            : createThinkingOutput();
         let surfaceStreamHandle: StreamHandle | undefined;
         if (streamEnabled()) {
           const streamingOutbound = opts.discord.streamingForSession(sid);
@@ -797,10 +811,9 @@ export async function startDiscordPlatform(
             }
           }
         }
-        const surfaceStreamPusher = surfaceStreamHandle
+        surfaceStreamPusher = surfaceStreamHandle
           ? createCoalescingStreamPusher((s) => surfaceStreamHandle!.pushUpdate(s), streamMinMs())
           : undefined;
-
         await adapter.withTypingIndicator(sid, async () => {
           turnResult = await executeTurn(
             buildAfterHitlQueued(delivery),
@@ -808,23 +821,25 @@ export async function startDiscordPlatform(
               ? {
                   streamModel: true,
                   onModelTextDelta: (t: string) => {
-                    surfaceStreamPusher.push(t.trim() ? t : "…");
+                    const display = thinkingOutput ? thinkingOutput.onText(t) : t;
+                    surfaceStreamPusher!.push(display.trim() ? display : "…");
                     // Prose phase (💬) on the live bar.
                     surfaceTracker?.onProse?.(t);
                   },
                 }
-              : streamEnabled()
+              : streamEnabled() || thinkingOutput
                 ? { streamModel: true }
                 : undefined,
           );
           const cfg = opts.configRef?.current ?? opts.config;
-          const fullBody = formatAssistantReply(
+          const formattedBody = formatAssistantReply(
             cfg,
             sid,
             env,
             turnResult.latestAssistantText,
             turnResult.failoverMeta,
           );
+          const fullBody = thinkingOutput?.render(formattedBody) ?? formattedBody;
           // ONE terminal composition: the tracker's finish() renders the
           // frozen bar (✅/🛑/❌) through the same renderer as the live bar and
           // returns the line for delivery — the terminal snapshot carries this
