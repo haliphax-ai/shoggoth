@@ -985,6 +985,7 @@ void (async () => {
         sessionManager,
         sessions,
         threadId: input.threadId,
+        threadTitle: input.threadTitle,
         parentChannelId: input.parentChannelId,
         guildId: input.guildId,
         platform: {

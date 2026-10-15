@@ -180,6 +180,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
                 db: unknown;
                 config: unknown;
                 threadId: string;
+                threadTitle?: string;
                 parentChannelId: string;
                 guildId?: string;
                 resolveSessionForChannel: (
@@ -200,6 +201,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
             db,
             config: configRef.current,
             threadId: ev.threadId,
+            threadTitle: ev.name,
             parentChannelId: ev.parentChannelId,
             guildId: ev.guildId,
             resolveSessionForChannel: (channelId, guildId2) =>

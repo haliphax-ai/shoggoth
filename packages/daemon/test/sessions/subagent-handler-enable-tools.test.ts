@@ -45,6 +45,7 @@ describe("builtin-subagent enable_tools passthrough", () => {
       {
         action: "spawn_one_shot",
         prompt: "do it",
+        agent_id: "seh-oneshot",
         enable_tools: ["kanban-*", "builtin-exec"],
       },
       stubCtx(async (op, payload) => {
@@ -67,6 +68,7 @@ describe("builtin-subagent enable_tools passthrough", () => {
       {
         action: "spawn_persistent",
         prompt: "do it",
+        agent_id: "seh-persist",
         thread_id: "555",
         enable_tools: ["lsp-*"],
       },
@@ -88,6 +90,7 @@ describe("builtin-subagent enable_tools passthrough", () => {
       {
         action: "spawn_one_shot",
         prompt: "do it",
+        agent_id: "seh-drop",
         enable_tools: ["ok", 42],
       },
       stubCtx(async (_op, payload) => {

@@ -218,6 +218,7 @@ async function sendSpawn(
         parent_session_id: parentId,
         prompt: "monitor ci",
         mode: "persistent",
+        agent_id: "spr-agent",
         ...payload,
       },
     });

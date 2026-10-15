@@ -193,6 +193,7 @@ describe("subagent_spawn maxSpawnDepth nesting gate", () => {
             parent_session_id: parentSessionId,
             prompt: "task",
             mode: "one_shot",
+            agent_id: "nest-agent",
           },
         });
         parsed = parseResponseLine(line) as WireResult;

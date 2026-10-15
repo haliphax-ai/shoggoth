@@ -30,7 +30,8 @@ export function deriveThreadSubagentAgentId(
       .replace(/[^a-zA-Z0-9-]/g, "")
       .replace(/^-+|-+$/g, "")
       .slice(0, SHOGGOTH_SUBAGENT_AGENT_ID_MAX_LENGTH)
-      .replace(/-+$/g, "") || "thread";
+      .replace(/-+$/g, "")
+      .toLowerCase() || "thread";
   if (!isUnavailable(base)) return base;
 
   for (let counter = 2; ; counter++) {

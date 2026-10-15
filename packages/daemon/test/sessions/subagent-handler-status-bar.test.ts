@@ -67,7 +67,11 @@ describe("builtin-subagent onSubagentsChanged (live status bar counts)", () => {
     registerSubagent(reg);
     const seen: Array<{ total: number; persistent: number }> = [];
     const { ctx } = stubCtx(spawnOkInvoker("one_shot"), (counts) => seen.push(counts));
-    await reg.execute("subagent", { action: "spawn_one_shot", prompt: "task" }, ctx);
+    await reg.execute(
+      "subagent",
+      { action: "spawn_one_shot", prompt: "task", agent_id: "sb-oneshot" },
+      ctx,
+    );
     assert.equal(seen.length, 1);
     assert.deepStrictEqual(seen[0], { total: 1, persistent: 0 });
   });
@@ -77,7 +81,11 @@ describe("builtin-subagent onSubagentsChanged (live status bar counts)", () => {
     registerSubagent(reg);
     const seen: Array<{ total: number; persistent: number }> = [];
     const { ctx } = stubCtx(spawnOkInvoker("persistent"), (counts) => seen.push(counts));
-    await reg.execute("subagent", { action: "spawn_persistent", prompt: "task" }, ctx);
+    await reg.execute(
+      "subagent",
+      { action: "spawn_persistent", prompt: "task", agent_id: "sb-persist" },
+      ctx,
+    );
     assert.equal(seen.length, 1);
     assert.deepStrictEqual(seen[0], { total: 1, persistent: 1 });
   });
@@ -92,7 +100,11 @@ describe("builtin-subagent onSubagentsChanged (live status bar counts)", () => {
       },
       (counts) => seen.push(counts),
     );
-    const result = await reg.execute("subagent", { action: "spawn_one_shot", prompt: "task" }, ctx);
+    const result = await reg.execute(
+      "subagent",
+      { action: "spawn_one_shot", prompt: "task", agent_id: "sb-fail" },
+      ctx,
+    );
     assert.equal(JSON.parse(result.resultJson).ok, false);
     assert.equal(seen.length, 0);
   });
