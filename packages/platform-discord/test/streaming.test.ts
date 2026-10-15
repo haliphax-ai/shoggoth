@@ -632,6 +632,128 @@ describe("DiscordStreamingOutbound status bar", () => {
   });
 });
 
+describe("DiscordStreamingOutbound synthetic formatting close", () => {
+  const BAR = "> ✅ done";
+
+  it("pushUpdate closes an unclosed inline marker before the bar", async () => {
+    const transport = createMockTransport();
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: discordCapabilityDescriptor(),
+      channelId: "ch-1",
+      maxContentLength: 2000,
+    });
+    const handle = await streaming.start();
+    await handle.setStatusBar(BAR);
+
+    await handle.pushUpdate("*italic that isn't finished");
+
+    const editCalls = vi.mocked(transport.editMessage).mock.calls;
+    expect(editCalls[editCalls.length - 1][2].content).toBe(
+      `*italic that isn't finished*\n\n${BAR}`,
+    );
+  });
+
+  it("drops the synthetic marker once the real pair completes on a later chunk", async () => {
+    const transport = createMockTransport();
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: discordCapabilityDescriptor(),
+      channelId: "ch-1",
+      maxContentLength: 2000,
+    });
+    const handle = await streaming.start();
+    await handle.setStatusBar(BAR);
+
+    await handle.pushUpdate("*italic unfinished");
+    await handle.pushUpdate("*italic unfinished* and more");
+
+    const editCalls = vi.mocked(transport.editMessage).mock.calls;
+    expect(editCalls[editCalls.length - 1][2].content).toBe(
+      `*italic unfinished* and more\n\n${BAR}`,
+    );
+  });
+
+  it("keeps the synthetic marker on the final content when the turn ends unclosed", async () => {
+    const transport = createMockTransport();
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: discordCapabilityDescriptor(),
+      channelId: "ch-1",
+      maxContentLength: 2000,
+    });
+    const handle = await streaming.start();
+    await handle.setFullContent("**bold that never closes");
+
+    // No explicit bar render, but the delivery-time bar arrives via the
+    // statusBar option — the guard must still apply.
+    const budget = 2000 - (BAR.length + 2);
+    await handle.setStatusBar(BAR);
+    vi.mocked(transport.editMessage).mockClear();
+
+    await handle.setFullContent("**bold that never closes");
+    const editCalls = vi.mocked(transport.editMessage).mock.calls;
+    expect(editCalls).toHaveLength(1);
+    expect(editCalls[0][2].content).toBe(`**bold that never closes**\n\n${BAR}`);
+    expect(editCalls[0][2].content.length).toBeLessThanOrEqual(budget + BAR.length + 2);
+  });
+
+  it("closes an unclosed fence so it cannot swallow the bar", async () => {
+    const transport = createMockTransport();
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: discordCapabilityDescriptor(),
+      channelId: "ch-1",
+      maxContentLength: 2000,
+    });
+    const handle = await streaming.start();
+    await handle.setStatusBar(BAR);
+
+    await handle.pushUpdate("```\ncode without a closing fence");
+
+    const editCalls = vi.mocked(transport.editMessage).mock.calls;
+    expect(editCalls[editCalls.length - 1][2].content).toBe(
+      "```\ncode without a closing fence\n```\n\n" + BAR,
+    );
+  });
+
+  it("leaves content untouched when no bar is ever set", async () => {
+    const transport = createMockTransport();
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: discordCapabilityDescriptor(),
+      channelId: "ch-1",
+      maxContentLength: 2000,
+    });
+    const handle = await streaming.start();
+
+    await handle.pushUpdate("*unclosed but no bar");
+    await handle.setFullContent("**also unclosed");
+
+    const editCalls = vi.mocked(transport.editMessage).mock.calls;
+    expect(editCalls[0][2].content).toBe("*unclosed but no bar");
+    expect(editCalls[1][2].content).toBe("**also unclosed");
+  });
+
+  it("re-render via setStatusBar guards the last pushed text too", async () => {
+    const transport = createMockTransport();
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: discordCapabilityDescriptor(),
+      channelId: "ch-1",
+      maxContentLength: 2000,
+    });
+    const handle = await streaming.start();
+
+    // Push unclosed content while no bar is active, then a bar render arrives.
+    await handle.pushUpdate("a *b c");
+    await handle.setStatusBar(BAR);
+
+    const editCalls = vi.mocked(transport.editMessage).mock.calls;
+    expect(editCalls[editCalls.length - 1][2].content).toBe(`a *b c*\n\n${BAR}`);
+  });
+});
+
 describe("DiscordStreamingOutbound concurrency", () => {
   it("serializes concurrent renders so racing reconciles never duplicate overflow messages", async () => {
     const transport = createMockTransport();
