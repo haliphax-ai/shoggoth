@@ -845,11 +845,21 @@ export interface ExecExtendedOptions {
    * Mutually exclusive with `background: true` (background wins).
    */
   yieldMs?: number;
-  /** File path to write stdout to (workspace-relative). Bypasses inline truncation; subject to MAX_FILE_OUTPUT_BYTES safety cap. */
+  /**
+   * File path to write stdout to (workspace-relative). Bypasses inline truncation; subject to MAX_FILE_OUTPUT_BYTES safety cap.
+   * With `background`/`yieldMs`, output streams directly to the file as it is produced (safety cap does not apply).
+   */
   stdoutFile?: string;
-  /** File path to write stderr to (workspace-relative). Bypasses inline truncation; subject to MAX_FILE_OUTPUT_BYTES safety cap. */
+  /**
+   * File path to write stderr to (workspace-relative). Bypasses inline truncation; subject to MAX_FILE_OUTPUT_BYTES safety cap.
+   * With `background`/`yieldMs`, output streams directly to the file as it is produced (safety cap does not apply).
+   */
   stderrFile?: string;
-  /** File path to write combined stdout+stderr to (workspace-relative). Mutually exclusive with stdoutFile/stderrFile. Bypasses inline truncation; subject to MAX_FILE_OUTPUT_BYTES safety cap. */
+  /**
+   * File path to write combined stdout+stderr to (workspace-relative). Mutually exclusive with stdoutFile/stderrFile.
+   * Bypasses inline truncation; subject to MAX_FILE_OUTPUT_BYTES safety cap.
+   * With `background`/`yieldMs`, output streams directly to the file as it is produced (safety cap does not apply).
+   */
   outputFile?: string;
 }
 
@@ -892,6 +902,12 @@ export interface ExecBackgroundResult {
   yielded?: boolean;
   /** Partial output captured before the process was backgrounded. */
   partialOutput?: string;
+  /** Path where stdout is streaming (when stdoutFile was specified). */
+  stdoutFile?: string;
+  /** Path where stderr is streaming (when stderrFile was specified). */
+  stderrFile?: string;
+  /** Path where combined output is streaming (when outputFile was specified). */
+  outputFile?: string;
 }
 
 export type ExecExtendedResult = ExecForegroundResult | ExecBackgroundResult;
@@ -1013,6 +1029,43 @@ export function removeExecSession(sessionId: string): boolean {
 // Extended exec — validation
 // ---------------------------------------------------------------------------
 
+/**
+ * Single-quote a path for safe interpolation into a bash command line.
+ */
+function shellQuotePath(p: string): string {
+  return `'${p.replace(/'/g, `'\\''`)}'`;
+}
+interface FileRedirects {
+  prefix: string;
+}
+/**
+ * Build a shell redirection prefix for streaming file output in
+ * background/yieldMs modes. Paths are resolved (and validated against the
+ * workspace root) up front so an escaping path fails before the process is
+ * spawned. Output streams to the file directly from the process — nothing is
+ * buffered in memory, so the MAX_FILE_OUTPUT_BYTES cap does not apply.
+ *
+ * The prefix uses `exec` so the redirections apply to the entire command line
+ * (including compound commands like `a && b`), unlike a trailing suffix.
+ */
+function buildFileRedirects(
+  workspaceRoot: string,
+  opts: Pick<ExecExtendedOptions, "outputFile" | "stdoutFile" | "stderrFile">,
+): FileRedirects {
+  if (opts.outputFile) {
+    const abs = resolvePathForWrite(workspaceRoot, opts.outputFile);
+    return { prefix: `exec > ${shellQuotePath(abs)} 2>&1; ` };
+  }
+  const parts: string[] = [];
+  if (opts.stdoutFile) {
+    parts.push(`> ${shellQuotePath(resolvePathForWrite(workspaceRoot, opts.stdoutFile))}`);
+  }
+  if (opts.stderrFile) {
+    parts.push(`2> ${shellQuotePath(resolvePathForWrite(workspaceRoot, opts.stderrFile))}`);
+  }
+  return { prefix: parts.length > 0 ? `exec ${parts.join(" ")}; ` : "" };
+}
+
 function validateExecOptions(opts: ExecExtendedOptions): void {
   if (!opts.command || opts.command.trim().length === 0) {
     throw new Error("`command` is required and must be non-empty.");
@@ -1030,16 +1083,8 @@ function validateExecOptions(opts: ExecExtendedOptions): void {
     throw new Error("`yieldMs` must be a non-negative number.");
   }
   // File output validation
-  const hasFileOutput =
-    opts.outputFile !== undefined || opts.stdoutFile !== undefined || opts.stderrFile !== undefined;
   if (opts.outputFile && (opts.stdoutFile || opts.stderrFile)) {
     throw new Error("`outputFile` cannot be used together with `stdoutFile` or `stderrFile`.");
-  }
-  if (hasFileOutput && opts.background) {
-    throw new Error("File output cannot be used with `background`.");
-  }
-  if (hasFileOutput && opts.yieldMs !== undefined) {
-    throw new Error("File output cannot be used with `yieldMs`.");
   }
 }
 
@@ -1108,11 +1153,15 @@ export async function toolExecExtended(
     // When a ProcessManager is available, start via procman
     if (_processManager) {
       const specId = nextProcmanId();
+      const redirects: FileRedirects | undefined =
+        opts.outputFile || opts.stdoutFile || opts.stderrFile
+          ? buildFileRedirects(workspaceRoot, opts)
+          : undefined;
       const spec: ProcessSpec = {
         id: specId,
         owner: { kind: "agent-tool", scopeId: "exec" },
         command: "/bin/bash",
-        args: ["-c", opts.command],
+        args: ["-c", redirects ? `${redirects.prefix}${opts.command}` : opts.command],
         cwd,
         uid: creds.uid,
         gid: creds.gid,
@@ -1127,6 +1176,9 @@ export async function toolExecExtended(
         sessionId: specId,
         pid: mp.pid!,
         status: "running",
+        stdoutFile: opts.stdoutFile,
+        stderrFile: opts.stderrFile,
+        outputFile: opts.outputFile,
       };
     }
 
@@ -1138,11 +1190,15 @@ export async function toolExecExtended(
     // When a ProcessManager is available, start via procman
     if (_processManager) {
       const specId = nextProcmanId();
+      const redirects: FileRedirects | undefined =
+        opts.outputFile || opts.stdoutFile || opts.stderrFile
+          ? buildFileRedirects(workspaceRoot, opts)
+          : undefined;
       const spec: ProcessSpec = {
         id: specId,
         owner: { kind: "agent-tool", scopeId: "exec" },
         command: "/bin/bash",
-        args: ["-c", opts.command],
+        args: ["-c", redirects ? `${redirects.prefix}${opts.command}` : opts.command],
         cwd,
         uid: creds.uid,
         gid: creds.gid,
@@ -1166,11 +1222,40 @@ export async function toolExecExtended(
       ]);
 
       if (finished) {
+        // Clean up from procman since we're returning a foreground result
+        _processManager.stop(specId).catch(() => {});
+        if (redirects) {
+          // Output streamed directly to file(s) via shell redirection;
+          // only non-redirected streams come back inline (mirrors
+          // foreground file-output semantics).
+          const fgResult: ExecForegroundResult = {
+            kind: "foreground",
+            exitCode: mp.lastExitCode,
+            signal: mp.lastSignal,
+          };
+          if (opts.outputFile) {
+            fgResult.outputFile = opts.outputFile;
+          } else {
+            if (opts.stdoutFile) {
+              fgResult.stdoutFile = opts.stdoutFile;
+            } else {
+              const t = truncateOutput(mp.readOutput("stdout"), maxOutput, truncationMode);
+              fgResult.stdout = t.text;
+              fgResult.stdoutTruncated = t.truncated || undefined;
+            }
+            if (opts.stderrFile) {
+              fgResult.stderrFile = opts.stderrFile;
+            } else {
+              const t = truncateOutput(mp.readOutput("stderr"), maxOutput, truncationMode);
+              fgResult.stderr = t.text;
+              fgResult.stderrTruncated = t.truncated || undefined;
+            }
+          }
+          return fgResult;
+        }
         // Process completed within the yield window — build foreground result
         const stdout = mp.readOutput("stdout");
         const stderr = mp.readOutput("stderr");
-        // Clean up from procman since we're returning a foreground result
-        _processManager.stop(specId).catch(() => {});
         return buildForegroundResultFromParts(
           stdout,
           stderr,
@@ -1195,6 +1280,9 @@ export async function toolExecExtended(
         status: "running",
         yielded: true,
         partialOutput,
+        stdoutFile: opts.stdoutFile,
+        stderrFile: opts.stderrFile,
+        outputFile: opts.outputFile,
       };
     }
 

@@ -883,35 +883,110 @@ describe("toolExecExtended", () => {
         /outputFile.*cannot be used together/i,
       );
     });
-    it("validation: rejects file output with background: true", async () => {
-      await assert.rejects(
-        () =>
-          toolExecExtended(
-            ws,
-            {
-              command: "echo hello",
-              stdoutFile: "stdout.txt",
-              background: true,
-            },
-            creds,
-          ),
-        /File output cannot be used with.*background/i,
+    it("background + outputFile: streams to file and returns handle", async () => {
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "echo bg-out; echo bg-err >&2",
+          outputFile: "bg-combined.txt",
+          background: true,
+        },
+        creds,
       );
+      assert.equal(r.kind, "background");
+      const bg = r as ExecBackgroundResult;
+      assert.ok(bg.sessionId);
+      assert.equal(bg.outputFile, "bg-combined.txt");
+
+      const mp = getManagedExecSession(bg.sessionId);
+      assert.ok(mp);
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
+
+      const content = readFileSync(join(ws, "bg-combined.txt"), "utf8");
+      assert.ok(content.includes("bg-out"));
+      assert.ok(content.includes("bg-err"));
+      removeExecSession(bg.sessionId);
     });
-    it("validation: rejects file output with yieldMs", async () => {
-      await assert.rejects(
-        () =>
-          toolExecExtended(
-            ws,
-            {
-              command: "echo hello",
-              stderrFile: "stderr.txt",
-              yieldMs: 100,
-            },
-            creds,
-          ),
-        /File output cannot be used with.*yieldMs/i,
+    it("background + stdoutFile/stderrFile: streams to separate files", async () => {
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "echo split-out; echo split-err >&2",
+          stdoutFile: "bg-stdout.txt",
+          stderrFile: "bg-stderr.txt",
+          background: true,
+        },
+        creds,
       );
+      assert.equal(r.kind, "background");
+      const bg = r as ExecBackgroundResult;
+      assert.equal(bg.stdoutFile, "bg-stdout.txt");
+      assert.equal(bg.stderrFile, "bg-stderr.txt");
+
+      const mp = getManagedExecSession(bg.sessionId);
+      assert.ok(mp);
+      await new Promise<void>((resolve) => {
+        if (["exited", "dead", "failed"].includes(mp.state)) {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
+
+      assert.ok(readFileSync(join(ws, "bg-stdout.txt"), "utf8").includes("split-out"));
+      assert.ok(readFileSync(join(ws, "bg-stderr.txt"), "utf8").includes("split-err"));
+      removeExecSession(bg.sessionId);
+    });
+    it("yieldMs expiry + stdoutFile: output streams to file while running", async () => {
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "echo yield-out; sleep 5",
+          stdoutFile: "yield-stdout.txt",
+          yieldMs: 300,
+        },
+        creds,
+      );
+      assert.equal(r.kind, "background");
+      const bg = r as ExecBackgroundResult;
+      assert.equal(bg.yielded, true);
+      assert.equal(bg.stdoutFile, "yield-stdout.txt");
+
+      // Output is in the file even though the process is still running
+      const content = readFileSync(join(ws, "yield-stdout.txt"), "utf8");
+      assert.ok(content.includes("yield-out"));
+      removeExecSession(bg.sessionId);
+    });
+    it("yieldMs finishing in window + file output: foreground result with paths", async () => {
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "echo quick-out; echo quick-err >&2",
+          stdoutFile: "quick-stdout.txt",
+          stderrFile: "quick-stderr.txt",
+          yieldMs: 30000,
+        },
+        creds,
+      );
+      assert.equal(r.kind, "foreground");
+      const fg = r as ExecForegroundResult;
+      assert.equal(fg.stdoutFile, "quick-stdout.txt");
+      assert.equal(fg.stderrFile, "quick-stderr.txt");
+      assert.equal(fg.stdout, undefined);
+      assert.equal(fg.stderr, undefined);
+
+      assert.ok(readFileSync(join(ws, "quick-stdout.txt"), "utf8").includes("quick-out"));
+      assert.ok(readFileSync(join(ws, "quick-stderr.txt"), "utf8").includes("quick-err"));
     });
     it("file writing: writes combined output to outputFile", async () => {
       const r = await toolExecExtended(

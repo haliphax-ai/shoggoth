@@ -103,6 +103,9 @@ async function execHandlerInner(
           pid: r.pid,
           yielded: r.yielded ?? false,
           partialOutput: r.partialOutput,
+          stdoutFile: r.stdoutFile,
+          stderrFile: r.stderrFile,
+          outputFile: r.outputFile,
         }),
       };
     }
