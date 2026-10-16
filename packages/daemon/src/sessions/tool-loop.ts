@@ -930,13 +930,6 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
             sessionId: options.sessionId,
             attempt: structuredOutputAttempt,
           });
-          if (structuredOutputAttempt > STRUCTURED_OUTPUT_MAX_RETRIES) {
-            log.error("structured output validation retries exhausted", {
-              sessionId: options.sessionId,
-              attempts: structuredOutputAttempt,
-            });
-            throw e;
-          }
           // Record the non-conformant response in transcript
           if (options.transcript) {
             appendTx({
@@ -945,6 +938,18 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
               metadata: { structuredOutputValidationFailed: true },
             });
             emitStats?.({ transcriptMessageCount: getTranscriptCount() });
+          }
+          if (structuredOutputAttempt > STRUCTURED_OUTPUT_MAX_RETRIES) {
+            log.error("structured output validation retries exhausted", {
+              sessionId: options.sessionId,
+              attempts: structuredOutputAttempt,
+            });
+            // Retry budget spent: stop and let the model's last attempt bubble
+            // up as the turn's terminal response (it was just written to the
+            // transcript) instead of failing the whole turn. Callers such as
+            // OOB delivery then parse it — or surface it verbatim — rather
+            // than retrying forever.
+            break;
           }
           // Build and inject correction message
           const correction = `Your previous response did not conform to the required JSON schema. Error: ${e.message}\n\nPlease retry and ensure your response conforms to the schema:\n${JSON.stringify(e.schema, null, 2)}`;
