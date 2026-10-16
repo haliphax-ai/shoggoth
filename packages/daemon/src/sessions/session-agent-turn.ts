@@ -459,6 +459,7 @@ export async function executeSessionAgentTurn(
     initialMessages,
     tools: () => currentToolsOpenAi,
     modelInvocation,
+    turnAbortSignal,
     streamModel: Boolean(input.stream?.streamModel),
     onModelTextDelta: input.stream?.onModelTextDelta,
     onThinkingDelta: input.events?.onThinkingDelta,

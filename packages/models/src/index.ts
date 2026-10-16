@@ -1,5 +1,5 @@
 export { isFailoverEligibleError } from "./classify";
-export { EmptyModelResponseError, ModelHttpError } from "./errors";
+export { EmptyModelResponseError, ModelHttpError, ModelRequestAbortedError } from "./errors";
 export {
   createOpenAICompatibleProvider,
   type OpenAICompatibleProviderOptions,
