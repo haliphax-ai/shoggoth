@@ -1,3 +1,5 @@
+import { renderThinkingBlockquote } from "@shoggoth/shared";
+
 export type ThinkingOutputKind = "text" | "thinking";
 
 interface OutputPart {
@@ -62,13 +64,7 @@ export function createThinkingOutput() {
             : textOffset + part.text.length;
         if (prose) rendered.push(prose);
       } else if (part.text) {
-        const quote = part.text
-          .split("\n")
-          // The emoji marks the START of a thinking block only;
-          // continuation lines keep the blockquote without it.
-          .map((line, index) => (index === 0 ? `> 💭 ${line}` : `> ${line}`))
-          .join("\n");
-        rendered.push(quote);
+        rendered.push(renderThinkingBlockquote(part.text));
       }
     }
     if (finalText !== undefined && parts.every((part) => part.kind === "thinking")) {

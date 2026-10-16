@@ -1,3 +1,5 @@
+import { renderThinkingBlockquote } from "@shoggoth/shared";
+
 /**
  * Formats thinking blocks in Discord messages based on display mode.
  */
@@ -20,16 +22,6 @@ function extractThinkingAndResponse(body: string): {
   const thinking = thinkingMatch[1];
   const response = body.replace(/<thinking>[\s\S]*?<\/thinking>/, "").trim();
   return { thinking, response };
-}
-
-/**
- * Format thinking content as a Discord blockquote with 💭 prefix.
- */
-function formatThinkingFull(thinking: string): string {
-  // The emoji marks the START of the thinking block only; continuation lines
-  // keep the blockquote without repeating it on every line.
-  const lines = thinking.split("\n");
-  return lines.map((line, index) => (index === 0 ? `> 💭 ${line}` : `> ${line}`)).join("\n");
 }
 
 /**
@@ -57,7 +49,7 @@ export function formatMessageWithThinking(body: string, mode: ThinkingDisplayMod
   let formatted = "";
 
   if (mode === "full") {
-    formatted = formatThinkingFull(thinking);
+    formatted = renderThinkingBlockquote(thinking);
     if (response) {
       formatted += "\n\n" + response;
     }
