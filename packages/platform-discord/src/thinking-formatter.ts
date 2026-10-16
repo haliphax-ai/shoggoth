@@ -26,8 +26,10 @@ function extractThinkingAndResponse(body: string): {
  * Format thinking content as a Discord blockquote with 💭 prefix.
  */
 function formatThinkingFull(thinking: string): string {
+  // The emoji marks the START of the thinking block only; continuation lines
+  // keep the blockquote without repeating it on every line.
   const lines = thinking.split("\n");
-  return lines.map((line) => `> 💭 ${line}`).join("\n");
+  return lines.map((line, index) => (index === 0 ? `> 💭 ${line}` : `> ${line}`)).join("\n");
 }
 
 /**

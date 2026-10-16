@@ -2500,8 +2500,8 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
             onTextDelta?: (delta: string, accumulated: string) => void;
           }) {
             events.push("model-call");
-            input.onTextDelta?.("streamed ", "streamed ");
-            input.onTextDelta?.("reply", marker);
+            input.onTextDelta?.("streamed-", "streamed-");
+            input.onTextDelta?.("reply-marker", marker);
             return {
               content: marker,
               toolCalls: [],
@@ -2539,14 +2539,11 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       "model text deltas should reach the stream handle as live updates",
     );
 
-    // …and the streamed accumulation stands as the delivered body. This stub
-    // handle can't render a status bar itself, so the terminal edit still runs
-    // — but it must carry the FULL streamed text, never a segment-scoped
-    // replacement of the accumulation.
-    assert.ok(
-      finalBody?.includes(marker),
-      "terminal edit (if any) must carry the full streamed text",
-    );
+    // …and the terminal edit delivers the turn-scoped reply body. This stub
+    // handle can't render a status bar itself, so the terminal edit always
+    // runs — it must carry the streamed reply, never a segment-scoped
+    // truncation of it.
+    assert.ok(finalBody?.includes(marker), "terminal edit (if any) must carry the full reply text");
 
     // The reply must NOT also be posted at once via the outbound surface.
     assert.strictEqual(
@@ -3223,6 +3220,108 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
       `fallback must deliver the formatted reply body, got: ${delivered}`,
     );
     assert.ok(!delivered.startsWith("…"), `placeholder must be replaced, got: ${delivered}`);
+    assert.ok(delivered.includes("✅"), `terminal bar must land, got: ${delivered}`);
+  });
+
+  it("streamed turn whose live display diverges mid-round delivers the clean turn-scoped prose exactly once", async () => {
+    const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
+    createSessionStore(db).create({ id: sessionUrn, workspacePath: tmp });
+    seedStats(sessionUrn, { turn_count: 7 });
+
+    let delivered = "";
+    let bar: string | null = null;
+    let body = "…";
+    const render = () => {
+      delivered = bar === null ? body : `${body}\n\n${bar}`;
+    };
+    const runtime: DiscordMessagingRuntime = {
+      ...baseRuntime(sessionUrn, []),
+      streamingForSession: () => ({
+        start: async () => ({
+          setFullContent: async (text: string) => {
+            body = text;
+            render();
+          },
+          pushUpdate: async (text: string) => {
+            body = text;
+            render();
+          },
+          setStatusBar: async (line: string | null) => {
+            bar = line;
+            render();
+          },
+        }),
+      }),
+    };
+
+    // Round 2's streamed tail ("Done partial") differs from its final content
+    // ("Done.") — as happens with trimmed content, failover hops, or
+    // steering-injected rounds — so round 3's display (priorRounds + new
+    // accumulation) diverges from the previous snapshot. The LIVE display may
+    // carry the junk; the DELIVERED message must be the clean turn-scoped
+    // prose with each segment exactly once.
+    let round = 0;
+    const platform = await startDiscordPlatform({
+      db,
+      config: {
+        ...defaultConfig(tmp),
+        platforms: { statusBar: { enabled: true } },
+      },
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord: runtime,
+      env: { SHOGGOTH_DISCORD_STREAM: "1" },
+      deps: {
+        createToolCallingClient: () => ({
+          async completeWithTools(input: {
+            onTextDelta?: (delta: string, accumulated: string) => void;
+          }) {
+            round += 1;
+            if (round === 1) {
+              input.onTextDelta?.("Checking ", "Checking ");
+              input.onTextDelta?.("the repo.", "Checking the repo.");
+              return {
+                content: "Checking the repo.",
+                toolCalls: [{ id: "t1", name: "no-such-tool", arguments: "{}" }],
+                usedModel: "m1",
+                usedProviderId: "p1",
+              };
+            }
+            if (round === 2) {
+              input.onTextDelta?.("Done ", "Checking the repo.\n\nDone ");
+              input.onTextDelta?.("partial", "Checking the repo.\n\nDone partial");
+              return {
+                content: "Done.",
+                toolCalls: [{ id: "t2", name: "no-such-tool", arguments: "{}" }],
+                usedModel: "m1",
+                usedProviderId: "p1",
+              };
+            }
+            const display = "Checking the repo.\n\nDone.\n\nAll green.";
+            input.onTextDelta?.("All green.", display);
+            return {
+              content: "All green.",
+              toolCalls: [],
+              usedModel: "m1",
+              usedProviderId: "p1",
+            };
+          },
+        }),
+      },
+    });
+
+    await platform.runSessionModelTurn({
+      sessionId: sessionUrn,
+      userContent: "hi",
+      delivery: { kind: "messaging_surface", userId: "u-1" },
+    });
+    await platform.stop();
+
+    assert.strictEqual(
+      delivered.split("Checking the repo.").length - 1,
+      1,
+      `pre-tools prose must be delivered exactly once — never duplicated by a diverged display, got: ${delivered}`,
+    );
+    assert.ok(delivered.includes("All green."), `final prose must be delivered, got: ${delivered}`);
     assert.ok(delivered.includes("✅"), `terminal bar must land, got: ${delivered}`);
   });
 });
