@@ -12,13 +12,23 @@ export function createThinkingOutput() {
 
   const update = (kind: ThinkingOutputKind, accumulated: string): string => {
     const previous = snapshots[kind];
-    const delta = accumulated.startsWith(previous)
-      ? accumulated.slice(previous.length)
-      : accumulated;
+    // The accumulated text is normally the previous snapshot plus a new
+    // suffix (append-only stream). When it diverges — a round restart after
+    // steering/failover whose final content differs from its streamed tail —
+    // only the shared-prefix remainder is the delta: the whole accumulated
+    // text must NEVER be re-pushed, or every earlier segment duplicates into
+    // the rendered display.
+    let shared = 0;
+    const max = Math.min(previous.length, accumulated.length);
+    while (shared < max && previous[shared] === accumulated[shared]) shared += 1;
+    const diverged = shared < previous.length;
+    const delta = diverged
+      ? accumulated.slice(shared).replace(/^[^\S\n]*\n+/, "")
+      : accumulated.slice(shared);
     snapshots[kind] = accumulated;
     if (!delta) return render();
     const last = parts.at(-1);
-    if (last?.kind === kind) last.text += delta;
+    if (!diverged && last?.kind === kind) last.text += delta;
     else parts.push({ kind, text: delta });
     return render();
   };
@@ -54,7 +64,9 @@ export function createThinkingOutput() {
       } else if (part.text) {
         const quote = part.text
           .split("\n")
-          .map((line) => `> 💭 ${line}`)
+          // The emoji marks the START of a thinking block only;
+          // continuation lines keep the blockquote without it.
+          .map((line, index) => (index === 0 ? `> 💭 ${line}` : `> ${line}`))
           .join("\n");
         rendered.push(quote);
       }
