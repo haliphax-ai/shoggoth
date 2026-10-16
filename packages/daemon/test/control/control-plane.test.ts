@@ -39,6 +39,8 @@ import {
 } from "@shoggoth/shared";
 import { setSubagentRuntimeExtension } from "../../src/subagent/subagent-extension-ref";
 import { beforeAll, afterAll } from "vitest";
+import { TieredTurnQueue } from "../../src/sessions/session-turn-queue";
+import { setTurnQueue } from "../../src/sessions/session-turn-queue-singleton";
 
 /**
  * Yield event-loop ticks so pending promise chains settle.
@@ -2340,6 +2342,92 @@ describe("control plane (unix socket + JSONL)", () => {
       sessionId: "s1",
       sourceId: "srv",
       requestId: 7,
+    });
+  });
+
+  it("session_queue_manage is reachable over the wire (queue CLI regression)", async () => {
+    const queue = new TieredTurnQueue(2, 6);
+    setTurnQueue(queue);
+    const sessionId = "agent:main:discord:channel:queue-wire";
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    // Block the session's pump so the enqueued entry stays visible to `list`.
+    queue
+      .enqueue(sessionId, "user", "blocker", async () => {
+        await gate;
+      })
+      .catch(() => {});
+    queue.enqueue(sessionId, "user", "u1", async () => {}).catch(() => {});
+    try {
+      await withControlPlaneSession({}, async (send) => {
+        const line = await send({
+          v: WIRE_VERSION,
+          id: "q-list",
+          op: "session_queue_manage",
+          auth: { kind: "operator_token", token: TEST_OPERATOR_TOKEN },
+          payload: { session_id: sessionId, action: "list" },
+        });
+        const res = parseResponseLine(line);
+        // Before the op was registered in DEFINED_CONTROL_OPS, the wire layer
+        // rejected it with ERR_UNKNOWN_OP before it ever reached the handler.
+        assert.equal(res.ok, true);
+        const entries = (res.result as { entries: Array<{ label: string }> }).entries;
+        assert.deepStrictEqual(
+          entries.map((e) => e.label),
+          ["u1"],
+        );
+      });
+    } finally {
+      release();
+    }
+  });
+
+  it.each([
+    "decision_evaluate",
+    "elevation_grant",
+    "elevation_revoke",
+    "media_generate",
+    "media_generate_poll",
+    "rerank_documents",
+  ])("%s is reachable over the wire for the operator (CLI regression)", async (op) => {
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-cli-ops-"));
+    const config: ShoggothConfig = {
+      ...minimalConfig(join(dir, "c.sock")),
+      // Satisfy the decision/rerank feature gates: with no configured
+      // provider models, both ops intentionally answer ERR_UNKNOWN_OP.
+      decision: {
+        providers: [
+          {
+            id: "dec",
+            kind: "typesafe",
+            baseUrl: "http://127.0.0.1:1",
+            models: [{ name: "m" }],
+          },
+        ],
+      },
+      rerank: {
+        providers: [
+          { id: "rr", kind: "cohere", baseUrl: "http://127.0.0.1:1", models: [{ name: "m" }] },
+        ],
+      },
+    };
+    await withControlPlaneSession({ config }, async (send) => {
+      const line = await send({
+        v: WIRE_VERSION,
+        id: `cli-${op}`,
+        op,
+        auth: { kind: "operator_token", token: TEST_OPERATOR_TOKEN },
+        payload: {},
+      });
+      const res = parseResponseLine(line);
+      // The wire gate rejects unregistered ops with ERR_UNKNOWN_OP before
+      // dispatch, and an agent-only op would reject the CLI's operator
+      // token with ERR_FORBIDDEN. The CLI sends operator_token for all of
+      // these, so neither failure is acceptable.
+      assert.notEqual(res.error?.code, "ERR_UNKNOWN_OP");
+      assert.notEqual(res.error?.code, "ERR_FORBIDDEN");
     });
   });
 });
