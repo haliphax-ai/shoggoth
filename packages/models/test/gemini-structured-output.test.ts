@@ -133,6 +133,46 @@ describe("Gemini structured output — responseSchema present", () => {
     );
   });
 
+  it("throws StructuredOutputValidationError on non-conformant synthetic call mixed with real tool calls", async () => {
+    // Previously the synthetic call was silently stripped when it rode along
+    // with real tool calls, so a bad attempt got no feedback and the model
+    // could keep retrying forever.
+    const mixedResponse = {
+      candidates: [
+        {
+          content: {
+            parts: [
+              { functionCall: { name: "read_file", args: { path: "/tmp/x" } } },
+              { functionCall: { name: "__structured_output__", args: { name: "Alice" } } },
+            ],
+            role: "model",
+          },
+          finishReason: "STOP",
+        },
+      ],
+    };
+    const fetchImpl = async () => new Response(JSON.stringify(mixedResponse), { status: 200 });
+
+    const p = createGeminiProvider({ id: "g", fetchImpl });
+
+    await assert.rejects(
+      () =>
+        p.completeWithTools({
+          model: "gemini-pro",
+          messages: [{ role: "user", content: "give me data" }],
+          tools: TOOLS,
+          responseSchema: RESPONSE_SCHEMA,
+        }),
+      (e: unknown) => {
+        assert.ok(
+          e instanceof StructuredOutputValidationError,
+          `expected StructuredOutputValidationError, got ${(e as Error).constructor.name}`,
+        );
+        return true;
+      },
+    );
+  });
+
   it("also sets responseMimeType and responseSchema in complete() (non-tool path)", async () => {
     let capturedBody: string | undefined;
     const conformantJson = JSON.stringify({ name: "Bob", count: 10 });

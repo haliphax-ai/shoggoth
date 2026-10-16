@@ -302,6 +302,132 @@ describe("OpenAI structured output — best-effort mode", () => {
     assert.equal(out.content, conformantJson);
   });
 
+  it("best-effort throws on non-conformant synthetic call mixed with real tool calls", async () => {
+    // Previously the synthetic call was silently stripped when it rode along
+    // with real tool calls, so a bad attempt got no feedback and the model
+    // could keep retrying forever.
+    const nonConformantJson = JSON.stringify({ name: "Alice" });
+    const fetchImpl = async () =>
+      okToolCallResponse([
+        { id: "call_synthetic", name: "__structured_output__", arguments: nonConformantJson },
+        { id: "call_read", name: "read_file", arguments: JSON.stringify({ path: "/tmp/x" }) },
+      ]);
+
+    const p = createOpenAICompatibleProvider({
+      id: "oai",
+      baseUrl: "https://api.openai.com/v1",
+      fetchImpl,
+    });
+
+    await assert.rejects(
+      () =>
+        p.completeWithTools({
+          model: "gpt-4o",
+          messages: [{ role: "user", content: "give me data" }],
+          tools: TOOLS,
+          responseSchema: RESPONSE_SCHEMA,
+          structuredOutputMode: "best-effort",
+        }),
+      (e: unknown) => {
+        assert.ok(
+          e instanceof StructuredOutputValidationError,
+          `expected StructuredOutputValidationError, got ${(e as Error).constructor.name}`,
+        );
+        assert.equal(e.rawContent, nonConformantJson);
+        return true;
+      },
+    );
+  });
+
+  it("valid synthetic call mixed with real tool calls is stripped and real calls are returned", async () => {
+    const conformantJson = JSON.stringify({ name: "Alice", count: 5 });
+    const fetchImpl = async () =>
+      okToolCallResponse([
+        { id: "call_synthetic", name: "__structured_output__", arguments: conformantJson },
+        { id: "call_read", name: "read_file", arguments: JSON.stringify({ path: "/tmp/x" }) },
+      ]);
+
+    const p = createOpenAICompatibleProvider({
+      id: "oai",
+      baseUrl: "https://api.openai.com/v1",
+      fetchImpl,
+    });
+
+    const out = await p.completeWithTools({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: "read a file and report" }],
+      tools: TOOLS,
+      responseSchema: RESPONSE_SCHEMA,
+      structuredOutputMode: "best-effort",
+    });
+
+    assert.equal(out.toolCalls.length, 1);
+    assert.equal(out.toolCalls[0]!.name, "read_file");
+  });
+
+  it("malformed JSON in a synthetic-only tool call throws StructuredOutputValidationError", async () => {
+    const malformed = "{not json";
+    const fetchImpl = async () => syntheticCallResponse(malformed);
+
+    const p = createOpenAICompatibleProvider({
+      id: "oai",
+      baseUrl: "https://api.openai.com/v1",
+      fetchImpl,
+    });
+
+    await assert.rejects(
+      () =>
+        p.completeWithTools({
+          model: "gpt-4o",
+          messages: [{ role: "user", content: "give me data" }],
+          tools: TOOLS,
+          responseSchema: RESPONSE_SCHEMA,
+          structuredOutputMode: "best-effort",
+        }),
+      (e: unknown) => {
+        assert.ok(
+          e instanceof StructuredOutputValidationError,
+          `expected StructuredOutputValidationError, got ${(e as Error).constructor.name}`,
+        );
+        assert.equal(e.rawContent, malformed);
+        return true;
+      },
+    );
+  });
+
+  it("synthetic tool advertises its schema and usage contract in the description", async () => {
+    let capturedBody: string | undefined;
+    const fetchImpl = async (_url: string | URL, init?: RequestInit) => {
+      capturedBody = init?.body as string;
+      return syntheticCallResponse(JSON.stringify({ name: "Alice", count: 5 }));
+    };
+
+    const p = createOpenAICompatibleProvider({
+      id: "oai",
+      baseUrl: "https://api.openai.com/v1",
+      fetchImpl,
+    });
+
+    await p.completeWithTools({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: "give me data" }],
+      tools: TOOLS,
+      responseSchema: RESPONSE_SCHEMA,
+      structuredOutputMode: "best-effort",
+    });
+
+    const body = JSON.parse(capturedBody ?? "{}") as {
+      tools?: Array<{ function: { name: string; description?: string; parameters?: unknown } }>;
+    };
+    const synthetic = body.tools?.find((t) => t.function.name === "__structured_output__");
+    assert.ok(synthetic, "synthetic tool should be advertised");
+    const desc = synthetic.function.description ?? "";
+    assert.match(desc, /conforms exactly to the schema/i);
+    assert.match(desc, /plain-text replies are ignored/i);
+    assert.match(desc, /call it alone/i);
+    assert.deepStrictEqual(synthetic.function.parameters, TEST_SCHEMA);
+  });
+
   it("throws when model answers with text and the forced follow-up also returns text (text is never accepted)", async () => {
     const textAnswer = JSON.stringify({ name: "Alice", count: 5 });
     const fetchImpl = async () => okJsonResponse(textAnswer);

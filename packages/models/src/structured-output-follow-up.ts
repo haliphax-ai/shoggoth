@@ -1,5 +1,4 @@
-import { isSyntheticToolCall } from "./structured-output-utils";
-import { validateResponseSchema, StructuredOutputValidationError } from "./response-validation";
+import { isSyntheticToolCall, validateSyntheticToolCall } from "./structured-output-utils";
 import { stripXmlThinkingTags } from "./thinking-normalize";
 import { assertResponseOk, safeJsonParse } from "./resilient-fetch";
 import type { ChatMessage, ChatToolCall, ModelUsage, ResponseSchema } from "./types";
@@ -76,19 +75,7 @@ export function findAndValidateForcedToolCall(
 ): string | null {
   const forced = toolCalls.find((tc) => isSyntheticToolCall(tc));
   if (!forced) return null;
-
-  const structuredContent = forced.arguments;
-  if (mode !== "strict") {
-    const result = validateResponseSchema(structuredContent, responseSchema.schema);
-    if (!result.valid) {
-      throw new StructuredOutputValidationError(
-        result.error,
-        result.rawContent,
-        responseSchema.schema,
-      );
-    }
-  }
-  return structuredContent;
+  return validateSyntheticToolCall(forced, responseSchema, mode);
 }
 
 /**
