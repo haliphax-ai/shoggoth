@@ -2881,6 +2881,17 @@ export async function handleIntegrationControlOp(
         shouldAnnounceKilled ? "killed" : undefined,
         ctx.hitlClear?.autoApproveGate,
       );
+      // Killing a session must not leave a wedged running entry or a queued
+      // backlog behind: clear any queued turns and force-release the running
+      // slot so the queue does not stay blocked on a dead session. The queue
+      // may not be initialized (e.g. tests), so swallow any error.
+      try {
+        const turnQueue = getTurnQueue();
+        turnQueue.clear(sessionId);
+        turnQueue.forceReleaseRunning(sessionId, "session_kill");
+      } catch {
+        /* turn queue not initialized */
+      }
       ctx.recordIntegrationAudit({
         action: "session.kill",
         resource: sessionId,
@@ -3118,12 +3129,17 @@ export async function handleIntegrationControlOp(
           enqueuedAt: e.enqueuedAt,
           index: i + 1,
         }));
-        return { entries };
+        return { entries, running: queue.getRunning(sessionId) ?? null };
       }
 
       if (action === "clear") {
         const removed = queue.clear(sessionId, priority);
         return { removed };
+      }
+
+      if (action === "release") {
+        const released = queue.forceReleaseRunning(sessionId);
+        return { released, running: queue.getRunning(sessionId) ?? null };
       }
 
       if (action === "remove") {
@@ -3177,7 +3193,7 @@ export async function handleIntegrationControlOp(
 
       throw new IntegrationOpError(
         "ERR_INVALID_PAYLOAD",
-        "payload.action must be list, remove, or clear",
+        "payload.action must be list, remove, clear, or release",
       );
     }
 

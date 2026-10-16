@@ -591,6 +591,8 @@ export async function startDiscordPlatform(
               formatAttachmentMetadata,
               workspacePath: session.workspacePath,
               messageId: msg.id,
+              // post-turn delivery runs outside the queue entry so a hung platform edit cannot wedge the session's turn queue
+              detachPostTurnDelivery: true,
               ...(session.runtimeUid !== undefined && session.runtimeGid !== undefined
                 ? { creds: { uid: session.runtimeUid, gid: session.runtimeGid } }
                 : {}),

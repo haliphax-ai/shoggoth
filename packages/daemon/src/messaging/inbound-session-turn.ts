@@ -143,6 +143,13 @@ export interface RunInboundSessionTurnOptions {
     readonly onTurnBegin?: () => void;
     readonly onTurnEnd?: () => void;
   };
+  /**
+   * When set, the returned promise settles as soon as `executeSessionAgentTurn`
+   * settles and post-turn delivery (status bar finish, stream flush, final body
+   * send, persistent-subagent delivery) runs detached, so a hung platform edit
+   * cannot hold the session's turn-queue entry open.
+   */
+  readonly detachPostTurnDelivery?: boolean;
   readonly logContext?: Record<string, string | undefined>;
   /** Observed before {@link sendErrorBody} (e.g. transport-specific log keys). */
   readonly onTurnExecutionFailed?: (err: unknown) => void;
@@ -285,72 +292,134 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
           : undefined,
     });
 
-    // All-turn delivery for persistent subagents
-    try {
-      const row = createSessionStore(turn.db).getById(turn.sessionId);
-      if (
-        row?.subagentMode === "persistent" &&
-        !row.subagentPlatformThreadId &&
-        row.subagentDeliveryMode !== "drop" &&
-        row.subagentRespondTo
-      ) {
-        const ext = subagentRuntimeExtensionRef.current;
-        if (ext) {
-          await deliverSubagentResult(ext, {
-            childSessionId: turn.sessionId,
-            respondTo: row.subagentRespondTo,
-            internalDelivery: true,
-            mode: "persistent",
-            deliveryMode: row.subagentDeliveryMode ?? "inline",
-            assistantText: turnResult.latestAssistantText,
-            subLog: log,
-            // Thread the turn's model invocation override (e.g. responseSchema for
-            // structured output) into the parent delivery turn when present.
-            modelInvocationOverride: turn.modelInvocationOverride,
-            fallbackRespondTo: row.parentSessionId,
+    const deliver = async (): Promise<void> => {
+      // All-turn delivery for persistent subagents
+      try {
+        const row = createSessionStore(turn.db).getById(turn.sessionId);
+        if (
+          row?.subagentMode === "persistent" &&
+          !row.subagentPlatformThreadId &&
+          row.subagentDeliveryMode !== "drop" &&
+          row.subagentRespondTo
+        ) {
+          const ext = subagentRuntimeExtensionRef.current;
+          if (ext) {
+            await deliverSubagentResult(ext, {
+              childSessionId: turn.sessionId,
+              respondTo: row.subagentRespondTo,
+              internalDelivery: true,
+              mode: "persistent",
+              deliveryMode: row.subagentDeliveryMode ?? "inline",
+              assistantText: turnResult.latestAssistantText,
+              subLog: log,
+              // Thread the turn's model invocation override (e.g. responseSchema for
+              // structured output) into the parent delivery turn when present.
+              modelInvocationOverride: turn.modelInvocationOverride,
+              fallbackRespondTo: row.parentSessionId,
+            });
+          }
+        }
+      } catch (e) {
+        log.warn("persistent_subagent_delivery.failed", {
+          sessionId: turn.sessionId,
+          err: String(e),
+        });
+      }
+
+      const formattedBody = formatAssistantReply(
+        turnResult.latestAssistantText,
+        turnResult.failoverMeta,
+      );
+      const rawBody = thinkingOutput?.render(formattedBody) ?? formattedBody;
+
+      const attachments = turnResult.showAttachments;
+
+      // Finish the tracker BEFORE final delivery so the last setFullContent /
+      // sendAssistantBody carries the frozen bar line (✅ / 🛑 / ❌).
+      let barLine: string | undefined;
+      if (statusBar) {
+        try {
+          barLine = await statusBar.finish(turnResult.outcome);
+        } catch (e) {
+          log.warn("inbound_session_turn.status_bar_finish_failed", {
+            ...ctx,
+            err: String(e),
+          });
+          barLine = undefined;
+        }
+      }
+
+      const bodyWithBar = barLine ? `${rawBody}\n\n${barLine}` : rawBody;
+
+      if (streamPusher && streamSink) {
+        // Flush first: its renders still carry the active terminal bar, so the
+        // bar stays visible right up to the final edit. Then clear the in-flight
+        // handle's active-bar state — a state-only operation that makes no edit —
+        // so the delivery edit below (whose body already appends barLine itself)
+        // lands the bar exactly once. A sink failure must never block delivery.
+        await streamPusher.flush();
+        if (barLine && streamSink.setStatusBar) {
+          try {
+            await streamSink.setStatusBar(null);
+          } catch (clearErr) {
+            log.warn("inbound_session_turn.status_bar_clear_failed", {
+              ...ctx,
+              err: String(clearErr),
+            });
+          }
+        }
+        // Pass the full body — setFullContent handles its own message splitting.
+        await streamSink.setFullContent(bodyWithBar);
+        // Streaming edits can't carry file attachments — send as follow-up.
+        if (attachments?.length && options.sendAttachments) {
+          try {
+            await options.sendAttachments(attachments);
+          } catch (e) {
+            log.warn("inbound_session_turn.show_attachment_followup_failed", {
+              ...ctx,
+              err: String(e),
+            });
+          }
+        }
+      } else {
+        await options.sendAssistantBody(
+          sliceDisplayText(bodyWithBar),
+          attachments?.length ? { attachments } : undefined,
+        );
+      }
+    };
+
+    if (options.detachPostTurnDelivery) {
+      void deliver().catch((err) => {
+        log.warn("inbound_session_turn.detached_delivery_failed", {
+          ...ctx,
+          err: String(err),
+        });
+      });
+    } else {
+      await deliver();
+    }
+  } catch (e) {
+    const deliverError = async (): Promise<void> => {
+      // Terminal ❌ bar before the error body — finish with "failed" so the tracker
+      // freezes; the rendered line is returned for delivery with the error body.
+      let barLine: string | undefined;
+      if (statusBar) {
+        try {
+          barLine = await statusBar.finish("failed");
+        } catch (barErr) {
+          log.warn("inbound_session_turn.status_bar_finish_failed", {
+            ...ctx,
+            err: String(barErr),
           });
         }
       }
-    } catch (e) {
-      log.warn("persistent_subagent_delivery.failed", {
-        sessionId: turn.sessionId,
-        err: String(e),
-      });
-    }
-
-    const formattedBody = formatAssistantReply(
-      turnResult.latestAssistantText,
-      turnResult.failoverMeta,
-    );
-    const rawBody = thinkingOutput?.render(formattedBody) ?? formattedBody;
-
-    const attachments = turnResult.showAttachments;
-
-    // Finish the tracker BEFORE final delivery so the last setFullContent /
-    // sendAssistantBody carries the frozen bar line (✅ / 🛑 / ❌).
-    let barLine: string | undefined;
-    if (statusBar) {
-      try {
-        barLine = await statusBar.finish(turnResult.outcome);
-      } catch (e) {
-        log.warn("inbound_session_turn.status_bar_finish_failed", {
-          ...ctx,
-          err: String(e),
-        });
-        barLine = undefined;
-      }
-    }
-
-    const bodyWithBar = barLine ? `${rawBody}\n\n${barLine}` : rawBody;
-
-    if (streamPusher && streamSink) {
-      // Flush first: its renders still carry the active terminal bar, so the
-      // bar stays visible right up to the final edit. Then clear the in-flight
-      // handle's active-bar state — a state-only operation that makes no edit —
-      // so the delivery edit below (whose body already appends barLine itself)
-      // lands the bar exactly once. A sink failure must never block delivery.
-      await streamPusher.flush();
-      if (barLine && streamSink.setStatusBar) {
+      // finish()'s terminal render flowed through the sink into the in-flight
+      // handle's setStatusBar, which keeps the bar as active state and re-applies
+      // it on future renders. Clear that state — a state-only operation that makes
+      // no edit, so the in-flight message keeps its terminal ❌ bar until the
+      // error body lands as a separate message — and never block error delivery.
+      if (barLine && streamSink?.setStatusBar) {
         try {
           await streamSink.setStatusBar(null);
         } catch (clearErr) {
@@ -360,64 +429,28 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
           });
         }
       }
-      // Pass the full body — setFullContent handles its own message splitting.
-      await streamSink.setFullContent(bodyWithBar);
-      // Streaming edits can't carry file attachments — send as follow-up.
-      if (attachments?.length && options.sendAttachments) {
-        try {
-          await options.sendAttachments(attachments);
-        } catch (e) {
-          log.warn("inbound_session_turn.show_attachment_followup_failed", {
-            ...ctx,
-            err: String(e),
-          });
-        }
-      }
-    } else {
-      await options.sendAssistantBody(
-        sliceDisplayText(bodyWithBar),
-        attachments?.length ? { attachments } : undefined,
-      );
-    }
-  } catch (e) {
-    // Terminal ❌ bar before the error body — finish with "failed" so the tracker
-    // freezes; the rendered line is returned for delivery with the error body.
-    let barLine: string | undefined;
-    if (statusBar) {
+      options.onTurnExecutionFailed?.(e);
+      log.warn("inbound_session_turn.failed", { ...ctx, err: String(e) });
       try {
-        barLine = await statusBar.finish("failed");
-      } catch (barErr) {
-        log.warn("inbound_session_turn.status_bar_finish_failed", {
+        const errorBody = barLine ? `${formatErrorReply(e)}\n\n${barLine}` : formatErrorReply(e);
+        await options.sendErrorBody(sliceDisplayText(errorBody));
+      } catch (sendErr) {
+        log.error("inbound_session_turn.error_delivery_failed", {
           ...ctx,
-          err: String(barErr),
+          err: String(sendErr),
         });
       }
-    }
-    // finish()'s terminal render flowed through the sink into the in-flight
-    // handle's setStatusBar, which keeps the bar as active state and re-applies
-    // it on future renders. Clear that state — a state-only operation that makes
-    // no edit, so the in-flight message keeps its terminal ❌ bar until the
-    // error body lands as a separate message — and never block error delivery.
-    if (barLine && streamSink?.setStatusBar) {
-      try {
-        await streamSink.setStatusBar(null);
-      } catch (clearErr) {
-        log.warn("inbound_session_turn.status_bar_clear_failed", {
+    };
+
+    if (options.detachPostTurnDelivery) {
+      void deliverError().catch((err) => {
+        log.warn("inbound_session_turn.detached_delivery_failed", {
           ...ctx,
-          err: String(clearErr),
+          err: String(err),
         });
-      }
-    }
-    options.onTurnExecutionFailed?.(e);
-    log.warn("inbound_session_turn.failed", { ...ctx, err: String(e) });
-    try {
-      const errorBody = barLine ? `${formatErrorReply(e)}\n\n${barLine}` : formatErrorReply(e);
-      await options.sendErrorBody(sliceDisplayText(errorBody));
-    } catch (sendErr) {
-      log.error("inbound_session_turn.error_delivery_failed", {
-        ...ctx,
-        err: String(sendErr),
       });
+    } else {
+      await deliverError();
     }
   } finally {
     options.mcpLifecycle?.onTurnEnd?.();

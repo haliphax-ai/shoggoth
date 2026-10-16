@@ -712,4 +712,106 @@ describe("TieredTurnQueue", () => {
       expect(ran).toBe(true);
     });
   });
+
+  describe("forceReleaseRunning", () => {
+    it("reports running state via isRunning and getRunning while a blocker holds the slot", async () => {
+      let resolveFirst!: () => void;
+      const gate = new Promise<void>((r) => {
+        resolveFirst = r;
+      });
+
+      const p0 = q.enqueue("s1", "user", "blocker", async () => {
+        await gate;
+      });
+
+      expect(q.isRunning("s1")).toBe(true);
+      const running = q.getRunning("s1");
+      expect(running).toBeDefined();
+      expect(running!.label).toBe("blocker");
+      expect(running!.priority).toBe("user");
+      expect(typeof running!.startedAt).toBe("number");
+
+      resolveFirst();
+      await p0;
+      // pump's finalization (which releases the running slot) settles one tick later.
+      await new Promise<void>((r) => setTimeout(r, 0));
+      expect(q.isRunning("s1")).toBe(false);
+      expect(q.getRunning("s1")).toBeUndefined();
+    });
+
+    it("rejects the wedged entry with TurnDroppedError and starts the next entry immediately", async () => {
+      let resolveFirst!: () => void;
+      const gate = new Promise<void>((r) => {
+        resolveFirst = r;
+      });
+      let nextRan = false;
+
+      const p0 = q.enqueue("s1", "user", "blocker", async () => {
+        await gate;
+      });
+      const p1 = q.enqueue("s1", "user", "next", async () => {
+        nextRan = true;
+      });
+
+      expect(q.forceReleaseRunning("s1")).toBe(true);
+      await expect(p0).rejects.toThrow(TurnDroppedError);
+      await p1;
+      expect(nextRan).toBe(true);
+
+      resolveFirst();
+    });
+
+    it("returns false for a session with no running turn", async () => {
+      expect(q.forceReleaseRunning("unknown")).toBe(false);
+
+      await q.enqueue("s1", "user", "quick", async () => {});
+      await q.enqueue("s1", "user", "quick", async () => {});
+      // pump's finalization (which releases the running slot) settles one tick later.
+      await new Promise<void>((r) => setTimeout(r, 0));
+    });
+
+    it("ignores a late settle of an abandoned turn and keeps the queue alive", async () => {
+      let resolveFirst!: () => void;
+      const gate = new Promise<void>((r) => {
+        resolveFirst = r;
+      });
+      let resolveSecond!: () => void;
+      const secondGate = new Promise<void>((r) => {
+        resolveSecond = r;
+      });
+      const order: string[] = [];
+
+      const p0 = q.enqueue("s1", "user", "blocker", async () => {
+        await gate;
+      });
+      const p1 = q.enqueue("s1", "user", "second", async () => {
+        order.push("second");
+        await secondGate;
+      });
+
+      expect(q.forceReleaseRunning("s1")).toBe(true);
+      await expect(p0).rejects.toThrow(TurnDroppedError);
+
+      // The abandoned blocker's execute() settles late while the second entry
+      // is still running — it must not interrupt that run.
+      resolveFirst();
+      await new Promise<void>((r) => setTimeout(r, 0));
+      expect(q.isRunning("s1")).toBe(true);
+
+      resolveSecond();
+      await p1;
+
+      // The queue is still healthy afterwards.
+      const p2 = q.enqueue("s1", "user", "third", async () => {
+        order.push("third");
+      });
+      await p2;
+
+      expect(order).toEqual(["second", "third"]);
+    });
+
+    it("returns undefined from getRunning for an unknown session", () => {
+      expect(q.getRunning("unknown")).toBeUndefined();
+    });
+  });
 });
