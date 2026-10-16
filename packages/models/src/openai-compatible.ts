@@ -5,6 +5,7 @@ import {
   STRUCTURED_OUTPUT_TOOL_NAME,
   buildSyntheticTool as buildSyntheticToolRaw,
   isSyntheticToolCall,
+  validateSyntheticToolCall,
 } from "./structured-output-utils";
 import {
   structuredOutputFollowUp,
@@ -557,32 +558,21 @@ export function createOpenAICompatibleProvider(
             const syntheticCall = toolCalls.find((tc) => isSyntheticToolCall(tc));
 
             if (syntheticCall && realCalls.length === 0) {
-              let structuredContent: string;
-              try {
-                structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
-              } catch (parseErr) {
-                throw new ModelHttpError(
-                  502,
-                  `Model returned malformed JSON in structured output: ${(parseErr as Error).message}`,
-                  syntheticCall.arguments,
-                );
-              }
-              if (mode !== "strict") {
-                const result = validateResponseSchema(
-                  structuredContent,
-                  input.responseSchema!.schema,
-                );
-                if (!result.valid) {
-                  throw new StructuredOutputValidationError(
-                    result.error,
-                    result.rawContent,
-                    input.responseSchema!.schema,
-                  );
-                }
-              }
+              const structuredContent = validateSyntheticToolCall(
+                syntheticCall,
+                input.responseSchema!,
+                mode,
+              );
               return { content: structuredContent, toolCalls: [], usage, reasoningContent };
             }
             if (syntheticCall && realCalls.length > 0) {
+              // Mixed with real tool calls: validate the synthetic attempt so a
+              // non-conformant call surfaces a schema error (and counts against
+              // the retry budget) instead of being silently discarded, which
+              // previously let models retry forever. Valid structured output is
+              // still stripped here — the model must finish by calling the tool
+              // alone.
+              validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode);
               return { content, toolCalls: realCalls, usage, reasoningContent };
             }
             if (toolCalls.length > 0) {
@@ -752,29 +742,11 @@ export function createOpenAICompatibleProvider(
           const syntheticCall = toolCalls.find((tc) => isSyntheticToolCall(tc));
 
           if (syntheticCall && realCalls.length === 0) {
-            let structuredContent: string;
-            try {
-              structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
-            } catch (parseErr) {
-              throw new ModelHttpError(
-                502,
-                `Model returned malformed JSON in structured output: ${(parseErr as Error).message}`,
-                syntheticCall.arguments,
-              );
-            }
-            if (mode !== "strict") {
-              const result = validateResponseSchema(
-                structuredContent,
-                input.responseSchema!.schema,
-              );
-              if (!result.valid) {
-                throw new StructuredOutputValidationError(
-                  result.error,
-                  result.rawContent,
-                  input.responseSchema!.schema,
-                );
-              }
-            }
+            const structuredContent = validateSyntheticToolCall(
+              syntheticCall,
+              input.responseSchema!,
+              mode,
+            );
             return {
               content: structuredContent,
               toolCalls: [],
@@ -783,6 +755,13 @@ export function createOpenAICompatibleProvider(
             };
           }
           if (syntheticCall && realCalls.length > 0) {
+            // Mixed with real tool calls: validate the synthetic attempt so a
+            // non-conformant call surfaces a schema error (and counts against
+            // the retry budget) instead of being silently discarded, which
+            // previously let models retry forever. Valid structured output is
+            // still stripped here — the model must finish by calling the tool
+            // alone.
+            validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode);
             return {
               content,
               toolCalls: realCalls,

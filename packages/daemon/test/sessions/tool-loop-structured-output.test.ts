@@ -63,8 +63,8 @@ describe("runToolLoop structured output validation retry", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("retries after StructuredOutputValidationError and succeeds on second attempt", async () => {
     const steered: string[] = [];
@@ -119,7 +119,7 @@ describe("runToolLoop structured output validation retry", () => {
     assert.equal(row.status, "completed");
   });
 
-  it("re-throws StructuredOutputValidationError after 3 total attempts (1 initial + 2 retries)", async () => {
+  it("bubbles up the last attempt after retries are exhausted instead of throwing", async () => {
     let completeCall = 0;
     const model: ModelClient = {
       async complete() {
@@ -129,28 +129,43 @@ describe("runToolLoop structured output validation retry", () => {
       pushSteerMessage() {},
     };
     const toolRuns = createToolRunStore(db);
+    const tr = createTranscriptStore(db);
+    const seg = getSessionContextSegmentId(db, "sess");
 
-    await assert.rejects(
-      runToolLoop({
-        db,
-        sessionId: "sess",
-        runId: "run-so-exhaust",
-        principalId: "p",
-        policy: { check: () => ({ allow: true }) },
-        audit: { record: () => {} },
-        model,
-        tools: [{ name: "read" }],
-        executor: { execute: async () => ({ resultJson: "{}" }) },
-        toolRuns,
-      }),
-      (err: unknown) => {
-        assert.ok(err instanceof StructuredOutputValidationError);
-        return true;
-      },
-    );
+    // Does NOT reject: the last failed attempt is surfaced as the turn's
+    // terminal response instead of killing the whole turn.
+    await runToolLoop({
+      db,
+      sessionId: "sess",
+      runId: "run-so-exhaust",
+      principalId: "p",
+      policy: { check: () => ({ allow: true }) },
+      audit: { record: () => {} },
+      model,
+      tools: [{ name: "read" }],
+      executor: { execute: async () => ({ resultJson: "{}" }) },
+      toolRuns,
+      transcript: tr,
+      contextSegmentId: seg,
+    });
 
     // Should have attempted exactly 3 times (1 initial + 2 retries)
     assert.equal(completeCall, 3);
+
+    // The run completes (the turn ends) rather than erroring out.
+    const row = db.prepare(`SELECT status FROM tool_runs WHERE id = 'run-so-exhaust'`).get() as {
+      status: string;
+    };
+    assert.equal(row.status, "completed");
+
+    // The last attempt is the final tool-call-free assistant row, so callers
+    // (e.g. OOB delivery) pick it up as the turn's response text.
+    const page = tr.listPage({ sessionId: "sess", contextSegmentId: seg, afterSeq: 0, limit: 20 });
+    const last = page.messages[page.messages.length - 1]!;
+    assert.equal(last.role, "assistant");
+    assert.equal(last.content, BAD_CONTENT);
+    const lastMeta = typeof last.metadata === "string" ? JSON.parse(last.metadata) : last.metadata;
+    assert.equal(lastMeta.structuredOutputValidationFailed, true);
   });
 
   it("records failed response and correction in transcript with correct metadata", async () => {

@@ -41,6 +41,7 @@ jobs:
 
   unit:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: haliphax-ai/shoggoth/.github@main
       - name: Install ripgrep

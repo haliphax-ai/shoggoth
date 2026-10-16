@@ -298,6 +298,29 @@ describe("sanitizeSchemaForGemini", () => {
     assert.equal(result.type, "string");
   });
 
+  it("collapses nullable type unions to the non-null member", () => {
+    // The OOB response schemas use `type: ["string", "null"]`, which Gemini's
+    // function-declaration subset cannot express — collapse to the non-null
+    // member so the schema is still advertised correctly.
+    const result = sanitizeSchemaForGemini({
+      type: "object",
+      properties: {
+        to_operator: { type: ["string", "null"], description: "message" },
+        to_sender: { type: ["null", "string"], description: "message" },
+        urgent: { type: ["null", "boolean"] },
+      },
+    }) as Record<string, unknown>;
+    const props = result.properties as Record<string, Record<string, unknown>>;
+    assert.equal(props.to_operator!.type, "string");
+    assert.equal(props.to_sender!.type, "string");
+    assert.equal(props.urgent!.type, "boolean");
+  });
+
+  it("drops type when no single non-null member remains", () => {
+    const result = sanitizeSchemaForGemini({ type: ["null", "null"] }) as Record<string, unknown>;
+    assert.equal("type" in result, false);
+  });
+
   it("recursively sanitizes nested properties", () => {
     const result = sanitizeSchemaForGemini({
       type: "object",

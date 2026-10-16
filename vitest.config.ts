@@ -4,30 +4,42 @@ import { dirname, relative } from "node:path";
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
 
+// When run from inside a package (e.g. via --workspace), narrow to that
+// package only. When run from root, include all packages.
+const include = (() => {
+  const rel = relative(rootDir, process.cwd());
+  if (rel.startsWith("packages/")) {
+    const pkg = rel.split("/")[1];
+    return [`packages/${pkg}/test/**/*.test.ts`];
+  }
+  return [
+    "packages/*/test/**/*.test.ts",
+    "packages/*/packages/*/test/**/*.test.ts",
+    "docker/test/**/*.test.ts",
+  ];
+})();
+
+// NOTE: Do NOT run this suite with `--no-isolate` (isolate: false). Under a
+// shared module registry, `vi.mock` interception becomes import-order dependent:
+// whichever test file imports the real module first pins the real binding, so a
+// later file's mock is silently bypassed. The failure set is non-deterministic
+// (it shifts run-to-run with scheduling), so it cannot be fixed by quarantining
+// specific files. Full isolation is required until the vi.mock-heavy tests are
+// refactored to dependency injection (github.com/haliphax-ai/shoggoth/issues/479).
+
 export default defineConfig({
+  cacheDir: ".vite",
   root: rootDir,
   poolOptions: {
     forks: {
-      maxForks: 4,
+      maxForks: process.env.CI ? 4 : 8,
     },
   },
   test: {
-    // When run from inside a package (e.g. via --workspace), narrow to that
-    // package only. When run from root, include all packages.
-    include: (() => {
-      const rel = relative(rootDir, process.cwd());
-      if (rel.startsWith("packages/")) {
-        const pkg = rel.split("/")[1];
-        return [`packages/${pkg}/test/**/*.test.ts`];
-      }
-      return [
-        "packages/*/test/**/*.test.ts",
-        "packages/*/packages/*/test/**/*.test.ts",
-        "docker/test/**/*.test.ts",
-      ];
-    })(),
+    include,
     onConsoleLog: () => false,
     pool: "forks",
+    maxWorkers: process.env.CI ? 4 : 8,
     setupFiles: ["./test/setup.ts"],
     testTimeout: 30_000,
     hookTimeout: 30_000,

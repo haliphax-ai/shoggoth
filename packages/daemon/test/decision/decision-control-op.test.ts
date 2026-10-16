@@ -118,16 +118,12 @@ describe("decision_evaluate control op", () => {
   });
 
   describe("principal gating", () => {
-    it("rejects operator principal", async () => {
+    it("allows operator principal (CLI surface)", async () => {
+      mockEvaluate.mockResolvedValueOnce({ status: "complete", model: "jev-latest", answers: {} });
       const req = makeReq(validPayload());
-      await assert.rejects(
-        () => handleIntegrationControlOp(req, operatorPrincipal(), makeCtx()),
-        (err: IntegrationOpError) => {
-          assert.equal(err.code, "ERR_FORBIDDEN");
-          return true;
-        },
-      );
-      assert.equal(mockEvaluate.mock.calls.length, 0);
+      const result = await handleIntegrationControlOp(req, operatorPrincipal(), makeCtx());
+      assert.ok(result != null);
+      assert.equal(mockEvaluate.mock.calls.length, 1);
     });
   });
 

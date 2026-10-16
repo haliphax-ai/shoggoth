@@ -5,6 +5,7 @@ import {
   STRUCTURED_OUTPUT_TOOL_NAME,
   buildSyntheticTool as buildSyntheticToolRaw,
   isSyntheticToolCall,
+  validateSyntheticToolCall,
 } from "./structured-output-utils";
 import {
   structuredOutputFollowUp,
@@ -22,7 +23,6 @@ import {
 import { parseApiErrorBody } from "./parse-api-error-body";
 import {
   resolveStructuredOutputMode,
-  validateResponseSchema,
   StructuredOutputValidationError,
 } from "./response-validation";
 import { stripXmlThinkingTags, ThinkingStreamNormalizer } from "./thinking-normalize";
@@ -933,26 +933,11 @@ export function createAnthropicMessagesProvider(
 
           if (syntheticCall && realToolCalls.length === 0) {
             // Terminal: extract structured content from synthetic tool arguments
-            let structuredContent: string;
-            try {
-              structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
-            } catch (parseErr) {
-              throw new StructuredOutputValidationError(
-                `Response is not valid JSON: ${(parseErr as Error).message}`,
-                syntheticCall.arguments,
-                input.responseSchema!.schema,
-              );
-            }
-            if (mode !== "strict") {
-              const result = validateResponseSchema(structuredContent, input.responseSchema.schema);
-              if (!result.valid) {
-                throw new StructuredOutputValidationError(
-                  result.error,
-                  result.rawContent,
-                  input.responseSchema.schema,
-                );
-              }
-            }
+            const structuredContent = validateSyntheticToolCall(
+              syntheticCall,
+              input.responseSchema!,
+              mode,
+            );
             return {
               content: structuredContent,
               toolCalls: [],
@@ -960,7 +945,13 @@ export function createAnthropicMessagesProvider(
               reasoningContent: streamedReasoning,
             };
           } else if (syntheticCall && realToolCalls.length > 0) {
-            // Mixed: strip synthetic, return only real tool calls
+            // Mixed with real tool calls: validate the synthetic attempt so a
+            // non-conformant call surfaces a schema error (and counts against
+            // the retry budget) instead of being silently discarded, which
+            // previously let models retry forever. Valid structured output is
+            // still stripped here — the model must finish by calling the tool
+            // alone.
+            validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode);
             return {
               content: outText,
               toolCalls: realToolCalls,
@@ -1067,27 +1058,11 @@ export function createAnthropicMessagesProvider(
 
         if (syntheticCall && realToolCalls.length === 0) {
           // Terminal: model is done, extract structured content
-          let structuredContent: string;
-          try {
-            structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
-          } catch (parseErr) {
-            throw new StructuredOutputValidationError(
-              `Response is not valid JSON: ${(parseErr as Error).message}`,
-              syntheticCall.arguments,
-              input.responseSchema!.schema,
-            );
-          }
-          // Validate (mode is always "best-effort" or "none" for Anthropic)
-          if (mode !== "strict") {
-            const result = validateResponseSchema(structuredContent, input.responseSchema.schema);
-            if (!result.valid) {
-              throw new StructuredOutputValidationError(
-                result.error,
-                result.rawContent,
-                input.responseSchema.schema,
-              );
-            }
-          }
+          const structuredContent = validateSyntheticToolCall(
+            syntheticCall,
+            input.responseSchema!,
+            mode,
+          );
           return {
             content: structuredContent,
             toolCalls: [],
@@ -1095,7 +1070,13 @@ export function createAnthropicMessagesProvider(
             reasoningContent,
           };
         } else if (syntheticCall && realToolCalls.length > 0) {
-          // Mixed: strip synthetic, return only real tool calls
+          // Mixed with real tool calls: validate the synthetic attempt so a
+          // non-conformant call surfaces a schema error (and counts against
+          // the retry budget) instead of being silently discarded, which
+          // previously let models retry forever. Valid structured output is
+          // still stripped here — the model must finish by calling the tool
+          // alone.
+          validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode);
           return {
             content: outText,
             toolCalls: realToolCalls,

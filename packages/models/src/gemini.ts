@@ -5,6 +5,7 @@ import {
   STRUCTURED_OUTPUT_TOOL_NAME,
   buildSyntheticTool as buildSyntheticToolRaw,
   isSyntheticToolCall,
+  validateSyntheticToolCall,
 } from "./structured-output-utils";
 import {
   structuredOutputFollowUp,
@@ -225,6 +226,20 @@ export function sanitizeSchemaForGemini(schema: unknown): unknown {
   const s = { ...(schema as Record<string, unknown>) };
 
   delete s.additionalProperties;
+
+  if (Array.isArray(s.type)) {
+    // Gemini function-declaration schemas accept a single type string only.
+    // Nullable unions such as `["string", "null"]` (used heavily by the OOB
+    // response schemas) are collapsed to the non-null member — nullability
+    // cannot be expressed in Gemini's schema subset — or dropped entirely
+    // when no single type remains.
+    const nonNull = (s.type as unknown[]).filter((t) => t !== "null");
+    if (nonNull.length === 1 && typeof nonNull[0] === "string") {
+      s.type = nonNull[0];
+    } else {
+      delete s.type;
+    }
+  }
 
   if ("const" in s) {
     s.enum = [String(s.const)];
@@ -761,33 +776,21 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
 
           if (syntheticCall && realCalls.length === 0) {
             // Terminal: model is done, extract structured content
-            let structuredContent: string;
-            try {
-              structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
-            } catch (parseErr) {
-              throw new StructuredOutputValidationError(
-                `Response is not valid JSON: ${(parseErr as Error).message}`,
-                syntheticCall.arguments,
-                input.responseSchema!.schema,
-              );
-            }
-            if (mode !== "strict") {
-              const result = validateResponseSchema(
-                structuredContent,
-                input.responseSchema!.schema,
-              );
-              if (!result.valid) {
-                throw new StructuredOutputValidationError(
-                  result.error,
-                  result.rawContent,
-                  input.responseSchema!.schema,
-                );
-              }
-            }
+            const structuredContent = validateSyntheticToolCall(
+              syntheticCall,
+              input.responseSchema!,
+              mode,
+            );
             return { content: structuredContent, toolCalls: [], usage };
           }
           if (syntheticCall && realCalls.length > 0) {
-            // Mixed: strip synthetic, return only real tool calls
+            // Mixed with real tool calls: validate the synthetic attempt so a
+            // non-conformant call surfaces a schema error (and counts against
+            // the retry budget) instead of being silently discarded, which
+            // previously let models retry forever. Valid structured output is
+            // still stripped here — the model must finish by calling the tool
+            // alone.
+            validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode);
             return {
               content:
                 typeof content === "string"
@@ -911,30 +914,21 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
 
         if (syntheticCall && realCalls.length === 0) {
           // Terminal: model is done, extract structured content
-          let structuredContent: string;
-          try {
-            structuredContent = JSON.stringify(JSON.parse(syntheticCall.arguments));
-          } catch (parseErr) {
-            throw new StructuredOutputValidationError(
-              `Response is not valid JSON: ${(parseErr as Error).message}`,
-              syntheticCall.arguments,
-              input.responseSchema!.schema,
-            );
-          }
-          if (mode !== "strict") {
-            const result = validateResponseSchema(structuredContent, input.responseSchema!.schema);
-            if (!result.valid) {
-              throw new StructuredOutputValidationError(
-                result.error,
-                result.rawContent,
-                input.responseSchema!.schema,
-              );
-            }
-          }
+          const structuredContent = validateSyntheticToolCall(
+            syntheticCall,
+            input.responseSchema!,
+            mode,
+          );
           return { content: structuredContent, toolCalls: [], usage: extractGeminiUsage(json) };
         }
         if (syntheticCall && realCalls.length > 0) {
-          // Mixed: strip synthetic, return only real tool calls
+          // Mixed with real tool calls: validate the synthetic attempt so a
+          // non-conformant call surfaces a schema error (and counts against
+          // the retry budget) instead of being silently discarded, which
+          // previously let models retry forever. Valid structured output is
+          // still stripped here — the model must finish by calling the tool
+          // alone.
+          validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode);
           return {
             content: finalContent,
             toolCalls: realCalls,

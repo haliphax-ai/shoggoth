@@ -3,13 +3,14 @@
 .env
 .env.shoggoth.local
 .ssh/
+.vite/
 coverage/
 dist/
+docker-compose.override.yml
+node_modules
 # The workspace-global excludesFile (projects/gitignore) has an unanchored
 # `memory` rule that also matches these tracked test/source dirs, breaking
 # explicit `git add` (and thus the pre-commit hook). Re-include them here,
 # which takes precedence over the global excludesFile.
 !packages/daemon/src/memory/
 !packages/daemon/test/memory/
-docker-compose.override.yml
-node_modules

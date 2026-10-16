@@ -232,6 +232,37 @@ describe("Anthropic structured output — mixed response", () => {
     const syntheticCall = out.toolCalls.find((tc) => tc.name === "__structured_output__");
     assert.equal(syntheticCall, undefined, "synthetic tool call should be stripped from toolCalls");
   });
+
+  it("throws StructuredOutputValidationError on non-conformant synthetic call mixed with real tool calls", async () => {
+    // Previously the synthetic call was silently stripped when it rode along
+    // with real tool calls, so a bad attempt got no feedback and the model
+    // could keep retrying forever.
+    const fetchImpl = async () =>
+      mixedToolResponse({ name: "Alice" }, "read_file", { path: "/tmp/test.txt" });
+
+    const p = createAnthropicMessagesProvider({
+      id: "anth",
+      baseUrl: "https://api.anthropic.com",
+      fetchImpl,
+    });
+
+    await assert.rejects(
+      () =>
+        p.completeWithTools({
+          model: "claude-3",
+          messages: [{ role: "user", content: "give me data" }],
+          tools: TOOLS,
+          responseSchema: RESPONSE_SCHEMA,
+        }),
+      (e: unknown) => {
+        assert.ok(
+          e instanceof StructuredOutputValidationError,
+          `expected StructuredOutputValidationError, got ${(e as Error).constructor.name}`,
+        );
+        return true;
+      },
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
