@@ -776,14 +776,6 @@ export async function startDiscordPlatform(
             ? undefined
             : createThinkingOutput();
         let surfaceStreamHandle: StreamHandle | undefined;
-        /**
-         * Whether the raw stream handle natively renders a status bar line.
-         * Captured at start() time, BEFORE attachSink mutates the raw handle
-         * (it assigns a setStatusBar even when no native one exists): the
-         * terminal delivery must know whether the handle can carry the bar
-         * line onto the streamed accumulation by itself.
-         */
-        let handleCarriesStatusBar = false;
         if (streamEnabled()) {
           const streamingOutbound = opts.discord.streamingForSession(sid);
           if (streamingOutbound) {
@@ -792,7 +784,6 @@ export async function startDiscordPlatform(
               // Wrap the raw stream handle with the status-bar sink so the bar
               // can be applied to the in-flight message (test: raw handles carry
               // setStatusBar). Delegates to any native setStatusBar on the handle.
-              handleCarriesStatusBar = typeof raw.setStatusBar === "function";
               if (statusBarDep.config.enabled) {
                 statusBarDep.attachSink(raw as unknown as StreamHandle);
               }
@@ -823,16 +814,6 @@ export async function startDiscordPlatform(
         surfaceStreamPusher = surfaceStreamHandle
           ? createCoalescingStreamPusher((s) => surfaceStreamHandle!.pushUpdate(s), streamMinMs())
           : undefined;
-        /**
-         * Last non-whitespace streamed display: the thinking output's rendered
-         * accumulation carrying every prose segment of the turn (pre-tools and
-         * post-tools) across tool rounds, interleaved with any streamed
-         * thinking quotes. This — not the segment-scoped latestAssistantText —
-         * is the delivered text whenever the turn streamed any prose.
-         * Undefined when nothing text streamed (tool-only / aborted / failed
-         * turns).
-         */
-        let streamedBody: string | undefined;
 
         await adapter.withTypingIndicator(sid, async () => {
           turnResult = await executeTurn(
@@ -842,7 +823,6 @@ export async function startDiscordPlatform(
                   streamModel: true,
                   onModelTextDelta: (t: string) => {
                     const display = thinkingOutput ? thinkingOutput.onText(t) : t;
-                    if (display.trim()) streamedBody = display;
                     surfaceStreamPusher!.push(display.trim() ? display : "…");
                     // Prose phase (💬) on the live bar.
                     surfaceTracker?.onProse?.(t);
@@ -853,12 +833,11 @@ export async function startDiscordPlatform(
                 : undefined,
           );
           const cfg = opts.configRef?.current ?? opts.config;
-          // The at-once path has no streamed accumulation to deliver (the
-          // streaming branch above carries every segment via streamedBody):
-          // compose the body from the turn's full prose — every assistant
+          // Compose the body from the turn's full prose — every assistant
           // text segment of this turn, in order — so prose → tools → prose
           // turns deliver ALL segments, not only the last one that
-          // latestAssistantText carries.
+          // latestAssistantText carries. Both delivery paths (streamed and
+          // at-once) deliver this same composition.
           const replyText = turnResult.assistantTurnProse ?? turnResult.latestAssistantText;
           const formattedBody = formatAssistantReply(
             cfg,
@@ -880,41 +859,30 @@ export async function startDiscordPlatform(
           const barLine = surfaceTracker ? await surfaceTracker.finish(outcome) : undefined;
           if (surfaceStreamPusher && surfaceStreamHandle) {
             await surfaceStreamPusher.flush();
-            if (streamedBody === undefined) {
-              // Nothing text streamed (tool-only, aborted-before-prose, or
-              // failed turns): the placeholder still stands, so deliver the
-              // formatted reply as the body — the previous behavior. Clear the
-              // in-flight handle's active-bar state first — a state-only
-              // operation that makes no edit — so the delivery edit below
-              // (whose body already carries barLine) lands the bar exactly
-              // once. Never block delivery.
-              if (barLine && surfaceStreamHandle.setStatusBar) {
-                try {
-                  await surfaceStreamHandle.setStatusBar(null);
-                } catch (e) {
-                  opts.logger.warn("discord.platform.status_bar_clear_failed", {
-                    err: String(e),
-                    sessionId: sid,
-                  });
-                }
+            // Clear the in-flight handle's active-bar state first — a
+            // state-only operation that makes no edit — so the delivery edit
+            // below (whose body already carries barLine) lands the bar
+            // exactly once. Never block delivery.
+            if (barLine && surfaceStreamHandle.setStatusBar) {
+              try {
+                await surfaceStreamHandle.setStatusBar(null);
+              } catch (e) {
+                opts.logger.warn("discord.platform.status_bar_clear_failed", {
+                  err: String(e),
+                  sessionId: sid,
+                });
               }
-              await surfaceStreamHandle.setFullContent(
-                barLine ? `${fullBody}\n\n${barLine}` : fullBody,
-              );
-            } else if (barLine && !handleCarriesStatusBar) {
-              // The flushed accumulation already carries every prose segment of
-              // the turn and the tracker's finish() landed the terminal bar
-              // through the sink — but this handle cannot render a bar itself,
-              // so append the terminal line to the streamed display (all
-              // prose segments plus rendered thinking quotes) explicitly.
-              await surfaceStreamHandle.setFullContent(`${streamedBody}\n\n${barLine}`);
             }
-            // Otherwise the delivered message is already final: the flushed
-            // accumulation carries all segments and the terminal bar landed
-            // via the tracker's sink (setStatusBar) on top of it. Never
-            // wholesale-replace the streamed body with the segment-scoped
-            // latestAssistantText — that silently dropped every prose segment
-            // before the last tool call from the delivered message.
+            // ONE terminal delivery: always replace the live streamed display
+            // with fullBody — the turn-scoped composition (every prose segment
+            // of THIS turn via assistantTurnProse, rendered thinking quotes,
+            // formatted decorations). The live display is only a view of the
+            // in-flight accumulation and may carry cross-round artifacts
+            // (round restarts after steering/failover in a session-long tool
+            // loop); the delivered message must be the clean turn record.
+            await surfaceStreamHandle.setFullContent(
+              barLine ? `${fullBody}\n\n${barLine}` : fullBody,
+            );
             // Stream edits can't carry file attachments — send as follow-up.
             const attachments = turnResult.showAttachments;
             if (attachments?.length) {
