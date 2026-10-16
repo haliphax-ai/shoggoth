@@ -14,9 +14,13 @@ vi.mock("../../src/logging.js", () => ({
 }));
 
 // Mock node:fs/promises for localFilePath tests
-vi.mock("node:fs/promises", () => ({
-  readFile: vi.fn(),
-}));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    readFile: vi.fn(),
+  };
+});
 
 function makeAttachment(overrides: Partial<MessageAttachment> = {}): MessageAttachment {
   return {

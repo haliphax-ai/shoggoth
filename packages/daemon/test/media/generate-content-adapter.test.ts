@@ -2,11 +2,15 @@ import { describe, it, vi, beforeEach } from "vitest";
 import assert from "node:assert";
 
 // Mock node:fs/promises for file writing
-vi.mock("node:fs/promises", () => ({
-  writeFile: vi.fn().mockResolvedValue(undefined),
-  mkdir: vi.fn().mockResolvedValue(undefined),
-  readFile: vi.fn().mockResolvedValue(Buffer.from("fake-image-bytes")),
-}));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    writeFile: vi.fn().mockResolvedValue(undefined),
+    mkdir: vi.fn().mockResolvedValue(undefined),
+    readFile: vi.fn().mockResolvedValue(Buffer.from("fake-image-bytes")),
+  };
+});
 
 // Mock global fetch
 const mockFetch = vi.fn();
