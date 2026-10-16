@@ -77,17 +77,17 @@ export const execArgs = {
     stdoutFile: {
       type: "string",
       description:
-        "Write stdout to this workspace-relative file instead of returning inline. Incompatible with background/yieldMs.",
+        "Write stdout to this workspace-relative file instead of returning inline. With background/yieldMs, output streams directly to the file as it is produced (no size cap).",
     },
     stderrFile: {
       type: "string",
       description:
-        "Write stderr to this workspace-relative file instead of returning inline. Incompatible with background/yieldMs.",
+        "Write stderr to this workspace-relative file instead of returning inline. With background/yieldMs, output streams directly to the file as it is produced (no size cap).",
     },
     outputFile: {
       type: "string",
       description:
-        "Write combined stdout+stderr to this workspace-relative file instead of returning inline. Mutually exclusive with stdoutFile/stderrFile. Incompatible with background/yieldMs.",
+        "Write combined stdout+stderr to this workspace-relative file instead of returning inline. Mutually exclusive with stdoutFile/stderrFile. With background/yieldMs, output streams directly to the file as it is produced (no size cap).",
     },
   },
   required: ["argv"],
