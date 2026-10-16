@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { isAbsolute, resolve, dirname } from "node:path";
+import { DEFAULT_MAX_TTL_MS, clampTtlMs } from "@shoggoth/shared";
 import type { TaskDef, FailureBehavior, FailureNotification } from "./types.js";
 import type { WorkflowServer } from "./server.js";
 import type { ControlPlane } from "./control.js";
@@ -90,6 +91,12 @@ export interface WorkflowToolHandlerDeps {
   workspaceRoot?: string;
   /** Agent-specific workspace root. Used for definition_file path resolution. Falls back to workspaceRoot. */
   agentWorkspaceRoot?: string;
+  /**
+   * Maximum TTL (ms) enforced on workflow runtime limits and wait timeouts. A provided
+   * value above this ceiling is clamped down; it is never interpreted as "forever"
+   * (see #439). Defaults to the shared max TTL (24h) when omitted.
+   */
+  maxTtlMs?: number;
 }
 
 // --- Helpers ---
@@ -282,14 +289,23 @@ export async function handleWorkflowToolCall(
         const finalName = name ?? "unnamed-workflow";
         const replyTo = requireField(args.reply_to, "reply_to");
 
-        const taskDefs = toTaskDefs(finalTasks);
+        // Cap provided TTLs at the configured max TTL so an over-large (or absent)
+        // runtime limit is never interpreted as "forever" (see #439). The absent case
+        // keeps the tighter 10-minute subsystem default; only the ceiling comes from
+        // maxTtl here.
+        const maxTtlMs = deps.maxTtlMs ?? DEFAULT_MAX_TTL_MS;
+        const taskDefs = toTaskDefs(finalTasks).map((t) =>
+          t.runtimeLimitMs !== undefined
+            ? { ...t, runtimeLimitMs: clampTtlMs(t.runtimeLimitMs, maxTtlMs) }
+            : t,
+        );
         const opts: OrchestratorOptions = {
           stateDir: deps.stateDir,
           currentDepth: deps.currentDepth,
           maxDepth: deps.maxDepth,
           replyTo,
           pollingIntervalMs: pollingIntervalMs ?? 10_000,
-          runtimeLimitMs: runtimeLimitMs ?? 600_000,
+          runtimeLimitMs: clampTtlMs(runtimeLimitMs ?? 600_000, maxTtlMs),
           name: finalName,
           ...(concurrency ? { concurrency } : {}),
         };
@@ -357,7 +373,12 @@ export async function handleWorkflowToolCall(
         if (args.failure_notification !== undefined) {
           updates.failureNotification = normalizeFailureNotification(args.failure_notification);
         }
-        if (args.runtime_limit_ms !== undefined) updates.runtimeLimitMs = args.runtime_limit_ms;
+        if (args.runtime_limit_ms !== undefined) {
+          updates.runtimeLimitMs = clampTtlMs(
+            args.runtime_limit_ms,
+            deps.maxTtlMs ?? DEFAULT_MAX_TTL_MS,
+          );
+        }
 
         await deps.controlPlane.edit(wfId, taskId, updates);
         return {
@@ -388,7 +409,13 @@ export async function handleWorkflowToolCall(
 
       case "wait": {
         const wfId = requireField(args.workflow_id, "workflow_id");
-        const wf = await deps.controlPlane.wait(wfId, args.wait_timeout_ms);
+        // Cap a provided wait timeout at the configured max TTL; an absent value keeps
+        // controlPlane.wait's own finite default (10 min) — never "forever" (#439).
+        const waitTimeoutMs =
+          args.wait_timeout_ms !== undefined
+            ? clampTtlMs(args.wait_timeout_ms, deps.maxTtlMs ?? DEFAULT_MAX_TTL_MS)
+            : args.wait_timeout_ms;
+        const wf = await deps.controlPlane.wait(wfId, waitTimeoutMs);
 
         // Add duration field to each task (same as status)
         const now = Date.now();

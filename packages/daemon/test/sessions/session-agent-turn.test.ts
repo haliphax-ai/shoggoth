@@ -27,6 +27,22 @@ import { createSessionStore } from "../../src/sessions/session-store";
 import { createTranscriptStore } from "../../src/sessions/transcript-store";
 import { createToolRunStore } from "../../src/sessions/tool-run-store";
 import { runToolLoop } from "../../src/sessions/tool-loop";
+import { createLogger, setRootLogger } from "../../src/logging";
+
+function stubLogger() {
+  const logs: Array<{ level: string; msg: string; fields?: Record<string, unknown> }> = [];
+  const log = (level: string) => (msg: string, fields?: Record<string, unknown>) => {
+    logs.push({ level, msg, fields });
+  };
+  const logger = {
+    debug: log("debug"),
+    info: log("info"),
+    warn: log("warn"),
+    error: log("error"),
+    child: () => logger,
+  };
+  return { logger, logs };
+}
 
 describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
   let db: Database.Database;
@@ -351,6 +367,148 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
     // Compaction should have failed (no real model endpoint) but the turn
     // should still complete successfully.
     assert.equal(result.latestAssistantText, "COMPACTION_FALLTHROUGH");
+  });
+
+  it("warns when mid-turn compaction is disabled because the context window is unresolvable", async () => {
+    const stub = stubLogger();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setRootLogger(stub.logger as any);
+    try {
+      const config = defaultConfig(tmp);
+      // The model entry carries no contextWindowTokens, so there is no window
+      // to threshold mid-turn compaction against.
+      config.models = {
+        providers: [
+          {
+            id: "nowin",
+            kind: "openai-compatible" as const,
+            baseUrl: "http://localhost:1/v1",
+            apiKey: "fake",
+          },
+        ],
+        failoverChain: [{ providerId: "nowin", model: "m" }],
+      };
+
+      const sessions = createSessionStore(db);
+      const session = sessions.getById("sess-core");
+      assert.ok(session);
+      const transcript = createTranscriptStore(db);
+      const toolRuns = createToolRunStore(db);
+      const hitlStack = createHitlPendingResolutionStack(db);
+      const builtin = buildBuiltinOnlySessionMcpToolContext();
+
+      const result = await executeSessionAgentTurn({
+        db,
+        sessionId: "sess-core",
+        session: session!,
+        transcript,
+        toolRuns,
+        userContent: "unresolvable window test",
+        userMetadata: undefined,
+        env: process.env,
+        config,
+        policyEngine: createPolicyEngine(config.policy),
+        getHitlConfig: () => ({ ...DEFAULT_HITL_CONFIG, ...config.hitl }),
+        hitl: {
+          bypassUpTo: "safe",
+          pending: hitlStack.pending,
+          clock: { nowMs: () => Date.now() },
+          newPendingId: () => randomUUID(),
+          waitForHitlResolution: hitlStack.waitForHitlResolution,
+        },
+        loopImpl: runToolLoop,
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            return {
+              content: "NOWIN_REPLY",
+              toolCalls: [],
+              usedModel: "m",
+              usedProviderId: "nowin",
+              degraded: false,
+            };
+          },
+        }),
+        resolveMcpContext: async () => builtin,
+      } as any);
+
+      assert.equal(result.latestAssistantText, "NOWIN_REPLY");
+      const entry = stub.logs.find(
+        (l) => l.level === "warn" && l.msg.includes("mid-turn compaction disabled"),
+      );
+      assert.ok(entry, "expected a warn log that mid-turn compaction is disabled");
+      assert.equal(entry!.fields?.sessionId, "sess-core");
+    } finally {
+      setRootLogger(createLogger({ component: "session-agent-turn.test" }));
+    }
+  });
+
+  it("stays silent about the disabled compaction check on minimalContext turns", async () => {
+    const stub = stubLogger();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setRootLogger(stub.logger as any);
+    try {
+      const config = defaultConfig(tmp);
+      config.models = {
+        providers: [
+          {
+            id: "nowin",
+            kind: "openai-compatible" as const,
+            baseUrl: "http://localhost:1/v1",
+            apiKey: "fake",
+          },
+        ],
+        failoverChain: [{ providerId: "nowin", model: "m" }],
+      };
+
+      const sessions = createSessionStore(db);
+      const session = sessions.getById("sess-core");
+      assert.ok(session);
+      const transcript = createTranscriptStore(db);
+      const toolRuns = createToolRunStore(db);
+      const hitlStack = createHitlPendingResolutionStack(db);
+      const builtin = buildBuiltinOnlySessionMcpToolContext();
+
+      const result = await executeSessionAgentTurn({
+        db,
+        sessionId: "sess-core",
+        session: session!,
+        transcript,
+        toolRuns,
+        userContent: "minimal context window test",
+        userMetadata: undefined,
+        env: process.env,
+        config,
+        policyEngine: createPolicyEngine(config.policy),
+        getHitlConfig: () => ({ ...DEFAULT_HITL_CONFIG, ...config.hitl }),
+        hitl: {
+          bypassUpTo: "safe",
+          pending: hitlStack.pending,
+          clock: { nowMs: () => Date.now() },
+          newPendingId: () => randomUUID(),
+          waitForHitlResolution: hitlStack.waitForHitlResolution,
+        },
+        minimalContext: { tailMessages: 2, eventContext: "minimal event" },
+        loopImpl: runToolLoop,
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            return {
+              content: "MINIMAL_REPLY",
+              toolCalls: [],
+              usedModel: "m",
+              usedProviderId: "nowin",
+              degraded: false,
+            };
+          },
+        }),
+        resolveMcpContext: async () => builtin,
+      } as any);
+
+      assert.equal(result.latestAssistantText, "MINIMAL_REPLY");
+      const entries = stub.logs.filter((l) => l.msg.includes("mid-turn compaction disabled"));
+      assert.equal(entries.length, 0, "minimalContext turns must stay silent about the disable");
+    } finally {
+      setRootLogger(createLogger({ component: "session-agent-turn.test" }));
+    }
   });
 
   it("wires imageBlockCodec into BuiltinToolContext when provider is configured", async () => {

@@ -392,6 +392,8 @@ The workflow engine is exposed as a single tool called `workflow` with an `actio
 }
 ```
 
+Task and workflow `runtime_limit_ms` values (and per-task values set via `edit`) are capped at `runtime.maxTtlMs`, so an over-large limit never becomes "forever".
+
 ### Control actions
 
 | Action      | Required Fields                                                                              |
@@ -399,7 +401,7 @@ The workflow engine is exposed as a single tool called `workflow` with an `actio
 | `abort`     | `workflow_id`                                                                                |
 | `pause`     | `workflow_id`                                                                                |
 | `resume`    | `workflow_id`                                                                                |
-| `wait`      | `workflow_id`, optional `wait_timeout_ms`                                                    |
+| `wait`      | `workflow_id`, optional `wait_timeout_ms` (capped at `runtime.maxTtlMs`)                     |
 | `status`    | `workflow_id`                                                                                |
 | `list`      | (optional `agent_chain_id`)                                                                  |
 | `post`      | `workflow_id`                                                                                |

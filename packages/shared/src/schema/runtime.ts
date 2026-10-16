@@ -221,6 +221,14 @@ export const shoggothRuntimeConfigSchema = z
       .strict()
       .optional(),
     toolCallTimeoutMs: z.number().int().positive().optional(),
+    /**
+     * Maximum TTL (ms) enforced wherever the system controls a process lifetime
+     * (subagent inactivity windows, workflow task runtime limits / wait timeouts,
+     * tool-call execution timeouts). Used both as the default when a TTL is
+     * unspecified and as the cap for provided TTLs — an absent TTL never means
+     * "forever". Default: 24 hours (86_400_000).
+     */
+    maxTtlMs: z.number().int().positive().optional(),
     modelResilience: z
       .object({
         maxRetries: z.number().int().nonnegative().optional(),

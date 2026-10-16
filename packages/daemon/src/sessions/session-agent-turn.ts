@@ -439,6 +439,15 @@ export async function executeSessionAgentTurn(
         sessionId: input.sessionId,
       })?.model?.contextWindowTokens;
     }
+    if (!ctxWindowTokens) {
+      // Without a window there is no mid-turn compaction threshold, so the
+      // check stays off for the whole turn — make that visible instead of
+      // silently degrading.
+      log.warn("mid-turn compaction disabled for this turn: context window could not be resolved", {
+        sessionId: input.sessionId,
+        modelRef: sessionModelRef ?? null,
+      });
+    }
   }
 
   const { signal: turnAbortSignal, end: endTurnAbortScope } = beginSessionTurnAbortScope(

@@ -74,3 +74,25 @@ export const workspaceRelativePathSchema = z
 
 /** Default tool call timeout: 10 minutes. */
 export const DEFAULT_TOOL_CALL_TIMEOUT_MS = 600_000;
+/** Default maximum TTL for lifetime-controlled units: 24 hours. */
+export const DEFAULT_MAX_TTL_MS = 86_400_000;
+
+/**
+ * Resolve the configured maximum TTL (ms) from `runtime.maxTtlMs`, falling back to
+ * {@link DEFAULT_MAX_TTL_MS} when unset or invalid. This value is used both as the
+ * default TTL for a lifetime-controlled unit whose TTL is unspecified and as the
+ * maximum cap for a provided TTL — an absent TTL never means "forever".
+ */
+export function resolveMaxTtlMs(cfg?: { runtime?: { maxTtlMs?: number } }): number {
+  const v = cfg?.runtime?.maxTtlMs;
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : DEFAULT_MAX_TTL_MS;
+}
+
+/**
+ * Resolve an effective TTL (ms) against the configured maximum: an absent TTL
+ * defaults to `maxTtlMs`, and a provided TTL is capped at `maxTtlMs`. The result is
+ * always a finite value in `(0, maxTtlMs]` — never "forever".
+ */
+export function clampTtlMs(value: number | undefined, maxTtlMs: number): number {
+  return Math.min(value ?? maxTtlMs, maxTtlMs);
+}
