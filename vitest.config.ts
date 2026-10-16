@@ -6,46 +6,26 @@ const rootDir = dirname(fileURLToPath(import.meta.url));
 
 // When run from inside a package (e.g. via --workspace), narrow to that
 // package only. When run from root, include all packages.
-const cwdRel = relative(rootDir, process.cwd());
-const currentPkg = cwdRel.startsWith("packages/") ? cwdRel.split("/")[1] : undefined;
+const include = (() => {
+  const rel = relative(rootDir, process.cwd());
+  if (rel.startsWith("packages/")) {
+    const pkg = rel.split("/")[1];
+    return [`packages/${pkg}/test/**/*.test.ts`];
+  }
+  return [
+    "packages/*/test/**/*.test.ts",
+    "packages/*/packages/*/test/**/*.test.ts",
+    "docker/test/**/*.test.ts",
+  ];
+})();
 
-const baseIncludes = currentPkg
-  ? [`packages/${currentPkg}/test/**/*.test.ts`]
-  : [
-      "packages/*/test/**/*.test.ts",
-      "packages/*/packages/*/test/**/*.test.ts",
-      "docker/test/**/*.test.ts",
-    ];
-
-// Test files that rely on `vi.mock` interception of app modules or node builtins.
-// Under a shared module registry (isolate:false) the mock is defeated by whichever
-// file imports the real module first, so these files are order-dependent and fail
-// intermittently when the suite runs shared. They are quarantined into the
-// `quarantine` project below (isolate:true) until they are refactored to inject
-// their seams (github.com/haliphax-ai/shoggoth/issues/479). Remove an entry once
-// its file has a DI seam and passes in the shared pool.
-const quarantineGlobs = [
-  "packages/daemon/test/builtin-handlers/exec-handler.test.ts",
-  "packages/daemon/test/builtin-handlers/web-search-handler.test.ts",
-  "packages/daemon/test/decision/decision-control-op.test.ts",
-  "packages/daemon/test/media/*.test.ts",
-  "packages/daemon/test/messaging/inbound-session-turn.test.ts",
-  "packages/daemon/test/messaging/inbound-session-turn-status-bar.test.ts",
-  "packages/daemon/test/mcp/mcp-server-pool.test.ts",
-  "packages/daemon/test/presentation/attachment-download.test.ts",
-  "packages/daemon/test/presentation/image-ingest.test.ts",
-  "packages/daemon/test/presentation/turn-orchestrator.test.ts",
-  "packages/daemon/test/rerank/rerank-control-op.test.ts",
-  "packages/daemon/test/sessions/session-manager.test.ts",
-  "packages/daemon/test/sessions/builtin-handlers/vault-inject.test.ts",
-  "packages/mcp-integration/test/mcp-jsonrpc-transport.test.ts",
-  "packages/mcp-integration/test/mcp-streamable-http-transport.test.ts",
-  "packages/mcp-integration/test/mcp-stdio-agent-identity.test.ts",
-];
-
-const activeQuarantine = currentPkg
-  ? quarantineGlobs.filter((p) => p.startsWith(`packages/${currentPkg}/`))
-  : quarantineGlobs;
+// NOTE: Do NOT run this suite with `--no-isolate` (isolate: false). Under a
+// shared module registry, `vi.mock` interception becomes import-order dependent:
+// whichever test file imports the real module first pins the real binding, so a
+// later file's mock is silently bypassed. The failure set is non-deterministic
+// (it shifts run-to-run with scheduling), so it cannot be fixed by quarantining
+// specific files. Full isolation is required until the vi.mock-heavy tests are
+// refactored to dependency injection (github.com/haliphax-ai/shoggoth/issues/479).
 
 export default defineConfig({
   cacheDir: ".vite",
@@ -56,47 +36,13 @@ export default defineConfig({
     },
   },
   test: {
+    include,
     onConsoleLog: () => false,
     pool: "forks",
     maxWorkers: process.env.CI ? 4 : 8,
     setupFiles: ["./test/setup.ts"],
     testTimeout: 30_000,
     hookTimeout: 30_000,
-    // Most tests run in a shared module registry (isolate:false) for speed. Only
-    // the vi.mock-heavy files above need isolation; they run in the `quarantine`
-    // project. Run WITHOUT `--no-isolate` so this split is honored (the CLI flag
-    // would force isolate:false everywhere and defeat the quarantine).
-    // NOTE: vitest does NOT inherit root-level `test.*` scalar options into
-    // `projects`, so pool/timeouts/setup are repeated per project below.
-    projects: [
-      {
-        test: {
-          name: "shared",
-          include: baseIncludes,
-          exclude: activeQuarantine,
-          isolate: false,
-          onConsoleLog: () => false,
-          pool: "forks",
-          maxWorkers: process.env.CI ? 4 : 8,
-          setupFiles: ["./test/setup.ts"],
-          testTimeout: 30_000,
-          hookTimeout: 30_000,
-        },
-      },
-      {
-        test: {
-          name: "quarantine",
-          include: activeQuarantine,
-          isolate: true,
-          onConsoleLog: () => false,
-          pool: "forks",
-          maxWorkers: process.env.CI ? 4 : 8,
-          setupFiles: ["./test/setup.ts"],
-          testTimeout: 30_000,
-          hookTimeout: 30_000,
-        },
-      },
-    ],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
