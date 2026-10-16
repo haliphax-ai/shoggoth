@@ -22,6 +22,8 @@ export interface FailoverCompleteInput extends ModelInvocationParams {
   readonly messages: readonly ChatMessage[];
   readonly stream?: boolean;
   readonly onTextDelta?: ModelStreamTextDeltaCallback;
+  /** Aborts the in-flight request / closes the SSE stream (`ModelRequestAbortedError`). */
+  readonly signal?: AbortSignal;
 }
 
 export interface FailoverCompleteOutput extends ModelCompleteOutput {
@@ -91,9 +93,7 @@ export async function iterateFailoverChain<
     }
 
     const thinkingFormat =
-      input.thinkingFormat ??
-      entry.thinkingFormat ??
-      entry.provider.capabilities?.thinkingFormat;
+      input.thinkingFormat ?? entry.thinkingFormat ?? entry.provider.capabilities?.thinkingFormat;
 
     try {
       const result = await callProvider(entry, input, thinkingFormat);
@@ -113,10 +113,7 @@ export async function iterateFailoverChain<
       }
       // Last in chain or non-eligible error — mark exhausted and throw
       if (isFailoverEligibleError(e)) {
-        hooks?.onProviderExhausted?.(
-          entry.provider.id,
-          e instanceof Error ? e.message : String(e),
-        );
+        hooks?.onProviderExhausted?.(entry.provider.id, e instanceof Error ? e.message : String(e));
       }
       throw e;
     }
@@ -142,6 +139,7 @@ export function createFailoverModelClient(
             temperature: input.temperature,
             stream: input.stream,
             onTextDelta: input.onTextDelta,
+            signal: input.signal,
             thinking: input.thinking,
             reasoningEffort: input.reasoningEffort,
             requestExtras: input.requestExtras,

@@ -1,4 +1,5 @@
 import { ModelHttpError } from "./errors";
+import { readStreamChunkOrAbort } from "./stream-abort";
 import { trimSlash } from "./trim-slash";
 import {
   STRUCTURED_OUTPUT_TOOL_NAME,
@@ -400,6 +401,8 @@ export interface ConsumeGeminiStreamOptions {
   readonly accumulateTools: boolean;
   readonly thinkingFormat?: "native" | "xml-tags" | "none";
   readonly onTextDelta?: ModelStreamTextDeltaCallback;
+  /** Cancels the reader (closing the response stream) and throws `ModelRequestAbortedError` on abort. */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -515,7 +518,7 @@ export async function consumeGeminiStream(
   };
 
   while (true) {
-    const { done, value } = await reader.read();
+    const { done, value } = await readStreamChunkOrAbort(reader, options.signal);
     const chunkText = done ? decoder.decode() : decoder.decode(value, { stream: true });
     lineBuf += chunkText;
     let nl: number;
@@ -619,6 +622,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
         method: "POST",
         headers,
         body: JSON.stringify(body),
+        signal: input.signal,
       });
 
       if (input.stream === true) {
@@ -628,6 +632,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
           accumulateTools: false,
           thinkingFormat: input.thinkingFormat,
           onTextDelta: input.onTextDelta,
+          signal: input.signal,
         });
         if (toolCalls.length > 0) {
           throw new ModelHttpError(502, "unexpected functionCall in non-tool Gemini stream", "");
@@ -734,6 +739,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
         method: "POST",
         headers,
         body: JSON.stringify(body),
+        signal: input.signal,
       });
 
       if (input.stream === true) {
@@ -743,6 +749,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
           accumulateTools: true,
           thinkingFormat: input.thinkingFormat,
           onTextDelta: input.onTextDelta,
+          signal: input.signal,
         });
         if (toolCalls.length === 0 && (content === null || content === "")) {
           throw new ModelHttpError(502, "missing assistant content and functionCall parts", "");
@@ -839,7 +846,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
                   headers,
                   followUpBody,
                   input.thinkingFormat,
-                  { formatErrorBody: parseApiErrorBody },
+                  { formatErrorBody: parseApiErrorBody, signal: input.signal },
                 );
               },
               extractToolCalls: (responseJson) => {
@@ -975,7 +982,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
                 headers,
                 followUpBody,
                 input.thinkingFormat,
-                { formatErrorBody: parseApiErrorBody },
+                { formatErrorBody: parseApiErrorBody, signal: input.signal },
               );
             },
             extractToolCalls: (responseJson) => {

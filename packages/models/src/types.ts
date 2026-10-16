@@ -138,6 +138,12 @@ export interface ModelToolCompleteInput extends ModelInvocationParams {
   readonly stream?: boolean;
   readonly onTextDelta?: ModelStreamTextDeltaCallback;
   readonly onReasoningDelta?: ModelStreamReasoningDeltaCallback;
+  /**
+   * Aborts the in-flight HTTP request and closes any SSE response stream
+   * immediately (throws `ModelRequestAbortedError`) instead of waiting for
+   * the stream to drain.
+   */
+  readonly signal?: AbortSignal;
 }
 
 /** Token usage metadata returned by model providers (when available). */
@@ -175,6 +181,12 @@ export interface ModelCompleteInput extends ModelInvocationParams {
   readonly stream?: boolean;
   readonly onTextDelta?: ModelStreamTextDeltaCallback;
   readonly onReasoningDelta?: ModelStreamReasoningDeltaCallback;
+  /**
+   * Aborts the in-flight HTTP request and closes any SSE response stream
+   * immediately (throws `ModelRequestAbortedError`) instead of waiting for
+   * the stream to drain.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface ModelCompleteOutput {

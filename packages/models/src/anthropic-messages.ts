@@ -1,4 +1,5 @@
 import { ModelHttpError } from "./errors";
+import { readStreamChunkOrAbort } from "./stream-abort";
 import { trimSlash } from "./trim-slash";
 import {
   STRUCTURED_OUTPUT_TOOL_NAME,
@@ -435,6 +436,8 @@ export interface ConsumeAnthropicMessagesStreamOptions {
   readonly onTextDelta?: ModelStreamTextDeltaCallback;
   /** Map Anthropic-safe tool names back to OpenAI/MCP names (e.g. `builtin_read` → `builtin-read`). */
   readonly anthropicToOpenAiToolName?: ReadonlyMap<string, string>;
+  /** Cancels the reader (closing the response stream) and throws `ModelRequestAbortedError` on abort. */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -683,7 +686,7 @@ export async function consumeAnthropicMessagesStream(
   };
 
   while (true) {
-    const { done, value } = await reader.read();
+    const { done, value } = await readStreamChunkOrAbort(reader, options.signal);
     const chunkText = done ? decoder.decode() : decoder.decode(value, { stream: true });
     lineBuf += chunkText;
     let nl: number;
@@ -801,6 +804,7 @@ export function createAnthropicMessagesProvider(
         method: "POST",
         headers,
         body: JSON.stringify(body),
+        signal: input.signal,
       });
 
       if (input.stream === true) {
@@ -815,6 +819,7 @@ export function createAnthropicMessagesProvider(
           accumulateTools: false,
           thinkingFormat: input.thinkingFormat,
           onTextDelta: input.onTextDelta,
+          signal: input.signal,
         });
         if (toolCalls.length > 0) {
           throw new ModelHttpError(
@@ -898,6 +903,7 @@ export function createAnthropicMessagesProvider(
         method: "POST",
         headers,
         body: JSON.stringify(body),
+        signal: input.signal,
       });
 
       if (input.stream === true) {
@@ -913,6 +919,7 @@ export function createAnthropicMessagesProvider(
           thinkingFormat: input.thinkingFormat,
           onTextDelta: input.onTextDelta,
           anthropicToOpenAiToolName: anthropicToOpenAi,
+          signal: input.signal,
         });
 
         if (toolCalls.length === 0 && (outText === null || outText === "")) {
@@ -997,6 +1004,7 @@ export function createAnthropicMessagesProvider(
                   {
                     formatErrorBody: parseApiErrorBody,
                     jsonErrorMessage: "invalid JSON from Anthropic Messages endpoint",
+                    signal: input.signal,
                   },
                 );
               },
@@ -1131,6 +1139,7 @@ export function createAnthropicMessagesProvider(
                 {
                   formatErrorBody: parseApiErrorBody,
                   jsonErrorMessage: "invalid JSON from Anthropic Messages endpoint",
+                  signal: input.signal,
                 },
               );
             },
