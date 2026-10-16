@@ -5,6 +5,7 @@ export {
 } from "./agent-id";
 export { loadLayeredConfigAsync } from "./config";
 export { resolveContextLevel, validateContextLevel } from "./context-level";
+export { renderThinkingBlockquote } from "./thinking-quote";
 export {
   generateSystemContextToken,
   renderSystemContextEnvelope,

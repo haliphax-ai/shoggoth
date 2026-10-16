@@ -12,6 +12,14 @@ import type { McpJsonRpcSession, McpStdioConnectOptions } from "@shoggoth/mcp-in
 
 // ---------------------------------------------------------------------------
 // Capture every call to openMcpStdioClient so we can inspect the options.
+//
+// The stdio opener is INJECTED via `options.openStdioClient` rather than
+// intercepted with `vi.mock("@shoggoth/mcp-integration")`. Under vitest
+// `--no-isolate` the module cache is shared across files, so a `vi.mock` can be
+// silently defeated when another test file imports the real module first (the
+// pool then binds the real openMcpStdioClient and actually spawns). DI is
+// order-independent and isolation-proof. The real mcpFetchToolsList /
+// mcpToolsToSourceCatalog run against fakeSession and return an empty catalog.
 // ---------------------------------------------------------------------------
 const capturedStdioOpts: McpStdioConnectOptions[] = [];
 
@@ -21,25 +29,10 @@ const fakeSession: McpJsonRpcSession = {
   close: vi.fn().mockResolvedValue(undefined),
 };
 
-vi.mock("@shoggoth/mcp-integration", async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
-  return {
-    ...actual,
-    openMcpStdioClient: vi.fn(async (opts: McpStdioConnectOptions) => {
-      capturedStdioOpts.push(opts);
-      return fakeSession;
-    }),
-    mcpFetchToolsList: vi.fn(async () => []),
-    mcpToolsToSourceCatalog: vi.fn((sourceId: string) => ({
-      sourceId,
-      tools: [],
-    })),
-  };
-});
-
-vi.mock("../../src/process-manager-singleton", () => ({
-  getProcessManager: vi.fn(() => undefined),
-}));
+async function openStdioClient(opts: McpStdioConnectOptions): Promise<McpJsonRpcSession> {
+  capturedStdioOpts.push(opts);
+  return fakeSession;
+}
 
 import {
   connectShoggothMcpServers,
@@ -67,6 +60,7 @@ describe("connectShoggothMcpServers — agentContext forwarding", () => {
           gid: 2001,
           workspacePath: "/home/agent-a/workspace",
         },
+        openStdioClient,
       } as ConnectShoggothMcpPoolOptions,
     );
 
@@ -120,6 +114,7 @@ describe("connectShoggothMcpServers — agentContext forwarding", () => {
           gid: 3001,
           workspacePath: "/home/agent-b/workspace",
         },
+        openStdioClient,
       } as ConnectShoggothMcpPoolOptions,
     );
 
@@ -146,14 +141,17 @@ describe("connectShoggothMcpServers — agentContext forwarding", () => {
   });
 
   it("inherits process.env and preserves server-level env when agentContext is absent", async () => {
-    const { pool } = await connectShoggothMcpServers([
-      {
-        id: "srv-no-ctx",
-        transport: "stdio",
-        command: "/usr/bin/echo",
-        env: { FOO: "bar" },
-      },
-    ]);
+    const { pool } = await connectShoggothMcpServers(
+      [
+        {
+          id: "srv-no-ctx",
+          transport: "stdio",
+          command: "/usr/bin/echo",
+          env: { FOO: "bar" },
+        },
+      ],
+      { openStdioClient },
+    );
 
     try {
       assert.equal(capturedStdioOpts.length, 1);
@@ -200,6 +198,7 @@ describe("connectShoggothMcpServers — agentContext forwarding", () => {
           gid: 4001,
           workspacePath: "/home/agent-c/workspace",
         },
+        openStdioClient,
       } as ConnectShoggothMcpPoolOptions,
     );
 
@@ -235,6 +234,7 @@ describe("connectShoggothMcpServers — agentContext forwarding", () => {
           gid: 5001,
           workspacePath: "/home/agent-d/workspace",
         },
+        openStdioClient,
       } as ConnectShoggothMcpPoolOptions,
     );
 
@@ -276,6 +276,7 @@ describe("connectShoggothMcpServers — agentContext forwarding", () => {
           gid: 6001,
           workspacePath: "/home/agent-e/workspace",
         },
+        openStdioClient,
       } as ConnectShoggothMcpPoolOptions,
     );
 
@@ -302,13 +303,16 @@ describe("connectShoggothMcpServers — agentContext forwarding", () => {
   });
 
   it("inherits process.env even when agentContext is absent and no server env", async () => {
-    const { pool } = await connectShoggothMcpServers([
-      {
-        id: "srv-env-only-process",
-        transport: "stdio",
-        command: "/usr/bin/echo",
-      },
-    ]);
+    const { pool } = await connectShoggothMcpServers(
+      [
+        {
+          id: "srv-env-only-process",
+          transport: "stdio",
+          command: "/usr/bin/echo",
+        },
+      ],
+      { openStdioClient },
+    );
 
     try {
       assert.equal(capturedStdioOpts.length, 1);
@@ -349,6 +353,7 @@ describe("connectShoggothMcpServers — agentContext forwarding", () => {
       {
         vault: mockVault as any,
         agentId: "developer",
+        openStdioClient,
       } as ConnectShoggothMcpPoolOptions,
     );
 
