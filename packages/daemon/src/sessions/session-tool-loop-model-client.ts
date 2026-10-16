@@ -9,6 +9,7 @@ import type {
 import {
   resolveCompactionPolicyFromModelsConfig,
   createFailoverClientFromModelsConfig,
+  ModelRequestAbortedError,
 } from "@shoggoth/models";
 import type { ShoggothModelsConfig } from "@shoggoth/shared";
 import { compactSessionTranscript } from "../transcript-compact";
@@ -51,6 +52,13 @@ export function createSessionToolLoopModelClient(input: {
     | (() => readonly OpenAIToolFunctionDefinition[]);
   /** Per-turn parameters forwarded to each `completeWithTools` (merged with stream options). */
   readonly modelInvocation?: ModelInvocationParams;
+  /**
+   * Turn abort signal forwarded to each `completeWithTools` so an abort
+   * cancels the in-flight HTTP request and closes the SSE response stream
+   * immediately instead of waiting for it to drain. Abort errors surface as
+   * {@link TurnAbortedError}.
+   */
+  readonly turnAbortSignal?: AbortSignal;
   /**
    * When true, passes `stream: true` to `completeWithTools` (OpenAI SSE). Use with
    * {@link onModelTextDelta} for live display (e.g. streaming edits on a message platform).
@@ -269,19 +277,27 @@ export function createSessionToolLoopModelClient(input: {
           : {};
 
       const inv = input.modelInvocation ?? {};
-      const out = await input.toolClient.completeWithTools({
-        messages,
-        tools: resolveTools(),
-        maxOutputTokens: inv.maxOutputTokens,
-        temperature: inv.temperature,
-        thinking: inv.thinking,
-        thinkingFormat: inv.thinkingFormat,
-        reasoningEffort: inv.reasoningEffort,
-        requestExtras: inv.requestExtras,
-        responseSchema: inv.responseSchema,
-        structuredOutputMode: inv.structuredOutputMode,
-        ...streamOpts,
-      });
+      const out = await input.toolClient
+        .completeWithTools({
+          messages,
+          tools: resolveTools(),
+          maxOutputTokens: inv.maxOutputTokens,
+          temperature: inv.temperature,
+          thinking: inv.thinking,
+          thinkingFormat: inv.thinkingFormat,
+          reasoningEffort: inv.reasoningEffort,
+          requestExtras: inv.requestExtras,
+          responseSchema: inv.responseSchema,
+          structuredOutputMode: inv.structuredOutputMode,
+          signal: input.turnAbortSignal,
+          ...streamOpts,
+        })
+        .catch((e: unknown) => {
+          // Abort mid-request/stream: the provider layer already closed the
+          // response stream; surface the daemon's turn-abort error type.
+          if (e instanceof ModelRequestAbortedError) throw new TurnAbortedError();
+          throw e;
+        });
       degradedAny = degradedAny || out.degraded;
       banner = {
         degraded: degradedAny,

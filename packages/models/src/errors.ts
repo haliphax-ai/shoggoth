@@ -23,3 +23,16 @@ export class EmptyModelResponseError extends ModelHttpError {
     this.name = "EmptyModelResponseError";
   }
 }
+
+/**
+ * Thrown when a model request (or its SSE response stream) is aborted via the
+ * caller-supplied `AbortSignal`. The response stream is cancelled immediately
+ * instead of being drained. Not failover-eligible: an aborted turn must stop,
+ * not hop to the next provider.
+ */
+export class ModelRequestAbortedError extends Error {
+  constructor(message = "model request aborted") {
+    super(message);
+    this.name = "ModelRequestAbortedError";
+  }
+}
