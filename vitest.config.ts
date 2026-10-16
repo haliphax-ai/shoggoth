@@ -5,10 +5,11 @@ import { dirname, relative } from "node:path";
 const rootDir = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  cacheDir: ".vite",
   root: rootDir,
   poolOptions: {
     forks: {
-      maxForks: 4,
+      maxForks: process.env.CI ? 4 : 8,
     },
   },
   test: {
@@ -28,6 +29,7 @@ export default defineConfig({
     })(),
     onConsoleLog: () => false,
     pool: "forks",
+    maxWorkers: process.env.CI ? 4 : 8,
     setupFiles: ["./test/setup.ts"],
     testTimeout: 30_000,
     hookTimeout: 30_000,
