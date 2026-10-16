@@ -384,6 +384,10 @@ Features:
 - Max queue depth (default 6 per tier). Excess enqueues are rejected with `TurnQueueFullError`.
 - `removeById`, `removeByRange`, `removeByCount`, `clear` for queue management.
 
+A queued entry covers only the tool loop. Post-turn delivery (posting/streaming the assistant reply to the platform) runs detached from the queue entry, so a hung platform-side delivery edit cannot wedge the session's `running` flag.
+
+Operator recovery: the `session_queue_manage` `release` action force-releases a wedged running entry, and `session_kill` clears the session's queued entries along with its running entry.
+
 ---
 
 ## Retention

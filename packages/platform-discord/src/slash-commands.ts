@@ -174,7 +174,7 @@ const SLASH_COMMANDS = [
       {
         name: "action",
         type: 3,
-        description: "list, remove, or clear",
+        description: "list, remove, clear, or release",
         required: true,
       },
       {

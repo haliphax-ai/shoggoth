@@ -194,4 +194,66 @@ describe("session_queue_manage control op (1-based indexes)", () => {
     );
     assert.deepStrictEqual(await listLabels(ctx), ["u1", "u2", "u3"]);
   });
+
+  it("list includes the blocked running turn alongside queued entries", async () => {
+    const result = (await handleIntegrationControlOp(
+      makeWireRequest("session_queue_manage", { session_id: SESSION_ID, action: "list" }),
+      operatorPrincipal,
+      ctx,
+    )) as {
+      entries: Array<{ index: number; label: string }>;
+      running: {
+        label: string;
+        priority: string;
+        enqueuedAt: number;
+        startedAt: number;
+      } | null;
+    };
+
+    assert.deepStrictEqual(
+      result.entries.map((e) => e.label),
+      ["u1", "u2", "u3"],
+    );
+    assert.ok(result.running);
+    assert.strictEqual(result.running.label, "blocker");
+    assert.strictEqual(result.running.priority, "user");
+    assert.strictEqual(typeof result.running.enqueuedAt, "number");
+    assert.strictEqual(typeof result.running.startedAt, "number");
+  });
+
+  it("release unblocks the running turn and starts the next queued entry", async () => {
+    const result = (await handleIntegrationControlOp(
+      makeWireRequest("session_queue_manage", { session_id: SESSION_ID, action: "release" }),
+      operatorPrincipal,
+      ctx,
+    )) as { released: boolean; running: { label: string } | null };
+
+    assert.strictEqual(result.released, true);
+    assert.ok(result.running);
+    assert.strictEqual(result.running.label, "u1");
+    assert.ok(queue.isRunning(SESSION_ID));
+    assert.deepStrictEqual(await listLabels(ctx), ["u2", "u3"]);
+  });
+
+  it("a second release after recovery reports no running entry", async () => {
+    // First release drops the blocked turn; the remaining queued turns are
+    // empty and drain on their own.
+    await handleIntegrationControlOp(
+      makeWireRequest("session_queue_manage", { session_id: SESSION_ID, action: "release" }),
+      operatorPrincipal,
+      ctx,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const result = (await handleIntegrationControlOp(
+      makeWireRequest("session_queue_manage", { session_id: SESSION_ID, action: "release" }),
+      operatorPrincipal,
+      ctx,
+    )) as { released: boolean; running: { label: string } | null };
+
+    assert.strictEqual(result.released, false);
+    assert.strictEqual(result.running, null);
+    assert.strictEqual(queue.isRunning(SESSION_ID), false);
+    assert.deepStrictEqual(await listLabels(ctx), []);
+  });
 });

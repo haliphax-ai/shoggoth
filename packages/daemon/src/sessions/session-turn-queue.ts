@@ -15,6 +15,11 @@ export interface QueueEntryInfo {
   readonly enqueuedAt: number;
 }
 
+export interface RunningEntryInfo extends QueueEntryInfo {
+  /** `Date.now()` when the entry was dequeued to execute. */
+  readonly startedAt: number;
+}
+
 export class TurnDroppedError extends Error {
   constructor(id: string) {
     super(`Turn dropped: ${id}`);
@@ -57,6 +62,10 @@ interface SessionQueue {
   high: QueueEntry[];
   normal: QueueEntry[];
   running: boolean;
+  /** The entry whose `execute()` is currently in flight (cleared when the turn settles). */
+  runningEntry?: QueueEntry;
+  /** `Date.now()` when the running entry was dequeued to execute. */
+  runningSince?: number;
   consecutiveHighTurns: number;
 }
 
@@ -220,6 +229,56 @@ export class TieredTurnQueue {
     return removed;
   }
 
+  /** Whether a turn is currently executing for the session (the running slot is held). */
+  isRunning(sessionId: string): boolean {
+    return this.sessions.get(sessionId)?.running === true;
+  }
+
+  /** Snapshot of the entry currently holding the session's running slot, if any. */
+  getRunning(sessionId: string): RunningEntryInfo | undefined {
+    const sq = this.sessions.get(sessionId);
+    if (!sq?.running || !sq.runningEntry) return undefined;
+    return {
+      id: sq.runningEntry.id,
+      priority: sq.runningEntry.priority,
+      label: sq.runningEntry.label,
+      enqueuedAt: sq.runningEntry.enqueuedAt,
+      startedAt: sq.runningSince ?? sq.runningEntry.enqueuedAt,
+    };
+  }
+
+  /**
+   * Operator recovery: force-release the session's running slot when a turn's
+   * post-loop work has wedged and the entry's promise will never settle. The
+   * wedged entry is rejected with {@link TurnDroppedError} (unblocking its
+   * caller) and the queue pumps the next entry immediately. The abandoned
+   * `execute()` may still settle later; its late finalization is ignored by
+   * the identity guard in `pump()`.
+   *
+   * Returns true when a running entry was force-released.
+   */
+  forceReleaseRunning(sessionId: string, reason = "operator request"): boolean {
+    const sq = this.sessions.get(sessionId);
+    if (!sq?.running) return false;
+    const entry = sq.runningEntry;
+    log.warn("turn_queue.running_force_released", {
+      sessionId,
+      entryId: entry?.id,
+      priority: entry?.priority,
+      label: entry?.label,
+      runningForMs: sq.runningSince ? Date.now() - sq.runningSince : undefined,
+      reason,
+    });
+    sq.running = false;
+    sq.runningEntry = undefined;
+    sq.runningSince = undefined;
+    // Settle the wedged entry's promise so its caller is unblocked. A no-op
+    // if the entry somehow already settled.
+    entry?.reject(new TurnDroppedError(entry.id));
+    this.pump(sessionId);
+    return true;
+  }
+
   private getOrCreate(sessionId: string): SessionQueue {
     let sq = this.sessions.get(sessionId);
     if (!sq) {
@@ -247,6 +306,8 @@ export class TieredTurnQueue {
       return;
     }
     sq.running = true;
+    sq.runningEntry = next;
+    sq.runningSince = Date.now();
     log.debug("turn_queue.turn_start", {
       sessionId,
       priority: next.priority,
@@ -260,6 +321,19 @@ export class TieredTurnQueue {
       .then(() => next.resolve())
       .catch((err) => next.reject(err))
       .finally(() => {
+        // Only the entry that owns the running slot may release it. A
+        // force-released entry (operator recovery) settles late — or never —
+        // and must not clear a newer turn's `running` flag.
+        const current = this.sessions.get(sessionId);
+        if (!current || current.runningEntry !== next) {
+          log.warn("turn_queue.turn_end_stale", {
+            sessionId,
+            priority: next.priority,
+            label: next.label,
+            id: next.id,
+          });
+          return;
+        }
         log.debug("turn_queue.turn_end", {
           sessionId,
           priority: next.priority,
@@ -269,7 +343,9 @@ export class TieredTurnQueue {
         // *** IMPLEMENTATION 2: Call the hook upon turn completion ***
         this.onTurnEnd?.(sessionId);
         // ***********************************************************
-        sq.running = false;
+        current.running = false;
+        current.runningEntry = undefined;
+        current.runningSince = undefined;
         this.pump(sessionId);
       });
   }

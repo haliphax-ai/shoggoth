@@ -235,7 +235,7 @@ Guild-scoped slash commands are registered on startup via `PUT /applications/{id
 | `/compact` | Compact transcript via [model summarization](models.md#transcript-compaction) (deferred response).                                                                              |
 | `/status`  | Show session status: provider, model, context fill, turns, compactions, queue depth.                                                                                            |
 | `/model`   | Get or set the session model selection. Options: `session_id`, `agent_id`, `model_selection`.                                                                                   |
-| `/queue`   | Manage the turn queue. Options: `action` (list/remove/clear), `priority`, `index`, `range`, `count`. Indexes are 1-based.                                                       |
+| `/queue`   | Manage the turn queue. Options: `action` (list/remove/clear/release), `priority`, `index`, `range`, `count`. Indexes are 1-based.                                               |
 
 When `session_id` is omitted, the handler resolves the session from the channel where the command was invoked. `session_id` accepts a session URN or a bare agent id (resolved to that agent's bootstrap primary session).
 

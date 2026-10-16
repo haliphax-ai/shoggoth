@@ -37,6 +37,13 @@ export interface OrchestrateTurnInput {
   readonly logContext?: Record<string, string | undefined>;
   readonly onTurnExecutionFailed?: (err: unknown) => void;
   /**
+   * When true, the returned promise settles as soon as the tool loop settles
+   * and post-turn delivery (status bar finish, stream flush, final body send,
+   * persistent-subagent delivery) runs detached, so a hung platform edit
+   * cannot hold the session's turn-queue entry open.
+   */
+  readonly detachPostTurnDelivery?: boolean;
+  /**
    * When provided, the orchestrator uses this already-started stream handle
    * instead of calling `adapter.startStream`. Useful when the platform needs
    * to start the stream before a typing indicator (e.g. Discord).
@@ -333,6 +340,7 @@ export class PresentationTurnOrchestrator {
       logContext,
       onTurnExecutionFailed,
       statusBar: statusBarOption,
+      detachPostTurnDelivery: input.detachPostTurnDelivery,
     });
   }
 }

@@ -352,6 +352,50 @@ describe("runInboundSessionTurn non-streaming path", () => {
     expect(body.length).toBe(MAX_LEN);
   });
 
+  it("resolves before delivery completes when detachPostTurnDelivery is set", async () => {
+    let releaseDeliveryGate!: () => void;
+    const deliveryGate = new Promise<void>((resolve) => {
+      releaseDeliveryGate = resolve;
+    });
+    let deliveryCompleted = false;
+    const sendAssistantBody = vi.fn().mockImplementation(async () => {
+      await deliveryGate;
+      deliveryCompleted = true;
+    });
+
+    await runInboundSessionTurn({
+      buildTurn: () =>
+        Promise.resolve({
+          sessionId: "s1",
+          agentId: "main",
+          userContent: "hi",
+          messages: [],
+          tools: [],
+          systemPrompt: "",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          config: {} as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          stateDb: {} as any,
+        }),
+      sliceDisplayText: (t) => t,
+      formatAssistantReply: (text) => text,
+      formatErrorReply: (err) => String(err),
+      sendAssistantBody,
+      sendErrorBody: vi.fn().mockResolvedValue(undefined),
+      detachPostTurnDelivery: true,
+    });
+
+    // The turn settles promptly even though delivery is still gated.
+    expect(sendAssistantBody).toHaveBeenCalledTimes(1);
+    expect(deliveryCompleted).toBe(false);
+
+    // Releasing the gate lets the detached delivery finish afterwards.
+    releaseDeliveryGate();
+    await vi.waitFor(() => {
+      expect(deliveryCompleted).toBe(true);
+    });
+  });
+
   it("does not call streaming methods when not configured", async () => {
     const setFullContent = vi.fn().mockResolvedValue(undefined);
     const pushUpdate = vi.fn().mockResolvedValue(undefined);
