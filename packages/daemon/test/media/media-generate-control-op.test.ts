@@ -450,15 +450,16 @@ describe("media_generate control op - Multi-Provider Integration", () => {
       assert.ok(result != null);
     });
 
-    it("rejects operator principal", async () => {
+    it("allows operator principal (CLI surface)", async () => {
+      mockGenerate.mockResolvedValueOnce({
+        status: "complete",
+        path: "/tmp/media/output.png",
+        mime_type: "image/png",
+      });
       const req = makeReq(validPayload());
-      try {
-        const result = await handleIntegrationControlOp(req, operatorPrincipal(), makeCtx());
-        assert.equal(result, undefined);
-      } catch (err) {
-        assert.ok(err instanceof IntegrationOpError);
-        assert.equal((err as IntegrationOpError).code, "ERR_FORBIDDEN");
-      }
+      const result = await handleIntegrationControlOp(req, operatorPrincipal(), makeCtx());
+      assert.ok(result != null);
+      assert.equal(mockGenerate.mock.calls.length, 1);
     });
   });
 });
