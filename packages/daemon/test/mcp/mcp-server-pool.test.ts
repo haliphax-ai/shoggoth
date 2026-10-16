@@ -338,6 +338,10 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
 
   it("forwards streamable HTTP onServerMessage to onMcpServerMessage with sourceId", async () => {
     const received: { sourceId: string; method?: string }[] = [];
+    let resolveProgressArrived!: () => void;
+    const progressArrived = new Promise<void>((r) => {
+      resolveProgressArrived = r;
+    });
     const server = createServer(async (req, res: ServerResponse) => {
       if (req.method === "GET") {
         res.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -430,11 +434,17 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
         onMcpServerMessage: ({ sourceId, msg }) => {
           const m = msg as { method?: string };
           received.push({ sourceId, method: m.method });
+          if (sourceId === "sse-src" && m.method === "notifications/progress") {
+            resolveProgressArrived();
+          }
         },
       },
     );
     try {
-      await vi.advanceTimersByTimeAsync(250);
+      // Gate on the real SSE delivery instead of a fixed fake-timer sleep:
+      // the progress event arrives over real I/O and a bounded sleep can
+      // elapse before it lands under load (flaky).
+      await progressArrived;
       assert.ok(
         received.some((x) => x.sourceId === "sse-src" && x.method === "notifications/progress"),
       );
@@ -446,6 +456,10 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
 
   it("cancelMcpRequest sends notifications/cancelled for HTTP transport", async () => {
     const cancelledParams: unknown[] = [];
+    let resolveCancelArrived!: () => void;
+    const cancelArrived = new Promise<void>((r) => {
+      resolveCancelArrived = r;
+    });
     const server = createServer(async (req, res: ServerResponse) => {
       if (req.method === "DELETE") {
         res.writeHead(204).end();
@@ -464,6 +478,7 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
       if (method === "notifications/cancelled") {
         cancelledParams.push(msg.params);
         res.writeHead(202).end();
+        resolveCancelArrived();
         return;
       }
       if (method === "initialize") {
@@ -529,7 +544,10 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
     try {
       assert.equal(pool.cancelMcpRequest?.("missing", 1), false);
       assert.equal(pool.cancelMcpRequest?.("http-cancel-src", 99), true);
-      await vi.advanceTimersByTimeAsync(150);
+      // Gate on the notification actually reaching the server rather than a
+      // fixed fake-timer sleep: the POST is real I/O and a bounded sleep can
+      // elapse before it lands under load (flaky).
+      await cancelArrived;
       assert.ok(
         cancelledParams.some((p) => {
           const o = p as { requestId?: number };

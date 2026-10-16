@@ -9,6 +9,7 @@ import {
   type McpSourceCatalog,
   type McpStreamableHttpServerMessage,
   type McpStreamableHttpSession,
+  type McpStdioConnectOptions,
 } from "@shoggoth/mcp-integration";
 import { getProcessManager } from "../process-manager-singleton";
 import { getLogger } from "../logging";
@@ -159,6 +160,14 @@ export type ConnectShoggothMcpPoolOptions = {
     readonly attempts?: number;
     readonly baseDelayMs?: number;
   };
+  /**
+   * Test seam: overrides how stdio servers are opened. Defaults to the real
+   * `openMcpStdioClient`. Injecting here is preferred over mocking the
+   * `@shoggoth/mcp-integration` module, because under vitest `--no-isolate`
+   * the shared module cache can defeat `vi.mock` when another file imports the
+   * real module first — DI stays isolation-proof regardless of file order.
+   */
+  readonly openStdioClient?: (opts: McpStdioConnectOptions) => Promise<McpJsonRpcSession>;
 };
 
 /** Per-server outcome of a pool start, gathered asynchronously across parallel connects. */
@@ -320,7 +329,8 @@ export async function connectShoggothMcpServers(
             baseEnv = await resolveVaultEnv(baseEnv, options.vault, options.agentId);
           }
           const cwd = s.cwd ?? agentCtx?.workspacePath;
-          session = await openMcpStdioClient({
+          const openStdio = options?.openStdioClient ?? openMcpStdioClient;
+          session = await openStdio({
             command: s.command,
             args: s.args,
             cwd,
