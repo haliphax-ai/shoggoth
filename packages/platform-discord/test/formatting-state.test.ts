@@ -187,4 +187,59 @@ describe("appendSyntheticClose", () => {
   it("leaves a lone closer-side underscore untouched", () => {
     assert.strictEqual(appendSyntheticClose("ends with word_"), "ends with word_");
   });
+
+  it("leaves a word-end asterisk untouched", () => {
+    assert.strictEqual(appendSyntheticClose("ends with *"), "ends with *");
+    assert.strictEqual(appendSyntheticClose("bold like this**"), "bold like this**");
+  });
+
+  it("leaves literal asterisk prose untouched but still closes real openers", () => {
+    assert.strictEqual(appendSyntheticClose("a*b*c*d"), "a*b*c*d");
+    // The "5*" is literal; the real opener still gets its synthetic close.
+    assert.strictEqual(appendSyntheticClose("5* and *unfinished"), "5* and *unfinished*");
+  });
+
+  it("leaves a lone word-end spoiler marker untouched", () => {
+    assert.strictEqual(appendSyntheticClose("ends here||"), "ends here||");
+  });
+});
+
+describe("word-boundary rules for all paired markers", () => {
+  it("ignores lone word-end markers that cannot open", () => {
+    assert.deepStrictEqual(computeOpenFormatting("ends with an asterisk *").openInline, []);
+    assert.deepStrictEqual(computeOpenFormatting("multiplication like 5*").openInline, []);
+    assert.deepStrictEqual(computeOpenFormatting("text ends with __").openInline, []);
+    assert.deepStrictEqual(computeOpenFormatting("text ends with ~~").openInline, []);
+  });
+
+  it("ignores intra-word asterisks, even an odd count", () => {
+    assert.deepStrictEqual(computeOpenFormatting("a*b*c*d here").openInline, []);
+  });
+
+  it("does not let a word-end marker pair with a later real marker", () => {
+    // "5*" is literal; "*this*" opens and closes normally.
+    assert.deepStrictEqual(computeOpenFormatting("5* then *this* done").openInline, []);
+  });
+
+  it("carries a paired marker across chunk boundaries via the reopen prefix", () => {
+    const first = computeOpenFormatting("start ~~struck");
+    assert.deepStrictEqual(first.openInline, ["~~"]);
+    // The reopen prefix supplies the closing context inside the next chunk.
+    const second = computeOpenFormatting("text~~ done", first);
+    assert.deepStrictEqual(second.openInline, []);
+  });
+});
+
+describe("spoiler (||) boundary rules", () => {
+  it("tracks balanced intra-word spoilers", () => {
+    assert.deepStrictEqual(computeOpenFormatting("foo||bar||baz").openInline, []);
+  });
+
+  it("reports an unclosed intra-word spoiler", () => {
+    assert.deepStrictEqual(computeOpenFormatting("mid||word spoiler").openInline, ["||"]);
+  });
+
+  it("ignores a lone word-end spoiler marker", () => {
+    assert.deepStrictEqual(computeOpenFormatting("ends here||").openInline, []);
+  });
 });
