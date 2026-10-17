@@ -71,8 +71,13 @@ export const execArgs = {
     yieldMs: {
       type: "integer",
       description:
-        "Wait up to this many milliseconds for the process to finish. If still running, background it and return a handle. Mutually exclusive with background (background wins). 0 is equivalent to background: true.",
+        "Wait up to this many milliseconds for the process to finish. If still running, background it and return a handle. Mutually exclusive with background (background wins). 0 is equivalent to background: true. Capped at 30000 by default (configurable via runtime.execMaxYieldMs); larger values are clamped, not ignored.",
       minimum: 0,
+    },
+    notify: {
+      type: "boolean",
+      description:
+        "With background/yieldMs: when the process completes, deliver an out-of-band notification to this session with the exit code and output, respecting the call's output options (splitStreams, maxOutput/truncation, stdoutFile/stderrFile/outputFile). Default: true.",
     },
     stdoutFile: {
       type: "string",
