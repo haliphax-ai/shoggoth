@@ -1,5 +1,5 @@
 name: Check out and set up
-description: Checks out repo, installs ripgrep and npm deps
+description: Checks out repo, installs npm deps
 
 inputs:
   token:
