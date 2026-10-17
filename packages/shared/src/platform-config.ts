@@ -11,6 +11,7 @@ export interface ResolvedStatusBarConfig {
   readonly toolCallsEnabled: boolean;
   readonly subagentsEnabled: boolean;
   readonly timersEnabled: boolean;
+  readonly notifyEnabled: boolean;
   readonly contextWindowEnabled: boolean;
   readonly compactionsEnabled: boolean;
 }
@@ -23,6 +24,7 @@ export const DEFAULT_STATUS_BAR_CONFIG: ResolvedStatusBarConfig = {
   toolCallsEnabled: true,
   subagentsEnabled: true,
   timersEnabled: true,
+  notifyEnabled: true,
   contextWindowEnabled: true,
   compactionsEnabled: true,
 };
@@ -40,6 +42,7 @@ export function resolveStatusBarConfig(cfg: ShoggothConfig): ResolvedStatusBarCo
     toolCallsEnabled: block?.toolCallsEnabled ?? DEFAULT_STATUS_BAR_CONFIG.toolCallsEnabled,
     subagentsEnabled: block?.subagentsEnabled ?? DEFAULT_STATUS_BAR_CONFIG.subagentsEnabled,
     timersEnabled: block?.timersEnabled ?? DEFAULT_STATUS_BAR_CONFIG.timersEnabled,
+    notifyEnabled: block?.notifyEnabled ?? DEFAULT_STATUS_BAR_CONFIG.notifyEnabled,
     contextWindowEnabled:
       block?.contextWindowEnabled ?? DEFAULT_STATUS_BAR_CONFIG.contextWindowEnabled,
     compactionsEnabled: block?.compactionsEnabled ?? DEFAULT_STATUS_BAR_CONFIG.compactionsEnabled,

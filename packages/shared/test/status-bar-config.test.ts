@@ -13,6 +13,7 @@ describe("statusBarConfigSchema", () => {
       toolCallsEnabled: true,
       subagentsEnabled: true,
       timersEnabled: true,
+      notifyEnabled: true,
       contextWindowEnabled: true,
       compactionsEnabled: true,
     });
@@ -55,6 +56,8 @@ describe("resolveStatusBarConfig", () => {
     assert.equal(r.statusEnabled, true);
     assert.equal(r.sequenceEnabled, true);
     assert.equal(r.toolCallsEnabled, true);
+    assert.equal(r.timersEnabled, true);
+    assert.equal(r.notifyEnabled, true);
     assert.equal(r.contextWindowEnabled, true);
     assert.equal(r.compactionsEnabled, true);
   });
@@ -77,6 +80,7 @@ describe("resolveStatusBarConfig", () => {
       toolCallsEnabled: true,
       subagentsEnabled: true,
       timersEnabled: true,
+      notifyEnabled: true,
       contextWindowEnabled: false,
       compactionsEnabled: true,
     });
@@ -85,6 +89,11 @@ describe("resolveStatusBarConfig", () => {
   it("honors timersEnabled:false over the default", () => {
     const r = resolveStatusBarConfig(cfgWith({ statusBar: { timersEnabled: false } }));
     assert.equal(r.timersEnabled, false);
+  });
+
+  it("honors notifyEnabled:false over the default", () => {
+    const r = resolveStatusBarConfig(cfgWith({ statusBar: { notifyEnabled: false } }));
+    assert.equal(r.notifyEnabled, false);
   });
 
   it("honors enabled:false from config", () => {

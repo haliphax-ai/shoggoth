@@ -222,6 +222,12 @@ export const shoggothRuntimeConfigSchema = z
       .optional(),
     toolCallTimeoutMs: z.number().int().positive().optional(),
     /**
+     * Maximum `yieldMs` (ms) the exec tool honors before backgrounding the
+     * process. Requested values above the cap are clamped. Default: 30000
+     * (30 seconds; see DEFAULT_EXEC_MAX_YIELD_MS).
+     */
+    execMaxYieldMs: z.number().int().positive().optional(),
+    /**
      * Maximum TTL (ms) enforced wherever the system controls a process lifetime
      * (subagent inactivity windows, workflow task runtime limits / wait timeouts,
      * tool-call execution timeouts). Used both as the default when a TTL is

@@ -70,6 +70,7 @@ export const statusBarConfigSchema = z
     toolCallsEnabled: z.boolean().optional(),
     subagentsEnabled: z.boolean().optional(),
     timersEnabled: z.boolean().optional(),
+    notifyEnabled: z.boolean().optional(),
     contextWindowEnabled: z.boolean().optional(),
     compactionsEnabled: z.boolean().optional(),
   })

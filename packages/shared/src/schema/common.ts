@@ -74,6 +74,13 @@ export const workspaceRelativePathSchema = z
 
 /** Default tool call timeout: 10 minutes. */
 export const DEFAULT_TOOL_CALL_TIMEOUT_MS = 600_000;
+
+/**
+ * Default maximum `yieldMs` (ms) accepted by the exec tool before it
+ * backgrounds the process. Requested values above the cap are clamped to it
+ * (issue #478) — overridable via `runtime.execMaxYieldMs`.
+ */
+export const DEFAULT_EXEC_MAX_YIELD_MS = 30_000;
 /** Default maximum TTL for lifetime-controlled units: 24 hours. */
 export const DEFAULT_MAX_TTL_MS = 86_400_000;
 
