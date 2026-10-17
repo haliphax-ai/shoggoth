@@ -170,7 +170,9 @@ export class ExecNotifyScheduler {
   }
 
   /** Cancel all live handles belonging to a session (e.g. session terminate). */
-  cancelBySession(db: Database.Database, sessionId: string): number {
+  cancelBySession(sessionId: string): number {
+    const db = this.db;
+    if (!db) return 0;
     const rows = db
       .prepare("SELECT id FROM exec_notifies WHERE session_id = ? AND fired = 0")
       .all(sessionId) as Array<{ id: string }>;

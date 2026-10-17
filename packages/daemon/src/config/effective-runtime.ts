@@ -3,6 +3,7 @@ import {
   resolveAgentIdFromSessionId,
   resolvePlatformConfig,
   DEFAULT_TOOL_CALL_TIMEOUT_MS,
+  DEFAULT_EXEC_MAX_YIELD_MS,
   resolveMaxTtlMs,
   type ShoggothConfig,
 } from "@shoggoth/shared";
@@ -43,6 +44,20 @@ export function resolveHeartbeatBatchSize(cfg: ShoggothConfig): number {
 
 export function resolveHeartbeatConcurrency(cfg: ShoggothConfig): number {
   return envPositiveInt("SHOGGOTH_HEARTBEAT_CONCURRENCY") ?? cfg.runtime?.heartbeatConcurrency ?? 4;
+}
+
+/**
+ * Effective maximum exec yield window for the daemon: env
+ * `SHOGGOTH_EXEC_MAX_YIELD_MS`, then `runtime.execMaxYieldMs`, then the
+ * default 30 s (issue #478). Requested `yieldMs` values above this are
+ * clamped — never silently ignored.
+ */
+export function resolveExecMaxYieldMs(cfg: ShoggothConfig): number {
+  return (
+    envPositiveInt("SHOGGOTH_EXEC_MAX_YIELD_MS") ??
+    cfg.runtime?.execMaxYieldMs ??
+    DEFAULT_EXEC_MAX_YIELD_MS
+  );
 }
 
 /** `SHOGGOTH_CONFIG_HOT_RELOAD=0` disables; else `runtime.configHotReload: false` disables. */

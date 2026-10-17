@@ -159,7 +159,7 @@ describe("ExecNotifyScheduler", () => {
       makeHandle({ id: "b1", sessionId: "sess-2", execSessionId: "exec-b1" }),
       () => fakeProcess("running"),
     );
-    assert.equal(sched.cancelBySession(db, "sess-1"), 2);
+    assert.equal(sched.cancelBySession("sess-1"), 2);
     assert.equal(sched.countForSession(db, "sess-1"), 0);
     assert.equal(sched.countForSession(db, "sess-2"), 1);
     sched.shutdown();
