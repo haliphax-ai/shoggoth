@@ -917,10 +917,10 @@ export type ExecExtendedResult = ExecForegroundResult | ExecBackgroundResult;
 // ---------------------------------------------------------------------------
 
 /** System-enforced upper bound on maxOutput to prevent memory issues. */
-const MAX_OUTPUT_SYSTEM_CAP = 1_024_000; // ~1 MB
+export const MAX_OUTPUT_SYSTEM_CAP = 1_024_000; // ~1 MB
 
 /** Default max output characters when no maxOutput is specified. */
-const MAX_OUTPUT_DEFAULT = 200_000; // 200 KB
+export const MAX_OUTPUT_DEFAULT = 200_000; // 200 KB
 
 /**
  * Safety cap for file output mode (stdoutFile/stderrFile/outputFile).
@@ -935,7 +935,7 @@ const MAX_FILE_OUTPUT_BYTES = 50 * 1024 * 1024; // 50 MB
  * Truncate a string according to the specified mode.
  * Returns { text, truncated }.
  */
-function truncateOutput(
+export function truncateOutput(
   raw: string,
   maxChars: number,
   mode: TruncationMode,

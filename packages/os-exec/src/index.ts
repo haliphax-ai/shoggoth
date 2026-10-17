@@ -5,6 +5,7 @@ export {
   DEFAULT_ADDITIONAL_READ_ROOTS,
 } from "./workspace-path";
 export { runAsUser, type RunAsUserOptions, type RunAsUserResult } from "./subprocess";
+export { isTerminal, TERMINAL_STATES } from "./util";
 export {
   toolRead,
   toolReadBinary,
@@ -19,6 +20,9 @@ export {
   removeExecSession,
   setProcessManager,
   getProcessManager,
+  truncateOutput,
+  MAX_OUTPUT_DEFAULT,
+  MAX_OUTPUT_SYSTEM_CAP,
   type AgentCredentials,
   type ReadExtendedOptions,
   type ReadExtendedResult,

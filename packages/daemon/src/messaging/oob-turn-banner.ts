@@ -53,6 +53,20 @@ export function buildTimerTurnBanner(input: {
   };
 }
 
+export function buildExecNotifyTurnBanner(input: {
+  handleId: string;
+  command: string;
+  maxPromptChars?: number;
+}): OobTurnBannerText {
+  const maxChars = input.maxPromptChars ?? DEFAULT_TIMER_PROMPT_CHARS;
+  const command = truncate(input.command, maxChars);
+  return {
+    processing: `> ↩️ Processing exec notification: *${command}* \`${input.handleId}\` …`,
+    terminal: (outcome) =>
+      `> ↩️ ${terminalEmoji(outcome)} Exec notification ${terminalVerb(outcome)}: \`${input.handleId}\``,
+  };
+}
+
 export function buildSessionMessageTurnBanner(input: {
   senderSessionId: string;
 }): OobTurnBannerText {

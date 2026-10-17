@@ -2,6 +2,7 @@ import { describe, it } from "vitest";
 import assert from "node:assert";
 import {
   buildTimerTurnBanner,
+  buildExecNotifyTurnBanner,
   buildSessionMessageTurnBanner,
   buildWorkflowTurnBanner,
 } from "../../src/messaging/oob-turn-banner";
@@ -26,6 +27,29 @@ describe("buildTimerTurnBanner", () => {
     assert.equal(b.terminal("finished"), "> ⏰ ✅ Timer processed: `t-1`");
     assert.equal(b.terminal("aborted"), "> ⏰ 🛑 Timer aborted: `t-1`");
     assert.equal(b.terminal("failed"), "> ⏰ ❌ Timer failed: `t-1`");
+  });
+});
+
+describe("buildExecNotifyTurnBanner", () => {
+  it("renders the processing banner with the back-arrow emoji, command, and id", () => {
+    const b = buildExecNotifyTurnBanner({ handleId: "n-1", command: "sleep 30" });
+    assert.equal(b.processing, "> ↩️ Processing exec notification: *sleep 30* `n-1` …");
+  });
+
+  it("truncates a long command with an ellipsis", () => {
+    const b = buildExecNotifyTurnBanner({
+      handleId: "n-1",
+      command: "y".repeat(100),
+      maxPromptChars: 10,
+    });
+    assert.equal(b.processing, "> ↩️ Processing exec notification: *yyyyyyyyyy…* `n-1` …");
+  });
+
+  it("terminal reflects the outcome emoji and verb", () => {
+    const b = buildExecNotifyTurnBanner({ handleId: "n-1", command: "true" });
+    assert.equal(b.terminal("finished"), "> ↩️ ✅ Exec notification processed: `n-1`");
+    assert.equal(b.terminal("aborted"), "> ↩️ 🛑 Exec notification aborted: `n-1`");
+    assert.equal(b.terminal("failed"), "> ↩️ ❌ Exec notification failed: `n-1`");
   });
 });
 
