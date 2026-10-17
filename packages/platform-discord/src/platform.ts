@@ -698,6 +698,10 @@ export async function startDiscordPlatform(
       let surfaceTracker: TurnStatusBarTracker | undefined;
       let thinkingOutput: ReturnType<typeof createThinkingOutput> | undefined;
       let surfaceStreamPusher: ReturnType<typeof createCoalescingStreamPusher> | undefined;
+      // Round-settled prose of earlier rounds for the live display when the
+      // thinking composer is disabled (showThinking === false surfaces still
+      // show every round, separated by the transcript's blank line).
+      let surfacePriorRoundsProse = "";
       const executeTurn = (
         afterHitlQueued?: (row: PendingActionRow) => void | Promise<void>,
         streamOverride?: ExecuteSessionAgentTurnInput["stream"],
@@ -737,14 +741,14 @@ export async function startDiscordPlatform(
           ...(surfaceTracker || thinkingOutput
             ? {
                 events: {
-                  onThinkingDelta: (accumulated: string) => {
+                  onThinkingDelta: (ev: { accumulated: string; round: number }) => {
                     if (thinkingOutput) {
-                      const display = thinkingOutput.onThinking(accumulated);
+                      const display = thinkingOutput.onThinking(ev);
                       if (surfaceStreamPusher) {
                         surfaceStreamPusher.push(display.trim() ? display : "…");
                       }
                     }
-                    surfaceTracker?.onThinkingDelta?.(accumulated);
+                    surfaceTracker?.onThinkingDelta?.(ev.accumulated);
                   },
                   onToolCall: (ev) => surfaceTracker?.onToolCall?.(ev),
                   onHitlQueued: (call) => surfaceTracker?.onHitlQueued?.(call),
@@ -823,11 +827,27 @@ export async function startDiscordPlatform(
             surfaceStreamPusher
               ? {
                   streamModel: true,
-                  onModelTextDelta: (t: string) => {
-                    const display = thinkingOutput ? thinkingOutput.onText(t) : t;
+                  onModelTextDelta: (ev: { accumulated: string; round: number }) => {
+                    const display = thinkingOutput
+                      ? thinkingOutput.onText(ev)
+                      : surfacePriorRoundsProse + ev.accumulated;
                     surfaceStreamPusher!.push(display.trim() ? display : "…");
                     // Prose phase (💬) on the live bar.
-                    surfaceTracker?.onProse?.(t);
+                    surfaceTracker?.onProse?.(ev.accumulated);
+                  },
+                  onModelRoundEnd: (ev: { round: number; content: string }) => {
+                    let display: string;
+                    if (thinkingOutput) {
+                      display = thinkingOutput.endRound(ev);
+                    } else {
+                      if (ev.content) {
+                        surfacePriorRoundsProse += surfacePriorRoundsProse
+                          ? `\n\n${ev.content}`
+                          : ev.content;
+                      }
+                      display = surfacePriorRoundsProse;
+                    }
+                    surfaceStreamPusher!.push(display.trim() ? display : "…");
                   },
                 }
               : streamEnabled() || thinkingOutput

@@ -117,8 +117,10 @@ describe("createSessionToolLoopModelClient", () => {
     assert.equal(banner?.degraded, true);
   });
 
-  it("streams model text and prefixes prior round content before tool follow-up", async () => {
-    const deltas: string[] = [];
+  it("streams per-round display events and settles each round with its final content", async () => {
+    const textEvents: Array<{ delta: string; accumulated: string; round: number }> = [];
+    const thinkingEvents: Array<{ accumulated: string; round: number }> = [];
+    const roundEnds: Array<{ round: number; content: string }> = [];
     let step = 0;
     const toolClient = {
       async completeWithTools(input: unknown) {
@@ -126,9 +128,11 @@ describe("createSessionToolLoopModelClient", () => {
         const req = input as {
           stream?: boolean;
           onTextDelta?: (d: string, a: string) => void;
+          onReasoningDelta?: (d: string, a: string) => void;
         };
         if (step === 1) {
           assert.equal(req.stream, true);
+          req.onReasoningDelta?.("th", "think1");
           req.onTextDelta?.("a", "a");
           req.onTextDelta?.("b", "ab");
           return {
@@ -165,8 +169,14 @@ describe("createSessionToolLoopModelClient", () => {
         },
       ],
       streamModel: true,
-      onModelTextDelta: (t) => {
-        deltas.push(t);
+      onModelTextDelta: (ev) => {
+        textEvents.push({ delta: ev.delta, accumulated: ev.accumulated, round: ev.round });
+      },
+      onThinkingDelta: (ev) => {
+        thinkingEvents.push({ accumulated: ev.accumulated, round: ev.round });
+      },
+      onModelRoundEnd: (ev) => {
+        roundEnds.push({ round: ev.round, content: ev.content });
       },
     });
 
@@ -175,8 +185,21 @@ describe("createSessionToolLoopModelClient", () => {
     model.pushToolMessage!({ toolCallId: "c1", content: "{}" });
     await model.complete();
 
-    assert.ok(deltas.includes("ab"));
-    assert.ok(deltas.some((d) => d === "abxy"));
+    // Deltas carry per-round accumulated content (never glued to prior
+    // rounds) plus the round index that scopes them.
+    assert.deepStrictEqual(textEvents, [
+      { delta: "a", accumulated: "a", round: 0 },
+      { delta: "b", accumulated: "ab", round: 0 },
+      { delta: "x", accumulated: "x", round: 1 },
+      { delta: "y", accumulated: "xy", round: 1 },
+    ]);
+    assert.deepStrictEqual(thinkingEvents, [{ accumulated: "think1", round: 0 }]);
+    // Each round settles with its authoritative final content before the
+    // next round's first delta.
+    assert.deepStrictEqual(roundEnds, [
+      { round: 0, content: "ab" },
+      { round: 1, content: "xy" },
+    ]);
   });
 });
 

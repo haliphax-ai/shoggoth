@@ -165,6 +165,10 @@ export interface RunInboundSessionTurnOptions {
 export async function runInboundSessionTurn(options: RunInboundSessionTurnOptions): Promise<void> {
   const { streaming, sliceDisplayText, formatAssistantReply, formatErrorReply } = options;
   const thinkingOutput = options.showThinking ? createThinkingOutput() : undefined;
+  // Round-settled prose of earlier rounds for the live display when the
+  // thinking composer is disabled (thinking-off surfaces still show every
+  // round, separated by the transcript's blank line).
+  let priorRoundsProse = "";
   const ctx = options.logContext;
 
   options.mcpLifecycle?.onTurnBegin?.();
@@ -262,12 +266,26 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
               streamModel: true,
               ...(streamPusher
                 ? {
-                    onModelTextDelta: (t: string) => {
-                      const display = thinkingOutput ? thinkingOutput.onText(t) : t;
+                    onModelTextDelta: (ev: { accumulated: string; round: number }) => {
+                      const display = thinkingOutput
+                        ? thinkingOutput.onText(ev)
+                        : priorRoundsProse + ev.accumulated;
                       const vis = display.trim() ? display : "…";
                       streamPusher!.push(vis);
                       // Prose phase (💬): the tracker renders live from text deltas.
-                      statusBar?.onProse?.(t);
+                      statusBar?.onProse?.(ev.accumulated);
+                    },
+                    onModelRoundEnd: (ev: { round: number; content: string }) => {
+                      let display: string;
+                      if (thinkingOutput) {
+                        display = thinkingOutput.endRound(ev);
+                      } else {
+                        if (ev.content) {
+                          priorRoundsProse += priorRoundsProse ? `\n\n${ev.content}` : ev.content;
+                        }
+                        display = priorRoundsProse;
+                      }
+                      streamPusher!.push(display.trim() ? display : "…");
                     },
                   }
                 : {}),
@@ -279,12 +297,12 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       events:
         statusBar || thinkingOutput
           ? {
-              onThinkingDelta: (accumulated) => {
+              onThinkingDelta: (ev) => {
                 if (thinkingOutput) {
-                  const display = thinkingOutput.onThinking(accumulated);
+                  const display = thinkingOutput.onThinking(ev);
                   if (streamPusher) streamPusher.push(display.trim() ? display : "…");
                 }
-                statusBar?.onThinkingDelta?.(accumulated);
+                statusBar?.onThinkingDelta?.(ev.accumulated);
               },
               onToolCall: (ev) => statusBar?.onToolCall?.(ev),
               onHitlQueued: (call) => statusBar?.onHitlQueued?.(call),
@@ -331,10 +349,14 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
         });
       }
 
-      const formattedBody = formatAssistantReply(
-        turnResult.latestAssistantText,
-        turnResult.failoverMeta,
-      );
+      // Compose from the turn's full prose — every assistant text segment of
+      // this turn, in order — so prose → tools → prose turns deliver ALL
+      // segments, not only the last one `latestAssistantText` carries. This
+      // also keeps the streamed display's snapshot matching the final body
+      // so the streamed thinking quotes interleave instead of being replaced
+      // by the quotes-plus-last-round fallback.
+      const replyText = turnResult.assistantTurnProse ?? turnResult.latestAssistantText;
+      const formattedBody = formatAssistantReply(replyText, turnResult.failoverMeta);
       const rawBody = thinkingOutput?.render(formattedBody) ?? formattedBody;
 
       const attachments = turnResult.showAttachments;

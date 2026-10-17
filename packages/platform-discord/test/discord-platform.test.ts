@@ -3102,8 +3102,8 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
                 usedProviderId: "p1",
               };
             }
-            input.onTextDelta?.("Done ", "Checking the repo.\n\nDone ");
-            input.onTextDelta?.("now.", "Checking the repo.\n\nDone now.");
+            input.onTextDelta?.("Done ", "Done ");
+            input.onTextDelta?.("now.", "Done now.");
             return {
               content: "Done now.",
               toolCalls: [],
@@ -3256,10 +3256,9 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
 
     // Round 2's streamed tail ("Done partial") differs from its final content
     // ("Done.") — as happens with trimmed content, failover hops, or
-    // steering-injected rounds — so round 3's display (priorRounds + new
-    // accumulation) diverges from the previous snapshot. The LIVE display may
-    // carry the junk; the DELIVERED message must be the clean turn-scoped
-    // prose with each segment exactly once.
+    // steering-injected rounds. The round boundary reconciles the tail with
+    // the authoritative content; the DELIVERED message must be the clean
+    // turn-scoped prose with each segment exactly once.
     let round = 0;
     const platform = await startDiscordPlatform({
       db,
@@ -3287,8 +3286,8 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
               };
             }
             if (round === 2) {
-              input.onTextDelta?.("Done ", "Checking the repo.\n\nDone ");
-              input.onTextDelta?.("partial", "Checking the repo.\n\nDone partial");
+              input.onTextDelta?.("Done ", "Done ");
+              input.onTextDelta?.("partial", "Done partial");
               return {
                 content: "Done.",
                 toolCalls: [{ id: "t2", name: "no-such-tool", arguments: "{}" }],
@@ -3296,8 +3295,7 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
                 usedProviderId: "p1",
               };
             }
-            const display = "Checking the repo.\n\nDone.\n\nAll green.";
-            input.onTextDelta?.("All green.", display);
+            input.onTextDelta?.("All green.", "All green.");
             return {
               content: "All green.",
               toolCalls: [],
