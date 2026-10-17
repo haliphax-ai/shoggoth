@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { createDiscordStreamingOutbound } from "../src/streaming";
 import type { DiscordRestTransport } from "../src/transport";
 import { discordCapabilityDescriptor } from "../src/capabilities";
+import type { DiscordBridgeLogger } from "../src/bridge";
+import { MissingPermissionsError, NotFoundError } from "../src/rest-client";
 
 function createMockTransport(): DiscordRestTransport {
   return {
@@ -813,5 +815,136 @@ describe("DiscordStreamingOutbound concurrency", () => {
 
     // Exactly one overflow message for the single extra chunk.
     expect(vi.mocked(transport.createMessage).mock.calls.length).toBe(1);
+  });
+});
+describe("DiscordStreamHandle permanent-error circuit breaker", () => {
+  const notFound = () => new NotFoundError("editMessage", 404, "Unknown Message");
+
+  it("poisons the handle on the first 404: one REST call, then all no-ops, logged once", async () => {
+    const transport = createMockTransport();
+    const logger = {
+      warn: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as DiscordBridgeLogger;
+    vi.mocked(transport.editMessage).mockRejectedValue(notFound());
+
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: discordCapabilityDescriptor(),
+      channelId: "ch-1",
+      logger,
+    });
+
+    const handle = await streaming.start();
+    vi.mocked(transport.editMessage).mockClear();
+
+    // First dispatch fails with 404: exactly one REST call poisons the handle.
+    await handle.pushUpdate("one");
+    expect(transport.editMessage).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "discord.streaming.handle_dead",
+      expect.objectContaining({ operation: "editMessage", status: 404 }),
+    );
+
+    // Every subsequent call is a no-op with zero REST traffic.
+    await handle.pushUpdate("two");
+    await handle.setFullContent("three");
+    await handle.setStatusBar("> bar");
+    await handle.setFullContent("four");
+    expect(transport.editMessage).toHaveBeenCalledTimes(1);
+    expect(transport.createMessage).toHaveBeenCalledTimes(1); // the start() placeholder only
+    // Still exactly one warn: the poison logs once, never again.
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("catches the 404 so no unhandled promise rejection escapes pushUpdate", async () => {
+    const transport = createMockTransport();
+    vi.mocked(transport.editMessage).mockRejectedValue(notFound());
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: discordCapabilityDescriptor(),
+      channelId: "ch-1",
+    });
+
+    const handle = await streaming.start();
+    await expect(handle.pushUpdate("boom")).resolves.toBeUndefined();
+    // The opChain itself never leaks a rejection either.
+    await expect(handle.setFullContent("after")).resolves.toBeUndefined();
+  });
+
+  it("rejects transient errors but stays alive (no poison)", async () => {
+    const transport = createMockTransport();
+    const logger = {
+      warn: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as DiscordBridgeLogger;
+    vi.mocked(transport.editMessage)
+      .mockRejectedValueOnce(new Error("ECONNRESET"))
+      .mockResolvedValue(undefined);
+
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: discordCapabilityDescriptor(),
+      channelId: "ch-1",
+      logger,
+    });
+
+    const handle = await streaming.start();
+    vi.mocked(transport.editMessage).mockClear();
+
+    await expect(handle.pushUpdate("transient")).rejects.toThrow("ECONNRESET");
+    expect(logger.warn).not.toHaveBeenCalled();
+
+    // Still alive: the next dispatch reaches the transport again.
+    await handle.pushUpdate("retry");
+    expect(transport.editMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("poisons on 403 from createMessage during overflow reconcile", async () => {
+    const transport = createMockTransport();
+    const logger = {
+      warn: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as DiscordBridgeLogger;
+    // Content long enough to require an overflow message on every dispatch.
+    const longText = "a".repeat(250);
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: discordCapabilityDescriptor(),
+      channelId: "ch-1",
+      maxContentLength: 100,
+      logger,
+    });
+
+    // Let start() post its placeholder first, THEN break overflow creation.
+    const handle = await streaming.start();
+    vi.mocked(transport.editMessage).mockClear();
+    vi.mocked(transport.createMessage).mockImplementation(async () => {
+      throw new MissingPermissionsError("createMessage", 403, "Missing Access");
+    });
+
+    // editMessage (first chunk) succeeds, then overflow createMessage 403s:
+    // the handle still poisons and the rejection is swallowed.
+    await expect(handle.pushUpdate(longText)).resolves.toBeUndefined();
+    expect(logger.warn).toHaveBeenCalledWith(
+      "discord.streaming.handle_dead",
+      expect.objectContaining({ operation: "createMessage", status: 403 }),
+    );
+
+    // Clear everything the poisoned dispatch itself used, then verify the
+    // subsequent calls are pure no-ops.
+    vi.mocked(transport.createMessage).mockClear();
+    vi.mocked(transport.editMessage).mockClear();
+    await handle.pushUpdate(longText);
+    await handle.setFullContent(longText);
+    expect(transport.createMessage).not.toHaveBeenCalled();
+    expect(transport.editMessage).not.toHaveBeenCalled();
   });
 });

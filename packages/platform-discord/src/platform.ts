@@ -737,8 +737,10 @@ export async function startDiscordPlatform(
           ...(streamOverride ? { stream: streamOverride } : {}),
           // Forward turn events into the tracker so the live bar re-renders
           // mid-turn (thinking / tool count / HITL pause / compaction /
-          // context fill).
-          ...(surfaceTracker || thinkingOutput
+          // context fill). `onTurnAborted` stops the stream pusher and
+          // freezes the tracker even when the aborted turn promise never
+          // settles (hung model call).
+          ...(surfaceTracker || thinkingOutput || surfaceStreamPusher
             ? {
                 events: {
                   onThinkingDelta: (ev: { accumulated: string; round: number }) => {
@@ -754,6 +756,23 @@ export async function startDiscordPlatform(
                   onHitlQueued: (call) => surfaceTracker?.onHitlQueued?.(call),
                   onCompaction: () => surfaceTracker?.onCompaction?.(),
                   onContextUpdate: (update) => surfaceTracker?.onContextUpdate?.(update),
+                  // Abort while the model call may still be streaming (or
+                  // hung): stop the producers immediately — post-turn delivery
+                  // never runs for a promise that never settles, so nothing
+                  // else would ever stop the edits. finish("aborted") freezes
+                  // the tracker at its terminal render (🛑); if the turn
+                  // still settles later, delivery reuses the captured line.
+                  onTurnAborted: () => {
+                    surfaceStreamPusher?.stop();
+                    if (surfaceTracker) {
+                      void surfaceTracker.finish("aborted").catch((e) => {
+                        opts.logger.warn("discord.platform.status_bar_abort_finish_failed", {
+                          sessionId: sid,
+                          err: String(e),
+                        });
+                      });
+                    }
+                  },
                 },
               }
             : {}),

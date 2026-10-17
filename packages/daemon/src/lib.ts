@@ -172,11 +172,11 @@ export {
 export { getTurnQueue, setTurnQueue } from "./sessions/session-turn-queue-singleton";
 export {
   runInboundSessionTurn,
-  createCoalescingStreamPusher,
   type InboundSessionTurnStreaming,
   type InboundSessionTurnInput,
   type RunInboundSessionTurnOptions,
 } from "./messaging/inbound-session-turn";
+export { createCoalescingStreamPusher } from "./presentation/stream-coordinator";
 export {
   buildSessionSystemContext,
   type BuildSessionSystemContextInput,

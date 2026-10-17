@@ -148,6 +148,12 @@ export interface ExecuteSessionAgentTurnInput {
     /** An exec-notify handle was registered or resolved mid-turn: fresh live
      *  handle count (live bar). */
     readonly onNotifiesChanged?: (count: number) => void;
+    /** The turn's abort scope was aborted (operator `session_abort`, subagent
+     *  kill, …). Fires even when the aborted model call never settles, so
+     *  presentation pipelines (stream pushers, status bars) can stop
+     *  producing output immediately instead of waiting for post-turn
+     *  delivery that may never run. */
+    readonly onTurnAborted?: () => void;
   };
 }
 
@@ -462,6 +468,12 @@ export async function executeSessionAgentTurn(
   const { signal: turnAbortSignal, end: endTurnAbortScope } = beginSessionTurnAbortScope(
     input.sessionId,
   );
+  // Notify the presentation pipeline the moment the turn is aborted. Cleanup
+  // that runs only when the turn promise settles is not enough: an aborted
+  // model call can hang forever (e.g. a stuck provider streaming deltas),
+  // leaving stream pushers/status bars editing a dead message indefinitely.
+  const notifyTurnAborted = () => input.events?.onTurnAborted?.();
+  turnAbortSignal.addEventListener("abort", notifyTurnAborted, { once: true });
 
   const model: SessionToolLoopModelClient = createSessionToolLoopModelClient({
     toolClient,
@@ -748,6 +760,9 @@ export async function executeSessionAgentTurn(
       outcome: "failed",
     };
   } finally {
+    // With { once: true } this is a no-op after an abort fired; it cleans up
+    // the listener on the normal (never-aborted) path.
+    turnAbortSignal.removeEventListener("abort", notifyTurnAborted);
     endTurnAbortScope();
   }
 
