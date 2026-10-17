@@ -304,6 +304,7 @@ export class PresentationTurnOrchestrator {
               onContextUpdate: (update) => tracker?.onContextUpdate?.(update),
               onSubagentsChanged: (counts) => tracker?.onSubagentsChanged?.(counts),
               onTimersChanged: (count) => tracker?.onTimersChanged?.(count),
+              onNotifiesChanged: (count) => tracker?.onNotifiesChanged?.(count),
             };
           },
         }
