@@ -17,7 +17,11 @@ vi.mock("../../src/sessions/session-agent-turn.js", () => {
         if (fail) throw new Error("boom");
         if (input.stream?.onModelTextDelta) {
           for (let i = 1; i <= 10; i++) {
-            input.stream.onModelTextDelta("a".repeat(i * 30));
+            input.stream.onModelTextDelta({
+              delta: "a".repeat(30),
+              accumulated: "a".repeat(i * 30),
+              round: 0,
+            });
           }
         }
         input.events?.onContextUpdate?.({ currentTokens: 12_345, totalTokens: 100_000 });
@@ -25,6 +29,7 @@ vi.mock("../../src/sessions/session-agent-turn.js", () => {
         input.events?.onTimersChanged?.(4);
         return {
           latestAssistantText: "a".repeat(300),
+          assistantTurnProse: "a".repeat(300),
           failoverMeta: undefined,
           showAttachments: undefined,
           outcome: "completed",

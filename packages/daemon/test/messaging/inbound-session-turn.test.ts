@@ -4,15 +4,20 @@ import { createCoalescingStreamPusher } from "../../src/messaging/inbound-sessio
 vi.mock("../../src/sessions/session-agent-turn.js", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   executeSessionAgentTurn: vi.fn().mockImplementation(async (input: any) => {
-    // Simulate streaming: accumulated text grows beyond slice limit
+    // Simulate streaming: the round's accumulated text grows beyond slice limit
     if (input.stream?.onModelTextDelta) {
       for (let i = 1; i <= 10; i++) {
-        input.stream.onModelTextDelta("a".repeat(i * 30));
+        input.stream.onModelTextDelta({
+          delta: "a".repeat(30),
+          accumulated: "a".repeat(i * 30),
+          round: 0,
+        });
       }
     }
-    input.events?.onThinkingDelta?.("private reasoning");
+    input.events?.onThinkingDelta?.({ accumulated: "private reasoning", round: 0 });
     return {
       latestAssistantText: "a".repeat(300),
+      assistantTurnProse: "a".repeat(300),
       failoverMeta: undefined,
       showAttachments: undefined,
     };

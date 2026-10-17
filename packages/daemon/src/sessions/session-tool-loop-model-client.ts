@@ -36,6 +36,31 @@ export interface SessionToolLoopFailoverState {
   readonly primaryModel?: string;
 }
 
+/** A streaming prose delta scoped to one tool-loop round. */
+export interface ModelTextStreamEvent {
+  /** The provider's delta chunk. */
+  readonly delta: string;
+  /** The round's accumulated content so far — never glued to prior rounds. */
+  readonly accumulated: string;
+  /** Zero-based index of the tool-loop round that produced this delta. */
+  readonly round: number;
+}
+
+/** A streaming reasoning delta scoped to one tool-loop round. */
+export interface ModelThinkingDeltaEvent {
+  /** The round's accumulated reasoning so far. */
+  readonly accumulated: string;
+  /** Zero-based index of the tool-loop round that produced this delta. */
+  readonly round: number;
+}
+
+/** A settled tool-loop round with its authoritative final prose content. */
+export interface ModelRoundEndEvent {
+  readonly round: number;
+  /** The round's final content as recorded in the transcript (may be blank). */
+  readonly content: string;
+}
+
 /**
  * Stateful OpenAI-style chat client for `runToolLoop`: keeps `messages`, forwards tool
  * results via `pushToolMessage`, and tracks whether any failover hop was degraded.
@@ -65,17 +90,26 @@ export function createSessionToolLoopModelClient(input: {
    */
   readonly streamModel?: boolean;
   /**
-   * Receives **display** text: prior model reply rounds in this tool loop (if any) plus the
-   * current stream's accumulated model content. Only invoked when `streamModel` is true.
+   * Receives the current round's **display** prose stream (per-round
+   * accumulated content, never glued to prior rounds). Consumers compose
+   * cross-round display from these events plus {@link onModelRoundEnd}.
+   * Only invoked when `streamModel` is true.
    */
-  readonly onModelTextDelta?: (displayText: string) => void | Promise<void>;
+  readonly onModelTextDelta?: (ev: ModelTextStreamEvent) => void | Promise<void>;
+  /**
+   * Fires after each `complete()` call with the round's authoritative final
+   * prose content, BEFORE the next round's first delta — display consumers
+   * use it to settle the round (reconcile any drifted streamed tail) and to
+   * place the cross-round separator. Only invoked when `streamModel` is true.
+   */
+  readonly onModelRoundEnd?: (ev: ModelRoundEndEvent) => void;
   /**
    * Fires after each `complete()` call with the per-call token delta (not accumulated totals).
    * Use for incremental stats persistence so mid-turn queries see up-to-date numbers.
    */
   readonly onUsageDelta?: (delta: ModelUsage) => void;
   /** Reasoning/thinking content is streaming from the model (mapped from onReasoningDelta). */
-  readonly onThinkingDelta?: (accumulated: string) => void;
+  readonly onThinkingDelta?: (ev: ModelThinkingDeltaEvent) => void;
   /** Fires when a mid-turn compaction completes with `compacted: true`. */
   readonly onCompaction?: () => void;
   /** Optional: enables mid-turn context compaction before each model call. */
@@ -105,8 +139,8 @@ export function createSessionToolLoopModelClient(input: {
   let lastContextWindowTokens: number | undefined;
   let lastInputTokens: number | undefined;
   let hasUsage = false;
-  /** Model reply text from earlier `complete()` rounds that returned tool calls (for streaming display). */
-  let priorRoundsStreamText = "";
+  /** Monotonic tool-loop round index; scopes every streamed display event. */
+  let nextRound = 0;
 
   const resolveTools = (): readonly OpenAIToolFunctionDefinition[] =>
     typeof input.tools === "function" ? input.tools() : input.tools;
@@ -262,16 +296,18 @@ export function createSessionToolLoopModelClient(input: {
         }
       }
 
+      const round = nextRound++;
       const streamOpts =
         input.streamModel === true
           ? {
               stream: true as const,
-              onTextDelta: (_delta: string, accumulated: string) => {
-                const display = priorRoundsStreamText + accumulated;
-                void Promise.resolve(input.onModelTextDelta?.(display)).catch(() => {});
+              onTextDelta: (delta: string, accumulated: string) => {
+                void Promise.resolve(input.onModelTextDelta?.({ delta, accumulated, round })).catch(
+                  () => {},
+                );
               },
               onReasoningDelta: (_delta: string, accumulated: string) => {
-                input.onThinkingDelta?.(accumulated);
+                input.onThinkingDelta?.({ accumulated, round });
               },
             }
           : {};
@@ -334,11 +370,14 @@ export function createSessionToolLoopModelClient(input: {
         });
       }
 
+      // The round is settled: hand the display layer the authoritative final
+      // content so it can reconcile any drifted streamed tail and keep the
+      // display round-truthful across tool follow-ups.
+      if (input.streamModel === true) {
+        input.onModelRoundEnd?.({ round, content: out.content ?? "" });
+      }
+
       if (out.toolCalls.length > 0) {
-        const piece = out.content?.trim() ? out.content : "";
-        if (piece) {
-          priorRoundsStreamText += priorRoundsStreamText ? `\n\n${piece}` : piece;
-        }
         messages = [
           ...messages,
           {
