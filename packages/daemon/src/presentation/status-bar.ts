@@ -5,6 +5,9 @@ import { getContextFill } from "../sessions/session-stats-store";
 import { getSessionPrimaryModelRef } from "../sessions/model-resolution";
 import { getModelContextWindowTokens } from "../model-metadata";
 import type { ToolCallEvent } from "../sessions/tool-loop";
+import { getLogger } from "../logging";
+
+const log = getLogger("status-bar");
 
 export type TurnStatusPhase =
   | "starting"
@@ -167,7 +170,12 @@ export function createTurnStatusBar(opts: {
     timer = setTimeout(() => {
       timer = undefined;
       if (finished || !dirty) return;
-      void doRender();
+      // A sink rejection (e.g. the platform message is gone) must be caught
+      // and logged here: this render is fire-and-forget, so an uncaught
+      // rejection would surface as an unhandled promise rejection.
+      void doRender().catch((err) => {
+        log.warn("status_bar.render_failed", { err: String(err) });
+      });
     }, minIntervalMs);
   }
 
@@ -509,14 +517,18 @@ export function createStatusBarTurnTracker(opts: {
     ...(opts.minIntervalMs !== undefined ? { minIntervalMs: opts.minIntervalMs } : {}),
   });
 
-  void engine.start({
-    sequence: opts.stats.sequence,
-    compactions: opts.stats.compactions,
-    ...(opts.stats.context ? { context: opts.stats.context } : {}),
-    ...(opts.stats.subagents ? { subagents: opts.stats.subagents } : {}),
-    ...(opts.stats.timers !== undefined ? { timers: opts.stats.timers } : {}),
-    ...(opts.stats.notifies !== undefined ? { notifies: opts.stats.notifies } : {}),
-  });
+  void engine
+    .start({
+      sequence: opts.stats.sequence,
+      compactions: opts.stats.compactions,
+      ...(opts.stats.context ? { context: opts.stats.context } : {}),
+      ...(opts.stats.subagents ? { subagents: opts.stats.subagents } : {}),
+      ...(opts.stats.timers !== undefined ? { timers: opts.stats.timers } : {}),
+      ...(opts.stats.notifies !== undefined ? { notifies: opts.stats.notifies } : {}),
+    })
+    .catch((err) => {
+      log.warn("status_bar.start_render_failed", { err: String(err) });
+    });
 
   return {
     setStatusBar: (line) => captureSink.setStatusBar(line),
@@ -524,7 +536,11 @@ export function createStatusBarTurnTracker(opts: {
       liveSink = sink;
       // Flush the captured (⏳ starting) line so the in-flight placeholder
       // carries the bar even though the initial render predated the sink.
-      if (capturedLine !== undefined) void sink.setStatusBar(capturedLine);
+      if (capturedLine !== undefined) {
+        void sink.setStatusBar(capturedLine).catch((err) => {
+          log.warn("status_bar.sink_flush_failed", { err: String(err) });
+        });
+      }
     },
     async finish(outcome) {
       await engine.finish(outcome);

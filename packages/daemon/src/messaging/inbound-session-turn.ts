@@ -9,54 +9,11 @@ import {
 } from "../sessions/session-agent-turn";
 import type { ToolCallEvent } from "../sessions/tool-loop";
 import type { OutboundAttachment, StreamHandle } from "../presentation/platform-adapter";
+import { createCoalescingStreamPusher } from "../presentation/stream-coordinator";
 import { getLogger } from "../logging";
 import { createThinkingOutput } from "./thinking-output";
 
 const log = getLogger("inbound-session-turn");
-
-/**
- * Coalesces high-frequency model token updates into occasional `setFull` calls (rate-limit friendly).
- * Always call {@link flush} before the final body patch.
- */
-export function createCoalescingStreamPusher(
-  setFull: (body: string) => Promise<void>,
-  minIntervalMs: number,
-): {
-  push: (text: string) => void;
-  flush: () => Promise<void>;
-} {
-  let latest = "";
-  let lastSent = 0;
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  let chain: Promise<void> = Promise.resolve();
-
-  function push(text: string) {
-    latest = text;
-    const now = Date.now();
-    if (minIntervalMs <= 0 || now - lastSent >= minIntervalMs) {
-      lastSent = now;
-      chain = chain.then(() => setFull(latest)).catch(() => {});
-      return;
-    }
-    if (timeout) clearTimeout(timeout);
-    const wait = minIntervalMs - (now - lastSent);
-    timeout = setTimeout(() => {
-      timeout = undefined;
-      lastSent = Date.now();
-      chain = chain.then(() => setFull(latest)).catch(() => {});
-    }, wait);
-  }
-
-  async function flush() {
-    if (timeout) clearTimeout(timeout);
-    timeout = undefined;
-    await chain;
-    lastSent = Date.now();
-    await setFull(latest);
-  }
-
-  return { push, flush };
-}
 
 export interface InboundSessionTurnStreaming {
   readonly minIntervalMs: number;
@@ -293,9 +250,10 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
           : undefined,
       // Forward status bar events (thinking / tool / hitl / compaction /
       // context fill) into the turn so the tracker can re-render live while
-      // the turn executes.
+      // the turn executes. `onTurnAborted` stops the stream pusher and
+      // freezes the tracker even when the aborted turn promise never settles.
       events:
-        statusBar || thinkingOutput
+        statusBar || thinkingOutput || streamPusher
           ? {
               onThinkingDelta: (ev) => {
                 if (thinkingOutput) {
@@ -311,6 +269,23 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
               onSubagentsChanged: (counts) => statusBar?.onSubagentsChanged?.(counts),
               onTimersChanged: (count) => statusBar?.onTimersChanged?.(count),
               onNotifiesChanged: (count) => statusBar?.onNotifiesChanged?.(count),
+              // Abort while the model call may still be streaming (or hung):
+              // stop the producers immediately — post-turn delivery never runs
+              // for a promise that never settles, so nothing else would ever
+              // stop the edits. finish("aborted") freezes the tracker at its
+              // terminal render; if the turn still settles later, delivery
+              // reuses the captured line.
+              onTurnAborted: () => {
+                streamPusher?.stop();
+                if (statusBar) {
+                  void statusBar.finish("aborted").catch((e) => {
+                    log.warn("inbound_session_turn.status_bar_abort_finish_failed", {
+                      ...ctx,
+                      err: String(e),
+                    });
+                  });
+                }
+              },
             }
           : undefined,
     });

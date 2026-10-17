@@ -61,4 +61,56 @@ describe("createCoalescingStreamPusher", () => {
     await vi.advanceTimersByTimeAsync(20);
     expect(setFull).toHaveBeenCalled();
   });
+
+  it("stop() drops further pushes and cancels the pending coalescing timer", async () => {
+    const setFull = vi.fn().mockResolvedValue(undefined);
+    const pusher = createCoalescingStreamPusher(setFull, 100);
+
+    pusher.push("first");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(setFull).toHaveBeenCalledTimes(1);
+
+    // Queue a coalesced push, then stop before the timer fires.
+    pusher.push("second");
+    pusher.stop();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(setFull).toHaveBeenCalledTimes(1);
+
+    // A producer that keeps emitting after stop() gets nothing through.
+    pusher.push("third");
+    pusher.push("fourth");
+    await vi.advanceTimersByTimeAsync(500);
+    expect(setFull).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips queued dispatches after stop() even while one is in flight", async () => {
+    let releaseFirst!: () => void;
+    const setFull = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<void>((resolve) => (releaseFirst = resolve)))
+      .mockResolvedValue(undefined);
+    const pusher = createCoalescingStreamPusher(setFull, 0);
+
+    pusher.push("slow");
+    // Let the first dispatch start so its setFull invocation resolves.
+    await vi.advanceTimersByTimeAsync(0);
+    pusher.push("queued");
+    pusher.stop();
+    releaseFirst();
+    await vi.advanceTimersByTimeAsync(20);
+    // Only the already-dispatched first call reached setFull; the queued one
+    // was dropped by the stop() guard.
+    expect(setFull).toHaveBeenCalledTimes(1);
+  });
+
+  it("flush() after stop() resolves without calling setFull", async () => {
+    const setFull = vi.fn().mockResolvedValue(undefined);
+    const pusher = createCoalescingStreamPusher(setFull, 0);
+
+    pusher.push("text");
+    pusher.stop();
+    setFull.mockClear();
+    await pusher.flush();
+    expect(setFull).not.toHaveBeenCalled();
+  });
 });

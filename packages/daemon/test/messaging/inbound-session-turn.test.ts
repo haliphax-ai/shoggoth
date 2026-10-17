@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createCoalescingStreamPusher } from "../../src/messaging/inbound-session-turn";
+import { executeSessionAgentTurn } from "../../src/sessions/session-agent-turn";
 
 vi.mock("../../src/sessions/session-agent-turn.js", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -25,16 +25,6 @@ vi.mock("../../src/sessions/session-agent-turn.js", () => ({
 }));
 
 const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn");
-
-describe("createCoalescingStreamPusher", () => {
-  it("calls setFull with latest text", async () => {
-    const setFull = vi.fn().mockResolvedValue(undefined);
-    const pusher = createCoalescingStreamPusher(setFull, 0);
-    pusher.push("hello");
-    await pusher.flush();
-    expect(setFull).toHaveBeenCalledWith("hello");
-  });
-});
 
 describe("runInboundSessionTurn streaming final delivery", () => {
   it("passes full unsliced body to setFullContent when streaming", async () => {
@@ -435,5 +425,96 @@ describe("runInboundSessionTurn non-streaming path", () => {
 
     // sendAssistantBody should be called instead
     expect(sendAssistantBody).toHaveBeenCalled();
+  });
+});
+describe("runInboundSessionTurn abort handling", () => {
+  it("stops stream edits after abort even though the producer keeps emitting deltas", async () => {
+    let releaseTurn!: () => void;
+    const turnGate = new Promise<void>((resolve) => {
+      releaseTurn = resolve;
+    });
+    // The turn promise stays pending after the abort — a hung model call —
+    // so no post-turn delivery ever runs to clean up the presentation
+    // pipeline. Only the abort hook can stop the edits here.
+    vi.mocked(executeSessionAgentTurn).mockImplementationOnce(async (input: any) => {
+      input.stream?.onModelTextDelta?.({
+        delta: "a".repeat(10),
+        accumulated: "a".repeat(10),
+        round: 0,
+      });
+      // Let the first delta's coalesced dispatch land (edits already flowing),
+      // THEN abort mid-stream while the model call never settles.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      input.events?.onTurnAborted?.();
+      // The stuck provider keeps trickling deltas after the abort.
+      input.stream?.onModelTextDelta?.({
+        delta: "b".repeat(10),
+        accumulated: "b".repeat(10),
+        round: 0,
+      });
+      input.stream?.onModelTextDelta?.({
+        delta: "c".repeat(10),
+        accumulated: "c".repeat(10),
+        round: 0,
+      });
+      await turnGate;
+      return {
+        latestAssistantText: "done",
+        assistantTurnProse: "done",
+        failoverMeta: undefined,
+        outcome: "aborted",
+      };
+    });
+
+    const setFullContent = vi.fn().mockResolvedValue(undefined);
+    const pushUpdate = vi.fn().mockResolvedValue(undefined);
+    const finish = vi.fn().mockResolvedValue("> stopped");
+    const createStatusBar = vi.fn().mockResolvedValue({
+      setStatusBar: vi.fn().mockResolvedValue(undefined),
+      finish,
+    });
+
+    const runPromise = runInboundSessionTurn({
+      buildTurn: () =>
+        Promise.resolve({
+          sessionId: "s1",
+          agentId: "main",
+          userContent: "hi",
+          messages: [],
+          tools: [],
+          systemPrompt: "",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          config: {} as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          stateDb: {} as any,
+        }),
+      streaming: {
+        minIntervalMs: 0,
+        start: vi.fn().mockResolvedValue({ setFullContent, pushUpdate }),
+      },
+      statusBar: {
+        enabled: true,
+        create: createStatusBar,
+      },
+      sliceDisplayText: (t) => t,
+      formatAssistantReply: (text) => text,
+      formatErrorReply: String,
+      sendAssistantBody: vi.fn().mockResolvedValue(undefined),
+      sendErrorBody: vi.fn().mockResolvedValue(undefined),
+    });
+
+    // The pre-abort delta flushes through…
+    await vi.waitFor(() => expect(pushUpdate).toHaveBeenCalled());
+    // …and nothing else does, even though two more deltas were emitted after
+    // the abort while the turn promise is still pending.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(pushUpdate).toHaveBeenCalledTimes(1);
+    // The tracker was frozen at its terminal abort render.
+    expect(finish).toHaveBeenCalledWith("aborted");
+
+    // Letting the turn settle afterwards still delivers normally.
+    releaseTurn();
+    await runPromise;
+    expect(setFullContent).toHaveBeenCalled();
   });
 });

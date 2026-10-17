@@ -1022,3 +1022,58 @@ describe("getSessionActiveTimerCount", () => {
     expect(getSessionActiveTimerCount(db, "root")).toBe(0);
   });
 });
+const { statusWarnSpy } = vi.hoisted(() => ({ statusWarnSpy: vi.fn() }));
+vi.mock("../../src/logging", () => ({
+  getLogger: vi.fn(() => ({
+    trace: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: statusWarnSpy,
+    error: vi.fn(),
+    fatal: vi.fn(),
+  })),
+}));
+
+describe("createTurnStatusBar sink rejection handling", () => {
+  it("catches and logs sink rejections from the render timer (no unhandled rejection)", async () => {
+    const sink: StatusBarSink = {
+      setStatusBar: vi
+        .fn()
+        .mockResolvedValueOnce(undefined) // start() render succeeds
+        .mockRejectedValue(new Error("Discord REST editMessage 404")),
+    };
+    const { bar } = createBar({ sink });
+    await bar.start({ sequence: 1, compactions: 0 });
+
+    // Mark dirty and let the fire-and-forget render timer fire; the sink
+    // rejection must be caught and logged, never surface as an unhandled
+    // promise rejection.
+    bar.markProse();
+    await vi.advanceTimersByTimeAsync(1100);
+
+    expect(sink.setStatusBar).toHaveBeenCalledTimes(2);
+    expect(statusWarnSpy).toHaveBeenCalledWith(
+      "status_bar.render_failed",
+      expect.objectContaining({ err: expect.stringContaining("404") }),
+    );
+  });
+
+  it("logs the initial render failure from tracker start instead of dropping it", async () => {
+    statusWarnSpy.mockClear();
+    // A renderer that throws makes the initial engine.start() render reject —
+    // that rejection was previously fire-and-forget (unhandled); it is now
+    // caught and logged.
+    createStatusBarTurnTracker({
+      cfg: defaultCfg,
+      render: () => {
+        throw new Error("render blew up");
+      },
+      stats: { sequence: 1, compactions: 0 },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(statusWarnSpy).toHaveBeenCalledWith(
+      "status_bar.start_render_failed",
+      expect.objectContaining({ err: expect.stringContaining("render blew up") }),
+    );
+  });
+});

@@ -1,6 +1,7 @@
 import type { MessagingAdapterCapabilities } from "@shoggoth/messaging";
 import type { DiscordBridgeLogger } from "./bridge";
 import type { DiscordRestTransport } from "./transport";
+import { MissingPermissionsError, NotFoundError } from "./rest-client";
 import { appendSyntheticClose } from "./formatting-state";
 import { splitDiscordMessage } from "./split-message";
 import { mdTableToAscii } from "./table-formatter.js";
@@ -80,6 +81,42 @@ export function createDiscordStreamingOutbound(
         opChain = run.catch(() => {});
         return run;
       };
+      /**
+       * Permanent-failure circuit breaker. A 404 (message/thread deleted) or
+       * 403 (permissions revoked) means this handle's target is gone: every
+       * further edit would fail the same way, instantly, forever. The first
+       * permanent rejection poisons the handle (logged once at warn) and all
+       * subsequent pushUpdate / setFullContent / setStatusBar calls resolve
+       * immediately as no-ops with zero REST traffic, so one 404 ends the
+       * edit loop instead of becoming its steady state.
+       */
+      let dead = false;
+      const isPermanent = (err: unknown): err is NotFoundError | MissingPermissionsError =>
+        err instanceof NotFoundError || err instanceof MissingPermissionsError;
+      const poison = (err: NotFoundError | MissingPermissionsError): void => {
+        dead = true;
+        logger?.warn("discord.streaming.handle_dead", {
+          operation: err.operation,
+          status: err.status,
+          err: String(err),
+        });
+      };
+      /** Serialize an operation; once the handle is dead the operation is a no-op,
+       *  and the first permanent rejection poisons the handle instead of
+       *  propagating (transient errors still reject to the caller). */
+      const enqueueGuarded = (op: () => Promise<void>): Promise<void> =>
+        enqueue(async () => {
+          if (dead) return;
+          try {
+            await op();
+          } catch (err) {
+            if (isPermanent(err)) {
+              poison(err);
+              return;
+            }
+            throw err;
+          }
+        });
       /** Rendered status bar line while a bar is active; null when no bar is set. */
       let _statusBarLine: string | null = null;
       /** Most recently pushed/full body text (formatted, bar excluded). */
@@ -131,10 +168,18 @@ export function createDiscordStreamingOutbound(
        */
       const deleteOverflowWithRetry = async (messageId: string): Promise<boolean> => {
         for (let attempt = 1; attempt <= DELETE_MAX_ATTEMPTS; attempt++) {
+          if (dead) return false;
           try {
             await transport.deleteMessage(channelId, messageId);
             return true;
           } catch (err) {
+            if (isPermanent(err)) {
+              // Target is gone (or we can no longer touch it): poison the
+              // handle instead of retrying — the retry loop must not become
+              // a permanent-error spew.
+              poison(err);
+              return false;
+            }
             if (attempt < DELETE_MAX_ATTEMPTS) {
               await new Promise((resolve) =>
                 setTimeout(resolve, DELETE_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1)),
@@ -169,7 +214,8 @@ export function createDiscordStreamingOutbound(
       return {
         messageId,
         async setFullContent(text: string): Promise<void> {
-          await enqueue(async () => {
+          if (dead) return;
+          await enqueueGuarded(async () => {
             let formattedText = text;
             if (thinkingDisplay) {
               formattedText = formatMessageWithThinking(text, thinkingDisplay);
@@ -198,7 +244,8 @@ export function createDiscordStreamingOutbound(
           });
         },
         async pushUpdate(text: string): Promise<void> {
-          await enqueue(async () => {
+          if (dead) return;
+          await enqueueGuarded(async () => {
             let formattedText = text;
             if (thinkingDisplay) {
               formattedText = formatMessageWithThinking(text, thinkingDisplay);
@@ -243,6 +290,7 @@ export function createDiscordStreamingOutbound(
           });
         },
         async setStatusBar(line: string | null): Promise<void> {
+          if (dead) return;
           // State changes stay synchronous so operations already queued see the
           // latest line; only the render is serialized with the other mutations.
           _statusBarLine = line;
@@ -258,7 +306,7 @@ export function createDiscordStreamingOutbound(
           // The enqueued render re-reads state at run time: prose pushed in the
           // meantime wins as the base content, and a clear in the meantime
           // suppresses the bar (never clobbers the newer state).
-          await enqueue(async () => {
+          await enqueueGuarded(async () => {
             const activeLine = _statusBarLine;
             if (activeLine === null) return;
             const baseText = lastPushedText ?? "…";
