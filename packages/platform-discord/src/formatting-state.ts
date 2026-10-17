@@ -19,7 +19,7 @@ const FENCE_OPEN_RE = /^(`{3,})(\S*)/;
 export interface OpenFormattingState {
   /** Non-empty when inside a fenced code block; holds the full opening fence line (e.g. "```ts"). */
   readonly openFence: string;
-  /** Inline markers open (toggled an odd number of times) outside fences. Empty while inside a fence. */
+  /** Inline markers still open at the end of the scanned text (outside fences). Empty while inside a fence. */
   readonly openInline: readonly string[];
 }
 
@@ -33,35 +33,84 @@ const isWordChar = (ch: string | undefined): boolean => ch !== undefined && WORD
 const isSpaceChar = (ch: string | undefined): boolean => ch === undefined || /\s/.test(ch);
 
 /**
+ * Every tracked marker: the paired markers plus the boundary-aware single
+ * `_`. Order matters for scanning (longer markers must match first) and for
+ * the canonical open/close ordering (`_` closes last, matching how the
+ * reopen prefix and the chunk-close suffix are built).
+ */
+const TRACKED_MARKERS: readonly string[] = [...INLINE_MARKERS, "_"];
+
+/**
+ * A marker may only OPEN formatting at Discord's opener boundary: preceded
+ * by a word boundary (or line start) and followed by non-whitespace.
+ * Spoilers (`||`) forgo the word boundary and only need content after them.
+ */
+const canOpenMarker = (
+  marker: string,
+  prevCh: string | undefined,
+  nextCh: string | undefined,
+): boolean => {
+  if (marker === "||") return !isSpaceChar(nextCh); // spoilers: content-side only
+  return !isWordChar(prevCh) && !isSpaceChar(nextCh);
+};
+
+/**
+ * A marker may only CLOSE open formatting at Discord's closer boundary:
+ * preceded by non-whitespace and followed by a word boundary (or line end).
+ * Spoilers only need content immediately before the closing marker.
+ */
+const canCloseMarker = (
+  marker: string,
+  prevCh: string | undefined,
+  nextCh: string | undefined,
+): boolean => {
+  if (marker === "||") return !isSpaceChar(prevCh); // spoilers: content-side only
+  return !isSpaceChar(prevCh) && !isWordChar(nextCh);
+};
+
+/**
  * Determine which inline markers are "open" at the end of `raw`, starting
  * from `prevOpen` state.
  *
- * Only counts markers that appear outside of fenced code blocks.
+ * Only markers outside of fenced code blocks are tracked.
  *
- * `**`, `*`, `__`, `~~`, and `||` are counted by parity. A single `_` is
- * tracked separately with Discord's asymmetric word-boundary rule: it OPENS
- * only when preceded by a non-word boundary (or line start) and followed by
- * non-whitespace, and CLOSES only when preceded by non-whitespace and
- * followed by a non-word boundary (or line end). This keeps intra-word
- * underscores (`snake_case_name`) from ever counting as formatting — even an
- * odd count of them — while still closing `_italic` before it can bleed into
- * a trailing status bar. A lone closer-side `_` (e.g. `word_`) opens nothing
- * and is ignored, matching Discord's literal rendering.
+ * The chunk is scanned as a viewer sees it: the reopen prefix built from
+ * `prevOpen` is prepended to `raw` before scanning, so markers at the very
+ * start of a chunk get their true surrounding context (a hard split can land
+ * right before a closing marker, where the prefix supplies the preceding
+ * content).
+ *
+ * A marker toggles only at positions where Discord can actually format:
+ *
+ * - it OPENS only when preceded by a word boundary (or line start) and
+ *   followed by non-whitespace;
+ * - it CLOSES only when preceded by non-whitespace and followed by a word
+ *   boundary (or line end).
+ *
+ * This is the asymmetric word-boundary rule that already applied to a
+ * single `_`; extending it to `**`, `*`, `__`, and `~~` keeps intra-word
+ * and word-end markers (`5 * 3`, `ends with *`, `snake_case_name`) from
+ * counting as toggles — an unpaired marker there is literal text in Discord,
+ * and appending its companion would corrupt later text that legitimately
+ * uses the marker. Spoilers (`||`) are the exception: Discord formats them
+ * with no word boundary at all (`foo||bar||baz`), so each marker only
+ * requires content on its inside (non-whitespace after an opener, before a
+ * closer).
  */
 export function computeOpenInlineMarkers(
   raw: string,
   prevOpen: readonly string[],
   prevOpenFence: string,
 ): string[] {
-  const toggleCounts = new Map<string, number>();
-  for (const m of prevOpen) {
-    if (m !== "_") toggleCounts.set(m, 1);
-  }
-  let underscoreOpen = prevOpen.includes("_");
+  // Rescan the chunk as rendered: the reopen prefix built from `prevOpen` is
+  // part of the visible text and supplies the boundary context for markers
+  // at the start of `raw`.
+  const text = prevOpen.join("") + raw;
 
+  const open = new Set<string>();
   let inFence = prevOpenFence !== "";
 
-  const lines = raw.split("\n");
+  const lines = text.split("\n");
   for (const line of lines) {
     const trimmed = line.trimStart();
     if (inFence) {
@@ -76,7 +125,7 @@ export function computeOpenInlineMarkers(
       continue;
     }
 
-    // Count inline marker occurrences in this line.
+    // Scan inline markers in this line with Discord's boundary rules.
     let pos = 0;
     while (pos < line.length) {
       // Skip inline code spans.
@@ -88,40 +137,27 @@ export function computeOpenInlineMarkers(
       }
 
       let matched = false;
-      for (const marker of INLINE_MARKERS) {
+      for (const marker of TRACKED_MARKERS) {
         if (line.startsWith(marker, pos)) {
-          toggleCounts.set(marker, (toggleCounts.get(marker) ?? 0) + 1);
+          const prevCh = pos > 0 ? line[pos - 1] : undefined;
+          const nextCh = pos + marker.length < line.length ? line[pos + marker.length] : undefined;
+          if (open.has(marker)) {
+            if (canCloseMarker(marker, prevCh, nextCh)) open.delete(marker);
+          } else if (canOpenMarker(marker, prevCh, nextCh)) {
+            open.add(marker);
+          }
           pos += marker.length;
           matched = true;
           break;
         }
       }
       if (matched) continue;
-
-      // Single "_" — boundary-aware, per the rule documented above.
-      if (line[pos] === "_") {
-        const prevCh = pos > 0 ? line[pos - 1] : undefined;
-        const nextCh = pos + 1 < line.length ? line[pos + 1] : undefined;
-        if (!underscoreOpen) {
-          // Opens only at a preceding word boundary with content after.
-          if (!isWordChar(prevCh) && !isSpaceChar(nextCh)) underscoreOpen = true;
-        } else {
-          // Closes only with content before and a following word boundary.
-          if (!isSpaceChar(prevCh) && !isWordChar(nextCh)) underscoreOpen = false;
-        }
-      }
       pos++;
     }
   }
 
-  // Markers with odd toggle count are "open".
-  const open: string[] = [];
-  for (const marker of INLINE_MARKERS) {
-    const c = toggleCounts.get(marker) ?? 0;
-    if (c % 2 === 1) open.push(marker);
-  }
-  if (underscoreOpen) open.push("_");
-  return open;
+  // Canonical order: INLINE_MARKERS order, then "_".
+  return TRACKED_MARKERS.filter((marker) => open.has(marker));
 }
 
 /**
@@ -195,12 +231,12 @@ export function buildReopenPrefix(state: OpenFormattingState): string {
  * synthetic markers so the rendered output cannot leak into whatever follows
  * it (e.g. the turn status bar).
  *
- * - Unclosed inline markers (`*`, `**`, `__`, `~~`, `||`, and boundary-aware
- *   `_`) get their closing marker appended. When a later chunk completes the
- *   pair, the marker count becomes even again and the synthetic close
- *   disappears on its own. Single `_` only counts at word boundaries
- *   (Discord's asymmetric rule), so intra-word underscores in prose such as
- *   `snake_case_name` never trigger a synthetic close.
+ * - Unclosed inline markers get their closing marker appended. A marker is
+ *   only tracked where Discord would actually format it — at its opener or
+ *   closer word boundary — so intra-word and word-end markers in prose
+ *   (`5 * 3`, `snake_case_name`, a trailing `*`) never trigger a synthetic
+ *   close. When a later chunk completes the pair, the synthetic close
+ *   disappears on its own.
  * - An unclosed fenced block gets a closing ``` (the fence swallows everything
  *   after it, including the bar, until closed).
  * - Inside a fenced block, inline markers are literal text and are ignored,

@@ -128,6 +128,18 @@ describe("splitDiscordMessage", () => {
     assert.ok(result[1].startsWith("||"), "second chunk should reopen spoiler");
   });
 
+  it("does not tack synthetic markers onto literal word-end asterisks", () => {
+    const filler = Array.from({ length: 30 }, (_, i) => `word ${i}`).join(" ");
+    const text = `${filler} ends with *`;
+    const result = splitDiscordMessage(text, 100);
+    assert.ok(result.length > 1, "expected multiple chunks");
+    const last = result[result.length - 1];
+    assert.ok(
+      last.endsWith("with *"),
+      `expected literal trailing asterisk, got: …${last.slice(-15)}`,
+    );
+  });
+
   it("all chunks fit within maxLength", () => {
     // Stress test with mixed content
     const text = Array.from({ length: 100 }, (_, i) =>
