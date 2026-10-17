@@ -139,6 +139,13 @@ All REST traffic flows through one process-wide client (`rest-client.ts`):
   `NetworkError` all extend `DiscordRestError` (with `kind`, `status`,
   `body`, `operation`), so callers distinguish transient from permanent
   failures without matching on error strings.
+- **Structured error logs** — every rejected request is also emitted as a
+  structured record through the daemon logger (`discord.rest.request_failed`
+  at warn; `discord.rest.backoff` at debug per scheduled retry) with typed
+  fields (`operation`, `kind`, `status`, `route_key`, `method`), so REST
+  failures are jq-queryable via `builtin-logs` instead of raw exception
+  text. `DiscordRestError.toJSON()` serializes those fields whenever an
+  error is logged as an object.
 
 ---
 
