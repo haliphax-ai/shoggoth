@@ -79,10 +79,12 @@ describe("createThinkingOutput", () => {
     );
   });
 
-  it("keeps one quote block when reasoning continues across a round boundary", () => {
-    // Round 2's reasoning continues round 1's text: even though prose parts
-    // arrived in between, the continuation must extend the SAME 💭 block —
-    // never open a second one mid-message.
+  it("opens a new quote block for a re-emitted prefix continuation at a round boundary", () => {
+    // Many providers re-emit the prior reasoning at the start of a new round
+    // (context quoting, not one continuous thought). The shared prefix is
+    // already displayed — the new round renders only its NEW text in its own
+    // 💭 block at its arrival position; the earlier block is never extended,
+    // reordered, or re-emitted.
     const output = createThinkingOutput();
     output.onText({ accumulated: "Before ", round: 0 });
     output.onThinking({ accumulated: "Reasoning so far", round: 0 });
@@ -91,9 +93,47 @@ describe("createThinkingOutput", () => {
       "Before \n\n> 💭 Reasoning so far\n\nafter",
     );
     expect(output.onThinking({ accumulated: "Reasoning so far and more", round: 1 })).toBe(
-      "Before \n\n> 💭 Reasoning so far and more\n\nafter",
+      "Before \n\n> 💭 Reasoning so far\n\nafter\n\n> 💭 and more",
     );
-    expect(output.render().split("💭").length - 1).toBe(1);
+    expect(output.render().split("💭").length - 1).toBe(2);
+  });
+
+  it("never splices a new round's reasoning onto an earlier round's block mid-word", () => {
+    // A round that starts by re-emitting only a short shared prefix of the
+    // earlier thinking and then veers into unrelated text must NOT cut the
+    // earlier block and glue the remainder onto it: the earlier block stays
+    // intact and the new text lands in its own block at its arrival
+    // position — never as "The iss" + "look at how".
+    const output = createThinkingOutput();
+    output.onThinking({ accumulated: "The issue says tests fail", round: 0 });
+    output.endRound({ round: 0, content: "" });
+    output.onText({ accumulated: "Looking around.", round: 1 });
+    // The re-emitted prefix already rendered in the earlier block — it is
+    // stripped from the new round, not shown twice and not spliced.
+    expect(output.onThinking({ accumulated: "The iss", round: 1 })).toBe(
+      "> 💭 The issue says tests fail\n\nLooking around.",
+    );
+    expect(
+      output.onThinking({ accumulated: "The isslook at how the parser is invoked", round: 1 }),
+    ).toBe(
+      "> 💭 The issue says tests fail\n\nLooking around.\n\n> 💭 look at how the parser is invoked",
+    );
+    // No mid-word seam anywhere: the earlier block still ends with "fail".
+    expect(output.render()).toContain("tests fail\n\nLooking around.");
+    expect(output.render()).not.toContain("isslook");
+  });
+
+  it("renders thinking blocks at their arrival position across interleaved rounds", () => {
+    // Round-0 reasoning renders after round-0 prose and round-1 reasoning
+    // after round-1 prose: every 💭 block sits where its text arrived.
+    const output = createThinkingOutput();
+    output.onText({ accumulated: "First an update.", round: 0 });
+    output.onThinking({ accumulated: "Noticing a first thing", round: 0 });
+    output.endRound({ round: 0, content: "First an update." });
+    output.onText({ accumulated: "Then the fix.", round: 1 });
+    expect(output.onThinking({ accumulated: "Second thought here", round: 1 })).toBe(
+      "First an update.\n\n> 💭 Noticing a first thing\n\nThen the fix.\n\n> 💭 Second thought here",
+    );
   });
 
   it("opens a fresh quote block when reasoning restarts at a round boundary", () => {
@@ -102,10 +142,10 @@ describe("createThinkingOutput", () => {
     output.onThinking({ accumulated: "First round thought", round: 0 });
     output.endRound({ round: 0, content: "Before " });
     output.onText({ accumulated: "after", round: 1 });
-    // A genuine restart replaces the superseded block in place — exactly one
-    // 💭 block, never duplicated or glued to interleaved prose.
+    // Unrelated reasoning in a new round keeps the earlier block untouched
+    // and lands in its own 💭 block at its arrival position.
     expect(output.onThinking({ accumulated: "An entirely new thought", round: 1 })).toBe(
-      "Before \n\n> 💭 An entirely new thought\n\nafter",
+      "Before \n\n> 💭 First round thought\n\nafter\n\n> 💭 An entirely new thought",
     );
   });
 

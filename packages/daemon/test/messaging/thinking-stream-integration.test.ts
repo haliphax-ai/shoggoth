@@ -88,7 +88,7 @@ describe("tool-loop → thinking-output streaming pipeline", () => {
     );
   });
 
-  it("keeps one quote block when reasoning continues across a round boundary", async () => {
+  it("opens a new quote block for re-emitted reasoning at the next round", async () => {
     const { model, displays } = wireDisplayPipeline([
       {
         reasoning: ["Planning the"],
@@ -96,20 +96,55 @@ describe("tool-loop → thinking-output streaming pipeline", () => {
         content: "Step one.",
         toolCalls: [TOOL_CALL],
       },
-      // The next round re-emits the prior reasoning and continues it (a
-      // full-prefix continuation of the same thought).
-      { reasoning: ["Planning the steps"], deltas: ["Step two."], content: "Step two." },
+      // The next round re-emits the prior reasoning (context quoting) and
+      // continues it: the shared prefix renders where it first arrived, and
+      // the new text opens its own 💭 block at the arrival position —
+      // after the prose that streamed in between.
+      {
+        reasoning: ["Planning the", " steps"],
+        deltas: ["Step two."],
+        content: "Step two.",
+      },
     ]);
 
     await model.complete();
     model.pushToolMessage!({ toolCallId: "t1", content: "{}" });
     await model.complete();
 
-    // Round 2's reasoning continues round 1's text — the 💭 block must
-    // continue with it even though prose parts arrived in between.
     const final = displays.at(-1)!;
-    expect(final).toBe("> 💭 Planning the steps\n\nStep one.\n\nStep two.");
-    expect(final.split("💭").length - 1).toBe(1);
+    expect(final).toBe("> 💭 Planning the\n\nStep one.\n\n> 💭 steps\n\nStep two.");
+    expect(final.split("💭").length - 1).toBe(2);
+  });
+
+  it("never splices cross-round reasoning into one block mid-word", async () => {
+    const { model, displays } = wireDisplayPipeline([
+      {
+        reasoning: ["The issue says tests fail"],
+        deltas: ["Looking around."],
+        content: "Looking around.",
+        toolCalls: [TOOL_CALL],
+      },
+      {
+        // The round re-emits only a short shared prefix of the earlier
+        // thought, then veers into unrelated reasoning — it must land in
+        // its own block, never cut-and-glued onto the earlier one.
+        reasoning: ["The iss", "look at how the parser is invoked"],
+        deltas: ["Fixed."],
+        content: "Fixed.",
+      },
+    ]);
+
+    await model.complete();
+    model.pushToolMessage!({ toolCallId: "t1", content: "{}" });
+    await model.complete();
+
+    const final = displays.at(-1)!;
+    expect(final).toBe(
+      "> 💭 The issue says tests fail\n\nLooking around.\n\n> 💭 look at how the parser is invoked\n\nFixed.",
+    );
+    expect(final).not.toContain("isslook");
+    // The earlier block is untouched — no later round mutated it.
+    expect(final).toContain("tests fail\n\nLooking around.");
   });
 
   it("never erases streamed prose when a fresh stream re-fires empty mid-round", async () => {

@@ -44,18 +44,51 @@ export function createThinkingOutput() {
    */
   let textRoundBase = 0;
   /**
-   * Whole-turn streams. `text` joins rounds with the transcript's blank-line
-   * separator so it maps 1:1 onto the delivered turn prose; `thinking`
-   * concatenates every reasoning block of the turn.
+   * Whole-turn prose: rounds joined with the transcript's blank-line
+   * separator so it maps 1:1 onto the delivered turn prose.
    */
   let turnText = "";
-  let turnThinking = "";
+  /**
+   * Reasoning state, round-scoped exactly like prose: `thinkRound` is the
+   * round the reasoning stream belongs to, `thinkStream` is that round's
+   * raw accumulated reasoning, and `thinkShown` is what this round has
+   * contributed to the display (its 💭 parts concatenate to exactly this).
+   * A new round NEVER diffs against — or mutates — an earlier round's parts.
+   */
+  let thinkRound = -1;
+  let thinkStream = "";
+  let thinkShown = "";
+  /**
+   * The provider's cumulative reasoning BEFORE the current round. Many
+   * providers re-emit the prior reasoning at the start of a new tool-loop
+   * round (context quoting, not one continuous thought): the still-matching
+   * prefix is stripped from each new round so it renders only where it first
+   * arrived, and the new round opens its own 💭 block with only the new text.
+   */
+  let thinkTurnBase = "";
 
   const lastPartIndex = (kind: ThinkingOutputKind): number => {
     for (let index = parts.length - 1; index >= 0; index -= 1) {
       if (parts[index].kind === kind) return index;
     }
     return -1;
+  };
+
+  /** Index of the LAST 💭 part belonging to `round` (round-scoped append target). */
+  const lastThinkingPartIndex = (round: number): number => {
+    for (let index = parts.length - 1; index >= 0; index -= 1) {
+      const part = parts[index];
+      if (part.kind === "thinking" && part.round === round) return index;
+    }
+    return -1;
+  };
+
+  /** Folds a settled round's raw reasoning into the provider's cumulative view. */
+  const extendTurnReasoningBase = (base: string, stream: string): string => {
+    if (!stream) return base;
+    if (stream.startsWith(base)) return stream; // the round extended the prior view
+    if (base.startsWith(stream)) return base; // the round re-emitted a subset of it
+    return base + stream; // unrelated reasoning: keep both for future stripping
   };
 
   const nextTextPartAfter = (index: number): number | undefined => {
@@ -160,32 +193,48 @@ export function createThinkingOutput() {
   };
 
   const updateThinking = ({ accumulated, round }: ThinkingStreamEvent): string => {
-    // Reasoning streams key off the WHOLE turn's accumulated thinking: a
-    // later round whose reasoning continues the previous round's text is a
-    // full-prefix continuation of the same thought, not a divergence.
-    const previous = turnThinking;
+    // Reasoning is round-scoped: within a round it continues that round's
+    // 💭 part; a NEW round never diffs against (or splices into) an earlier
+    // round's parts. A cross-round prefix match is provider context quoting,
+    // so the still-shared prefix is stripped — it already rendered where it
+    // first arrived — and only the new text opens a 💭 part here.
+    if (round !== thinkRound) {
+      if (thinkRound >= 0) thinkTurnBase = extendTurnReasoningBase(thinkTurnBase, thinkStream);
+      thinkRound = round;
+      thinkStream = "";
+      thinkShown = "";
+    }
+    thinkStream = accumulated;
+    let stripped = 0;
+    const stripMax = Math.min(accumulated.length, thinkTurnBase.length);
+    while (stripped < stripMax && accumulated[stripped] === thinkTurnBase[stripped]) stripped += 1;
+    const shown = accumulated.slice(stripped);
+    const previous = thinkShown;
     let shared = 0;
-    const max = Math.min(previous.length, accumulated.length);
-    while (shared < max && previous[shared] === accumulated[shared]) shared += 1;
+    const max = Math.min(previous.length, shown.length);
+    while (shared < max && previous[shared] === shown[shared]) shared += 1;
     const diverged = shared < previous.length;
     if (!diverged) {
-      if (accumulated.length > previous.length) {
-        const delta = accumulated.slice(shared);
-        turnThinking = accumulated;
-        // A continuation appends to the LAST quote block even when prose
-        // parts arrived in between — interleaved delivery must never split
-        // one continuous thought into two 💭 blocks.
-        const lastIdx = lastPartIndex("thinking");
+      if (shown.length > previous.length) {
+        const delta = shown.slice(shared);
+        thinkShown = shown;
+        // Within the round, reasoning continues the round's 💭 part; a round
+        // with no open 💭 part yet opens one at the current position.
+        const lastIdx = lastThinkingPartIndex(round);
         if (lastIdx >= 0) parts[lastIdx].text += delta;
         else parts.push({ kind: "thinking", text: delta, round });
       }
       return render();
     }
-    // Diverged: a restarted reasoning tail. An EMPTY remainder keeps the
-    // superseded quote visible — never splice it to zero mid-turn.
-    const remainder = accumulated.slice(shared);
+    // Diverged WITHIN the round (a provider retry / failover hop re-fires
+    // the round's reasoning). An EMPTY remainder keeps the superseded quote
+    // visible — never splice it to zero mid-turn. The merge only touches
+    // THIS round's parts (spliceStream is minRound-scoped), so a round's
+    // remainder can never glue onto another round's text mid-word.
+    const remainder = shown.slice(shared);
     if (!remainder) return render();
-    const cutIndex = spliceStream("thinking", shared, Number.NEGATIVE_INFINITY);
+    thinkShown = shown;
+    const cutIndex = spliceStream("thinking", shared, round);
     if (cutIndex >= 0) parts[cutIndex].text += remainder;
     else parts.push({ kind: "thinking", text: remainder, round });
     return render();
