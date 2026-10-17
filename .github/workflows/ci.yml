@@ -91,7 +91,7 @@ jobs:
       - name: strict DAC + agent UID integration tests
         env:
           SHOGGOTH_CI_STRICT_AGENT_TESTS: "1"
-        run: npx vitest run packages/os-exec
+        run: npx vitest run --no-isolate packages/os-exec
 
   oxlint:
     runs-on: ubuntu-latest
