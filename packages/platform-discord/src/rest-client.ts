@@ -16,6 +16,12 @@
  * failures instead of matching on error strings. All errors extend
  * `DiscordRestError` and keep the legacy `Discord REST <op> <status>: <body>`
  * message shape for log compatibility.
+ *
+ * Every failure is ALSO emitted as a structured log record through an optional
+ * injected logger (`discord.rest.request_failed` / `discord.rest.backoff`)
+ * with typed fields (`operation`, `kind`, `status`, `route_key`, ...) so
+ * operators can query failures with jq (`builtin-logs`) instead of parsing raw
+ * exception text. The logger is optional: without it, behavior is unchanged.
  */
 
 /** Priority lanes: user-facing sends > workflow status > background probes. */
@@ -79,6 +85,21 @@ export class DiscordRestError extends Error {
     this.operation = operation;
     this.status = status;
     this.body = body;
+  }
+
+  /**
+   * Structured serialization for log sinks: `JSON.stringify(err)` (e.g.
+   * logging an error object as a field) yields typed fields instead of the
+   * bare `{}` that `Error` produces, so records stay jq-queryable.
+   */
+  toJSON(): Record<string, unknown> {
+    return {
+      name: this.name,
+      kind: this.kind,
+      operation: this.operation,
+      status: this.status,
+      message: this.message,
+    };
   }
 }
 
@@ -181,6 +202,17 @@ export interface DiscordRestRequestSpec {
   readonly coalesceKey?: string;
 }
 
+/**
+ * Minimal structured-logger surface for REST failure records. The daemon
+ * `Logger` (and the bridge's `DiscordBridgeLogger`) are structurally
+ * compatible, so they can be passed directly.
+ */
+export interface DiscordRestLogger {
+  readonly debug: (msg: string, fields?: Record<string, unknown>) => void;
+  readonly warn: (msg: string, fields?: Record<string, unknown>) => void;
+  readonly error: (msg: string, fields?: Record<string, unknown>) => void;
+}
+
 export interface DiscordRestClientOptions {
   readonly botToken: string;
   /** Injected for tests; defaults to `globalThis.fetch`. */
@@ -188,6 +220,11 @@ export interface DiscordRestClientOptions {
   readonly apiBase?: string;
   /** Policy overrides (tests / tuning). */
   readonly policy?: DiscordRestPolicy;
+  /**
+   * Structured-logger sink for request failures (`discord.rest.*` records).
+   * Optional: without it the client only throws, as before.
+   */
+  readonly logger?: DiscordRestLogger;
 }
 
 interface BucketState {
@@ -267,6 +304,31 @@ export function createDiscordRestClient(options: DiscordRestClientOptions): Disc
   const base = (options.apiBase ?? "https://discord.com/api/v10").replace(/\/$/, "");
   const fetchFn = options.fetchFn ?? globalThis.fetch.bind(globalThis);
   const policy = { ...discordRestRateLimitPolicy, ...options.policy };
+  const logger = options.logger;
+
+  /**
+   * Emit a rejected request as one structured record instead of leaving
+   * callers to stringify raw exceptions. Stable `msg` + typed fields keep
+   * the record jq-queryable (e.g. `.msg == "discord.rest.request_failed"
+   * and .kind == "rate_limited"`). Never throws.
+   */
+  function logFailure(err: DiscordRestError, spec: DiscordRestRequestSpec): void {
+    if (!logger) return;
+    try {
+      logger.warn("discord.rest.request_failed", {
+        operation: err.operation,
+        kind: err.kind,
+        status: err.status,
+        route_key: spec.routeKey,
+        method: spec.method,
+        // Typed fields above are the query surface; the raw body is attached
+        // for diagnosis only (truncated so one failure can't flood a record).
+        error: err.message.length > 300 ? `${err.message.slice(0, 300)}…` : err.message,
+      });
+    } catch {
+      // Logging must never break request settlement.
+    }
+  }
 
   /** routeKey → bucket hash learned from `X-RateLimit-Bucket`. */
   const routeToBucket = new Map<string, string>();
@@ -404,9 +466,11 @@ export function createDiscordRestClient(options: DiscordRestClientOptions): Disc
     const kept: QueuedRequest[] = [];
     for (const q of state.queue) {
       const dl = deadlineFor(q);
-      if (now - q.enqueuedAt > dl)
-        q.reject(new QueueTimeoutError(q.spec.operation, now - q.enqueuedAt, dl));
-      else kept.push(q);
+      if (now - q.enqueuedAt > dl) {
+        const err = new QueueTimeoutError(q.spec.operation, now - q.enqueuedAt, dl);
+        logFailure(err, q.spec);
+        q.reject(err);
+      } else kept.push(q);
     }
     state.queue = kept;
   }
@@ -539,7 +603,9 @@ export function createDiscordRestClient(options: DiscordRestClientOptions): Disc
         void onResponse(state, entry, res);
       },
       (err: unknown) => {
-        settle(entry, () => entry.reject(new NetworkError(entry.spec.operation, err)));
+        const netErr = new NetworkError(entry.spec.operation, err);
+        logFailure(netErr, entry.spec);
+        settle(entry, () => entry.reject(netErr));
       },
     );
   }
@@ -572,7 +638,9 @@ export function createDiscordRestClient(options: DiscordRestClientOptions): Disc
     const retryable = status === 429 || (status === 503 && retryAfterHeader != null);
 
     if (!retryable) {
-      settle(entry, () => entry.reject(classifyHttpError(op, status, bodyText)));
+      const err = classifyHttpError(op, status, bodyText);
+      logFailure(err, entry.spec);
+      settle(entry, () => entry.reject(err));
       return;
     }
 
@@ -592,10 +660,29 @@ export function createDiscordRestClient(options: DiscordRestClientOptions): Disc
     const jitter = policy.jitterMaxMs > 0 ? Math.floor(Math.random() * policy.jitterMaxMs) : 0;
     const waitMs = Math.ceil((delaySec ?? policy.default429DelaySec) * 1000) + jitter;
 
+    // Structured retry visibility: one debug record per scheduled backoff so
+    // rate-limit pressure is queryable before it becomes a terminal failure.
+    if (logger) {
+      try {
+        logger.debug("discord.rest.backoff", {
+          operation: op,
+          status,
+          route_key: entry.spec.routeKey,
+          attempts: entry.attempts,
+          wait_ms: waitMs,
+          global,
+        });
+      } catch {
+        // Logging must never break request settlement.
+      }
+    }
+
     const budgetExhausted =
       entry.attempts >= policy.maxAttempts || entry.totalWaitedMs + waitMs > policy.maxTotalWaitMs;
     if (budgetExhausted) {
-      settle(entry, () => entry.reject(new RateLimitedError(op, status, bodyText)));
+      const err = new RateLimitedError(op, status, bodyText);
+      logFailure(err, entry.spec);
+      settle(entry, () => entry.reject(err));
       return;
     }
 
@@ -608,7 +695,9 @@ export function createDiscordRestClient(options: DiscordRestClientOptions): Disc
       const key = resolveKey(entry.spec);
       const s = buckets.get(key);
       if (!s) {
-        entry.reject(new RateLimitedError(op, status, bodyText));
+        const err = new RateLimitedError(op, status, bodyText);
+        logFailure(err, entry.spec);
+        entry.reject(err);
         return;
       }
       s.remaining = 0;

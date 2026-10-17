@@ -1,5 +1,5 @@
 import { createDiscordRestClient, discordRestRateLimitPolicy } from "./rest-client";
-import type { DiscordRestClient, DiscordRestPriority } from "./rest-client";
+import type { DiscordRestClient, DiscordRestLogger, DiscordRestPriority } from "./rest-client";
 import type {
   DiscordChannelMessagesQuery,
   DiscordEditMessageBody,
@@ -11,6 +11,11 @@ export interface DiscordRestTransportOptions {
   /** Injected for tests; defaults to `globalThis.fetch`. */
   readonly fetchFn?: typeof fetch;
   readonly apiBase?: string;
+  /**
+   * Structured-logger sink for REST failures (`discord.rest.*` records;
+   * daemon `Logger` is structurally compatible). Optional.
+   */
+  readonly logger?: DiscordRestLogger;
 }
 
 // Re-exported for tests and observability (the retry budget now lives in the
@@ -69,6 +74,7 @@ export function createDiscordRestTransport(
     botToken: options.botToken,
     ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
     ...(options.apiBase ? { apiBase: options.apiBase } : {}),
+    ...(options.logger ? { logger: options.logger } : {}),
   });
 
   function op(

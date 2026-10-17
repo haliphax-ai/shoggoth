@@ -240,7 +240,10 @@ export async function startDiscordMessagingIfConfigured(
   });
   const bus = createAgentToAgentBus();
   const capabilities = discordCapabilityDescriptor();
-  const transport = createDiscordRestTransport({ botToken: token });
+  // The bridge logger (daemon `Logger`-compatible) is threaded into the REST
+  // client so request failures land as structured `discord.rest.*` records
+  // instead of raw exception text (jq-queryable via `builtin-logs`).
+  const transport = createDiscordRestTransport({ botToken: token, logger: opts.logger });
 
   const sessionToChannel = (sessionId: string): string | undefined =>
     discordOutboundChannelBySession.get(sessionId) ??

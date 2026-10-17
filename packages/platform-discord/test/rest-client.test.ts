@@ -10,6 +10,7 @@ import {
   ServerError,
   QueueTimeoutError,
   NetworkError,
+  type DiscordRestLogger,
 } from "../src/rest-client";
 
 type FetchCall = { url: string; init: RequestInit };
@@ -472,6 +473,139 @@ describe("Discord REST client", () => {
         );
       assert.ok(err instanceof ServerError);
       assert.equal(calls.length, 1);
+    });
+  });
+
+  describe("structured error logging", () => {
+    interface LogRecord {
+      level: string;
+      msg: string;
+      fields: Record<string, unknown>;
+    }
+
+    function logRecorder(): { logger: DiscordRestLogger; records: LogRecord[] } {
+      const records: LogRecord[] = [];
+      const push =
+        (level: string) =>
+        (msg: string, fields?: Record<string, unknown>): void => {
+          records.push({ level, msg, fields: fields ?? {} });
+        };
+      return {
+        logger: { debug: push("debug"), warn: push("warn"), error: push("error") },
+        records,
+      };
+    }
+
+    const spec = {
+      operation: "createMessage",
+      method: "POST",
+      path: "/channels/c/messages",
+      routeKey: "POST /channels/c/messages",
+    };
+
+    it("emits a structured record for terminal HTTP failures", async () => {
+      const { fetchFn } = recorder(() => new Response("boom", { status: 404 }));
+      const { logger, records } = logRecorder();
+      const c = createDiscordRestClient({ botToken: "tok", fetchFn, logger });
+      await c.request(spec).catch(() => undefined);
+      const rec = records.find((r) => r.msg === "discord.rest.request_failed");
+      assert.ok(rec, `expected a request_failed record, got ${JSON.stringify(records)}`);
+      assert.equal(rec.level, "warn");
+      assert.equal(rec.fields.operation, "createMessage");
+      assert.equal(rec.fields.kind, "not_found");
+      assert.equal(rec.fields.status, 404);
+      assert.equal(rec.fields.route_key, "POST /channels/c/messages");
+      assert.equal(rec.fields.method, "POST");
+      assert.match(String(rec.fields.error), /404/);
+    });
+
+    it("emits a structured record for network failures", async () => {
+      const fetchFn: typeof fetch = async () => {
+        throw new Error("ECONNREFUSED");
+      };
+      const { logger, records } = logRecorder();
+      const c = createDiscordRestClient({ botToken: "tok", fetchFn, logger });
+      await c.request(spec).catch(() => undefined);
+      const rec = records.find((r) => r.msg === "discord.rest.request_failed");
+      assert.ok(rec);
+      assert.equal(rec.fields.kind, "network");
+      assert.equal(rec.fields.status, null);
+      assert.match(String(rec.fields.error), /ECONNREFUSED/);
+    });
+
+    it("emits backoff debug records and a failure record when 429 retries exhaust", async () => {
+      const { fetchFn } = recorder(() =>
+        json({ retry_after: 0.001, message: "rate limited" }, 429),
+      );
+      const { logger, records } = logRecorder();
+      const c = createDiscordRestClient({ botToken: "tok", fetchFn, logger });
+      await c.request(spec).catch(() => undefined);
+      const backoffs = records.filter((r) => r.msg === "discord.rest.backoff");
+      assert.equal(backoffs.length, discordRestRateLimitPolicy.maxAttempts);
+      assert.equal(backoffs[0]!.level, "debug");
+      assert.equal(backoffs[0]!.fields.status, 429);
+      assert.notEqual(backoffs[0]!.fields.wait_ms, undefined);
+      const rec = records.find((r) => r.msg === "discord.rest.request_failed");
+      assert.ok(rec);
+      assert.equal(rec.fields.kind, "rate_limited");
+      assert.equal(rec.fields.status, 429);
+    });
+
+    it("emits a structured record for queue deadline rejections", async () => {
+      const { fetchFn } = recorder(() =>
+        json(
+          { id: "seed" },
+          200,
+          okHeaders({ "X-RateLimit-Remaining": "0", "X-RateLimit-Reset-After": "5" }),
+        ),
+      );
+      const { logger, records } = logRecorder();
+      const c = createDiscordRestClient({
+        botToken: "tok",
+        fetchFn,
+        logger,
+        policy: { coalesceDeadlineMs: 30 },
+      });
+      // Seed the bucket with an exhausted window so the edit below must queue.
+      await c.request({
+        operation: "editMessage",
+        method: "PATCH",
+        path: "/channels/ch1/messages/m0",
+        routeKey: "PATCH /channels/ch1/messages/:id",
+      });
+      await c
+        .request({
+          operation: "editMessage",
+          method: "PATCH",
+          path: "/channels/ch1/messages/m1",
+          routeKey: "PATCH /channels/ch1/messages/:id",
+          coalesceKey: "edit:ch1:m1",
+        })
+        .catch(() => undefined);
+      const rec = records.find((r) => r.msg === "discord.rest.request_failed");
+      assert.ok(rec, `expected a request_failed record, got ${JSON.stringify(records)}`);
+      assert.equal(rec.fields.kind, "queue_timeout");
+      assert.equal(rec.fields.operation, "editMessage");
+    });
+
+    it("still rejects with typed errors when no logger is configured", async () => {
+      const { fetchFn } = recorder(() => new Response("boom", { status: 404 }));
+      const c = createDiscordRestClient({ botToken: "tok", fetchFn });
+      const err = await c.request(spec).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      assert.ok(err instanceof NotFoundError);
+    });
+
+    it("serializes DiscordRestError as structured JSON (toJSON)", () => {
+      const err = new NotFoundError("getMessage", 404, '{"message":"Unknown Message"}');
+      const j = JSON.parse(JSON.stringify(err)) as Record<string, unknown>;
+      assert.equal(j.name, "NotFoundError");
+      assert.equal(j.kind, "not_found");
+      assert.equal(j.operation, "getMessage");
+      assert.equal(j.status, 404);
+      assert.match(String(j.message), /404/);
     });
   });
 });
