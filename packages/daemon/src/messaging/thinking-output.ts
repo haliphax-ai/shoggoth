@@ -2,26 +2,82 @@ import { renderThinkingBlockquote } from "@shoggoth/shared";
 
 export type ThinkingOutputKind = "text" | "thinking";
 
+/** A streaming event scoped to one tool-loop round. */
+export interface ThinkingStreamEvent {
+  /** The round's accumulated content so far — never glued to other rounds. */
+  readonly accumulated: string;
+  /** Zero-based index of the tool-loop round this accumulation belongs to. */
+  readonly round: number;
+}
+
+/** A settled tool-loop round with its authoritative final prose content. */
+export interface ThinkingRoundEndEvent {
+  readonly round: number;
+  /** The round's final content as recorded in the transcript (may be blank). */
+  readonly content: string;
+}
+
 interface OutputPart {
   kind: ThinkingOutputKind;
   text: string;
+  /** Tool-loop round that produced this part; round boundaries split parts. */
+  round: number;
 }
+
+/**
+ * Strips leading padding so a quote block never opens with a blank `> ` line
+ * (leading newline) or a doubled space after the 💭 marker (leading space).
+ */
+const quoteBody = (text: string): string => text.replace(/^\s+/, "");
 
 /** Tracks cumulative model deltas as ordered text/thinking segments for display. */
 export function createThinkingOutput() {
   const parts: OutputPart[] = [];
-  const snapshots: Record<ThinkingOutputKind, string> = { text: "", thinking: "" };
+  /** The current round's accumulated prose stream (divergence base). */
+  let textRoundStream = "";
+  /** The round the prose stream currently belongs to (-1: none yet). */
+  let textRound = -1;
+  /**
+   * Index in the turn stream where the current round's contribution starts.
+   * The contribution carries the blank-line separator when prior rounds
+   * already contributed, so dropping or rewriting the round is exact.
+   */
+  let textRoundBase = 0;
+  /**
+   * Whole-turn streams. `text` joins rounds with the transcript's blank-line
+   * separator so it maps 1:1 onto the delivered turn prose; `thinking`
+   * concatenates every reasoning block of the turn.
+   */
+  let turnText = "";
+  let turnThinking = "";
+
+  const lastPartIndex = (kind: ThinkingOutputKind): number => {
+    for (let index = parts.length - 1; index >= 0; index -= 1) {
+      if (parts[index].kind === kind) return index;
+    }
+    return -1;
+  };
+
+  const nextTextPartAfter = (index: number): number | undefined => {
+    for (let next = index + 1; next < parts.length; next += 1) {
+      if (parts[next].kind === "text") return next;
+    }
+    return undefined;
+  };
 
   /**
-   * Truncates the `kind` stream inside `parts` to its first `keep`
+   * Truncates the `kind` stream inside `parts` (only parts from `minRound`
+   * on — earlier rounds are settled history) to its first `keep`
    * characters. The parts of one kind concatenate (in order) to that kind's
-   * previous snapshot, so this cuts at the right offset, trims the part
-   * holding the cut, and drops every part of this kind past it. Returns the
-   * index of the trimmed part, or -1 when this kind has no parts (or the cut
-   * lands exactly at its end — no part needs trimming).
+   * stream, so this cuts at the right offset, trims the part holding the
+   * cut, and drops every part of this kind past it. Returns the index of
+   * the trimmed part, or -1 when this kind has no matching parts (or the
+   * cut lands exactly at its end — no part needs trimming).
    */
-  const spliceStream = (kind: ThinkingOutputKind, keep: number): number => {
-    const indices = parts.flatMap((part, index) => (part.kind === kind ? [index] : []));
+  const spliceStream = (kind: ThinkingOutputKind, keep: number, minRound: number): number => {
+    const indices = parts.flatMap((part, index) =>
+      part.kind === kind && part.round >= minRound ? [index] : [],
+    );
     let remaining = keep;
     let cutOrdinal = indices.length;
     for (let ordinal = 0; ordinal < indices.length; ordinal += 1) {
@@ -39,44 +95,153 @@ export function createThinkingOutput() {
     return cutOrdinal < indices.length ? indices[cutOrdinal] : -1;
   };
 
-  const update = (kind: ThinkingOutputKind, accumulated: string): string => {
-    const previous = snapshots[kind];
-    // The accumulated text is normally the previous snapshot plus a new
-    // suffix (append-only stream). When it diverges — a round restart after
-    // steering/failover whose final content differs from its streamed tail —
-    // only the shared-prefix remainder is new: the whole accumulated text
-    // must NEVER be re-pushed, or every earlier segment duplicates into the
-    // rendered display.
+  const dropRoundText = (round: number): void => {
+    for (let index = parts.length - 1; index >= 0; index -= 1) {
+      const part = parts[index];
+      if (part.kind === "text" && part.round === round) parts.splice(index, 1);
+    }
+    turnText = turnText.slice(0, textRoundBase);
+    textRoundStream = "";
+  };
+
+  /** Opens the prose stream for a new round; the separator materializes lazily. */
+  const enterRoundText = (round: number): void => {
+    textRound = round;
+    textRoundStream = "";
+    textRoundBase = turnText.length;
+  };
+
+  /** Writes the round's stream into the turn text (separator included). */
+  const commitRoundText = (accumulated: string): void => {
+    textRoundStream = accumulated;
+    turnText =
+      turnText.slice(0, textRoundBase) + (textRoundBase > 0 ? `\n\n${accumulated}` : accumulated);
+  };
+
+  const updateText = ({ accumulated, round }: ThinkingStreamEvent): string => {
+    if (round !== textRound) enterRoundText(round);
+    // The accumulated text is normally the round's previous stream plus a new
+    // suffix (append-only stream). When it diverges — a provider retry /
+    // failover hop re-fires the round from scratch — only the shared-prefix
+    // remainder is new: the whole accumulated text must NEVER be re-pushed,
+    // or every earlier segment duplicates into the rendered display.
+    const previous = textRoundStream;
     let shared = 0;
     const max = Math.min(previous.length, accumulated.length);
     while (shared < max && previous[shared] === accumulated[shared]) shared += 1;
     const diverged = shared < previous.length;
-    snapshots[kind] = accumulated;
     if (!diverged) {
       if (accumulated.length > previous.length) {
         const delta = accumulated.slice(shared);
+        textRoundStream = accumulated;
+        turnText += delta;
         const last = parts.at(-1);
-        if (last?.kind === kind) last.text += delta;
-        else parts.push({ kind, text: delta });
+        // Prose continues its own round's part; a round boundary always
+        // opens a fresh part so the round separator never lands mid-part,
+        // and prose resuming after slipstreamed thinking opens a fresh part.
+        if (last?.kind === "text" && last.round === round) last.text += delta;
+        else parts.push({ kind: "text", text: delta, round });
       }
       return render();
     }
-    // Diverged: splice this stream's parts back to the shared prefix and
-    // merge the remainder into the part holding the cut point. A stream
-    // continuation must NOT open a new part: parts are joined with a
-    // formatting blank line, which would otherwise land mid-word at the
-    // divergence point (and give a restarted thinking tail its own spurious
-    // quoted block). Only a genuine restart (no cut part) opens one.
-    const cutIndex = spliceStream(kind, shared);
+    // Diverged within the round. An EMPTY remainder must never splice the
+    // display to zero: the superseded tail stays visible until a non-empty
+    // replacement arrives (or endRound confirms the round's final content).
     const remainder = accumulated.slice(shared);
     if (!remainder) return render();
+    commitRoundText(accumulated);
+    // A diverged continuation merges into the part holding the cut point —
+    // opening a new part would split the prose with a blank line mid-word.
+    // Only a genuine restart (no cut part) opens one.
+    const cutIndex = spliceStream("text", shared, round);
     if (cutIndex >= 0) parts[cutIndex].text += remainder;
-    else parts.push({ kind, text: remainder.replace(/^[^\S\n]*\n+/, "") });
+    else parts.push({ kind: "text", text: remainder, round });
+    return render();
+  };
+
+  const updateThinking = ({ accumulated, round }: ThinkingStreamEvent): string => {
+    // Reasoning streams key off the WHOLE turn's accumulated thinking: a
+    // later round whose reasoning continues the previous round's text is a
+    // full-prefix continuation of the same thought, not a divergence.
+    const previous = turnThinking;
+    let shared = 0;
+    const max = Math.min(previous.length, accumulated.length);
+    while (shared < max && previous[shared] === accumulated[shared]) shared += 1;
+    const diverged = shared < previous.length;
+    if (!diverged) {
+      if (accumulated.length > previous.length) {
+        const delta = accumulated.slice(shared);
+        turnThinking = accumulated;
+        // A continuation appends to the LAST quote block even when prose
+        // parts arrived in between — interleaved delivery must never split
+        // one continuous thought into two 💭 blocks.
+        const lastIdx = lastPartIndex("thinking");
+        if (lastIdx >= 0) parts[lastIdx].text += delta;
+        else parts.push({ kind: "thinking", text: delta, round });
+      }
+      return render();
+    }
+    // Diverged: a restarted reasoning tail. An EMPTY remainder keeps the
+    // superseded quote visible — never splice it to zero mid-turn.
+    const remainder = accumulated.slice(shared);
+    if (!remainder) return render();
+    const cutIndex = spliceStream("thinking", shared, Number.NEGATIVE_INFINITY);
+    if (cutIndex >= 0) parts[cutIndex].text += remainder;
+    else parts.push({ kind: "thinking", text: remainder, round });
+    return render();
+  };
+
+  /**
+   * Reconciles the round's streamed prose tail with its authoritative final
+   * content and confirms the round boundary: a blank final content drops the
+   * round's streamed tail from the display (the turn record carries no such
+   * segment), and a settled round with content but no streamed deltas enters
+   * the display as its own segment.
+   */
+  const endRound = ({ round, content }: ThinkingRoundEndEvent): string => {
+    if (textRound === round) {
+      if (!content) {
+        dropRoundText(round);
+        return render();
+      }
+      const previous = textRoundStream;
+      let shared = 0;
+      const max = Math.min(previous.length, content.length);
+      while (shared < max && previous[shared] === content[shared]) shared += 1;
+      const diverged = shared < previous.length;
+      const remainder = content.slice(shared);
+      commitRoundText(content);
+      if (!diverged) {
+        // The final content extends the streamed tail (late deltas were
+        // recorded in the transcript only): append to the round's part.
+        if (remainder) {
+          const lastIdx = lastPartIndex("text");
+          if (lastIdx >= 0 && parts[lastIdx].round === round) parts[lastIdx].text += remainder;
+          else parts.push({ kind: "text", text: remainder, round });
+        }
+      } else if (remainder) {
+        const cutIndex = spliceStream("text", shared, round);
+        if (cutIndex >= 0) parts[cutIndex].text += remainder;
+        else parts.push({ kind: "text", text: remainder, round });
+      } else {
+        // The final content is a trimmed prefix of the streamed tail — the
+        // round boundary confirms the restart, so the junk tail is cut.
+        spliceStream("text", shared, round);
+      }
+      return render();
+    }
+    if (content && round > textRound) {
+      // The round produced prose without streaming deltas (or endRound ran
+      // ahead of the display stream): record it as its own round segment.
+      enterRoundText(round);
+      commitRoundText(content);
+      parts.push({ kind: "text", text: content, round });
+    }
     return render();
   };
 
   const render = (finalText?: string): string => {
-    const snapshot = snapshots.text;
+    const snapshot = turnText;
     const snapshotStart = finalText === undefined || !snapshot ? 0 : finalText.indexOf(snapshot);
     if (finalText !== undefined && snapshotStart < 0) {
       // The streamed display no longer matches the turn's final prose (a
@@ -85,8 +250,9 @@ export function createThinkingOutput() {
       // above it. Slicing finalText by the streamed parts' offsets here
       // would cut words apart and re-insert blank lines mid-word.
       const quotes = parts
-        .filter((part) => part.kind === "thinking" && part.text)
-        .map((part) => renderThinkingBlockquote(part.text));
+        .map((part) => (part.kind === "thinking" ? quoteBody(part.text) : ""))
+        .filter((body) => body !== "")
+        .map(renderThinkingBlockquote);
       return quotes.length > 0 ? [...quotes, finalText].join("\n\n") : finalText;
     }
     // When the streamed snapshot is found inside finalText, the parts map
@@ -116,16 +282,22 @@ export function createThinkingOutput() {
                 textOffset,
                 index === lastTextIndex ? undefined : textOffset + part.text.length,
               );
-        textOffset =
-          region !== undefined && index === lastTextIndex
-            ? region.length
-            : textOffset + part.text.length;
+        if (region !== undefined) {
+          textOffset = index === lastTextIndex ? region.length : textOffset + part.text.length;
+          // A round boundary between prose parts carries the transcript's
+          // blank-line round separator — step the region offset past it.
+          // Same-round parts (prose split by slipstreamed thinking) have no
+          // separator in the region.
+          const nextText = index === lastTextIndex ? undefined : nextTextPartAfter(index);
+          if (nextText !== undefined && parts[nextText].round !== part.round) textOffset += 2;
+        }
         if (prose) rendered.push(prose);
       } else if (part.text) {
-        rendered.push(renderThinkingBlockquote(part.text));
+        const body = quoteBody(part.text);
+        if (body) rendered.push(renderThinkingBlockquote(body));
       }
     }
-    if (region !== undefined && parts.every((part) => part.kind === "thinking")) {
+    if (region !== undefined && parts.every((part) => part.kind === "thinking" || !part.text)) {
       rendered.push(region);
     } else if (region !== undefined && textOffset < region.length) {
       rendered.push(region.slice(textOffset));
@@ -135,8 +307,9 @@ export function createThinkingOutput() {
   };
 
   return {
-    onText: (accumulated: string) => update("text", accumulated),
-    onThinking: (accumulated: string) => update("thinking", accumulated),
+    onText: (ev: ThinkingStreamEvent) => updateText(ev),
+    onThinking: (ev: ThinkingStreamEvent) => updateThinking(ev),
+    endRound: (ev: ThinkingRoundEndEvent) => endRound(ev),
     render,
   };
 }

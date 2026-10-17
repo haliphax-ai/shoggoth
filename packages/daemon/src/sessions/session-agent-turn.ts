@@ -56,6 +56,9 @@ import {
 } from "./transcript-to-chat";
 import {
   createSessionToolLoopModelClient,
+  type ModelRoundEndEvent,
+  type ModelTextStreamEvent,
+  type ModelThinkingDeltaEvent,
   type SessionToolLoopFailoverState,
   type SessionToolLoopModelClient,
 } from "./session-tool-loop-model-client";
@@ -105,7 +108,10 @@ export interface ExecuteSessionAgentTurnInput {
   readonly resolveMcpContext: (sessionId: string) => Promise<SessionMcpToolContext>;
   readonly stream?: {
     readonly streamModel: boolean;
-    readonly onModelTextDelta?: (displayText: string) => void | Promise<void>;
+    /** The current round's prose stream (per-round, not glued to prior rounds). */
+    readonly onModelTextDelta?: (ev: ModelTextStreamEvent) => void | Promise<void>;
+    /** A round settled: its authoritative final prose content for display. */
+    readonly onModelRoundEnd?: (ev: ModelRoundEndEvent) => void;
   };
   /** When set, this is a minimal context turn — truncate transcript to tail messages. */
   readonly minimalContext?: {
@@ -120,7 +126,7 @@ export interface ExecuteSessionAgentTurnInput {
   /** Optional turn lifecycle events for the status bar / external observers. */
   readonly events?: {
     /** Reasoning/thinking content is streaming from the model. */
-    readonly onThinkingDelta?: (accumulated: string) => void;
+    readonly onThinkingDelta?: (ev: ModelThinkingDeltaEvent) => void;
     readonly onToolCall?: (ev: ToolCallEvent) => void;
     /** A HITL approval row was queued for a tool call (⏸️). */
     readonly onHitlQueued?: (call: { name: string; argsJson: string }) => void;
@@ -465,6 +471,7 @@ export async function executeSessionAgentTurn(
     turnAbortSignal,
     streamModel: Boolean(input.stream?.streamModel),
     onModelTextDelta: input.stream?.onModelTextDelta,
+    onModelRoundEnd: input.stream?.onModelRoundEnd,
     onThinkingDelta: input.events?.onThinkingDelta,
     onCompaction: input.events?.onCompaction,
     onUsageDelta: (delta) => {
