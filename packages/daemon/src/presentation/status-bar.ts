@@ -46,6 +46,9 @@ export interface StatusBarSnapshot {
   /** Unfired timer count for the session — queued and active timers as one
    *  cumulative sum. Absent when never seeded. */
   readonly timers?: number;
+  /** Live background-exec notify handle count for the session. Absent when
+   *  never seeded. */
+  readonly notifies?: number;
 }
 
 /** Platform-supplied sink: applies the rendered bar line to the in-flight message. */
@@ -64,6 +67,7 @@ export interface TurnStatusBar {
     compactions: number;
     subagents?: { total: number; persistent: number };
     timers?: number;
+    notifies?: number;
   }): Promise<void>;
   markThinking(): void; // 🧠
   markProse(): void; // 💬
@@ -77,6 +81,8 @@ export interface TurnStatusBar {
   setSubagents(counts: { total: number; persistent: number }): void;
   /** Live timer count refresh (timers queued/cancelled mid-turn). */
   setTimers(count: number): void;
+  /** Live exec-notify handle refresh (handles registered/resolved mid-turn). */
+  setNotifies(count: number): void;
   /** Terminal render (✅/🛑/❌); after this the bar is frozen and timers cleared. */
   finish(outcome: "finished" | "aborted" | "failed"): Promise<void>;
   /** Abandon without a terminal render (e.g. turn dispatch failed before delivery). */
@@ -104,6 +110,7 @@ export function createTurnStatusBar(opts: {
       !cfg.toolCallsEnabled &&
       !cfg.subagentsEnabled &&
       !cfg.timersEnabled &&
+      !cfg.notifyEnabled &&
       !cfg.contextWindowEnabled &&
       !cfg.compactionsEnabled);
 
@@ -114,6 +121,7 @@ export function createTurnStatusBar(opts: {
   let context: { currentTokens: number; totalTokens?: number } | undefined;
   let subagents: { total: number; persistent: number } | undefined;
   let timers: number | undefined;
+  let notifies: number | undefined;
   let totalTools = 0;
   let last:
     | {
@@ -139,6 +147,7 @@ export function createTurnStatusBar(opts: {
       compactions,
       ...(subagents ? { subagents } : {}),
       ...(timers !== undefined ? { timers } : {}),
+      ...(notifies !== undefined ? { notifies } : {}),
     };
   }
 
@@ -176,6 +185,7 @@ export function createTurnStatusBar(opts: {
       context = input.context;
       subagents = input.subagents;
       timers = input.timers;
+      notifies = input.notifies;
       totalTools = 0;
       last = undefined;
       phase = "starting";
@@ -254,6 +264,12 @@ export function createTurnStatusBar(opts: {
       scheduleRender();
     },
 
+    setNotifies(count) {
+      if (finished) return;
+      notifies = count;
+      scheduleRender();
+    },
+
     async finish(outcome) {
       if (finished) return;
       finished = true;
@@ -295,6 +311,9 @@ export interface StatusBarStats {
    *  fired = 0 — queued and active timers as one cumulative sum, the same
    *  state the builtin timer-list reads). */
   readonly timers?: number;
+  /** Live exec-notify handle count for the session (the `exec_notifies`
+   *  table rows with fired = 0). */
+  readonly notifies?: number;
 }
 
 /** `<10K` → plain integer with thousands separators; `≥10K` → one-decimal K; `≥1M` → one-decimal M. */
@@ -352,7 +371,8 @@ export function getStatusBarStats(db: Database.Database, sessionId: string): Sta
   const compactions = row?.compaction_count ?? 0;
   const subagents = getSessionSubagentCounts(db, sessionId);
   const timers = getSessionActiveTimerCount(db, sessionId);
-  if (currentTokens <= 0) return { sequence, compactions, subagents, timers };
+  const notifies = getSessionActiveNotifyCount(db, sessionId);
+  if (currentTokens <= 0) return { sequence, compactions, subagents, timers, notifies };
   // Known context window: the session_stats gauge first, then model metadata
   // for the session's selected model; unknown (omitted) when neither knows.
   let windowTokens = row?.context_window_tokens ?? 0;
@@ -362,6 +382,7 @@ export function getStatusBarStats(db: Database.Database, sessionId: string): Sta
     compactions,
     subagents,
     timers,
+    notifies,
     context: windowTokens > 0 ? { currentTokens, totalTokens: windowTokens } : { currentTokens },
   };
 }
@@ -402,6 +423,15 @@ export function getSessionActiveTimerCount(db: Database.Database, sessionId: str
   return row.cnt;
 }
 
+/** Live background-exec notify handle count for the session — the same state
+ *  the exec-notify scheduler counts (`exec_notifies` rows with fired = 0). */
+export function getSessionActiveNotifyCount(db: Database.Database, sessionId: string): number {
+  const row = db
+    .prepare("SELECT COUNT(*) AS cnt FROM exec_notifies WHERE session_id = ? AND fired = 0")
+    .get(sessionId) as { cnt: number };
+  return row.cnt;
+}
+
 /** One tracker per turn: the live bar and the terminal bar are the same
  *  tracker's snapshots rendered by the same injected renderer — the only
  *  difference between live and terminal is the phase (emoji). The engine
@@ -434,6 +464,9 @@ export interface TurnStatusBarTracker {
   /** A timer was queued or cancelled mid-turn: fresh unfired count for the
    *  section (queued and active timers as one cumulative sum). */
   onTimersChanged?: (count: number) => void;
+  /** An exec-notify handle was registered or resolved mid-turn: fresh live
+   *  handle count for the section. */
+  onNotifiesChanged?: (count: number) => void;
   /** A mid-turn compaction completed. */
   onCompaction?: () => void;
   /** A model call reported provider usage: currentTokens is that call's
@@ -482,6 +515,7 @@ export function createStatusBarTurnTracker(opts: {
     ...(opts.stats.context ? { context: opts.stats.context } : {}),
     ...(opts.stats.subagents ? { subagents: opts.stats.subagents } : {}),
     ...(opts.stats.timers !== undefined ? { timers: opts.stats.timers } : {}),
+    ...(opts.stats.notifies !== undefined ? { notifies: opts.stats.notifies } : {}),
   });
 
   return {
@@ -509,6 +543,7 @@ export function createStatusBarTurnTracker(opts: {
     onHitlQueued: (call) => engine.markPaused({ name: call.name }),
     onSubagentsChanged: (counts) => engine.setSubagents(counts),
     onTimersChanged: (count) => engine.setTimers(count),
+    onNotifiesChanged: (count) => engine.setNotifies(count),
     onCompaction: () => engine.setCompactions(++compactions),
     onContextUpdate: (update) => engine.updateContext(update.currentTokens, update.totalTokens),
   };

@@ -311,6 +311,48 @@ describe("createTurnStatusBar", () => {
     expect(sink.setStatusBar.mock.calls.length).toBe(callsAfterFinish);
   });
 
+  it("carries the seeded exec-notify handle count into the snapshot", async () => {
+    const { bar, sink } = createBar();
+    await bar.start({ sequence: 27, compactions: 0, notifies: 2 });
+    const snap = sink.setStatusBar.mock.calls[0]![0] as StatusBarSnapshot;
+    expect(snap.notifies).toBe(2);
+  });
+
+  it("omits notifies from the snapshot when never seeded", async () => {
+    const { bar, sink } = createBar();
+    await bar.start({ sequence: 28, compactions: 0 });
+    const snap = sink.setStatusBar.mock.calls[0]![0] as StatusBarSnapshot;
+    expect(snap.notifies).toBeUndefined();
+  });
+
+  it("setNotifies updates the handle count mid-turn", async () => {
+    const { bar, sink } = createBar();
+    await bar.start({ sequence: 29, compactions: 0, notifies: 1 });
+    bar.setNotifies(2);
+    await vi.advanceTimersByTimeAsync(1000);
+    const last = sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot;
+    expect(last.notifies).toBe(2);
+  });
+
+  it("setNotifies seeds the section when it was never seeded at start", async () => {
+    const { bar, sink } = createBar();
+    await bar.start({ sequence: 30, compactions: 0 });
+    bar.setNotifies(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    const last = sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot;
+    expect(last.notifies).toBe(1);
+  });
+
+  it("setNotifies is a no-op after finish()", async () => {
+    const { bar, sink } = createBar();
+    await bar.start({ sequence: 31, compactions: 0, notifies: 1 });
+    await bar.finish("finished");
+    const callsAfterFinish = sink.setStatusBar.mock.calls.length;
+    bar.setNotifies(5);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(sink.setStatusBar.mock.calls.length).toBe(callsAfterFinish);
+  });
+
   it("finish() renders immediately and then freezes", async () => {
     const { bar, sink } = createBar();
     await bar.start({ sequence: 13, compactions: 0 });
@@ -603,6 +645,7 @@ describe("getStatusBarStats", () => {
       compactions: 0,
       subagents: { total: 0, persistent: 0 },
       timers: 0,
+      notifies: 0,
     });
   });
 
@@ -622,6 +665,17 @@ describe("getStatusBarStats", () => {
     insert.run("tm-b", "t1", "b", "2030-01-01T00:00:00Z", "b", 0);
     insert.run("tm-c", "t1", "c", "2030-01-01T00:00:00Z", "c", 1); // fired: not counted
     expect(getStatusBarStats(db, "t1").timers).toBe(2);
+  });
+
+  it("includes the live (unfired) exec-notify handle count for the session", () => {
+    createSessionStore(db).create({ id: "n1", workspacePath: tmp });
+    const insert = db.prepare(
+      "INSERT INTO exec_notifies (id, session_id, exec_session_id, command, fired) VALUES (?, ?, ?, ?, ?)",
+    );
+    insert.run("nh-a", "n1", "exec-a", "sleep 5", 0);
+    insert.run("nh-b", "n1", "exec-b", "sleep 9", 0);
+    insert.run("nh-c", "n1", "exec-c", "true", 1); // fired: not counted
+    expect(getStatusBarStats(db, "n1").notifies).toBe(2);
   });
 });
 
@@ -755,6 +809,25 @@ describe("createStatusBarTurnTracker", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     const lastSnap = render.mock.calls.at(-1)![0] as StatusBarSnapshot;
     expect(lastSnap.timers).toBe(1);
+  });
+
+  it("onNotifiesChanged feeds a mid-turn exec notify registration into the live bar", async () => {
+    // The handle was registered AFTER the bar was seeded from pre-turn stats,
+    // so the fresh count must reach the live snapshot during the same turn —
+    // not wait for the next turn's pre-turn stats.
+    const render = vi.fn((snap: StatusBarSnapshot) => `${snap.phase}#${snap.sequence}`);
+    const { tracker, sink } = createTracker({
+      render,
+      stats: { sequence: 1, compactions: 0, notifies: 0 },
+    });
+    tracker.attachSink(sink);
+    const startingSnap = render.mock.calls.at(-1)![0] as StatusBarSnapshot;
+    expect(startingSnap.notifies).toBe(0);
+
+    tracker.onNotifiesChanged?.(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    const lastSnap = render.mock.calls.at(-1)![0] as StatusBarSnapshot;
+    expect(lastSnap.notifies).toBe(1);
   });
 
   it("finish renders via the injected renderer, returns the line; only the phase differs from live", async () => {

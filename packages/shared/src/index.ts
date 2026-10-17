@@ -65,6 +65,7 @@ export {
   thinkingDisplaySchema,
   DEFAULT_SKILLS_CONFIG,
   DEFAULT_TOOL_CALL_TIMEOUT_MS,
+  DEFAULT_EXEC_MAX_YIELD_MS,
   DEFAULT_MAX_TTL_MS,
   resolveMaxTtlMs,
   clampTtlMs,

@@ -139,6 +139,9 @@ export interface ExecuteSessionAgentTurnInput {
     }) => void;
     /** A timer was queued or cancelled mid-turn: fresh unfired count (live bar). */
     readonly onTimersChanged?: (count: number) => void;
+    /** An exec-notify handle was registered or resolved mid-turn: fresh live
+     *  handle count (live bar). */
+    readonly onNotifiesChanged?: (count: number) => void;
   };
 }
 
@@ -579,6 +582,7 @@ export async function executeSessionAgentTurn(
           isSubagentSession: isSubagentSessionUrn(input.sessionId),
           onSubagentsChanged: input.events?.onSubagentsChanged,
           onTimersChanged: input.events?.onTimersChanged,
+          onNotifiesChanged: input.events?.onNotifiesChanged,
           imageBlockCodec,
           vault: vaultServiceRef.current,
         };

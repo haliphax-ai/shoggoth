@@ -75,6 +75,13 @@ export interface BuiltinToolContext {
    */
   readonly onTimersChanged?: (count: number) => void;
 
+  /**
+   * Notified after a background exec notify handle is registered or resolved
+   * mid-turn with the recomputed live handle count for this session (drives
+   * the live turn status bar).
+   */
+  readonly onNotifiesChanged?: (count: number) => void;
+
   /** Image block codec for the active model provider, or undefined when unsupported. */
   readonly imageBlockCodec?: ImageBlockCodec;
 

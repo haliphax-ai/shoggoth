@@ -8,19 +8,22 @@ Execute a command via the system shell. Returns combined or split stdout/stderr.
 
 ### Parameters
 
-| Param          | Type     | Required | Notes                                                                              |
-| -------------- | -------- | -------- | ---------------------------------------------------------------------------------- |
-| `argv`         | string[] | yes      | Command + arguments                                                                |
-| `timeout`      | number   | no       | Max milliseconds before SIGTERM → SIGKILL (default: 30000)                         |
-| `stdin`        | string   | no       | Written to stdin, then closed                                                      |
-| `workdir`      | string   | no       | Working directory (absolute or workspace-relative)                                 |
-| `env`          | object   | no       | Key-value pairs merged into process env                                            |
-| `splitStreams` | boolean  | no       | Return `stdout`/`stderr` separately (default: false → combined `output`)           |
-| `maxOutput`    | number   | no       | Max characters per stream. System cap: ~1 MB, default: ~200 KB                     |
-| `truncation`   | string   | no       | `"head"`, `"tail"` (default), or `"both"` — which end to keep                      |
-| `stdoutFile`   | string   | no       | Write stdout to this workspace-relative file instead of returning inline           |
-| `stderrFile`   | string   | no       | Write stderr to this workspace-relative file instead of returning inline           |
-| `outputFile`   | string   | no       | Write combined output to this file (mutually exclusive with stdoutFile/stderrFile) |
+| Param          | Type     | Required | Notes                                                                                                                          |
+| -------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `argv`         | string[] | yes      | Command + arguments                                                                                                            |
+| `timeout`      | number   | no       | Max milliseconds before SIGTERM → SIGKILL (default: 30000)                                                                     |
+| `stdin`        | string   | no       | Written to stdin, then closed                                                                                                  |
+| `workdir`      | string   | no       | Working directory (absolute or workspace-relative)                                                                             |
+| `env`          | object   | no       | Key-value pairs merged into process env                                                                                        |
+| `splitStreams` | boolean  | no       | Return `stdout`/`stderr` separately (default: false → combined `output`)                                                       |
+| `maxOutput`    | number   | no       | Max characters per stream. System cap: ~1 MB, default: ~200 KB                                                                 |
+| `truncation`   | string   | no       | `"head"`, `"tail"` (default), or `"both"` — which end to keep                                                                  |
+| `background`   | boolean  | no       | Start in the background immediately and return a session handle                                                                |
+| `yieldMs`      | number   | no       | Wait up to this many ms for completion; still running → background. Capped at 30 s (configurable via `runtime.execMaxYieldMs`) |
+| `notify`       | boolean  | no       | With `background`/`yieldMs`: notify the session when the process completes (default: true)                                     |
+| `stdoutFile`   | string   | no       | Write stdout to this workspace-relative file instead of returning inline                                                       |
+| `stderrFile`   | string   | no       | Write stderr to this workspace-relative file instead of returning inline                                                       |
+| `outputFile`   | string   | no       | Write combined output to this file (mutually exclusive with stdoutFile/stderrFile)                                             |
 
 ### Newline Preservation in argv Strings
 
@@ -197,7 +200,7 @@ Instead of returning output inline, you can write it to workspace files for late
 
 - `outputFile` writes combined stdout+stderr to a single file. Mutually exclusive with `stdoutFile`/`stderrFile`.
 - `stdoutFile` and `stderrFile` can be used together or separately. Non-redirected streams are returned inline.
-- File output is foreground-only — cannot be combined with `background` or `yieldMs`.
+- With `background`/`yieldMs`, output streams directly to the file(s) as it is produced (no size cap).
 - Files are created even if output is empty (zero-byte file).
 - Files are written even on non-zero exit codes.
 - Paths are validated to stay within the workspace boundary.
@@ -237,6 +240,27 @@ Reading the output file afterward:
 ```json
 { "tool": "builtin-read", "args": { "path": "tmp/ts-files.txt" } }
 ```
+
+## Background Execution & Completion Notifications
+
+Long-running commands don't have to block a turn:
+
+- `background: true` starts the process immediately and returns
+  `{ "status": "running", "sessionId": "exec-…", "pid": N }`.
+- `yieldMs: <ms>` waits up to that many milliseconds for the command to
+  finish; if it is still running, the same background handle is returned
+  (with `yielded: true` and any partial output). Values above the cap are
+  clamped to it, never ignored. The cap defaults to 30000 ms and is
+  configurable via `runtime.execMaxYieldMs` (or `SHOGGOTH_EXEC_MAX_YIELD_MS`).
+- `notify` (default `true`) registers the backgrounded call for a completion
+  notification: when the process exits, the session receives an
+  out-of-band turn carrying the exit code and the output — respecting the
+  call's output options (`splitStreams`, `maxOutput`/`truncation`, and
+  `stdoutFile`/`stderrFile`/`outputFile`) exactly as a blocking call would
+  have. Pass `notify: false` to opt out and rely on `builtin-poll` instead.
+- In-flight notify handles appear in the turn status bar after the timers
+  section (↩️ `N`); the toggle is `platforms.statusBar.notifyEnabled`
+  (default true).
 
 ## Tips
 

@@ -2,12 +2,15 @@
 // exec & poll handlers
 // ---------------------------------------------------------------------------
 
+import { randomUUID } from "node:crypto";
 import { toolExec, toolExecExtended, toolPoll } from "@shoggoth/os-exec";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
 import { resolveUserPath } from "../builtin-tool-registry";
 import { truncateToolOutput } from "./truncate-output";
 import { resolveVaultEnv } from "../../mcp/vault-env-resolve";
 import { parseAgentSessionUrn } from "@shoggoth/shared";
+import { resolveExecMaxYieldMs } from "../../config/effective-runtime";
+import { getExecNotifyScheduler, type ExecNotifyOptions } from "../../exec/exec-notify-scheduler";
 
 export function register(registry: BuiltinToolRegistry): void {
   registry.register("exec", execHandler);
@@ -17,6 +20,49 @@ export function register(registry: BuiltinToolRegistry): void {
 /** Effective root for exec: workingDirectory if set, else workspacePath. */
 function execCwd(ctx: BuiltinToolContext): string | undefined {
   return ctx.workingDirectory ?? undefined;
+}
+
+/**
+ * Clamp the requested yield window to the configured maximum
+ * (`runtime.execMaxYieldMs`, default 30 s). The requested window is honored
+ * up to the cap — never silently dropped (issue #478).
+ */
+function resolveYieldMs(
+  args: Record<string, unknown>,
+  ctx: BuiltinToolContext,
+): number | undefined {
+  if (typeof args.yieldMs !== "number") return undefined;
+  return Math.min(args.yieldMs, resolveExecMaxYieldMs(ctx.config));
+}
+
+/**
+ * Track a backgrounded exec for completion notification (the `notify` flag,
+ * default true). The handle delivers an OOB turn to the calling session when
+ * the subprocess finishes, and its live count drives the status bar section.
+ */
+function registerExecNotify(
+  ctx: BuiltinToolContext,
+  input: { execSessionId: string; pid: number; command: string; options: ExecNotifyOptions },
+): void {
+  const scheduler = getExecNotifyScheduler();
+  if (!scheduler) {
+    // No scheduler (e.g. bare test harness): the call simply goes untracked;
+    // polling still works.
+    return;
+  }
+  scheduler.register(
+    ctx.db,
+    {
+      id: randomUUID(),
+      sessionId: ctx.sessionId,
+      execSessionId: input.execSessionId,
+      pid: input.pid,
+      command: input.command,
+      options: input.options,
+    },
+    (execSessionId) => ctx.getProcessManager()?.get(execSessionId),
+  );
+  ctx.onNotifiesChanged?.(scheduler.countForSession(ctx.db, ctx.sessionId));
 }
 
 /** Resolve $vault: references in exec env vars, if vault is available. */
@@ -88,7 +134,7 @@ async function execHandlerInner(
             ? (args.truncation as "head" | "tail" | "both")
             : undefined,
         background: typeof args.background === "boolean" ? args.background : undefined,
-        yieldMs: typeof args.yieldMs === "number" ? args.yieldMs : undefined,
+        yieldMs: resolveYieldMs(args, ctx),
         stdoutFile: typeof args.stdoutFile === "string" ? args.stdoutFile : undefined,
         stderrFile: typeof args.stderrFile === "string" ? args.stderrFile : undefined,
         outputFile: typeof args.outputFile === "string" ? args.outputFile : undefined,
@@ -96,18 +142,37 @@ async function execHandlerInner(
       ctx.creds,
     );
     if (r.kind === "background") {
-      return {
-        resultJson: JSON.stringify({
-          status: "running",
-          sessionId: r.sessionId,
-          pid: r.pid,
-          yielded: r.yielded ?? false,
-          partialOutput: r.partialOutput,
-          stdoutFile: r.stdoutFile,
-          stderrFile: r.stderrFile,
-          outputFile: r.outputFile,
-        }),
+      const notify = typeof args.notify === "boolean" ? args.notify : true;
+      const bgResult: Record<string, unknown> = {
+        status: "running",
+        sessionId: r.sessionId,
+        pid: r.pid,
+        yielded: r.yielded ?? false,
+        partialOutput: r.partialOutput,
+        stdoutFile: r.stdoutFile,
+        stderrFile: r.stderrFile,
+        outputFile: r.outputFile,
       };
+      if (notify) {
+        registerExecNotify(ctx, {
+          execSessionId: r.sessionId,
+          pid: r.pid,
+          command,
+          options: {
+            splitStreams: typeof args.splitStreams === "boolean" ? args.splitStreams : undefined,
+            maxOutput: typeof args.maxOutput === "number" ? args.maxOutput : undefined,
+            truncation:
+              typeof args.truncation === "string"
+                ? (args.truncation as "head" | "tail" | "both")
+                : undefined,
+            stdoutFile: typeof args.stdoutFile === "string" ? args.stdoutFile : undefined,
+            stderrFile: typeof args.stderrFile === "string" ? args.stderrFile : undefined,
+            outputFile: typeof args.outputFile === "string" ? args.outputFile : undefined,
+          },
+        });
+        bgResult.notify = true;
+      }
+      return { resultJson: JSON.stringify(bgResult) };
     }
     // File output — return paths, not content
     if (r.outputFile) {

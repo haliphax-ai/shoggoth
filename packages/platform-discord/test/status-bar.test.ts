@@ -265,6 +265,33 @@ describe("renderDiscordStatusBar", () => {
     expect(line.indexOf("🕵️")).toBeLessThan(line.indexOf("⏰"));
   });
 
+  it("renders the exec-notify handle count with the back-arrow emoji", () => {
+    const line = renderDiscordStatusBar(snap({ notifies: 2 }), defaultCfg);
+    expect(line).toContain("↩️");
+    expect(line).toContain("`2`");
+  });
+
+  it("omits the notify section when the snapshot has no count", () => {
+    const line = renderDiscordStatusBar(snap(), defaultCfg);
+    expect(line).not.toContain("↩️");
+  });
+
+  it("omits the notify section when the count is zero", () => {
+    const line = renderDiscordStatusBar(snap({ notifies: 0 }), defaultCfg);
+    expect(line).not.toContain("↩️");
+  });
+
+  it("honors the notifyEnabled toggle to omit the section", () => {
+    const cfg: ResolvedStatusBarConfig = { ...defaultCfg, notifyEnabled: false };
+    const line = renderDiscordStatusBar(snap({ notifies: 3 }), cfg);
+    expect(line).not.toContain("↩️");
+  });
+
+  it("places the notify section after the timer section", () => {
+    const line = renderDiscordStatusBar(snap({ timers: 2, notifies: 1 }), defaultCfg);
+    expect(line.indexOf("⏰")).toBeLessThan(line.indexOf("↩️"));
+  });
+
   it("honors per-section config toggles to omit sections", () => {
     const cfg: ResolvedStatusBarConfig = {
       ...defaultCfg,

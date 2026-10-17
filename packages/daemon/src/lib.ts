@@ -255,6 +255,7 @@ export {
   getStatusBarStats,
   getSessionSubagentCounts,
   getSessionActiveTimerCount,
+  getSessionActiveNotifyCount,
   formatTokens,
   type TurnStatusBar,
   type TurnStatusBarTracker,

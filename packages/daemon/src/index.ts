@@ -121,6 +121,8 @@ import { TimerScheduler } from "./timers/timer-scheduler";
 import { deliverTimerMessage } from "./timers/timer-delivery";
 import { buildWorkflowTurnBanner } from "./messaging/oob-turn-banner";
 import { setTimerScheduler } from "./sessions/builtin-handlers/timer-handler";
+import { ExecNotifyScheduler, setExecNotifyScheduler } from "./exec/exec-notify-scheduler";
+import { deliverExecNotifyMessage } from "./exec/exec-notify-delivery";
 import {
   ShoggothPluginSystem,
   loadAllPluginsFromConfig,
@@ -423,6 +425,22 @@ async function initTimerScheduler(db: ReturnType<typeof openStateDb>) {
 
   return () => {
     timerScheduler.shutdown();
+  };
+}
+
+/**
+ * Initialise the exec notify scheduler (background `builtin-exec` completion
+ * notifications), restore pending handles from the DB, and return a disposer
+ * function.
+ */
+function initExecNotifyScheduler(db: ReturnType<typeof openStateDb>) {
+  const notifyScheduler = new ExecNotifyScheduler(deliverExecNotifyMessage);
+  setExecNotifyScheduler(notifyScheduler);
+  notifyScheduler.restore(db).catch((e) => {
+    getLogger("daemon").warn("exec notify restore failed", { err: String(e) });
+  });
+  return () => {
+    notifyScheduler.shutdown();
   };
 }
 
@@ -1135,6 +1153,10 @@ void (async () => {
   // --- Timer Scheduler ---
   const disposeTimer = await initTimerScheduler(db);
   rt.shutdown.registerDrain("timer-scheduler", disposeTimer, { group: 1 });
+
+  // --- Exec Notify Scheduler (background builtin-exec completion) ---
+  const disposeExecNotify = initExecNotifyScheduler(db);
+  rt.shutdown.registerDrain("exec-notify-scheduler", disposeExecNotify, { group: 1 });
 
   // --- Service Lifecycle Manager ---
   const serviceApprovalStore = new ServiceApprovalStore(db);

@@ -20,6 +20,7 @@ import { ensureAgentWorkspaceLayout } from "../workspaces/agent-workspace-layout
 import { resolveAgentCreds } from "../agent-creds";
 import type { SessionStore } from "./session-store";
 import { getTimerScheduler } from "./builtin-handlers/timer-handler";
+import { getExecNotifyScheduler } from "../exec/exec-notify-scheduler";
 import { requestSessionTurnAbort } from "./session-turn-abort";
 import { disposeSubagentRuntime } from "../subagent/subagent-disposables";
 
@@ -244,6 +245,7 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
         options.agentTokens.revoke(id);
         options.sessions.update(id, { status: "terminated" });
         getTimerScheduler()?.cancelByAnchorSession(id);
+        getExecNotifyScheduler()?.cancelBySession(id);
       }
     },
 
