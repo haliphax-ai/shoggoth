@@ -41,13 +41,40 @@ jobs:
 
   unit:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+        total: [3]
     steps:
       - uses: haliphax-ai/shoggoth/.github@main
       - name: Install ripgrep
         run: sudo apt-get update && sudo apt-get install -y ripgrep
         shell: bash
-      - run: npx vitest run
+      - run: npx vitest run --reporter=blob --shard=${{ matrix.shard }}/${{ matrix.total }}
+      - name: Upload test artifacts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: blob-report-${{ matrix.shard }}
+          path: .vitest-reports/*
+          include-hidden-files: true
+          retention-days: 1
+
+  unit-merge:
+    if: ${{ !cancelled() }}
+    needs: [unit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: haliphax-ai/shoggoth/.github@main
+      - name: Download results
+        uses: actions/download-artifact@v8
+        with:
+          path: .vitest-reports
+          pattern: blob-report-*
+          merge-multiple: true
+      - name: Merge reports
+        run: npx vitest --merge-reports
 
   agent-uid-isolation:
     runs-on: ubuntu-latest
@@ -64,7 +91,7 @@ jobs:
       - name: strict DAC + agent UID integration tests
         env:
           SHOGGOTH_CI_STRICT_AGENT_TESTS: "1"
-        run: npx vitest run packages/os-exec
+        run: npx vitest run --no-isolate packages/os-exec
 
   oxlint:
     runs-on: ubuntu-latest
