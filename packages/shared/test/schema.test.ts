@@ -648,6 +648,32 @@ describe("fetch config", () => {
     assert.ok(r.success);
     assert.equal((r.data as any).fetch?.caBundle, "/etc/ssl/certs/corp-ca.pem");
   });
+
+  it("accepts fetch with maxRedirects in full config", () => {
+    const r = shoggothConfigSchema.safeParse(
+      fullConfigWith({
+        fetch: { maxRedirects: 5 },
+      }),
+    );
+    assert.ok(r.success, JSON.stringify((r as any).error?.issues));
+    assert.equal((r.data as any).fetch?.maxRedirects, 5);
+  });
+
+  it("accepts fetch with maxRedirects: 0 (disables following) in config fragment", () => {
+    const r = shoggothConfigFragmentSchema.safeParse({ fetch: { maxRedirects: 0 } });
+    assert.ok(r.success);
+    assert.equal((r.data as any).fetch?.maxRedirects, 0);
+  });
+
+  it("rejects fetch with negative maxRedirects", () => {
+    const r = shoggothConfigSchema.safeParse(fullConfigWith({ fetch: { maxRedirects: -1 } }));
+    assert.ok(!r.success);
+  });
+
+  it("rejects fetch with non-integer maxRedirects", () => {
+    const r = shoggothConfigFragmentSchema.safeParse({ fetch: { maxRedirects: 1.5 } });
+    assert.ok(!r.success);
+  });
 });
 
 // ---------------------------------------------------------------------------
