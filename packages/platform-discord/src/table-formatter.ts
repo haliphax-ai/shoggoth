@@ -1,7 +1,6 @@
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
-import remarkStringify from "remark-stringify";
 import { visit, SKIP } from "unist-util-visit";
 import type { Node } from "unist";
 import stringWidth from "string-width";
@@ -256,14 +255,15 @@ function boxTable(cells: string[][], aligns: Array<"left" | "right" | "center">)
 }
 
 export function mdTableToAscii(md: string): string {
-  const processor = unified().use(remarkParse).use(remarkGfm).use(remarkStringify);
+  const processor = unified().use(remarkParse).use(remarkGfm);
   const tree = processor.parse(md) as any;
 
+  let result = "";
+  let cursor = 0;
   let foundTable = false;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  visit(tree as any, "table", (tableNode: any, index: any, parent: any) => {
-    if (index == null) return;
+  visit(tree as any, "table", (tableNode: any) => {
     foundTable = true;
 
     const cells: string[][] = (tableNode.children ?? [])
@@ -275,21 +275,20 @@ export function mdTableToAscii(md: string): string {
         a === "left" ? "left" : a === "right" ? "right" : a === "center" ? "center" : "left",
     );
 
-    parent.children!.splice(index, 1, {
-      type: "code",
-      lang: "text",
-      value: boxTable(cells, aligns),
-    });
+    // Splice the boxed table into the ORIGINAL text by source offsets.
+    // Re-serializing the whole document would rewrite unrelated markdown —
+    // notably, remark-stringify re-emits empty blockquote continuation
+    // lines as a bare `>` (no trailing space), which breaks Discord's
+    // blockquote rendering — so everything outside the table stays
+    // byte-identical.
+    const start: number | undefined = tableNode.position?.start?.offset;
+    const end: number | undefined = tableNode.position?.end?.offset;
+    if (start == null || end == null || start < cursor) return SKIP;
+    result += md.slice(cursor, start) + "```text\n" + boxTable(cells, aligns) + "\n```";
+    cursor = end;
     return SKIP;
   });
 
   if (!foundTable) return md;
-
-  // remark-stringify adds inter-block blank lines and a trailing newline.
-  // Normalize: collapse 3+ newlines to 2, close code blocks tight, strip trailing.
-  return processor
-    .stringify(tree as any)
-    .replace(/\n{3,}/g, "\n\n") // 3+ blanks -> 2
-    .replace(/```\n\n/g, "```\n") // close code block + blank -> close code block
-    .replace(/\n$/, ""); // no trailing newline
+  return result + md.slice(cursor);
 }

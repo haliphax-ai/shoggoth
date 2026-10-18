@@ -98,29 +98,72 @@ describe("createThinkingOutput", () => {
     expect(output.render().split("💭").length - 1).toBe(2);
   });
 
-  it("never splices a new round's reasoning onto an earlier round's block mid-word", () => {
-    // A round that starts by re-emitting only a short shared prefix of the
-    // earlier thinking and then veers into unrelated text must NOT cut the
-    // earlier block and glue the remainder onto it: the earlier block stays
-    // intact and the new text lands in its own block at its arrival
-    // position — never as "The iss" + "look at how".
+  it("strips a genuine re-emission at a round boundary and shows only the new tail", () => {
+    // A provider that re-emits the prior reasoning VERBATIM at the start of
+    // a new round (context quoting) must not double it: the re-emission is
+    // stripped and only the genuinely new tail opens the round's own 💭
+    // block, at its arrival position.
+    const output = createThinkingOutput();
+    output.onText({ accumulated: "Before ", round: 0 });
+    output.onThinking({ accumulated: "Let me check the config", round: 0 });
+    output.endRound({ round: 0, content: "Before " });
+    expect(output.onText({ accumulated: "after", round: 1 })).toBe(
+      "Before \n\n> 💭 Let me check the config\n\nafter",
+    );
+    // The verbatim re-emit renders nothing new…
+    expect(output.onThinking({ accumulated: "Let me check the config", round: 1 })).toBe(
+      "Before \n\n> 💭 Let me check the config\n\nafter",
+    );
+    // …and the moment it continues past the base, only the new tail opens
+    // the round's own block.
+    expect(output.onThinking({ accumulated: "Let me check the config carefully", round: 1 })).toBe(
+      "Before \n\n> 💭 Let me check the config\n\nafter\n\n> 💭 carefully",
+    );
+    expect(output.render().split("💭").length - 1).toBe(2);
+  });
+
+  it("never strips a coincidental shared opening from a new round's reasoning", () => {
+    // Rounds that merely OPEN alike ("Let me …") share a prefix by
+    // coincidence — the new round's opening is its own reasoning and must
+    // display in full, never eaten down to the divergence point.
+    const output = createThinkingOutput();
+    output.onThinking({ accumulated: "Let me look at the slash commands file", round: 0 });
+    output.endRound({ round: 0, content: "" });
+    output.onText({ accumulated: "Checking.", round: 1 });
+    // A re-emit still streaming in (a prefix of the base) holds silently…
+    expect(output.onThinking({ accumulated: "Let me ", round: 1 })).toBe(
+      "> 💭 Let me look at the slash commands file\n\nChecking.",
+    );
+    // …but the moment it veers off the base, the whole accumulated text is
+    // new reasoning — displayed verbatim in its own block, glued to nothing.
+    expect(output.onThinking({ accumulated: "Let me fix the tool calls", round: 1 })).toBe(
+      "> 💭 Let me look at the slash commands file\n\nChecking.\n\n> 💭 Let me fix the tool calls",
+    );
+    expect(output.render()).toContain("💭 Let me fix the tool calls");
+    expect(output.render()).toContain("slash commands file\n\nChecking.");
+  });
+
+  it("never splices a partially re-emitted round onto an earlier round's block", () => {
+    // A round that streams a strict PREFIX of the earlier reasoning and
+    // then veers must not cut the earlier block or glue text mid-word:
+    // the earlier block stays intact and the veering text lands whole in
+    // its own block at its arrival position.
     const output = createThinkingOutput();
     output.onThinking({ accumulated: "The issue says tests fail", round: 0 });
     output.endRound({ round: 0, content: "" });
     output.onText({ accumulated: "Looking around.", round: 1 });
-    // The re-emitted prefix already rendered in the earlier block — it is
-    // stripped from the new round, not shown twice and not spliced.
     expect(output.onThinking({ accumulated: "The iss", round: 1 })).toBe(
       "> 💭 The issue says tests fail\n\nLooking around.",
     );
     expect(
       output.onThinking({ accumulated: "The isslook at how the parser is invoked", round: 1 }),
     ).toBe(
-      "> 💭 The issue says tests fail\n\nLooking around.\n\n> 💭 look at how the parser is invoked",
+      "> 💭 The issue says tests fail\n\nLooking around.\n\n> 💭 The isslook at how the parser is invoked",
     );
-    // No mid-word seam anywhere: the earlier block still ends with "fail".
+    // No mid-word seam anywhere: the earlier block still ends with "fail",
+    // and nothing was duplicated across the round boundary.
     expect(output.render()).toContain("tests fail\n\nLooking around.");
-    expect(output.render()).not.toContain("isslook");
+    expect(output.render().split("The iss").length - 1).toBe(2);
   });
 
   it("renders thinking blocks at their arrival position across interleaved rounds", () => {
@@ -197,6 +240,36 @@ describe("createThinkingOutput", () => {
     expect(output.onText({ accumulated: "junk tail", round: 1 })).toBe("R1\n\njunk tail");
     expect(output.endRound({ round: 1, content: "" })).toBe("R1");
     expect(output.onText({ accumulated: "R2", round: 2 })).toBe("R1\n\nR2");
+    expect(output.endRound({ round: 2, content: "R2" })).toBe("R1\n\nR2");
+    // Whitespace-only content is blank too: it never commits as a padded
+    // empty segment with its own dangling separator.
+    expect(output.onText({ accumulated: "padded tail", round: 3 })).toBe("R1\n\nR2\n\npadded tail");
+    expect(output.endRound({ round: 3, content: " \n\n " })).toBe("R1\n\nR2");
+    expect(output.onText({ accumulated: "R3", round: 4 })).toBe("R1\n\nR2\n\nR3");
+  });
+
+  it("commits newline-padded round content with only its edge padding removed", () => {
+    const output = createThinkingOutput();
+    output.onText({ accumulated: "R1", round: 0 });
+    output.endRound({ round: 0, content: "R1" });
+    // The model padded the round's content with newlines on both edges: the
+    // live display and the committed segment never stack blank lines onto
+    // the round separator. (A trailing SPACE is prose, not padding, and is
+    // preserved — pinned by the re-emit test above.)
+    expect(output.onText({ accumulated: "\n\nHello.\n\n", round: 1 })).toBe("R1\n\nHello.");
+    expect(output.endRound({ round: 1, content: "\n\nHello.\n\n\n" })).toBe("R1\n\nHello.");
+  });
+
+  it("never ends a quote block with an empty continuation line", () => {
+    const output = createThinkingOutput();
+    // Reasoning that ends in "\n" must not render a trailing bare "> " —
+    // it would break the Discord blockquote at that line.
+    expect(output.onThinking({ accumulated: "Consider this\n", round: 0 })).toBe(
+      "> 💭 Consider this",
+    );
+    expect(output.onThinking({ accumulated: "Consider this\nmore\n", round: 0 })).toBe(
+      "> 💭 Consider this\n> more",
+    );
   });
 
   it("enters a round's prose without streamed deltas at its boundary", () => {

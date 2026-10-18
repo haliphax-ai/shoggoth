@@ -116,19 +116,20 @@ describe("tool-loop → thinking-output streaming pipeline", () => {
     expect(final.split("💭").length - 1).toBe(2);
   });
 
-  it("never splices cross-round reasoning into one block mid-word", async () => {
+  it("displays a new round's coincidental shared opening in full, never eaten or spliced", async () => {
     const { model, displays } = wireDisplayPipeline([
       {
-        reasoning: ["The issue says tests fail"],
+        reasoning: ["Let me look at the slash commands file"],
         deltas: ["Looking around."],
         content: "Looking around.",
         toolCalls: [TOOL_CALL],
       },
       {
-        // The round re-emits only a short shared prefix of the earlier
-        // thought, then veers into unrelated reasoning — it must land in
-        // its own block, never cut-and-glued onto the earlier one.
-        reasoning: ["The iss", "look at how the parser is invoked"],
+        // The round opens like the earlier one, then veers immediately:
+        // the coincidental opening is NEW reasoning and must display in
+        // full — never stripped down to the divergence point, never
+        // glued onto the earlier block.
+        reasoning: ["Let me ", "fix the tool calls"],
         deltas: ["Fixed."],
         content: "Fixed.",
       },
@@ -140,11 +141,38 @@ describe("tool-loop → thinking-output streaming pipeline", () => {
 
     const final = displays.at(-1)!;
     expect(final).toBe(
-      "> 💭 The issue says tests fail\n\nLooking around.\n\n> 💭 look at how the parser is invoked\n\nFixed.",
+      "> 💭 Let me look at the slash commands file\n\nLooking around.\n\n> 💭 Let me fix the tool calls\n\nFixed.",
     );
-    expect(final).not.toContain("isslook");
     // The earlier block is untouched — no later round mutated it.
-    expect(final).toContain("tests fail\n\nLooking around.");
+    expect(final).toContain("slash commands file\n\nLooking around.");
+    expect(final.split("💭").length - 1).toBe(2);
+  });
+
+  it("keeps single-blank-line separation for newline-padded model output", async () => {
+    const { model, thinkingOutput, displays } = wireDisplayPipeline([
+      {
+        deltas: ["\n\nHello.\n", "\n\n"],
+        content: "\n\nHello.\n\n\n",
+        toolCalls: [TOOL_CALL],
+      },
+      { deltas: ["\n\nBye."], content: "\n\nBye.\n\n" },
+    ]);
+
+    await model.complete();
+    model.pushToolMessage!({ toolCallId: "t1", content: "{}" });
+    await model.complete();
+
+    // Every live render — including mid-stream snapshots of the padded
+    // deltas — keeps a single blank line between segments.
+    expect(displays.every((d) => !d.includes("\n\n\n"))).toBe(true);
+    expect(displays.at(-1)).toBe("Hello.\n\nBye.");
+
+    // Terminal composition mirrors delivery: the turn prose is the turn's
+    // segments joined by a single blank line, so the delivered body maps
+    // verbatim — no blank-line wall anywhere.
+    expect(thinkingOutput.render("**Rook:**\nHello.\n\nBye.\n· m: test")).toBe(
+      "**Rook:**\nHello.\n\nBye.\n· m: test",
+    );
   });
 
   it("never erases streamed prose when a fresh stream re-fires empty mid-round", async () => {
