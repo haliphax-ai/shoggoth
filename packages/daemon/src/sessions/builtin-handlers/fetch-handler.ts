@@ -13,6 +13,8 @@ import { truncateToolOutput } from "./truncate-output";
 
 const DEFAULT_MAX_RESPONSE_BYTES = 1_048_576; // 1 MB
 const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_REDIRECTS = 2;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const VALID_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 
 export function register(registry: BuiltinToolRegistry): void {
@@ -157,6 +159,34 @@ function isIpAllowed(
   return false;
 }
 
+/**
+ * Resolve a target URL's hostname and verify that every resolved IP is
+ * permitted (public, or private-but-allowed by configuration). Returns an
+ * error message when the target is blocked, `null` when it is allowed.
+ *
+ * Called for the initial request and again for every redirect hop so a
+ * redirect cannot bounce the request into a private/internal network.
+ */
+async function checkTargetAllowed(
+  target: URL,
+  allowPrivateIps: boolean,
+  allowlist: string[],
+): Promise<string | null> {
+  const hostname = target.hostname.replace(/^\[|\]$/g, ""); // strip IPv6 brackets
+  let resolved: { address: string }[];
+  try {
+    resolved = await lookup(hostname, { all: true });
+  } catch (err: unknown) {
+    return `DNS resolution failed for ${hostname}: ${(err as Error).message}`;
+  }
+  for (const entry of resolved) {
+    if (!isIpAllowed(entry.address, hostname, allowPrivateIps, allowlist)) {
+      return `Blocked: ${hostname} resolves to private/internal IP ${entry.address}. Configure fetch.allowPrivateIps or fetch.privateIpAllowlist to permit.`;
+    }
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
@@ -207,30 +237,20 @@ async function fetchHandler(
 
   // --- Fetch config from runtime config ---
   const fetchConfig = (ctx.config as Record<string, unknown>).fetch as
-    | { allowPrivateIps?: boolean; privateIpAllowlist?: string[]; caBundle?: string }
+    | {
+        allowPrivateIps?: boolean;
+        privateIpAllowlist?: string[];
+        caBundle?: string;
+        maxRedirects?: number;
+      }
     | undefined;
   const allowPrivateIps = fetchConfig?.allowPrivateIps ?? false;
   const privateIpAllowlist = fetchConfig?.privateIpAllowlist ?? [];
 
-  // --- Private IP check: resolve hostname first ---
-  const hostname = parsed.hostname.replace(/^\[|\]$/g, ""); // strip IPv6 brackets
-  try {
-    const resolved = await lookup(hostname, { all: true });
-    for (const entry of resolved) {
-      if (!isIpAllowed(entry.address, hostname, allowPrivateIps, privateIpAllowlist)) {
-        return {
-          resultJson: JSON.stringify({
-            error: `Blocked: ${hostname} resolves to private/internal IP ${entry.address}. Configure fetch.allowPrivateIps or fetch.privateIpAllowlist to permit.`,
-          }),
-        };
-      }
-    }
-  } catch (err: unknown) {
-    return {
-      resultJson: JSON.stringify({
-        error: `DNS resolution failed for ${hostname}: ${(err as Error).message}`,
-      }),
-    };
+  // --- Private IP check: resolve hostname first (re-run per redirect hop) ---
+  const blockedInitial = await checkTargetAllowed(parsed, allowPrivateIps, privateIpAllowlist);
+  if (blockedInitial) {
+    return { resultJson: JSON.stringify({ error: blockedInitial }) };
   }
 
   // --- Build request ---
@@ -266,18 +286,73 @@ async function fetchHandler(
   }
 
   // --- Execute fetch ---
+  // Redirects are followed manually (rather than via undici's redirect mode)
+  // so that every hop is re-checked against the SSRF rules above. Following
+  // is on by default and capped by fetch.maxRedirects.
+  const followRedirects = (args.followRedirects as boolean) ?? true;
+  const maxRedirects = Math.max(fetchConfig?.maxRedirects ?? DEFAULT_MAX_REDIRECTS, 0);
+
+  const redirects: { url: string; status: number; location: string }[] = [];
+  let currentUrl = parsed.href;
+  let currentMethod = method;
+  let currentBody = bodyPayload;
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = (await undiciFetch(parsed.href, {
-      method,
-      headers,
-      body: bodyPayload,
-      signal: controller.signal,
-      redirect: "manual", // no redirect following by default
-      dispatcher,
-    })) as unknown as Response;
+    let res: Response;
+    for (;;) {
+      const blocked = await checkTargetAllowed(
+        new URL(currentUrl),
+        allowPrivateIps,
+        privateIpAllowlist,
+      );
+      if (blocked) {
+        clearTimeout(timer);
+        return { resultJson: JSON.stringify({ error: blocked }) };
+      }
+
+      res = (await undiciFetch(currentUrl, {
+        method: currentMethod,
+        headers,
+        body: currentBody,
+        signal: controller.signal,
+        redirect: "manual", // following is manual so each hop is re-checked
+        dispatcher,
+      })) as unknown as Response;
+
+      const location = res.headers.get("location");
+      if (!followRedirects || redirects.length >= maxRedirects || !location) break;
+      if (!REDIRECT_STATUSES.has(res.status)) break;
+
+      let next: URL;
+      try {
+        next = new URL(location, currentUrl);
+      } catch {
+        break; // unparseable Location — surface the 3xx as-is
+      }
+      if (next.protocol !== "http:" && next.protocol !== "https:") break;
+
+      // Release the redirect response body before issuing the next hop.
+      res.body?.cancel().catch(() => {});
+
+      redirects.push({ url: currentUrl, status: res.status, location: next.href });
+
+      // RFC 9110 semantics: 303 always becomes GET; 301/302 historically do
+      // for POST. 307/308 preserve the method and body.
+      if (
+        res.status === 303 ||
+        ((res.status === 301 || res.status === 302) && currentMethod === "POST")
+      ) {
+        currentMethod = "GET";
+        currentBody = undefined;
+        delete headers["Content-Type"];
+        delete headers["content-type"];
+      }
+
+      currentUrl = next.href;
+    }
     clearTimeout(timer);
 
     // --- Read response body with cap ---
@@ -340,6 +415,8 @@ async function fetchHandler(
 
     return {
       resultJson: JSON.stringify({
+        // Redirect chain (hops taken before the final response), when any
+        ...(redirects.length > 0 ? { redirects } : {}),
         status: res.status,
         statusText: res.statusText,
         headers: responseHeaders,
