@@ -6,12 +6,14 @@ to `line-number`); phases 4–6 activate the mode behind the config key.
 
 ## Phase 1: Hashline core module (pure)
 
-- New `packages/daemon/src/sessions/hashline/` module: `canonLine`, `allocateAnchors`,
-  `lineChecksum`, `contentChecksum`, `resolveAnchors`, `assertRangeServed`,
-  `applySpan`/`changedRange` helpers, error classes (`AnchorStaleError`, `RangeStaleError`)
-  with `fresh` row payloads, and constants (`MAX_HASH_SOURCE_BYTES`, `MAX_HASHLINE_LINES`).
-- Full unit-test suite for allocation determinism, collision probing, resolution under
-  upstream edits, stale/range-stale detection, no-op and reversed-bound handling.
+- New `packages/daemon/src/sessions/hashline/` module: `canonLine` for display anchors only,
+  `allocateAnchors`, exact-content `lineChecksum`, duplicate/context `lineIdentityChecksum`,
+  `contentChecksum`, `resolveAnchors`, `assertRangeServed`, `applySpan`/`changedRange`, stale
+  error classes with fresh rows, and size-limit constants. Separate lossy display
+  canonicalization from full-content verification.
+- Unit tests cover deterministic snapshot allocation, collision probing, duplicate occurrence
+  ambiguity, Unicode-safe byte caps, trailing-whitespace and over-cap-suffix changes, EOL
+  parsing, upstream insert/delete/reorder, stale/range-stale behavior, no-op, and reversed bounds.
 
 **Files:**
 
@@ -20,7 +22,9 @@ to `line-number`); phases 4–6 activate the mode behind the config key.
 
 ## Phase 2: State tables and boot id
 
-- Migrations `0021_served_hashes.sql`, `0022_file_edit_mode_hint.sql`.
+- Migrations `0024_served_hashes.sql`, `0025_file_edit_mode_hint.sql` (the current tree has
+  migrations through `0023_exec_notifies.sql`; recheck before implementation and never reuse a
+  migration version).
 - Served-map store module (register on read, lookup on replace, clear on segment
   new/reset — hook next to `clearSessionReReadRequired` in `session-context-segment.ts`).
 - Daemon `bootId` (module-level `randomUUID()` at process start, exposed via a small
@@ -28,10 +32,11 @@ to `line-number`); phases 4–6 activate the mode behind the config key.
 
 **Files:**
 
-- `migrations/0021_served_hashes.sql`, `migrations/0022_file_edit_mode_hint.sql`
+- `migrations/0024_served_hashes.sql`, `migrations/0025_file_edit_mode_hint.sql`
 - `packages/daemon/src/sessions/hashline/served-store.ts`
 - `packages/daemon/src/sessions/hashline/hint-state.ts`
-- `packages/daemon/src/sessions/session-context-segment.ts` (clear hook)
+- `packages/daemon/src/sessions/session-context-segment.ts` (segment clear hook)
+- Session deletion/retirement path(s) (served-row cleanup)
 - `packages/daemon/test/sessions/hashline/served-store.test.ts`,
   `packages/daemon/test/sessions/hashline/hint-state.test.ts`
 
@@ -48,37 +53,63 @@ to `line-number`); phases 4–6 activate the mode behind the config key.
 - `packages/daemon/src/config/effective-runtime.ts`
 - `packages/daemon/test/config/file-editing-config.test.ts`
 
-## Phase 4: builtin-read hashline mode
+## Phase 4: builtin-read hashline mode and catalog plumbing
 
-- Schema/description rendering in `builtin-shoggoth-tools.ts`: mode-conditional `start`/`end`
-  types and descriptions (names unchanged); `builtin-read` description gains anchor-format
-  guidance in hashline mode. Verify how the schema builder learns the effective mode (main
-  integration unknown — resolve here; config is plumbable since the daemon builds tool
-  contexts per turn).
-- Read handler: in hashline mode, prefix output rows with anchors and register the served
-  map for the returned window.
-- Line-number mode path untouched; existing read tests stay green.
+- Resolve the mode/schema boundary explicitly: pass immutable `FileEditingContext` into
+  `builtinShoggothToolsCatalog`/`buildAggregatedMcpCatalog` and thread it through every
+  session/tool-context construction and tool-call handler context. Do not assume catalogs are
+  rebuilt per turn; test each builder and runtime path. Keep catalog and handler mode identical.
+- Hashline mode changes the replace schema's `start`/`end` and batch-item types. Specify the
+  read API separately: preserve existing `fromLine`/`toLine`/`offset`/`limit` window selection;
+  document returned row format and stable line numbering in the result. Keep `lines` and
+  `lineNumbers` behavior explicit rather than requiring callers to guess an option.
+- Define behavior for each read result kind: full/ranged text, multi-file, truncation, stat,
+  image, empty file, and too-large file. Register only text rows actually emitted to the model;
+  never register truncated-away rows, stats, notices, or image data. If an existing result shape
+  cannot safely identify rows returned, adapt it or reject that combination in hashline mode.
+- Prefix returned text rows with anchors, register exact row checksums plus duplicate identity
+  metadata, and use one normalized workspace-relative path representation for registration and
+  replace lookup. Leave line-number mode unchanged.
+- Tests cover every result kind, clipping/truncation boundaries, file-size caps, and mode/schema
+  parity across catalog construction and invocation.
 
 **Files:**
 
 - `packages/mcp-integration/src/builtin-shoggoth-tools.ts`
-- `packages/daemon/src/sessions/builtin-handlers/` (read handler)
+- `packages/daemon/src/mcp/tool-loop-mcp.ts`
+- `packages/daemon/src/sessions/session-mcp-tool-context.ts`
+- `packages/daemon/src/sessions/builtin-tool-registry.ts` and tool-context assembly in
+  `packages/daemon/src/sessions/session-agent-turn.ts`
+- `packages/daemon/src/sessions/builtin-handlers/fs-handlers.ts`
 - `packages/daemon/test/sessions/builtin-handlers/read-hashline.test.ts`
 
 ## Phase 5: builtin-replace hashline mode
 
-- Mode branch in `replaceHandler`: interpret `start`/`end` (and `edits[]` items) as anchors;
-  resolve + verify via the hashline core; write via existing span mechanics; return
-  `changed_lines` + `live_anchors`; no-op short-circuit; `[W_*]` slip-stripping; regex mode
-  gains served-checksum verification of matched lines under hashline mode.
-- Skip the `re-read-required` consumer/producer in hashline mode only.
-- `[E_FILE_TOO_LARGE]` guard for over-cap files.
-- Handler integration tests for every mode×feature combination; line-number regression suite
-  stays green.
+- Resolve anchors and validate each edit against the exact line checksum, duplicate ordinal,
+  and local identity fingerprint registered by read. Verify every destructive row, including
+  every line deleted; reject absent/unserved anchors, ambiguous duplicate resolution, and
+  newly inserted interior content with fresh rows. Regex/fixed-string matches must be wholly
+  served and verified before replacement; reject or precisely define multiline matches whose
+  span cannot be mapped to complete served rows.
+- Serialize read/verify/write through a per-canonical-path lock shared by hashline replace
+  calls. Recheck the snapshot immediately before an atomic replacement. State that this only
+  prevents races among cooperating handlers; cover other Shoggoth mutation paths or explicitly
+  bound the guarantee to `builtin-replace`, and document the residual race from external writers.
+- Preserve untouched original EOL separators and final-newline state; specify separator choice
+  for inserted rows. Compute `live_anchors` and changed rows from the post-write file, never
+  from pre-edit arrays. No-op edits must not write or invalidate served state.
+- Skip the `re-read-required` consumer/producer in hashline replace only; do not imply the proof
+  covers `builtin-write`, `builtin-exec`, or external writers unless integrated separately.
+- `[E_FILE_TOO_LARGE]` guard for over-cap files. Handler tests cover concurrent edits, duplicate
+  insertion/deletion, trailing-whitespace-only changes, changed suffix after hash cap, interior
+  insertion during deletion, multiline regex, no-op, and post-write live rows; line-number tests
+  stay green.
 
 **Files:**
 
 - `packages/daemon/src/sessions/builtin-handlers/replace-handler.ts`
+- Shared canonical-path file lock helper (add a dedicated file under `packages/daemon/src/sessions/`;
+  exact module name to be chosen with existing filesystem helpers)
 - `packages/daemon/test/sessions/builtin-handlers/replace-hashline.test.ts`
 
 ## Phase 6: System-prompt mode hint

@@ -21,17 +21,18 @@ blind spots:
 
 - **Same-line edits are invisible.** Detection compares line counts; a same-count content
   change (another agent rewriting a function in place) never flags, and positional edits land
-  on silently wrong lines.
+  on silently wrong lines. `builtin-write` and other writer paths remain outside this legacy
+  gate unless separately integrated.
 - **All-or-nothing per file.** Any flagged shift blocks edits anywhere in the file, even to
   regions the agent demonstrably re-read.
 - **Per-session only.** Two agents (subagents, parallel workflow lanes) racing on one file
   clobber each other without any detection at all.
 
 Hashline mode — modeled on the `pi-hashline-edit-pro` plugin's paradigm (see
-[References](#references)) — makes every line's identity a pure function of its content, so
-edits are resolved and verified against the file as it exists at apply time. Staleness becomes
-per-range, self-healing (the error returns the fresh data needed to retry), and correct across
-agents by construction.
+[References](#references)) — derives compact anchors deterministically for a file snapshot, then validates edits against
+the exact served content and row identity. Staleness becomes per-range and self-healing (the
+error returns fresh data needed to retry). Duplicate-line and concurrency ambiguity fails
+closed rather than being assumed safe.
 
 ## Design
 
@@ -64,27 +65,40 @@ rendered to models differ only in value type/description per mode, from a single
 
 ### Anchors
 
-`builtin-read` in hashline mode prefixes each returned line with a content-derived anchor:
-`Xk7Qm2│line text`. The anchor is derived deterministically from the canonicalized line
-content (CR stripped, trailing whitespace trimmed, length-capped) via `node:crypto` hashing
-and a per-file collision probe — no WASM, no external registry, no session state. The same
-content produces the same anchor in any session, on any machine, at any time, which is what
-makes parallel agents safe without coordination.
+`builtin-read` in hashline mode prefixes each returned line with a compact content-derived
+anchor: `XK7QM2│line text` (uppercase RFC 4648 base32 alphabet `A-Z2-7`). Anchors are
+snapshot locators, not globally stable line identities: repeated canonical lines and edits to
+their neighborhood can change collision assignments. The served map also records exact line
+checksums, duplicate occurrence ordinals, and local identity fingerprints; ambiguous identity
+is rejected rather than guessed. The compact anchor canonicalization is only for display and
+allocation; verification hashes the full decoded line, including trailing whitespace.
+
+The proof-of-read guarantee covers destructive `builtin-replace` operations only. `builtin-write`,
+`builtin-exec`, and external writers are separate mutation paths unless explicitly routed through
+the same coordination layer. Hashline handlers serialize their own read/verify/write sequence
+per canonical path and recheck before atomic replacement; this cannot eliminate races with
+non-cooperating external writers without filesystem compare-and-swap support.
 
 Full allocation/verification semantics: [`spec.md`](spec.md#anchors).
 
 ### Served map (proof of read)
 
-A successful `builtin-read` in hashline mode records `(session, context segment, path,
-anchor → line checksum)` rows in a new `served_hashes` table. `builtin-replace` may only
-modify lines whose current content still matches the checksum this session was served —
-i.e., an agent can never overwrite content it has not seen. Rows are cleared on context
-segment new/reset, exactly like `re_read_required`.
+A successful text `builtin-read` in hashline mode records only rows actually rendered to the
+model as `(session, context segment, canonical workspace-relative path, anchor → exact line
+checksum + identity fingerprint)` in `served_hashes`. Truncated-away rows, notices, stat results,
+and image payloads do not grant edit authority. Use the same normalized path form for read and
+replace. Clear rows on context-segment new/reset and session deletion/retirement. This proof-of-read
+guarantee does not automatically cover other mutation tools.
 
 ### Edit resolution and verification
 
-At apply time, `builtin-replace` re-hashes the current file, resolves `start`/`end` anchors
-to live line numbers, and verifies the served checksums of the target range, in layers:
+At apply time, `builtin-replace` resolves `start`/`end` against the current file and verifies
+that every destructive target row was served and its complete content and snapshot identity
+still match. Deletions verify every covered line, not just endpoints, so newly inserted interior
+content cannot be silently removed. The read/verify/write sequence is serialized among hashline
+handlers for each canonical path; recheck the snapshot immediately before atomic replacement.
+External, non-cooperating writers remain a documented residual race without filesystem CAS.
+Errors are returned in layers:
 
 1. **`[E_STALE_ANCHOR]`** — an anchor no longer exists in the file. The error embeds fresh
    anchor rows around the surviving bound so the agent retries without a full re-read.
@@ -95,20 +109,23 @@ to live line numbers, and verifies the served checksums of the target range, in 
    diff-marker rows); reversed bounds are swapped; no-op edits (replacement identical to
    current content) short-circuit without writing.
 
-Edits by _other_ sessions to unrelated lines never block: resolution is always against live
-content, and the served check is per-range.
+Edits by other sessions to non-overlapping regions should not block: resolution is against live
+content and verification is per-range. Changes to the target rows, their duplicate identity, or
+context required to disambiguate them fail closed and require fresh rows.
 
 ### Result payload
 
-After a successful write, the result includes the live anchors for the changed window
-(`+anchor│` rows for new/changed lines), so the agent chains consecutive edits without
-re-reading. `changed_lines` is returned as today.
+After a successful write, compute returned `live_anchors` from the post-write content and
+include the live rows for the changed window, so the agent can chain edits without re-reading.
+Never format the result from pre-edit line/anchor buffers. `changed_lines` retains its current
+meaning.
 
 ### Regex/pattern mode under hashline
 
-`pattern`/`replacement` remains available in both modes. In hashline mode, matched lines are
-subject to the same served-checksum verification before replacement — the proof-of-read
-invariant holds even for regex edits.
+`pattern`/`replacement` remains available in both modes. In hashline mode, every complete
+matched row must be served and its full content verified before replacement. Reject multiline
+matches spanning partial/unserved rows unless exact span-to-row verification is specified;
+include fixed-string and multiline cases in tests. This remains a `builtin-replace` guarantee.
 
 ### System-prompt mode hint
 
@@ -150,9 +167,11 @@ Red/green TDD per project rules. Vitest throughout.
   range-stale detection, no-op detection, reversed-bound swap.
 - **Served map:** registration on read, verification on replace, clear on segment new/reset,
   rejection of unserved anchors.
-- **Handler integration (both modes):** existing `replace-handler`-style tests run under
-  `fileEditing.mode: "hashline"` — batch, positional, regex, dryRun, error payloads;
-  line-number mode regression suite stays green unchanged.
+- **Handler integration (both modes):** batch, positional, regex/fixed-string, dryRun, and
+  error payloads; read result shapes and truncation registration; canonical paths; fresh post-write
+  live rows. Include same-path concurrent handlers, duplicate-line insert/delete ambiguity,
+  interior insertion in a deletion, trailing-space-only changes, changed long-line suffixes,
+  EOL/final-newline preservation, and multiline matches. Line-number regression suite stays green.
 - **Mode hint:** emitted on first turn of session; re-emitted for every session on new boot
   id; not repeated on subsequent turns of the same boot.
 - **Config:** default resolves to `line-number`; restart-required enforcement.
@@ -160,27 +179,51 @@ Red/green TDD per project rules. Vitest throughout.
 
 ## Considerations
 
-- **Token overhead:** ~7 chars per line of read output in hashline mode. Accepted globally
-  in exchange for eliminating re-read round trips; windowed reads (`offset`/`limit`) bound it.
-- **Mixed line endings:** v1 writes the file's dominant EOL for replaced regions; per-line
-  separator fidelity (the plugin's `content_separators` machinery) is deferred — tracked
-  below under deferred work.
+- **Token overhead:** ~7 chars per returned row in hashline mode. Windowed reads bound it;
+  only rows actually emitted into the model-visible result are registered as served. Define
+  behavior for full, ranged, multi-file, truncated, stat, and image reads. Metadata and image
+  results do not authorize line edits.
+- **Line endings:** preserve untouched original separators and final-newline state. Specify the
+  separator inherited by inserted/replacement rows; never normalize the entire file.
 - **Deferred to a future plan:** undo slot (`undo_last_change` equivalent), same-message
   batching of same-file edits, `replace_match`-style sub-line editing, anchor-stability
   carry-across-edits (v1 rehashes the file after each edit; the content-checksum cache keeps
   this cheap), anchor-only path resolution.
 - **File caps:** a max-lines bound for hashline mode exists by design; large-file editing
-  stays in line-number mode's territory or falls back to `builtin-write`.
+  stays in line-number mode's territory or falls back to `builtin-write`. Enforce the line cap
+  before emitting/registering rows and use a hard byte cap on hashing/output work as well; do not
+  silently authorize rows hidden by truncation.
 - **Schema rendering source:** `builtin-shoggoth-tools.ts` must learn the effective mode at
   schema-build time; the wiring mechanism (config plumbed into the mcp-integration schema
   builder) is the main integration unknown and is called out in its implementation phase.
 
 ## Migration
 
-Additive only. Two new tables (`served_hashes`, `file_edit_mode_hint`); no changes to
+Additive only. Two new tables (`served_hashes`, `file_edit_mode_hint`) using migration versions `0024` and
+`0025` respectively (the repository already has migrations through `0023`); confirm latest
+migration numbering at implementation time. No changes to
 `re_read_required` or existing tables; no config changes required to keep current behavior
 (`fileEditing` defaults to `line-number`). Existing sessions and workflows are unaffected
 until an operator flips the mode and restarts the daemon.
+
+## Review addendum (2026-10-18)
+
+This addendum records review-driven refinements to the original proposal; where wording above
+conflicts, this addendum and the detailed contracts in `spec.md`/`implementation.md` govern.
+
+- Assign served-map and hint-table migrations `0024` and `0025` respectively; repository
+  migrations already occupy versions through `0023` at review time. Recheck before implementation.
+- Separate lossy anchor canonicalization from verification of complete line content. Treat
+  anchors as snapshot locators, fail closed on duplicate-line/context ambiguity, and verify every
+  row in destructive ranges (including deletion interiors).
+- Serialize hashline handler read/verify/write per canonical path, recheck before atomic replace,
+  and state the remaining race with non-cooperating writers. The proof-of-read guarantee is for
+  hashline `builtin-replace` only unless other writers are explicitly integrated.
+- Register only model-visible read rows; define behavior for ranged, multi-file, truncated,
+  stat, image, and empty-file reads. Return anchors computed from post-edit content and preserve
+  untouched line separators and final-newline state.
+- Thread effective mode through MCP catalog and handler construction, rather than assuming
+  schemas are rebuilt on each turn. Corrected examples use only `A-Z2-7` anchor characters.
 
 ## References
 
