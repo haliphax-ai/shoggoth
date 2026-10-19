@@ -1,7 +1,16 @@
-import { describe, it } from "vitest";
+import { describe, it, afterEach, vi } from "vitest";
 import assert from "node:assert";
-import { buildExecNotifyResult } from "../../src/exec/exec-notify-delivery";
+import {
+  buildExecNotifyResult,
+  deliverExecNotifyMessage,
+} from "../../src/exec/exec-notify-delivery";
 import type { ExecNotifyCompletion, ExecNotifyHandle } from "../../src/exec/exec-notify-scheduler";
+import {
+  registerSteerChannel,
+  drainSteers,
+  _resetAllChannels,
+} from "../../src/sessions/steer-channel";
+import { setSubagentRuntimeExtension } from "../../src/subagent/subagent-extension-ref";
 
 function completion(
   options: ExecNotifyHandle["options"] = {},
@@ -83,5 +92,71 @@ describe("buildExecNotifyResult", () => {
     assert.equal(r.lost, true);
     assert.ok(typeof r.note === "string");
     assert.equal(r.output, undefined);
+  });
+});
+
+describe("deliverExecNotifyMessage in-turn delivery", () => {
+  afterEach(() => {
+    _resetAllChannels();
+    setSubagentRuntimeExtension(undefined);
+  });
+
+  const completion: ExecNotifyCompletion = {
+    handle: {
+      id: "n1",
+      sessionId: "sess-1",
+      execSessionId: "exec-1",
+      pid: 4242,
+      command: "echo hi",
+      options: {},
+    },
+    exitCode: 0,
+    signal: null,
+    stdout: "hi",
+  };
+
+  it("injects into the steer channel when a turn is active — no OOB turn", async () => {
+    const runSessionModelTurn = vi.fn();
+    setSubagentRuntimeExtension({ runSessionModelTurn } as never);
+    const { unregister } = registerSteerChannel("sess-1");
+
+    await deliverExecNotifyMessage(completion);
+
+    const msgs = drainSteers("sess-1");
+    assert.equal(msgs.length, 1);
+    // Emoji-lead blockquote banner with the payload body underneath
+    assert.ok(msgs[0].startsWith("> ↩️ Exec notification: *echo hi* `n1`"), msgs[0]);
+    assert.ok(msgs[0].includes('"kind": "exec.notify"'), msgs[0]);
+    assert.ok(msgs[0].includes('"exitCode": 0'), msgs[0]);
+    assert.ok(msgs[0].includes('"output": "hi"'), msgs[0]);
+    assert.equal(runSessionModelTurn.mock.calls.length, 0);
+    unregister();
+  });
+
+  it("falls back to an OOB turn when no turn is active", async () => {
+    const runSessionModelTurn = vi.fn().mockResolvedValue({ latestAssistantText: "" });
+    setSubagentRuntimeExtension({ runSessionModelTurn } as never);
+
+    await deliverExecNotifyMessage(completion);
+
+    assert.equal(runSessionModelTurn.mock.calls.length, 1);
+    const call = runSessionModelTurn.mock.calls[0][0];
+    assert.equal(call.sessionId, "sess-1");
+    assert.equal(call.userMetadata.exec_notify, true);
+  });
+
+  it("falls back to an OOB turn when the in-turn delivery is dropped by turn end", async () => {
+    const runSessionModelTurn = vi.fn().mockResolvedValue({ latestAssistantText: "" });
+    setSubagentRuntimeExtension({ runSessionModelTurn } as never);
+    const { unregister } = registerSteerChannel("sess-1");
+
+    await deliverExecNotifyMessage(completion);
+    // Turn ended before the steer was drained — the drop callback must
+    // deliver OOB so the notification is never lost.
+    assert.equal(runSessionModelTurn.mock.calls.length, 0);
+    unregister();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(runSessionModelTurn.mock.calls.length, 1);
+    assert.equal(runSessionModelTurn.mock.calls[0][0].userMetadata.exec_notify, true);
   });
 });
