@@ -84,7 +84,9 @@ export interface TurnStatusBar {
   setSubagents(counts: { total: number; persistent: number }): void;
   /** Live timer count refresh (timers queued/cancelled mid-turn). */
   setTimers(count: number): void;
-  /** Live exec-notify handle refresh (handles registered/resolved mid-turn). */
+  /** Live exec-notify handle refresh (handles registered/resolved mid-turn).
+   *  Ignored at render time when a `notifiesCount` provider is set — the
+   *  provider is the render-time source of truth. */
   setNotifies(count: number): void;
   /** Terminal render (✅/🛑/❌); after this the bar is frozen and timers cleared. */
   finish(outcome: "finished" | "aborted" | "failed"): Promise<void>;
@@ -99,6 +101,15 @@ export function createTurnStatusBar(opts: {
   /** Bar re-render cadence; default 1000 ms. */
   minIntervalMs?: number;
   now?: () => number;
+  /**
+   * Live exec-notify count provider. When present, the notifies section is
+   * re-read from it on every render instead of using the seeded/cached
+   * `setNotifies` value — a handle that fires or is cancelled mid-turn is
+   * reflected immediately, so the terminal bar can never render a stale
+   * count. A provider throw (e.g. the DB closing during shutdown) falls
+   * back to the cache.
+   */
+  notifiesCount?: () => number;
 }): TurnStatusBar {
   const cfg = opts.cfg;
   const sink = opts.sink;
@@ -150,8 +161,24 @@ export function createTurnStatusBar(opts: {
       compactions,
       ...(subagents ? { subagents } : {}),
       ...(timers !== undefined ? { timers } : {}),
-      ...(notifies !== undefined ? { notifies } : {}),
+      ...(effectiveNotifies() !== undefined ? { notifies: effectiveNotifies() } : {}),
     };
+  }
+
+  /**
+   * The count the notifies section renders: the live provider when present
+   * (DB truth at render time — a handle that fired or was cancelled mid-turn
+   * is reflected immediately), else the seeded/cached value. A provider
+   * throw (e.g. the DB closing during shutdown) falls back to the cache.
+   */
+  function effectiveNotifies(): number | undefined {
+    const provider = opts.notifiesCount;
+    if (!provider) return notifies;
+    try {
+      return provider();
+    } catch {
+      return notifies;
+    }
   }
 
   async function doRender() {
@@ -322,6 +349,14 @@ export interface StatusBarStats {
   /** Live exec-notify handle count for the session (the `exec_notifies`
    *  table rows with fired = 0). */
   readonly notifies?: number;
+  /**
+   * Live provider for the notify-handle count (bound to the same session the
+   * stats were collected for): the seeded `notifies` value is a snapshot
+   * taken before the turn runs, so renders pull through this provider
+   * instead — a handle that fires mid-turn must not leave a stale section on
+   * the bar. Absent in bare/test setups: the snapshot is used.
+   */
+  readonly liveNotifies?: () => number;
 }
 
 /** `<10K` → plain integer with thousands separators; `≥10K` → one-decimal K; `≥1M` → one-decimal M. */
@@ -380,7 +415,12 @@ export function getStatusBarStats(db: Database.Database, sessionId: string): Sta
   const subagents = getSessionSubagentCounts(db, sessionId);
   const timers = getSessionActiveTimerCount(db, sessionId);
   const notifies = getSessionActiveNotifyCount(db, sessionId);
-  if (currentTokens <= 0) return { sequence, compactions, subagents, timers, notifies };
+  // Renders pull the notify count live through this closure (the seeded
+  // value is a pre-turn snapshot and goes stale the moment a handle fires).
+  const liveNotifies = (): number => getSessionActiveNotifyCount(db, sessionId);
+  if (currentTokens <= 0) {
+    return { sequence, compactions, subagents, timers, notifies, liveNotifies };
+  }
   // Known context window: the session_stats gauge first, then model metadata
   // for the session's selected model; unknown (omitted) when neither knows.
   let windowTokens = row?.context_window_tokens ?? 0;
@@ -391,6 +431,7 @@ export function getStatusBarStats(db: Database.Database, sessionId: string): Sta
     subagents,
     timers,
     notifies,
+    liveNotifies,
     context: windowTokens > 0 ? { currentTokens, totalTokens: windowTokens } : { currentTokens },
   };
 }
@@ -491,6 +532,11 @@ export function createStatusBarTurnTracker(opts: {
   render: StatusBarRenderer;
   stats: StatusBarStats;
   minIntervalMs?: number;
+  /**
+   * Overrides the live notify-count provider (defaults to the collected
+   * stats' bound `liveNotifies` closure when present).
+   */
+  notifiesCount?: () => number;
 }): TurnStatusBarTracker {
   let liveSink: StatusBarSink | undefined;
   let capturedLine: string | undefined;
@@ -510,11 +556,17 @@ export function createStatusBarTurnTracker(opts: {
     },
   };
 
+  // Live notify-count provider: an explicit opt wins, else the collected
+  // stats' bound closure (`getStatusBarStats` supplies it). With a provider
+  // present, every render — including the terminal one — reflects handles
+  // that fired or were cancelled mid-turn instead of the pre-turn snapshot.
+  const notifiesCount = opts.notifiesCount ?? opts.stats.liveNotifies;
   const engine = createTurnStatusBar({
     cfg: opts.cfg,
     sink: captureSink,
     render: opts.render,
     ...(opts.minIntervalMs !== undefined ? { minIntervalMs: opts.minIntervalMs } : {}),
+    ...(notifiesCount ? { notifiesCount } : {}),
   });
 
   void engine
