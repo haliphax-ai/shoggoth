@@ -45,6 +45,7 @@ function createBar(
     render?: StatusBarRenderer;
     cfg?: ResolvedStatusBarConfig;
     minIntervalMs?: number;
+    notifiesCount?: () => number;
   } = {},
 ) {
   const sink = opts.sink ?? makeSink();
@@ -55,6 +56,7 @@ function createBar(
     render,
     minIntervalMs: opts.minIntervalMs,
     now,
+    ...(opts.notifiesCount ? { notifiesCount: opts.notifiesCount } : {}),
   });
   return { bar, sink, render };
 }
@@ -341,6 +343,64 @@ describe("createTurnStatusBar", () => {
     await vi.advanceTimersByTimeAsync(1000);
     const last = sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot;
     expect(last.notifies).toBe(1);
+  });
+
+  it("notifiesCount provider overrides the stale seeded count at start render", async () => {
+    // The seeded count is a pre-turn snapshot: a handle registered before the
+    // turn and fired before the first render must not show as live.
+    const { bar, sink } = createBar({ notifiesCount: () => 0 });
+    await bar.start({ sequence: 32, compactions: 0, notifies: 1 });
+    const snap = sink.setStatusBar.mock.calls[0]![0] as StatusBarSnapshot;
+    expect(snap.notifies).toBe(0);
+  });
+
+  it("a handle firing mid-turn with no push event renders fresh (no stale section)", async () => {
+    // The #500 scenario: register pushes 1 into the cached value, the handle
+    // then fires with NO count-change event — the next render must re-read
+    // the provider and drop the section instead of showing a stale ↩️ 1.
+    let live = 1;
+    const { bar, sink } = createBar({ notifiesCount: () => live });
+    await bar.start({ sequence: 33, compactions: 0 });
+    bar.setNotifies(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot).notifies).toBe(1);
+    live = 0; // complete() marked the row fired; nothing pushed a count
+    bar.markThinking();
+    await vi.advanceTimersByTimeAsync(1000);
+    // Live 0 (not the stale cached 1): renderers omit the section at 0, so
+    // the bar drops the ↩️ segment instead of showing a phantom handle.
+    expect((sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot).notifies).toBe(0);
+  });
+
+  it("the terminal render reflects the provider, not the cached value", async () => {
+    let live = 1;
+    const { bar, sink } = createBar({ notifiesCount: () => live });
+    await bar.start({ sequence: 34, compactions: 0 });
+    bar.setNotifies(1);
+    live = 0;
+    await bar.finish("finished");
+    const snap = sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot;
+    expect(snap.phase).toBe("finished");
+    expect(snap.notifies).toBe(0);
+  });
+
+  it("setNotifies is ignored at render time when a provider is set", async () => {
+    const { bar, sink } = createBar({ notifiesCount: () => 0 });
+    await bar.start({ sequence: 35, compactions: 0 });
+    bar.setNotifies(5);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot).notifies).toBe(0);
+  });
+
+  it("a throwing provider falls back to the cached value", async () => {
+    const { bar, sink } = createBar({
+      notifiesCount: () => {
+        throw new Error("db closing");
+      },
+    });
+    await bar.start({ sequence: 36, compactions: 0, notifies: 2 });
+    const snap = sink.setStatusBar.mock.calls[0]![0] as StatusBarSnapshot;
+    expect(snap.notifies).toBe(2);
   });
 
   it("setNotifies is a no-op after finish()", async () => {
@@ -646,6 +706,7 @@ describe("getStatusBarStats", () => {
       subagents: { total: 0, persistent: 0 },
       timers: 0,
       notifies: 0,
+      liveNotifies: expect.any(Function),
     });
   });
 
@@ -677,6 +738,22 @@ describe("getStatusBarStats", () => {
     insert.run("nh-c", "n1", "exec-c", "true", 1); // fired: not counted
     expect(getStatusBarStats(db, "n1").notifies).toBe(2);
   });
+
+  it("supplies a live notifies provider bound to the same session", () => {
+    createSessionStore(db).create({ id: "n2", workspacePath: tmp });
+    const insert = db.prepare(
+      "INSERT INTO exec_notifies (id, session_id, exec_session_id, command, fired) VALUES (?, ?, ?, ?, ?)",
+    );
+    insert.run("nh-d", "n2", "exec-d", "sleep 5", 0);
+    const s = getStatusBarStats(db, "n2");
+    expect(s.notifies).toBe(1);
+    expect(s.liveNotifies?.()).toBe(1);
+    // A handle firing after the snapshot: the seeded value stays stale …
+    db.prepare("UPDATE exec_notifies SET fired = 1 WHERE id = ?").run("nh-d");
+    expect(s.notifies).toBe(1);
+    // … while the provider reflects the DB truth without re-collecting.
+    expect(s.liveNotifies?.()).toBe(0);
+  });
 });
 
 describe("createStatusBarTurnTracker", () => {
@@ -702,6 +779,30 @@ describe("createStatusBarTurnTracker", () => {
     const sink = makeSink();
     return { tracker, sink, render };
   }
+
+  it("pulls the live notify count from the stats' provider at render", async () => {
+    let live = 1;
+    const statsWithProvider: StatusBarStats = {
+      ...stats,
+      notifies: 1,
+      liveNotifies: () => live,
+    };
+    const lines: string[] = [];
+    const render = (snap: StatusBarSnapshot) => {
+      const line = `n${snap.notifies ?? "none"}`;
+      lines.push(line);
+      return line;
+    };
+    const { tracker } = createTracker({ render, stats: statsWithProvider });
+    tracker.onThinkingDelta?.("…");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(lines.at(-1)).toBe("n1");
+    // The handle fires with no push event: the render must not go stale.
+    live = 0;
+    tracker.onThinkingDelta?.("…");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(lines.at(-1)).toBe("n0");
+  });
 
   it("captures the ⏳ starting line synchronously; attachSink flushes it to the live sink", () => {
     const { tracker, sink } = createTracker();
