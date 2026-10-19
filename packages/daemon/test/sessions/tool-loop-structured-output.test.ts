@@ -383,3 +383,282 @@ describe("runToolLoop structured output validation retry", () => {
     assert.equal(completeCall, 1);
   });
 });
+
+describe("runToolLoop circuit breakers (structured-output near-miss + unknown-tool backstop)", () => {
+  let db: Database.Database;
+  let tmp: string;
+
+  beforeEach(() => {
+    const o = openMigratedDb();
+    db = o.db;
+    tmp = o.dir;
+    createSessionStore(db).create({ id: "sess", workspacePath: "/w" });
+  });
+
+  afterEach(async () => {
+    await closeTestDb(db, tmp);
+  });
+
+  it("routes near-miss __structured_output__ calls into the retry budget and terminates the turn", async () => {
+    const pushed: string[] = [];
+    const auditPhases: string[] = [];
+    let completeCall = 0;
+    const model: ModelClient = {
+      async complete() {
+        completeCall++;
+        // Model keeps emitting a garbled near-miss of the synthetic tool.
+        return {
+          content: null,
+          toolCalls: [
+            { id: `tc${completeCall}`, name: "__structured_output__parameter", argsJson: "{}" },
+          ],
+        };
+      },
+      pushToolMessage({ content }) {
+        pushed.push(content);
+      },
+    };
+    const toolRuns = createToolRunStore(db);
+    const tr = createTranscriptStore(db);
+    const seg = getSessionContextSegmentId(db, "sess");
+
+    await runToolLoop({
+      db,
+      sessionId: "sess",
+      runId: "run-near-miss",
+      principalId: "p",
+      policy: { check: () => ({ allow: true }) },
+      audit: {
+        record: (e: unknown) => {
+          auditPhases.push((e as { phase?: string }).phase ?? "");
+        },
+      },
+      model,
+      tools: [{ name: "read" }],
+      executor: { execute: async () => ({ resultJson: "{}" }) },
+      toolRuns,
+      transcript: tr,
+      contextSegmentId: seg,
+    });
+
+    // Budget is STRUCTURED_OUTPUT_MAX_RETRIES (2): initial attempt + 2 retries
+    // = 3 dispatches, after which the turn terminates instead of spinning.
+    assert.equal(completeCall, 3);
+
+    // Each near-miss pushed a correction naming the EXACT synthetic tool.
+    assert.equal(pushed.length, 3);
+    for (const p of pushed) {
+      const parsed = JSON.parse(p);
+      assert.equal(parsed.error, "structured_output_tool_near_miss");
+      assert.ok(parsed.message.includes("__structured_output__"));
+      assert.ok(parsed.message.includes("__structured_output__parameter"));
+    }
+
+    // Near-miss dispatches were audited.
+    assert.equal(auditPhases.filter((p) => p === "structured_output_tool_near_miss").length, 3);
+
+    // Turn ended cleanly (not by the unknown-tool backstop).
+    assert.ok(!auditPhases.includes("invalid_tool_call_backstop"));
+    const row = db.prepare(`SELECT status FROM tool_runs WHERE id = 'run-near-miss'`).get() as {
+      status: string;
+    };
+    assert.equal(row.status, "completed");
+  });
+
+  it("does NOT charge the structured-output budget for ordinary unknown tools", async () => {
+    let completeCall = 0;
+    const pushed: string[] = [];
+    const model: ModelClient = {
+      async complete() {
+        completeCall++;
+        if (completeCall <= 3) {
+          // Ordinary unrelated unknown tools — must take the generic path and
+          // must NOT increment structuredOutputAttempt. If they did, the
+          // structured-output breaker would trip at the 3rd and the turn would
+          // end before reaching the terminal response below.
+          return {
+            content: null,
+            toolCalls: [
+              { id: `tc${completeCall}`, name: `bogus_tool_${completeCall}`, argsJson: "{}" },
+            ],
+          };
+        }
+        return { content: "done", toolCalls: [] };
+      },
+      pushToolMessage({ content }) {
+        pushed.push(content);
+      },
+    };
+    const toolRuns = createToolRunStore(db);
+
+    await runToolLoop({
+      db,
+      sessionId: "sess",
+      runId: "run-ordinary-unknown",
+      principalId: "p",
+      policy: { check: () => ({ allow: true }) },
+      audit: { record: () => {} },
+      model,
+      tools: [{ name: "read" }],
+      executor: { execute: async () => ({ resultJson: "{}" }) },
+      toolRuns,
+    });
+
+    // 3 unknown rounds + 1 terminal response.
+    assert.equal(completeCall, 4);
+
+    // All 3 dispatches were generic unknown_tool errors (no near-miss correction).
+    assert.equal(pushed.length, 3);
+    for (const p of pushed) {
+      assert.equal(JSON.parse(p).error, "unknown_tool");
+    }
+  });
+
+  it("terminates the turn after MAX_CONSECUTIVE_INVALID_TOOL_CALLS consecutive unknown-tool calls", async () => {
+    const auditPhases: string[] = [];
+    let completeCall = 0;
+    const model: ModelClient = {
+      async complete() {
+        completeCall++;
+        return {
+          content: null,
+          toolCalls: [
+            { id: `tc${completeCall}`, name: `fake_tool_${completeCall}`, argsJson: "{}" },
+          ],
+        };
+      },
+      pushToolMessage() {},
+    };
+    const toolRuns = createToolRunStore(db);
+
+    await runToolLoop({
+      db,
+      sessionId: "sess",
+      runId: "run-unknown-backstop",
+      principalId: "p",
+      policy: { check: () => ({ allow: true }) },
+      audit: {
+        record: (e: unknown) => {
+          auditPhases.push((e as { phase?: string }).phase ?? "");
+        },
+      },
+      model,
+      tools: [{ name: "read" }],
+      executor: { execute: async () => ({ resultJson: "{}" }) },
+      toolRuns,
+    });
+
+    // Backstop is 5: dispatches 1..5 continue, the 6th trips the breaker and
+    // ends the turn — proving it can never spin forever.
+    assert.equal(completeCall, 6);
+    assert.ok(auditPhases.includes("invalid_tool_call_backstop"));
+
+    const row = db
+      .prepare(`SELECT status FROM tool_runs WHERE id = 'run-unknown-backstop'`)
+      .get() as {
+      status: string;
+    };
+    assert.equal(row.status, "completed");
+  });
+
+  it("resets the consecutive unknown-tool counter on a valid tool call", async () => {
+    const auditPhases: string[] = [];
+    let completeCall = 0;
+    const model: ModelClient = {
+      async complete() {
+        completeCall++;
+        // 4 unknowns, 1 valid call (resets counter), 5 more unknowns, terminal.
+        // Never 6 consecutive unknowns, so the backstop must NOT fire.
+        if (completeCall <= 4 || (completeCall >= 6 && completeCall <= 10)) {
+          return {
+            content: null,
+            toolCalls: [{ id: `tc${completeCall}`, name: `fake_${completeCall}`, argsJson: "{}" }],
+          };
+        }
+        if (completeCall === 5) {
+          return {
+            content: null,
+            toolCalls: [{ id: "valid", name: "read", argsJson: "{}" }],
+          };
+        }
+        return { content: "done", toolCalls: [] };
+      },
+      pushToolMessage() {},
+    };
+    const toolRuns = createToolRunStore(db);
+
+    await runToolLoop({
+      db,
+      sessionId: "sess",
+      runId: "run-unknown-reset",
+      principalId: "p",
+      policy: { check: () => ({ allow: true }) },
+      audit: {
+        record: (e: unknown) => {
+          auditPhases.push((e as { phase?: string }).phase ?? "");
+        },
+      },
+      model,
+      tools: [{ name: "read" }],
+      executor: { execute: async () => ({ resultJson: "{}" }) },
+      toolRuns,
+    });
+
+    // Reaches the terminal response without the backstop firing (counter was
+    // reset by the valid call).
+    assert.equal(completeCall, 11);
+    assert.ok(!auditPhases.includes("invalid_tool_call_backstop"));
+
+    const row = db.prepare(`SELECT status FROM tool_runs WHERE id = 'run-unknown-reset'`).get() as {
+      status: string;
+    };
+    assert.equal(row.status, "completed");
+  });
+
+  it("also trips the backstop for a valid tool called repeatedly with invalid arguments", async () => {
+    const auditPhases: string[] = [];
+    let completeCall = 0;
+    const model: ModelClient = {
+      async complete() {
+        completeCall++;
+        // "read" is a real tool, but the args are never valid JSON — each round
+        // takes the skip_bad_args path and must count toward the backstop.
+        return {
+          content: null,
+          toolCalls: [{ id: `tc${completeCall}`, name: "read", argsJson: "not json" }],
+        };
+      },
+      pushToolMessage() {},
+    };
+    const toolRuns = createToolRunStore(db);
+
+    await runToolLoop({
+      db,
+      sessionId: "sess",
+      runId: "run-bad-args-backstop",
+      principalId: "p",
+      policy: { check: () => ({ allow: true }) },
+      audit: {
+        record: (e: unknown) => {
+          auditPhases.push((e as { phase?: string }).phase ?? "");
+        },
+      },
+      model,
+      tools: [{ name: "read" }],
+      executor: { execute: async () => ({ resultJson: "{}" }) },
+      toolRuns,
+    });
+
+    // 6 consecutive invalid-argument dispatches trip the backstop (same cap as
+    // unknown tool names), proving the turn can't spin on a real tool either.
+    assert.equal(completeCall, 6);
+    assert.ok(auditPhases.includes("invalid_tool_call_backstop"));
+
+    const row = db
+      .prepare(`SELECT status FROM tool_runs WHERE id = 'run-bad-args-backstop'`)
+      .get() as {
+      status: string;
+    };
+    assert.equal(row.status, "completed");
+  });
+});
