@@ -538,6 +538,9 @@ export async function startDiscordPlatform(
                   ...(raw.setStatusBar
                     ? { setStatusBar: (line: string | null) => raw.setStatusBar!(line) }
                     : {}),
+                  // Teardown pass-through: the abort path must be able to
+                  // finalize the underlying handle through this wrapper.
+                  ...(raw.close ? { close: () => raw.close!() } : {}),
                 };
               } catch (e) {
                 opts.logger.warn("discord.platform.stream_start_failed", {
@@ -698,6 +701,9 @@ export async function startDiscordPlatform(
       let surfaceTracker: TurnStatusBarTracker | undefined;
       let thinkingOutput: ReturnType<typeof createThinkingOutput> | undefined;
       let surfaceStreamPusher: ReturnType<typeof createCoalescingStreamPusher> | undefined;
+      // Declared here (not in the messaging_surface branch) so the abort
+      // handler inside executeTurn can finalize the in-flight message handle.
+      let surfaceStreamHandle: StreamHandle | undefined;
       // Round-settled prose of earlier rounds for the live display when the
       // thinking composer is disabled (showThinking === false surfaces still
       // show every round, separated by the transcript's blank line).
@@ -764,6 +770,10 @@ export async function startDiscordPlatform(
                   // still settles later, delivery reuses the captured line.
                   onTurnAborted: () => {
                     surfaceStreamPusher?.stop();
+                    // Deterministic teardown: no producer (late deltas,
+                    // deferred-abort delivery, stray renders) may edit the
+                    // aborted turn's message after this point.
+                    surfaceStreamHandle?.close?.();
                     if (surfaceTracker) {
                       void surfaceTracker.finish("aborted").catch((e) => {
                         opts.logger.warn("discord.platform.status_bar_abort_finish_failed", {
@@ -800,7 +810,6 @@ export async function startDiscordPlatform(
           (opts.configRef?.current ?? opts.config).platforms?.showThinking === false
             ? undefined
             : createThinkingOutput();
-        let surfaceStreamHandle: StreamHandle | undefined;
         if (streamEnabled()) {
           const streamingOutbound = opts.discord.streamingForSession(sid);
           if (streamingOutbound) {
@@ -818,6 +827,9 @@ export async function startDiscordPlatform(
                 ...(raw.setStatusBar
                   ? { setStatusBar: (line: string | null) => raw.setStatusBar!(line) }
                   : {}),
+                // Teardown pass-through: the abort path must be able to
+                // finalize the underlying handle through this wrapper.
+                ...(raw.close ? { close: () => raw.close!() } : {}),
               };
               // Wire the tracker's live target; the tracker flushes its
               // captured ⏳ line so the placeholder carries the bar from turn

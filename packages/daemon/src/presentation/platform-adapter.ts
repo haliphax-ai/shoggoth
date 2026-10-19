@@ -30,6 +30,14 @@ export interface StreamHandle {
 
   /** Optional: apply the rendered status bar to the in-flight message. */
   setStatusBar?(line: string | null): Promise<void>;
+
+  /**
+   * Optional: finalize the handle when the owning turn is aborted or torn
+   * down. After close(), every subsequent setFullContent / pushUpdate /
+   * setStatusBar call is a no-op issuing zero platform traffic. Idempotent
+   * and safe to call while an operation is mid-flight.
+   */
+  close?(): void;
 }
 
 // ---------------------------------------------------------------------------

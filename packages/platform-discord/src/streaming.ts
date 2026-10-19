@@ -1,7 +1,7 @@
 import type { MessagingAdapterCapabilities } from "@shoggoth/messaging";
 import type { DiscordBridgeLogger } from "./bridge";
 import type { DiscordRestTransport } from "./transport";
-import { MissingPermissionsError, NotFoundError } from "./rest-client";
+import { BadRequestError, MissingPermissionsError, NotFoundError } from "./rest-client";
 import { appendSyntheticClose } from "./formatting-state";
 import { splitDiscordMessage } from "./split-message";
 import { mdTableToAscii } from "./table-formatter.js";
@@ -34,6 +34,14 @@ export interface DiscordStreamHandle {
   pushUpdate(text: string): Promise<void>;
   /** Optional: apply the rendered status bar line to the in-flight message. */
   setStatusBar?(line: string | null): Promise<void>;
+  /**
+   * Optional: finalize the handle (turn aborted / pipeline torn down). After
+   * close() every subsequent setFullContent / pushUpdate / setStatusBar call
+   * is a no-op with zero REST traffic. Idempotent and safe mid-flight: an
+   * operation already in the transport settles on its own, but no new edit is
+   * ever dispatched.
+   */
+  close?(): void;
 }
 
 export interface DiscordStreamingOutbound {
@@ -82,18 +90,26 @@ export function createDiscordStreamingOutbound(
         return run;
       };
       /**
-       * Permanent-failure circuit breaker. A 404 (message/thread deleted) or
-       * 403 (permissions revoked) means this handle's target is gone: every
+       * Permanent-failure circuit breaker. A 404 (message/thread deleted),
+       * a 403 (permissions revoked), or ANY 400 (the request will be
+       * rejected identically forever — archived thread, malformed payload,
+       * unknown code) means this handle's target cannot be edited: every
        * further edit would fail the same way, instantly, forever. The first
        * permanent rejection poisons the handle (logged once at warn) and all
        * subsequent pushUpdate / setFullContent / setStatusBar calls resolve
-       * immediately as no-ops with zero REST traffic, so one 404 ends the
-       * edit loop instead of becoming its steady state.
+       * immediately as no-ops with zero REST traffic, so one permanent
+       * rejection ends the edit loop instead of becoming its steady state.
        */
       let dead = false;
-      const isPermanent = (err: unknown): err is NotFoundError | MissingPermissionsError =>
-        err instanceof NotFoundError || err instanceof MissingPermissionsError;
-      const poison = (err: NotFoundError | MissingPermissionsError): void => {
+      const isPermanent = (
+        err: unknown,
+      ): err is NotFoundError | MissingPermissionsError | BadRequestError =>
+        err instanceof NotFoundError ||
+        err instanceof MissingPermissionsError ||
+        // BadRequestError covers every unclassified 400 and (via the
+        // subclass link) ThreadArchivedError — no 400 may thrash in a loop.
+        err instanceof BadRequestError;
+      const poison = (err: NotFoundError | MissingPermissionsError | BadRequestError): void => {
         dead = true;
         logger?.warn("discord.streaming.handle_dead", {
           operation: err.operation,
@@ -320,6 +336,20 @@ export function createDiscordStreamingOutbound(
             const finalChunks = applyStatusBar(chunks, activeLine);
             await reconcileOverflow(finalChunks);
           });
+        },
+        /**
+         * Deterministic teardown (turn aborted, pipeline disposed). Marks the
+         * handle dead WITHOUT an error log — this is a deliberate shutdown,
+         * not a failure — so every later pushUpdate / setFullContent /
+         * setStatusBar from any producer (late model deltas, deferred
+         * post-abort delivery, status-bar renders) is a silent no-op issuing
+         * zero REST traffic. Idempotent; an operation already dispatched to
+         * the transport settles on its own.
+         */
+        close(): void {
+          dead = true;
+          _statusBarLine = null;
+          lastPushedText = null;
         },
       };
     },

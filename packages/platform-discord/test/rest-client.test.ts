@@ -10,6 +10,8 @@ import {
   ServerError,
   QueueTimeoutError,
   NetworkError,
+  BadRequestError,
+  ThreadArchivedError,
   type DiscordRestLogger,
 } from "../src/rest-client";
 
@@ -92,7 +94,8 @@ describe("Discord REST client", () => {
       { status: 404, cls: NotFoundError, kind: "not_found" },
       { status: 403, cls: MissingPermissionsError, kind: "missing_permissions" },
       { status: 500, cls: ServerError, kind: "server_error" },
-      { status: 400, cls: DiscordRestError, kind: "http" },
+      // Non-JSON 400 body: generic bad request, never the old "http" kind.
+      { status: 400, cls: BadRequestError, kind: "bad_request" },
     ];
 
     for (const { status, cls, kind } of cases) {
@@ -117,6 +120,79 @@ describe("Discord REST client", () => {
         assert.match((err as Error).message, new RegExp(String(status)));
       });
     }
+
+    it("classifies 400 code 50083 as ThreadArchivedError (a BadRequestError)", async () => {
+      const body = JSON.stringify({ message: "Thread is archived", code: 50083 });
+      const { fetchFn } = recorder(() => new Response(body, { status: 400 }));
+      const c = createDiscordRestClient({ botToken: "tok", fetchFn });
+      const err = await c
+        .request({
+          operation: "editMessage",
+          method: "PATCH",
+          path: "/channels/c/messages/m",
+          routeKey: "PATCH /channels/c/messages/:id",
+        })
+        .then(
+          () => null,
+          (e: unknown) => e,
+        );
+      assert.ok(err instanceof ThreadArchivedError);
+      // The subclass link keeps generic-400 handling working everywhere.
+      assert.ok(err instanceof BadRequestError);
+      assert.ok(err instanceof DiscordRestError);
+      assert.equal((err as DiscordRestError).kind, "thread_archived");
+      assert.equal((err as DiscordRestError).status, 400);
+      assert.equal((err as DiscordRestError).body, body);
+      assert.match((err as Error).message, /ThreadArchived|400/);
+    });
+
+    it("classifies an unclassified 400 (e.g. code 50035) as BadRequestError", async () => {
+      const body = JSON.stringify({
+        message: "Invalid Form Body",
+        code: 50035,
+        errors: { content: { _errors: [{ code: "BASE_TYPE_MAX_LENGTH", message: "too long" }] } },
+      });
+      const { fetchFn } = recorder(() => new Response(body, { status: 400 }));
+      const c = createDiscordRestClient({ botToken: "tok", fetchFn });
+      const err = await c
+        .request({
+          operation: "editMessage",
+          method: "PATCH",
+          path: "/channels/c/messages/m",
+          routeKey: "PATCH /channels/c/messages/:id",
+        })
+        .then(
+          () => null,
+          (e: unknown) => e,
+        );
+      assert.ok(err instanceof BadRequestError);
+      assert.equal((err as DiscordRestError).kind, "bad_request");
+      assert.equal((err as DiscordRestError).status, 400);
+      // Raw body carried through so the log line identifies the real error.
+      assert.equal((err as DiscordRestError).body, body);
+      assert.ok(!(err instanceof ThreadArchivedError));
+    });
+
+    it("classifies a malformed-JSON 400 body as generic BadRequestError", async () => {
+      const { fetchFn } = recorder(
+        () => new Response("<html>gateway error</html>", { status: 400 }),
+      );
+      const c = createDiscordRestClient({ botToken: "tok", fetchFn });
+      const err = await c
+        .request({
+          operation: "editMessage",
+          method: "PATCH",
+          path: "/channels/c/messages/m",
+          routeKey: "PATCH /channels/c/messages/:id",
+        })
+        .then(
+          () => null,
+          (e: unknown) => e,
+        );
+      assert.ok(err instanceof BadRequestError);
+      assert.ok(!(err instanceof ThreadArchivedError));
+      assert.equal((err as DiscordRestError).kind, "bad_request");
+    });
 
     it("wraps fetch failures as NetworkError", async () => {
       const fetchFn: typeof fetch = async () => {

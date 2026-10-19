@@ -3,7 +3,12 @@ import { createDiscordStreamingOutbound } from "../src/streaming";
 import type { DiscordRestTransport } from "../src/transport";
 import { discordCapabilityDescriptor } from "../src/capabilities";
 import type { DiscordBridgeLogger } from "../src/bridge";
-import { MissingPermissionsError, NotFoundError } from "../src/rest-client";
+import {
+  BadRequestError,
+  MissingPermissionsError,
+  NotFoundError,
+  ThreadArchivedError,
+} from "../src/rest-client";
 
 function createMockTransport(): DiscordRestTransport {
   return {
@@ -946,5 +951,133 @@ describe("DiscordStreamHandle permanent-error circuit breaker", () => {
     await handle.setFullContent(longText);
     expect(transport.createMessage).not.toHaveBeenCalled();
     expect(transport.editMessage).not.toHaveBeenCalled();
+  });
+
+  it("poisons on the first archived-thread 400 (code 50083): one REST call, one warn, then no-ops", async () => {
+    const transport = createMockTransport();
+    const logger = {
+      warn: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as DiscordBridgeLogger;
+    const archived = () =>
+      new ThreadArchivedError(
+        "editMessage",
+        400,
+        JSON.stringify({ message: "Thread is archived", code: 50083 }),
+      );
+    vi.mocked(transport.editMessage).mockRejectedValue(archived());
+
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: discordCapabilityDescriptor(),
+      channelId: "ch-1",
+      logger,
+    });
+
+    const handle = await streaming.start();
+    vi.mocked(transport.editMessage).mockClear();
+    vi.mocked(transport.createMessage).mockClear(); // drop the start() placeholder
+
+    // First dispatch hits the archived thread: exactly one REST call, then
+    // the handle poisons. The rejection is swallowed (no unhandled rejection).
+    await expect(handle.pushUpdate("one")).resolves.toBeUndefined();
+    expect(transport.editMessage).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "discord.streaming.handle_dead",
+      expect.objectContaining({ operation: "editMessage", status: 400 }),
+    );
+
+    // Every subsequent operation from ANY producer is a silent no-op with
+    // zero REST traffic — the edit loop cannot continue. The transport still
+    // shows ONLY the single poisoning call.
+    await handle.pushUpdate("two");
+    await handle.setFullContent("three");
+    await handle.setStatusBar("> bar");
+    await handle.setFullContent("four");
+    expect(transport.editMessage).toHaveBeenCalledTimes(1);
+    expect(transport.createMessage).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("poisons on the first unclassified 400 (BadRequestError): one REST call, one warn, then no-ops", async () => {
+    const transport = createMockTransport();
+    const logger = {
+      warn: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as DiscordBridgeLogger;
+    const badRequest = () =>
+      new BadRequestError(
+        "editMessage",
+        400,
+        JSON.stringify({ message: "Invalid Form Body", code: 50035 }),
+      );
+    vi.mocked(transport.editMessage).mockRejectedValue(badRequest());
+
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: discordCapabilityDescriptor(),
+      channelId: "ch-1",
+      logger,
+    });
+
+    const handle = await streaming.start();
+    vi.mocked(transport.editMessage).mockClear();
+    vi.mocked(transport.createMessage).mockClear(); // drop the start() placeholder
+
+    await expect(handle.pushUpdate("one")).resolves.toBeUndefined();
+    expect(transport.editMessage).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "discord.streaming.handle_dead",
+      expect.objectContaining({ operation: "editMessage", status: 400 }),
+    );
+
+    await handle.pushUpdate("two");
+    await handle.setFullContent("three");
+    await handle.setStatusBar("> bar");
+    // Still ONLY the single poisoning call — no traffic from the no-ops.
+    expect(transport.editMessage).toHaveBeenCalledTimes(1);
+    expect(transport.createMessage).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("close() finalizes the handle: idempotent, silent, zero REST traffic afterwards", async () => {
+    const transport = createMockTransport();
+    const logger = {
+      warn: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as DiscordBridgeLogger;
+
+    const streaming = createDiscordStreamingOutbound({
+      transport,
+      capabilities: discordCapabilityDescriptor(),
+      channelId: "ch-1",
+      logger,
+    });
+
+    const handle = await streaming.start();
+    await handle.setFullContent("live");
+    expect(transport.editMessage).toHaveBeenCalledTimes(1);
+    vi.mocked(transport.editMessage).mockClear();
+    vi.mocked(transport.createMessage).mockClear(); // drop the start() placeholder
+
+    // Deterministic teardown (e.g. the owning turn was aborted).
+    handle.close?.();
+    handle.close?.(); // idempotent
+
+    await handle.pushUpdate("late delta");
+    await handle.setFullContent("late delivery");
+    await handle.setStatusBar("> late bar");
+    expect(transport.editMessage).not.toHaveBeenCalled();
+    expect(transport.createMessage).not.toHaveBeenCalled();
+    // A deliberate teardown is not a failure: no handle_dead warn.
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 });

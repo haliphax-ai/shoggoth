@@ -64,7 +64,11 @@ import {
 } from "./session-tool-loop-model-client";
 import type { SessionMcpToolContext } from "./session-mcp-tool-context";
 import type { PolicyEngine } from "../policy/engine";
-import { beginSessionTurnAbortScope, TurnAbortedError } from "./session-turn-abort";
+import {
+  beginSessionTurnAbortScope,
+  notifyOnTurnAbort,
+  TurnAbortedError,
+} from "./session-turn-abort";
 import { messageToolContextRef } from "../messaging/message-tool-context-ref";
 import {
   incrementTokenUsage,
@@ -472,8 +476,11 @@ export async function executeSessionAgentTurn(
   // that runs only when the turn promise settles is not enough: an aborted
   // model call can hang forever (e.g. a stuck provider streaming deltas),
   // leaving stream pushers/status bars editing a dead message indefinitely.
+  // notifyOnTurnAbort also covers an ALREADY-aborted signal (the abort raced
+  // turn setup against a slow provider): a bare addEventListener would never
+  // fire and the display pipeline would outlive the session.
   const notifyTurnAborted = () => input.events?.onTurnAborted?.();
-  turnAbortSignal.addEventListener("abort", notifyTurnAborted, { once: true });
+  notifyOnTurnAbort(turnAbortSignal, notifyTurnAborted);
 
   const model: SessionToolLoopModelClient = createSessionToolLoopModelClient({
     toolClient,
