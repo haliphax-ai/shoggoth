@@ -1,4 +1,4 @@
-import { describe, it, afterEach } from "vitest";
+import { describe, it, afterEach, vi } from "vitest";
 import assert from "node:assert";
 import {
   registerSteerChannel,
@@ -66,5 +66,53 @@ describe("steer-channel", () => {
     pushSteer("sess-1", "still works");
     assert.deepStrictEqual(drainSteers("sess-1"), ["still works"]);
     c2.unregister();
+  });
+
+  // ---- onDropped callbacks (guaranteed in-turn delivery) ----
+
+  it("onDropped is not called for a message that was drained", () => {
+    const { unregister } = registerSteerChannel("sess-1");
+    const onDropped = vi.fn();
+    pushSteer("sess-1", "consumed", { onDropped });
+    assert.deepStrictEqual(drainSteers("sess-1"), ["consumed"]);
+    unregister();
+    assert.equal(onDropped.mock.calls.length, 0);
+  });
+
+  it("onDropped fires for undrained messages when the channel unregisters", () => {
+    const { unregister } = registerSteerChannel("sess-1");
+    const consumed = vi.fn();
+    const dropped = vi.fn();
+    pushSteer("sess-1", "consumed", { onDropped: consumed });
+    drainSteers("sess-1");
+    pushSteer("sess-1", "left behind", { onDropped: dropped });
+    unregister();
+    assert.equal(consumed.mock.calls.length, 0);
+    assert.equal(dropped.mock.calls.length, 1);
+    // callbacks fire at most once even if unregister is called again
+    unregister();
+    assert.equal(dropped.mock.calls.length, 1);
+  });
+
+  it("onDropped fires for undrained messages when the channel is replaced", () => {
+    registerSteerChannel("sess-1");
+    const dropped = vi.fn();
+    pushSteer("sess-1", "left behind", { onDropped: dropped });
+    const c2 = registerSteerChannel("sess-1");
+    assert.equal(dropped.mock.calls.length, 1);
+    c2.unregister();
+  });
+
+  it("one throwing onDropped does not prevent later callbacks", () => {
+    const { unregister } = registerSteerChannel("sess-1");
+    const bad = vi.fn(() => {
+      throw new Error("boom");
+    });
+    const good = vi.fn();
+    pushSteer("sess-1", "a", { onDropped: bad });
+    pushSteer("sess-1", "b", { onDropped: good });
+    unregister();
+    assert.equal(bad.mock.calls.length, 1);
+    assert.equal(good.mock.calls.length, 1);
   });
 });

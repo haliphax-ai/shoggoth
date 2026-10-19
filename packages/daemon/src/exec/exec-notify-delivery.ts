@@ -1,10 +1,11 @@
 // ---------------------------------------------------------------------------
-// deliverExecNotifyMessage — background exec completion → OOB turn (issue #478)
+// deliverExecNotifyMessage — background exec completion → in-turn steer or OOB
 // ---------------------------------------------------------------------------
 
 import { truncateOutput, MAX_OUTPUT_DEFAULT } from "@shoggoth/os-exec";
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
 import { buildExecNotifyTurnBanner } from "../messaging/oob-turn-banner";
+import { buildInTurnEventBanner, deliverInTurnEvent } from "../messaging/in-turn-event";
 import { deliverOobStructuredResponse } from "../control/integration-ops";
 import { OOB_NO_SENDER_GUIDANCE, OOB_SCHEMA_NO_SENDER } from "../messaging/oob-response-schemas";
 import { truncateToolOutput } from "../sessions/builtin-handlers/truncate-output";
@@ -83,8 +84,41 @@ export function buildExecNotifyResult(completion: ExecNotifyCompletion): Record<
   return result;
 }
 
-/** Deliver a completed background exec through the same OOB boundary as timers. */
+/**
+ * Deliver a completed background exec: in-turn via the steer channel when the
+ * session has an active turn, OOB otherwise.
+ */
 export async function deliverExecNotifyMessage(completion: ExecNotifyCompletion): Promise<void> {
+  const { handle } = completion;
+  const payload = buildExecNotifyResult(completion);
+  const body = truncateToolOutput(
+    `Background builtin-exec completed (notify handle \`${handle.id}\`):\n` +
+      JSON.stringify(payload, null, 2),
+  );
+  // --- In-turn path: inject into the active turn's steer
+  // channel when one exists. Falls back to the OOB turn below when no turn
+  // is active, or when the turn ends before the queued event is drained
+  // (guaranteed delivery via the steer channel's drop callback).
+  const banner = buildInTurnEventBanner({
+    emoji: "↩️",
+    title: "Exec notification",
+    detail: handle.command,
+    id: handle.id,
+  });
+  const outcome = await deliverInTurnEvent({
+    sessionId: handle.sessionId,
+    content: `${banner}\n\n${body}`,
+    fallback: () => deliverExecNotifyOobTurn(completion),
+  });
+  getLogger("exec-notify").debug("exec notify delivery resolved", {
+    id: handle.id,
+    sessionId: handle.sessionId,
+    outcome,
+  });
+}
+
+/** OOB delivery path: full structured turn on the session. */
+async function deliverExecNotifyOobTurn(completion: ExecNotifyCompletion): Promise<void> {
   const { handle } = completion;
   const ext = subagentRuntimeExtensionRef.current;
   if (!ext) {
