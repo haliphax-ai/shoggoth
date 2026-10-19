@@ -220,6 +220,9 @@ export const shoggothConfigFragmentSchema = z
       .object({
         allowPrivateIps: z.boolean().optional(),
         privateIpAllowlist: z.array(z.string()).optional(),
+        // Cap on automatic redirects followed per request (cf. the
+        // followRedirects tool argument, which defaults to true)
+        maxRedirects: z.number().int().min(0).max(20).optional(),
         // Path to a PEM certificate bundle file (cf. operatorTokenPath)
         caBundle: z.string().min(1).optional(),
       })
@@ -253,6 +256,9 @@ export const shoggothConfigSchema = z
       .object({
         allowPrivateIps: z.boolean().optional(),
         privateIpAllowlist: z.array(z.string()).optional(),
+        // Cap on automatic redirects followed per request (cf. the
+        // followRedirects tool argument, which defaults to true)
+        maxRedirects: z.number().int().min(0).max(20).optional(),
         // Path to a PEM certificate bundle file (cf. operatorTokenPath)
         caBundle: z.string().min(1).optional(),
       })

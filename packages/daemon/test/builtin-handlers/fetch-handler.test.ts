@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import http from "node:http";
 import https from "node:https";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -140,5 +141,159 @@ describe("fetch-handler — custom CA bundle over TLS", () => {
     const parsed = JSON.parse(result.resultJson);
 
     expect(parsed.error).toMatch(/Failed to load CA bundle/);
+  });
+});
+
+describe("fetch-handler — redirect following", () => {
+  let server: http.Server;
+  let origin: string;
+  const methodsSeen: Record<string, string | undefined> = {};
+
+  beforeAll(async () => {
+    server = http.createServer((req, res) => {
+      methodsSeen[req.url ?? ""] = req.method;
+      const port = (server.address() as AddressInfo).port;
+      switch (req.url) {
+        case "/redirect-once":
+          res.writeHead(302, { location: "/final" });
+          res.end();
+          return;
+        case "/redirect-chain":
+          res.writeHead(302, { location: "/redirect-once" });
+          res.end();
+          return;
+        case "/redirect-303":
+          res.writeHead(303, { location: "/final-303" });
+          res.end();
+          return;
+        case "/redirect-307":
+          res.writeHead(307, { location: "/final-307" });
+          res.end();
+          return;
+        case "/redirect-internal":
+          res.writeHead(302, { location: `http://localhost:${port}/final` });
+          res.end();
+          return;
+        case "/final":
+        case "/final-303":
+        case "/final-307":
+          res.writeHead(200, { "content-type": "text/plain" });
+          res.end("landed");
+          return;
+        default:
+          res.writeHead(404);
+          res.end();
+      }
+    });
+    await new Promise<void>((resolvePromise, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => resolvePromise());
+    });
+    const { port } = server.address() as AddressInfo;
+    origin = `http://127.0.0.1:${port}`;
+  });
+
+  afterAll(async () => {
+    server.closeAllConnections();
+    await new Promise<void>((resolvePromise) => server.close(() => resolvePromise()));
+  });
+
+  it("follows a single redirect by default and reports the chain", async () => {
+    const registry = new BuiltinToolRegistry();
+    register(registry);
+
+    const result = await registry.execute(
+      "fetch",
+      { url: `${origin}/redirect-once` },
+      makeCtx({ allowPrivateIps: true }),
+    );
+    const parsed = JSON.parse(result.resultJson);
+
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.status).toBe(200);
+    expect(parsed.body).toContain("landed");
+    expect(parsed.redirects).toEqual([
+      { url: `${origin}/redirect-once`, status: 302, location: `${origin}/final` },
+    ]);
+  });
+
+  it("does not follow redirects when followRedirects is false", async () => {
+    const registry = new BuiltinToolRegistry();
+    register(registry);
+
+    const result = await registry.execute(
+      "fetch",
+      { url: `${origin}/redirect-once`, followRedirects: false },
+      makeCtx({ allowPrivateIps: true }),
+    );
+    const parsed = JSON.parse(result.resultJson);
+
+    expect(parsed.status).toBe(302);
+    expect(parsed.headers.location).toBe("/final");
+    expect(parsed.redirects).toBeUndefined();
+  });
+
+  it("caps following at fetch.maxRedirects and returns the last response", async () => {
+    const registry = new BuiltinToolRegistry();
+    register(registry);
+
+    const result = await registry.execute(
+      "fetch",
+      { url: `${origin}/redirect-chain` },
+      makeCtx({ allowPrivateIps: true, maxRedirects: 1 }),
+    );
+    const parsed = JSON.parse(result.resultJson);
+
+    // One hop followed (/redirect-chain -> /redirect-once), then the cap
+    // stops on the second 302, which is returned as-is with the chain.
+    expect(parsed.status).toBe(302);
+    expect(parsed.redirects).toEqual([
+      { url: `${origin}/redirect-chain`, status: 302, location: `${origin}/redirect-once` },
+    ]);
+  });
+
+  it("re-checks redirect targets against the private-IP block", async () => {
+    const registry = new BuiltinToolRegistry();
+    register(registry);
+
+    const result = await registry.execute(
+      "fetch",
+      { url: `${origin}/redirect-internal` },
+      makeCtx({ allowPrivateIps: false, privateIpAllowlist: ["127.0.0.1"] }),
+    );
+    const parsed = JSON.parse(result.resultJson);
+
+    expect(parsed.status).toBeUndefined();
+    expect(parsed.error).toMatch(/Blocked: localhost/);
+  });
+
+  it("downgrades POST to GET when following a 303", async () => {
+    const registry = new BuiltinToolRegistry();
+    register(registry);
+
+    const result = await registry.execute(
+      "fetch",
+      { url: `${origin}/redirect-303`, method: "POST", body: { hello: "world" } },
+      makeCtx({ allowPrivateIps: true }),
+    );
+    const parsed = JSON.parse(result.resultJson);
+
+    expect(parsed.status).toBe(200);
+    expect(methodsSeen["/final-303"]).toBe("GET");
+  });
+
+  it("preserves the POST method when following a 307", async () => {
+    const registry = new BuiltinToolRegistry();
+    register(registry);
+
+    const result = await registry.execute(
+      "fetch",
+      { url: `${origin}/redirect-307`, method: "POST", body: { hello: "world" } },
+      makeCtx({ allowPrivateIps: true }),
+    );
+    const parsed = JSON.parse(result.resultJson);
+
+    expect(parsed.status).toBe(200);
+    expect(methodsSeen["/final-307"]).toBe("POST");
   });
 });
