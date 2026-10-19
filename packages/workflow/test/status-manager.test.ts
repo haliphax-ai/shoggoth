@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from "vitest";
 import assert from "node:assert/strict";
 import type { TaskList, TaskState, TaskDef, DependencyGraph } from "../src/types.js";
-import type { MessageAdapter } from "../src/message-adapter.js";
+import type { EditMessageFailureReason, MessageAdapter } from "../src/message-adapter.js";
 import { StatusManager } from "../src/status-manager.js";
 
 // --- Helpers ---
@@ -40,7 +40,7 @@ class MockMessageAdapter implements MessageAdapter {
   posted: Array<{ content: string; messageId: string }> = [];
   edited: Array<{ messageId: string; content: string }> = [];
   pinned: string[] = [];
-  editFailureReason: "not_found" | "unsupported" | "transient" | null = null;
+  editFailureReason: EditMessageFailureReason | null = null;
   private nextId = 1;
 
   async postMessage(content: string): Promise<{ messageId: string }> {
@@ -52,7 +52,7 @@ class MockMessageAdapter implements MessageAdapter {
   async editMessage(
     messageId: string,
     content: string,
-  ): Promise<{ ok: true } | { ok: false; reason: "not_found" | "unsupported" | "transient" }> {
+  ): Promise<{ ok: true } | { ok: false; reason: EditMessageFailureReason }> {
     if (this.editFailureReason) return { ok: false, reason: this.editFailureReason };
     this.edited.push({ messageId, content });
     return { ok: true };
@@ -183,6 +183,34 @@ describe("StatusManager", () => {
       assert.equal(adapter.posted.length, 1);
       assert.equal(adapter.edited.length, 1);
       assert.equal(adapter.edited[0].messageId, "msg-1");
+    });
+
+    it("latches dead on permanent edit failures: no repost, no further edits", async () => {
+      const graph: DependencyGraph = new Map([[1, new Set()]]);
+      const wf = makeWorkflow("wf", [makeTask(1, "Task", "pending")], graph);
+
+      await manager.postInitialStatus(wf);
+      assert.equal(adapter.posted.length, 1);
+
+      // e.g. HTTP 400 "Thread is archived": the surface rejects the request
+      // identically forever.
+      adapter.editFailureReason = "permanent";
+      wf.tasks[0].status = "in_progress";
+      wf.tasks[0].startedAt = Date.now();
+      await manager.updateStatus(wf);
+
+      // No repost (the surface itself is the problem — a repost would land
+      // in the same broken place) and the message ID is retained.
+      assert.equal(adapter.posted.length, 1);
+      assert.equal(adapter.edited.length, 0);
+
+      // Every later tick is a pure no-op: zero platform traffic. Even if the
+      // failure would have cleared, a latched surface stays latched.
+      adapter.editFailureReason = null;
+      await manager.updateStatus(wf);
+      await manager.updateStatus(wf);
+      assert.equal(adapter.posted.length, 1);
+      assert.equal(adapter.edited.length, 0);
     });
 
     it("reposts when the platform does not support edits (unsupported)", async () => {

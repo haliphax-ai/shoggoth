@@ -12,7 +12,14 @@ export type EditMessageFailureReason =
    * Transient failure (rate limit, 5xx, network). The message likely still
    * exists — do NOT repost; retry the edit on the next tick instead.
    */
-  | "transient";
+  | "transient"
+  /**
+   * Permanent failure (e.g. HTTP 400 — archived thread, rejected payload):
+   * the same request will fail identically forever. Do NOT repost and do NOT
+   * retry — callers must latch and stop editing, or the tick loop becomes a
+   * permanent-error spew against the platform.
+   */
+  | "permanent";
 
 /** Result of an edit attempt, typed so transient failures are legible. */
 export type EditMessageResult =
@@ -24,7 +31,8 @@ export interface MessageAdapter {
   /**
    * Edit an existing message. Returns a typed result: only `not_found` and
    * `unsupported` justify falling back to a repost; `transient` failures
-   * should be retried in place.
+   * should be retried in place; `permanent` failures must latch — never
+   * retried, never reposted.
    */
   editMessage(messageId: string, content: string): Promise<EditMessageResult>;
   /**

@@ -12,7 +12,8 @@
  *
  * Errors are typed (`RateLimitedError`, `NotFoundError`,
  * `MissingPermissionsError`, `ServerError`, `QueueTimeoutError`,
- * `NetworkError`) so callers can distinguish transient from permanent
+ * `NetworkError`, `BadRequestError`, `ThreadArchivedError`) so callers can
+ * distinguish transient from permanent
  * failures instead of matching on error strings. All errors extend
  * `DiscordRestError` and keep the legacy `Discord REST <op> <status>: <body>`
  * message shape for log compatibility.
@@ -61,6 +62,8 @@ export type DiscordRestErrorKind =
   | "server_error"
   | "queue_timeout"
   | "network"
+  | "bad_request"
+  | "thread_archived"
   | "http";
 
 /** Base class for every error thrown by the REST client. */
@@ -133,6 +136,38 @@ export class MissingPermissionsError extends DiscordRestError {
   }
 }
 
+/**
+ * HTTP 400 — the request was rejected by Discord and will be rejected the
+ * same way forever (malformed payload, unknown fields, invalid state).
+ * Permanent by nature: callers must not retry the identical request in a
+ * loop. Specific known 400 cases subclass this (see {@link ThreadArchivedError})
+ * so bespoke recovery (e.g. unarchive-and-retry) has a clean hook, while the
+ * default behavior for unclassified 400s is "log + give up".
+ */
+export class BadRequestError extends DiscordRestError {
+  constructor(
+    operation: string,
+    status: number,
+    body: string,
+    kind: DiscordRestErrorKind = "bad_request",
+  ) {
+    super(kind, operation, `Discord REST ${operation} ${status}: ${body}`, status, body);
+    this.name = "BadRequestError";
+  }
+}
+
+/**
+ * HTTP 400 with Discord code 50083 ("Thread is archived") — the target
+ * thread is archived, so every further edit/create against it fails the same
+ * way until a human unarchives it. Permanent for the calling handle.
+ */
+export class ThreadArchivedError extends BadRequestError {
+  constructor(operation: string, status: number, body: string) {
+    super(operation, status, body, "thread_archived");
+    this.name = "ThreadArchivedError";
+  }
+}
+
 /** HTTP 5xx — server-side failure. Transient by nature. */
 export class ServerError extends DiscordRestError {
   constructor(operation: string, status: number, body: string) {
@@ -163,10 +198,28 @@ export class NetworkError extends DiscordRestError {
   }
 }
 
+/** Discord error code for "Thread is archived" (HTTP 400 bodies). */
+const DISCORD_CODE_THREAD_ARCHIVED = 50083;
+
 function classifyHttpError(operation: string, status: number, body: string): DiscordRestError {
   if (status === 404) return new NotFoundError(operation, status, body);
   if (status === 403) return new MissingPermissionsError(operation, status, body);
   if (status >= 500) return new ServerError(operation, status, body);
+  if (status === 400) {
+    // Parse the body defensively: non-JSON or missing fields still classify
+    // as a generic bad request — the raw body is carried on the error either
+    // way so the log line identifies the actual failure.
+    let code: unknown;
+    try {
+      code = (JSON.parse(body) as { code?: unknown } | null)?.code;
+    } catch {
+      code = undefined;
+    }
+    if (code === DISCORD_CODE_THREAD_ARCHIVED) {
+      return new ThreadArchivedError(operation, status, body);
+    }
+    return new BadRequestError(operation, status, body);
+  }
   return new DiscordRestError(
     "http",
     operation,

@@ -20,6 +20,10 @@ export interface InboundSessionTurnStreaming {
   readonly start: () => Promise<{
     setFullContent: (body: string) => Promise<void>;
     pushUpdate: (body: string) => Promise<void>;
+    /** Present when the platform augments the handle with a live bar sink. */
+    setStatusBar?: (line: string | null) => Promise<void>;
+    /** Present when the platform handle supports deterministic teardown. */
+    close?: () => void;
   }>;
   readonly onStartFailed?: (message: string) => void;
 }
@@ -136,6 +140,8 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
         pushUpdate: (body: string) => Promise<void>;
         /** Present when the platform augments the handle (attachSink) with a live bar sink. */
         setStatusBar?: (line: string | null) => Promise<void>;
+        /** Deterministic teardown: after close() every further op is a no-op. */
+        close?: () => void;
       }
     | undefined;
   let streamPusher: ReturnType<typeof createCoalescingStreamPusher> | undefined;
@@ -277,9 +283,15 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
               // for a promise that never settles, so nothing else would ever
               // stop the edits. finish("aborted") freezes the tracker at its
               // terminal render; if the turn still settles later, delivery
-              // reuses the captured line.
+              // reuses the captured line. Closing the stream handle makes the
+              // teardown deterministic: even a producer that slips past the
+              // pusher/tracker stops (late model deltas, a deferred abort that
+              // settles minutes later via the compaction path and runs
+              // delivery, an unknown renderer) can never issue another edit —
+              // every later op is a no-op with zero platform traffic.
               onTurnAborted: () => {
                 streamPusher?.stop();
+                streamSink?.close?.();
                 if (statusBar) {
                   void statusBar.finish("aborted").catch((e) => {
                     log.warn("inbound_session_turn.status_bar_abort_finish_failed", {

@@ -39,3 +39,20 @@ export function requestSessionTurnAbort(sessionId: string): boolean {
   ac.abort();
   return true;
 }
+
+/**
+ * Fires `onAborted` when `signal` aborts — INCLUDING when the signal is
+ * already aborted at wiring time. A bare `addEventListener("abort", ...)`
+ * silently misses that case: when the abort races turn setup (operator
+ * abort/kill while a slow provider drags MCP/context/compaction setup), the
+ * listener would never fire and the turn's display pipeline — stream pusher,
+ * status-bar render timer, message edits — would keep running against a
+ * dead session forever.
+ */
+export function notifyOnTurnAbort(signal: AbortSignal, onAborted: () => void): void {
+  if (signal.aborted) {
+    onAborted();
+    return;
+  }
+  signal.addEventListener("abort", onAborted, { once: true });
+}
