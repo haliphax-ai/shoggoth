@@ -21,6 +21,7 @@ import { resolveAgentCreds } from "../agent-creds";
 import type { SessionStore } from "./session-store";
 import { getTimerScheduler } from "./builtin-handlers/timer-handler";
 import { getExecNotifyScheduler } from "../exec/exec-notify-scheduler";
+import { getSessionSendNotifyScheduler } from "./session-send-notify-scheduler";
 import { requestSessionTurnAbort } from "./session-turn-abort";
 import { disposeSubagentRuntime } from "../subagent/subagent-disposables";
 
@@ -246,6 +247,7 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
         options.sessions.update(id, { status: "terminated" });
         getTimerScheduler()?.cancelByAnchorSession(id);
         getExecNotifyScheduler()?.cancelBySession(id);
+        getSessionSendNotifyScheduler()?.cancelBySession(id);
       }
     },
 
