@@ -242,8 +242,32 @@ Registered as `session-send`. Send a message to a session or agent.
 | `silent`              | boolean | no       | Suppress notifications                              |
 | `platform_user_id`    | string  | no       | Sender context                                      |
 | `reply_to_message_id` | string  | no       | Reply context                                       |
+| `yieldMs`             | number  | no       | Reply window before yielding (default 30 s)         |
+| `notify`              | boolean | no       | Deliver the delayed reply later (default: true)     |
 
 \* Exactly one of `session_id` or `agent_id` is required.
+
+### Yield & notify
+
+A send blocks on the target's turn for at most the reply window — per-call
+`yieldMs` (`0` blocks until the reply arrives, the legacy behavior), else
+`runtime.sessionSendYieldMs` (or `SHOGGOTH_SESSION_SEND_YIELD_MS`), else 30 s.
+A reply that lands in time is returned inline, exactly as before.
+
+When the window expires the call returns a pending result
+(`{ status: "pending", notify, notifyId?, targetSessionId, yieldMs, note }`)
+instead of blocking, and — with `notify` (default `true`) — the pending call is
+handed off to a notify handle. When the target's turn finally settles, the
+reply (shaped like the result a blocking call would have returned) is
+delivered to the calling session: **in-turn** through the steer channel when a
+turn is active, **out of band** otherwise — wrapped in an emoji-stamped (📨)
+banner, the same aesthetic as the background-exec notify banner. A failed send
+(e.g. the target died mid-turn) is delivered the same way so the caller is
+never left waiting on a handle that will never resolve.
+
+`notify: false` skips the handle: the target's turn still runs (and posts to
+its bound surface unless `silent`), but the reply is dropped — rely on the
+target's own surface or `session-query` instead.
 
 ### Examples
 

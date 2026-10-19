@@ -228,6 +228,13 @@ export const shoggothRuntimeConfigSchema = z
      */
     execMaxYieldMs: z.number().int().positive().optional(),
     /**
+     * How long (ms) a `builtin-session-send` call blocks waiting for the
+     * target's reply before yielding and registering a notify handle. `0`
+     * disables yielding (block until the reply arrives). Default: 30000
+     * (30 seconds; see DEFAULT_SESSION_SEND_YIELD_MS).
+     */
+    sessionSendYieldMs: z.number().int().nonnegative().optional(),
+    /**
      * Maximum TTL (ms) enforced wherever the system controls a process lifetime
      * (subagent inactivity windows, workflow task runtime limits / wait timeouts,
      * tool-call execution timeouts). Used both as the default when a TTL is

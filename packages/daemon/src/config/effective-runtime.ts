@@ -4,6 +4,7 @@ import {
   resolvePlatformConfig,
   DEFAULT_TOOL_CALL_TIMEOUT_MS,
   DEFAULT_EXEC_MAX_YIELD_MS,
+  DEFAULT_SESSION_SEND_YIELD_MS,
   resolveMaxTtlMs,
   type ShoggothConfig,
 } from "@shoggoth/shared";
@@ -58,6 +59,20 @@ export function resolveExecMaxYieldMs(cfg: ShoggothConfig): number {
     cfg.runtime?.execMaxYieldMs ??
     DEFAULT_EXEC_MAX_YIELD_MS
   );
+}
+
+/**
+ * Effective session-send yield window for the daemon: env
+ * `SHOGGOTH_SESSION_SEND_YIELD_MS`, then `runtime.sessionSendYieldMs`, then
+ * the default 30 s (see DEFAULT_SESSION_SEND_YIELD_MS). A `builtin-session-send`
+ * call blocks for at most this long on the target's turn before yielding and
+ * handing the reply off to a notify handle. `0` disables yielding entirely
+ * (the call blocks until the reply arrives).
+ */
+export function resolveSessionSendYieldMs(cfg: ShoggothConfig): number {
+  const env = envInt("SHOGGOTH_SESSION_SEND_YIELD_MS");
+  if (env !== undefined && env >= 0) return env;
+  return cfg.runtime?.sessionSendYieldMs ?? DEFAULT_SESSION_SEND_YIELD_MS;
 }
 
 /** `SHOGGOTH_CONFIG_HOT_RELOAD=0` disables; else `runtime.configHotReload: false` disables. */

@@ -9,7 +9,14 @@ import {
   resolveAgentIdFromSessionId,
   resolveEffectiveSessionQueryAllowedAgentIds,
 } from "@shoggoth/shared";
+import { randomUUID } from "node:crypto";
+import { resolveMaxTtlMs } from "@shoggoth/shared";
 import { IntegrationOpError } from "../../control/integration-ops";
+import { resolveSessionSendYieldMs } from "../../config/effective-runtime";
+import {
+  getSessionSendNotifyScheduler,
+  type SessionSendNotifyHandle,
+} from "../session-send-notify-scheduler";
 import {
   computeSessionDepthFromStore,
   createSessionStore,
@@ -544,6 +551,29 @@ async function sessionListHandler(
 // session-send
 // ---------------------------------------------------------------------------
 
+/** Cap on the message preview echoed into notify banners. */
+const SESSION_SEND_PREVIEW_CHARS = 120;
+
+/**
+ * Effective reply window for a session-send call before it yields: per-call
+ * `yieldMs` (`0` = block until the reply arrives, the legacy behavior)
+ * overrides the configured default (`runtime.sessionSendYieldMs`, default 30 s;
+ * `0` there disables yielding globally). Returns `undefined` when the call
+ * should block. Per-call values are capped at the configured max TTL so a
+ * window can never stretch toward "forever".
+ */
+function resolveSendYieldMs(
+  args: Record<string, unknown>,
+  ctx: BuiltinToolContext,
+): number | undefined {
+  if (typeof args.yieldMs === "number") {
+    if (args.yieldMs <= 0) return undefined;
+    return Math.min(args.yieldMs, resolveMaxTtlMs(ctx.config));
+  }
+  const cfgMs = resolveSessionSendYieldMs(ctx.config);
+  return cfgMs > 0 ? cfgMs : undefined;
+}
+
 async function sessionSendHandler(
   args: Record<string, unknown>,
   ctx: BuiltinToolContext,
@@ -582,7 +612,63 @@ async function sessionSendHandler(
   if (typeof du === "string" && du.trim()) payload.platform_user_id = du.trim();
   const rt = args.reply_to_message_id;
   if (typeof rt === "string" && rt.trim()) payload.reply_to_message_id = rt.trim();
-  return invokeIntegration(inv, ctx.sessionId, "session_send", payload);
+
+  // --- Yield + notify (mirrors the background-exec notify mechanism) ---
+  // Race the target's turn against the reply window. A reply that lands in
+  // time returns inline exactly as before; an expired window hands the pending
+  // call off to a notify handle (default) and returns a pending result. The
+  // reply is then delivered to the calling session in-turn when a turn is
+  // active, out of band otherwise.
+  const resultPromise = invokeIntegration(inv, ctx.sessionId, "session_send", payload);
+  const yieldMs = resolveSendYieldMs(args, ctx);
+  if (yieldMs === undefined) return resultPromise;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const yielded = await Promise.race([
+    resultPromise.then(
+      () => false,
+      () => false,
+    ),
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(true), yieldMs);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+  if (!yielded) return resultPromise;
+  const targetSessionId =
+    (typeof payload.session_id === "string" ? payload.session_id : undefined) ??
+    (typeof payload.agent_id === "string" ? `agent:${payload.agent_id}` : undefined) ??
+    "unknown";
+  const handle: SessionSendNotifyHandle = {
+    id: randomUUID(),
+    sessionId: ctx.sessionId,
+    targetSessionId,
+    message:
+      message.length > SESSION_SEND_PREVIEW_CHARS
+        ? `${message.slice(0, SESSION_SEND_PREVIEW_CHARS)}…`
+        : message,
+  };
+  const notify = typeof args.notify === "boolean" ? args.notify : true;
+  const scheduler = notify ? getSessionSendNotifyScheduler() : undefined;
+  if (scheduler) {
+    scheduler.register(handle, resultPromise);
+  } else {
+    // Opted out (notify: false) or no scheduler (e.g. bare test harness): the
+    // reply is intentionally dropped; swallow the eventual rejection so it
+    // never surfaces as an unhandled rejection.
+    void resultPromise.catch(() => undefined);
+  }
+  return {
+    resultJson: JSON.stringify({
+      status: "pending",
+      notify: Boolean(scheduler),
+      ...(scheduler ? { notifyId: handle.id } : {}),
+      targetSessionId,
+      yieldMs,
+      note: scheduler
+        ? "The reply has not arrived yet; it will be delivered when it does (in-turn if a turn is active, otherwise out of band)."
+        : "Notify is disabled: the reply will not be delivered when it arrives.",
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------------
