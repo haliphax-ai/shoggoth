@@ -25,10 +25,21 @@ interface OutputPart {
 }
 
 /**
- * Strips leading padding so a quote block never opens with a blank `> ` line
- * (leading newline) or a doubled space after the 💭 marker (leading space).
+ * Strips padding so a quote block never opens with a blank `> ` line
+ * (leading newline) or a doubled space after the 💭 marker (leading space),
+ * and never ends with an empty `> ` continuation line (trailing newline).
  */
-const quoteBody = (text: string): string => text.replace(/^\s+/, "");
+const quoteBody = (text: string): string => text.trim();
+
+/**
+ * Normalizes a round's committed prose: leading whitespace and the trailing
+ * newline run are cosmetic (real models stream "\n\n…\n\n\n" padded prose,
+ * even blank-only rounds), but a trailing SPACE can be meaningful prose, so
+ * only the newline run is stripped from the tail. Shared with the turn-prose
+ * extraction so the streamed snapshot and the delivered body stay aligned.
+ */
+export const normalizeRoundProse = (content: string): string =>
+  content.replace(/^\s+/, "").replace(/[\r\n]+$/, "");
 
 /** Tracks cumulative model deltas as ordered text/thinking segments for display. */
 export function createThinkingOutput() {
@@ -61,9 +72,12 @@ export function createThinkingOutput() {
   /**
    * The provider's cumulative reasoning BEFORE the current round. Many
    * providers re-emit the prior reasoning at the start of a new tool-loop
-   * round (context quoting, not one continuous thought): the still-matching
-   * prefix is stripped from each new round so it renders only where it first
-   * arrived, and the new round opens its own 💭 block with only the new text.
+   * round (context quoting, not one continuous thought): a GENUINE
+   * re-emission — the whole base reappearing verbatim, or a re-emit still
+   * streaming in — is stripped so it renders only where it first arrived,
+   * and the new round opens its own 💭 block with only the new text. A
+   * coincidental shared opening (every round merely starting "Let me …")
+   * is NOT stripped: those bytes are new reasoning.
    */
   let thinkTurnBase = "";
 
@@ -195,9 +209,7 @@ export function createThinkingOutput() {
   const updateThinking = ({ accumulated, round }: ThinkingStreamEvent): string => {
     // Reasoning is round-scoped: within a round it continues that round's
     // 💭 part; a NEW round never diffs against (or splices into) an earlier
-    // round's parts. A cross-round prefix match is provider context quoting,
-    // so the still-shared prefix is stripped — it already rendered where it
-    // first arrived — and only the new text opens a 💭 part here.
+    // round's parts.
     if (round !== thinkRound) {
       if (thinkRound >= 0) thinkTurnBase = extendTurnReasoningBase(thinkTurnBase, thinkStream);
       thinkRound = round;
@@ -205,10 +217,18 @@ export function createThinkingOutput() {
       thinkShown = "";
     }
     thinkStream = accumulated;
-    let stripped = 0;
-    const stripMax = Math.min(accumulated.length, thinkTurnBase.length);
-    while (stripped < stripMax && accumulated[stripped] === thinkTurnBase[stripped]) stripped += 1;
-    const shown = accumulated.slice(stripped);
+    // Strip ONLY a genuine re-emission of the prior reasoning: the whole
+    // base reappearing verbatim (provider context quoting) or a re-emit
+    // still streaming in (a prefix of the base — hold, showing nothing
+    // until it completes or diverges). A coincidental shared opening —
+    // neither string a prefix of the other, e.g. every round merely
+    // starting "Let me …" — is NOT a re-emit: nothing is stripped and the
+    // whole accumulated text is this round's own reasoning.
+    const shown = accumulated.startsWith(thinkTurnBase)
+      ? accumulated.slice(thinkTurnBase.length)
+      : thinkTurnBase.startsWith(accumulated)
+        ? ""
+        : accumulated;
     const previous = thinkShown;
     let shared = 0;
     const max = Math.min(previous.length, shown.length);
@@ -242,24 +262,32 @@ export function createThinkingOutput() {
 
   /**
    * Reconciles the round's streamed prose tail with its authoritative final
-   * content and confirms the round boundary: a blank final content drops the
-   * round's streamed tail from the display (the turn record carries no such
-   * segment), and a settled round with content but no streamed deltas enters
-   * the display as its own segment.
+   * content and confirms the round boundary: a whitespace-only final content
+   * drops the round's streamed tail from the display (the turn record
+   * carries no such segment), a non-blank final content commits with its
+   * edge padding removed, and a settled round with content but no streamed
+   * deltas enters the display as its own segment.
    */
   const endRound = ({ round, content }: ThinkingRoundEndEvent): string => {
+    // Real models stream newline-padded prose ("\n\n…\n\n\n", even
+    // blank-only rounds): the committed prose is the NORMALIZED content, so
+    // the display, the round separator, and the delivered turn prose all
+    // agree on exactly one blank line between segments — and a
+    // whitespace-only round commits nothing (the turn record carries no
+    // such segment).
+    const finalContent = normalizeRoundProse(content);
     if (textRound === round) {
-      if (!content) {
+      if (!finalContent) {
         dropRoundText(round);
         return render();
       }
       const previous = textRoundStream;
       let shared = 0;
-      const max = Math.min(previous.length, content.length);
-      while (shared < max && previous[shared] === content[shared]) shared += 1;
+      const max = Math.min(previous.length, finalContent.length);
+      while (shared < max && previous[shared] === finalContent[shared]) shared += 1;
       const diverged = shared < previous.length;
-      const remainder = content.slice(shared);
-      commitRoundText(content);
+      const remainder = finalContent.slice(shared);
+      commitRoundText(finalContent);
       if (!diverged) {
         // The final content extends the streamed tail (late deltas were
         // recorded in the transcript only): append to the round's part.
@@ -279,12 +307,12 @@ export function createThinkingOutput() {
       }
       return render();
     }
-    if (content && round > textRound) {
+    if (finalContent && round > textRound) {
       // The round produced prose without streaming deltas (or endRound ran
       // ahead of the display stream): record it as its own round segment.
       enterRoundText(round);
-      commitRoundText(content);
-      parts.push({ kind: "text", text: content, round });
+      commitRoundText(finalContent);
+      parts.push({ kind: "text", text: finalContent, round });
     }
     return render();
   };
@@ -352,7 +380,18 @@ export function createThinkingOutput() {
       rendered.push(region.slice(textOffset));
     }
     const body = rendered.join("\n\n");
-    return finalText === undefined ? body : `${head}${body}${tail}`;
+    if (finalText !== undefined) return `${head}${body}${tail}`;
+    // The live display is provisional: newline-padded model output can
+    // transiently stack the round separator onto the padding while a round
+    // is still streaming, and a padded tail would stack blank lines onto
+    // whatever the platform appends next (e.g. the status bar). Mask it in
+    // the RENDERED string only — parts and turnText keep the raw stream
+    // until endRound reconciles them against the round's final content —
+    // so the live message never shows a wall of blank lines.
+    return body
+      .replace(/^\s+/, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/\n+$/, "");
   };
 
   return {

@@ -11,7 +11,7 @@ import type { ToolCallEvent } from "../sessions/tool-loop";
 import type { OutboundAttachment, StreamHandle } from "../presentation/platform-adapter";
 import { createCoalescingStreamPusher } from "../presentation/stream-coordinator";
 import { getLogger } from "../logging";
-import { createThinkingOutput } from "./thinking-output";
+import { createThinkingOutput, normalizeRoundProse } from "./thinking-output";
 
 const log = getLogger("inbound-session-turn");
 
@@ -237,8 +237,11 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
                       if (thinkingOutput) {
                         display = thinkingOutput.endRound(ev);
                       } else {
-                        if (ev.content) {
-                          priorRoundsProse += priorRoundsProse ? `\n\n${ev.content}` : ev.content;
+                        // Whitespace-only round content carries no prose and
+                        // must never enter the display as a blank segment.
+                        const prose = normalizeRoundProse(ev.content);
+                        if (prose) {
+                          priorRoundsProse += priorRoundsProse ? `\n\n${prose}` : prose;
                         }
                         display = priorRoundsProse;
                       }

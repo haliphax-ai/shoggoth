@@ -105,6 +105,12 @@ fi
 
 cp -R "$BASE_DIR"/. "$REPO"/
 
+# Repository-discovery variables leak from the caller: a `git commit` hook
+# environment exports GIT_DIR, which overrides the -C target of every git call
+# and would retarget the throwaway repository's commits at the caller's
+# checkout. Unset them before the FIRST git call, init included.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+
 git -C "$REPO" init -q -b main
 # Identity comes from the environment, never from `git config`, because config writes
 # resolve against the invoking checkout — the repo-local config inside a worktree, or the

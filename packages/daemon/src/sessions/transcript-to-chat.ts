@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import type { ChatMessage, ChatToolCall, ChatContentPart, ImageBlockCodec } from "@shoggoth/models";
 import { createTranscriptStore } from "./transcript-store";
+import { normalizeRoundProse } from "../messaging/thinking-output";
 
 /**
  * Detects whether a content string is a JSON-serialized `ChatContentPart[]` or a plain string.
@@ -200,7 +201,12 @@ export function extractTurnTranscriptAssistantProse(
     });
     for (const m of page.messages) {
       if (m.role === "assistant" && m.content) {
-        segments.push(m.content);
+        // Real models record newline-padded segment content ("\n\n…\n\n\n",
+        // even blank-only rounds): normalize each segment and skip blank
+        // ones so the composed prose joins with exactly one blank-line
+        // separator — matching the display pipeline's round normalization.
+        const prose = normalizeRoundProse(m.content);
+        if (prose) segments.push(prose);
       }
     }
     if (!page.nextCursor) break;

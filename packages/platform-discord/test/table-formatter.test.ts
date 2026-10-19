@@ -83,6 +83,29 @@ test("no table -> pass-through unchanged", () => {
   expect(mdTableToAscii(input)).toBe(input);
 });
 
+test("keeps blockquote continuation lines intact when the body has a table", () => {
+  const body = [
+    "> 💭 Checking the parser.",
+    "> ",
+    "Prose before the table.",
+    "",
+    "| A | B |",
+    "|---|---|",
+    "| 1 | 2 |",
+  ].join("\n");
+  const result = mdTableToAscii(body);
+  // Everything outside the table stays byte-identical: the empty
+  // blockquote continuation keeps its trailing space (a bare ">" breaks
+  // Discord's blockquote rendering).
+  expect(result).toContain("> 💭 Checking the parser.\n> \nProse before the table.\n\n```text\n");
+  // The table itself still becomes a boxed code block.
+  const codeMatch = result.match(/```text\n([\s\S]*?)```/);
+  expect(codeMatch).toBeTruthy();
+  const box = codeMatch![1].trim();
+  expect(box).toContain("┌");
+  expect(box).toContain("│ 1 │ 2 │");
+});
+
 test("single cell table", () => {
   const md2 = ["| X |", "|---|", "| 1 |", ""].join("\n");
   const result = mdTableToAscii(md2);
