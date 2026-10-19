@@ -133,6 +133,28 @@ describe("deliverExecNotifyMessage in-turn delivery", () => {
     unregister();
   });
 
+  it("posts a surface delivery banner when steering in-turn", async () => {
+    const statusMessages: string[] = [];
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: vi.fn(),
+      sendStatusMessage: async (_sessionId: string, body: string) => {
+        statusMessages.push(body);
+      },
+    } as never);
+    const { unregister } = registerSteerChannel("sess-1");
+
+    await deliverExecNotifyMessage(completion);
+
+    assert.equal(drainSteers("sess-1").length, 1);
+    assert.equal(statusMessages.length, 1);
+    assert.ok(
+      statusMessages[0]!.startsWith("> ↩️ ✅ Exec notification delivered in-turn"),
+      statusMessages[0],
+    );
+    assert.ok(statusMessages[0]!.includes("`n1`"), statusMessages[0]);
+    unregister();
+  });
+
   it("falls back to an OOB turn when no turn is active", async () => {
     const runSessionModelTurn = vi.fn().mockResolvedValue({ latestAssistantText: "" });
     setSubagentRuntimeExtension({ runSessionModelTurn } as never);

@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import { resolveMaxTtlMs } from "@shoggoth/shared";
 import { IntegrationOpError } from "../../control/integration-ops";
 import { resolveSessionSendYieldMs } from "../../config/effective-runtime";
+import { subagentRuntimeExtensionRef } from "../../subagent/subagent-extension-ref";
 import {
   getSessionSendNotifyScheduler,
   type SessionSendNotifyHandle,
@@ -656,6 +657,22 @@ async function sessionSendHandler(
     // reply is intentionally dropped; swallow the eventual rejection so it
     // never surfaces as an unhandled rejection.
     void resultPromise.catch(() => undefined);
+  }
+  // Surface trace for the yield itself (best-effort): post an emoji-stamped
+  // banner to the session's bound surface so the operator can see the call
+  // stopped blocking, mirroring the OOB notify banners. The later reply
+  // delivery carries its own banner, so the two moments stay distinguishable.
+  const yieldBanner = scheduler
+    ? `> 📨 Session-send yielded: waiting for reply from *${targetSessionId}* \`${handle.id}\` …`
+    : `> 📨 Session-send yielded: reply from *${targetSessionId}* will not be delivered (notify disabled)`;
+  const ext = subagentRuntimeExtensionRef.current;
+  if (ext?.sendStatusMessage) {
+    void ext.sendStatusMessage(ctx.sessionId, yieldBanner).catch((e) => {
+      log.warn("session-send yield banner failed", {
+        sessionId: ctx.sessionId,
+        err: String(e),
+      });
+    });
   }
   return {
     resultJson: JSON.stringify({

@@ -11,6 +11,7 @@ import {
   type SessionSendNotifyCompletion,
 } from "../../src/sessions/session-send-notify-scheduler";
 import { IntegrationOpError } from "../../src/control/integration-ops";
+import { setSubagentRuntimeExtension } from "../../src/subagent/subagent-extension-ref";
 import { resolveSessionSendYieldMs } from "../../src/config/effective-runtime";
 import type { ShoggothConfig } from "@shoggoth/shared";
 
@@ -53,6 +54,7 @@ describe("builtin-session-send yield + notify", () => {
   let completions: SessionSendNotifyCompletion[];
   let scheduler: SessionSendNotifyScheduler;
   let invCalls: Array<{ sessionId: string; op: string; payload: unknown }>;
+  let statusMessages: string[];
 
   function stubCtx(inv: InvokerFn | undefined, config: ShoggothConfig = {}): BuiltinToolContext {
     return {
@@ -71,15 +73,22 @@ describe("builtin-session-send yield + notify", () => {
   beforeEach(() => {
     completions = [];
     invCalls = [];
+    statusMessages = [];
     scheduler = new SessionSendNotifyScheduler(async (c) => {
       completions.push(c);
     });
     setSessionSendNotifyScheduler(scheduler);
+    setSubagentRuntimeExtension({
+      sendStatusMessage: async (_sessionId: string, body: string) => {
+        statusMessages.push(body);
+      },
+    } as never);
   });
 
   afterEach(() => {
     scheduler.shutdown();
     setSessionSendNotifyScheduler(undefined as unknown as SessionSendNotifyScheduler);
+    setSubagentRuntimeExtension(undefined);
   });
 
   it("returns the reply inline when it lands within the reply window", async () => {
@@ -235,6 +244,46 @@ describe("builtin-session-send yield + notify", () => {
     d.resolve({ reply: "undelivered" });
     await sleep(50);
     assert.equal(completions.length, 0);
+  });
+
+  it("posts a yield banner to the bound surface when the call yields", async () => {
+    const d = deferred<Record<string, unknown>>();
+    const inv: InvokerFn = async () => d.promise;
+    await reg().execute(
+      "session-send",
+      { message: "hi", session_id: TARGET_SESSION_ID },
+      stubCtx(inv, { runtime: { sessionSendYieldMs: 50 } }),
+    );
+    assert.equal(statusMessages.length, 1);
+    assert.ok(statusMessages[0]!.startsWith("> 📨 Session-send yielded"), statusMessages[0]);
+    assert.ok(statusMessages[0]!.includes(TARGET_SESSION_ID), statusMessages[0]);
+    d.resolve({ reply: "ok" });
+  });
+
+  it("posts no banner when the reply lands inline within the window", async () => {
+    const inv: InvokerFn = async () => {
+      await sleep(10);
+      return { reply: "fast" };
+    };
+    await reg().execute(
+      "session-send",
+      { message: "hi", session_id: TARGET_SESSION_ID },
+      stubCtx(inv, { runtime: { sessionSendYieldMs: 5_000 } }),
+    );
+    assert.equal(statusMessages.length, 0);
+  });
+
+  it("banners the yield with dropped-reply wording when notify: false", async () => {
+    const d = deferred<Record<string, unknown>>();
+    const inv: InvokerFn = async () => d.promise;
+    await reg().execute(
+      "session-send",
+      { message: "hi", session_id: TARGET_SESSION_ID, notify: false },
+      stubCtx(inv, { runtime: { sessionSendYieldMs: 50 } }),
+    );
+    assert.equal(statusMessages.length, 1);
+    assert.ok(statusMessages[0]!.includes("will not be delivered"), statusMessages[0]);
+    d.resolve({ reply: "ok" });
   });
 
   it("resolves the target from agent_id when no session_id is given", async () => {

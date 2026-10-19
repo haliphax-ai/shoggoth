@@ -253,11 +253,15 @@ Long-running commands don't have to block a turn:
   clamped to it, never ignored. The cap defaults to 30000 ms and is
   configurable via `runtime.execMaxYieldMs` (or `SHOGGOTH_EXEC_MAX_YIELD_MS`).
 - `notify` (default `true`) registers the backgrounded call for a completion
-  notification: when the process exits, the session receives an
-  out-of-band turn carrying the exit code and the output — respecting the
-  call's output options (`splitStreams`, `maxOutput`/`truncation`, and
-  `stdoutFile`/`stderrFile`/`outputFile`) exactly as a blocking call would
-  have. Pass `notify: false` to opt out and rely on `builtin-poll` instead.
+  notification: when the process exits, the session receives the exit code
+  and the output — respecting the call's output options (`splitStreams`,
+  `maxOutput`/`truncation`, and `stdoutFile`/`stderrFile`/`outputFile`)
+  exactly as a blocking call would have. Delivery is in-turn through the
+  steer channel when the session has an active turn (with a
+  `↩️ ✅ Exec notification delivered in-turn` banner posted to the bound
+  surface),
+  or an out-of-band turn with processing/terminal banners otherwise. Pass
+  `notify: false` to opt out and rely on `builtin-poll` instead.
 - In-flight notify handles appear in the turn status bar after the timers
   section (↩️ `N`); the toggle is `platforms.statusBar.notifyEnabled`
   (default true).

@@ -110,6 +110,24 @@ export async function deliverExecNotifyMessage(completion: ExecNotifyCompletion)
     content: `${banner}\n\n${body}`,
     fallback: () => deliverExecNotifyOobTurn(completion),
   });
+  // Surface trace for in-turn delivery (best-effort): the steer-channel
+  // injection only lands in the turn's context, so post a lightweight
+  // terminal-style banner to the bound surface as well. The OOB fallback
+  // posts its own processing/terminal banners, so it needs no extra post.
+  if (outcome === "in_turn") {
+    const ext = subagentRuntimeExtensionRef.current;
+    if (ext?.sendStatusMessage) {
+      const command =
+        handle.command.length > 60 ? `${handle.command.slice(0, 60)}…` : handle.command;
+      const deliveryBanner = `> ↩️ ✅ Exec notification delivered in-turn: *${command}* \`${handle.id}\``;
+      await ext.sendStatusMessage(handle.sessionId, deliveryBanner).catch((e) => {
+        getLogger("exec-notify").warn("exec notify delivery banner failed", {
+          sessionId: handle.sessionId,
+          err: String(e),
+        });
+      });
+    }
+  }
   getLogger("exec-notify").debug("exec notify delivery resolved", {
     id: handle.id,
     sessionId: handle.sessionId,

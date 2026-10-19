@@ -257,13 +257,19 @@ A reply that lands in time is returned inline, exactly as before.
 When the window expires the call returns a pending result
 (`{ status: "pending", notify, notifyId?, targetSessionId, yieldMs, note }`)
 instead of blocking, and — with `notify` (default `true`) — the pending call is
-handed off to a notify handle. When the target's turn finally settles, the
-reply (shaped like the result a blocking call would have returned) is
-delivered to the calling session: **in-turn** through the steer channel when a
-turn is active, **out of band** otherwise — wrapped in an emoji-stamped (📨)
-banner, the same aesthetic as the background-exec notify banner. A failed send
-(e.g. the target died mid-turn) is delivered the same way so the caller is
-never left waiting on a handle that will never resolve.
+handed off to a notify handle. The yield itself posts a best-effort
+`> 📨 Session-send yielded: waiting for reply from …` banner to the calling
+session's bound surface, so the operator can see the call stopped blocking.
+
+When the target's turn finally settles, the reply (shaped like the result a
+blocking call would have returned) is delivered to the calling session:
+**in-turn** through the steer channel when a turn is active — plus a
+best-effort `> 📨 ✅ Session-send reply delivered in-turn` banner on the bound
+surface so the in-band delivery leaves a visible trace — or **out of band**
+otherwise, wrapped in the full emoji-stamped (📨) processing/terminal
+banners, the same aesthetic as the background-exec notify banner. A failed
+send (e.g. the target died mid-turn) is delivered the same way so the caller
+is never left waiting on a handle that will never resolve.
 
 `notify: false` skips the handle: the target's turn still runs (and posts to
 its bound surface unless `silent`), but the reply is dropped — rely on the

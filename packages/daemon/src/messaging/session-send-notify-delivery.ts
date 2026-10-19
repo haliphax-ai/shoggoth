@@ -71,6 +71,22 @@ export async function deliverSessionSendNotifyMessage(
     content: `${banner}\n\n${body}`,
     fallback: () => deliverSessionSendOobTurn(completion),
   });
+  // Surface trace for in-turn delivery (best-effort): the steer-channel
+  // injection only lands in the turn's context, so post a lightweight
+  // terminal-style banner to the bound surface as well. The OOB fallback
+  // posts its own processing/terminal banners, so it needs no extra post.
+  if (outcome === "in_turn") {
+    const ext = subagentRuntimeExtensionRef.current;
+    if (ext?.sendStatusMessage) {
+      const deliveryBanner = `> 📨 ✅ Session-send reply delivered in-turn: *${handle.targetSessionId}* \`${handle.id}\``;
+      await ext.sendStatusMessage(handle.sessionId, deliveryBanner).catch((e) => {
+        getLogger("session-send-notify").warn("session-send delivery banner failed", {
+          sessionId: handle.sessionId,
+          err: String(e),
+        });
+      });
+    }
+  }
   getLogger("session-send-notify").debug("session-send notify delivery resolved", {
     id: handle.id,
     sessionId: handle.sessionId,

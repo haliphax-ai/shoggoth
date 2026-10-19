@@ -1,4 +1,4 @@
-import { describe, it, afterEach, vi } from "vitest";
+import { describe, it, beforeEach, afterEach, vi } from "vitest";
 import assert from "node:assert";
 import {
   buildSessionSendNotifyResult,
@@ -14,6 +14,8 @@ import {
   _resetAllChannels,
 } from "../../src/sessions/steer-channel";
 import { setSubagentRuntimeExtension } from "../../src/subagent/subagent-extension-ref";
+
+let statusMessages: string[];
 
 function handle(overrides: Partial<SessionSendNotifyHandle> = {}): SessionSendNotifyHandle {
   return {
@@ -60,6 +62,10 @@ describe("buildSessionSendNotifyResult", () => {
 });
 
 describe("deliverSessionSendNotifyMessage in-turn delivery", () => {
+  beforeEach(() => {
+    statusMessages = [];
+  });
+
   afterEach(() => {
     _resetAllChannels();
     setSubagentRuntimeExtension(undefined);
@@ -67,9 +73,18 @@ describe("deliverSessionSendNotifyMessage in-turn delivery", () => {
 
   const done: SessionSendNotifyCompletion = completion({ reply: "the reply" });
 
+  function stubStatusExtension(extra: Record<string, unknown> = {}): void {
+    setSubagentRuntimeExtension({
+      sendStatusMessage: async (_sessionId: string, body: string) => {
+        statusMessages.push(body);
+      },
+      ...extra,
+    } as never);
+  }
+
   it("injects into the steer channel when a turn is active — no OOB turn", async () => {
     const runSessionModelTurn = vi.fn();
-    setSubagentRuntimeExtension({ runSessionModelTurn } as never);
+    stubStatusExtension({ runSessionModelTurn });
     const { unregister } = registerSteerChannel("sess-1");
 
     await deliverSessionSendNotifyMessage(done);
@@ -82,6 +97,13 @@ describe("deliverSessionSendNotifyMessage in-turn delivery", () => {
     assert.ok(msgs[0].includes('"reply": "the reply"'), msgs[0]);
     assert.ok(msgs[0].includes('"targetSessionId": "sess-2"'), msgs[0]);
     assert.equal(runSessionModelTurn.mock.calls.length, 0);
+    // The in-band delivery also leaves a surface trace.
+    assert.equal(statusMessages.length, 1);
+    assert.ok(
+      statusMessages[0]!.startsWith("> 📨 ✅ Session-send reply delivered in-turn"),
+      statusMessages[0],
+    );
+    assert.ok(statusMessages[0]!.includes("`ssn1`"), statusMessages[0]);
     unregister();
   });
 
@@ -100,7 +122,7 @@ describe("deliverSessionSendNotifyMessage in-turn delivery", () => {
 
   it("falls back to an OOB turn when no turn is active", async () => {
     const runSessionModelTurn = vi.fn().mockResolvedValue({ latestAssistantText: "" });
-    setSubagentRuntimeExtension({ runSessionModelTurn } as never);
+    stubStatusExtension({ runSessionModelTurn });
 
     await deliverSessionSendNotifyMessage(done);
 
@@ -109,5 +131,7 @@ describe("deliverSessionSendNotifyMessage in-turn delivery", () => {
     assert.equal(call.sessionId, "sess-1");
     assert.equal(call.userMetadata.session_send_notify, true);
     assert.ok(call.userContent.includes('"reply": "the reply"'));
+    // The OOB path posts its own processing/terminal banners — no extra post.
+    assert.equal(statusMessages.length, 0);
   });
 });
