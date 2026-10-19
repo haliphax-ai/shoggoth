@@ -81,6 +81,14 @@ export const DEFAULT_TOOL_CALL_TIMEOUT_MS = 600_000;
  * (issue #478) — overridable via `runtime.execMaxYieldMs`.
  */
 export const DEFAULT_EXEC_MAX_YIELD_MS = 30_000;
+
+/**
+ * Default yield window (ms) for the session-send tool before it stops blocking
+ * on the target's turn and hands the reply off to a notify handle. `0` disables
+ * yielding (block until the reply arrives) — overridable via
+ * `runtime.sessionSendYieldMs`.
+ */
+export const DEFAULT_SESSION_SEND_YIELD_MS = 30_000;
 /** Default maximum TTL for lifetime-controlled units: 24 hours. */
 export const DEFAULT_MAX_TTL_MS = 86_400_000;
 

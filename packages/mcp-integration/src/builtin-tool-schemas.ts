@@ -285,7 +285,7 @@ export const sessionListArgs = {
 export const sessionSendArgs = {
   type: "object",
   description:
-    "Deliver a user message to a session and run one model turn. Use session_id or agent_id (main session); not both. When silent is true, the assistant reply is not posted to the bound messaging surface (internal delivery only).",
+    "Deliver a user message to a session and run one model turn. Use session_id or agent_id (main session); not both. When silent is true, the assistant reply is not posted to the bound messaging surface (internal delivery only). Yields after a reply window (default 30s, configurable via runtime.sessionSendYieldMs) and returns a pending result; with notify (default true) the reply is delivered later in-turn if a turn is active, or out of band otherwise.",
   properties: {
     message: {
       type: "string",
@@ -311,6 +311,17 @@ export const sessionSendArgs = {
     reply_to_message_id: {
       type: "string",
       description: "When not silent, optional reply reference",
+    },
+    yieldMs: {
+      type: "integer",
+      description:
+        "Wait up to this many ms for the reply before yielding and returning a pending result. 0 blocks until the reply arrives. Defaults to runtime.sessionSendYieldMs (30000).",
+      minimum: 0,
+    },
+    notify: {
+      type: "boolean",
+      description:
+        "When the call yields: register the reply for later delivery (in-turn if a turn is active, out of band otherwise). Default true. false drops the reply — the target's turn still runs.",
     },
   },
   required: ["message"],

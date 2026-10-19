@@ -123,6 +123,11 @@ import { buildWorkflowTurnBanner } from "./messaging/oob-turn-banner";
 import { setTimerScheduler } from "./sessions/builtin-handlers/timer-handler";
 import { ExecNotifyScheduler, setExecNotifyScheduler } from "./exec/exec-notify-scheduler";
 import { deliverExecNotifyMessage } from "./exec/exec-notify-delivery";
+import { deliverSessionSendNotifyMessage } from "./messaging/session-send-notify-delivery";
+import {
+  SessionSendNotifyScheduler,
+  setSessionSendNotifyScheduler,
+} from "./sessions/session-send-notify-scheduler";
 import {
   ShoggothPluginSystem,
   loadAllPluginsFromConfig,
@@ -439,6 +444,20 @@ function initExecNotifyScheduler(db: ReturnType<typeof openStateDb>) {
   notifyScheduler.restore(db).catch((e) => {
     getLogger("daemon").warn("exec notify restore failed", { err: String(e) });
   });
+  return () => {
+    notifyScheduler.shutdown();
+  };
+}
+
+/**
+ * Initialise the session-send notify scheduler (yielded `builtin-session-send`
+ * reply notifications) and return a disposer function. Handles are in-memory
+ * (their pending integration promises die with the process), so there is
+ * nothing to restore from the DB.
+ */
+function initSessionSendNotifyScheduler() {
+  const notifyScheduler = new SessionSendNotifyScheduler(deliverSessionSendNotifyMessage);
+  setSessionSendNotifyScheduler(notifyScheduler);
   return () => {
     notifyScheduler.shutdown();
   };
@@ -1157,6 +1176,12 @@ void (async () => {
   // --- Exec Notify Scheduler (background builtin-exec completion) ---
   const disposeExecNotify = initExecNotifyScheduler(db);
   rt.shutdown.registerDrain("exec-notify-scheduler", disposeExecNotify, { group: 1 });
+
+  // --- Session-Send Notify Scheduler (yielded session-send replies) ---
+  const disposeSessionSendNotify = initSessionSendNotifyScheduler();
+  rt.shutdown.registerDrain("session-send-notify-scheduler", disposeSessionSendNotify, {
+    group: 1,
+  });
 
   // --- Service Lifecycle Manager ---
   const serviceApprovalStore = new ServiceApprovalStore(db);

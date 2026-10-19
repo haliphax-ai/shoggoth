@@ -67,6 +67,20 @@ export function buildExecNotifyTurnBanner(input: {
   };
 }
 
+export function buildSessionSendReplyTurnBanner(input: {
+  handleId: string;
+  targetSessionId: string;
+  maxPromptChars?: number;
+}): OobTurnBannerText {
+  const maxChars = input.maxPromptChars ?? DEFAULT_TIMER_PROMPT_CHARS;
+  const target = truncate(input.targetSessionId, maxChars);
+  return {
+    processing: `> 📨 Processing session-send reply from *${target}* \`${input.handleId}\` …`,
+    terminal: (outcome) =>
+      `> 📨 ${terminalEmoji(outcome)} Session-send reply ${terminalVerb(outcome)}: \`${input.handleId}\``,
+  };
+}
+
 export function buildSessionMessageTurnBanner(input: {
   senderSessionId: string;
 }): OobTurnBannerText {
