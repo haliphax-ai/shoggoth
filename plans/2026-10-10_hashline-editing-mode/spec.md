@@ -17,13 +17,16 @@ interface FileEditingContext {
 }
 
 /** Per-line canonicalization before hashing. */
-function canonLine(line: string): string; // strip \r, trimEnd, cap at MAX_HASH_SOURCE_BYTES
+function canonLine(line: string): string; // display-anchor input only; normalize EOL, trimEnd, cap UTF-8 bytes
 
-/** Deterministic per-file anchor allocation. Pure: (content) -> anchors. */
+/** Deterministic compact display anchors for an exact file snapshot. */
 function allocateAnchors(content: string): string[];
 
-/** Per-line served checksum (content proof). */
-function lineChecksum(line: string): string; // hex sha1 of canonLine(line)
+/** Verification checksum over complete decoded line content, including trailing spaces. */
+function lineChecksum(line: string): string; // hex sha1 over exact UTF-8 bytes, excluding EOL separator
+
+/** Fingerprint binding a row to its duplicate occurrence and local snapshot context. */
+function lineIdentityChecksum(lines: readonly string[], index: number): string;
 
 /** Whole-file cache key. */
 function contentChecksum(content: string): string; // hex sha1 of raw content
@@ -41,8 +44,11 @@ function assertRangeServed(input: {
   fileHashes: readonly string[];
   fromLine: number;
   toLine: number;
-  served: ReadonlyMap<string, string>; // anchor -> checksum served to this session
-  deletion: boolean; // deletions enforce only boundary lines
+  served: ReadonlyMap<
+    string,
+    { lineChecksum: string; identityChecksum: string; lineOrdinal: number }
+  >;
+  deletion: boolean; // retained for diagnostics; ALL destructive ranges verify every covered row
 }): void; // throws RangeStaleError with fresh rows embedded
 ```
 
@@ -54,14 +60,21 @@ function assertRangeServed(input: {
   `salt = 0, 1, 2, …`, where base32 is the RFC 4648 alphabet `A-Z2-7`. First salt whose
   6-char candidate is unused in the file wins.
 - **Properties:** 6 chars × 5 bits = 30-bit space; per-file collisions resolved by salt
-  probe; allocation is a pure function of file content — deterministic across sessions,
-  machines, and restarts. Anchor pattern: `^[A-Z2-7]{6}$`.
+  probe; allocation is deterministic for an exact file snapshot. Anchors are not globally
+  stable line identities: inserting/removing duplicate canonical lines can change collision
+  assignments. The served map therefore also records occurrence ordinal and a neighboring-line
+  identity fingerprint; if resolution points at a different occurrence/context, reject with
+  `[E_STALE_ANCHOR]` and fresh rows rather than guessing. Anchor pattern: `^[A-Z2-7]{6}$`.
 - **Caps:** `MAX_HASHLINE_LINES` = 65536; files over the cap are rejected in hashline mode
   with an error directing the agent to `builtin-write`.
 
 ## Data Structures / Schemas
 
-### `served_hashes` (migration `0021_served_hashes.sql`)
+### `served_hashes` (migration `0024_served_hashes.sql`)
+
+Migration numbering follows the current repository sequence: existing migrations run through
+`0023_exec_notifies.sql`; do not reuse earlier numbers. Assign additional migrations after
+`0024` only after checking the tree and migration runner for newer entries.
 
 ```sql
 CREATE TABLE IF NOT EXISTS served_hashes (
@@ -69,7 +82,9 @@ CREATE TABLE IF NOT EXISTS served_hashes (
   context_segment_id TEXT    NOT NULL,
   file_path          TEXT    NOT NULL,
   anchor             TEXT    NOT NULL,
-  line_checksum      TEXT    NOT NULL,
+  line_checksum      TEXT    NOT NULL, -- exact line content, excluding its EOL separator
+  identity_checksum  TEXT    NOT NULL, -- line + neighboring-line context fingerprint
+  line_ordinal       INTEGER NOT NULL, -- 1-based occurrence among identical canonical lines
   created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (session_id, context_segment_id, file_path, anchor)
 );
@@ -77,10 +92,17 @@ CREATE INDEX IF NOT EXISTS served_hashes_session_idx
   ON served_hashes (session_id, context_segment_id);
 ```
 
-Cleared on context segment new/reset alongside `re_read_required`
-(`session-context-segment.ts`).
+Paths are normalized using the same workspace-relative canonical form at read and replace.
+Only rows actually rendered to the model are registered; truncated-away rows, notices,
+metadata, and image payloads do not count as served. Clear rows on context segment new/reset
+and on session deletion/retirement so state is not retained indefinitely. Verification must
+fail closed if an anchor now resolves to a different duplicate occurrence or its identity
+fingerprint has changed.
 
-### `file_edit_mode_hint` (migration `0022_file_edit_mode_hint.sql`)
+`file_edit_mode_hint` uses migration `0025_file_edit_mode_hint.sql` (same migration-numbering
+rule). The hint table is session-scoped and is not a substitute for served-row cleanup.
+
+### `file_edit_mode_hint`
 
 ```sql
 CREATE TABLE IF NOT EXISTS file_edit_mode_hint (
@@ -96,11 +118,11 @@ Emission rule: hint when the row is missing (first turn of session) or
 ### `builtin-replace` — hashline value semantics (names unchanged)
 
 ```jsonc
-// positional (mode: "hashline")
-{ "path": "projects/x.ts", "start": "Xk7Qm2", "end": "Ab3Zz9", "replacement": ["new line"] }
-// batch (mode: "hashline") — same shape as line-number mode
+// Positional (mode: "hashline"); examples conform to the RFC 4648 A-Z2-7 alphabet.
+{ "path": "projects/x.ts", "start": "XK7QM2", "end": "AB3ZZ7", "replacement": "new line" }
+// Batch (mode: "hashline"); same shape as line-number mode, with anchor strings.
 { "path": "projects/x.ts", "edits": [
-  { "start": "Xk7Qm2", "end": "Ab3Zz9", "replacement": ["..."] } // replacement omitted => delete
+  { "start": "XK7QM2", "end": "AB3ZZ7", "replacement": "..." } // omitted => delete
 ] }
 ```
 
@@ -113,15 +135,18 @@ Rendered schema differences per mode (single source, mode-selected at build time
 
 ### Error payloads
 
-```jsonc
-// [E_STALE_ANCHOR] — anchor absent from current file; embeds fresh rows around the
-// surviving bound so the agent can retry without a re-read
-{ "error": "[E_STALE_ANCHOR] \"Xk7Qm2\" is not in <path> as read. Current rows:\n  41: Qw3Rt8│...",
-  "fresh": { "lines": [ { "line": 41, "anchor": "Qw3Rt8", "text": "..." } ] } }
+Examples use only uppercase RFC 4648 base32 characters `A-Z2-7`, matching the schema
+pattern. Anchors are not case-insensitive; reject malformed/lowercase values rather than
+silently normalizing them.
 
-// [E_RANGE_STALE] — range resolved but served checksums mismatch; embeds fresh range
+```jsonc
+// [E_STALE_ANCHOR] — absent anchor or ambiguous duplicate identity; fresh rows supplied
+{ "error": "[E_STALE_ANCHOR] Anchor XK7QM2 is stale in <path>. Current rows include 41: QW3RT7│...",
+  "fresh": { "lines": [ { "line": 41, "anchor": "QW3RT7", "text": "..." } ] } }
+
+// [E_RANGE_STALE] — any covered row is unserved or its exact content/identity changed
 { "error": "[E_RANGE_STALE] Lines 40-52 of <path> no longer match what you read...",
-  "fresh": { "lines": [ { "line": 40, "anchor": "Mm2Kk4", "text": "..." } ] } }
+  "fresh": { "lines": [ { "line": 40, "anchor": "MM2KK4", "text": "..." } ] } }
 
 // [E_FILE_TOO_LARGE] — over MAX_HASHLINE_LINES in hashline mode
 { "error": "[E_FILE_TOO_LARGE] <path> exceeds the 65536-line hashline limit; use builtin-write." }
@@ -132,7 +157,7 @@ Rendered schema differences per mode (single source, mode-selected at build time
 ```jsonc
 {
   "changed_lines": { "start": 40, "end": 52 },
-  "live_anchors": "Mm2Kk4│const x = 1;\nPp9Ll0│const y = 2;",
+  "live_anchors": "MM2KK4│const x = 1;\nPP7LL2│const y = 2;",
 } // +anchor rows for the changed window
 ```
 
@@ -152,20 +177,37 @@ instead of re-reading. Successful edits return live anchors for the changed wind
 
 ## Code Examples
 
+For line splitting, retain each original separator and the file's final-newline state. New
+replacement rows inherit the first replaced row's separator; insertions with no replaced row
+inherit the nearest preceding separator, then the nearest following separator, falling back to
+`\\n` for a file with no existing separator. Untouched bytes must remain unchanged.
+
 ```ts
-// Handler-level hashline replace (inside replaceHandler, mode branch)
-const fileHashes = allocateAnchors(content);
-const range = resolveAnchors(fileHashes, args.start, args.end); // -> E_STALE_ANCHOR on miss
-assertRangeServed({ fileLines, fileHashes, ...range, served, deletion: !replacement });
-const next = applySpan(content, fileLines, range, replacement); // no-op short-circuit
-writeFileSync(absPath, next, "utf8");
-return {
-  resultJson: JSON.stringify({
-    changed_lines: changedRange(content, next),
-    live_anchors: fmtRows(fileHashes, fileLines, changedRange(content, next)),
-  }),
-};
+// Hashline positional replace; serialized read/verify/write per canonical path.
+await withFileEditLock(canonicalPath, async () => {
+  const content = await readFileExact(absPath);
+  const fileLines = splitLinesPreservingSeparators(content);
+  const fileHashes = allocateAnchors(content);
+  const range = resolveAnchors(fileHashes, args.start, args.end);
+  assertRangeServed({ fileLines, fileHashes, ...range, served, deletion: !replacement });
+  const next = applySpan(content, fileLines, range, replacement);
+  if (next === content) return noOpResult();
+  // Recheck snapshot identity immediately before atomic replacement; lock also
+  // serializes cooperating handlers for this path.
+  await assertUnchangedSinceRead(absPath, contentChecksum(content));
+  await atomicReplaceFile(absPath, next);
+  const liveLines = splitLinesPreservingSeparators(next);
+  const liveHashes = allocateAnchors(next);
+  return resultWithLiveRows(liveLines, liveHashes, changedRange(content, next));
+});
 ```
+
+The lock only coordinates Shoggoth file-edit handlers. Non-cooperating external writers
+cannot be made race-free with a check-then-rename protocol; re-stat/re-read immediately
+before commit and document the residual race unless the filesystem provides an actual
+compare-and-swap primitive. `builtin-write`, `builtin-exec`, and other writers are outside
+the hashline replace guarantee unless separately routed through this locking/verification
+layer.
 
 ```ts
 // Hint emission (session-system-prompt assembly)
