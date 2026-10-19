@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { sanitizeJsonEscapes, type ShoggothHitlConfig, type HitlRiskTier } from "@shoggoth/shared";
 import type { ChatContentPart } from "@shoggoth/models";
-import { StructuredOutputValidationError } from "@shoggoth/models";
+import { StructuredOutputValidationError, STRUCTURED_OUTPUT_TOOL_NAME } from "@shoggoth/models";
 import { classifyToolRisk } from "../hitl/risk-classify";
 import { requiresHumanApproval } from "../hitl/approval-gate";
 import { resolveCompoundResource, type SubResourceExtractorRegistry } from "../policy/sub-resource";
@@ -167,6 +167,7 @@ export type ToolCallDispatchResultKind =
   | "skip_invalid_name"
   | "skip_thinking_leak"
   | "skip_unknown_tool"
+  | "skip_structured_output_near_miss"
   | "skip_bad_args"
   | "skip_validation_error"
   | "skip_policy_denied"
@@ -217,6 +218,38 @@ const buildSchemaMap = (
 
 /** Maximum number of structured output validation retries before giving up. */
 const STRUCTURED_OUTPUT_MAX_RETRIES = 2;
+
+/**
+ * Backstop for consecutive invalid tool calls within a single turn.
+ *
+ * The model loop is `for (;;)` and only exits on abort, a terminal no-tool-call
+ * response, or the structured-output retry budget. A model that repeatedly emits
+ * invalid tool calls (and never recovers) would spin forever, so we cap
+ * consecutive invalid dispatches. "Invalid" here means an unknown tool name, a
+ * known tool called with unparseable arguments, or a known tool called with
+ * schema-invalid arguments — all three are calls the model could retry forever
+ * without the loop ever advancing. When this many occur in a row without a valid
+ * tool call or terminal response in between, the turn is terminated cleanly
+ * (same `break` style as the retry-exhausted path). Near-miss structured-output
+ * calls are excluded: they have their own bounded retry budget above.
+ */
+const MAX_CONSECUTIVE_INVALID_TOOL_CALLS = 5;
+
+/**
+ * Detect a near-miss of the synthetic structured-output tool name.
+ *
+ * Models under stress sometimes emit a garbled variant — e.g.
+ * `__structured_output__parameter` — that contains the exact synthetic name as a
+ * substring. The provider adapters match the synthetic tool with an exact-name
+ * check (`isSyntheticToolCall`), so these near-misses fall through to the
+ * daemon's generic unknown-tool path, which has no counter and would let the
+ * `for (;;)` loop spin unbounded. Routing them into the structured-output retry
+ * budget (instead) bounds the spin. Deliberately simple: exact-name-substring
+ * containment, excluding the exact name itself (which the adapter intercepts).
+ */
+function isNearMissStructuredOutputTool(name: string): boolean {
+  return name !== STRUCTURED_OUTPUT_TOOL_NAME && name.includes(STRUCTURED_OUTPUT_TOOL_NAME);
+}
 
 const HITL_EXPIRE_POLL_MS = 1000;
 
@@ -453,6 +486,42 @@ async function processSingleToolCall(
   }
 
   if (!names.has(tc.name)) {
+    // Near-miss of the synthetic structured-output tool (e.g.
+    // `__structured_output__parameter`): do NOT take the generic unknown-tool
+    // path, which is unbounded. Hand the model a correction naming the EXACT
+    // tool and flag it so the caller charges the structured-output retry budget
+    // and terminates the turn once that budget is exhausted.
+    if (isNearMissStructuredOutputTool(tc.name)) {
+      log.warn("near-miss structured output tool call", {
+        toolName: tc.name,
+        toolCallId: tc.id,
+        sessionId: options.sessionId,
+      });
+      const correction = JSON.stringify({
+        error: "structured_output_tool_near_miss",
+        tool: tc.name,
+        message:
+          `You called "${tc.name}", which is not a real tool. ` +
+          `The structured-output tool is named exactly "${STRUCTURED_OUTPUT_TOOL_NAME}". ` +
+          `Call it alone with a single JSON object whose arguments conform to the ` +
+          `JSON schema provided in that tool's definition.`,
+      });
+      options.audit.record({
+        phase: "structured_output_tool_near_miss",
+        tool: tc.name,
+        toolCallId: tc.id,
+      });
+      options.model.pushToolMessage?.({ toolCallId: tc.id, content: correction });
+      if (options.transcript) {
+        appendTx({
+          role: "tool",
+          content: correction,
+          toolCallId: tc.id,
+          metadata: { tool: tc.name },
+        });
+      }
+      return { kind: "skip_structured_output_near_miss" };
+    }
     log.warn("unknown tool called", {
       toolName: tc.name,
       toolCallId: tc.id,
@@ -903,6 +972,10 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
 
   try {
     let structuredOutputAttempt = 0;
+    // Consecutive invalid tool calls (unknown name, unparseable args, or
+    // schema-invalid args) within the current turn; reset on any valid call or
+    // other non-invalid dispatch and on a terminal response.
+    let consecutiveInvalidToolCalls = 0;
     for (;;) {
       assertNotAborted(options.turnAbortSignal);
 
@@ -982,6 +1055,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         }
         // Reset retry counter on successful terminal response
         structuredOutputAttempt = 0;
+        consecutiveInvalidToolCalls = 0;
         break;
       }
 
@@ -1032,8 +1106,13 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         emitStats?.({ transcriptMessageCount: getTranscriptCount() });
       }
 
+      // Set when a circuit breaker fires inside the per-tool-call loop; the
+      // outer `for (;;)` is then broken after the inner loop unwinds so the
+      // turn terminates cleanly (retry-exhausted / backstop style).
+      let breakerTripped: "structured_output_exhausted" | "invalid_tool_call_backstop" | undefined;
+
       for (const tc of sanitizedToolCalls) {
-        await processSingleToolCall(
+        const dispatch = await processSingleToolCall(
           ctx,
           tc,
           names,
@@ -1042,6 +1121,53 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
           options.turnAbortSignal,
           options.runId,
         );
+
+        if (dispatch.kind === "skip_structured_output_near_miss") {
+          // Charge the structured-output retry budget (shared with the
+          // schema-failure path) and terminate the turn once it's spent.
+          structuredOutputAttempt++;
+          log.warn("structured output near-miss counted against retry budget", {
+            sessionId: options.sessionId,
+            attempt: structuredOutputAttempt,
+            toolName: tc.name,
+          });
+          if (structuredOutputAttempt > STRUCTURED_OUTPUT_MAX_RETRIES) {
+            log.error("structured output near-miss retries exhausted", {
+              sessionId: options.sessionId,
+              attempts: structuredOutputAttempt,
+            });
+            breakerTripped = "structured_output_exhausted";
+            break;
+          }
+        } else if (
+          dispatch.kind === "skip_unknown_tool" ||
+          dispatch.kind === "skip_bad_args" ||
+          dispatch.kind === "skip_validation_error"
+        ) {
+          // All invalid tool calls — unknown name, unparseable args, or
+          // schema-invalid args on a known tool — count toward the backstop,
+          // since the model could retry each forever without advancing.
+          consecutiveInvalidToolCalls++;
+          if (consecutiveInvalidToolCalls > MAX_CONSECUTIVE_INVALID_TOOL_CALLS) {
+            log.error("consecutive invalid tool calls exceeded backstop; terminating turn", {
+              sessionId: options.sessionId,
+              consecutive: consecutiveInvalidToolCalls,
+              lastKind: dispatch.kind,
+            });
+            options.audit.record({
+              phase: "invalid_tool_call_backstop",
+              sessionId: options.sessionId,
+              consecutive: consecutiveInvalidToolCalls,
+              lastKind: dispatch.kind,
+            });
+            breakerTripped = "invalid_tool_call_backstop";
+            break;
+          }
+        } else {
+          // A valid tool call (or any other non-invalid-args skip kind) resets
+          // the consecutive invalid-tool-call counter.
+          consecutiveInvalidToolCalls = 0;
+        }
 
         // --- Mid-loop tool refresh (tool discovery) ---
         if (toolRefreshNeeded.get(options.sessionId) && options.refreshTools) {
@@ -1055,6 +1181,10 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
           });
         }
       }
+
+      // A circuit breaker fired: end the turn (mirrors the retry-exhausted
+      // `break` above) so the loop can never spin forever.
+      if (breakerTripped) break;
 
       // --- Mid-loop steer injection ---
       for (const s of drainSteers(options.sessionId)) {
