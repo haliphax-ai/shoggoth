@@ -2,7 +2,7 @@
  * Per-session steer channel for injecting operator guidance into active tool loops.
  * Follows the same singleton-map pattern as system-context-buffer.ts.
  *
- * Pushed messages may carry an `onDropped` callback (issue #497): guaranteed
+ * Pushed messages may carry an `onDropped` callback: guaranteed
  * in-turn delivery needs to know when a queued message will never reach the
  * model — the turn ended (unregister) or a new turn replaced the channel
  * before the message was drained — so the sender can fall back to another

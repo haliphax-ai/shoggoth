@@ -1,6 +1,5 @@
 // ---------------------------------------------------------------------------
 // deliverExecNotifyMessage — background exec completion → in-turn steer or OOB
-// (issues #478, #497)
 // ---------------------------------------------------------------------------
 
 import { truncateOutput, MAX_OUTPUT_DEFAULT } from "@shoggoth/os-exec";
@@ -87,7 +86,7 @@ export function buildExecNotifyResult(completion: ExecNotifyCompletion): Record<
 
 /**
  * Deliver a completed background exec: in-turn via the steer channel when the
- * session has an active turn, OOB otherwise (issue #497).
+ * session has an active turn, OOB otherwise.
  */
 export async function deliverExecNotifyMessage(completion: ExecNotifyCompletion): Promise<void> {
   const { handle } = completion;
@@ -96,7 +95,7 @@ export async function deliverExecNotifyMessage(completion: ExecNotifyCompletion)
     `Background builtin-exec completed (notify handle \`${handle.id}\`):\n` +
       JSON.stringify(payload, null, 2),
   );
-  // --- In-turn path (issue #497): inject into the active turn's steer
+  // --- In-turn path: inject into the active turn's steer
   // channel when one exists. Falls back to the OOB turn below when no turn
   // is active, or when the turn ends before the queued event is drained
   // (guaranteed delivery via the steer channel's drop callback).
@@ -118,7 +117,7 @@ export async function deliverExecNotifyMessage(completion: ExecNotifyCompletion)
   });
 }
 
-/** OOB delivery path (issue #478): full structured turn on the session. */
+/** OOB delivery path: full structured turn on the session. */
 async function deliverExecNotifyOobTurn(completion: ExecNotifyCompletion): Promise<void> {
   const { handle } = completion;
   const ext = subagentRuntimeExtensionRef.current;

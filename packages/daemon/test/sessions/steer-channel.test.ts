@@ -68,7 +68,7 @@ describe("steer-channel", () => {
     c2.unregister();
   });
 
-  // ---- onDropped callbacks (issue #497: guaranteed in-turn delivery) ----
+  // ---- onDropped callbacks (guaranteed in-turn delivery) ----
 
   it("onDropped is not called for a message that was drained", () => {
     const { unregister } = registerSteerChannel("sess-1");

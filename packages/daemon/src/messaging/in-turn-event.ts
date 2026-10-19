@@ -1,5 +1,5 @@
 /**
- * In-turn event banners and delivery (issue #497).
+ * In-turn event banners and delivery.
  *
  * Async completions that land while the agent's turn is still running —
  * background exec notifications, async agent-to-agent replies, inline tool
