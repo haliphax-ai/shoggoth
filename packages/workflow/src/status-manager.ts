@@ -19,6 +19,10 @@ export interface StatusManagerOptions {
  * failures (rate limits, 5xx, network), where the message still exists and
  * the next tick can retry the edit. Reposting on transient failures is what
  * orphaned duplicate status posts.
+ * A `permanent` failure (e.g. HTTP 400 — archived thread) latches the manager
+ * dead: no further edits and no repost, because the failure is the SURFACE
+ * itself — a repost would target the same broken surface and every retry
+ * would fail identically forever.
  * Pins the status post whenever it is (re)created when the platform supports
  * pinning and `pinStatusPost` is enabled (default).
  */
@@ -26,6 +30,8 @@ export class StatusManager {
   private readonly adapter: MessageAdapter;
   private readonly pinStatusPost: boolean;
   private messageId: string | null = null;
+  /** Set after a `permanent` edit failure: the surface is unreachable. */
+  private dead = false;
 
   constructor(adapter: MessageAdapter, options: StatusManagerOptions = {}) {
     this.adapter = adapter;
@@ -42,6 +48,7 @@ export class StatusManager {
 
   /** Format current status and edit the existing message (or repost when it is gone). */
   async updateStatus(wf: TaskList): Promise<void> {
+    if (this.dead) return;
     if (!this.messageId) return;
 
     const content = formatStatusMessage(wf);
@@ -53,6 +60,14 @@ export class StatusManager {
       // Rate limited, 5xx, or network error: the status message still exists.
       // Keep the message ID and let the next tick retry the edit — reposting
       // here orphans the old post as a duplicate.
+      return;
+    }
+    if (res.reason === "permanent") {
+      // The surface itself rejects the request (e.g. HTTP 400 — archived
+      // thread): every edit and every repost would fail identically forever.
+      // Latch dead so the poll tick stops issuing platform traffic after
+      // this one request.
+      this.dead = true;
       return;
     }
     // not_found / unsupported: the target is gone or the platform cannot

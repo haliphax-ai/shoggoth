@@ -454,6 +454,42 @@ describe("createDaemonMessageAdapter", () => {
     assert.deepEqual(res, { ok: false, reason: "unsupported" });
   });
 
+  it("classifies an edit failure with http 400 as permanent (archived thread etc.)", async () => {
+    const adapter = createDaemonMessageAdapter({
+      getMessageContext: () => ({
+        execute: async () => ({
+          ok: false,
+          error: 'Discord REST editMessage 400: {"message":"Thread is archived","code":50083}',
+          http_status: 400,
+        }),
+      }),
+      resolveChannelId: () => "channel-abc",
+      sessionId: "agent:main:discord:channel:abc",
+    });
+
+    const res = await adapter.editMessage("msg-123", "updated");
+    assert.deepEqual(res, { ok: false, reason: "permanent" });
+  });
+
+  it("classifies a THROWN edit error with status 400 as permanent", async () => {
+    const adapter = createDaemonMessageAdapter({
+      getMessageContext: () => ({
+        execute: async () => {
+          const err = new Error("Discord REST editMessage 400: Thread is archived") as Error & {
+            status: number;
+          };
+          err.status = 400;
+          throw err;
+        },
+      }),
+      resolveChannelId: () => "channel-abc",
+      sessionId: "agent:main:discord:channel:abc",
+    });
+
+    const res = await adapter.editMessage("msg-123", "updated");
+    assert.deepEqual(res, { ok: false, reason: "permanent" });
+  });
+
   it("returns false when no message context is available", async () => {
     const adapter = createDaemonMessageAdapter({
       getMessageContext: () => undefined,

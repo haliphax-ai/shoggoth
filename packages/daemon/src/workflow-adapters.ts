@@ -409,10 +409,14 @@ export function createDaemonMessageAdapter(deps: DaemonMessageAdapterDeps): Mess
           });
           // Classify from the message-tool result: 404 means the message is
           // genuinely gone (repost is safe); the unsupported code means the
-          // platform cannot edit; everything else is transient — never treat
-          // a rate limit or 5xx as "message gone" and repost an orphan.
+          // platform cannot edit; 400 means the request is rejected
+          // identically forever (e.g. archived thread) — the SURFACE is the
+          // problem, so never repost and never retry; everything else is
+          // transient — never treat a rate limit or 5xx as "message gone"
+          // and repost an orphan.
           if (res.http_status === 404) return { ok: false, reason: "not_found" };
           if (res.code === "edit_unsupported") return { ok: false, reason: "unsupported" };
+          if (res.http_status === 400) return { ok: false, reason: "permanent" };
           return { ok: false, reason: "transient" };
         }
 
@@ -420,6 +424,12 @@ export function createDaemonMessageAdapter(deps: DaemonMessageAdapterDeps): Mess
         return { ok: true };
       } catch (e) {
         log.error("editMessage threw", { err: String(e), messageId });
+        // The Discord REST client throws typed errors with a numeric `status`
+        // (surfaced by the message tool on some paths): a thrown 400 is just
+        // as permanent as a returned one.
+        if ((e as { status?: number } | null)?.status === 400) {
+          return { ok: false, reason: "permanent" };
+        }
         return { ok: false, reason: "transient" };
       }
     },
