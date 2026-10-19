@@ -13,6 +13,7 @@ Make HTTP requests. Supports SSRF protection with private-IP blocking and an opt
 | `maxResponseBytes` | number           | no       | Cap on response body size in bytes (default: 1 048 576 / 1 MB)                                      |
 | `timeoutMs`        | number           | no       | Request timeout in milliseconds (default: 30 000)                                                   |
 | `binary`           | boolean          | no       | Return body as base64 instead of UTF-8 text (default: false)                                        |
+| `followRedirects`  | boolean          | no       | Follow 3xx redirects automatically, up to `fetch.maxRedirects` hops (default: true)                 |
 
 ## Response Shape
 
@@ -29,6 +30,7 @@ Make HTTP requests. Supports SSRF protection with private-IP blocking and an opt
 
 - `body` — UTF-8 text (or base64 when `binary: true`). JSON responses are pretty-printed automatically.
 - `truncated` — `true` when the response exceeded `maxResponseBytes`.
+- `redirects` — present only when redirects were followed: the chain of hops (`url`, `status`, `location`) that preceded the final response.
 
 ## Examples
 
@@ -75,6 +77,24 @@ Hostnames are resolved before the request is made. If any resolved IP is private
 - `fetch.allowPrivateIps` is `true` in the daemon config, or
 - the hostname or CIDR range is listed in `fetch.privateIpAllowlist`.
 
+## Redirects
+
+Redirects are **followed by default**, up to `fetch.maxRedirects` hops from
+the daemon config (default: `2`, maximum: `20`). Set `fetch.maxRedirects` to
+`0` to disable following entirely, or pass `followRedirects: false` on a
+single request to inspect the 3xx response and its `location` header
+yourself.
+
+When at least one redirect was followed, the response includes a
+`redirects` array listing each hop (`url`, `status`, `location`) that
+preceded the final response. When the cap is reached, the last 3xx response
+is returned as-is with the chain so far, so the caller can continue
+manually.
+
+- Every hop is re-checked against the SSRF rules above — a redirect cannot bounce the request into a blocked private/internal host.
+- Method semantics: `303` always becomes `GET` (body dropped); `301`/`302` become `GET` when the original method was `POST`; `307`/`308` preserve the method and body.
+- A `location` with an unparseable URL or a non-HTTP(S) scheme stops following; the 3xx response is returned as-is.
+
 ## Custom Certificate Bundle
 
 Set `fetch.caBundle` in the daemon config to the path of a PEM certificate
@@ -95,6 +115,6 @@ request first uses it.
 
 ## Tips
 
-- Redirects are **not** followed (redirect mode is `manual`). Check for 3xx status and the `location` header.
+- Redirects are followed by default (see [Redirects](#redirects)); pass `followRedirects: false` to handle a 3xx response yourself.
 - Object `body` values get `Content-Type: application/json` automatically; string bodies do not.
 - For large downloads, set `maxResponseBytes` explicitly to avoid silent truncation at 1 MB.

@@ -168,7 +168,7 @@ export function builtinShoggothToolsCatalog(sourceId = BUILTIN_SOURCE_ID): McpSo
       {
         name: "fetch",
         description:
-          "Make an HTTP request. Returns status, headers, and body. Private/internal IPs are blocked by default. No redirect following by default. Response body capped at maxResponseBytes (default 1MB).",
+          "Make an HTTP request. Returns status, headers, and body. Private/internal IPs are blocked by default. Redirects are followed by default (capped by fetch.maxRedirects, default 2); set followRedirects: false to disable. Response body capped at maxResponseBytes (default 1MB).",
         inputSchema: fetchArgs,
       },
       {
