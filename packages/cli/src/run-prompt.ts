@@ -29,6 +29,8 @@ Options:
   --json <blob>             Inline JSON object of placeholder values
   --json-file <path>        Read placeholder values from a JSON file
   --silent                  Internal delivery only (skip messaging surface)
+  --wait                    Wait for the agent turn to finish before returning
+                            (default: return as soon as the prompt is delivered)
 
 Any other argument is parsed as a placeholder value (name=value).
 Sources merge in order: --json-file, --json, then name=value arguments.
@@ -67,6 +69,7 @@ export function parsePromptArgs(argv: string[]): ParseOk | ParseErr {
   let slug: string | undefined;
   let sessionTarget: string | undefined;
   let silent = false;
+  let wait = false;
   const positional: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
@@ -105,6 +108,8 @@ export function parsePromptArgs(argv: string[]): ParseOk | ParseErr {
       if (err) return { ok: false, error: err };
     } else if (a === "--silent") {
       silent = true;
+    } else if (a === "--wait") {
+      wait = true;
     } else if (a === "--help" || a === "-h") {
       printPromptHelp();
       return { ok: false, error: "" };
@@ -127,7 +132,7 @@ export function parsePromptArgs(argv: string[]): ParseOk | ParseErr {
     params[token.slice(0, eq)] = token.slice(eq + 1);
   }
 
-  const payload: Record<string, unknown> = { slug, params };
+  const payload: Record<string, unknown> = { slug, params, wait };
   if (silent) payload.silent = true;
   return { ok: true, payload, sessionTarget: sessionTarget! };
 }
@@ -141,7 +146,9 @@ export async function runPromptCli(argv: string[]): Promise<void> {
   if (!parsed.ok) {
     if (parsed.error) {
       console.error(parsed.error);
-      console.error("usage: shoggoth prompt <slug> --session <sessionUrn|agentId> [--json <blob>] [--json-file <path>] [name=value...]");
+      console.error(
+        "usage: shoggoth prompt <slug> --session <sessionUrn|agentId> [--json <blob>] [--json-file <path>] [--wait] [name=value...]",
+      );
       process.exitCode = 1;
     }
     return;

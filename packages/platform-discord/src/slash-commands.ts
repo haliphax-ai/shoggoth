@@ -331,7 +331,7 @@ const TEXT_INPUT_SHORT = 1;
 
 // ---------------------------------------------------------------------------
 // Canned prompt flow: staged inline message updates (slug dropdown →
-// optional parameter modal → final recap), mirroring the /model flow
+// optional parameter modal → delivery confirmation), mirroring the /model flow
 // ---------------------------------------------------------------------------
 
 /**
@@ -359,30 +359,37 @@ const CRUISE_MODAL_PREFIX = "cruise_modal|";
 type PromptListEntry = { slug: string; placeholders?: readonly string[] };
 
 /**
- * How a prompt run's outcome is delivered back to Discord. Each stage of the
+ * How a prompt delivery is reported back to Discord. Each stage of the
  * staged `/prompt` flow uses a different style so message A (the slug
  * dropdown) always transitions forward instead of being left behind:
  *
- * - `deferred-channel` — ACK with DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE (5),
- *   which creates a new "thinking" message, then deliver the outcome via
- *   `editOriginalInteractionResponse`. Used by the slash command's direct run
- *   (no dropdown stage exists to update).
+ * - `direct-response` — the prompt op returns as soon as the prompt is
+ *   delivered, so the slash command's initial response IS the delivery
+ *   confirmation (`✅ Canned prompt … submitted to session …`). No deferred
+ *   "thinking" placeholder and no post-turn edit.
  * - `inline-update` — ACK FIRST with UPDATE_MESSAGE (7), rewriting message A
- *   in place with a pending state, then deliver the outcome via
- *   `editOriginalInteractionResponse`. Used by BOTH the slug-dropdown
- *   selection (no placeholders) and modal submits: Discord text inputs are
- *   modal-only, so message A stays visible as the dropdown while the modal
- *   is open and is rewritten here once the parameters are known. For the
- *   dropdown selection the pending rewrite clears the dropdown immediately.
+ *   in place with the same delivery confirmation. Used by BOTH the
+ *   slug-dropdown selection (no placeholders) and modal submits: Discord text
+ *   inputs are modal-only, so message A stays visible as the dropdown while
+ *   the modal is open and is rewritten here once the parameters are known.
+ *   For the dropdown selection the rewrite clears the dropdown immediately.
+ *
+ * Either way the status is posted the moment the prompt is delivered — the
+ * turn keeps running detached and announces itself via the typing indicator
+ * and the session's delivery surface. Only a failure rewrites the status
+ * afterwards (into `⚠️ Prompt failed: …`).
  */
-type PromptReplyStyle = "deferred-channel" | "inline-update";
+type PromptReplyStyle = "direct-response" | "inline-update";
 
 /**
  * Translate the prompt options to a control op, resolving the target session
  * from the interaction's channel when the payload carries none (responding
  * with the unbound-channel warning instead of running the op when there is
- * nothing to target), then run the op and deliver the outcome according to
- * `replyStyle` (see {@link PromptReplyStyle}).
+ * nothing to target), then run the op — which returns as soon as the prompt
+ * is delivered — and report that delivery per `replyStyle` (see
+ * {@link PromptReplyStyle}). A failure rewrites the status message; a
+ * successful run never does (the turn announces itself on the session's
+ * delivery surface).
  */
 async function runPromptProxy(
   deps: DiscordInteractionHandlerDeps,
@@ -409,50 +416,15 @@ async function runPromptProxy(
     });
     return;
   }
-  // ACK unconditionally and FIRST — before `invokeControlOp`. The prompt
-  // control op awaits the full model turn (runSessionModelTurn), which
-  // routinely outlives Discord's ~3s initial-response window, so the ack must
-  // precede it (same rationale as the `/steer` branch).
-  try {
-    if (replyStyle === "inline-update") {
-      // Both inline-update callers (the slug-dropdown selection with no
-      // placeholders and the modal submit) ACK FIRST with UPDATE_MESSAGE (7):
-      // this satisfies the 3s window AND rewrites message A (the dropdown) in
-      // place with a pending state, so the dropdown is cleared immediately
-      // instead of sitting inert for the whole model turn. If Discord rejects
-      // type 7 the first ack throws — only then fall back to DEFERRED (5),
-      // which degrades to a new "thinking" message while message A stays as
-      // the dropdown. Never send a second POST after a successful first ack.
-      try {
-        await deps.transport.interactionCallback(interactionId, interactionToken, {
-          type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
-          data: { content: `⏳ Running \`${options.slug}\`...`, components: [] },
-        });
-      } catch (err) {
-        deps.logger.warn("discord.interaction.prompt_ack_failed", {
-          interactionId,
-          err: String(err),
-        });
-        await deps.transport.interactionCallback(interactionId, interactionToken, {
-          type: INTERACTION_RESPONSE_DEFERRED,
-        });
-      }
-    } else {
-      // deferred-channel: no message A to update (direct slash-command run),
-      // so a plain DEFERRED ack creates the "thinking" message.
-      await deps.transport.interactionCallback(interactionId, interactionToken, {
-        type: INTERACTION_RESPONSE_DEFERRED,
-      });
-    }
-  } catch (err) {
-    deps.logger.warn("discord.interaction.prompt_defer_failed", {
-      interactionId,
-      err: String(err),
-    });
-  }
-  // Every terminal state clears components so the updated message never
-  // keeps an inert slug dropdown (or modal-era inputs) around.
-  const deliver = async (content: string): Promise<void> => {
+  // `wait: false` — the op returns as soon as the prompt is delivered to the
+  // agent, so the delivery confirmation below is the whole status. The turn
+  // keeps running detached and is announced by the typing indicator and the
+  // session's delivery surface, so there is no post-turn status edit.
+  payload.wait = false;
+  const submitted = `✅ Canned prompt \`${options.slug}\` submitted to session \`${payload.session_id}\`.`;
+  // Terminal-state editor: every terminal state clears components so the
+  // message never keeps an inert slug dropdown (or modal-era inputs) around.
+  const edit = async (content: string): Promise<void> => {
     // Held in a variable: the transport body type only declares `content`, so
     // a fresh inline literal with `components` would fail excess-property
     // checks (the field is still serialized to Discord's PATCH body).
@@ -470,16 +442,69 @@ async function runPromptProxy(
       });
     }
   };
-  try {
-    const res = await deps.invokeControlOp(controlOp.op, payload);
-    if (!res.ok) {
-      await deliver(`⚠️ Prompt failed: ${res.error ?? "unknown error"}`);
+  const invoke = async (): Promise<{ ok: boolean; error?: string } | Error> => {
+    try {
+      return await deps.invokeControlOp(controlOp.op, payload);
+    } catch (err) {
+      return err instanceof Error ? err : new Error(String(err));
+    }
+  };
+  if (replyStyle === "inline-update") {
+    // ACK FIRST with UPDATE_MESSAGE (7): this satisfies the ~3s window AND
+    // rewrites message A (the dropdown) in place with the delivery
+    // confirmation, so the dropdown is cleared immediately instead of sitting
+    // inert for the whole model turn. If Discord rejects type 7 the first ack
+    // throws — only then fall back to DEFERRED (5) and report the outcome by
+    // editing that deferred response. Never send a second POST after a
+    // successful first ack.
+    let deferredFallback = false;
+    try {
+      try {
+        await deps.transport.interactionCallback(interactionId, interactionToken, {
+          type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
+          data: { content: submitted, components: [] },
+        });
+      } catch (err) {
+        deps.logger.warn("discord.interaction.prompt_ack_failed", {
+          interactionId,
+          err: String(err),
+        });
+        await deps.transport.interactionCallback(interactionId, interactionToken, {
+          type: INTERACTION_RESPONSE_DEFERRED,
+        });
+        deferredFallback = true;
+      }
+    } catch (err) {
+      deps.logger.warn("discord.interaction.prompt_defer_failed", {
+        interactionId,
+        err: String(err),
+      });
+    }
+    const res = await invoke();
+    if (res instanceof Error || !res.ok) {
+      await edit(
+        `⚠️ Prompt failed: ${res instanceof Error ? res.message : (res.error ?? "unknown error")}`,
+      );
       return;
     }
-    await deliver(`✅ Prompt \`${options.slug}\` sent to \`${payload.session_id}\`.`);
-  } catch (err) {
-    await deliver(`⚠️ Prompt failed: ${String(err)}`);
+    // Success needs no edit — the ack already shows the delivery confirmation.
+    // Only the deferred fallback (a bare "thinking" placeholder) still has to
+    // be rewritten.
+    if (deferredFallback) await edit(submitted);
+    return;
   }
+  // direct-response: no message A to preserve, and the op returns as soon as
+  // the prompt is delivered, so the initial slash response IS the delivery
+  // confirmation — no deferred "thinking" placeholder, no post-turn edit.
+  const res = await invoke();
+  const content =
+    res instanceof Error || !res.ok
+      ? `⚠️ Prompt failed: ${res instanceof Error ? res.message : (res.error ?? "unknown error")}`
+      : submitted;
+  await deps.transport.interactionCallback(interactionId, interactionToken, {
+    type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+    data: { content },
+  });
 }
 
 /**
@@ -688,8 +713,9 @@ async function handleInteraction(
     }
 
     // Stage 2: canned prompt slug dropdown selected. No placeholders →
-    // immediate UPDATE_MESSAGE (7) pending rewrite of message A; placeholders →
-    // modal (9), after which stage 3 rewrites message A on submit. The
+    // immediate UPDATE_MESSAGE (7) delivery confirmation on message A;
+    // placeholders → modal (9), after which stage 3 rewrites message A on
+    // submit. The
     // /prompt slash command with a slug argument opens the same modal
     // directly when the prompt has placeholders (bypassing this dropdown).
     if (customId.startsWith(PROMPT_SELECT_PREFIX)) {
@@ -725,9 +751,8 @@ async function handleInteraction(
       }
       if (placeholders.length === 0) {
         // No placeholders — nothing to ask. ACK FIRST with UPDATE_MESSAGE (7)
-        // so message A is immediately rewritten in place with a `⏳ Running`
-        // pending state (dropdown cleared), then the outcome is delivered by
-        // editing that response into the final recap.
+        // so message A is immediately rewritten in place with the delivery
+        // confirmation (dropdown cleared).
         await runPromptProxy(
           deps,
           ev.id,
@@ -1034,10 +1059,8 @@ async function handleInteraction(
         ev.channelId,
         ev.guildId,
         // ACK FIRST with UPDATE_MESSAGE (7), rewriting message A in place
-        // with a pending state: the prompt op awaits the full model turn, so
-        // it must not run before the ~3s ack window (and type 6 is invalid
-        // for modal submits — component interactions only). The outcome is
-        // then delivered via editOriginalInteractionResponse.
+        // with the delivery confirmation (type 6 is invalid for modal
+        // submits — component interactions only).
         "inline-update",
       );
       return;
@@ -1225,48 +1248,34 @@ async function handleInteraction(
       });
       return;
     }
-    // The steer control op runs a full model turn that routinely outlives Discord's ~3s
-    // initial-response window, so defer FIRST (the one and only POST callback for this
-    // interaction) and deliver the outcome by editing the deferred response — the same
-    // pattern `/compact` uses. A second POST with this token would 404 "Unknown
-    // interaction", so the callback is never retried.
-    try {
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_DEFERRED,
-      });
-    } catch (err) {
-      deps.logger.warn("discord.interaction.steer_defer_failed", {
-        interactionId: parsed.interactionId,
-        err: String(err),
-      });
-    }
-    // Finish via PATCH `/webhooks/{appId}/{token}/messages/@original`. The token dies 15
-    // minutes after the interaction; if a long turn outlives it, log distinctly — never throw.
-    const finishSteer = async (content: string): Promise<void> => {
-      try {
-        await deps.transport.editOriginalInteractionResponse(
-          deps.applicationId,
-          parsed.interactionToken,
-          {
-            content,
-          },
-        );
-      } catch (err) {
-        deps.logger.warn("discord.interaction.steer_reply_undeliverable", {
-          interactionId: parsed.interactionId,
-          sessionId: payload.session_id,
-          err: String(err),
-        });
-      }
-    };
+    // The steer control op returns as soon as the prompt is delivered
+    // (`wait: false`) — the turn keeps running detached and announces itself
+    // via the typing indicator and the session's delivery surface — so the
+    // initial slash response reports the delivery immediately. No deferred
+    // "thinking" placeholder, no post-turn edit.
+    payload.wait = false;
+    let steerContent: string;
     try {
       const res = await deps.invokeControlOp("session_steer", payload);
-      const content = res.ok
-        ? `✅ Steering prompt sent to \`${payload.session_id}\`.`
+      steerContent = res.ok
+        ? `✅ Steering prompt submitted to session \`${payload.session_id}\`.`
         : `⚠️ Steer failed: ${res.error ?? "unknown error"}`;
-      await finishSteer(content);
     } catch (err) {
-      await finishSteer(`⚠️ Steer failed: ${String(err)}`);
+      steerContent = `⚠️ Steer failed: ${String(err)}`;
+    }
+    try {
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content: steerContent },
+      });
+    } catch (err) {
+      // The steer already ran; an undeliverable status must stay non-fatal
+      // (and distinct from a handler error).
+      deps.logger.warn("discord.interaction.steer_reply_undeliverable", {
+        interactionId: parsed.interactionId,
+        sessionId: payload.session_id,
+        err: String(err),
+      });
     }
     return;
   }
@@ -1444,8 +1453,8 @@ async function handleInteraction(
       : undefined;
     if (requestedSlug && requestedEntry && (requestedEntry.placeholders ?? []).length === 0) {
       // Slug given and the prompt takes no parameters: skip the dropdown
-      // confirmation round-trip entirely and run it directly (deferred
-      // channel message → edit).
+      // confirmation round-trip entirely and run it directly (the slash
+      // response itself reports the delivery).
       await runPromptProxy(
         deps,
         parsed.interactionId,
@@ -1457,7 +1466,7 @@ async function handleInteraction(
         },
         parsed.channelId,
         parsed.guildId,
-        "deferred-channel",
+        "direct-response",
       );
       return;
     }

@@ -2305,7 +2305,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     assert.ok(result.latestAssistantText.length > 0);
   });
 
-  it("canned prompt delivers the assistant reply exactly once (platform post + ack-then-edit interaction flow)", async () => {
+  it("canned prompt delivers the assistant reply exactly once (platform post + immediate delivery confirmation)", async () => {
     const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
     const marker = "unique-reply-marker";
 
@@ -2357,6 +2357,9 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     // Mirrors the daemon prompt op: runs the turn (delivered via the
     // messaging_surface path) and returns the rendered reply in the result.
+    // (The op also honors `wait: false`, but this stub always completes the
+    // turn before responding — the delivery confirmation is what matters
+    // here, not the op's timing.)
     const handler = createDiscordInteractionHandler({
       transport: {
         interactionCallback: async (_id, _token, body) => {
@@ -2399,12 +2402,12 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     };
 
     handler(ev);
-    // The ack lands BEFORE the turn starts, so keep advancing timers until the
-    // post-turn edit has been delivered too — otherwise platform.stop() could
-    // tear things down between the ack and the outcome edit.
+    // The ack lands BEFORE the turn starts, so keep advancing timers until
+    // the platform path has posted the reply too — otherwise platform.stop()
+    // could tear things down mid-turn.
     for (
       let i = 0;
-      i < 200 && (interactionResponses.length === 0 || interactionEdits.length === 0);
+      i < 200 && (interactionResponses.length === 0 || !sent.some((s) => s.body.includes(marker)));
       i++
     ) {
       await vi.advanceTimersByTimeAsync(10);
@@ -2420,13 +2423,17 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     );
 
     // …and the modal submit is ACKed up front with one UPDATE_MESSAGE (7)
-    // carrying the pending state — never the reply text.
+    // carrying the delivery confirmation — never the reply text.
     assert.strictEqual(interactionResponses.length, 1, "modal submit ACKs exactly once");
     const resp = interactionResponses[0]!;
     assert.strictEqual(resp.type, 7, "modal submit should update message A in place");
     assert.ok(
-      resp.data?.content?.includes("⏳ Running"),
-      "interaction response should carry the pending-state ack",
+      resp.data?.content?.includes("✅ Canned prompt"),
+      "interaction response should carry the delivery confirmation",
+    );
+    assert.ok(
+      resp.data?.content?.includes(sessionUrn),
+      "delivery confirmation should name the target session",
     );
     assert.ok(
       !resp.data?.content?.includes(marker),
@@ -2434,13 +2441,14 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     );
     assert.deepStrictEqual(resp.data?.components, [], "dropdown must be cleared");
 
-    // The outcome then lands as a single edit of that response (the ack
-    // already rewrote message A, so the edit updates it in place rather than
-    // leaving it stale) — still never repeating the reply text.
-    assert.strictEqual(interactionEdits.length, 1, "outcome is delivered via one edit");
-    const edit = interactionEdits[0]!;
-    assert.ok(edit.content.includes("✅ Prompt"), "edit should carry the prompt ack");
-    assert.ok(!edit.content.includes(marker), "edit must not repeat the assistant reply");
+    // The delivery confirmation is terminal on success — the turn announces
+    // itself via the messaging_surface post, so no post-turn edit may rewrite
+    // the status (and it never repeats the reply text).
+    assert.strictEqual(
+      interactionEdits.length,
+      0,
+      "successful delivery must not be edited afterwards",
+    );
   });
 
   it("canned prompt with streaming enabled streams the reply instead of posting it at once", async () => {

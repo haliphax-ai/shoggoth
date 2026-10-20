@@ -79,3 +79,46 @@ describe("session model", () => {
     assert.ok(out.includes("(using default)"), `expected default selection: ${out}`);
   });
 });
+
+describe("session send / steer wait flag", () => {
+  it("send returns on delivery by default and waits with --wait", async () => {
+    mockInvoke.mockResolvedValue({ ok: true, result: { delivered: true } });
+
+    await runSessionCli(["send", "some-session", "hello there"]);
+    const call = mockInvoke.mock.calls[0]![0]!;
+    assert.strictEqual(call.op, "session_send");
+    assert.strictEqual(
+      call.payload.wait,
+      false,
+      "default must return as soon as the message is delivered",
+    );
+    assert.strictEqual(call.payload.message, "hello there");
+
+    mockInvoke.mockClear();
+    await runSessionCli(["send", "--wait", "some-session", "hello again"]);
+    const waited = mockInvoke.mock.calls[0]![0]!;
+    assert.strictEqual(waited.payload.wait, true);
+    assert.strictEqual(waited.payload.message, "hello again");
+  });
+
+  it("steer returns on delivery by default and waits with --wait", async () => {
+    mockInvoke.mockResolvedValue({ ok: true, result: { delivered: true } });
+
+    await runSessionCli(["steer", "some-session", "internal", "wrap up"]);
+    const call = mockInvoke.mock.calls[0]![0]!;
+    assert.strictEqual(call.op, "session_steer");
+    assert.strictEqual(
+      call.payload.wait,
+      false,
+      "default must return as soon as the prompt is delivered",
+    );
+    assert.strictEqual(call.payload.delivery, "internal");
+    assert.strictEqual(call.payload.prompt, "wrap up");
+
+    mockInvoke.mockClear();
+    await runSessionCli(["steer", "--wait", "some-session", "surface", "wrap up now"]);
+    const waited = mockInvoke.mock.calls[0]![0]!;
+    assert.strictEqual(waited.payload.wait, true);
+    assert.strictEqual(waited.payload.prompt, "wrap up now");
+  });
+});

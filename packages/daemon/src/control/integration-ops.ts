@@ -240,6 +240,19 @@ function optionalStringArray(obj: Record<string, unknown>, key: string): string[
   return v as string[];
 }
 
+/**
+ * Optional boolean payload flag (e.g. `wait`). Absent → `undefined` so the
+ * caller applies its own default; a present value must be a boolean.
+ */
+function optionalBooleanFlag(obj: Record<string, unknown>, key: string): boolean | undefined {
+  const v = obj[key];
+  if (v === undefined) return undefined;
+  if (typeof v !== "boolean") {
+    throw new IntegrationOpError("ERR_INVALID_PAYLOAD", `payload.${key} must be a boolean`);
+  }
+  return v;
+}
+
 function optionalNonEmptySessionId(pl: Record<string, unknown>): string | undefined {
   const v = pl.session_id;
   if (v === undefined) return undefined;
@@ -2602,6 +2615,56 @@ export async function handleIntegrationControlOp(
       const senderSessionId =
         principal.kind === "agent" ? principal.sessionId : `operator:${principal.operatorId}`;
       const bannerText = buildSessionMessageTurnBanner({ senderSessionId });
+      const turnInput: Parameters<typeof ext.runSessionModelTurn>[0] = {
+        sessionId,
+        userContent: message,
+        userMetadata: { session_send: true },
+        systemContext: {
+          kind: "session.message",
+          summary: `Message from session ${senderSessionId}.`,
+          data: { sender_session_id: senderSessionId },
+        },
+        delivery,
+      };
+      if (optionalBooleanFlag(pl, "wait") === false) {
+        // wait:false — return as soon as the message is handed off. The turn
+        // keeps running detached; its outcome reaches the operator through
+        // the normal delivery surface and failures land in the daemon log.
+        void (async () => {
+          const bannerHandle =
+            delivery.kind === "internal"
+              ? await ext.oobTurnBanner?.begin({
+                  sessionId,
+                  processing: bannerText.processing,
+                })
+              : undefined;
+          try {
+            const turn = await ext.runSessionModelTurn({
+              ...turnInput,
+              ...(bannerHandle ? { statusBarSink: bannerHandle } : {}),
+            });
+            if (bannerHandle) {
+              await ext.oobTurnBanner?.finish({
+                handle: bannerHandle,
+                terminal: bannerText.terminal("finished"),
+                ...(turn.statusBarLine ? { statusBar: turn.statusBarLine } : {}),
+              });
+            }
+          } catch (err) {
+            ioLog.warn("subagent conversation: send detached turn failed", {
+              sessionId,
+              err: String(err),
+            });
+          }
+        })();
+        ctx.recordIntegrationAudit({
+          action: "session.send",
+          resource: sessionId,
+          outcome: "delivered",
+          argsRedactedJson: JSON.stringify({ silent, wait: false }),
+        });
+        return { delivered: true, session_id: sessionId };
+      }
       const bannerHandle =
         delivery.kind === "internal"
           ? await ext.oobTurnBanner?.begin({
@@ -2610,16 +2673,8 @@ export async function handleIntegrationControlOp(
             })
           : undefined;
       const turn = await ext.runSessionModelTurn({
-        sessionId,
-        userContent: message,
+        ...turnInput,
         ...(bannerHandle ? { statusBarSink: bannerHandle } : {}),
-        userMetadata: { session_send: true },
-        systemContext: {
-          kind: "session.message",
-          summary: `Message from session ${senderSessionId}.`,
-          data: { sender_session_id: senderSessionId },
-        },
-        delivery,
       });
       if (bannerHandle) {
         await ext.oobTurnBanner?.finish({
@@ -2712,7 +2767,7 @@ export async function handleIntegrationControlOp(
             })();
       const senderInfo =
         principal.kind === "agent" ? principal.sessionId : `operator:${principal.operatorId}`;
-      const turn = await ext.runSessionModelTurn({
+      const turnInput: Parameters<typeof ext.runSessionModelTurn>[0] = {
         sessionId,
         userContent: prompt,
         userMetadata: { session_steer: true },
@@ -2722,7 +2777,25 @@ export async function handleIntegrationControlOp(
           data: { steered_by: senderInfo },
         },
         delivery,
-      });
+      };
+      if (optionalBooleanFlag(pl, "wait") === false) {
+        // wait:false — deliver the directive and return immediately; the
+        // detached turn's outcome reaches the operator via the delivery
+        // surface and failures land in the daemon log.
+        void ext.runSessionModelTurn(turnInput).catch((err) => {
+          ioLog.warn("subagent conversation: steer detached turn failed", {
+            sessionId,
+            err: String(err),
+          });
+        });
+        ctx.recordIntegrationAudit({
+          action: "session.steer",
+          resource: sessionId,
+          outcome: "delivered",
+        });
+        return { delivered: true, session_id: sessionId };
+      }
+      const turn = await ext.runSessionModelTurn(turnInput);
       ctx.recordIntegrationAudit({
         action: "session.steer",
         resource: sessionId,
@@ -2819,7 +2892,7 @@ export async function handleIntegrationControlOp(
           })();
       const senderSessionId =
         principal.kind === "agent" ? principal.sessionId : `operator:${principal.operatorId}`;
-      const turn = await ext.runSessionModelTurn({
+      const turnInput: Parameters<typeof ext.runSessionModelTurn>[0] = {
         sessionId,
         userContent: message,
         userMetadata: { prompt: slug },
@@ -2829,7 +2902,27 @@ export async function handleIntegrationControlOp(
           data: { sender_session_id: senderSessionId, prompt_slug: slug },
         },
         delivery,
-      });
+      };
+      if (optionalBooleanFlag(pl, "wait") === false) {
+        // wait:false — the prompt is delivered; return without waiting for
+        // the turn. Callers report an immediate "submitted" status and the
+        // turn's outcome reaches the operator via the delivery surface.
+        void ext.runSessionModelTurn(turnInput).catch((err) => {
+          ioLog.warn("canned prompt detached turn failed", {
+            sessionId,
+            slug,
+            err: String(err),
+          });
+        });
+        ctx.recordIntegrationAudit({
+          action: "prompt.run",
+          resource: sessionId,
+          outcome: "delivered",
+          argsRedactedJson: JSON.stringify({ slug, wait: false }),
+        });
+        return { delivered: true, session_id: sessionId, slug };
+      }
+      const turn = await ext.runSessionModelTurn(turnInput);
       ctx.recordIntegrationAudit({
         action: "prompt.run",
         resource: sessionId,

@@ -579,18 +579,24 @@ describe("createDiscordInteractionHandler", () => {
     assert.strictEqual(invokeOps[0]!.payload.session_id, "agent:sub:discord:channel:ch-1");
     assert.strictEqual(invokeOps[0]!.payload.prompt, "Focus on the failing tests first.");
     assert.strictEqual(invokeOps[0]!.payload.delivery, undefined);
+    assert.strictEqual(
+      invokeOps[0]!.payload.wait,
+      false,
+      "steer must ask the op to return on delivery",
+    );
 
-    // Acked deferred (single POST callback), then delivered the outcome by editing
-    // the deferred response — never a second POST with the same token.
-    assert.strictEqual(calls.length, 2);
+    // The op returns on delivery, so a single POST callback carries the
+    // delivery confirmation — no deferred ack, no @original edit.
+    assert.strictEqual(calls.length, 1);
     assert.strictEqual(calls[0]!.method, "interactionCallback");
-    const [, , ackBody] = calls[0]!.args as [string, string, { type: number }];
-    assert.strictEqual(ackBody.type, 5, "ack must be DEFERRED (type 5)");
-    assert.strictEqual(calls[1]!.method, "editOriginalInteractionResponse");
-    const [appId, editToken, editBody] = calls[1]!.args as [string, string, { content: string }];
-    assert.strictEqual(appId, "app-123");
-    assert.strictEqual(editToken, "tok-steer-1");
-    assert.ok(editBody.content.includes("Steering prompt sent"));
+    const [, , body] = calls[0]!.args as [
+      string,
+      string,
+      { type: number; data: { content: string } },
+    ];
+    assert.strictEqual(body.type, 4, "delivery confirmation is a CHANNEL_MESSAGE (type 4)");
+    assert.ok(body.data.content.includes("✅ Steering prompt submitted to session"));
+    assert.ok(body.data.content.includes("agent:sub:discord:channel:ch-1"));
   });
 
   it("prefers an explicit session_id and passes internal delivery through", async () => {
@@ -640,6 +646,11 @@ describe("createDiscordInteractionHandler", () => {
     assert.strictEqual(invokeOps[0]!.payload.session_id, "agent:target:discord:channel:ch-7");
     assert.strictEqual(invokeOps[0]!.payload.prompt, "Wrap up after this turn.");
     assert.strictEqual(invokeOps[0]!.payload.delivery, "internal");
+    assert.strictEqual(
+      invokeOps[0]!.payload.wait,
+      false,
+      "steer must ask the op to return on delivery",
+    );
   });
 
   it("warns when no session is bound and no session_id is provided", async () => {
@@ -714,20 +725,21 @@ describe("createDiscordInteractionHandler", () => {
     handler(ev);
     await vi.advanceTimersByTimeAsync(50);
 
-    // Acked deferred (single POST), then the failure surfaced via the @original edit.
-    assert.strictEqual(calls.length, 2);
+    // The op returns on delivery, so the failure surfaces in the single POST
+    // callback itself — no deferred ack, no @original edit.
+    assert.strictEqual(calls.length, 1);
     assert.strictEqual(calls[0]!.method, "interactionCallback");
-    const [, , ackBody] = calls[0]!.args as [string, string, { type: number }];
-    assert.strictEqual(ackBody.type, 5, "ack must be DEFERRED (type 5)");
-    assert.strictEqual(calls[1]!.method, "editOriginalInteractionResponse");
-    const [appId, editToken, editBody] = calls[1]!.args as [string, string, { content: string }];
-    assert.strictEqual(appId, "app-123");
-    assert.strictEqual(editToken, "tok-steer-4");
-    assert.ok(editBody.content.includes("Steer failed"));
-    assert.ok(editBody.content.includes("ERR_SESSION_INACTIVE"));
+    const [, , body] = calls[0]!.args as [
+      string,
+      string,
+      { type: number; data: { content: string } },
+    ];
+    assert.strictEqual(body.type, 4, "delivery status is a CHANNEL_MESSAGE (type 4)");
+    assert.ok(body.data.content.includes("Steer failed"));
+    assert.ok(body.data.content.includes("ERR_SESSION_INACTIVE"));
   });
 
-  it("acks steer with a deferred response before invoking the control op (single POST)", async () => {
+  it("reports steer delivery in a single POST callback after the op returns (no defer)", async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
     const events: string[] = [];
     const transport: DiscordRestTransport = {
@@ -770,33 +782,32 @@ describe("createDiscordInteractionHandler", () => {
     handler(ev);
     await vi.advanceTimersByTimeAsync(50);
 
-    // Ordering: the interaction is acked (deferred) BEFORE the slow control op runs, and
-    // the outcome arrives afterwards via the @original edit — never a second POST callback.
-    assert.deepStrictEqual(events, ["callback", "invoke", "edit_original"]);
+    // Ordering: the op runs first (it returns as soon as the prompt is
+    // delivered), then the single POST callback carries the delivery
+    // confirmation — never a second POST, never an @original edit.
+    assert.deepStrictEqual(events, ["invoke", "callback"]);
     const callbacks = calls.filter((c) => c.method === "interactionCallback");
     assert.strictEqual(callbacks.length, 1, "exactly one POST callback per interaction");
-    const [, , body] = callbacks[0]!.args as [string, string, { type: number }];
-    assert.strictEqual(body.type, 5, "ack must be DEFERRED (type 5)");
+    const [, , body] = callbacks[0]!.args as [
+      string,
+      string,
+      { type: number; data: { content: string } },
+    ];
+    assert.strictEqual(body.type, 4, "delivery confirmation is a CHANNEL_MESSAGE (type 4)");
+    assert.ok(body.data.content.includes("✅ Steering prompt submitted to session"));
+    assert.ok(body.data.content.includes("agent:sub:discord:channel:ch-1"));
 
     const edits = calls.filter((c) => c.method === "editOriginalInteractionResponse");
-    assert.strictEqual(edits.length, 1);
-    const [editAppId, editToken, editContent] = edits[0]!.args as [
-      string,
-      string,
-      { content: string },
-    ];
-    assert.strictEqual(editAppId, "app-123");
-    assert.strictEqual(editToken, "tok-steer-5");
-    assert.ok(editContent.content.includes("Steering prompt sent"));
+    assert.strictEqual(edits.length, 0, "no post-turn edit on success");
   });
 
-  it("logs distinctly and stays non-fatal when the deferred steer reply edit fails", async () => {
+  it("logs distinctly and stays non-fatal when the steer reply callback fails", async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
     const warns: string[] = [];
     const transport: DiscordRestTransport = {
       ...stubTransport(calls),
-      async editOriginalInteractionResponse() {
-        calls.push({ method: "editOriginalInteractionResponse", args: [] });
+      async interactionCallback() {
+        calls.push({ method: "interactionCallback", args: [] });
         throw new Error("Discord REST 404: Unknown interaction");
       },
     };
@@ -848,9 +859,11 @@ describe("createDiscordInteractionHandler", () => {
     );
     const callbacks = calls.filter((c) => c.method === "interactionCallback");
     assert.strictEqual(callbacks.length, 1, "still exactly one POST callback");
+    const edits = calls.filter((c) => c.method === "editOriginalInteractionResponse");
+    assert.strictEqual(edits.length, 0, "no edit fallback for the steer status");
   });
 
-  it("still runs the steer and never retries the POST callback when the initial defer fails", async () => {
+  it("runs the steer with wait:false and never retries a failed POST callback", async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
     const warns: string[] = [];
     const transport: DiscordRestTransport = {
@@ -868,13 +881,15 @@ describe("createDiscordInteractionHandler", () => {
       debug: () => {},
     };
     let invoked = false;
+    let waitFlag: unknown;
     const handler = createDiscordInteractionHandler({
       transport,
       applicationId: "app-123",
       logger,
       abortSession: async () => true,
-      invokeControlOp: async () => {
+      invokeControlOp: async (op, payload) => {
         invoked = true;
+        waitFlag = payload.wait;
         return { ok: true };
       },
       resolveSessionForChannel: () => "agent:sub:discord:channel:ch-1",
@@ -897,16 +912,17 @@ describe("createDiscordInteractionHandler", () => {
     handler(ev);
     await vi.advanceTimersByTimeAsync(50);
 
-    assert.strictEqual(invoked, true, "steer must run even when the defer ack fails");
+    assert.strictEqual(invoked, true, "steer must run even when the response fails");
+    assert.strictEqual(waitFlag, false, "steer must ask the op to return on delivery");
     const callbacks = calls.filter((c) => c.method === "interactionCallback");
     assert.strictEqual(callbacks.length, 1, "must never retry the POST callback with the token");
     assert.ok(
-      warns.includes("discord.interaction.steer_defer_failed"),
-      `expected distinct defer warn, got: ${JSON.stringify(warns)}`,
+      warns.includes("discord.interaction.steer_reply_undeliverable"),
+      `expected distinct reply warn, got: ${JSON.stringify(warns)}`,
     );
     assert.ok(!warns.includes("discord.interaction.handler_error"));
     const edits = calls.filter((c) => c.method === "editOriginalInteractionResponse");
-    assert.strictEqual(edits.length, 1, "outcome still delivered through the deferred edit");
+    assert.strictEqual(edits.length, 0, "no edit fallback — the POST callback is the only reply");
   });
 });
 

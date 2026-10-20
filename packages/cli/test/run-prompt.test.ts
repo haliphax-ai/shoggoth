@@ -151,6 +151,15 @@ describe("parsePromptArgs", () => {
     assert.ok(result.ok);
     assert.strictEqual(result.payload.silent, true);
   });
+
+  it("defaults to returning on delivery and flips to wait mode with --wait", () => {
+    const immediate = parsePromptArgs(["triage", "--session", "s1"]);
+    assert.ok(immediate.ok);
+    assert.strictEqual(immediate.payload.wait, false);
+    const waited = parsePromptArgs(["triage", "--session", "s1", "--wait"]);
+    assert.ok(waited.ok);
+    assert.strictEqual(waited.payload.wait, true);
+  });
 });
 
 describe("runPromptCli", () => {
@@ -162,6 +171,11 @@ describe("runPromptCli", () => {
     assert.strictEqual(call.op, "prompt");
     assert.strictEqual(call.payload.session_id, "agent:resolved:main");
     assert.strictEqual(call.payload.slug, "triage");
+    assert.strictEqual(
+      call.payload.wait,
+      false,
+      "default must return as soon as the prompt is delivered",
+    );
     assert.deepStrictEqual(call.payload.params, { cardId: "F-1" });
     assert.ok(logged.join("\n").includes("done"));
     assert.strictEqual(process.exitCode, undefined);
