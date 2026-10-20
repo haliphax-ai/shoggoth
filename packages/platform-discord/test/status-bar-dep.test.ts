@@ -71,4 +71,16 @@ describe("buildStatusBarDep stats", () => {
     expect(stats.compactions).toBe(0);
     expect(stats.context).toBeUndefined();
   });
+
+  it("exposes cruiseControlActive when provided", () => {
+    const cruiseActive = (sid: string) => sid === "s1";
+    const dep = buildStatusBarDep(db, cfg, cruiseActive);
+    expect(dep.cruiseControlActive?.("s1")).toBe(true);
+    expect(dep.cruiseControlActive?.("s2")).toBe(false);
+  });
+
+  it("omits cruiseControlActive when not provided", () => {
+    const dep = buildStatusBarDep(db, cfg);
+    expect(dep.cruiseControlActive).toBeUndefined();
+  });
 });

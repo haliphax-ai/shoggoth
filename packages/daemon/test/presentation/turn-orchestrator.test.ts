@@ -218,6 +218,36 @@ describe("PresentationTurnOrchestrator", () => {
     expect(barLine?.length ?? 0).toBeGreaterThan(0);
   });
 
+  it("threads cruiseControlActive into the tracker create()", async () => {
+    const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn.js");
+    const config = { ...DEFAULT_STATUS_BAR_CONFIG, enabled: true } as ResolvedStatusBarConfig;
+    const render = vi.fn().mockReturnValue("✅ ｜ 🔢 `3`");
+    const attachSink = vi.fn().mockReturnValue({
+      setStatusBar: vi.fn().mockResolvedValue(undefined),
+    });
+    const adapter = createMockAdapter();
+    const cruiseActive = vi.fn((sid: string) => sid === "s1");
+    const orch = new PresentationTurnOrchestrator({
+      config: {} as ShoggothConfig,
+      adapter,
+      statusBar: { config, render, attachSink, cruiseControlActive: cruiseActive },
+    });
+
+    await orch.orchestrateInboundTurn({
+      sessionId: "s1",
+      buildTurn: vi.fn().mockResolvedValue({}),
+    });
+
+    const call = vi.mocked(runInboundSessionTurn).mock.calls.at(-1)?.[0];
+    const tracker = await call.statusBar?.create?.();
+    expect(tracker).toBeDefined();
+    // The tracker expose the full event surface so the inbound path can drive live phase updates.
+    expect(typeof tracker?.onProse).toBe("function");
+    const barLine = await tracker?.finish?.("completed");
+    expect(typeof barLine).toBe("string");
+    expect(barLine?.length ?? 0).toBeGreaterThan(0);
+  });
+
   it("create() then attachSink wires the live sink and flushes the captured starting line", async () => {
     const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn.js");
     const config = { ...DEFAULT_STATUS_BAR_CONFIG, enabled: true } as ResolvedStatusBarConfig;
