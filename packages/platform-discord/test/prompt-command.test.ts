@@ -193,21 +193,20 @@ describe("prompt slash command", () => {
     assert.strictEqual(promptCall!.payload.session_id, SESSION);
     assert.strictEqual(promptCall!.payload.platform_user_id, "u-1");
 
-    // Exactly one callback: the deferred channel-message ACK (type 5) — no
-    // dropdown message is ever shown.
+    // The op is asked to return as soon as the prompt is delivered…
+    assert.strictEqual(promptCall!.payload.wait, false);
+
+    // …and the single slash response IS the delivery confirmation (type 4):
+    // no deferred "thinking" placeholder, no post-turn edit.
     const callbacks = calls.filter((c) => c.method === "interactionCallback");
     assert.strictEqual(callbacks.length, 1, "should not render a dropdown");
-    const ack = callbacks[0]!.args[2] as Body;
-    assert.strictEqual(ack.type, 5);
-    assert.strictEqual((ack as { data?: Record<string, unknown> }).data, undefined);
-
-    // …then the deferred response is edited with the success recap.
+    const reply = callbacks[0]!.args[2] as Body;
+    assert.strictEqual(reply.type, 4);
+    assert.ok((reply.data.content as string).includes("✅ Canned prompt"));
+    assert.ok((reply.data.content as string).includes("`plain`"));
+    assert.ok((reply.data.content as string).includes(SESSION));
     const edit = calls.find((c) => c.method === "editOriginalInteractionResponse");
-    assert.ok(edit, "should edit the deferred response with the outcome");
-    const editBody = edit!.args[2] as { content: string; components: unknown[] };
-    assert.ok(editBody.content.includes("✅ Prompt"));
-    assert.ok(editBody.content.includes("`plain`"));
-    assert.deepStrictEqual(editBody.components, []);
+    assert.strictEqual(edit, undefined, "successful delivery must not be edited afterwards");
   });
 
   it("returns an ephemeral error without dropdown for an unknown slug", async () => {
@@ -300,11 +299,11 @@ describe("prompt dropdown component → modal", () => {
     assert.ok(components.every((c) => c.components[0]!.label.length <= 32));
   });
 
-  it("acks with UPDATE (type 7) pending state, then edits message A with the outcome", async () => {
+  it("acks with UPDATE (type 7) delivery confirmation and never edits afterwards", async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
     const invoked: Array<{ op: string; payload: Record<string, unknown> }> = [];
-    // The ack must already be on the wire before the op dispatches — the op
-    // awaits the full model turn, which cannot fit Discord's 3s window.
+    // The ack must already be on the wire before the op dispatches — the
+    // ~3s response window started when the selection interaction was created.
     let ackBeforeInvoke = false;
     const handler = makeHandler(calls, async (op, payload) => {
       if (op === "prompt") {
@@ -327,26 +326,22 @@ describe("prompt dropdown component → modal", () => {
     assert.strictEqual(promptCall!.payload.platform_user_id, "u-1");
 
     // Ack FIRST: a single UPDATE_MESSAGE (7) rewrites message A (the
-    // dropdown) in place with a pending state before the op runs — dropdown
-    // cleared immediately, `⏳ Running` visible for the whole model turn.
+    // dropdown) in place with the delivery confirmation before the op runs —
+    // dropdown cleared immediately, "submitted" status already final.
     const callback = calls.find((c) => c.method === "interactionCallback");
     assert.ok(callback, "should ACK the selection");
     const ack = callback!.args[2] as Body;
     assert.strictEqual(ack.type, 7);
-    assert.ok((ack.data.content as string).includes("⏳ Running"));
+    assert.ok((ack.data.content as string).includes("✅ Canned prompt"));
     assert.ok((ack.data.content as string).includes("`plain`"));
-    assert.ok(!(ack.data.content as string).includes("✅ Prompt"));
+    assert.ok((ack.data.content as string).includes(SESSION));
     assert.deepStrictEqual(ack.data.components, [], "dropdown must be cleared at ack time");
     assert.ok(ackBeforeInvoke, "ack must precede the prompt op");
+    assert.strictEqual(promptCall!.payload.wait, false);
 
-    // …then the outcome is delivered by editing that response into the recap.
+    // …and success is final: no post-turn edit of the status message.
     const edit = calls.find((c) => c.method === "editOriginalInteractionResponse");
-    assert.ok(edit, "should edit message A with the outcome");
-    const editBody = edit!.args[2] as { content: string; components: unknown[] };
-    assert.ok(editBody.content.includes("✅ Prompt"));
-    assert.ok(editBody.content.includes("`plain`"));
-    assert.ok(editBody.content.includes(SESSION));
-    assert.deepStrictEqual(editBody.components, [], "dropdown must be cleared");
+    assert.strictEqual(edit, undefined, "successful delivery must not be edited afterwards");
   });
 
   it("reports an error when the prompt has more than 5 placeholders", async () => {
@@ -386,7 +381,7 @@ describe("prompt modal submit → slash handler proxy", () => {
     const invoked: Array<{ op: string; payload: Record<string, unknown> }> = [];
     const handler = makeHandler(calls, async (op, payload) => {
       // The ack must already be on the wire before the op dispatches — the
-      // op awaits the full model turn, which cannot fit Discord's 3s window.
+      // ~3s response window started when the modal submit arrived.
       const acksBeforeInvoke = calls.filter((c) => c.method === "interactionCallback");
       assert.strictEqual(acksBeforeInvoke.length, 1, "ack must precede the prompt op");
       invoked.push({ op, payload });
@@ -419,30 +414,28 @@ describe("prompt modal submit → slash handler proxy", () => {
       session_id: SESSION,
       platform_user_id: "u-1",
       params: { cardId: "F-42", note: "" },
+      wait: false,
     });
 
     // Ack FIRST: a single UPDATE_MESSAGE (7) response rewrites message A
-    // (the dropdown) in place with a pending state before the op runs —
-    // components cleared.
+    // (the dropdown) in place with the delivery confirmation — components
+    // cleared.
     const callbacks = calls.filter((c) => c.method === "interactionCallback");
     assert.strictEqual(callbacks.length, 1, "modal submit ACKs exactly once");
     const ack = callbacks[0]!.args[2] as Body;
     assert.strictEqual(ack.type, 7); // UPDATE_MESSAGE
-    assert.ok((ack.data.content as string).includes("⏳ Running"));
+    assert.ok((ack.data.content as string).includes("✅ Canned prompt"));
     assert.ok((ack.data.content as string).includes("`triage`"));
-    assert.ok(!(ack.data.content as string).includes("rendered reply"));
+    assert.ok((ack.data.content as string).includes(SESSION));
     assert.deepStrictEqual(ack.data.components, []);
 
-    // …then the outcome is delivered by editing that response.
+    // …and success is final: the turn announces itself on the session
+    // surface, so the status is never edited.
     const edits = calls.filter((c) => c.method === "editOriginalInteractionResponse");
-    assert.strictEqual(edits.length, 1, "outcome is delivered via a single edit");
-    const editBody = edits[0]!.args[2] as { content: string; components: unknown[] };
-    assert.ok(editBody.content.includes("✅ Prompt"));
-    assert.ok(!editBody.content.includes("rendered reply"));
-    assert.deepStrictEqual(editBody.components, []);
+    assert.strictEqual(edits.length, 0, "successful delivery must not be edited afterwards");
   });
 
-  it("reports daemon validation failures in the edit after the pending-state ack", async () => {
+  it("reports daemon validation failures in the edit after the delivery-confirmation ack", async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
     const handler = makeHandler(calls, async () => ({
       ok: false,
@@ -465,12 +458,12 @@ describe("prompt modal submit → slash handler proxy", () => {
     handler(ev);
     await vi.advanceTimersByTimeAsync(100);
 
-    // The interaction is still ACKed first with the pending state…
+    // The interaction is still ACKed first with the delivery confirmation…
     const callbacks = calls.filter((c) => c.method === "interactionCallback");
     assert.strictEqual(callbacks.length, 1, "failure must still ACK first");
     const ack = callbacks[0]!.args[2] as Body;
     assert.strictEqual(ack.type, 7); // UPDATE_MESSAGE
-    assert.ok((ack.data.content as string).includes("⏳ Running"));
+    assert.ok((ack.data.content as string).includes("✅ Canned prompt"));
     assert.deepStrictEqual(ack.data.components, []);
 
     // …and the failure is reported via a single edit of that response.

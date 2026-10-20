@@ -74,12 +74,13 @@ Output: JSON.
 #### Send a message
 
 ```
-shoggoth session send <sessionUrn|agentId> [--silent] <message...>
+shoggoth session send <sessionUrn|agentId> [--silent] [--wait] <message...>
 ```
 
 Injects a user-role message into the session and triggers a model turn.
 
 - `--silent` — run the model turn but do not post the assistant reply to the bound messaging surface (internal delivery only).
+- `--wait` — block until the model turn finishes before returning. By default the command returns as soon as the message is delivered (`{ "delivered": true }`) and the turn keeps running detached.
 
 #### Compact transcript
 
@@ -118,13 +119,14 @@ Returns session status, stats, and model info. Output: JSON.
 #### Steer (extra model turn)
 
 ```
-shoggoth session steer <sessionUrn|agentId> <surface|internal> <prompt...>
+shoggoth session steer <sessionUrn|agentId> <surface|internal> [--wait] <prompt...>
 ```
 
 Triggers an additional model turn with the given prompt.
 
 - `surface` — reply is posted to the bound messaging channel.
 - `internal` — reply stays internal (not posted).
+- `--wait` — block until the model turn finishes before returning. By default the command returns as soon as the prompt is delivered (`{ "delivered": true }`) and the turn keeps running detached.
 
 #### Abort in-flight turn
 

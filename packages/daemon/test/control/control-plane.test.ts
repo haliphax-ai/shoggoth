@@ -2430,4 +2430,238 @@ describe("control plane (unix socket + JSONL)", () => {
       assert.notEqual(res.error?.code, "ERR_FORBIDDEN");
     });
   });
+
+  it("session_send with wait:false returns on delivery while the turn keeps running detached", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-ssend-nowait-"));
+    const sock = join(dir, "c.sock");
+    const dbPath = join(dir, "state.db");
+    const db = new Database(dbPath);
+    migrate(db, defaultMigrationsDir());
+    const target = formatAgentSessionUrn(
+      "snd",
+      "discord",
+      "channel",
+      SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID,
+    );
+    createSessionStore(db).create({ id: target, workspacePath: "/w", status: "active" });
+
+    let turnCalls = 0;
+    let resolveTurn: (v: {
+      latestAssistantText: string;
+      failoverMeta: undefined;
+    }) => void = () => {};
+    const pendingTurn = new Promise<{ latestAssistantText: string; failoverMeta: undefined }>(
+      (res) => {
+        resolveTurn = res;
+      },
+    );
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: async () => {
+        turnCalls += 1;
+        return pendingTurn;
+      },
+      subscribeSubagentSession: () => () => {},
+      registerPlatformThreadBinding: () => () => {},
+    });
+    try {
+      await withControlPlaneSession(
+        {
+          stateDb: db,
+          config: minimalConfig(sock),
+        },
+        async (send) => {
+          const opAuth = {
+            kind: "operator_token",
+            token: "test-op-token",
+          } as const;
+          const line = await send({
+            v: WIRE_VERSION,
+            id: "ss-nowait",
+            op: "session_send",
+            auth: opAuth,
+            payload: {
+              session_id: target,
+              message: "detached hello",
+              silent: true,
+              wait: false,
+            },
+          });
+          const res = parseResponseLine(line);
+          assert.equal(res.ok, true);
+          const body = res.result as { delivered?: boolean; session_id?: string };
+          assert.equal(body.delivered, true);
+          assert.equal(body.session_id, target);
+          // The turn was started but is still pending — the op did not wait.
+          assert.equal(turnCalls, 1);
+          resolveTurn({ latestAssistantText: "late reply", failoverMeta: undefined });
+          await flushAsyncWork();
+        },
+      );
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
+
+    db.close();
+  });
+
+  it("session_steer with wait:false returns on delivery while the turn keeps running detached", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-steer-nowait-"));
+    const sock = join(dir, "c.sock");
+    const dbPath = join(dir, "state.db");
+    const db = new Database(dbPath);
+    migrate(db, defaultMigrationsDir());
+    const target = formatAgentSessionUrn(
+      "str",
+      "discord",
+      "channel",
+      SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID,
+    );
+    createSessionStore(db).create({ id: target, workspacePath: "/w", status: "active" });
+
+    let turnCalls = 0;
+    let resolveTurn: (v: {
+      latestAssistantText: string;
+      failoverMeta: undefined;
+    }) => void = () => {};
+    const pendingTurn = new Promise<{ latestAssistantText: string; failoverMeta: undefined }>(
+      (res) => {
+        resolveTurn = res;
+      },
+    );
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: async () => {
+        turnCalls += 1;
+        return pendingTurn;
+      },
+      subscribeSubagentSession: () => () => {},
+      registerPlatformThreadBinding: () => () => {},
+    });
+    try {
+      await withControlPlaneSession(
+        {
+          stateDb: db,
+          config: minimalConfig(sock),
+        },
+        async (send) => {
+          const opAuth = {
+            kind: "operator_token",
+            token: "test-op-token",
+          } as const;
+          const line = await send({
+            v: WIRE_VERSION,
+            id: "steer-nowait",
+            op: "session_steer",
+            auth: opAuth,
+            payload: {
+              session_id: target,
+              prompt: "steer detached",
+              delivery: "internal",
+              wait: false,
+            },
+          });
+          const res = parseResponseLine(line);
+          assert.equal(res.ok, true);
+          const body = res.result as { delivered?: boolean; session_id?: string };
+          assert.equal(body.delivered, true);
+          assert.equal(body.session_id, target);
+          assert.equal(turnCalls, 1);
+          resolveTurn({ latestAssistantText: "late reply", failoverMeta: undefined });
+          await flushAsyncWork();
+        },
+      );
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
+
+    db.close();
+  });
+
+  it("prompt with wait:false returns on delivery while the rendered turn keeps running detached", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-prompt-nowait-"));
+    const sock = join(dir, "c.sock");
+    const dbPath = join(dir, "state.db");
+    const db = new Database(dbPath);
+    migrate(db, defaultMigrationsDir());
+    const ws = join(dir, "ws");
+    await mkdir(join(ws, "prompts"), { recursive: true });
+    await writeFile(join(ws, "prompts", "plain.md"), "Do the canned thing.\n");
+    const target = formatAgentSessionUrn(
+      "pr",
+      "discord",
+      "channel",
+      SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID,
+    );
+    createSessionStore(db).create({ id: target, workspacePath: ws, status: "active" });
+
+    let turnCalls = 0;
+    let deliveredContent: string | undefined;
+    let resolveTurn: (v: {
+      latestAssistantText: string;
+      failoverMeta: undefined;
+    }) => void = () => {};
+    const pendingTurn = new Promise<{ latestAssistantText: string; failoverMeta: undefined }>(
+      (res) => {
+        resolveTurn = res;
+      },
+    );
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: async (input) => {
+        turnCalls += 1;
+        deliveredContent = input.userContent;
+        return pendingTurn;
+      },
+      subscribeSubagentSession: () => () => {},
+      registerPlatformThreadBinding: () => () => {},
+    });
+    try {
+      await withControlPlaneSession(
+        {
+          stateDb: db,
+          config: minimalConfig(sock),
+        },
+        async (send) => {
+          const opAuth = {
+            kind: "operator_token",
+            token: "test-op-token",
+          } as const;
+          const line = await send({
+            v: WIRE_VERSION,
+            id: "prompt-nowait",
+            op: "prompt",
+            auth: opAuth,
+            payload: {
+              session_id: target,
+              slug: "plain",
+              silent: true,
+              wait: false,
+            },
+          });
+          const res = parseResponseLine(line);
+          assert.equal(res.ok, true);
+          const body = res.result as {
+            delivered?: boolean;
+            session_id?: string;
+            slug?: string;
+          };
+          assert.equal(body.delivered, true);
+          assert.equal(body.session_id, target);
+          assert.equal(body.slug, "plain");
+          assert.equal(turnCalls, 1);
+          assert.equal(deliveredContent, "Do the canned thing.\n");
+          resolveTurn({ latestAssistantText: "late reply", failoverMeta: undefined });
+          await flushAsyncWork();
+        },
+      );
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
+
+    db.close();
+  });
 });

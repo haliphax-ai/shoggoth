@@ -36,20 +36,21 @@ function printSessionHelp(): void {
   console.log(`shoggoth ${VERSION}
 Usage:
   shoggoth session list [status] [--agent <agentId>]   List sessions (optional filters; JSON)
-  shoggoth session send <sessionUrn|agentId> [--silent] <message...>  Inject user message + model turn (operator)
+  shoggoth session send <sessionUrn|agentId> [--silent] [--wait] <message...>  Inject user message + model turn (operator)
   shoggoth session compact <sessionUrn|agentId>  Transcript compact (state DB); JSON on stdout
   shoggoth session context new <sessionUrn|agentId>   New context segment (control socket; operator)
   shoggoth session context reset <sessionUrn|agentId>  Reset context segment (control socket; operator)
   shoggoth session inspect <sessionUrn|agentId>   Session row + child subagents (operator)
   shoggoth session status <sessionUrn|agentId>    Session status + stats + model info (operator)
-  shoggoth session steer <sessionUrn|agentId> <surface|internal> <prompt...>  Extra model turn (operator)
+  shoggoth session steer <sessionUrn|agentId> <surface|internal> [--wait] <prompt...>  Extra model turn (operator)
   shoggoth session abort <sessionUrn|agentId>  Abort in-flight model turn (operator)
   shoggoth session kill <sessionUrn|agentId>      Terminate session + cleanup (operator)
   shoggoth session model <sessionUrn|agentId>     Show current model selection (operator)
   shoggoth session model <sessionUrn|agentId> <provider/model>  Set model selection (e.g. openai/gpt-4o)
   shoggoth session model <sessionUrn|agentId> --clear  Reset model selection to null
 
-  session send: --silent skips posting the assistant reply to the bound messaging surface (internal delivery only).`);
+  session send: --silent skips posting the assistant reply to the bound messaging surface (internal delivery only).
+  session send + session steer: --wait blocks until the model turn finishes; default returns as soon as the message is delivered.`);
 }
 
 function parseSessionListArgv(
@@ -126,10 +127,15 @@ export async function runSessionCli(argv: string[]): Promise<void> {
   if (sub === "send") {
     const rest = argv.slice(1);
     let silent = false;
+    let wait = false;
     const tokens: string[] = [];
     for (const t of rest) {
       if (t === "--silent") {
         silent = true;
+        continue;
+      }
+      if (t === "--wait") {
+        wait = true;
         continue;
       }
       tokens.push(t);
@@ -143,7 +149,7 @@ export async function runSessionCli(argv: string[]): Promise<void> {
     }
     const sessionId = await resolveSessionTargetOrExit(configDir, rawTarget);
     if (!sessionId) return;
-    const payload: Record<string, unknown> = { session_id: sessionId, message };
+    const payload: Record<string, unknown> = { session_id: sessionId, message, wait };
     if (silent) payload.silent = true;
     const res = await invokeControlRequest({
       socketPath,
@@ -250,14 +256,16 @@ export async function runSessionCli(argv: string[]): Promise<void> {
   }
 
   if (sub === "steer") {
-    const rawTarget = argv[1]?.trim();
-    const deliveryRaw = argv[2]?.trim().toLowerCase();
-    const prompt = argv.slice(3).join(" ").trim();
+    const wait = argv.includes("--wait");
+    const rest = argv.slice(1).filter((t) => t !== "--wait");
+    const rawTarget = rest[0]?.trim();
+    const deliveryRaw = rest[1]?.trim().toLowerCase();
+    const prompt = rest.slice(2).join(" ").trim();
     const deliveryInternal = deliveryRaw === "internal";
     const deliverySurface = deliveryRaw === "surface";
     if (!rawTarget || (!deliveryInternal && !deliverySurface) || !prompt) {
       console.error(
-        "usage: shoggoth session steer <sessionUrn|agentId> <surface|internal> <prompt...>",
+        "usage: shoggoth session steer <sessionUrn|agentId> <surface|internal> [--wait] <prompt...>",
       );
       process.exitCode = 1;
       return;
@@ -267,6 +275,7 @@ export async function runSessionCli(argv: string[]): Promise<void> {
     const payload: Record<string, unknown> = {
       session_id: sessionId,
       prompt,
+      wait,
     };
     if (deliveryInternal) payload.delivery = "internal";
     const res = await invokeControlRequest({
