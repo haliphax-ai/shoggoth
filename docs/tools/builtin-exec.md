@@ -257,9 +257,10 @@ Long-running commands don't have to block a turn:
   and the output — respecting the call's output options (`splitStreams`,
   `maxOutput`/`truncation`, and `stdoutFile`/`stderrFile`/`outputFile`)
   exactly as a blocking call would have. Delivery is in-turn through the
-  steer channel when the session has an active turn (with a
-  `↩️ ✅ Exec notification delivered in-turn` banner posted to the bound
-  surface),
+  steer channel when the session has an active turn — the
+  `↩️ ✅ Exec notification delivered in-turn` banner is folded into that
+  turn's own output (falling back to a standalone surface message only
+  when no turn output is live) —
   or an out-of-band turn with processing/terminal banners otherwise. Pass
   `notify: false` to opt out and rely on `builtin-poll` instead.
 - In-flight notify handles appear in the turn status bar after the timers

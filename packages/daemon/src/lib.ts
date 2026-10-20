@@ -286,6 +286,11 @@ export type {
   OutboundAttachment,
 } from "./presentation/platform-adapter";
 export {
+  registerActiveTurnSurface,
+  postTurnSurfaceNotice,
+  type ActiveTurnNoticeSink,
+} from "./presentation/active-turn-surface";
+export {
   PresentationTurnOrchestrator,
   type OrchestrateTurnInput,
   type PresentationTurnOrchestratorDeps,

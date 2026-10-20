@@ -10,6 +10,7 @@
 
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
 import { buildInTurnEventBanner, deliverInTurnEvent } from "./in-turn-event";
+import { postTurnSurfaceNotice } from "../presentation/active-turn-surface";
 import { buildSessionSendReplyTurnBanner } from "./oob-turn-banner";
 import { deliverOobStructuredResponse } from "../control/integration-ops";
 import { OOB_NO_SENDER_GUIDANCE, OOB_SCHEMA_NO_SENDER } from "./oob-response-schemas";
@@ -71,15 +72,15 @@ export async function deliverSessionSendNotifyMessage(
     content: `${banner}\n\n${body}`,
     fallback: () => deliverSessionSendOobTurn(completion),
   });
-  // Surface trace for in-turn delivery (best-effort): the steer-channel
-  // injection only lands in the turn's context, so post a lightweight
-  // terminal-style banner to the bound surface as well. The OOB fallback
+  // Surface trace for in-turn delivery (best-effort): folded into the
+  // active turn's own output when one is live, posted as a standalone
+  // message only when no turn surface exists. The OOB fallback
   // posts its own processing/terminal banners, so it needs no extra post.
   if (outcome === "in_turn") {
-    const ext = subagentRuntimeExtensionRef.current;
-    if (ext?.sendStatusMessage) {
-      const deliveryBanner = `> 📨 ✅ Session-send reply delivered in-turn: *${handle.targetSessionId}* \`${handle.id}\``;
-      await ext.sendStatusMessage(handle.sessionId, deliveryBanner).catch((e) => {
+    const deliveryBanner = `> 📨 ✅ Session-send reply delivered in-turn: *${handle.targetSessionId}* \`${handle.id}\``;
+    if (!postTurnSurfaceNotice(handle.sessionId, deliveryBanner)) {
+      const ext = subagentRuntimeExtensionRef.current;
+      await ext?.sendStatusMessage?.(handle.sessionId, deliveryBanner).catch((e) => {
         getLogger("session-send-notify").warn("session-send delivery banner failed", {
           sessionId: handle.sessionId,
           err: String(e),

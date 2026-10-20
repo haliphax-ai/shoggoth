@@ -10,6 +10,7 @@ import {
 import type { ToolCallEvent } from "../sessions/tool-loop";
 import type { OutboundAttachment, StreamHandle } from "../presentation/platform-adapter";
 import { createCoalescingStreamPusher } from "../presentation/stream-coordinator";
+import { registerActiveTurnSurface } from "../presentation/active-turn-surface";
 import { getLogger } from "../logging";
 import { createThinkingOutput, normalizeRoundProse } from "./thinking-output";
 
@@ -193,8 +194,32 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
     }
   }
 
+  // In-turn surface notices: banners that land while this turn runs are
+  // folded into the turn's active output — the streamed display and the
+  // final/error bodies — instead of being posted as standalone messages.
+  const surfaceNotices: string[] = [];
+  const renderSurfaceNotices = (): string =>
+    surfaceNotices.length ? `\n\n${surfaceNotices.join("\n\n")}` : "";
+  let surfaceDisplay = "";
+  const pushDisplay = (display: string): void => {
+    surfaceDisplay = display;
+    if (!streamPusher) return;
+    streamPusher.push(
+      surfaceNotices.length ? `${display}\n\n${surfaceNotices.join("\n\n")}` : display,
+    );
+  };
+  let surfaceUnregister: (() => void) | undefined;
+
   try {
     const turn = await options.buildTurn();
+    if (turn.sessionId) {
+      surfaceUnregister = registerActiveTurnSurface(turn.sessionId, (notice) => {
+        surfaceNotices.push(notice);
+        // Re-render immediately so the banner lands mid-turn, not on the next
+        // model delta; show the placeholder when no display exists yet.
+        if (streamPusher) pushDisplay(surfaceDisplay || "…");
+      }).unregister;
+    }
 
     // Thread sentinel (core inbound path, upstream of the turn): a thread-bound
     // subagent session ignores a leading inbound message that is only "." while it
@@ -234,7 +259,7 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
                         ? thinkingOutput.onText(ev)
                         : priorRoundsProse + ev.accumulated;
                       const vis = display.trim() ? display : "…";
-                      streamPusher!.push(vis);
+                      pushDisplay(vis);
                       // Prose phase (💬): the tracker renders live from text deltas.
                       statusBar?.onProse?.(ev.accumulated);
                     },
@@ -251,7 +276,7 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
                         }
                         display = priorRoundsProse;
                       }
-                      streamPusher!.push(display.trim() ? display : "…");
+                      pushDisplay(display.trim() ? display : "…");
                     },
                   }
                 : {}),
@@ -267,7 +292,7 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
               onThinkingDelta: (ev) => {
                 if (thinkingOutput) {
                   const display = thinkingOutput.onThinking(ev);
-                  if (streamPusher) streamPusher.push(display.trim() ? display : "…");
+                  pushDisplay(display.trim() ? display : "…");
                 }
                 statusBar?.onThinkingDelta?.(ev.accumulated);
               },
@@ -347,7 +372,8 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       // by the quotes-plus-last-round fallback.
       const replyText = turnResult.assistantTurnProse ?? turnResult.latestAssistantText;
       const formattedBody = formatAssistantReply(replyText, turnResult.failoverMeta);
-      const rawBody = thinkingOutput?.render(formattedBody) ?? formattedBody;
+      const rawBody =
+        (thinkingOutput?.render(formattedBody) ?? formattedBody) + renderSurfaceNotices();
 
       const attachments = turnResult.showAttachments;
 
@@ -449,7 +475,8 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       options.onTurnExecutionFailed?.(e);
       log.warn("inbound_session_turn.failed", { ...ctx, err: String(e) });
       try {
-        const errorBody = barLine ? `${formatErrorReply(e)}\n\n${barLine}` : formatErrorReply(e);
+        const errorText = `${formatErrorReply(e)}${renderSurfaceNotices()}`;
+        const errorBody = barLine ? `${errorText}\n\n${barLine}` : errorText;
         await options.sendErrorBody(sliceDisplayText(errorBody));
       } catch (sendErr) {
         log.error("inbound_session_turn.error_delivery_failed", {
@@ -470,6 +497,7 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       await deliverError();
     }
   } finally {
+    surfaceUnregister?.();
     options.mcpLifecycle?.onTurnEnd?.();
   }
 }

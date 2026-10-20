@@ -6,6 +6,7 @@ import { truncateOutput, MAX_OUTPUT_DEFAULT } from "@shoggoth/os-exec";
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
 import { buildExecNotifyTurnBanner } from "../messaging/oob-turn-banner";
 import { buildInTurnEventBanner, deliverInTurnEvent } from "../messaging/in-turn-event";
+import { postTurnSurfaceNotice } from "../presentation/active-turn-surface";
 import { deliverOobStructuredResponse } from "../control/integration-ops";
 import { OOB_NO_SENDER_GUIDANCE, OOB_SCHEMA_NO_SENDER } from "../messaging/oob-response-schemas";
 import { truncateToolOutput } from "../sessions/builtin-handlers/truncate-output";
@@ -110,17 +111,16 @@ export async function deliverExecNotifyMessage(completion: ExecNotifyCompletion)
     content: `${banner}\n\n${body}`,
     fallback: () => deliverExecNotifyOobTurn(completion),
   });
-  // Surface trace for in-turn delivery (best-effort): the steer-channel
-  // injection only lands in the turn's context, so post a lightweight
-  // terminal-style banner to the bound surface as well. The OOB fallback
+  // Surface trace for in-turn delivery (best-effort): folded into the
+  // active turn's own output when one is live, posted as a standalone
+  // message only when no turn surface exists. The OOB fallback
   // posts its own processing/terminal banners, so it needs no extra post.
   if (outcome === "in_turn") {
-    const ext = subagentRuntimeExtensionRef.current;
-    if (ext?.sendStatusMessage) {
-      const command =
-        handle.command.length > 60 ? `${handle.command.slice(0, 60)}…` : handle.command;
-      const deliveryBanner = `> ↩️ ✅ Exec notification delivered in-turn: *${command}* \`${handle.id}\``;
-      await ext.sendStatusMessage(handle.sessionId, deliveryBanner).catch((e) => {
+    const command = handle.command.length > 60 ? `${handle.command.slice(0, 60)}…` : handle.command;
+    const deliveryBanner = `> ↩️ ✅ Exec notification delivered in-turn: *${command}* \`${handle.id}\``;
+    if (!postTurnSurfaceNotice(handle.sessionId, deliveryBanner)) {
+      const ext = subagentRuntimeExtensionRef.current;
+      await ext?.sendStatusMessage?.(handle.sessionId, deliveryBanner).catch((e) => {
         getLogger("exec-notify").warn("exec notify delivery banner failed", {
           sessionId: handle.sessionId,
           err: String(e),

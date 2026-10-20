@@ -263,9 +263,10 @@ session's bound surface, so the operator can see the call stopped blocking.
 
 When the target's turn finally settles, the reply (shaped like the result a
 blocking call would have returned) is delivered to the calling session:
-**in-turn** through the steer channel when a turn is active — plus a
-best-effort `> 📨 ✅ Session-send reply delivered in-turn` banner on the bound
-surface so the in-band delivery leaves a visible trace — or **out of band**
+**in-turn** through the steer channel when a turn is active — the
+best-effort `> 📨 ✅ Session-send reply delivered in-turn` trace is folded
+into that turn's own output (a standalone surface message only when no turn
+output is live) — or **out of band**
 otherwise, wrapped in the full emoji-stamped (📨) processing/terminal
 banners, the same aesthetic as the background-exec notify banner. A failed
 send (e.g. the target died mid-turn) is delivered the same way so the caller

@@ -11,6 +11,7 @@ import {
   type SystemContext,
 } from "@shoggoth/shared";
 import {
+  registerActiveTurnSurface,
   createCoalescingStreamPusher,
   createThinkingOutput,
   createHitlPendingResolutionStack,
@@ -875,102 +876,126 @@ export async function startDiscordPlatform(
           ? createCoalescingStreamPusher((s) => surfaceStreamHandle!.pushUpdate(s), streamMinMs())
           : undefined;
 
-        await adapter.withTypingIndicator(sid, async () => {
-          turnResult = await executeTurn(
-            buildAfterHitlQueued(delivery),
-            surfaceStreamPusher
-              ? {
-                  streamModel: true,
-                  onModelTextDelta: (ev: { accumulated: string; round: number }) => {
-                    const display = thinkingOutput
-                      ? thinkingOutput.onText(ev)
-                      : surfacePriorRoundsProse + ev.accumulated;
-                    surfaceStreamPusher!.push(display.trim() ? display : "…");
-                    // Prose phase (💬) on the live bar.
-                    surfaceTracker?.onProse?.(ev.accumulated);
-                  },
-                  onModelRoundEnd: (ev: { round: number; content: string }) => {
-                    let display: string;
-                    if (thinkingOutput) {
-                      display = thinkingOutput.endRound(ev);
-                    } else {
-                      if (ev.content) {
-                        surfacePriorRoundsProse += surfacePriorRoundsProse
-                          ? `\n\n${ev.content}`
-                          : ev.content;
+        // In-turn surface notices: banners landing mid-turn are folded into
+        // this messaging_surface turn's output (streamed display and final
+        // body) instead of being posted as standalone messages.
+        const surfaceNotices: string[] = [];
+        const renderSurfaceNotices = (): string =>
+          surfaceNotices.length ? `\n\n${surfaceNotices.join("\n\n")}` : "";
+        let surfaceDisplay = "";
+        const pushDisplay = (display: string): void => {
+          surfaceDisplay = display;
+          if (!surfaceStreamPusher) return;
+          surfaceStreamPusher.push(
+            surfaceNotices.length ? `${display}\n\n${surfaceNotices.join("\n\n")}` : display,
+          );
+        };
+        const surfaceUnregister = registerActiveTurnSurface(sid, (notice) => {
+          surfaceNotices.push(notice);
+          if (surfaceStreamPusher) pushDisplay(surfaceDisplay || "…");
+        }).unregister;
+
+        try {
+          await adapter.withTypingIndicator(sid, async () => {
+            turnResult = await executeTurn(
+              buildAfterHitlQueued(delivery),
+              surfaceStreamPusher
+                ? {
+                    streamModel: true,
+                    onModelTextDelta: (ev: { accumulated: string; round: number }) => {
+                      const display = thinkingOutput
+                        ? thinkingOutput.onText(ev)
+                        : surfacePriorRoundsProse + ev.accumulated;
+                      pushDisplay(display.trim() ? display : "…");
+                      // Prose phase (💬) on the live bar.
+                      surfaceTracker?.onProse?.(ev.accumulated);
+                    },
+                    onModelRoundEnd: (ev: { round: number; content: string }) => {
+                      let display: string;
+                      if (thinkingOutput) {
+                        display = thinkingOutput.endRound(ev);
+                      } else {
+                        if (ev.content) {
+                          surfacePriorRoundsProse += surfacePriorRoundsProse
+                            ? `\n\n${ev.content}`
+                            : ev.content;
+                        }
+                        display = surfacePriorRoundsProse;
                       }
-                      display = surfacePriorRoundsProse;
-                    }
-                    surfaceStreamPusher!.push(display.trim() ? display : "…");
-                  },
-                }
-              : streamEnabled() || thinkingOutput
-                ? { streamModel: true }
-                : undefined,
-          );
-          const cfg = opts.configRef?.current ?? opts.config;
-          // Compose the body from the turn's full prose — every assistant
-          // text segment of this turn, in order — so prose → tools → prose
-          // turns deliver ALL segments, not only the last one that
-          // latestAssistantText carries. Both delivery paths (streamed and
-          // at-once) deliver this same composition.
-          const replyText = turnResult.assistantTurnProse ?? turnResult.latestAssistantText;
-          const formattedBody = formatAssistantReply(
-            cfg,
-            sid,
-            env,
-            replyText,
-            turnResult.failoverMeta,
-          );
-          const fullBody = thinkingOutput?.render(formattedBody) ?? formattedBody;
-          // ONE terminal composition: the tracker's finish() renders the
-          // frozen bar (✅/🛑/❌) through the same renderer as the live bar and
-          // returns the line for delivery — the terminal snapshot carries this
-          // turn's real tool-call count (the tracker, not a stats-derived
-          // parallel composition, is the source).
-          const outcome =
-            turnResult.outcome === "aborted" || turnResult.outcome === "failed"
-              ? turnResult.outcome
-              : "finished";
-          const barLine = surfaceTracker ? await surfaceTracker.finish(outcome) : undefined;
-          if (surfaceStreamPusher && surfaceStreamHandle) {
-            await surfaceStreamPusher.flush();
-            // Clear the in-flight handle's active-bar state first — a
-            // state-only operation that makes no edit — so the delivery edit
-            // below (whose body already carries barLine) lands the bar
-            // exactly once. Never block delivery.
-            if (barLine && surfaceStreamHandle.setStatusBar) {
-              try {
-                await surfaceStreamHandle.setStatusBar(null);
-              } catch (e) {
-                opts.logger.warn("discord.platform.status_bar_clear_failed", {
-                  err: String(e),
-                  sessionId: sid,
-                });
-              }
-            }
-            // ONE terminal delivery: always replace the live streamed display
-            // with fullBody — the turn-scoped composition (every prose segment
-            // of THIS turn via assistantTurnProse, rendered thinking quotes,
-            // formatted decorations). The live display is only a view of the
-            // in-flight accumulation and may carry cross-round artifacts
-            // (round restarts after steering/failover in a session-long tool
-            // loop); the delivered message must be the clean turn record.
-            await surfaceStreamHandle.setFullContent(
-              barLine ? `${fullBody}\n\n${barLine}` : fullBody,
+                      pushDisplay(display.trim() ? display : "…");
+                    },
+                  }
+                : streamEnabled() || thinkingOutput
+                  ? { streamModel: true }
+                  : undefined,
             );
-            // Stream edits can't carry file attachments — send as follow-up.
-            const attachments = turnResult.showAttachments;
-            if (attachments?.length) {
-              await adapter.sendBody(sid, "", { attachments: [...attachments] });
+            const cfg = opts.configRef?.current ?? opts.config;
+            // Compose the body from the turn's full prose — every assistant
+            // text segment of this turn, in order — so prose → tools → prose
+            // turns deliver ALL segments, not only the last one that
+            // latestAssistantText carries. Both delivery paths (streamed and
+            // at-once) deliver this same composition.
+            const replyText = turnResult.assistantTurnProse ?? turnResult.latestAssistantText;
+            const formattedBody = formatAssistantReply(
+              cfg,
+              sid,
+              env,
+              replyText,
+              turnResult.failoverMeta,
+            );
+            const fullBody =
+              (thinkingOutput?.render(formattedBody) ?? formattedBody) + renderSurfaceNotices();
+            // ONE terminal composition: the tracker's finish() renders the
+            // frozen bar (✅/🛑/❌) through the same renderer as the live bar and
+            // returns the line for delivery — the terminal snapshot carries this
+            // turn's real tool-call count (the tracker, not a stats-derived
+            // parallel composition, is the source).
+            const outcome =
+              turnResult.outcome === "aborted" || turnResult.outcome === "failed"
+                ? turnResult.outcome
+                : "finished";
+            const barLine = surfaceTracker ? await surfaceTracker.finish(outcome) : undefined;
+            if (surfaceStreamPusher && surfaceStreamHandle) {
+              await surfaceStreamPusher.flush();
+              // Clear the in-flight handle's active-bar state first — a
+              // state-only operation that makes no edit — so the delivery edit
+              // below (whose body already carries barLine) lands the bar
+              // exactly once. Never block delivery.
+              if (barLine && surfaceStreamHandle.setStatusBar) {
+                try {
+                  await surfaceStreamHandle.setStatusBar(null);
+                } catch (e) {
+                  opts.logger.warn("discord.platform.status_bar_clear_failed", {
+                    err: String(e),
+                    sessionId: sid,
+                  });
+                }
+              }
+              // ONE terminal delivery: always replace the live streamed display
+              // with fullBody — the turn-scoped composition (every prose segment
+              // of THIS turn via assistantTurnProse, rendered thinking quotes,
+              // formatted decorations). The live display is only a view of the
+              // in-flight accumulation and may carry cross-round artifacts
+              // (round restarts after steering/failover in a session-long tool
+              // loop); the delivered message must be the clean turn record.
+              await surfaceStreamHandle.setFullContent(
+                barLine ? `${fullBody}\n\n${barLine}` : fullBody,
+              );
+              // Stream edits can't carry file attachments — send as follow-up.
+              const attachments = turnResult.showAttachments;
+              if (attachments?.length) {
+                await adapter.sendBody(sid, "", { attachments: [...attachments] });
+              }
+            } else {
+              await adapter.sendBody(sid, barLine ? `${fullBody}\n\n${barLine}` : fullBody, {
+                replyTo: delivery.replyToMessageId,
+              });
             }
-          } else {
-            await adapter.sendBody(sid, barLine ? `${fullBody}\n\n${barLine}` : fullBody, {
-              replyTo: delivery.replyToMessageId,
-            });
-          }
-        });
-        return;
+          });
+          return;
+        } finally {
+          surfaceUnregister();
+        }
       }
       let internalAfterHitlQueued: ((row: PendingActionRow) => void | Promise<void>) | undefined;
       if (sessionRow.parentSessionId && hitlReplyInSession) {
