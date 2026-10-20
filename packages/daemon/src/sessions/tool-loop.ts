@@ -1085,6 +1085,9 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
             sessionId: options.sessionId,
             attempt: structuredOutputAttempt,
             error: e.message,
+            // Provider stop reason; `length` = response truncated mid-generation
+            // (e.g. tool-call args cut off at the output-token limit).
+            finishReason: e.finishReason ?? null,
           });
           options.audit.record({
             phase: "structured_output_validation_failed",

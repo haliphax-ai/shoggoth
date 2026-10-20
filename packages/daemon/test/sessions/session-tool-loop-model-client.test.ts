@@ -201,6 +201,82 @@ describe("createSessionToolLoopModelClient", () => {
       { round: 1, content: "xy" },
     ]);
   });
+
+  it("tracks the last reported finish reason across hops", async () => {
+    let step = 0;
+    const toolClient = {
+      async completeWithTools() {
+        step += 1;
+        if (step === 1) {
+          return {
+            content: null,
+            toolCalls: [{ id: "c1", name: "builtin-read", arguments: "{}" }],
+            usedProviderId: "p",
+            usedModel: "m",
+            degraded: false,
+            finishReason: "tool_calls",
+          };
+        }
+        return {
+          content: "done",
+          toolCalls: [],
+          usedProviderId: "p",
+          usedModel: "m",
+          degraded: false,
+          finishReason: "length",
+        };
+      },
+    };
+
+    const model = createSessionToolLoopModelClient({
+      toolClient,
+      initialMessages: [
+        { role: "system", content: "sys" },
+        { role: "user", content: "hi" },
+      ],
+      tools: [],
+    });
+
+    assert.equal(model.getLastFinishReason(), undefined);
+    await model.complete();
+    assert.equal(model.getLastFinishReason(), "tool_calls");
+    model.pushToolMessage!({ toolCallId: "c1", content: '{"ok":true}' });
+    await model.complete();
+    assert.equal(model.getLastFinishReason(), "length");
+  });
+
+  it("keeps the previous finish reason when a later hop omits it", async () => {
+    let step = 0;
+    const toolClient = {
+      async completeWithTools() {
+        step += 1;
+        const base = { usedProviderId: "p", usedModel: "m", degraded: false };
+        if (step === 1) {
+          return {
+            content: null,
+            toolCalls: [{ id: "c1", name: "builtin-read", arguments: "{}" }],
+            ...base,
+            finishReason: "tool_calls",
+          };
+        }
+        return { content: "done", toolCalls: [], ...base };
+      },
+    };
+
+    const model = createSessionToolLoopModelClient({
+      toolClient,
+      initialMessages: [
+        { role: "system", content: "sys" },
+        { role: "user", content: "hi" },
+      ],
+      tools: [],
+    });
+
+    await model.complete();
+    model.pushToolMessage!({ toolCallId: "c1", content: '{"ok":true}' });
+    await model.complete();
+    assert.equal(model.getLastFinishReason(), "tool_calls");
+  });
 });
 
 describe("mid-turn compaction in complete()", () => {

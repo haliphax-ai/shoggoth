@@ -53,11 +53,15 @@ export function isSyntheticToolCall(toolCall: ChatToolCall): boolean {
  *
  * @param mode - When `"strict"`, schema validation is skipped (the provider
  *   enforces the schema server-side); JSON parsing is always enforced.
+ * @param finishReason - Provider-reported finish reason for the response that
+ *   carried this tool call (e.g. `length` = truncated). Attached to any
+ *   validation error so callers can surface truncation explicitly.
  */
 export function validateSyntheticToolCall(
   toolCall: ChatToolCall,
   responseSchema: ResponseSchema,
   mode: string,
+  finishReason?: string,
 ): string {
   let structuredContent: string;
   try {
@@ -67,6 +71,7 @@ export function validateSyntheticToolCall(
       `Response is not valid JSON: ${(parseErr as Error).message}`,
       toolCall.arguments,
       responseSchema.schema,
+      finishReason,
     );
   }
   if (mode !== "strict") {
@@ -76,6 +81,7 @@ export function validateSyntheticToolCall(
         result.error,
         result.rawContent,
         responseSchema.schema,
+        finishReason,
       );
     }
   }

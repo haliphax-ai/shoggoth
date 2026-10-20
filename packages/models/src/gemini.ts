@@ -328,6 +328,7 @@ function parseGeminiResponse(
 ): {
   content: string | ChatContentPart[] | null;
   toolCalls: ChatToolCall[];
+  finishReason?: string;
 } {
   if (!json || typeof json !== "object") {
     throw new ModelHttpError(502, "invalid Gemini response shape", String(json).slice(0, 200));
@@ -405,7 +406,7 @@ function parseGeminiResponse(
     content = normalizeThinkingBlocks(content as string, thinkingFormat);
   }
 
-  return { content, toolCalls };
+  return { content, toolCalls, finishReason };
 }
 
 // ---------------------------------------------------------------------------
@@ -433,6 +434,7 @@ export async function consumeGeminiStream(
   content: string | ChatContentPart[] | null;
   toolCalls: ChatToolCall[];
   usage?: ModelUsage;
+  finishReason?: string;
 }> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -443,6 +445,7 @@ export async function consumeGeminiStream(
   let callIndex = 0;
   let forbiddenToolUse = false;
   let lastUsage: ModelUsage | undefined;
+  let lastFinishReason: string | undefined;
   const thinkNorm =
     options.thinkingFormat === "xml-tags" ? new ThinkingStreamNormalizer() : undefined;
 
@@ -461,6 +464,9 @@ export async function consumeGeminiStream(
 
     const candidate = candidates[0] as Record<string, unknown>;
     const finishReason = candidate.finishReason as string | undefined;
+    if (typeof finishReason === "string" && finishReason.length > 0) {
+      lastFinishReason = finishReason;
+    }
 
     if (finishReason === "SAFETY") {
       throw new ModelHttpError(
@@ -566,7 +572,7 @@ export async function consumeGeminiStream(
     content = normalizeThinkingBlocks(content as string, options.thinkingFormat);
   }
 
-  return { content, toolCalls, usage: lastUsage };
+  return { content, toolCalls, usage: lastUsage, finishReason: lastFinishReason };
 }
 
 // ---------------------------------------------------------------------------
@@ -760,7 +766,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
       if (input.stream === true) {
         await assertResponseOk(res, parseApiErrorBody);
         const streamBody = assertResponseBody(res, "Gemini stream");
-        const { content, toolCalls, usage } = await consumeGeminiStream(streamBody, {
+        const { content, toolCalls, usage, finishReason } = await consumeGeminiStream(streamBody, {
           accumulateTools: true,
           thinkingFormat: input.thinkingFormat,
           onTextDelta: input.onTextDelta,
@@ -780,8 +786,9 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
               syntheticCall,
               input.responseSchema!,
               mode,
+              finishReason,
             );
-            return { content: structuredContent, toolCalls: [], usage };
+            return { content: structuredContent, toolCalls: [], usage, finishReason };
           }
           if (syntheticCall && realCalls.length > 0) {
             // Mixed with real tool calls: validate the synthetic attempt so a
@@ -790,7 +797,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
             // previously let models retry forever. Valid structured output is
             // still stripped here — the model must finish by calling the tool
             // alone.
-            validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode);
+            validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode, finishReason);
             return {
               content:
                 typeof content === "string"
@@ -800,6 +807,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
                     : JSON.stringify(content),
               toolCalls: realCalls,
               usage,
+              finishReason,
             };
           }
           if (!syntheticCall && toolCalls.length === 0) {
@@ -874,6 +882,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
               "Model responded with text instead of calling the __structured_output__ tool",
               textContent ?? "",
               input.responseSchema!.schema,
+              finishReason,
             );
           }
         }
@@ -887,6 +896,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
                 : JSON.stringify(content),
           toolCalls,
           usage,
+          finishReason,
         };
       }
 
@@ -896,7 +906,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
       const text = input.thinkingFormat === "xml-tags" ? stripXmlThinkingTags(rawText) : rawText;
       const json = safeJsonParse(text, "invalid JSON from Gemini generateContent endpoint");
 
-      const { content, toolCalls } = parseGeminiResponse(json, input.thinkingFormat);
+      const { content, toolCalls, finishReason } = parseGeminiResponse(json, input.thinkingFormat);
       if (toolCalls.length === 0 && (content === null || content === "")) {
         throw new ModelHttpError(
           502,
@@ -918,8 +928,14 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
             syntheticCall,
             input.responseSchema!,
             mode,
+            finishReason,
           );
-          return { content: structuredContent, toolCalls: [], usage: extractGeminiUsage(json) };
+          return {
+            content: structuredContent,
+            toolCalls: [],
+            usage: extractGeminiUsage(json),
+            finishReason,
+          };
         }
         if (syntheticCall && realCalls.length > 0) {
           // Mixed with real tool calls: validate the synthetic attempt so a
@@ -928,11 +944,12 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
           // previously let models retry forever. Valid structured output is
           // still stripped here — the model must finish by calling the tool
           // alone.
-          validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode);
+          validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode, finishReason);
           return {
             content: finalContent,
             toolCalls: realCalls,
             usage: extractGeminiUsage(json),
+            finishReason,
           };
         }
         if (!syntheticCall && toolCalls.length === 0) {
@@ -997,6 +1014,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
             "Model responded with text instead of calling the __structured_output__ tool",
             finalContent ?? "",
             input.responseSchema!.schema,
+            finishReason,
           );
         }
       }
@@ -1005,6 +1023,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
         content: finalContent,
         toolCalls,
         usage: extractGeminiUsage(json),
+        finishReason,
       };
     },
   };

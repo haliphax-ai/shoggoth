@@ -173,6 +173,13 @@ export interface ModelToolCompleteOutput {
   readonly usage?: ModelUsage;
   /** Native reasoning content from providers like DeepSeek. */
   readonly reasoningContent?: string;
+  /**
+   * Provider-reported reason generation stopped (OpenAI `finish_reason`,
+   * Gemini `finishReason`, Anthropic `stop_reason`). Notably `length` /
+   * `max_tokens` indicates the response was truncated at the output-token
+   * limit — invisible on prose turns, fatal for structured output.
+   */
+  readonly finishReason?: string;
 }
 
 export interface ModelCompleteInput extends ModelInvocationParams {
