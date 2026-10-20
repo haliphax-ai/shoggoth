@@ -24,6 +24,12 @@ import { getLogger } from "../logging";
 import { postTurnSurfaceNotice } from "../presentation/active-turn-surface";
 import { validateToolArgs } from "./validate-tool-args";
 import { registerSteerChannel, drainSteers } from "./steer-channel";
+import {
+  RunawayBreaker,
+  buildRunawayCancelNotice,
+  buildRunawaySteerBanner,
+  buildRunawaySteerMessage,
+} from "./runaway-breaker";
 
 export { TurnAbortedError } from "./session-turn-abort";
 
@@ -157,6 +163,18 @@ export interface RunToolLoopOptions {
   }>;
   /** When set, configurable system gates (AGENTS.md / re-read) run before HITL and after execution. */
   readonly systemGates?: SystemGatesHook;
+  /**
+   * Runaway agent circuit breaker tuning. Enabled by default (identical
+   * tool calls repeated past the duplicate threshold steer once, then
+   * cancel the turn); pass `false` to disable entirely.
+   */
+  readonly runawayBreaker?:
+    | false
+    | {
+        readonly windowSize?: number;
+        readonly maxDuplicates?: number;
+        readonly signatureArgsChars?: number;
+      };
   /**
    * Fired around executor.execute for calls that proceed to execution (not policy-denied,
    * HITL-queued, or validation-skipped dispatches). "start" then "end" per executed call.
@@ -1083,6 +1101,13 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
 
   try {
     let structuredOutputAttempt = 0;
+    // Runaway agent circuit breaker (per-turn): steers a repeating tool-call
+    // pattern once, then cancels the turn on a second trigger. Opt-out via
+    // `runawayBreaker: false`.
+    const runawayBreaker =
+      options.runawayBreaker === false
+        ? undefined
+        : new RunawayBreaker(options.runawayBreaker ?? {});
     // Consecutive invalid tool calls (unknown name, unparseable args, or
     // schema-invalid args) within the current turn; reset on any valid call or
     // other non-invalid dispatch and on a terminal response.
@@ -1223,7 +1248,11 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
       // Set when a circuit breaker fires inside the per-tool-call loop; the
       // outer `for (;;)` is then broken after the inner loop unwinds so the
       // turn terminates cleanly (retry-exhausted / backstop style).
-      let breakerTripped: "structured_output_exhausted" | "invalid_tool_call_backstop" | undefined;
+      let breakerTripped:
+        | "structured_output_exhausted"
+        | "invalid_tool_call_backstop"
+        | "runaway_cancel"
+        | undefined;
 
       for (const tc of sanitizedToolCalls) {
         const dispatch = await processSingleToolCall(
@@ -1281,6 +1310,65 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
           // A valid tool call (or any other non-invalid-args skip kind) resets
           // the consecutive invalid-tool-call counter.
           consecutiveInvalidToolCalls = 0;
+        }
+
+        // --- Runaway agent circuit breaker ---
+        // Records every call that actually EXECUTED (post-dispatch `proceed`):
+        // a repeating pattern (same tool + same truncated args within a
+        // rolling window) steers once; a second trigger cancels the turn and
+        // raises a warning that rides the normal transcript delivery path.
+        // Calls that never dispatched (unknown tool, bad args, …) are left to
+        // the consecutive-invalid backstop above.
+        if (runawayBreaker && dispatch.kind === "proceed") {
+          const runaway = runawayBreaker.record(tc.name, tc.argsJson);
+          if (runaway.verdict === "steer") {
+            const steerMsg = buildRunawaySteerMessage(runaway.trigger);
+            log.warn("runaway circuit breaker steered", {
+              sessionId: options.sessionId,
+              toolName: runaway.trigger.toolName,
+              count: runaway.trigger.count,
+            });
+            options.audit.record({
+              phase: "runaway_breaker_steer",
+              sessionId: options.sessionId,
+              toolName: runaway.trigger.toolName,
+              count: runaway.trigger.count,
+            });
+            options.model.pushSteerMessage?.(steerMsg);
+            postTurnSurfaceNotice(options.sessionId, buildRunawaySteerBanner(runaway.trigger));
+            if (options.transcript) {
+              appendTx({
+                role: "user",
+                content: steerMsg,
+                metadata: { runawayBreakerSteer: true },
+              });
+              emitStats?.({ transcriptMessageCount: getTranscriptCount() });
+            }
+          } else if (runaway.verdict === "cancel") {
+            const notice = buildRunawayCancelNotice(runaway.trigger);
+            log.error("runaway circuit breaker canceled turn", {
+              sessionId: options.sessionId,
+              toolName: runaway.trigger.toolName,
+              count: runaway.trigger.count,
+            });
+            options.audit.record({
+              phase: "runaway_breaker_cancel",
+              sessionId: options.sessionId,
+              toolName: runaway.trigger.toolName,
+              count: runaway.trigger.count,
+            });
+            postTurnSurfaceNotice(options.sessionId, notice);
+            if (options.transcript) {
+              appendTx({
+                role: "assistant",
+                content: notice,
+                metadata: { runawayBreakerCancel: true },
+              });
+              emitStats?.({ transcriptMessageCount: getTranscriptCount() });
+            }
+            breakerTripped = "runaway_cancel";
+            break;
+          }
         }
 
         // --- Mid-loop tool refresh (tool discovery) ---
