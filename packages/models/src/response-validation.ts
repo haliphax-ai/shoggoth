@@ -91,6 +91,12 @@ export class StructuredOutputValidationError extends Error {
     public readonly rawContent: string,
     /** The schema that was violated. */
     public readonly schema: Record<string, unknown>,
+    /**
+     * Provider-reported finish reason for the response that failed validation
+     * (e.g. `length` / `max_tokens` = truncated mid-generation). Lets callers
+     * distinguish schema mistakes from output-limit truncation.
+     */
+    public readonly finishReason?: string,
   ) {
     super(message);
     this.name = "StructuredOutputValidationError";
