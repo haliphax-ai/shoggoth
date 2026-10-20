@@ -52,6 +52,8 @@ export interface StatusBarSnapshot {
   /** Live background-exec notify handle count for the session. Absent when
    *  never seeded. */
   readonly notifies?: number;
+  /** True while cruise control (HITL auto-pilot) is active for the session. */
+  readonly cruiseControl?: boolean;
 }
 
 /** Platform-supplied sink: applies the rendered bar line to the in-flight message. */
@@ -110,6 +112,12 @@ export function createTurnStatusBar(opts: {
    * back to the cache.
    */
   notifiesCount?: () => number;
+  /**
+   * Live cruise-control activity provider. When present and true, the
+   * snapshot carries `cruiseControl` so the platform renders the 🚗 section
+   * (reflected immediately when activated/deactivated mid-turn).
+   */
+  cruiseControlActive?: () => boolean;
 }): TurnStatusBar {
   const cfg = opts.cfg;
   const sink = opts.sink;
@@ -126,7 +134,8 @@ export function createTurnStatusBar(opts: {
       !cfg.timersEnabled &&
       !cfg.notifyEnabled &&
       !cfg.contextWindowEnabled &&
-      !cfg.compactionsEnabled);
+      !cfg.compactionsEnabled &&
+      !cfg.cruiseControlEnabled);
 
   let finished = false;
   let phase: TurnStatusPhase = "starting";
@@ -162,7 +171,19 @@ export function createTurnStatusBar(opts: {
       ...(subagents ? { subagents } : {}),
       ...(timers !== undefined ? { timers } : {}),
       ...(effectiveNotifies() !== undefined ? { notifies: effectiveNotifies() } : {}),
+      ...(effectiveCruiseControl() ? { cruiseControl: true } : {}),
     };
+  }
+
+  /** True while the cruise-control provider (when present) reports active. */
+  function effectiveCruiseControl(): boolean {
+    const provider = opts.cruiseControlActive;
+    if (!provider) return false;
+    try {
+      return provider();
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -537,6 +558,11 @@ export function createStatusBarTurnTracker(opts: {
    * stats' bound `liveNotifies` closure when present).
    */
   notifiesCount?: () => number;
+  /**
+   * Live cruise-control activity provider — re-read on every render so an
+   * activation/deactivation mid-turn is reflected immediately.
+   */
+  cruiseControlActive?: () => boolean;
 }): TurnStatusBarTracker {
   let liveSink: StatusBarSink | undefined;
   let capturedLine: string | undefined;
@@ -567,6 +593,7 @@ export function createStatusBarTurnTracker(opts: {
     render: opts.render,
     ...(opts.minIntervalMs !== undefined ? { minIntervalMs: opts.minIntervalMs } : {}),
     ...(notifiesCount ? { notifiesCount } : {}),
+    ...(opts.cruiseControlActive ? { cruiseControlActive: opts.cruiseControlActive } : {}),
   });
 
   void engine

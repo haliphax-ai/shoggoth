@@ -227,6 +227,42 @@ const SLASH_COMMANDS = [
       },
     ],
   },
+  {
+    name: "cruise",
+    description: "Activate or deactivate cruise control (HITL auto-pilot) for a session",
+    options: [
+      {
+        name: "yes",
+        type: 3, // STRING
+        description: "Guidance for when to approve HITL requests",
+        required: false,
+      },
+      {
+        name: "no",
+        type: 3, // STRING
+        description: "Guidance for when to deny HITL requests",
+        required: false,
+      },
+      {
+        name: "escalate",
+        type: 3, // STRING
+        description: "Guidance for when to escalate HITL requests to the operator",
+        required: false,
+      },
+      {
+        name: "model",
+        type: 3, // STRING
+        description: "Decision model (provider/model); configured default used if omitted",
+        required: false,
+      },
+      {
+        name: "session_id",
+        type: 3, // STRING
+        description: "Session URN or agent ID (defaults to this channel's session)",
+        required: false,
+      },
+    ],
+  },
 ] as const;
 /**
  * Register slash commands for each configured guild via bulk overwrite.
@@ -310,6 +346,15 @@ const PROMPT_SELECT_PREFIX = "prompt_select|";
  * carried; the session is re-derived from the interaction's channel at stage 3.
  */
 const PROMPT_MODAL_PREFIX = "prompt_modal|";
+
+/**
+ * Cruise control activation modal custom_id. Format: `cruise_modal` or
+ * `cruise_modal|<model>`. Only the (optional) model is carried — a session
+ * URN overflows Discord's 100-char custom_id limit, so the session is
+ * re-derived from the interaction's channel at submit time.
+ */
+const CRUISE_MODAL_ID = "cruise_modal";
+const CRUISE_MODAL_PREFIX = "cruise_modal|";
 
 type PromptListEntry = { slug: string; placeholders?: readonly string[] };
 
@@ -499,6 +544,50 @@ async function respondWithPromptParameterModal(
       title: `Prompt: ${slug}`.slice(0, 45),
       custom_id: `${PROMPT_MODAL_PREFIX}${slug}`,
       components,
+    },
+  });
+}
+
+/**
+ * Open the cruise control activation modal. `yes` (approve guidance) and `no`
+ * (deny guidance) are required inputs, prefilled with any values already
+ * provided on the command; `escalate` is optional. When a model was provided
+ * while the required guidance is incomplete, the model rides in the modal
+ * custom_id (short provider/model refs only — the session is re-derived from
+ * the channel at submit; a session URN would overflow the 100-char limit).
+ */
+async function respondWithCruiseModal(
+  deps: DiscordInteractionHandlerDeps,
+  interactionId: string,
+  interactionToken: string,
+  prefill: { yes?: string; no?: string; escalate?: string; model?: string },
+): Promise<void> {
+  const customIdWithModel = prefill.model ? `${CRUISE_MODAL_PREFIX}${prefill.model}` : undefined;
+  const customId =
+    customIdWithModel && customIdWithModel.length <= 100 ? customIdWithModel : CRUISE_MODAL_ID;
+  const textInput = (id: string, label: string, required: boolean, value?: string) => ({
+    type: ACTION_ROW,
+    components: [
+      {
+        type: TEXT_INPUT,
+        custom_id: id,
+        label,
+        style: TEXT_INPUT_SHORT,
+        required,
+        ...(value ? { value } : {}),
+      },
+    ],
+  });
+  await deps.transport.interactionCallback(interactionId, interactionToken, {
+    type: INTERACTION_RESPONSE_MODAL,
+    data: {
+      title: "Cruise Control",
+      custom_id: customId,
+      components: [
+        textInput("yes", "Approve guidance", true, prefill.yes),
+        textInput("no", "Deny guidance", true, prefill.no),
+        textInput("escalate", "Escalate guidance (optional)", false, prefill.escalate),
+      ],
     },
   });
 }
@@ -853,6 +942,69 @@ async function handleInteraction(
       return;
     }
 
+    // Cruise control activation modal submitted → activate and report.
+    // The session is re-derived from the channel (never embedded in the
+    // custom_id — thread-bound subagent URNs overflow the 100-char limit);
+    // an optional model rides in the custom_id suffix.
+    if (customId === CRUISE_MODAL_ID || customId.startsWith(CRUISE_MODAL_PREFIX)) {
+      const model = customId.startsWith(CRUISE_MODAL_PREFIX)
+        ? customId.slice(CRUISE_MODAL_PREFIX.length)
+        : undefined;
+      const sessionId = deps.resolveSessionForChannel?.(ev.channelId, ev.guildId);
+      if (!sessionId) {
+        await deps.transport.interactionCallback(ev.id, ev.token, {
+          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+          data: { content: "⚠️ No session bound to this channel." },
+        });
+        return;
+      }
+      const inputs: Record<string, string> = {};
+      for (const row of ev.data?.components ?? []) {
+        const input = row.components?.[0];
+        if (input && typeof input.custom_id === "string") {
+          inputs[input.custom_id] = input.value ?? "";
+        }
+      }
+      const yes = inputs.yes?.trim();
+      const no = inputs.no?.trim();
+      const escalate = inputs.escalate?.trim();
+      if (!yes || !no) {
+        await deps.transport.interactionCallback(ev.id, ev.token, {
+          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+          data: {
+            content: "⚠️ Approve (`yes`) and deny (`no`) guidance are both required.",
+          },
+        });
+        return;
+      }
+      let content: string;
+      try {
+        const res = await deps.invokeControlOp("hitl_cruise_control", {
+          session_id: sessionId,
+          yes,
+          no,
+          ...(escalate ? { escalate } : {}),
+          ...(model ? { model } : {}),
+        });
+        if (res.ok) {
+          const warnings = (res.result as { warnings?: string[] } | undefined)?.warnings ?? [];
+          const warnSuffix = warnings.length
+            ? `\n${warnings.map((w) => `⚠️ ${w}`).join("\n")}`
+            : "";
+          content = `🚗 Cruise control activated for \`${sessionId}\`${escalate ? " (with escalation route)" : ""}.${warnSuffix}`;
+        } else {
+          content = `⚠️ Failed to activate cruise control: ${res.error ?? "unknown error"}`;
+        }
+      } catch (err) {
+        content = `⚠️ Failed to activate cruise control: ${String(err)}`;
+      }
+      await deps.transport.interactionCallback(ev.id, ev.token, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content },
+      });
+      return;
+    }
+
     // Stage 3: canned prompt modal submitted → run the prompt and rewrite
     // message A (the dropdown) with the final recap.
     if (customId.startsWith(PROMPT_MODAL_PREFIX)) {
@@ -1116,6 +1268,118 @@ async function handleInteraction(
     } catch (err) {
       await finishSteer(`⚠️ Steer failed: ${String(err)}`);
     }
+    return;
+  }
+
+  if (controlOp.op === "hitl_cruise_control") {
+    // `/cruise` — cruise control (HITL auto-pilot):
+    // - No options + active → deactivate.
+    // - No options (or partial required guidance) → activation modal, prefilled
+    //   with whatever was provided.
+    // - All required guidance (yes + no) → activate directly, no modal.
+    const payload = { ...controlOp.payload };
+    if (!payload.session_id && deps.resolveSessionForChannel) {
+      const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
+      if (resolved) payload.session_id = resolved;
+    }
+    if (!payload.session_id) {
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content: "⚠️ No session bound to this channel. Provide a session_id." },
+      });
+      return;
+    }
+    const asGuidance = (v: unknown): string | undefined =>
+      typeof v === "string" && v.trim() ? v.trim() : undefined;
+    const yes = asGuidance(payload.yes);
+    const no = asGuidance(payload.no);
+    const escalate = asGuidance(payload.escalate);
+    const model = asGuidance(payload.model);
+    const hasGuidance =
+      yes !== undefined || no !== undefined || escalate !== undefined || model !== undefined;
+
+    const reportActivation = async (result: unknown, sessionId: string): Promise<void> => {
+      const r = result as { warnings?: string[] } | undefined;
+      const warnings = r?.warnings ?? [];
+      const warnSuffix = warnings.length ? `\n${warnings.map((w) => `⚠️ ${w}`).join("\n")}` : "";
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: {
+          content: `🚗 Cruise control activated for \`${sessionId}\`${escalate ? " (with escalation route)" : ""}.${warnSuffix}`,
+        },
+      });
+    };
+
+    if (!hasGuidance) {
+      // Toggle: deactivate when active, otherwise open the activation modal.
+      let active = false;
+      try {
+        const res = await deps.invokeControlOp("hitl_cruise_control", {
+          session_id: payload.session_id,
+        });
+        active = Boolean(res.ok && (res.result as { active?: boolean } | undefined)?.active);
+      } catch (err) {
+        deps.logger.warn("discord.interaction.cruise_status_failed", {
+          interactionId: parsed.interactionId,
+          err: String(err),
+        });
+      }
+      if (active) {
+        let content: string;
+        try {
+          const res = await deps.invokeControlOp("hitl_cruise_control", {
+            session_id: payload.session_id,
+            deactivate: true,
+          });
+          content = res.ok
+            ? `🚗 Cruise control deactivated for \`${payload.session_id}\`.`
+            : `⚠️ Failed to deactivate cruise control: ${res.error ?? "unknown error"}`;
+        } catch (err) {
+          content = `⚠️ Failed to deactivate cruise control: ${String(err)}`;
+        }
+        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+          data: { content },
+        });
+        return;
+      }
+      await respondWithCruiseModal(deps, parsed.interactionId, parsed.interactionToken, {});
+      return;
+    }
+
+    if (yes !== undefined && no !== undefined) {
+      // Complete required guidance — activate directly, no modal.
+      let content: string;
+      try {
+        const res = await deps.invokeControlOp("hitl_cruise_control", {
+          session_id: payload.session_id,
+          yes,
+          no,
+          ...(escalate ? { escalate } : {}),
+          ...(model ? { model } : {}),
+        });
+        if (res.ok) {
+          await reportActivation(res.result, payload.session_id as string);
+          return;
+        }
+        content = `⚠️ Failed to activate cruise control: ${res.error ?? "unknown error"}`;
+      } catch (err) {
+        content = `⚠️ Failed to activate cruise control: ${String(err)}`;
+      }
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content },
+      });
+      return;
+    }
+
+    // Partial guidance — modal prefilled with whatever was provided.
+    await respondWithCruiseModal(deps, parsed.interactionId, parsed.interactionToken, {
+      ...(yes ? { yes } : {}),
+      ...(no ? { no } : {}),
+      ...(escalate ? { escalate } : {}),
+      ...(model ? { model } : {}),
+    });
     return;
   }
 

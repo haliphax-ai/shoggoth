@@ -24,6 +24,17 @@ export const shoggothAgentToAgentConfigSchema = z
   .strict();
 export type ShoggothAgentToAgentConfig = z.infer<typeof shoggothAgentToAgentConfigSchema>;
 
+// Cruise control — HITL auto-pilot configuration defaults
+export const shoggothCruiseControlConfigSchema = z
+  .object({
+    /** Minimum score the escalation route must reach to escalate to true HITL (default 0.34). */
+    escalateMinScore: z.number().min(0).max(1).optional(),
+    /** Default `provider/model` decision model for cruise control sessions. */
+    model: z.string().min(1).optional(),
+  })
+  .strict();
+export type ShoggothCruiseControlConfig = z.infer<typeof shoggothCruiseControlConfigSchema>;
+
 // Session Query
 export const shoggothSessionQueryAllowSchema = z
   .object({ allowedAgentIds: z.array(z.string().min(1)).optional() })
@@ -134,6 +145,8 @@ export const shoggothAgentsConfigSchema = z
     subagentMcp: z.object({ serverRules: mcpServerRulesSchema.optional() }).strict().optional(),
     /** Auto-create thread-based subagent sessions when a thread appears in a top-level agent session's channel. Enabled by default; set false to disable. */
     threadSubagents: z.boolean().optional(),
+    /** Cruise control (HITL auto-pilot) defaults; activated per-session via control plane. */
+    cruiseControl: shoggothCruiseControlConfigSchema.optional(),
   })
   .strict();
 export type ShoggothAgentsConfig = z.infer<typeof shoggothAgentsConfigSchema>;

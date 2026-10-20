@@ -38,6 +38,7 @@ export const DEFINED_CONTROL_OPS = [
   "hitl_pending_approve",
   "hitl_pending_deny",
   "hitl_clear",
+  "hitl_cruise_control",
   "mcp_http_cancel_request",
   "session_compact",
   "session_context_new",

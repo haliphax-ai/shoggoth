@@ -14,6 +14,7 @@ export interface ResolvedStatusBarConfig {
   readonly notifyEnabled: boolean;
   readonly contextWindowEnabled: boolean;
   readonly compactionsEnabled: boolean;
+  readonly cruiseControlEnabled: boolean;
 }
 
 /** Defaults: every section enabled. */
@@ -27,6 +28,7 @@ export const DEFAULT_STATUS_BAR_CONFIG: ResolvedStatusBarConfig = {
   notifyEnabled: true,
   contextWindowEnabled: true,
   compactionsEnabled: true,
+  cruiseControlEnabled: true,
 };
 
 /**
@@ -46,6 +48,8 @@ export function resolveStatusBarConfig(cfg: ShoggothConfig): ResolvedStatusBarCo
     contextWindowEnabled:
       block?.contextWindowEnabled ?? DEFAULT_STATUS_BAR_CONFIG.contextWindowEnabled,
     compactionsEnabled: block?.compactionsEnabled ?? DEFAULT_STATUS_BAR_CONFIG.compactionsEnabled,
+    cruiseControlEnabled:
+      block?.cruiseControlEnabled ?? DEFAULT_STATUS_BAR_CONFIG.cruiseControlEnabled,
   };
   // Env kill switch wins over config (mirrors the platform flag pattern).
   if (process.env.SHOGGOTH_STATUS_BAR === "0") {

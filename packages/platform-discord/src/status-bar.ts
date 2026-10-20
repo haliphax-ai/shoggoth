@@ -35,6 +35,11 @@ export function renderDiscordStatusBar(
     sections.push(`🔢 \`${snap.sequence}\``);
   }
 
+  // 🚗 — cruise control (HITL auto-pilot) is active for the session.
+  if (cfg.cruiseControlEnabled && snap.cruiseControl) {
+    sections.push("🚗");
+  }
+
   if (cfg.toolCallsEnabled) {
     const toolSection = formatToolSection(snap);
     if (toolSection !== undefined) sections.push(toolSection);

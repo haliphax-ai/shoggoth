@@ -8,6 +8,7 @@ import type {
   HitlPendingStack,
   HitlAutoApproveGate,
   HitlConfigRef,
+  CruiseControlHandle,
   PolicyEngine,
   SubagentRuntimeExtension,
   MessageToolContext,
@@ -69,6 +70,8 @@ export interface PlatformDeps {
   readonly policyEngine: PolicyEngine;
   readonly hitlConfigRef: HitlConfigRef;
   readonly hitlAutoApproveGate?: HitlAutoApproveGate;
+  /** Cruise control (HITL auto-pilot): per-session store + judge. */
+  readonly cruiseControl?: CruiseControlHandle;
   readonly logger: Logger;
   /** Default platform assistant dependencies (opaque to the plugin system). */
   readonly platformAssistantDeps: unknown;

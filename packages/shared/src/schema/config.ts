@@ -73,6 +73,7 @@ export const statusBarConfigSchema = z
     notifyEnabled: z.boolean().optional(),
     contextWindowEnabled: z.boolean().optional(),
     compactionsEnabled: z.boolean().optional(),
+    cruiseControlEnabled: z.boolean().optional(),
   })
   .strict()
   .optional();
