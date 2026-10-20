@@ -327,6 +327,8 @@ State is in-memory and per-session (activation does not survive a daemon restart
 
 While cruise control is active, a 🚗 section appears in the turn status bar after the sequence counter.
 
+When a judge decision lands mid-turn, a blockquote banner is injected in-place into the active turn's output (`> 🚗✅ Cruise control **approved** \`builtin-exec: git status\``) — ✅ approved / ❌ denied / ⬆️ elevated — carrying the tool name plus the extracted command (from `argv`or`command` args, truncated) when one is present. Turns without a live output surface (internal/OOB turns) skip the banner; the decision itself is unaffected.
+
 ---
 
 ## Elevation

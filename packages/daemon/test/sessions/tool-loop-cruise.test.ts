@@ -2,8 +2,12 @@ import { DEFAULT_POLICY_CONFIG } from "@shoggoth/shared";
 import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import assert from "node:assert";
 import Database from "better-sqlite3";
-import { describe, it } from "vitest";
+import { afterEach, describe, it } from "vitest";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
+import {
+  _resetActiveTurnSurfaces,
+  registerActiveTurnSurface,
+} from "../../src/presentation/active-turn-surface";
 import { createHitlPendingResolutionStack } from "../../src/hitl/hitl-pending-stack";
 import { createPolicyEngine } from "../../src/policy/engine";
 import { createToolLoopPolicyAndAudit } from "../../src/policy/tool-loop-bridge";
@@ -127,8 +131,20 @@ function makeHarness(sessionId: string, verdicts: CruiseControlDecision[]): Loop
 }
 
 describe("runToolLoop cruise control", () => {
+  afterEach(() => {
+    _resetActiveTurnSurfaces();
+  });
+
+  /** Register a fake active turn surface and collect its in-place notices. */
+  function captureNotices(sessionId: string): string[] {
+    const notices: string[] = [];
+    registerActiveTurnSurface(sessionId, (notice) => notices.push(notice));
+    return notices;
+  }
+
   it("executes the tool immediately when the judge approves (no HITL queue)", async () => {
     const h = makeHarness("sess-cruise-approve", ["approve"]);
+    const notices = captureNotices("sess-cruise-approve");
     await runToolLoop(h.options);
     assert.equal(h.execCount(), 1);
     // The executed tool result is fed back to the model as usual.
@@ -136,11 +152,14 @@ describe("runToolLoop cruise control", () => {
     assert.ok(writeResult);
     assert.match(writeResult!.content, /"ok":\s*true/);
     assert.equal(h.queuedNotifier.length, 0);
+    // The decision banner is injected in-place on the active turn surface.
+    assert.deepEqual(notices, ["> 🚗✅ Cruise control **approved** `builtin-write`"]);
     h.db.close();
   });
 
   it("feeds a cruise denial back to the model without queueing HITL", async () => {
     const h = makeHarness("sess-cruise-deny", ["deny"]);
+    const notices = captureNotices("sess-cruise-deny");
     await runToolLoop(h.options);
     assert.equal(h.execCount(), 0);
     assert.equal(h.queuedNotifier.length, 0);
@@ -151,11 +170,14 @@ describe("runToolLoop cruise control", () => {
     };
     assert.equal(body.error, "hitl_denied");
     assert.equal(body.reason, "cruise");
+    // The decision banner is injected in-place on the active turn surface.
+    assert.deepEqual(notices, ["> 🚗❌ Cruise control **denied** `builtin-write`"]);
     h.db.close();
   });
 
   it("escalations fall through to the normal HITL queue", async () => {
     const h = makeHarness("sess-cruise-escalate", ["escalate"]);
+    const notices = captureNotices("sess-cruise-escalate");
     h.queuedNotifier.push({
       onQueued: (row) => {
         queueMicrotask(() => {
@@ -168,11 +190,14 @@ describe("runToolLoop cruise control", () => {
     const writeResult = h.toolMsgs.find((m) => m.toolCallId === "w1");
     assert.ok(writeResult);
     assert.match(writeResult!.content, /"ok":\s*true/);
+    // The elevated banner lands in-turn while the request waits in true HITL.
+    assert.deepEqual(notices, ["> 🚗⬆️ Cruise control **elevated** `builtin-write`"]);
     h.db.close();
   });
 
   it("judge failures escalate to the normal HITL queue", async () => {
     const h = makeHarness("sess-cruise-judge-fail", []);
+    const notices = captureNotices("sess-cruise-judge-fail");
     // Replace the judge with one that throws.
     (h.options.hitl as { cruiseControl: { judge: unknown } }).cruiseControl.judge = async () => {
       throw new Error("decision model down");
@@ -186,6 +211,8 @@ describe("runToolLoop cruise control", () => {
     });
     await runToolLoop(h.options);
     assert.equal(h.execCount(), 1);
+    // A failed judge elevates too, so the elevated banner still lands.
+    assert.deepEqual(notices, ["> 🚗⬆️ Cruise control **elevated** `builtin-write`"]);
     h.db.close();
   });
 

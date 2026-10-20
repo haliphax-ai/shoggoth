@@ -9,6 +9,7 @@ import type { ChatContentPart } from "@shoggoth/models";
 import { StructuredOutputValidationError, STRUCTURED_OUTPUT_TOOL_NAME } from "@shoggoth/models";
 import { classifyToolRisk } from "../hitl/risk-classify";
 import { requiresHumanApproval } from "../hitl/approval-gate";
+import { buildCruiseControlBanner, extractCruiseToolCommand } from "../hitl/cruise-control";
 import { resolveCompoundResource, type SubResourceExtractorRegistry } from "../policy/sub-resource";
 import type { HitlAutoApproveGate } from "../hitl/hitl-auto-approve";
 import type { HitlNotifier } from "../hitl/hitl-notifier";
@@ -20,6 +21,7 @@ import { TurnAbortedError } from "./session-turn-abort";
 import { estimateTokens } from "./session-stats-store";
 import { toolRefreshNeeded } from "./session-tool-discovery";
 import { getLogger } from "../logging";
+import { postTurnSurfaceNotice } from "../presentation/active-turn-surface";
 import { validateToolArgs } from "./validate-tool-args";
 import { registerSteerChannel, drainSteers } from "./steer-channel";
 
@@ -292,6 +294,24 @@ function abortPromise(signal: AbortSignal | undefined): Promise<never> {
   });
 }
 
+/**
+ * Fold the cruise control decision banner into the active turn's output
+ * (in-place via the turn surface). Silently skipped when the turn has no
+ * live output surface; the decision itself is unaffected.
+ */
+function postCruiseBanner(
+  sessionId: string,
+  decision: CruiseControlDecision,
+  toolName: string,
+  argsJson: string,
+): void {
+  const command = extractCruiseToolCommand(argsJson);
+  postTurnSurfaceNotice(
+    sessionId,
+    buildCruiseControlBanner({ decision, toolName, ...(command ? { command } : {}) }),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // HITL approval gate
 // ---------------------------------------------------------------------------
@@ -363,6 +383,9 @@ async function hitlApprovalGate(
       decision: cruiseDecision,
       riskTier: tier,
     });
+    // In-place verdict banner: folded into the active turn's output so the
+    // operator sees the decision where it happens.
+    postCruiseBanner(options.sessionId, cruiseDecision, compoundResource, tc.argsJson);
     if (cruiseDecision === "approve") {
       log.info("hitl cruise control approved", {
         toolName: compoundResource,

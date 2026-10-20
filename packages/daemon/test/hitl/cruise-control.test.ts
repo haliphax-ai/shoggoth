@@ -21,10 +21,12 @@ vi.mock("../../src/decision/decision-service", () => ({
 }));
 
 import {
+  buildCruiseControlBanner,
   createCruiseControlStore,
-  judgeCruiseControl,
   cruiseControlActivationWarnings,
   DEFAULT_CRUISE_ESCALATE_MIN_SCORE,
+  extractCruiseToolCommand,
+  judgeCruiseControl,
 } from "../../src/hitl/cruise-control";
 import type { ShoggothConfig, CruiseControlPolicy } from "@shoggoth/shared";
 
@@ -277,5 +279,84 @@ describe("cruise control judge failure fallbacks", () => {
     );
     assert.equal(decision, "escalate");
     assert.equal(mockEvaluate.mock.calls.length, 0);
+  });
+});
+
+describe("cruise control decision banners", () => {
+  it("renders the approved banner with the tool name when no command is present", () => {
+    assert.equal(
+      buildCruiseControlBanner({ decision: "approve", toolName: "builtin-write" }),
+      "> 🚗✅ Cruise control **approved** `builtin-write`",
+    );
+  });
+
+  it("renders the denied banner with the tool name and extracted command", () => {
+    assert.equal(
+      buildCruiseControlBanner({
+        decision: "deny",
+        toolName: "builtin-exec",
+        command: "git status",
+      }),
+      "> 🚗❌ Cruise control **denied** `builtin-exec: git status`",
+    );
+  });
+
+  it("renders the elevated banner with the tool name and extracted command", () => {
+    assert.equal(
+      buildCruiseControlBanner({
+        decision: "escalate",
+        toolName: "builtin-exec",
+        command: "rm -rf /tmp/x",
+      }),
+      "> 🚗⬆️ Cruise control **elevated** `builtin-exec: rm -rf /tmp/x`",
+    );
+  });
+
+  it("truncates long extracted commands", () => {
+    const banner = buildCruiseControlBanner({
+      decision: "approve",
+      toolName: "builtin-exec",
+      command: "x".repeat(200),
+    });
+    assert.ok(banner.includes("…"));
+    assert.ok(!banner.includes("x".repeat(61)));
+  });
+});
+
+describe("cruise control command extraction", () => {
+  it("joins argv arrays into a space-separated command", () => {
+    assert.equal(
+      extractCruiseToolCommand(JSON.stringify({ argv: ["git", "status"] })),
+      "git status",
+    );
+  });
+
+  it("prefers argv over a command string", () => {
+    assert.equal(
+      extractCruiseToolCommand(JSON.stringify({ argv: ["ls"], command: "ignored" })),
+      "ls",
+    );
+  });
+
+  it("falls back to a command string", () => {
+    assert.equal(extractCruiseToolCommand(JSON.stringify({ command: "npm test" })), "npm test");
+  });
+
+  it("strips backticks and collapses newlines so the banner span stays intact", () => {
+    assert.equal(
+      extractCruiseToolCommand(JSON.stringify({ command: "echo `hi`\nthere" })),
+      "echo 'hi' there",
+    );
+  });
+
+  it("returns undefined for unparseable args", () => {
+    assert.equal(extractCruiseToolCommand("{nope"), undefined);
+  });
+
+  it("returns undefined when no command-shaped arg is present", () => {
+    assert.equal(extractCruiseToolCommand("{}"), undefined);
+    assert.equal(extractCruiseToolCommand(JSON.stringify({ argv: [] })), undefined);
+    assert.equal(extractCruiseToolCommand(JSON.stringify({ command: "   " })), undefined);
+    assert.equal(extractCruiseToolCommand(JSON.stringify({ command: 42 })), undefined);
   });
 });

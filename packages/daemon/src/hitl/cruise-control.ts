@@ -49,6 +49,74 @@ export function createCruiseControlStore(): CruiseControlStore {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Decision banners — in-turn operator visibility.
+//
+// The judge decides mid-turn, so verdicts are folded into the active turn's
+// output as blockquote banners (via the active turn surface) instead of
+// being buried in logs.
+// ---------------------------------------------------------------------------
+
+/** Cap on the extracted command shown in a decision banner. */
+const BANNER_COMMAND_MAX_CHARS = 60;
+
+/**
+ * Extract a command-shaped preview from a tool call's args for decision
+ * banners: an `argv` array (joined) or a `command` string. Backticks are
+ * quoted out and newlines collapsed so the banner's code span stays intact.
+ * Returns undefined when args are unparseable or carry no command.
+ */
+export function extractCruiseToolCommand(argsJson: string): string | undefined {
+  let args: unknown;
+  try {
+    args = JSON.parse(argsJson);
+  } catch {
+    return undefined;
+  }
+  const obj = args as { argv?: unknown; command?: unknown };
+  let command: string | undefined;
+  if (
+    Array.isArray(obj?.argv) &&
+    obj.argv.length > 0 &&
+    obj.argv.every((a) => typeof a === "string")
+  ) {
+    command = obj.argv.join(" ");
+  } else if (typeof obj?.command === "string") {
+    command = obj.command;
+  }
+  if (command === undefined) return undefined;
+  const normalized = command.replace(/`/g, "'").replace(/\r?\n/g, " ").trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+/** Decision-word segment of the banner, per verdict. */
+const CRUISE_BANNER_LABEL: Record<CruiseControlDecision, string> = {
+  approve: "✅ Cruise control **approved**",
+  deny: "❌ Cruise control **denied**",
+  escalate: "⬆️ Cruise control **elevated**",
+};
+
+/**
+ * Build the in-turn decision banner, e.g.
+ * `> 🚗✅ Cruise control **approved** `builtin-exec: git status``.
+ * The monospace span carries the tool name plus the extracted command
+ * (truncated) when one was provided.
+ */
+export function buildCruiseControlBanner(input: {
+  readonly decision: CruiseControlDecision;
+  readonly toolName: string;
+  /** Extracted command preview (see {@link extractCruiseToolCommand}). */
+  readonly command?: string;
+}): string {
+  const command = input.command
+    ? input.command.length > BANNER_COMMAND_MAX_CHARS
+      ? `${input.command.slice(0, BANNER_COMMAND_MAX_CHARS)}…`
+      : input.command
+    : undefined;
+  const span = command ? `${input.toolName}: ${command}` : input.toolName;
+  return `> 🚗${CRUISE_BANNER_LABEL[input.decision]} \`${span}\``;
+}
+
 /**
  * Warnings surfaced to the operator when cruise control is activated: a
  * missing model is logged and shown because every request would otherwise
