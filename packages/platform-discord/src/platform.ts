@@ -71,6 +71,7 @@ import { renderDiscordStatusBar } from "./status-bar";
 export function buildStatusBarDep(
   db: Database.Database,
   cfg: ResolvedStatusBarConfig,
+  cruiseControlActive?: (sessionId: string) => boolean,
 ): {
   config: ResolvedStatusBarConfig;
   render: (snap: StatusBarSnapshot, c: ResolvedStatusBarConfig) => string;
@@ -80,6 +81,7 @@ export function buildStatusBarDep(
     compactions: number;
     context?: { currentTokens: number; totalTokens?: number };
   };
+  cruiseControlActive?: (sessionId: string) => boolean;
 } {
   return {
     config: cfg,
@@ -100,6 +102,8 @@ export function buildStatusBarDep(
     // Pre-turn stats for seeding the bar (sequence / compactions / context
     // window fill) — sourced daemon-side; the platform only wires them in.
     stats: (sessionId: string) => getStatusBarStats(db, sessionId),
+    // Live cruise-control activity provider — re-read on every render.
+    ...(cruiseControlActive ? { cruiseControlActive } : {}),
   };
 }
 
@@ -229,6 +233,10 @@ export async function startDiscordPlatform(
   const statusBarDep = buildStatusBarDep(
     opts.db,
     resolveStatusBarConfig(opts.configRef?.current ?? opts.config),
+    (sessionId) => {
+      const provider = cruiseStatusBarProvider(opts, sessionId).cruiseControlActive;
+      return provider ? provider() : false;
+    },
   );
 
   const mcpRuntime = await createSessionMcpRuntime({
@@ -644,6 +652,7 @@ export async function startDiscordPlatform(
                     waitForHitlResolution,
                     hitlNotifier,
                     autoApprove: opts.hitlAutoApproveGate,
+                    ...cruiseControlToolLoopHook(opts),
                     ...(hitlReplyInSession
                       ? {
                           afterHitlQueued: (row: PendingActionRow) =>
@@ -1023,6 +1032,7 @@ export async function startDiscordPlatform(
           cfg: statusBarDep.config,
           render: statusBarDep.render,
           stats: getStatusBarStats(opts.db, sid),
+          ...cruiseStatusBarProvider(opts, sid),
         });
         surfaceTracker.attachSink(input.statusBarSink);
       }

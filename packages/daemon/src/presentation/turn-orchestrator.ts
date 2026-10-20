@@ -118,6 +118,11 @@ export interface PresentationTurnOrchestratorDeps {
       readonly context?: { readonly currentTokens: number; readonly totalTokens?: number };
       readonly subagents?: { readonly total: number; readonly persistent: number };
     };
+    /**
+     * Live cruise-control activity provider — re-read on every render so an
+     * activation/deactivation mid-turn is reflected immediately.
+     */
+    readonly cruiseControlActive?: (sessionId: string) => boolean;
   };
 }
 
@@ -289,6 +294,11 @@ export class PresentationTurnOrchestrator {
               cfg: statusBarDep.config,
               render: statusBarDep.render,
               stats,
+              ...(statusBarDep.cruiseControlActive
+                ? {
+                    cruiseControlActive: () => statusBarDep.cruiseControlActive!(sessionId),
+                  }
+                : {}),
             });
             return {
               setStatusBar: (line: string | null) => tracker!.setStatusBar(line),
