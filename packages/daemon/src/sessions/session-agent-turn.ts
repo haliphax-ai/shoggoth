@@ -783,6 +783,8 @@ export async function executeSessionAgentTurn(
     model: failoverMeta ? `${failoverMeta.usedProviderId}/${failoverMeta.usedModel}` : null,
     contentLength: latestAssistantText.length,
     degraded: failoverMeta?.degraded,
+    // Provider stop reason for the final hop; `length` = output-token truncation.
+    finishReason: model.getLastFinishReason() ?? null,
   });
   log.debug("agent response content", {
     sessionId: input.sessionId,

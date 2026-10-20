@@ -26,6 +26,12 @@ export interface SessionToolLoopModelClient extends ModelClient {
   getSessionToolLoopFailoverState(): SessionToolLoopFailoverState | undefined;
   /** Accumulated token usage across all `completeWithTools` calls in this tool loop. */
   getAccumulatedUsage(): ModelUsage | undefined;
+  /**
+   * Provider-reported finish reason from the most recent `completeWithTools`
+   * call (e.g. `stop`, `length`, `tool_calls`). `length` means the response
+   * was truncated at the output-token limit.
+   */
+  getLastFinishReason(): string | undefined;
 }
 
 export interface SessionToolLoopFailoverState {
@@ -139,6 +145,7 @@ export function createSessionToolLoopModelClient(input: {
   let lastContextWindowTokens: number | undefined;
   let lastInputTokens: number | undefined;
   let hasUsage = false;
+  let lastFinishReason: string | undefined;
   /** Monotonic tool-loop round index; scopes every streamed display event. */
   let nextRound = 0;
 
@@ -148,6 +155,10 @@ export function createSessionToolLoopModelClient(input: {
   return {
     getSessionToolLoopFailoverState() {
       return banner;
+    },
+
+    getLastFinishReason() {
+      return lastFinishReason;
     },
 
     getAccumulatedUsage() {
@@ -340,6 +351,10 @@ export function createSessionToolLoopModelClient(input: {
         usedModel: out.usedModel,
         usedProviderId: out.usedProviderId,
       };
+      // Track the last *reported* finish reason (keep prior when a hop omits
+      // it) so the turn-end log can surface output-limit truncation (`length`)
+      // even when a later round doesn't report one.
+      if (out.finishReason !== undefined) lastFinishReason = out.finishReason;
 
       if (out.usage) {
         hasUsage = true;

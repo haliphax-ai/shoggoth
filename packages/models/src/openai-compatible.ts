@@ -217,6 +217,7 @@ async function consumeOpenAIChatCompletionStream(
   toolCalls: ChatToolCall[];
   usage?: ModelUsage;
   reasoningContent?: string;
+  finishReason?: string;
 }> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -225,6 +226,7 @@ async function consumeOpenAIChatCompletionStream(
   let content: string | null = null;
   let reasoningBuf = "";
   let usage: ModelUsage | undefined;
+  let finishReason: string | undefined;
   const toolPartials = new Map<number, ToolCallPartial>();
   const thinkNorm =
     options.thinkingFormat === "xml-tags" ? new ThinkingStreamNormalizer() : undefined;
@@ -241,6 +243,11 @@ async function consumeOpenAIChatCompletionStream(
     const ch0 = choices[0];
     if (!ch0 || typeof ch0 !== "object") return;
     sawValidChoice = true;
+    // Capture finish_reason from the choice (not the delta): the terminal
+    // chunk may carry ONLY the finish reason — e.g. `length` when the
+    // output-token cap truncates a response mid-tool-call-args.
+    const fr = (ch0 as { finish_reason?: unknown }).finish_reason;
+    if (typeof fr === "string" && fr.length > 0) finishReason = fr;
     const delta = (ch0 as { delta?: unknown }).delta;
     if (!delta || typeof delta !== "object" || delta === null) return;
     const d = delta as { content?: unknown; tool_calls?: unknown; reasoning_content?: unknown };
@@ -322,6 +329,7 @@ async function consumeOpenAIChatCompletionStream(
       : [],
     usage,
     reasoningContent: reasoningBuf || undefined,
+    finishReason,
   };
 }
 
@@ -539,6 +547,7 @@ export function createOpenAICompatibleProvider(
             toolCalls,
             usage,
             reasoningContent,
+            finishReason,
           } = await consumeOpenAIChatCompletionStream(streamBody, {
             accumulateTools: true,
             thinkingFormat,
@@ -562,8 +571,15 @@ export function createOpenAICompatibleProvider(
                 syntheticCall,
                 input.responseSchema!,
                 mode,
+                finishReason,
               );
-              return { content: structuredContent, toolCalls: [], usage, reasoningContent };
+              return {
+                content: structuredContent,
+                toolCalls: [],
+                usage,
+                reasoningContent,
+                finishReason,
+              };
             }
             if (syntheticCall && realCalls.length > 0) {
               // Mixed with real tool calls: validate the synthetic attempt so a
@@ -572,11 +588,11 @@ export function createOpenAICompatibleProvider(
               // previously let models retry forever. Valid structured output is
               // still stripped here — the model must finish by calling the tool
               // alone.
-              validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode);
-              return { content, toolCalls: realCalls, usage, reasoningContent };
+              validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode, finishReason);
+              return { content, toolCalls: realCalls, usage, reasoningContent, finishReason };
             }
             if (toolCalls.length > 0) {
-              return { content, toolCalls, usage, reasoningContent };
+              return { content, toolCalls, usage, reasoningContent, finishReason };
             }
             // No tool calls at all — model returned text only. Trigger follow-up
             // to force the structured output tool.
@@ -667,6 +683,7 @@ export function createOpenAICompatibleProvider(
                 "Model responded with text instead of calling the __structured_output__ tool",
                 content ?? "",
                 input.responseSchema!.schema,
+                finishReason,
               );
             }
           }
@@ -678,7 +695,7 @@ export function createOpenAICompatibleProvider(
               : typeof normalized === "string"
                 ? normalized
                 : JSON.stringify(normalized);
-          return { content: finalContent, toolCalls, usage, reasoningContent };
+          return { content: finalContent, toolCalls, usage, reasoningContent, finishReason };
         }
 
         await assertResponseOk(res);
@@ -692,6 +709,14 @@ export function createOpenAICompatibleProvider(
         const message =
           first && typeof first === "object" && first !== null && "message" in first
             ? (first as { message?: Record<string, unknown> }).message
+            : undefined;
+        const rawFinishReason =
+          first && typeof first === "object" && "finish_reason" in first
+            ? (first as { finish_reason?: unknown }).finish_reason
+            : undefined;
+        const finishReason =
+          typeof rawFinishReason === "string" && rawFinishReason.length > 0
+            ? rawFinishReason
             : undefined;
 
         let content: string | null = null;
@@ -746,12 +771,14 @@ export function createOpenAICompatibleProvider(
               syntheticCall,
               input.responseSchema!,
               mode,
+              finishReason,
             );
             return {
               content: structuredContent,
               toolCalls: [],
               usage: extractOpenAIUsage(json),
               reasoningContent,
+              finishReason,
             };
           }
           if (syntheticCall && realCalls.length > 0) {
@@ -761,12 +788,13 @@ export function createOpenAICompatibleProvider(
             // previously let models retry forever. Valid structured output is
             // still stripped here — the model must finish by calling the tool
             // alone.
-            validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode);
+            validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode, finishReason);
             return {
               content,
               toolCalls: realCalls,
               usage: extractOpenAIUsage(json),
               reasoningContent,
+              finishReason,
             };
           }
           if (!syntheticCall && toolCalls.length === 0) {
@@ -873,6 +901,7 @@ export function createOpenAICompatibleProvider(
           toolCalls,
           usage: extractOpenAIUsage(json),
           reasoningContent,
+          finishReason,
         };
       });
     },

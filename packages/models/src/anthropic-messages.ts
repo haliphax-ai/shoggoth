@@ -454,6 +454,7 @@ export async function consumeAnthropicMessagesStream(
   toolCalls: ChatToolCall[];
   usage?: ModelUsage;
   reasoningContent?: string;
+  finishReason?: string;
 }> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -465,6 +466,7 @@ export async function consumeAnthropicMessagesStream(
   let forbiddenToolUse = false;
   let accumulatedAssistantText = "";
   let usageFields: AnthropicUsageFields | undefined;
+  let stopReason: string | undefined;
   const blocks = new Map<number, AnthropicBlockState>();
   const toolCallsByIndex: { index: number; call: ChatToolCall }[] = [];
   const thinkNorm =
@@ -527,6 +529,11 @@ export async function consumeAnthropicMessagesStream(
         const u = o.usage as AnthropicUsageFields | undefined;
         if (u && typeof u.output_tokens === "number") {
           usageFields = { ...usageFields, ...u };
+        }
+        // stop_reason rides on message_delta.delta (`max_tokens` = truncated).
+        const d = o.delta as { stop_reason?: unknown } | undefined;
+        if (d && typeof d.stop_reason === "string" && d.stop_reason.length > 0) {
+          stopReason = d.stop_reason;
         }
       }
       return;
@@ -757,7 +764,7 @@ export async function consumeAnthropicMessagesStream(
   const usage: ModelUsage | undefined = toAnthropicModelUsage(usageFields);
 
   const reasoningContent = thinkingParts.length > 0 ? thinkingParts.join("\n\n") : undefined;
-  return { content, toolCalls, usage, reasoningContent };
+  return { content, toolCalls, usage, reasoningContent, finishReason: stopReason };
 }
 
 export function createAnthropicMessagesProvider(
@@ -914,6 +921,7 @@ export function createAnthropicMessagesProvider(
           toolCalls,
           usage,
           reasoningContent: streamedReasoning,
+          finishReason,
         } = await consumeAnthropicMessagesStream(streamBody, {
           accumulateTools: true,
           thinkingFormat: input.thinkingFormat,
@@ -937,12 +945,14 @@ export function createAnthropicMessagesProvider(
               syntheticCall,
               input.responseSchema!,
               mode,
+              finishReason,
             );
             return {
               content: structuredContent,
               toolCalls: [],
               usage,
               reasoningContent: streamedReasoning,
+              finishReason,
             };
           } else if (syntheticCall && realToolCalls.length > 0) {
             // Mixed with real tool calls: validate the synthetic attempt so a
@@ -951,12 +961,13 @@ export function createAnthropicMessagesProvider(
             // previously let models retry forever. Valid structured output is
             // still stripped here — the model must finish by calling the tool
             // alone.
-            validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode);
+            validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode, finishReason);
             return {
               content: outText,
               toolCalls: realToolCalls,
               usage,
               reasoningContent: streamedReasoning,
+              finishReason,
             };
           } else if (!syntheticCall && toolCalls.length === 0) {
             const followUpResult = await structuredOutputFollowUp({
@@ -1023,11 +1034,18 @@ export function createAnthropicMessagesProvider(
               "Model responded with text instead of calling the __structured_output__ tool",
               outText ?? "",
               input.responseSchema!.schema,
+              finishReason,
             );
           }
         }
 
-        return { content: outText, toolCalls, usage, reasoningContent: streamedReasoning };
+        return {
+          content: outText,
+          toolCalls,
+          usage,
+          reasoningContent: streamedReasoning,
+          finishReason,
+        };
       }
 
       await assertResponseOk(res, parseApiErrorBody);
@@ -1035,6 +1053,10 @@ export function createAnthropicMessagesProvider(
 
       const text = input.thinkingFormat === "xml-tags" ? stripXmlThinkingTags(rawText) : rawText;
       const json = safeJsonParse(text, "invalid JSON from Anthropic Messages endpoint");
+
+      const rawStopReason = (json as { stop_reason?: unknown }).stop_reason;
+      const finishReason =
+        typeof rawStopReason === "string" && rawStopReason.length > 0 ? rawStopReason : undefined;
 
       const content = (json as { content?: unknown }).content;
       const {
@@ -1062,12 +1084,14 @@ export function createAnthropicMessagesProvider(
             syntheticCall,
             input.responseSchema!,
             mode,
+            finishReason,
           );
           return {
             content: structuredContent,
             toolCalls: [],
             usage: extractAnthropicUsage(json),
             reasoningContent,
+            finishReason,
           };
         } else if (syntheticCall && realToolCalls.length > 0) {
           // Mixed with real tool calls: validate the synthetic attempt so a
@@ -1076,12 +1100,13 @@ export function createAnthropicMessagesProvider(
           // previously let models retry forever. Valid structured output is
           // still stripped here — the model must finish by calling the tool
           // alone.
-          validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode);
+          validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode, finishReason);
           return {
             content: outText,
             toolCalls: realToolCalls,
             usage: extractAnthropicUsage(json),
             reasoningContent,
+            finishReason,
           };
         } else if (!syntheticCall && toolCalls.length === 0) {
           const followUpResult = await structuredOutputFollowUp({
@@ -1149,6 +1174,7 @@ export function createAnthropicMessagesProvider(
             "Model responded with text instead of calling the __structured_output__ tool",
             outText ?? "",
             input.responseSchema!.schema,
+            finishReason,
           );
         }
         // else: no synthetic call but has real tool calls — pass through normally
@@ -1159,6 +1185,7 @@ export function createAnthropicMessagesProvider(
         toolCalls,
         usage: extractAnthropicUsage(json),
         reasoningContent,
+        finishReason,
       };
     },
   };
