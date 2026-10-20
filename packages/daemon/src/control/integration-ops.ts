@@ -50,6 +50,8 @@ import {
 } from "../hitl/hitl-agent-tool-auto-persist";
 import type { HitlAutoApproveGate } from "../hitl/hitl-auto-approve";
 import type { PendingActionsStore } from "../hitl/pending-actions-store";
+import { cruiseControlActivationWarnings, type CruiseControlStore } from "../hitl/cruise-control";
+import type { CruiseControlPolicy } from "@shoggoth/shared";
 import {
   clearAllSessionToolAutoApprove,
   clearSessionToolAutoApproveForSessionIds,
@@ -147,6 +149,11 @@ export type IntegrationOpsContext = {
   readonly recordIntegrationAudit: IntegrationAuditRecorder;
   /** When unset, HITL control ops return ERR_HITL_UNAVAILABLE. */
   readonly hitlPending?: PendingActionsStore;
+  /**
+   * Cruise control (HITL auto-pilot) store. When unset, `hitl_cruise_control`
+   * returns ERR_CRUISE_UNAVAILABLE.
+   */
+  readonly cruiseControl?: CruiseControlStore;
   /**
    * When set with {@link hitlPending}, `hitl_clear` can wipe agent/session auto-approve (disk + memory).
    * Omitted in minimal setups (e.g. tests with only the pending store).
@@ -1371,6 +1378,66 @@ export async function handleIntegrationControlOp(
         cleared_session_auto_approve: clearedSessionAutoApprove,
         cleared_agent_auto_approve_agents: clearedAgentAutoApproveAgents,
       };
+    }
+
+    case "hitl_cruise_control": {
+      if (principal.kind !== "operator") {
+        throw new IntegrationOpError(
+          "ERR_FORBIDDEN",
+          "hitl_cruise_control requires operator principal",
+        );
+      }
+      if (!ctx.cruiseControl) {
+        throw new IntegrationOpError("ERR_CRUISE_UNAVAILABLE", "cruise control not configured");
+      }
+      const pl = payloadObject(req);
+      const sessionId = requireSessionId(pl, ctx.config, ctx.sessions);
+
+      if (pl.deactivate === true) {
+        const cleared = ctx.cruiseControl.clear(sessionId);
+        ctx.recordIntegrationAudit({
+          action: "hitl.cruise_deactivate",
+          resource: sessionId,
+          outcome: cleared ? "ok" : "not_active",
+        });
+        return { active: false, cleared };
+      }
+
+      const yes = typeof pl.yes === "string" ? pl.yes.trim() : "";
+      const no = typeof pl.no === "string" ? pl.no.trim() : "";
+      if (!yes || !no) {
+        // No guidance provided — status query.
+        const policy = ctx.cruiseControl.get(sessionId);
+        return {
+          active: policy !== undefined,
+          policy: policy ?? null,
+          warnings: policy ? cruiseControlActivationWarnings(ctx.config, policy) : [],
+        };
+      }
+
+      const escalate =
+        typeof pl.escalate === "string" && pl.escalate.trim() ? pl.escalate.trim() : undefined;
+      const model = typeof pl.model === "string" && pl.model.trim() ? pl.model.trim() : undefined;
+      const policy: CruiseControlPolicy = {
+        yes,
+        no,
+        ...(escalate ? { escalate } : {}),
+        ...(model ? { model } : {}),
+      };
+      const warnings = cruiseControlActivationWarnings(ctx.config, policy);
+      ctx.cruiseControl.set(sessionId, policy);
+      ctx.recordIntegrationAudit({
+        action: "hitl.cruise_activate",
+        resource: sessionId,
+        outcome: "ok",
+        argsRedactedJson: JSON.stringify({
+          yes,
+          no,
+          escalate: escalate ?? null,
+          model: model ?? null,
+        }),
+      });
+      return { active: true, policy, warnings };
     }
 
     case "mcp_http_cancel_request": {

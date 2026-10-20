@@ -1,5 +1,10 @@
 import type Database from "better-sqlite3";
-import { sanitizeJsonEscapes, type ShoggothHitlConfig, type HitlRiskTier } from "@shoggoth/shared";
+import {
+  sanitizeJsonEscapes,
+  type ShoggothHitlConfig,
+  type HitlRiskTier,
+  type CruiseControlDecision,
+} from "@shoggoth/shared";
 import type { ChatContentPart } from "@shoggoth/models";
 import { StructuredOutputValidationError, STRUCTURED_OUTPUT_TOOL_NAME } from "@shoggoth/models";
 import { classifyToolRisk } from "../hitl/risk-classify";
@@ -97,6 +102,20 @@ export interface RunToolLoopHitl {
    * When set (e.g. platform ♾️/✅ reactions), matching session/agent **for this tool name** skips HITL.
    */
   readonly autoApprove?: HitlAutoApproveGate;
+  /**
+   * Cruise control (HITL auto-pilot): when set and active for the session,
+   * requests that do not pass auto-approvals are judged (approve / deny /
+   * escalate) before being queued for true HITL. Escalations and judge
+   * failures fall through to the normal HITL queue.
+   */
+  readonly cruiseControl?: {
+    readonly isActive: (sessionId: string) => boolean;
+    readonly judge: (input: {
+      readonly sessionId: string;
+      readonly toolName: string;
+      readonly argsJson: string;
+    }) => Promise<CruiseControlDecision>;
+  };
 }
 
 export interface RunToolLoopOptions {
@@ -312,6 +331,75 @@ async function hitlApprovalGate(
   }
   if (!(requiresReview || (needsApproval && (tier === "never" || !autoApproved)))) {
     return true; // No approval needed
+  }
+
+  // Cruise control: requests that did not pass auto-approvals are routed to
+  // the decision judge before being queued for true HITL. Approvals execute;
+  // denials are pushed back to the model like an operator denial; escalations
+  // (and judge failures) fall through to the normal HITL queue.
+  if (!autoApproved && h.cruiseControl?.isActive(options.sessionId)) {
+    let cruiseDecision: CruiseControlDecision = "escalate";
+    try {
+      cruiseDecision = await Promise.race([
+        h.cruiseControl.judge({
+          sessionId: options.sessionId,
+          toolName: compoundResource,
+          argsJson: tc.argsJson,
+        }),
+        abortPromise(turnAbortSignal),
+      ]);
+    } catch (err) {
+      log.warn("hitl cruise judge failed; escalating to HITL", {
+        toolName: compoundResource,
+        sessionId: options.sessionId,
+        err: String(err),
+      });
+      cruiseDecision = "escalate";
+    }
+    options.audit.record({
+      phase: "hitl_cruise_decision",
+      tool: compoundResource,
+      toolCallId: tc.id,
+      decision: cruiseDecision,
+      riskTier: tier,
+    });
+    if (cruiseDecision === "approve") {
+      log.info("hitl cruise control approved", {
+        toolName: compoundResource,
+        sessionId: options.sessionId,
+      });
+      return true;
+    }
+    if (cruiseDecision === "deny") {
+      const errBody = JSON.stringify({
+        error: "hitl_denied",
+        reason: "cruise",
+      });
+      options.audit.record({
+        phase: "hitl_denied",
+        tool: compoundResource,
+        toolCallId: tc.id,
+        denialReason: "cruise",
+      });
+      log.info("hitl cruise control denied", {
+        toolName: compoundResource,
+        sessionId: options.sessionId,
+      });
+      options.model.pushToolMessage?.({
+        toolCallId: tc.id,
+        content: errBody,
+      });
+      if (options.transcript) {
+        appendTx({
+          role: "tool",
+          content: errBody,
+          toolCallId: tc.id,
+          metadata: { tool: tc.name },
+        });
+      }
+      return false;
+    }
+    // "escalate" — fall through to true HITL below.
   }
 
   const pendingId = h.newPendingId();

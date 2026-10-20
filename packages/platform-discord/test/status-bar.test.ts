@@ -54,6 +54,25 @@ describe("renderDiscordStatusBar", () => {
     expect(line).toContain("217");
   });
 
+  it("renders the cruise control section after the sequence when active", () => {
+    const line = renderDiscordStatusBar(snap({ sequence: 5, cruiseControl: true }), defaultCfg);
+    expect(line).toContain("🚗");
+    // The section sits between the sequence counter and the tool section.
+    const seqIdx = line.indexOf("🔢");
+    const cruiseIdx = line.indexOf("🚗");
+    expect(cruiseIdx).toBeGreaterThan(seqIdx);
+  });
+
+  it("omits the cruise control section when inactive or disabled", () => {
+    expect(renderDiscordStatusBar(snap(), defaultCfg)).not.toContain("🚗");
+    expect(
+      renderDiscordStatusBar(snap({ cruiseControl: true }), {
+        ...defaultCfg,
+        cruiseControlEnabled: false,
+      }),
+    ).not.toContain("🚗");
+  });
+
   it("omits the tool section when total is 0 and no queued tool", () => {
     const line = renderDiscordStatusBar(snap({ toolCalls: { total: 0 } }), defaultCfg);
     expect(line).not.toContain("🔧");

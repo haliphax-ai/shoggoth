@@ -243,8 +243,15 @@ Guild-scoped slash commands are registered on startup via `PUT /applications/{id
 | `/status`  | Show session status: provider, model, context fill, turns, compactions, queue depth.                                                                                            |
 | `/model`   | Get or set the session model selection. Options: `session_id`, `agent_id`, `model_selection`.                                                                                   |
 | `/queue`   | Manage the turn queue. Options: `action` (list/remove/clear/release), `priority`, `index`, `range`, `count`. Indexes are 1-based.                                               |
+| `/cruise`  | Activate or deactivate [cruise control](daemon.md#cruise-control) (HITL auto-pilot). Options: `yes`, `no`, `escalate`, `model`, `session_id`.                                   |
 
 When `session_id` is omitted, the handler resolves the session from the channel where the command was invoked. `session_id` accepts a session URN or a bare agent id (resolved to that agent's bootstrap primary session).
+
+### `/cruise` Flow
+
+- **No options + cruise control active** → deactivates it for the session.
+- **All required guidance provided** (`yes` and `no`) → activates (or changes) cruise control directly, no modal; activation warnings (e.g. missing model) are surfaced in the reply.
+- **Otherwise** (no options while inactive, or partial guidance) → a modal with three text inputs (`yes`/`no` required, `escalate` optional) prefilled with whatever was provided; an optional model rides in the modal `custom_id` (the session is re-derived from the channel at submit).
 
 ### Durable Command IDs
 

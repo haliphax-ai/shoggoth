@@ -241,7 +241,7 @@ Rules support wildcards (`*`), compound resources (`exec:*`, `exec:curl`), and p
 | Agent    | `agent_ping`                                                                                                                                                                                                                                               |
 | Session  | `session_list`, `session_inspect`, `session_send`, `session_steer`, `session_abort`, `session_kill`, `session_model`, `session_compact`, `session_context_new`, `session_context_reset`, `session_context_status`, `session_stats`, `session_queue_manage` |
 | Subagent | `subagent_spawn`                                                                                                                                                                                                                                           |
-| HITL     | `hitl_pending_list`, `hitl_pending_get`, `hitl_pending_approve`, `hitl_pending_deny`, `hitl_clear`                                                                                                                                                         |
+| HITL     | `hitl_pending_list`, `hitl_pending_get`, `hitl_pending_approve`, `hitl_pending_deny`, `hitl_clear`, `hitl_cruise_control`                                                                                                                                  |
 | Config   | `config_show`, `config_request`                                                                                                                                                                                                                            |
 | Process  | `procman_list`, `procman_restart`, `procman_stop`                                                                                                                                                                                                          |
 | ACPX     | `acpx_bind_get`, `acpx_bind_set`, `acpx_bind_delete`, `acpx_bind_list`, `acpx_agent_start`, `acpx_agent_stop`, `acpx_agent_list`                                                                                                                           |
@@ -303,6 +303,29 @@ When approval is required, the tool loop:
 ### Auto-Approve
 
 `HitlAutoApproveGate` allows operators to grant blanket approval for specific tools per session (e.g. via ✅ reaction). The `never` tier cannot be auto-approved.
+
+### Cruise Control
+
+Cruise control is a per-session HITL auto-pilot. When active, every HITL approval request that does **not** pass configured auto-approvals is routed to a tiny decision-model judge (`packages/daemon/src/hitl/cruise-control.ts`, TypeSafe System One via `DecisionService`) instead of the operator:
+
+- **Approve** — the tool call executes immediately (no pending row, no operator notice).
+- **Deny** — a `hitl_denied` tool error with `reason: "cruise"` is fed back to the model (same shape as an operator denial).
+- **Escalate** — the request falls through to the normal HITL queue (true HITL).
+
+Decision shape:
+
+- No `--escalate` guidance → a `noul` question whose `true`/`false` criteria are the yes/no guidance; a probability ≥ 0.5 approves.
+- `--escalate` provided → a `choice` question with `approve`/`deny`/`escalate` routes; the escalation route scoring at or above `agents.cruiseControl.escalateMinScore` (default `0.34`) escalates even when it is not the highest-scoring route (enough doubt).
+
+Judge failures (no model, decision error, timeout, missing answer) always escalate. The judge model is the activation-time `model` option, falling back to `agents.cruiseControl.model`; when neither is configured, a warning is logged and surfaced at activation.
+
+State is in-memory and per-session (activation does not survive a daemon restart). Activation surfaces:
+
+- Control op: `hitl_cruise_control` — `{ session_id, yes, no, escalate?, model? }` activates/changes, `{ session_id }` is a status query, `{ session_id, deactivate: true }` deactivates.
+- CLI: `shoggoth cruise` (see [CLI](cli.md#shoggoth-cruise)).
+- Discord: `/cruise` (see [Platform — Discord](platform-discord.md)).
+
+While cruise control is active, a 🚗 section appears in the turn status bar after the sequence counter.
 
 ---
 

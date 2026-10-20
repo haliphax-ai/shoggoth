@@ -930,7 +930,7 @@ describe("registerDiscordSlashCommands", () => {
     ];
     assert.strictEqual(appId, "app-123");
     assert.strictEqual(guildId, "g-1");
-    assert.strictEqual(commands.length, 11);
+    assert.strictEqual(commands.length, 12);
     assert.ok(commands.some((c) => c.name === "abort"));
     assert.ok(commands.some((c) => c.name === "close"));
     assert.ok(commands.some((c) => c.name === "steer"));
@@ -941,6 +941,7 @@ describe("registerDiscordSlashCommands", () => {
     assert.ok(commands.some((c) => c.name === "model"));
     assert.ok(commands.some((c) => c.name === "queue"));
     assert.ok(commands.some((c) => c.name === "prompt"));
+    assert.ok(commands.some((c) => c.name === "cruise"));
   });
 
   it("performs no transport calls when the guild list is empty", async () => {

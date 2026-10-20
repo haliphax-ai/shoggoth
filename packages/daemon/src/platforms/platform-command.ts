@@ -125,6 +125,19 @@ const COMMAND_TO_OP: Record<string, (opts: Readonly<Record<string, string>>) => 
       if (opts.platform_user_id?.trim()) payload.platform_user_id = opts.platform_user_id.trim();
       return { op: "prompt", payload };
     },
+    // `/cruise` — activate/deactivate cruise control (HITL auto-pilot).
+    // Activation requires yes + no guidance; without both the op answers a
+    // status query. `deactivate: true` turns cruise control off.
+    cruise: (opts) => {
+      const payload: Record<string, unknown> = {};
+      if (opts.session_id) payload.session_id = opts.session_id;
+      if (opts.yes) payload.yes = opts.yes;
+      if (opts.no) payload.no = opts.no;
+      if (opts.escalate) payload.escalate = opts.escalate;
+      if (opts.model) payload.model = opts.model;
+      if (opts.deactivate === "true") payload.deactivate = true;
+      return { op: "hitl_cruise_control", payload };
+    },
     queue: (opts) => {
       const payload: Record<string, unknown> = {
         action: opts.action ?? "list",

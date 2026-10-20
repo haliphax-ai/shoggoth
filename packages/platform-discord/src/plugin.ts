@@ -357,6 +357,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           hitlPending: hitlStack as any,
           hitlDiscordNoticeRegistry,
           hitlAutoApproveGate: hitlAutoApproveGate as any,
+          cruiseControl: platformDeps.cruiseControl,
           logger,
           discord: discordMessaging,
           deps: platformAssistantDeps as DiscordPlatformOptions["deps"],

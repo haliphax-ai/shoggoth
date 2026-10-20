@@ -92,6 +92,8 @@ import { defaultPlatformAssistantDeps } from "./sessions/assistant-runtime";
 import { createPersistingHitlAutoApproveGate } from "./hitl/hitl-auto-approve-persisting";
 import { type HitlAutoApproveGate } from "./hitl/hitl-auto-approve";
 import { createHitlPendingResolutionStack, type HitlPendingStack } from "./hitl/hitl-pending-stack";
+import { createCruiseControlStore, judgeCruiseControl } from "./hitl/cruise-control";
+import type { CruiseControlHandle } from "@shoggoth/shared";
 import { daemonNotice, loadDaemonNotices } from "./notices/load-notices";
 import { setNoticeResolver as setPresentationNoticeResolver } from "./presentation/notices";
 import { loadDaemonPrompts } from "./prompts/load-prompts";
@@ -854,6 +856,17 @@ void (async () => {
   // --- State Database, HITL stack, vault ---
   const { db, hitlStack, hitlAutoApproveGate } = await initStateDatabase();
 
+  // --- Cruise control (HITL auto-pilot): per-session store + judge ---
+  const cruiseControlStore = createCruiseControlStore();
+  const cruiseControl: CruiseControlHandle = {
+    store: cruiseControlStore,
+    judge: async (input) => {
+      const policy = cruiseControlStore.get(input.sessionId);
+      if (!policy) return "escalate";
+      return judgeCruiseControl({ ...input, policy, config: configRef.current });
+    },
+  };
+
   // --- Module-level side effects (moved from top-level for testability) ---
   process.umask(0o007);
   loadDaemonPrompts();
@@ -908,6 +921,7 @@ void (async () => {
               autoApproveGate: hitlAutoApproveGate,
             }
           : undefined,
+      cruiseControl: cruiseControlStore,
     });
     const stopConfigHotReload = startConfigHotReload({
       configDirectory: config.configDirectory,
@@ -965,6 +979,7 @@ void (async () => {
     policyEngine,
     hitlConfigRef: hitlRef,
     hitlAutoApproveGate,
+    cruiseControl,
     logger: getLogger("messaging"),
     platformAssistantDeps: defaultPlatformAssistantDeps as unknown,
     abortSession: async (sessionId) => {
@@ -980,6 +995,7 @@ void (async () => {
         sessionManager,
         acpxSupervisor: undefined,
         hitlPending: hitlStack?.pending,
+        cruiseControl: cruiseControlStore,
         recordIntegrationAudit: () => {},
         serviceApprovalStore,
         serviceRegistry,
@@ -1082,6 +1098,7 @@ void (async () => {
         sessionManager,
         acpxSupervisor: undefined,
         hitlPending: hitlStack?.pending,
+        cruiseControl: cruiseControlStore,
         recordIntegrationAudit: () => {},
         serviceApprovalStore,
         serviceRegistry,
