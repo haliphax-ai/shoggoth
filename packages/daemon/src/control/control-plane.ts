@@ -65,6 +65,8 @@ type ControlPlaneOptions = {
   hitlPending?: PendingActionsStore;
   /** When set with `hitlPending`, enables `hitl_clear` to wipe agent auto-approve (disk + memory). */
   hitlClear?: IntegrationOpsContext["hitlClear"];
+  /** When set, enables the `hitl_cruise_control` op (cruise control HITL auto-pilot). */
+  cruiseControl?: IntegrationOpsContext["cruiseControl"];
   /** Test hook: override `mcp_http_cancel_request` routing (default: platform cancel registry). */
   cancelMcpHttpRequest?: IntegrationOpsContext["cancelMcpHttpRequest"];
   /** When set, use these shared instances instead of creating local session store/manager. */
@@ -152,6 +154,7 @@ async function handleOneLine(
       | "acpxSupervisor"
       | "hitlPending"
       | "hitlClear"
+      | "cruiseControl"
       | "cancelMcpHttpRequest"
       | "vault"
     >;
@@ -265,6 +268,7 @@ async function handleOneLine(
       acpxSupervisor: deps.integration.acpxSupervisor,
       hitlPending: deps.integration.hitlPending,
       hitlClear: deps.integration.hitlClear,
+      cruiseControl: deps.integration.cruiseControl,
       cancelMcpHttpRequest: deps.integration.cancelMcpHttpRequest,
       vault: vaultServiceRef.current,
       serviceApprovalStore: serviceApprovalStoreRef.current,
@@ -331,6 +335,7 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
     acpxSpawn,
     hitlPending: hitlPendingOpt,
     hitlClear: hitlClearOpt,
+    cruiseControl: cruiseControlOpt,
     cancelMcpHttpRequest: cancelMcpHttpRequestOpt,
     sessions: sessionsOpt,
     sessionManager: sessionManagerOpt,
@@ -381,6 +386,7 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
     | "acpxSupervisor"
     | "hitlPending"
     | "hitlClear"
+    | "cruiseControl"
     | "cancelMcpHttpRequest"
     | "vault"
   > = {
@@ -392,6 +398,7 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
     acpxSupervisor,
     hitlPending: hitlPendingOpt,
     hitlClear: hitlClearOpt,
+    cruiseControl: cruiseControlOpt,
     cancelMcpHttpRequest: cancelMcpHttpRequestOpt ?? dispatchMcpHttpCancelRequest,
     vault: vaultServiceRef.current,
   };

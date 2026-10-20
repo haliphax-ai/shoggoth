@@ -62,6 +62,7 @@ import { sliceDiscordPlatformMessageBody } from "./errors";
 import { formatAttachmentMetadata } from "./attachment-metadata";
 import { DiscordPlatformAdapter } from "./discord-platform-adapter";
 import { resolveStatusBarConfig, type ResolvedStatusBarConfig } from "@shoggoth/shared";
+import type { CruiseControlHandle } from "@shoggoth/shared";
 import { renderDiscordStatusBar } from "./status-bar";
 
 /** Minimal status-bar dep: config from resolveStatusBarConfig, render from renderDiscordStatusBar,
@@ -113,6 +114,24 @@ function pickDiscordAssistantDeps(
   return { ...defaultPlatformAssistantDeps, ...rest };
 }
 
+/** Spread into a turn's `hitl` object to enable cruise control for the loop. */
+function cruiseControlToolLoopHook(opts: DiscordPlatformOptions) {
+  const cruise = opts.cruiseControl;
+  if (!cruise) return {};
+  return {
+    cruiseControl: {
+      isActive: (sessionId: string) => cruise.store.isActive(sessionId),
+      judge: cruise.judge,
+    },
+  };
+}
+
+/** Spread into a status-bar tracker creation to render the 🚗 section. */
+function cruiseStatusBarProvider(opts: DiscordPlatformOptions, sessionId: string) {
+  const cruise = opts.cruiseControl;
+  return cruise ? { cruiseControlActive: () => cruise.store.isActive(sessionId) } : {};
+}
+
 // Re-export presentation-layer formatting helpers for backward compatibility.
 export { formatDegradedPrefix as formatDiscordPlatformDegradedPrefix } from "@shoggoth/daemon/lib";
 export { formatModelTagFooter as formatDiscordPlatformModelTagFooter } from "@shoggoth/daemon/lib";
@@ -128,6 +147,8 @@ export interface DiscordPlatformOptions {
   readonly configRef?: { current: ShoggothConfig };
   readonly hitlDiscordNoticeRegistry?: HitlDiscordNoticeRegistry;
   readonly hitlAutoApproveGate?: HitlAutoApproveGate;
+  /** Cruise control (HITL auto-pilot): per-session store + judge. */
+  readonly cruiseControl?: CruiseControlHandle;
   readonly env?: NodeJS.ProcessEnv;
   readonly deps?: Partial<PlatformAssistantDeps> & {
     readonly hitlNotifier?: HitlNotifier;
@@ -736,6 +757,7 @@ export async function startDiscordPlatform(
             waitForHitlResolution,
             hitlNotifier,
             autoApprove: opts.hitlAutoApproveGate,
+            ...cruiseControlToolLoopHook(opts),
             ...(afterHitlQueued ? { afterHitlQueued } : {}),
           },
           loopImpl,
@@ -800,6 +822,7 @@ export async function startDiscordPlatform(
             cfg: statusBarDep.config,
             render: statusBarDep.render,
             stats: getStatusBarStats(opts.db, sid),
+            ...cruiseStatusBarProvider(opts, sid),
           });
         }
 

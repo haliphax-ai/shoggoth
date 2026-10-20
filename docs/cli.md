@@ -217,6 +217,42 @@ Output: JSON.
 
 ---
 
+### `shoggoth cruise`
+
+Cruise control (HITL auto-pilot) management. When cruise control is active for a session, HITL approval requests that do not pass configured auto-approvals are routed to a decision-model judge that approves or denies them automatically (escalating ambiguous requests to true HITL).
+
+#### Activate (or change)
+
+```
+shoggoth cruise <sessionId|agentId> --yes <guidance> --no <guidance> \
+  [--escalate <guidance>] [--model <provider/model>]
+```
+
+- `--yes` — guidance for when to approve HITL requests (required).
+- `--no` — guidance for when to deny HITL requests (required).
+- `--escalate` — guidance for when to escalate to the operator; when provided, a `choice` decision is used and an escalation score at or above `agents.cruiseControl.escalateMinScore` (default `0.34`) escalates even when approve/deny score higher. When omitted, a `noul` decision maps yes/no guidance to the true/false criteria.
+- `--model` — decision model (`provider/model`); falls back to `agents.cruiseControl.model`. When neither is set, a warning is logged and surfaced (requests will escalate to true HITL).
+
+Output: JSON (activation warnings also printed to stderr).
+
+#### Status
+
+```
+shoggoth cruise status <sessionId|agentId>
+```
+
+Reports whether cruise control is active for the session, with the stored policy.
+
+#### Deactivate
+
+```
+shoggoth cruise off <sessionId|agentId>
+```
+
+Deactivates cruise control for the session.
+
+---
+
 ### `shoggoth mcp`
 
 MCP (Model Context Protocol) helpers.

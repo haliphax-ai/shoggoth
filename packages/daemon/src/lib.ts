@@ -147,6 +147,14 @@ export {
 export { resolveSessionTargetFromCliArg } from "./control/resolve-session-cli-target";
 export { createLogger, type Logger, type LogLevel, type LogFields } from "./logging";
 export { createHitlAutoApproveGate, type HitlAutoApproveGate } from "./hitl/hitl-auto-approve";
+export {
+  createCruiseControlStore,
+  judgeCruiseControl,
+  cruiseControlActivationWarnings,
+  DEFAULT_CRUISE_ESCALATE_MIN_SCORE,
+  type CruiseControlStore,
+  type CruiseJudgeInput,
+} from "./hitl/cruise-control";
 export { transcriptRowsToModelChatMessages } from "./sessions/transcript-to-chat";
 export { daemonNotice, loadDaemonNotices } from "./notices/load-notices";
 export {

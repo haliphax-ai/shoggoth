@@ -52,6 +52,45 @@ export interface HitlConfigRef {
 }
 
 /**
+ * Per-session cruise control policy — operator guidance for the HITL judge
+ * agent that auto-approves/denies requests that do not pass auto-approvals.
+ */
+export interface CruiseControlPolicy {
+  /** Guidance for when to approve HITL requests. */
+  readonly yes: string;
+  /** Guidance for when to deny HITL requests. */
+  readonly no: string;
+  /** Guidance for when to escalate HITL requests to the operator. */
+  readonly escalate?: string;
+  /** `provider/model` decision model; falls back to `agents.cruiseControl.model`. */
+  readonly model?: string;
+}
+
+/** Verdict of the cruise control judge for one HITL request. */
+export type CruiseControlDecision = "approve" | "deny" | "escalate";
+
+/**
+ * Minimal interface for the per-session cruise control store (platform side).
+ */
+export interface CruiseControlStore {
+  get(sessionId: string): CruiseControlPolicy | undefined;
+  isActive(sessionId: string): boolean;
+}
+
+/**
+ * Cruise control handle the daemon passes to platform plugins: the session
+ * store plus the judge used by the tool loop HITL gate.
+ */
+export interface CruiseControlHandle {
+  readonly store: CruiseControlStore;
+  readonly judge: (input: {
+    readonly sessionId: string;
+    readonly toolName: string;
+    readonly argsJson: string;
+  }) => Promise<CruiseControlDecision>;
+}
+
+/**
  * Policy engine — evaluates whether a principal can perform an action.
  */
 export interface PolicyEngine {

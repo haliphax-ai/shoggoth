@@ -5,6 +5,7 @@ import { runRetentionCli } from "./run-retention";
 import { runEventsDlqCli } from "./run-events-dlq";
 import { runSessionCli } from "./run-session";
 import { runHitlCli } from "./run-hitl";
+import { runCruiseCli } from "./run-cruise";
 import { runMcpCli } from "./run-mcp";
 import { runSubagentCli } from "./run-subagent";
 import { runSystemCli } from "./run-system";
@@ -46,6 +47,7 @@ Usage:
   shoggoth events                 Event tooling (see: shoggoth events --help)
   shoggoth skills                 Skill discovery (see: shoggoth skills --help)
   shoggoth hitl                   HITL queue / clear (see: shoggoth hitl --help)
+  shoggoth cruise                 HITL cruise control (see: shoggoth cruise --help)
   shoggoth mcp                    MCP helpers (see: shoggoth mcp --help)
   shoggoth system               System operations (see: shoggoth system --help)
   shoggoth procman              Process manager (see: shoggoth procman --help)
@@ -186,6 +188,16 @@ if (argv[0] === "events") {
 if (argv[0] === "hitl") {
   try {
     await runHitlCli(argv.slice(1));
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  }
+  process.exit(process.exitCode ?? 0);
+}
+
+if (argv[0] === "cruise") {
+  try {
+    await runCruiseCli(argv.slice(1));
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
     process.exit(1);

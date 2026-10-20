@@ -83,7 +83,13 @@ describe("resolveStatusBarConfig", () => {
       notifyEnabled: true,
       contextWindowEnabled: false,
       compactionsEnabled: true,
+      cruiseControlEnabled: true,
     });
+  });
+
+  it("honors cruiseControlEnabled:false over the default", () => {
+    const r = resolveStatusBarConfig(cfgWith({ statusBar: { cruiseControlEnabled: false } }));
+    assert.equal(r.cruiseControlEnabled, false);
   });
 
   it("honors timersEnabled:false over the default", () => {
