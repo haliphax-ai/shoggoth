@@ -1,11 +1,16 @@
 /**
  * Runaway agent circuit breaker.
  *
- * Deterministic detection of a model stuck in a tool-call loop: it keeps
- * issuing the same call (same tool name, same — truncated — arguments) until
- * its TTL burns the token budget. The detector tracks a rolling window of the
- * most recent tool-call signatures and trips when any one signature's count
- * within the window exceeds the configured maximum.
+ * Deterministic detection of runaway model behavior that burns the token
+ * budget until the TTL expires. Two heuristics, one shared two-stage state:
+ *
+ * - **Duplicate tool calls**: the model keeps issuing the same call (same
+ *   tool name, same — truncated — arguments). A rolling window of the most
+ *   recent tool-call signatures trips when any one signature's count within
+ *   the window exceeds the configured maximum.
+ * - **Excessive prose**: the model generates long prose without the tool
+ *   activity needed to make progress (a runaway monologue). Accumulated
+ *   assistant prose is charged against a per-turn character budget.
  *
  * Two-stage response, mirroring a physical circuit breaker:
  *
@@ -36,12 +41,31 @@ export const RUNAWAY_MAX_DUPLICATES = 2;
  */
 export const RUNAWAY_SIGNATURE_ARGS_CHARS = 200;
 
-export interface RunawayTrigger {
+/**
+ * Prose character budget for a single turn before the breaker trips: prose
+ * generation without tool calls is the other runaway shape called out in the
+ * issue — a model that talks and talks without ever acting burns the token
+ * budget just as hard as a duplicate tool-call loop. Accumulated assistant
+ * prose is charged against this budget as hops complete.
+ */
+export const RUNAWAY_PROSE_CHAR_LIMIT = 20_000;
+
+/** Duplicate-tool-call trigger: which call repeated, and how often. */
+export interface RunawayDuplicateTrigger {
+  readonly kind: "duplicate_tool_call";
   readonly toolName: string;
   readonly count: number;
   /** Tool name plus truncated args — what the detector matched on. */
   readonly signature: string;
 }
+
+/** Excessive-prose trigger: how many prose characters the turn has burned. */
+export interface RunawayProseTrigger {
+  readonly kind: "excessive_prose";
+  readonly chars: number;
+}
+
+export type RunawayTrigger = RunawayDuplicateTrigger | RunawayProseTrigger;
 
 export type RunawayVerdict =
   | { readonly verdict: "ok" }
@@ -51,20 +75,25 @@ export interface RunawayBreakerOptions {
   readonly windowSize?: number;
   readonly maxDuplicates?: number;
   readonly signatureArgsChars?: number;
+  readonly proseCharLimit?: number;
 }
 
 export class RunawayBreaker {
   private readonly windowSize: number;
   private readonly maxDuplicates: number;
   private readonly signatureArgsChars: number;
+  private readonly proseCharLimit: number;
   /** FIFO of recent signatures; newest last. */
   private readonly window: string[] = [];
+  /** Prose characters accumulated since the last trip/reset. */
+  private proseChars = 0;
   private steeredOnce = false;
 
   constructor(options: RunawayBreakerOptions = {}) {
     this.windowSize = options.windowSize ?? RUNAWAY_WINDOW_SIZE;
     this.maxDuplicates = options.maxDuplicates ?? RUNAWAY_MAX_DUPLICATES;
     this.signatureArgsChars = options.signatureArgsChars ?? RUNAWAY_SIGNATURE_ARGS_CHARS;
+    this.proseCharLimit = options.proseCharLimit ?? RUNAWAY_PROSE_CHAR_LIMIT;
   }
 
   /** True once a steer has been issued this turn (a next trip cancels). */
@@ -89,10 +118,30 @@ export class RunawayBreaker {
 
     if (count <= this.maxDuplicates) return { verdict: "ok" };
 
-    const trigger: RunawayTrigger = { toolName, count, signature };
+    const trigger: RunawayTrigger = { kind: "duplicate_tool_call", toolName, count, signature };
+    return this.trip(trigger);
+  }
+
+  /**
+   * Charge prose characters generated this turn (e.g. the assistant content
+   * of a hop that issued no tool calls) against the prose budget. Trips when
+   * the accumulated total crosses the limit, then resets the budget — same
+   * steer-once / cancel-on-second contract as {@link record}, with the
+   * shared per-turn `steered` state.
+   */
+  recordProse(charCount: number): RunawayVerdict {
+    this.proseChars += charCount;
+    if (this.proseChars <= this.proseCharLimit) return { verdict: "ok" };
+    const trigger: RunawayTrigger = { kind: "excessive_prose", chars: this.proseChars };
+    return this.trip(trigger);
+  }
+
+  /** Shared two-stage trip bookkeeping: steer once, cancel after. */
+  private trip(trigger: RunawayTrigger): RunawayVerdict {
     const verdict = this.steeredOnce ? "cancel" : "steer";
     this.steeredOnce = true;
     this.window.length = 0;
+    this.proseChars = 0;
     return { verdict, trigger };
   }
 }
@@ -101,15 +150,30 @@ export class RunawayBreaker {
 const PREVIEW_MAX_CHARS = 80;
 
 function preview(trigger: RunawayTrigger): string {
-  const args = trigger.signature.includes("|")
-    ? trigger.signature.slice(trigger.signature.indexOf("|") + 1)
-    : trigger.signature;
-  const span = args ? `${trigger.toolName}: ${args}` : trigger.toolName;
+  const span =
+    trigger.kind === "duplicate_tool_call"
+      ? (() => {
+          const args = trigger.signature.includes("|")
+            ? trigger.signature.slice(trigger.signature.indexOf("|") + 1)
+            : trigger.signature;
+          return args ? `${trigger.toolName}: ${args}` : trigger.toolName;
+        })()
+      : `${trigger.chars} chars of prose`;
   return span.length > PREVIEW_MAX_CHARS ? `${span.slice(0, PREVIEW_MAX_CHARS)}…` : span;
 }
 
 /** Model-facing steering message injected into the loop on the first trip. */
 export function buildRunawaySteerMessage(trigger: RunawayTrigger): string {
+  if (trigger.kind === "excessive_prose") {
+    return (
+      `Circuit breaker: this turn has generated ${trigger.chars} characters of prose ` +
+      `without the tool activity needed to make progress. This pattern looks like a ` +
+      `runaway monologue. STOP writing long prose — either call the tools you need to ` +
+      `actually accomplish the task, or conclude your turn with a SHORT summary of ` +
+      `what you have done and what is blocking you. Continuing to generate prose will ` +
+      `cancel this turn.`
+    );
+  }
   return (
     `Circuit breaker: you have issued the identical tool call ${trigger.count} times ` +
     `in quick succession (\`${preview(trigger)}\`). This pattern looks like a runaway ` +
@@ -121,7 +185,8 @@ export function buildRunawaySteerMessage(trigger: RunawayTrigger): string {
 
 /** In-turn operator banner for a steer (folded into the active turn output). */
 export function buildRunawaySteerBanner(trigger: RunawayTrigger): string {
-  return `> ⚠️ Runaway breaker **steered** \`${preview(trigger)}\` (×${trigger.count})`;
+  const suffix = trigger.kind === "duplicate_tool_call" ? ` (×${trigger.count})` : "";
+  return `> ⚠️ Runaway breaker **steered** \`${preview(trigger)}\`${suffix}`;
 }
 
 /**
@@ -131,6 +196,12 @@ export function buildRunawaySteerBanner(trigger: RunawayTrigger): string {
  * for top-level agents.
  */
 export function buildRunawayCancelNotice(trigger: RunawayTrigger): string {
+  if (trigger.kind === "excessive_prose") {
+    return (
+      `⚠️ Runaway circuit breaker: turn canceled — the turn generated ${trigger.chars} ` +
+      `characters of prose without sufficient tool activity despite a steering warning.`
+    );
+  }
   return (
     `⚠️ Runaway circuit breaker: turn canceled — the identical tool call ` +
     `\`${preview(trigger)}\` was issued ${trigger.count} times despite a steering ` +

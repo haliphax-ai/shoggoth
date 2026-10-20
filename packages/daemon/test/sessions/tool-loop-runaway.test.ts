@@ -254,6 +254,166 @@ describe("runToolLoop runaway circuit breaker", () => {
     assert.ok(!audits.some((a) => String(a.phase ?? "").startsWith("runaway")));
   });
 
+  it("steers when hop prose accumulates past the budget without concluding", async () => {
+    const steers: string[] = [];
+    let step = 0;
+    const bigProse = "lorem ipsum ".repeat(50); // 600 chars per hop
+    const model: ModelClient = {
+      async complete() {
+        step += 1;
+        if (step <= 2) {
+          // Prose-heavy hops that keep the loop spinning with a tool call.
+          return {
+            content: bigProse,
+            toolCalls: [{ id: `c${step}`, name: "t", argsJson: `{"n":${step}}` }],
+          };
+        }
+        return { content: "concluded", toolCalls: [] };
+      },
+      pushToolMessage() {},
+      pushSteerMessage() {},
+    };
+    model.pushSteerMessage = (content: string) => {
+      steers.push(content);
+    };
+    const audits: Array<Record<string, unknown>> = [];
+
+    await runToolLoop({
+      db,
+      sessionId: "sess",
+      runId: "run-prose-steer",
+      principalId: "p",
+      policy: { check: () => ({ allow: true }) },
+      audit: {
+        record: (e) => {
+          audits.push(e as Record<string, unknown>);
+        },
+      },
+      model,
+      tools: [{ name: "t" }],
+      executor: { execute: async () => ({ resultJson: "{}" }) },
+      toolRuns: createToolRunStore(db),
+      runawayBreaker: { proseCharLimit: 1000 },
+    });
+
+    // Hop 1: 600 chars — ok. Hop 2: 1200 — trips the steer; the hop's tool
+    // call still executes. Hop 3 concludes normally.
+    assert.equal(steers.length, 1);
+    assert.match(steers[0]!, /prose/i);
+    assert.ok(
+      audits.some(
+        (a) =>
+          a.phase === "runaway_breaker_steer" &&
+          (a.trigger as { kind?: string } | undefined)?.kind === "excessive_prose",
+      ),
+      "prose steer must be audited with an excessive_prose trigger",
+    );
+  });
+
+  it("cancels the turn when the prose budget is blown again after a steer", async () => {
+    let step = 0;
+    const bigProse = "lorem ipsum ".repeat(50); // 600 chars per hop
+    const completions: number[] = [];
+    const model: ModelClient = {
+      async complete() {
+        step += 1;
+        completions.push(step);
+        return {
+          content: bigProse,
+          toolCalls: [{ id: `c${step}`, name: "t", argsJson: `{"n":${step}}` }],
+        };
+      },
+      pushToolMessage() {},
+      pushSteerMessage() {},
+    };
+    const tr = createTranscriptStore(db);
+    const seg = getSessionContextSegmentId(db, "sess");
+    const audits: Array<Record<string, unknown>> = [];
+
+    await runToolLoop({
+      db,
+      sessionId: "sess",
+      runId: "run-prose-cancel",
+      principalId: "p",
+      policy: { check: () => ({ allow: true }) },
+      audit: {
+        record: (e) => {
+          audits.push(e as Record<string, unknown>);
+        },
+      },
+      model,
+      tools: [{ name: "t" }],
+      executor: { execute: async () => ({ resultJson: "{}" }) },
+      toolRuns: createToolRunStore(db),
+      transcript: tr,
+      contextSegmentId: seg,
+      runawayBreaker: { proseCharLimit: 1000 },
+    });
+
+    // Hop 1: 600 — ok. Hop 2: 1200 — steer. Hop 3: 600 — ok (budget
+    // reset). Hop 4: 1200 — cancel; no 5th model call.
+    assert.equal(completions.length, 4);
+    assert.ok(
+      audits.some(
+        (a) =>
+          a.phase === "runaway_breaker_cancel" &&
+          (a.trigger as { kind?: string } | undefined)?.kind === "excessive_prose",
+      ),
+      "prose cancel must be audited with an excessive_prose trigger",
+    );
+
+    const page = tr.listPage({ sessionId: "sess", contextSegmentId: seg, afterSeq: 0, limit: 100 });
+    const warning = page.messages.find(
+      (m) =>
+        m.role === "assistant" &&
+        !m.toolCalls?.length &&
+        (m.metadata as { runawayBreakerCancel?: boolean } | undefined)?.runawayBreakerCancel ===
+          true,
+    );
+    assert.ok(warning, "prose cancel warning should be the turn's terminal assistant message");
+  });
+
+  it("never charges the terminal response against the prose budget", async () => {
+    let step = 0;
+    const hugeTerminal = "x".repeat(5000);
+    const model: ModelClient = {
+      async complete() {
+        step += 1;
+        if (step === 1) {
+          return {
+            content: "working... ",
+            toolCalls: [{ id: "c1", name: "t", argsJson: "{}" }],
+          };
+        }
+        // The terminal prose IS the deliverable — must not trip.
+        return { content: hugeTerminal, toolCalls: [] };
+      },
+      pushToolMessage() {},
+      pushSteerMessage() {},
+    };
+    const audits: Array<Record<string, unknown>> = [];
+
+    await runToolLoop({
+      db,
+      sessionId: "sess",
+      runId: "run-prose-terminal",
+      principalId: "p",
+      policy: { check: () => ({ allow: true }) },
+      audit: {
+        record: (e) => {
+          audits.push(e as Record<string, unknown>);
+        },
+      },
+      model,
+      tools: [{ name: "t" }],
+      executor: { execute: async () => ({ resultJson: "{}" }) },
+      toolRuns: createToolRunStore(db),
+      runawayBreaker: { proseCharLimit: 1000 },
+    });
+
+    assert.ok(!audits.some((a) => String(a.phase ?? "").startsWith("runaway")));
+  });
+
   it("persists the steer to the transcript as a user message", async () => {
     let step = 0;
     const model: ModelClient = {

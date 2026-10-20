@@ -29,6 +29,7 @@ import {
   buildRunawayCancelNotice,
   buildRunawaySteerBanner,
   buildRunawaySteerMessage,
+  type RunawayVerdict,
 } from "./runaway-breaker";
 
 export { TurnAbortedError } from "./session-turn-abort";
@@ -174,6 +175,7 @@ export interface RunToolLoopOptions {
         readonly windowSize?: number;
         readonly maxDuplicates?: number;
         readonly signatureArgsChars?: number;
+        readonly proseCharLimit?: number;
       };
   /**
    * Fired around executor.execute for calls that proceed to execution (not policy-denied,
@@ -1108,6 +1110,59 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
       options.runawayBreaker === false
         ? undefined
         : new RunawayBreaker(options.runawayBreaker ?? {});
+
+    /**
+     * Shared steer/cancel handling for both runaway heuristics (duplicate
+     * tool calls, excessive prose). Returns true when the turn must be
+     * canceled — the caller sets `breakerTripped` and unwinds.
+     */
+    const handleRunawayVerdict = (runaway: RunawayVerdict): boolean => {
+      if (runaway.verdict === "ok") return false;
+      const trigger = runaway.trigger;
+      if (runaway.verdict === "steer") {
+        const steerMsg = buildRunawaySteerMessage(trigger);
+        log.warn("runaway circuit breaker steered", {
+          sessionId: options.sessionId,
+          trigger,
+        });
+        options.audit.record({
+          phase: "runaway_breaker_steer",
+          sessionId: options.sessionId,
+          trigger,
+        });
+        options.model.pushSteerMessage?.(steerMsg);
+        postTurnSurfaceNotice(options.sessionId, buildRunawaySteerBanner(trigger));
+        if (options.transcript) {
+          appendTx({
+            role: "user",
+            content: steerMsg,
+            metadata: { runawayBreakerSteer: true },
+          });
+          emitStats?.({ transcriptMessageCount: getTranscriptCount() });
+        }
+        return false;
+      }
+      const notice = buildRunawayCancelNotice(trigger);
+      log.error("runaway circuit breaker canceled turn", {
+        sessionId: options.sessionId,
+        trigger,
+      });
+      options.audit.record({
+        phase: "runaway_breaker_cancel",
+        sessionId: options.sessionId,
+        trigger,
+      });
+      postTurnSurfaceNotice(options.sessionId, notice);
+      if (options.transcript) {
+        appendTx({
+          role: "assistant",
+          content: notice,
+          metadata: { runawayBreakerCancel: true },
+        });
+        emitStats?.({ transcriptMessageCount: getTranscriptCount() });
+      }
+      return true;
+    };
     // Consecutive invalid tool calls (unknown name, unparseable args, or
     // schema-invalid args) within the current turn; reset on any valid call or
     // other non-invalid dispatch and on a terminal response.
@@ -1198,6 +1253,27 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         break;
       }
 
+      // Set when a circuit breaker fires inside the per-tool-call loop; the
+      // outer `for (;;)` is then broken after the inner loop unwinds so the
+      // turn terminates cleanly (retry-exhausted / backstop style).
+      let breakerTripped:
+        | "structured_output_exhausted"
+        | "invalid_tool_call_backstop"
+        | "runaway_cancel"
+        | undefined;
+
+      // --- Runaway prose budget ---
+      // The hop continues the loop (it carries tool calls), so its prose is
+      // charged against the turn's budget — a runaway monologue is prose
+      // generated hop after hop without concluding. A terminal response is
+      // the turn's deliverable and is never charged.
+      if (runawayBreaker && turn.content) {
+        if (handleRunawayVerdict(runawayBreaker.recordProse(turn.content.length))) {
+          breakerTripped = "runaway_cancel";
+          break;
+        }
+      }
+
       // ---- Per-tool-call dispatch ----
 
       // Sanitize malformed argsJson before transcript storage.
@@ -1244,15 +1320,6 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         });
         emitStats?.({ transcriptMessageCount: getTranscriptCount() });
       }
-
-      // Set when a circuit breaker fires inside the per-tool-call loop; the
-      // outer `for (;;)` is then broken after the inner loop unwinds so the
-      // turn terminates cleanly (retry-exhausted / backstop style).
-      let breakerTripped:
-        | "structured_output_exhausted"
-        | "invalid_tool_call_backstop"
-        | "runaway_cancel"
-        | undefined;
 
       for (const tc of sanitizedToolCalls) {
         const dispatch = await processSingleToolCall(
@@ -1320,52 +1387,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         // Calls that never dispatched (unknown tool, bad args, …) are left to
         // the consecutive-invalid backstop above.
         if (runawayBreaker && dispatch.kind === "proceed") {
-          const runaway = runawayBreaker.record(tc.name, tc.argsJson);
-          if (runaway.verdict === "steer") {
-            const steerMsg = buildRunawaySteerMessage(runaway.trigger);
-            log.warn("runaway circuit breaker steered", {
-              sessionId: options.sessionId,
-              toolName: runaway.trigger.toolName,
-              count: runaway.trigger.count,
-            });
-            options.audit.record({
-              phase: "runaway_breaker_steer",
-              sessionId: options.sessionId,
-              toolName: runaway.trigger.toolName,
-              count: runaway.trigger.count,
-            });
-            options.model.pushSteerMessage?.(steerMsg);
-            postTurnSurfaceNotice(options.sessionId, buildRunawaySteerBanner(runaway.trigger));
-            if (options.transcript) {
-              appendTx({
-                role: "user",
-                content: steerMsg,
-                metadata: { runawayBreakerSteer: true },
-              });
-              emitStats?.({ transcriptMessageCount: getTranscriptCount() });
-            }
-          } else if (runaway.verdict === "cancel") {
-            const notice = buildRunawayCancelNotice(runaway.trigger);
-            log.error("runaway circuit breaker canceled turn", {
-              sessionId: options.sessionId,
-              toolName: runaway.trigger.toolName,
-              count: runaway.trigger.count,
-            });
-            options.audit.record({
-              phase: "runaway_breaker_cancel",
-              sessionId: options.sessionId,
-              toolName: runaway.trigger.toolName,
-              count: runaway.trigger.count,
-            });
-            postTurnSurfaceNotice(options.sessionId, notice);
-            if (options.transcript) {
-              appendTx({
-                role: "assistant",
-                content: notice,
-                metadata: { runawayBreakerCancel: true },
-              });
-              emitStats?.({ transcriptMessageCount: getTranscriptCount() });
-            }
+          if (handleRunawayVerdict(runawayBreaker.record(tc.name, tc.argsJson))) {
             breakerTripped = "runaway_cancel";
             break;
           }
