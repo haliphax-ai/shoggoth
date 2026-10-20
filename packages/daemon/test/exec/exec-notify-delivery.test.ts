@@ -10,6 +10,10 @@ import {
   drainSteers,
   _resetAllChannels,
 } from "../../src/sessions/steer-channel";
+import {
+  registerActiveTurnSurface,
+  _resetActiveTurnSurfaces,
+} from "../../src/presentation/active-turn-surface";
 import { setSubagentRuntimeExtension } from "../../src/subagent/subagent-extension-ref";
 
 function completion(
@@ -98,6 +102,7 @@ describe("buildExecNotifyResult", () => {
 describe("deliverExecNotifyMessage in-turn delivery", () => {
   afterEach(() => {
     _resetAllChannels();
+    _resetActiveTurnSurfaces();
     setSubagentRuntimeExtension(undefined);
   });
 
@@ -133,7 +138,7 @@ describe("deliverExecNotifyMessage in-turn delivery", () => {
     unregister();
   });
 
-  it("posts a surface delivery banner when steering in-turn", async () => {
+  it("posts a standalone surface banner only when no turn surface is registered", async () => {
     const statusMessages: string[] = [];
     setSubagentRuntimeExtension({
       runSessionModelTurn: vi.fn(),
@@ -152,6 +157,31 @@ describe("deliverExecNotifyMessage in-turn delivery", () => {
       statusMessages[0],
     );
     assert.ok(statusMessages[0]!.includes("`n1`"), statusMessages[0]);
+    unregister();
+  });
+
+  it("folds the delivery banner into the active turn surface instead of posting", async () => {
+    const statusMessages: string[] = [];
+    const notices: string[] = [];
+    setSubagentRuntimeExtension({
+      runSessionModelTurn: vi.fn(),
+      sendStatusMessage: async (_sessionId: string, body: string) => {
+        statusMessages.push(body);
+      },
+    } as never);
+    const { unregister } = registerSteerChannel("sess-1");
+    const surface = registerActiveTurnSurface("sess-1", (notice) => {
+      notices.push(notice);
+    });
+
+    await deliverExecNotifyMessage(completion);
+
+    assert.equal(drainSteers("sess-1").length, 1);
+    assert.equal(statusMessages.length, 0, "no standalone message while a turn surface exists");
+    assert.equal(notices.length, 1);
+    assert.ok(notices[0]!.startsWith("> ↩️ ✅ Exec notification delivered in-turn"), notices[0]);
+    assert.ok(notices[0]!.includes("`n1`"), notices[0]);
+    surface.unregister();
     unregister();
   });
 

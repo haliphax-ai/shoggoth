@@ -14,6 +14,7 @@ import { resolveMaxTtlMs } from "@shoggoth/shared";
 import { IntegrationOpError } from "../../control/integration-ops";
 import { resolveSessionSendYieldMs } from "../../config/effective-runtime";
 import { subagentRuntimeExtensionRef } from "../../subagent/subagent-extension-ref";
+import { postTurnSurfaceNotice } from "../../presentation/active-turn-surface";
 import {
   getSessionSendNotifyScheduler,
   type SessionSendNotifyHandle,
@@ -665,9 +666,11 @@ async function sessionSendHandler(
   const yieldBanner = scheduler
     ? `> 📨 Session-send yielded: waiting for reply from *${targetSessionId}* \`${handle.id}\` …`
     : `> 📨 Session-send yielded: reply from *${targetSessionId}* will not be delivered (notify disabled)`;
-  const ext = subagentRuntimeExtensionRef.current;
-  if (ext?.sendStatusMessage) {
-    void ext.sendStatusMessage(ctx.sessionId, yieldBanner).catch((e) => {
+  // Folded into the active turn's output when one is live; standalone
+  // post only when no turn surface exists.
+  if (!postTurnSurfaceNotice(ctx.sessionId, yieldBanner)) {
+    const ext = subagentRuntimeExtensionRef.current;
+    void ext?.sendStatusMessage?.(ctx.sessionId, yieldBanner).catch((e) => {
       log.warn("session-send yield banner failed", {
         sessionId: ctx.sessionId,
         err: String(e),

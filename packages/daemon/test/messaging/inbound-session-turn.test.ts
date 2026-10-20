@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { executeSessionAgentTurn } from "../../src/sessions/session-agent-turn";
+import { postTurnSurfaceNotice } from "../../src/presentation/active-turn-surface";
 
 vi.mock("../../src/sessions/session-agent-turn.js", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -107,6 +108,50 @@ describe("runInboundSessionTurn streaming final delivery", () => {
     // The last call should have the full 300-character text
     const lastCall = pushUpdate.mock.calls.at(-1)?.[0] as string;
     expect(lastCall.length).toBe(300);
+  });
+});
+
+describe("runInboundSessionTurn in-turn surface notices", () => {
+  it("folds a notice posted mid-turn into the final body", async () => {
+    const setFullContent = vi.fn().mockResolvedValue(undefined);
+    const pushUpdate = vi.fn().mockResolvedValue(undefined);
+    const streamStart = vi.fn().mockResolvedValue({ setFullContent, pushUpdate });
+
+    await runInboundSessionTurn({
+      buildTurn: () =>
+        Promise.resolve({
+          sessionId: "s1",
+          agentId: "main",
+          userContent: "hi",
+          messages: [],
+          tools: [],
+          systemPrompt: "",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          config: {} as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          stateDb: {} as any,
+        }),
+      streaming: {
+        minIntervalMs: 0,
+        start: streamStart,
+      },
+      sliceDisplayText: (t) => t,
+      formatAssistantReply: (text) => {
+        // A banner lands while the turn is still running: it must be part
+        // of the turn's own output, not a separate channel message.
+        postTurnSurfaceNotice("s1", "> ↩️ ✅ Exec notification delivered in-turn: *echo hi* `n1`");
+        return text;
+      },
+      formatErrorReply: (err) => String(err),
+      sendAssistantBody: vi.fn().mockResolvedValue(undefined),
+      sendErrorBody: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const last = setFullContent.mock.calls.at(-1)?.[0] as string;
+    expect(last).toContain("a".repeat(300));
+    expect(last).toContain("> ↩️ ✅ Exec notification delivered in-turn: *echo hi* `n1`");
+    // The notice is cleared from the registry when the turn ends.
+    expect(postTurnSurfaceNotice("s1", "late")).toBe(false);
   });
 });
 

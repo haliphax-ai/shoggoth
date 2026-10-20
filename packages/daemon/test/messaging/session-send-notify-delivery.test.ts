@@ -13,6 +13,10 @@ import {
   drainSteers,
   _resetAllChannels,
 } from "../../src/sessions/steer-channel";
+import {
+  registerActiveTurnSurface,
+  _resetActiveTurnSurfaces,
+} from "../../src/presentation/active-turn-surface";
 import { setSubagentRuntimeExtension } from "../../src/subagent/subagent-extension-ref";
 
 let statusMessages: string[];
@@ -68,6 +72,7 @@ describe("deliverSessionSendNotifyMessage in-turn delivery", () => {
 
   afterEach(() => {
     _resetAllChannels();
+    _resetActiveTurnSurfaces();
     setSubagentRuntimeExtension(undefined);
   });
 
@@ -104,6 +109,25 @@ describe("deliverSessionSendNotifyMessage in-turn delivery", () => {
       statusMessages[0],
     );
     assert.ok(statusMessages[0]!.includes("`ssn1`"), statusMessages[0]);
+    unregister();
+  });
+
+  it("folds the delivery banner into the active turn surface instead of posting", async () => {
+    const notices: string[] = [];
+    stubStatusExtension({ runSessionModelTurn: vi.fn() });
+    const { unregister } = registerSteerChannel("sess-1");
+    const surface = registerActiveTurnSurface("sess-1", (notice) => {
+      notices.push(notice);
+    });
+
+    await deliverSessionSendNotifyMessage(done);
+
+    assert.equal(drainSteers("sess-1").length, 1);
+    assert.equal(statusMessages.length, 0, "no standalone message while a turn surface exists");
+    assert.equal(notices.length, 1);
+    assert.ok(notices[0]!.startsWith("> 📨 ✅ Session-send reply delivered in-turn"), notices[0]);
+    assert.ok(notices[0]!.includes("`ssn1`"), notices[0]);
+    surface.unregister();
     unregister();
   });
 
