@@ -750,6 +750,38 @@ export async function startDiscordPlatform(
       // segments / tool calls) captured at notice-fire time.
       let surfaceCommittedProseSegments = 0;
       let surfaceToolCalls = 0;
+      // The turn's committed prose segments so far — pushed in lockstep with
+      // `surfaceCommittedProseSegments` (same admission condition), so the
+      // live splice always sees the same notion of "committed segment" as
+      // the anchors and the terminal splice. The round still streaming is
+      // not in here: it is not a committed block, so notices firing
+      // mid-round splice after the last settled segment and a segment not
+      // yet joined into the display just rides the tail append — never
+      // dropped, never thrown.
+      const surfaceCommittedProse: string[] = [];
+      let surfaceDisplay = "";
+      // Every push re-renders display + notices from scratch — the
+      // coalescing pusher always ships the latest state, so a banner is
+      // never patched into an already-pushed message; it lands in
+      // chronological position instead of being pinned to the tail. Lives at
+      // this scope so EVERY producer (text deltas, round ends, thinking
+      // deltas, notice re-pushes) renders through the banner splice.
+      const surfaceBanners = createTurnBannerCollector({
+        captureAnchor: () => ({
+          committedProseSegments: surfaceCommittedProseSegments,
+          toolCalls: surfaceToolCalls,
+        }),
+        onNotice: () => {
+          if (surfaceStreamPusher) pushDisplay(surfaceDisplay || "…");
+        },
+      });
+      const pushDisplay = (display: string): void => {
+        surfaceDisplay = display;
+        if (!surfaceStreamPusher) return;
+        surfaceStreamPusher.push(
+          surfaceBanners.liveBody(display, { segments: surfaceCommittedProse }),
+        );
+      };
       const executeTurn = (
         afterHitlQueued?: (row: PendingActionRow) => void | Promise<void>,
         streamOverride?: ExecuteSessionAgentTurnInput["stream"],
@@ -796,7 +828,7 @@ export async function startDiscordPlatform(
                     if (thinkingOutput) {
                       const display = thinkingOutput.onThinking(ev);
                       if (surfaceStreamPusher) {
-                        surfaceStreamPusher.push(display.trim() ? display : "…");
+                        pushDisplay(display.trim() ? display : "…");
                       }
                     }
                     surfaceTracker?.onThinkingDelta?.(ev.accumulated);
@@ -908,24 +940,9 @@ export async function startDiscordPlatform(
 
         // In-turn surface notices: banners landing mid-turn are folded into
         // this messaging_surface turn's output (streamed display and final
-        // body) instead of being posted as standalone messages. A single
-        // per-turn banner manager owns capture (anchored to the runner's live
-        // position), live rendering, and terminal splicing.
-        const surfaceBanners = createTurnBannerCollector({
-          captureAnchor: () => ({
-            committedProseSegments: surfaceCommittedProseSegments,
-            toolCalls: surfaceToolCalls,
-          }),
-          onNotice: () => {
-            if (surfaceStreamPusher) pushDisplay(surfaceDisplay || "…");
-          },
-        });
-        let surfaceDisplay = "";
-        const pushDisplay = (display: string): void => {
-          surfaceDisplay = display;
-          if (!surfaceStreamPusher) return;
-          surfaceStreamPusher.push(surfaceBanners.liveBody(display));
-        };
+        // body) instead of being posted as standalone messages. Register the
+        // collector created above (every live push already renders through
+        // its splice).
         const surfaceUnregister = registerActiveTurnSurface(sid, surfaceBanners).unregister;
 
         try {
@@ -947,17 +964,21 @@ export async function startDiscordPlatform(
                       // A settled round commits exactly one prose segment when
                       // its content is non-blank — the same condition that
                       // admits it into the composed turn prose — so anchors
-                      // map 1:1 onto final body positions.
-                      if (ev.content.trim()) surfaceCommittedProseSegments += 1;
+                      // map 1:1 onto final body positions. Whitespace-only
+                      // round content must never enter the display, the
+                      // committed segment list, or the anchors.
+                      if (ev.content.trim()) {
+                        surfaceCommittedProseSegments += 1;
+                        surfaceCommittedProse.push(ev.content);
+                      }
                       let display: string;
                       if (thinkingOutput) {
                         display = thinkingOutput.endRound(ev);
                       } else {
-                        if (ev.content) {
-                          surfacePriorRoundsProse += surfacePriorRoundsProse
-                            ? `\n\n${ev.content}`
-                            : ev.content;
-                        }
+                        // The committed list and `surfacePriorRoundsProse`
+                        // track the same segments; rebuild the display from
+                        // it so the two can never drift.
+                        surfacePriorRoundsProse = surfaceCommittedProse.join("\n\n");
                         display = surfacePriorRoundsProse;
                       }
                       pushDisplay(display.trim() ? display : "…");

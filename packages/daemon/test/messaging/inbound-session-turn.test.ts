@@ -216,11 +216,16 @@ describe("runInboundSessionTurn chronological notice placement", () => {
     // The final body splices the notice chronologically — between the two
     // prose segments — not as a trailing block.
     expect(setFullContent).toHaveBeenLastCalledWith(`first\n\n${notice}\n\nsecond`);
-    // Live rendering folded the notice into the streamed display (the live
-    // view appends at the tail; the terminal body splices chronologically).
+    // The live frames place the notice at the same chronological position.
     // The coalescing pusher dispatches deferred microtasks that all read the
-    // latest state, so assert presence, not an intermediate snapshot.
-    expect(pushUpdate.mock.calls.some(([text]) => text.includes(notice))).toBe(true);
+    // LATEST state, so any frame carrying the notice carries the final
+    // render: find one such frame and pin its structure exactly — the notice
+    // must sit between the two committed segments, not pinned to the tail.
+    const liveFrame = pushUpdate.mock.calls
+      .map(([text]) => text as string)
+      .find((text) => text.includes(notice));
+    expect(liveFrame).toBeDefined();
+    expect(liveFrame).toBe(`first\n\n${notice}\n\nsecond`);
   });
 
   it("appends notices at the end of the error body", async () => {

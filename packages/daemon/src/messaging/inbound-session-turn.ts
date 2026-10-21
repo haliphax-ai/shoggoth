@@ -206,6 +206,14 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
   // live position), live rendering, and terminal splicing.
   let committedProseSegments = 0;
   let toolCalls = 0;
+  // The turn's committed prose segments so far — pushed in lockstep with
+  // `committedProseSegments` (same admission condition), so the live splice
+  // always sees the same notion of "committed segment" as the anchors and
+  // the terminal splice. The round still streaming is not in here: it is not
+  // a committed block, so notices firing mid-round splice after the last
+  // settled segment and a segment not yet joined into the display just rides
+  // the tail append — never dropped, never thrown.
+  const committedProse: string[] = [];
   const banners = createTurnBannerCollector({
     captureAnchor: () => ({ committedProseSegments, toolCalls }),
     onNotice: () => {
@@ -215,10 +223,14 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
     },
   });
   let surfaceDisplay = "";
+  // Every push re-renders display + notices from scratch — the coalescing
+  // pusher always ships the latest state, so a banner is never patched into
+  // an already-pushed message; it lands in chronological position instead of
+  // being pinned to the tail.
   const pushDisplay = (display: string): void => {
     surfaceDisplay = display;
     if (!streamPusher) return;
-    streamPusher.push(banners.liveBody(display));
+    streamPusher.push(banners.liveBody(display, { segments: committedProse }));
   };
   let surfaceUnregister: (() => void) | undefined;
 
@@ -277,17 +289,22 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
                       // condition that admits it into the display and the
                       // turn's composed prose, so anchors map 1:1 onto final
                       // body positions.
-                      if (normalizeRoundProse(ev.content)) committedProseSegments += 1;
+                      // Whitespace-only round content carries no prose: it must never enter
+                      // the display, the committed segment list, or the
+                      // anchors.
+                      const prose = normalizeRoundProse(ev.content);
+                      if (prose) {
+                        committedProseSegments += 1;
+                        committedProse.push(prose);
+                      }
                       let display: string;
                       if (thinkingOutput) {
                         display = thinkingOutput.endRound(ev);
                       } else {
-                        // Whitespace-only round content carries no prose and
-                        // must never enter the display as a blank segment.
-                        const prose = normalizeRoundProse(ev.content);
-                        if (prose) {
-                          priorRoundsProse += priorRoundsProse ? `\n\n${prose}` : prose;
-                        }
+                        // The committed list and `priorRoundsProse` track the
+                        // same segments; rebuild the display from it so the
+                        // two can never drift.
+                        priorRoundsProse = committedProse.join("\n\n");
                         display = priorRoundsProse;
                       }
                       pushDisplay(display.trim() ? display : "…");
