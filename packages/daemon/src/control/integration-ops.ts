@@ -179,6 +179,7 @@ export type IntegrationOpsContext = {
   /** The service tool registry for managed services. */
   readonly serviceToolRegistry?: import("../service-tool-registry").ServiceToolRegistry;
   /** The service key store for age key management. */
+  readonly serviceKeyStore?: import("../service-key-store").ServiceKeyStore;
   /**
    * Media generation service factory. Defaults to {@link MediaGenerationService.fromConfig}.
    * Override in tests to inject a fake instead of mocking the module.

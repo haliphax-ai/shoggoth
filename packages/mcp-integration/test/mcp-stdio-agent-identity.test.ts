@@ -49,7 +49,7 @@ describe("connectMcpStdioSession — uid/gid forwarding", () => {
       args: ["hello"],
       uid: 1001,
       gid: 1001,
-      spawnImpl: fakeSpawn as typeof import("node:child_process").spawn,
+      spawnImpl: fakeSpawn as unknown as typeof import("node:child_process").spawn,
     } as McpStdioConnectOptions;
 
     let session;
@@ -72,7 +72,7 @@ describe("connectMcpStdioSession — uid/gid forwarding", () => {
     const opts: McpStdioConnectOptions = {
       command: "/usr/bin/echo",
       args: ["hello"],
-      spawnImpl: fakeSpawn as typeof import("node:child_process").spawn,
+      spawnImpl: fakeSpawn as unknown as typeof import("node:child_process").spawn,
     };
 
     let session;
