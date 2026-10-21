@@ -114,7 +114,7 @@ export async function runDecisionCli(argv: string[]): Promise<void> {
   // Feature gating: with no decision provider that has models, the command is
   // inert on every subcommand (including help) — the feature does not exist.
   const config = await loadLayeredConfigAsync(configDir);
-  const decisionEnabled = (config.decision?.providers ?? []).some(
+  const decisionEnabled = Object.values(config.decision?.providers ?? {}).some(
     (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
   );
   if (!decisionEnabled) {
@@ -133,17 +133,11 @@ export async function runDecisionCli(argv: string[]): Promise<void> {
   const sub = argv[0];
 
   if (sub === "models") {
-    const providers = config.decision?.providers ?? [];
     const lines: string[] = [];
     const defaultModel = (config.decision as { defaultModel?: string } | undefined)?.defaultModel;
-    for (const provider of providers) {
-      const p = provider as {
-        id: string;
-        kind: string;
-        models?: { name: string }[];
-      };
+    for (const [providerId, p] of Object.entries(config.decision?.providers ?? {})) {
       for (const model of p.models ?? []) {
-        const ref = `${p.id}/${model.name}`;
+        const ref = `${providerId}/${model.name}`;
         const marker = ref === defaultModel ? "  (default)" : "";
         lines.push(`${ref}${marker}  →  ${p.kind}`);
       }

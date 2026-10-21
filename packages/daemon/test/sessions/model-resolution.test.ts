@@ -41,7 +41,7 @@ function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
     memory: { paths: [], embeddings: { enabled: false } },
     skills: { scanRoots: [], disabledIds: [] },
     plugins: [],
-    mcp: { servers: [], poolScope: "global" },
+    mcp: { servers: {}, poolScope: "global" },
     policy: {
       operator: {
         controlOps: { allow: ["*"], deny: [], review: [] },
@@ -54,21 +54,19 @@ function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
       auditRedaction: { jsonPaths: [] },
     },
     models: {
-      providers: [
-        {
-          id: "openai",
+      providers: {
+        openai: {
           kind: "openai-compatible",
           baseUrl: "https://api.openai.com/v1",
           models: [{ name: "gpt-4o" }],
         },
-        {
-          id: "anthropic",
+        anthropic: {
           kind: "anthropic-messages",
           baseUrl: "https://api.anthropic.com",
           models: [{ name: "claude-sonnet" }],
         },
-        { id: "gemini", kind: "gemini", models: [{ name: "gemini-pro" }] },
-      ],
+        gemini: { kind: "gemini", models: [{ name: "gemini-pro" }] },
+      },
       failoverChain: ["openai/gpt-4o", "anthropic/claude-sonnet", "gemini/gemini-pro"],
     },
     ...overrides,
@@ -83,8 +81,8 @@ describe("model-resolution", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, TMP);
-});
+    await closeTestDb(db, TMP);
+  });
 
   describe("resolveModel", () => {
     it("resolves the first chain entry by default (happy path)", () => {
@@ -157,14 +155,13 @@ describe("model-resolution", () => {
     it("returns null when failover chain is empty", () => {
       const config = makeConfig({
         models: {
-          providers: [
-            {
-              id: "openai",
+          providers: {
+            openai: {
               kind: "openai-compatible" as const,
               baseUrl: "https://api.openai.com/v1",
               models: [{ name: "gpt-4o" }],
             },
-          ],
+          },
           failoverChain: [],
         },
       });
@@ -175,14 +172,13 @@ describe("model-resolution", () => {
     it("returns null when provider not found for ref", () => {
       const config = makeConfig({
         models: {
-          providers: [
-            {
-              id: "openai",
+          providers: {
+            openai: {
               kind: "openai-compatible" as const,
               baseUrl: "https://api.openai.com/v1",
               models: [{ name: "gpt-4o" }],
             },
-          ],
+          },
           failoverChain: ["missing-provider/some-model"],
         },
       });
@@ -193,14 +189,13 @@ describe("model-resolution", () => {
     it("returns null when model not found in provider's models list", () => {
       const config = makeConfig({
         models: {
-          providers: [
-            {
-              id: "openai",
+          providers: {
+            openai: {
               kind: "openai-compatible" as const,
               baseUrl: "https://api.openai.com/v1",
               models: [{ name: "gpt-4o" }],
             },
-          ],
+          },
           failoverChain: ["openai/nonexistent-model"],
         },
       });
@@ -211,14 +206,13 @@ describe("model-resolution", () => {
     it("handles object-style failover chain entries", () => {
       const config = makeConfig({
         models: {
-          providers: [
-            {
-              id: "openai",
+          providers: {
+            openai: {
               kind: "openai-compatible" as const,
               baseUrl: "https://api.openai.com/v1",
               models: [{ name: "gpt-4o" }],
             },
-          ],
+          },
           failoverChain: ["openai/gpt-4o"],
         },
       });
@@ -250,21 +244,19 @@ describe("model-resolution", () => {
     it("respects provider-level markFailedDurationMs", () => {
       const config = makeConfig({
         models: {
-          providers: [
-            {
-              id: "openai",
+          providers: {
+            openai: {
               kind: "openai-compatible" as const,
               baseUrl: "https://api.openai.com/v1",
               models: [{ name: "gpt-4o" }],
               markFailedDurationMs: 1000,
             },
-            {
-              id: "anthropic",
+            anthropic: {
               kind: "anthropic-messages" as const,
               baseUrl: "https://api.anthropic.com",
               models: [{ name: "claude-sonnet" }],
             },
-          ],
+          },
           failoverChain: ["openai/gpt-4o", "anthropic/claude-sonnet"],
         },
       });
@@ -357,14 +349,13 @@ describe("model-resolution", () => {
     it("returns undefined when failover chain is empty", () => {
       const config = makeConfig({
         models: {
-          providers: [
-            {
-              id: "openai",
+          providers: {
+            openai: {
               kind: "openai-compatible" as const,
               baseUrl: "https://api.openai.com/v1",
               models: [{ name: "gpt-4o" }],
             },
-          ],
+          },
           failoverChain: [],
         },
       });
@@ -375,14 +366,13 @@ describe("model-resolution", () => {
     it("returns undefined when first chain entry is a bare name without /", () => {
       const config = makeConfig({
         models: {
-          providers: [
-            {
-              id: "openai",
+          providers: {
+            openai: {
               kind: "openai-compatible" as const,
               baseUrl: "https://api.openai.com/v1",
               models: [{ name: "gpt-4o" }],
             },
-          ],
+          },
           failoverChain: ["gpt-4o"],
         },
       });

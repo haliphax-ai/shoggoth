@@ -21,7 +21,7 @@ describe("resolveEffectiveSessionQueryAllowedAgentIds", () => {
     memory: { paths: [], embeddings: { enabled: false } },
     skills: { scanRoots: [], disabledIds: [] },
     plugins: [],
-    mcp: { servers: [], poolScope: "global" },
+    mcp: { servers: {}, poolScope: "global" },
     policy: {
       operator: {
         controlOps: { allow: ["*"], deny: [] },

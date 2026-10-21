@@ -91,18 +91,10 @@ function buildConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
   return {
     ...base,
     mcp: {
-      servers: [
-        {
-          id: "allowed-server",
-          transport: "stdio",
-          command: "true",
-        } as ShoggothMcpServerEntry,
-        {
-          id: "denied-server",
-          transport: "stdio",
-          command: "true",
-        } as ShoggothMcpServerEntry,
-      ],
+      servers: {
+        "allowed-server": { transport: "stdio", command: "true" },
+        "denied-server": { transport: "stdio", command: "true" },
+      },
       poolScope: "global",
     },
     ...overrides,
@@ -143,18 +135,10 @@ describe("MCP server rules — runtime filtering", () => {
 
     const config = buildConfig({
       mcp: {
-        servers: [
-          {
-            id: "allowed-server",
-            transport: "stdio",
-            command: "true",
-          } as ShoggothMcpServerEntry,
-          {
-            id: "denied-server",
-            transport: "stdio",
-            command: "true",
-          } as ShoggothMcpServerEntry,
-        ],
+        servers: {
+          "allowed-server": { transport: "stdio", command: "true" },
+          "denied-server": { transport: "stdio", command: "true" },
+        },
         poolScope: "global",
         serverRules: { allow: ["*"], deny: ["denied-server"] },
       },
@@ -198,18 +182,10 @@ describe("MCP server rules — runtime filtering", () => {
 
     const config = buildConfig({
       mcp: {
-        servers: [
-          {
-            id: "allowed-server",
-            transport: "stdio",
-            command: "true",
-          } as ShoggothMcpServerEntry,
-          {
-            id: "denied-server",
-            transport: "stdio",
-            command: "true",
-          } as ShoggothMcpServerEntry,
-        ],
+        servers: {
+          "allowed-server": { transport: "stdio", command: "true" },
+          "denied-server": { transport: "stdio", command: "true" },
+        },
         poolScope: "global",
         serverRules: { allow: ["*"], deny: ["denied-server"] },
       },
@@ -262,18 +238,10 @@ describe("MCP server rules — runtime filtering", () => {
     // Start with denied-server blocked
     const config = buildConfig({
       mcp: {
-        servers: [
-          {
-            id: "allowed-server",
-            transport: "stdio",
-            command: "true",
-          } as ShoggothMcpServerEntry,
-          {
-            id: "denied-server",
-            transport: "stdio",
-            command: "true",
-          } as ShoggothMcpServerEntry,
-        ],
+        servers: {
+          "allowed-server": { transport: "stdio", command: "true" },
+          "denied-server": { transport: "stdio", command: "true" },
+        },
         poolScope: "global",
         serverRules: { allow: ["*"], deny: ["denied-server"] },
       },
@@ -325,20 +293,10 @@ describe("MCP server rules — runtime filtering", () => {
 
     const config = buildConfig({
       mcp: {
-        servers: [
-          {
-            id: "allowed-server",
-            transport: "stdio",
-            command: "true",
-            poolScope: "per_agent",
-          } as ShoggothMcpServerEntry,
-          {
-            id: "denied-server",
-            transport: "stdio",
-            command: "true",
-            poolScope: "per_agent",
-          } as ShoggothMcpServerEntry,
-        ],
+        servers: {
+          "allowed-server": { transport: "stdio", command: "true", poolScope: "per_agent" },
+          "denied-server": { transport: "stdio", command: "true", poolScope: "per_agent" },
+        },
         poolScope: "per_agent",
         serverRules: { allow: ["*"], deny: ["denied-server"] },
       },
@@ -377,20 +335,10 @@ describe("MCP server rules — runtime filtering", () => {
 
     const config = buildConfig({
       mcp: {
-        servers: [
-          {
-            id: "allowed-server",
-            transport: "stdio",
-            command: "true",
-            poolScope: "per_session",
-          } as ShoggothMcpServerEntry,
-          {
-            id: "denied-server",
-            transport: "stdio",
-            command: "true",
-            poolScope: "per_session",
-          } as ShoggothMcpServerEntry,
-        ],
+        servers: {
+          "allowed-server": { transport: "stdio", command: "true", poolScope: "per_session" },
+          "denied-server": { transport: "stdio", command: "true", poolScope: "per_session" },
+        },
         poolScope: "per_session",
         serverRules: { allow: ["*"], deny: ["denied-server"] },
       },
@@ -429,20 +377,10 @@ describe("MCP server rules — runtime filtering", () => {
 
     const config = buildConfig({
       mcp: {
-        servers: [
-          {
-            id: "allowed-server",
-            transport: "stdio",
-            command: "true",
-            poolScope: "per_agent",
-          } as ShoggothMcpServerEntry,
-          {
-            id: "denied-server",
-            transport: "stdio",
-            command: "true",
-            poolScope: "per_agent",
-          } as ShoggothMcpServerEntry,
-        ],
+        servers: {
+          "allowed-server": { transport: "stdio", command: "true", poolScope: "per_agent" },
+          "denied-server": { transport: "stdio", command: "true", poolScope: "per_agent" },
+        },
         poolScope: "per_agent",
         serverRules: { allow: ["*"], deny: ["denied-server"] },
       },
@@ -487,20 +425,10 @@ describe("MCP server rules — runtime filtering", () => {
     // With && logic, denied-server is excluded (denied in ANY context).
     const config = buildConfig({
       mcp: {
-        servers: [
-          {
-            id: "allowed-server",
-            transport: "stdio",
-            command: "true",
-            poolScope: "per_agent",
-          } as ShoggothMcpServerEntry,
-          {
-            id: "denied-server",
-            transport: "stdio",
-            command: "true",
-            poolScope: "per_agent",
-          } as ShoggothMcpServerEntry,
-        ],
+        servers: {
+          "allowed-server": { transport: "stdio", command: "true", poolScope: "per_agent" },
+          "denied-server": { transport: "stdio", command: "true", poolScope: "per_agent" },
+        },
         poolScope: "per_agent",
         serverRules: { allow: ["*"], deny: ["denied-server"] },
       },

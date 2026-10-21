@@ -66,7 +66,7 @@ function makeConfig(overrides: Partial<ShoggothConfig> = {}): ShoggothConfig {
     memory: { paths: [], embeddings: { enabled: false } },
     skills: { scanRoots: [], disabledIds: [] },
     plugins: [],
-    mcp: { servers: [], poolScope: "global" },
+    mcp: { servers: {}, poolScope: "global" },
     platforms: {},
     agents: {
       list: {

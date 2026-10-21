@@ -50,7 +50,7 @@ function minimalConfig(tmp: string) {
     memory: { paths: [] as string[], embeddings: { enabled: false } },
     skills: { scanRoots: [] as string[], disabledIds: [] as string[] },
     plugins: [] as never[],
-    mcp: { servers: [] as never[], poolScope: "global" as const },
+    mcp: { servers: {} as never[], poolScope: "global" as const },
     policy: DEFAULT_POLICY_CONFIG,
   };
 }

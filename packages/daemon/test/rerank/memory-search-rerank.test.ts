@@ -17,15 +17,14 @@ import type { FetchLike } from "@shoggoth/models";
 
 const rerankConfigBase = {
   defaultModel: "openrouter-cohere/cohere/rerank-v3.5",
-  providers: [
-    {
-      id: "openrouter-cohere",
+  providers: {
+    "openrouter-cohere": {
       kind: "cohere" as const,
       baseUrl: "https://openrouter.ai/api",
       apiKey: "or-key",
       models: [{ name: "cohere/rerank-v3.5" }, { name: "other-rerank-model" }],
     },
-  ],
+  },
 };
 
 const rerankConfig = { ...rerankConfigBase, memorySearch: { enabled: true } };

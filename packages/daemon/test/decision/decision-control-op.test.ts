@@ -61,18 +61,17 @@ function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
     memory: { paths: ["memory"], embeddings: { enabled: false } },
     skills: { scanRoots: ["skills"], disabledIds: [] },
     plugins: [],
-    mcp: { servers: [], poolScope: "global" },
+    mcp: { servers: {}, poolScope: "global" },
     policy: DEFAULT_POLICY_CONFIG,
     decision: {
-      providers: [
-        {
-          id: "typesafe-main",
+      providers: {
+        "typesafe-main": {
           kind: "typesafe",
           apiKey: "test-api-key",
           baseUrl: "https://api.typesafe.ai",
           models: [{ name: "jev-latest" }, { name: "jev-1.13.0" }],
         },
-      ],
+      },
     },
     ...overrides,
   } as ShoggothConfig;
@@ -270,14 +269,13 @@ describe("decision_evaluate control op", () => {
     it("is invisible when providers exist but have no models", async () => {
       const ctx = makeCtx({
         decision: {
-          providers: [
-            {
-              id: "typesafe-main",
+          providers: {
+            "typesafe-main": {
               kind: "typesafe",
               baseUrl: "https://api.typesafe.ai",
               models: [],
             },
-          ],
+          },
         },
       });
       const req = makeReq(validPayload());
@@ -319,15 +317,14 @@ describe("decision config schema", () => {
   it("accepts valid decision with providers and nested models", () => {
     const fragment = {
       decision: {
-        providers: [
-          {
-            id: "typesafe-main",
+        providers: {
+          "typesafe-main": {
             kind: "typesafe",
             baseUrl: "https://api.typesafe.ai",
             apiKeyEnv: "TYPESAFE_API_KEY",
             models: [{ name: "jev-latest" }],
           },
-        ],
+        },
       },
     };
     const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
@@ -335,7 +332,7 @@ describe("decision config schema", () => {
   });
 
   it("accepts decision with only providers array", () => {
-    const fragment = { decision: { providers: [] } };
+    const fragment = { decision: { providers: {} } };
     const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
     assert.ok(parsed.success, JSON.stringify(parsed.error?.issues));
   });
@@ -349,7 +346,7 @@ describe("decision config schema", () => {
   it("rejects unknown provider kind", () => {
     const fragment = {
       decision: {
-        providers: [{ id: "p1", kind: "openai", baseUrl: "https://example.com", models: [] }],
+        providers: { p1: { kind: "openai", baseUrl: "https://example.com", models: [] } },
       },
     };
     const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
@@ -359,7 +356,7 @@ describe("decision config schema", () => {
   it("rejects provider without baseUrl", () => {
     const fragment = {
       decision: {
-        providers: [{ id: "p1", kind: "typesafe", models: [] }],
+        providers: { p1: { kind: "typesafe", models: [] } },
       },
     };
     const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
@@ -369,14 +366,13 @@ describe("decision config schema", () => {
   it("rejects model without name", () => {
     const fragment = {
       decision: {
-        providers: [
-          {
-            id: "p1",
+        providers: {
+          p1: {
             kind: "typesafe",
             baseUrl: "https://example.com",
             models: [{ label: "jev" }],
           },
-        ],
+        },
       },
     };
     const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
@@ -387,7 +383,7 @@ describe("decision config schema", () => {
     const fragment = {
       decision: {
         defaultProviderId: "typesafe-main",
-        providers: [],
+        providers: {},
       },
     };
     const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
@@ -406,11 +402,11 @@ describe("decision config schema", () => {
     assert.ok(parsed.success, JSON.stringify(parsed.error?.issues));
   });
 
-  it("standalone schema defaults providers to empty array", () => {
+  it("standalone schema defaults providers to empty object", () => {
     const parsed = shoggothDecisionConfigSchema.safeParse({});
     assert.ok(parsed.success);
     if (parsed.success) {
-      assert.deepStrictEqual(parsed.data.providers, []);
+      assert.deepStrictEqual(parsed.data.providers, {});
     }
   });
 
@@ -418,14 +414,13 @@ describe("decision config schema", () => {
     const fragment = {
       decision: {
         defaultModel: "typesafe-main/jev-latest",
-        providers: [
-          {
-            id: "typesafe-main",
+        providers: {
+          "typesafe-main": {
             kind: "typesafe",
             baseUrl: "https://api.typesafe.ai",
             models: [{ name: "jev-latest" }],
           },
-        ],
+        },
       },
     };
     const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
@@ -436,14 +431,13 @@ describe("decision config schema", () => {
     const fragment = {
       decision: {
         defaultModel: "typesafe-main/jev-typo",
-        providers: [
-          {
-            id: "typesafe-main",
+        providers: {
+          "typesafe-main": {
             kind: "typesafe",
             baseUrl: "https://api.typesafe.ai",
             models: [{ name: "jev-latest" }],
           },
-        ],
+        },
       },
     };
     const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
@@ -451,7 +445,7 @@ describe("decision config schema", () => {
   });
 
   it("rejects a defaultModel when no providers are configured", () => {
-    const fragment = { decision: { defaultModel: "typesafe-main/jev-latest", providers: [] } };
+    const fragment = { decision: { defaultModel: "typesafe-main/jev-latest", providers: {} } };
     const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
     assert.ok(!parsed.success);
   });
@@ -460,14 +454,13 @@ describe("decision config schema", () => {
     const fragment = {
       decision: {
         defaultModel: "jev-latest",
-        providers: [
-          {
-            id: "typesafe-main",
+        providers: {
+          "typesafe-main": {
             kind: "typesafe",
             baseUrl: "https://api.typesafe.ai",
             models: [{ name: "jev-latest" }],
           },
-        ],
+        },
       },
     };
     const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
@@ -478,14 +471,13 @@ describe("decision config schema", () => {
     const fragment = {
       decision: {
         defaultModel: "wrong-provider/jev-latest",
-        providers: [
-          {
-            id: "typesafe-main",
+        providers: {
+          "typesafe-main": {
             kind: "typesafe",
             baseUrl: "https://api.typesafe.ai",
             models: [{ name: "jev-latest" }],
           },
-        ],
+        },
       },
     };
     const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
@@ -495,14 +487,13 @@ describe("decision config schema", () => {
   it("accepts decision without a defaultModel", () => {
     const fragment = {
       decision: {
-        providers: [
-          {
-            id: "typesafe-main",
+        providers: {
+          "typesafe-main": {
             kind: "typesafe",
             baseUrl: "https://api.typesafe.ai",
             models: [{ name: "jev-latest" }],
           },
-        ],
+        },
       },
     };
     const parsed = shoggothConfigFragmentSchema.safeParse(fragment);

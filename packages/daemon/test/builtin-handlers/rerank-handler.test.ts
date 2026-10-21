@@ -9,15 +9,14 @@ function makeConfig(rerank?: ShoggothConfig["rerank"]): ShoggothConfig {
 }
 
 const configuredRerank: NonNullable<ShoggothConfig["rerank"]> = {
-  providers: [
-    {
-      id: "openrouter-cohere",
+  providers: {
+    "openrouter-cohere": {
       kind: "cohere",
       baseUrl: "https://openrouter.ai/api",
       apiKeyEnv: "OPENROUTER_API_KEY",
       models: [{ name: "cohere/rerank-v3.5" }],
     },
-  ],
+  },
 };
 
 function makeCtx(
@@ -121,14 +120,13 @@ describe("rerank-handler", () => {
   it("returns error when no provider has models", async () => {
     const ctx = makeCtx(
       makeConfig({
-        providers: [
-          {
-            id: "openrouter-cohere",
+        providers: {
+          "openrouter-cohere": {
             kind: "cohere",
             baseUrl: "https://openrouter.ai/api",
             models: [],
           },
-        ],
+        },
       }),
     );
     const result = await registry.execute("rerank", validArgs, ctx);

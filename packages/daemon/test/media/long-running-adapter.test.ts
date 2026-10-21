@@ -461,28 +461,26 @@ function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
     memory: { paths: ["memory"], embeddings: { enabled: false } },
     skills: { scanRoots: ["skills"], disabledIds: [] },
     plugins: [],
-    mcp: { servers: [], poolScope: "global" },
+    mcp: { servers: {}, poolScope: "global" },
     policy: DEFAULT_POLICY_CONFIG,
     models: {
-      providers: [
-        {
-          id: "gemini-default",
+      providers: {
+        "gemini-default": {
           kind: "gemini" as const,
           apiKey: "test-api-key",
           baseUrl: "https://generativelanguage.googleapis.com",
         },
-      ],
+      },
     },
     mediaGeneration: {
-      providers: [
-        {
-          id: "gemini-default",
+      providers: {
+        "gemini-default": {
           kind: "gemini",
           apiKey: "test-api-key",
           baseUrl: "https://generativelanguage.googleapis.com",
           models: [{ name: "veo-3.1-generate-preview", mediaType: "video" }],
         },
-      ],
+      },
     },
     ...overrides,
   } as ShoggothConfig;

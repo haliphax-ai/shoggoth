@@ -80,15 +80,14 @@ describe(
 
       const config = defaultConfig(tmp);
       config.models = {
-        providers: [
-          {
-            id: "provA",
+        providers: {
+          provA: {
             kind: "openai-compatible" as const,
             baseUrl: "http://localhost:1/v1",
             apiKey: "k",
             models: [{ name: "modelA", contextWindowTokens: 99_999 }],
           },
-        ],
+        },
         failoverChain: ["provA/modelA"],
       };
 
@@ -151,15 +150,14 @@ describe(
       // resolveModel() should NOT be called at all when sessionModelRef is present.
       const config = defaultConfig(tmp);
       config.models = {
-        providers: [
-          {
-            id: "provUnique",
+        providers: {
+          provUnique: {
             kind: "openai-compatible" as const,
             baseUrl: "http://localhost:1/v1",
             apiKey: "k",
             models: [{ name: "modelUnique", contextWindowTokens: 50_000 }],
           },
-        ],
+        },
         failoverChain: ["provUnique/modelUnique"],
       };
 
@@ -211,15 +209,14 @@ describe(
       // No session model ref → the existing resolveModel() fallback path is used.
       const config = defaultConfig(tmp);
       config.models = {
-        providers: [
-          {
-            id: "provFallback",
+        providers: {
+          provFallback: {
             kind: "openai-compatible" as const,
             baseUrl: "http://localhost:1/v1",
             apiKey: "k",
             models: [{ name: "modelFallback", contextWindowTokens: 60_000 }],
           },
-        ],
+        },
         failoverChain: ["provFallback/modelFallback"],
       };
 

@@ -391,7 +391,9 @@ export function createMcpServerRulesFinalizer(
     // Server ids flagged `explicit` are never matched by wildcard/`*` allow
     // patterns — they must be named exactly in the effective allow list.
     const explicitServerIds = new Set(
-      config.mcp?.servers?.filter((s) => s.explicit).map((s) => s.id) ?? [],
+      Object.entries(config.mcp?.servers ?? {})
+        .filter(([, s]) => s.explicit)
+        .map(([id]) => id),
     );
 
     // Determine which external sourceIds are denied
@@ -521,7 +523,9 @@ const MEDIA_GENERATE_TOOL_DESCRIPTOR: AggregatedTool = {
  */
 function decisionToolDescriptor(config: ShoggothConfig): AggregatedTool {
   const decision = (config as any).decision;
-  const providers: { id?: string; models?: { name: string }[] }[] = decision?.providers ?? [];
+  const providers: { id: string; models?: { name: string }[] }[] = Object.entries(
+    (decision?.providers ?? {}) as Record<string, { models?: { name: string }[] }>,
+  ).map(([id, p]) => ({ id, ...p }));
   const defaultModel: string | undefined = decision?.defaultModel;
   // defaultModel is already in provider-id/model-name format; the provider
   // prefix names the combo explicitly, so no separate provider lookup is needed
@@ -587,7 +591,9 @@ function decisionToolDescriptor(config: ShoggothConfig): AggregatedTool {
  */
 function rerankToolDescriptor(config: ShoggothConfig): AggregatedTool {
   const rerank = config.rerank;
-  const providers: { id?: string; models?: { name: string }[] }[] = rerank?.providers ?? [];
+  const providers: { id: string; models?: { name: string }[] }[] = Object.entries(
+    (rerank?.providers ?? {}) as Record<string, { models?: { name: string }[] }>,
+  ).map(([id, p]) => ({ id, ...p }));
   const defaultModel: string | undefined = rerank?.defaultModel;
   // defaultModel is already in provider-id/model-name format; the provider
   // prefix names the combo explicitly, so no separate provider lookup is needed
@@ -716,10 +722,12 @@ export function createMediaGenerateToolFinalizer(
   config: ShoggothConfig,
 ): (ctx: SessionMcpToolContext, sessionId: string) => SessionMcpToolContext {
   const hasMediaConfig =
-    (config.models?.providers ?? []).length > 0 ||
-    ((config as any).mediaGeneration?.providers ?? []).some(
-      (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
-    );
+    Object.keys(config.models?.providers ?? {}).length > 0 ||
+    (
+      Object.values((config as any).mediaGeneration?.providers ?? {}) as Array<{
+        models?: unknown[];
+      }>
+    ).some((p) => (p.models?.length ?? 0) > 0);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   return (ctx, _sessionId) => {
     if (!hasMediaConfig) return ctx;
@@ -749,9 +757,9 @@ export function createMediaGenerateToolFinalizer(
 export function createDecisionToolFinalizer(
   config: ShoggothConfig,
 ): (ctx: SessionMcpToolContext, sessionId: string) => SessionMcpToolContext {
-  const hasDecisionConfig = ((config as any).decision?.providers ?? []).some(
-    (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
-  );
+  const hasDecisionConfig = (
+    Object.values((config as any).decision?.providers ?? {}) as Array<{ models?: unknown[] }>
+  ).some((p) => (p.models?.length ?? 0) > 0);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   return (ctx, _sessionId) => {
     if (!hasDecisionConfig) return ctx;
@@ -782,7 +790,9 @@ export function createDecisionToolFinalizer(
 export function createRerankToolFinalizer(
   config: ShoggothConfig,
 ): (ctx: SessionMcpToolContext, sessionId: string) => SessionMcpToolContext {
-  const hasRerankConfig = (config.rerank?.providers ?? []).some((p) => (p.models?.length ?? 0) > 0);
+  const hasRerankConfig = (
+    Object.values(config.rerank?.providers ?? {}) as Array<{ models?: unknown[] }>
+  ).some((p) => (p.models?.length ?? 0) > 0);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   return (ctx, _sessionId) => {
     if (!hasRerankConfig) return ctx;

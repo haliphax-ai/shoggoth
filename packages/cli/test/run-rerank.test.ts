@@ -20,14 +20,13 @@ function configuredRerankConfig() {
     socketPath: "/tmp/test.sock",
     rerank: {
       defaultModel: "openrouter-cohere/cohere/rerank-v3.5",
-      providers: [
-        {
-          id: "openrouter-cohere",
+      providers: {
+        "openrouter-cohere": {
           kind: "cohere",
           baseUrl: "https://openrouter.ai/api",
           models: [{ name: "cohere/rerank-v3.5" }],
         },
-      ],
+      },
     },
   };
 }
@@ -188,7 +187,7 @@ describe("runRerankCli feature gating", () => {
   it("is inert (including help) when providers have no models", async () => {
     mockLoadLayeredConfig.mockReturnValue({
       socketPath: "/tmp/test.sock",
-      rerank: { providers: [{ id: "p1", kind: "cohere", baseUrl: "https://x", models: [] }] },
+      rerank: { providers: { p1: { kind: "cohere", baseUrl: "https://x", models: [] } } },
     });
 
     await runRerankCli(["--help"]);

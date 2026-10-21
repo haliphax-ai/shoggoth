@@ -85,13 +85,26 @@ const mediaGenerationProviderSchema = z.object({
   apiVersion: z.string().optional(),
   models: z.array(mediaGenerationModelSchema).optional().default([]),
 });
+export type ShoggothMediaGenerationProvider = z.infer<typeof mediaGenerationProviderSchema>;
+export type ShoggothMediaGenerationProviderBody = Omit<ShoggothMediaGenerationProvider, "id">;
+
+/** Expand a keyed `mediaGeneration.providers` map into runtime provider entries (injecting the key as `id`). */
+export function mediaGenerationProvidersToEntries(
+  providers: Record<string, ShoggothMediaGenerationProviderBody> = {},
+): ShoggothMediaGenerationProvider[] {
+  return Object.entries(providers).map(([id, p]) => ({ id, ...p }));
+}
+
 const mediaGenerationAdapterDefaults = z.object({
   pollIntervalMs: z.number().int().positive().optional(),
   timeoutMs: z.number().int().positive().optional(),
 });
 export const shoggothMediaGenerationConfigSchema = z
   .object({
-    providers: z.array(mediaGenerationProviderSchema).optional().default([]),
+    providers: z
+      .record(z.string().min(1), mediaGenerationProviderSchema.omit({ id: true }))
+      .optional()
+      .default({}),
     adapterDefaults: z
       .record(mediaGenerationAdapterType, mediaGenerationAdapterDefaults)
       .optional(),
@@ -113,19 +126,31 @@ const decisionProviderSchema = z.object({
   apiKeyEnv: z.string().optional(),
   models: z.array(decisionModelSchema).optional().default([]),
 });
+export type ShoggothDecisionProvider = z.infer<typeof decisionProviderSchema>;
+export type ShoggothDecisionProviderBody = Omit<ShoggothDecisionProvider, "id">;
+
+/** Expand a keyed `decision.providers` map into runtime provider entries (injecting the key as `id`). */
+export function decisionProvidersToEntries(
+  providers: Record<string, ShoggothDecisionProviderBody> = {},
+): ShoggothDecisionProvider[] {
+  return Object.entries(providers).map(([id, p]) => ({ id, ...p }));
+}
 export const shoggothDecisionConfigSchema = z
   .object({
     /** Model used when a request omits `model`, in `provider-id/model-name`
      * format. Must match a configured provider model. */
     defaultModel: z.string().min(1).optional(),
-    providers: z.array(decisionProviderSchema).optional().default([]),
+    providers: z
+      .record(z.string().min(1), decisionProviderSchema.omit({ id: true }))
+      .optional()
+      .default({}),
   })
   .strict()
   .superRefine((cfg, ctx) => {
     if (!cfg.defaultModel) return;
     // must reference a configured model in provider-id/model-name format
-    const known = (cfg.providers ?? []).some((p) =>
-      (p.models ?? []).some((m) => `${p.id}/${m.name}` === cfg.defaultModel),
+    const known = Object.entries(cfg.providers ?? {}).some(([id, p]) =>
+      (p.models ?? []).some((m) => `${id}/${m.name}` === cfg.defaultModel),
     );
     if (!known) {
       ctx.addIssue({
@@ -152,6 +177,15 @@ const rerankProviderSchema = z.object({
   apiKeyEnv: z.string().optional(),
   models: z.array(rerankModelSchema).optional().default([]),
 });
+export type ShoggothRerankProvider = z.infer<typeof rerankProviderSchema>;
+export type ShoggothRerankProviderBody = Omit<ShoggothRerankProvider, "id">;
+
+/** Expand a keyed `rerank.providers` map into runtime provider entries (injecting the key as `id`). */
+export function rerankProvidersToEntries(
+  providers: Record<string, ShoggothRerankProviderBody> = {},
+): ShoggothRerankProvider[] {
+  return Object.entries(providers).map(([id, p]) => ({ id, ...p }));
+}
 export const shoggothRerankConfigSchema = z
   .object({
     /** Model used when a request omits `model`, in `provider-id/model-name`
@@ -171,14 +205,17 @@ export const shoggothRerankConfigSchema = z
       })
       .strict()
       .optional(),
-    providers: z.array(rerankProviderSchema).optional().default([]),
+    providers: z
+      .record(z.string().min(1), rerankProviderSchema.omit({ id: true }))
+      .optional()
+      .default({}),
   })
   .strict()
   .superRefine((cfg, ctx) => {
     if (!cfg.defaultModel) return;
     // must reference a configured model in provider-id/model-name format
-    const known = (cfg.providers ?? []).some((p) =>
-      (p.models ?? []).some((m) => `${p.id}/${m.name}` === cfg.defaultModel),
+    const known = Object.entries(cfg.providers ?? {}).some(([id, p]) =>
+      (p.models ?? []).some((m) => `${id}/${m.name}` === cfg.defaultModel),
     );
     if (!known) {
       ctx.addIssue({

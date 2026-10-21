@@ -49,7 +49,7 @@ async function mediaGenerateHandler(
   }
 
   // Check that media generation is configured
-  const hasMediaConfig = (ctx.config.mediaGeneration?.providers ?? []).some(
+  const hasMediaConfig = Object.values(ctx.config.mediaGeneration?.providers ?? {}).some(
     (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
   );
   if (!hasMediaConfig) {

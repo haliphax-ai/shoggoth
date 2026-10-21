@@ -67,7 +67,7 @@ function minimalConfig(dir: string): ShoggothConfig {
     memory: { paths: [], embeddings: { enabled: false } },
     skills: { scanRoots: [], disabledIds: [] },
     plugins: [],
-    mcp: { servers: [], poolScope: "global" },
+    mcp: { servers: {}, poolScope: "global" },
     policy: DEFAULT_POLICY_CONFIG,
   };
 }
@@ -399,15 +399,14 @@ describe("subagentModel config resolution", () => {
     const config: ShoggothConfig = {
       ...minimalConfig(dir),
       models: {
-        providers: [
-          {
-            id: "openai",
+        providers: {
+          openai: {
             kind: "openai-compatible" as const,
             baseUrl: "https://api.openai.com/v1",
             apiKey: "test",
             models: [{ name: "gpt-4o" }],
           },
-        ],
+        },
         failoverChain: ["openai/gpt-4o"],
       },
     };
@@ -484,15 +483,14 @@ describe("subagentModel config resolution", () => {
     const config: ShoggothConfig = {
       ...minimalConfig(dir),
       models: {
-        providers: [
-          {
-            id: "openai",
+        providers: {
+          openai: {
             kind: "openai-compatible" as const,
             baseUrl: "https://api.openai.com/v1",
             apiKey: "test",
             models: [{ name: "gpt-4o" }],
           },
-        ],
+        },
         failoverChain: ["openai/gpt-4o"],
       },
     };
@@ -565,15 +563,14 @@ describe("subagentModel config resolution", () => {
     const config: ShoggothConfig = {
       ...minimalConfig(dir),
       models: {
-        providers: [
-          {
-            id: "openai",
+        providers: {
+          openai: {
             kind: "openai-compatible" as const,
             baseUrl: "https://api.openai.com/v1",
             apiKey: "test",
             models: [{ name: "gpt-4o" }],
           },
-        ],
+        },
         failoverChain: ["openai/gpt-4o"],
       },
       agents: {
@@ -648,15 +645,14 @@ describe("subagentModel config resolution", () => {
     const config: ShoggothConfig = {
       ...minimalConfig(dir),
       models: {
-        providers: [
-          {
-            id: "openai",
+        providers: {
+          openai: {
             kind: "openai-compatible" as const,
             baseUrl: "https://api.openai.com/v1",
             apiKey: "test",
             models: [{ name: "gpt-4o" }],
           },
-        ],
+        },
         failoverChain: ["openai/gpt-4o"],
       },
     };

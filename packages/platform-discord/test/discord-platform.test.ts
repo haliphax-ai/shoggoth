@@ -638,7 +638,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     const cfg = defaultConfig(tmp);
     cfg.mcp = {
       poolScope: "global",
-      servers: [{ id: "s1", transport: "stdio", command: "true", args: [] }],
+      servers: { s1: { transport: "stdio", command: "true", args: [] } },
     };
 
     const platform = await startDiscordPlatform({
@@ -707,7 +707,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     const cfg = defaultConfig(tmp);
     cfg.mcp = {
       poolScope: "per_session",
-      servers: [{ id: "s1", transport: "stdio", command: "true", args: [] }],
+      servers: { s1: { transport: "stdio", command: "true", args: [] } },
     };
 
     const platform = await startDiscordPlatform({
@@ -805,7 +805,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     cfg.mcp = {
       poolScope: "per_session",
       perInstanceIdleTimeoutMs: 40,
-      servers: [{ id: "s1", transport: "stdio", command: "true", args: [] }],
+      servers: { s1: { transport: "stdio", command: "true", args: [] } },
     };
 
     const platform = await startDiscordPlatform({
@@ -891,7 +891,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     cfg.mcp = {
       poolScope: "per_session",
       perInstanceIdleTimeoutMs: 0,
-      servers: [{ id: "s1", transport: "stdio", command: "true", args: [] }],
+      servers: { s1: { transport: "stdio", command: "true", args: [] } },
     };
 
     const platform = await startDiscordPlatform({
@@ -985,22 +985,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     const cfg = defaultConfig(tmp);
     cfg.mcp = {
       poolScope: "per_session",
-      servers: [
-        {
-          id: "g",
-          transport: "stdio",
-          command: "true",
-          args: [],
-          poolScope: "global",
-        },
-        {
-          id: "p",
-          transport: "stdio",
-          command: "true",
-          args: [],
-          poolScope: "inherit",
-        },
-      ],
+      servers: {
+        g: { transport: "stdio", command: "true", args: [], poolScope: "global" },
+        p: { transport: "stdio", command: "true", args: [], poolScope: "inherit" },
+      },
     };
 
     const platform = await startDiscordPlatform({
@@ -1111,16 +1099,15 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     const cfg = defaultConfig(tmp);
     cfg.mcp = {
       poolScope: "global",
-      servers: [
-        { id: "indexer", transport: "stdio", command: "true", args: [] },
-        {
-          id: "sandbox",
+      servers: {
+        indexer: { transport: "stdio", command: "true", args: [] },
+        sandbox: {
           transport: "stdio",
           command: "true",
           args: [],
           poolScope: "per_session",
         },
-      ],
+      },
     };
 
     const platform = await startDiscordPlatform({
@@ -1232,15 +1219,14 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
     const cfg = defaultConfig(tmp);
     cfg.mcp = {
       poolScope: "per_session",
-      servers: [
-        {
-          id: "shared_index",
+      servers: {
+        shared_index: {
           transport: "stdio",
           command: "true",
           args: [],
           poolScope: "global",
         },
-      ],
+      },
     };
 
     const platform = await startDiscordPlatform({

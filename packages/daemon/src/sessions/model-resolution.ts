@@ -2,10 +2,11 @@ import type Database from "better-sqlite3";
 import type {
   ShoggothConfig,
   ShoggothModelsConfig,
+  ShoggothModelProviderEntry,
   FailoverChainEntry,
   ModelsRetry,
 } from "@shoggoth/shared";
-import { resolveEffectiveModelsConfig } from "@shoggoth/shared";
+import { modelProvidersToEntries, resolveEffectiveModelsConfig } from "@shoggoth/shared";
 import { isProviderFailed } from "./provider-failure-store";
 import { getLogger } from "../logging";
 
@@ -14,7 +15,7 @@ const log = getLogger("model-resolution");
 /** Default mark-failed duration when not configured (5 minutes). */
 const DEFAULT_MARK_FAILED_DURATION_MS = 300_000;
 
-type ProviderConfig = NonNullable<ShoggothModelsConfig["providers"]>[number];
+type ProviderConfig = ShoggothModelProviderEntry;
 type ProviderModelDefinition = NonNullable<ProviderConfig["models"]>[number];
 
 export interface ResolvedModel {
@@ -94,7 +95,9 @@ export function validateModelRefExists(
     };
   }
 
-  const providers = modelsConfig?.providers;
+  const providers = modelsConfig?.providers
+    ? modelProvidersToEntries(modelsConfig.providers)
+    : undefined;
   if (!providers?.length) {
     // No providers configured — skip validation (nothing to check against).
     return { ok: true };
@@ -199,7 +202,9 @@ export function resolveModel(
     return null;
   }
 
-  const providers = effectiveModels.providers;
+  const providers = effectiveModels.providers
+    ? modelProvidersToEntries(effectiveModels.providers)
+    : undefined;
   if (!providers?.length) {
     log.warn("no providers configured");
     return null;

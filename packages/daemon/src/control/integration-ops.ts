@@ -3511,9 +3511,9 @@ export async function handleIntegrationControlOp(
       // Feature gating: with no decision provider that has models, the op is
       // indistinguishable from a nonexistent one (undefined → ERR_UNKNOWN_OP).
       const decisionConfig = (ctx.config as any).decision;
-      const decisionEnabled = (decisionConfig?.providers ?? []).some(
-        (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
-      );
+      const decisionEnabled = (
+        Object.values(decisionConfig?.providers ?? {}) as Array<{ models?: unknown[] }>
+      ).some((p) => (p.models?.length ?? 0) > 0);
       if (!decisionEnabled) {
         return undefined;
       }
@@ -3565,7 +3565,7 @@ export async function handleIntegrationControlOp(
       // Feature gating: with no rerank provider that has models, the op is
       // indistinguishable from a nonexistent one (undefined → ERR_UNKNOWN_OP).
       const rerankConfig = ctx.config.rerank;
-      const rerankEnabled = (rerankConfig?.providers ?? []).some(
+      const rerankEnabled = Object.values(rerankConfig?.providers ?? {}).some(
         (p) => (p.models?.length ?? 0) > 0,
       );
       if (!rerankEnabled) {

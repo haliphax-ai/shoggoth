@@ -93,6 +93,11 @@ per-property, so a fragment holding several unrelated keys can land in several b
    runtime: objects merge recursively, arrays and scalars are replaced, and the incoming
    fragment wins on conflict.
 
+Agent-mergeable collections (`mcp.servers`, `models.providers`, `mediaGeneration.providers`,
+`decision.providers`, `rerank.providers`) are keyed objects — provider/server id → config block —
+so a fragment that adds or overrides one entry deep-merges by id instead of replacing the whole
+list. Leave the id out of the value; it is the property key.
+
 Because routing is "first file that already has the key", adding a key to a file that sorts
 later will not steal it from an earlier file that owns it — matching the runtime load order,
 where the earlier file is read first.

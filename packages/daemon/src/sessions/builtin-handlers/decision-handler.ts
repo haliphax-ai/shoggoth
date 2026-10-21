@@ -46,7 +46,7 @@ async function decisionHandler(
   }
 
   // Check that decision support is configured
-  const hasDecisionConfig = (ctx.config.decision?.providers ?? []).some(
+  const hasDecisionConfig = Object.values(ctx.config.decision?.providers ?? {}).some(
     (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
   );
   if (!hasDecisionConfig) {

@@ -14,7 +14,11 @@
  * same index (array identity preserved), then call `onToolCatalogChange`.
  */
 import type { McpSourceCatalog } from "@shoggoth/mcp-integration";
-import type { ShoggothConfig, ShoggothMcpServerEntry } from "@shoggoth/shared";
+import type {
+  ShoggothConfig,
+  ShoggothMcpServerBody,
+  ShoggothMcpServerEntry,
+} from "@shoggoth/shared";
 import { defaultConfig, formatAgentSessionUrn } from "@shoggoth/shared";
 import Database from "better-sqlite3";
 import { mkdtempSync } from "node:fs";
@@ -43,7 +47,9 @@ function configWithServers(
   servers: ShoggothMcpServerEntry[],
 ): ShoggothConfig {
   const cfg = defaultConfig(workspacePath);
-  cfg.mcp = { ...cfg.mcp, servers, poolScope: "global" };
+  const keyed: Record<string, ShoggothMcpServerBody> = {};
+  for (const { id, ...body } of servers) keyed[id] = body;
+  cfg.mcp = { ...cfg.mcp, servers: keyed, poolScope: "global" };
   return cfg;
 }
 

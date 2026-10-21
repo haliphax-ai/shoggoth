@@ -90,14 +90,13 @@ describe(
     function baseConfig() {
       const config = defaultConfig(tmp);
       config.models = {
-        providers: [
-          {
-            id: "provA",
+        providers: {
+          provA: {
             kind: "openai-compatible" as const,
             baseUrl: "http://localhost:1/v1",
             apiKey: "k",
           },
-        ],
+        },
         failoverChain: [{ providerId: "provA", model: "modelA" }],
         defaultInvocation: { temperature: 0.4, maxOutputTokens: 300 },
       };

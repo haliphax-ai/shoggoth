@@ -20,14 +20,13 @@ function configuredDecisionConfig() {
     socketPath: "/tmp/test.sock",
     decision: {
       defaultModel: "typesafe-main/jev-latest",
-      providers: [
-        {
-          id: "typesafe-main",
+      providers: {
+        "typesafe-main": {
           kind: "typesafe",
           baseUrl: "https://api.typesafe.ai",
           models: [{ name: "jev-latest" }, { name: "jev-1.13.0" }],
         },
-      ],
+      },
     },
   };
 }
@@ -348,14 +347,13 @@ describe("runDecisionCli models", () => {
       socketPath: "/tmp/test.sock",
       decision: {
         defaultModel: "typesafe-main/jev-latest",
-        providers: [
-          {
-            id: "typesafe-main",
+        providers: {
+          "typesafe-main": {
             kind: "typesafe",
             baseUrl: "https://api.typesafe.ai",
             models: [{ name: "jev-latest" }, { name: "jev-1.13.0" }],
           },
-        ],
+        },
       },
     });
 

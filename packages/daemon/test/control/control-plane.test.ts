@@ -79,7 +79,7 @@ function minimalConfig(socketPath: string): ShoggothConfig {
     memory: { paths: [], embeddings: { enabled: false } },
     skills: { scanRoots: [], disabledIds: [] },
     plugins: [],
-    mcp: { servers: [], poolScope: "global" },
+    mcp: { servers: {}, poolScope: "global" },
     policy: DEFAULT_POLICY_CONFIG,
   };
 }
@@ -2398,19 +2398,18 @@ describe("control plane (unix socket + JSONL)", () => {
       // Satisfy the decision/rerank feature gates: with no configured
       // provider models, both ops intentionally answer ERR_UNKNOWN_OP.
       decision: {
-        providers: [
-          {
-            id: "dec",
+        providers: {
+          dec: {
             kind: "typesafe",
             baseUrl: "http://127.0.0.1:1",
             models: [{ name: "m" }],
           },
-        ],
+        },
       },
       rerank: {
-        providers: [
-          { id: "rr", kind: "cohere", baseUrl: "http://127.0.0.1:1", models: [{ name: "m" }] },
-        ],
+        providers: {
+          rr: { kind: "cohere", baseUrl: "http://127.0.0.1:1", models: [{ name: "m" }] },
+        },
       },
     };
     await withControlPlaneSession({ config }, async (send) => {

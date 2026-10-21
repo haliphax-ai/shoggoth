@@ -57,8 +57,22 @@ export const shoggothModelProviderEntrySchema = z.discriminatedUnion("kind", [
   shoggothGeminiProviderSchema,
 ]);
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export type _ShoggothModelProviderEntry = z.infer<typeof shoggothModelProviderEntrySchema>;
+export type ShoggothModelProviderEntry = z.infer<typeof shoggothModelProviderEntrySchema>;
+
+/** Model provider block as stored in `models.providers` (keyed by provider id; the block itself carries no `id`). */
+export const shoggothModelProviderBodySchema = z.discriminatedUnion("kind", [
+  shoggothOpenAiCompatibleProviderSchema.omit({ id: true }),
+  shoggothAnthropicMessagesProviderSchema.omit({ id: true }),
+  shoggothGeminiProviderSchema.omit({ id: true }),
+]);
+export type ShoggothModelProviderBody = z.infer<typeof shoggothModelProviderBodySchema>;
+
+/** Expand a keyed `models.providers` map into runtime provider entries (injecting the key as `id`). */
+export function modelProvidersToEntries(
+  providers: Record<string, ShoggothModelProviderBody> = {},
+): ShoggothModelProviderEntry[] {
+  return Object.entries(providers).map(([id, p]) => ({ id, ...p }));
+}
 
 export const shoggothModelThinkingSchema = z
   .object({
@@ -148,7 +162,7 @@ export type ShoggothAgentModelsOverride = z.infer<typeof shoggothAgentModelsOver
 
 export const shoggothModelsConfigSchema = z
   .object({
-    providers: z.array(shoggothModelProviderEntrySchema).optional(),
+    providers: z.record(z.string().min(1), shoggothModelProviderBodySchema).optional(),
     failoverChain: z.array(failoverChainEntrySchema).optional(),
     /** Default model call parameters; per-session `model_selection` JSON overrides by field. */
     defaultInvocation: shoggothModelDefaultInvocationSchema.optional(),

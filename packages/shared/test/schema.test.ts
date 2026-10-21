@@ -104,41 +104,40 @@ describe("providerModelSchema", () => {
 // ---------------------------------------------------------------------------
 describe("provider schema with models and retry fields", () => {
   const baseProvider = {
-    id: "my-provider",
     kind: "openai-compatible" as const,
     baseUrl: "https://api.example.com",
   };
 
   it("accepts provider with models array", () => {
     const r = shoggothModelsConfigSchema.safeParse({
-      providers: [{ ...baseProvider, models: [{ name: "gpt-4o" }] }],
+      providers: { "my-provider": { ...baseProvider, models: [{ name: "gpt-4o" }] } },
     });
     assert.ok(r.success);
-    assert.equal(r.data!.providers![0].models![0].name, "gpt-4o");
+    assert.equal(Object.values(r.data!.providers!)[0].models![0].name, "gpt-4o");
   });
 
   it("accepts provider without models (optional)", () => {
     const r = shoggothModelsConfigSchema.safeParse({
-      providers: [baseProvider],
+      providers: { "my-provider": baseProvider },
     });
     assert.ok(r.success);
-    assert.equal(r.data!.providers![0].models, undefined);
+    assert.equal(Object.values(r.data!.providers!)[0].models, undefined);
   });
 
   it("accepts provider with per-provider retry fields", () => {
     const r = shoggothModelsConfigSchema.safeParse({
-      providers: [
-        {
+      providers: {
+        "my-provider": {
           ...baseProvider,
           maxRetries: 3,
           retryDelayMs: 1000,
           retryBackoffMultiplier: 2.0,
           markFailedDurationMs: 60_000,
         },
-      ],
+      },
     });
     assert.ok(r.success);
-    const p = r.data!.providers![0];
+    const p = Object.values(r.data!.providers!)[0];
     assert.equal(p.maxRetries, 3);
     assert.equal(p.retryDelayMs, 1000);
     assert.equal(p.retryBackoffMultiplier, 2.0);
@@ -147,30 +146,29 @@ describe("provider schema with models and retry fields", () => {
 
   it("rejects negative maxRetries on provider", () => {
     const r = shoggothModelsConfigSchema.safeParse({
-      providers: [{ ...baseProvider, maxRetries: -1 }],
+      providers: { "my-provider": { ...baseProvider, maxRetries: -1 } },
     });
     assert.ok(!r.success);
   });
 
   it("rejects non-positive retryBackoffMultiplier on provider", () => {
     const r = shoggothModelsConfigSchema.safeParse({
-      providers: [{ ...baseProvider, retryBackoffMultiplier: 0 }],
+      providers: { "my-provider": { ...baseProvider, retryBackoffMultiplier: 0 } },
     });
     assert.ok(!r.success);
   });
 
   it("rejects non-positive markFailedDurationMs on provider", () => {
     const r = shoggothModelsConfigSchema.safeParse({
-      providers: [{ ...baseProvider, markFailedDurationMs: 0 }],
+      providers: { "my-provider": { ...baseProvider, markFailedDurationMs: 0 } },
     });
     assert.ok(!r.success);
   });
 
   it("works with anthropic-messages provider too", () => {
     const r = shoggothModelsConfigSchema.safeParse({
-      providers: [
-        {
-          id: "anthropic",
+      providers: {
+        anthropic: {
           kind: "anthropic-messages",
           baseUrl: "https://api.anthropic.com",
           models: [
@@ -182,26 +180,24 @@ describe("provider schema with models and retry fields", () => {
           ],
           maxRetries: 2,
         },
-      ],
+      },
     });
     assert.ok(r.success);
   });
 
   it("works with gemini provider too", () => {
     const r = shoggothModelsConfigSchema.safeParse({
-      providers: [
-        {
-          id: "gemini",
+      providers: {
+        gemini: {
           kind: "gemini",
           models: [{ name: "gemini-2.5-pro" }],
           retryDelayMs: 500,
         },
-      ],
+      },
     });
     assert.ok(r.success);
   });
 });
-
 // ---------------------------------------------------------------------------
 // failoverChainEntrySchema
 // ---------------------------------------------------------------------------

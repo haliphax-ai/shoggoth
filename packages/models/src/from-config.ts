@@ -1,4 +1,8 @@
-import type { ShoggothModelsConfig } from "@shoggoth/shared";
+import {
+  modelProvidersToEntries,
+  type ShoggothModelProviderEntry,
+  type ShoggothModelsConfig,
+} from "@shoggoth/shared";
 import { createAnthropicMessagesProvider } from "./anthropic-messages";
 import {
   createFailoverModelClient,
@@ -28,7 +32,7 @@ function normalizeOpenAIBaseUrl(raw: string): string {
 }
 
 function modelProvidersById(
-  providers: ShoggothModelsConfig["providers"],
+  providers: readonly ShoggothModelProviderEntry[] | undefined,
   env: NodeJS.ProcessEnv,
   fetchImpl?: FetchLike,
   resilienceGate?: ModelResilienceGate,
@@ -172,7 +176,7 @@ function envBackedFailover(
  */
 function buildFailoverChainFromConfig(
   chain: readonly string[],
-  providers: ShoggothModelsConfig["providers"],
+  providers: readonly ShoggothModelProviderEntry[] | undefined,
   byId: Map<string, ModelProvider>,
 ): FailoverChainEntry[] {
   return chain.map((entry) => {
@@ -217,13 +221,13 @@ export function createFailoverClientFromModelsConfig(
   }
 
   const byId = modelProvidersById(
-    providers,
+    modelProvidersToEntries(providers),
     env,
     options.fetchImpl,
     options.resilienceGate,
     requestTimeoutMs,
   );
-  const entries = buildFailoverChainFromConfig(chain, providers, byId);
+  const entries = buildFailoverChainFromConfig(chain, modelProvidersToEntries(providers), byId);
 
   return createFailoverModelClient(entries, options.hooks);
 }
@@ -248,13 +252,13 @@ export function createFailoverToolCallingClientFromModelsConfig(
   }
 
   const byId = modelProvidersById(
-    providers,
+    modelProvidersToEntries(providers),
     env,
     options.fetchImpl,
     options.resilienceGate,
     requestTimeoutMs,
   );
-  const entries = buildFailoverChainFromConfig(chain, providers, byId);
+  const entries = buildFailoverChainFromConfig(chain, modelProvidersToEntries(providers), byId);
 
   return createFailoverToolCallingClient(entries, options.hooks);
 }

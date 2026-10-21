@@ -290,9 +290,8 @@ describe("runMediaCli models", () => {
     mockLoadLayeredConfig.mockReturnValue({
       socketPath: "/tmp/test.sock",
       mediaGeneration: {
-        providers: [
-          {
-            id: "google",
+        providers: {
+          google: {
             kind: "gemini",
             apiKey: "key",
             baseUrl: "https://generativelanguage.googleapis.com",
@@ -301,8 +300,7 @@ describe("runMediaCli models", () => {
               { name: "veo-3.1-generate-preview", mediaType: "video" },
             ],
           },
-          {
-            id: "openrouter",
+          openrouter: {
             kind: "openai-compatible",
             apiKey: "key2",
             baseUrl: "https://openrouter.ai/api",
@@ -311,7 +309,7 @@ describe("runMediaCli models", () => {
               { name: "openai/gpt-5-image-mini", mediaType: "image", adapter: "openai-chat-image" },
             ],
           },
-        ],
+        },
       },
     });
 
@@ -330,9 +328,8 @@ describe("runMediaCli models", () => {
     mockLoadLayeredConfig.mockReturnValue({
       socketPath: "/tmp/test.sock",
       mediaGeneration: {
-        providers: [
-          {
-            id: "google",
+        providers: {
+          google: {
             kind: "gemini",
             apiKey: "key",
             baseUrl: "https://generativelanguage.googleapis.com",
@@ -344,7 +341,7 @@ describe("runMediaCli models", () => {
               },
             ],
           },
-        ],
+        },
       },
     });
 

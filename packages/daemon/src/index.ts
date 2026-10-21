@@ -3,6 +3,7 @@ import {
   loadLayeredConfigAsync,
   LAYOUT,
   VERSION,
+  modelProvidersToEntries,
   parseAgentSessionUrn,
 } from "@shoggoth/shared";
 import {
@@ -75,7 +76,11 @@ import { bootstrapMainSession } from "./bootstrap-main-session";
 import { createDaemonRuntime } from "./runtime";
 import { initProcessManager } from "./process-manager-singleton";
 import { setProcessManager } from "@shoggoth/os-exec";
-import type { ProcessDeclaration } from "@shoggoth/shared";
+import type {
+  ProcessDeclaration,
+  ShoggothModelProviderEntry,
+  ShoggothModelsConfig,
+} from "@shoggoth/shared";
 import type { ProcessSpec } from "@shoggoth/procman";
 import { createToolRunStore } from "./sessions/tool-run-store";
 import { registerPlatform as registerMessagingPlatform } from "@shoggoth/messaging";
@@ -224,15 +229,25 @@ if (config.fetch?.caBundle) {
   }
 }
 
+/** Expand keyed `models.providers` config into runtime provider entries (with `id`). */
+function modelProviderEntries(
+  models: ShoggothModelsConfig | undefined,
+): ShoggothModelProviderEntry[] | undefined {
+  return models?.providers ? modelProvidersToEntries(models.providers) : undefined;
+}
+
 // Initialize model metadata store from config and register known defaults.
 if (config.models?.failoverChain) {
-  initModelMetadataFromConfig(config.models.failoverChain, config.models.providers);
+  initModelMetadataFromConfig(config.models.failoverChain, modelProviderEntries(config.models));
 }
 if (config.models?.providers) {
-  registerAnthropicDefaultsForProviders(config.models.providers);
+  registerAnthropicDefaultsForProviders(modelProviderEntries(config.models)!);
 }
 if (config.models?.providers && config.models?.failoverChain) {
-  registerOpenAIDefaultsForProviders(config.models.providers, config.models.failoverChain);
+  registerOpenAIDefaultsForProviders(
+    modelProviderEntries(config.models)!,
+    config.models.failoverChain,
+  );
 }
 
 const policyRef = { engine: createPolicyEngine(config.policy, config.agents) };
@@ -833,7 +848,7 @@ function registerHealthProbes() {
     createModelEndpointProbe({
       getBaseUrl: () => resolveModelHealthProbeBaseUrl(configRef.current),
       getApiKey: () => resolveModelHealthProbeApiKey(configRef.current),
-      getProviderKind: () => configRef.current.models?.providers?.[0]?.kind,
+      getProviderKind: () => modelProviderEntries(configRef.current.models)?.[0]?.kind,
     }),
   );
 
@@ -1395,13 +1410,13 @@ void (async () => {
   const modelPassed = modelChecks.some((c) => c.status === "pass");
   if (modelPassed && config.models?.providers && config.models?.failoverChain) {
     void fetchGeminiMetadataForProviders(
-      config.models.providers,
+      modelProviderEntries(config.models)!,
       config.models.failoverChain,
       process.env,
       getLogger("daemon"),
     );
     void fetchOpenAIMetadataForProviders(
-      config.models.providers,
+      modelProviderEntries(config.models)!,
       config.models.failoverChain,
       process.env,
       getLogger("daemon"),

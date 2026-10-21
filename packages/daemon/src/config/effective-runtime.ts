@@ -120,7 +120,7 @@ export function resolveModelHealthProbeBaseUrl(cfg: ShoggothConfig): string | un
   if (cOpenai) return cOpenai;
   const cOllama = cfg.runtime?.ollamaHost?.trim();
   if (cOllama) return cOllama;
-  return cfg.models?.providers?.[0]?.baseUrl?.trim() || undefined;
+  return Object.values(cfg.models?.providers ?? {})[0]?.baseUrl?.trim() || undefined;
 }
 
 /**
@@ -131,7 +131,7 @@ export function resolveModelHealthProbeApiKey(cfg: ShoggothConfig): string | und
   if (anthropic) return anthropic;
   const openai = process.env.OPENAI_API_KEY?.trim();
   if (openai) return openai;
-  return cfg.models?.providers?.[0]?.apiKey?.trim() || undefined;
+  return Object.values(cfg.models?.providers ?? {})[0]?.apiKey?.trim() || undefined;
 }
 
 /**

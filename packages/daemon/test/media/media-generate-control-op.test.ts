@@ -59,22 +59,20 @@ function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
     memory: { paths: ["memory"], embeddings: { enabled: false } },
     skills: { scanRoots: ["skills"], disabledIds: [] },
     plugins: [],
-    mcp: { servers: [], poolScope: "global" },
+    mcp: { servers: {}, poolScope: "global" },
     policy: DEFAULT_POLICY_CONFIG,
     models: {
-      providers: [
-        {
-          id: "gemini-default",
+      providers: {
+        "gemini-default": {
           kind: "gemini" as const,
           apiKey: "test-api-key",
           baseUrl: "https://generativelanguage.googleapis.com",
         },
-      ],
+      },
     },
     mediaGeneration: {
-      providers: [
-        {
-          id: "gemini-default",
+      providers: {
+        "gemini-default": {
           kind: "gemini",
           apiKey: "test-api-key",
           baseUrl: "https://generativelanguage.googleapis.com",
@@ -84,7 +82,7 @@ function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
             { name: "veo-3.1-generate-preview", mediaType: "video" },
           ],
         },
-      ],
+      },
     },
     ...overrides,
   } as ShoggothConfig;
@@ -219,15 +217,14 @@ describe("media_generate control op - Multi-Provider Integration", () => {
 
       const ctx = makeCtx({
         mediaGeneration: {
-          providers: [
-            {
-              id: "test",
+          providers: {
+            test: {
               kind: "gemini",
               apiKey: "key",
               baseUrl: "https://generativelanguage.googleapis.com",
               models: [{ name: "dall-e-3", mediaType: "image" }],
             },
-          ],
+          },
         },
       } as any);
 
@@ -262,9 +259,8 @@ describe("media_generate control op - Multi-Provider Integration", () => {
     it("works with openai-compatible provider when model matches", async () => {
       const ctx = makeCtx({
         mediaGeneration: {
-          providers: [
-            {
-              id: "openai",
+          providers: {
+            openai: {
               kind: "openai-compatible",
               apiKey: "sk-test",
               baseUrl: "https://api.openai.com/v1",
@@ -273,7 +269,7 @@ describe("media_generate control op - Multi-Provider Integration", () => {
                 { name: "gpt-image-1", mediaType: "image", adapter: "openai-chat-image" },
               ],
             },
-          ],
+          },
         },
       } as any);
 
@@ -294,15 +290,14 @@ describe("media_generate control op - Multi-Provider Integration", () => {
     it("routes to openai-images for dall-e models", async () => {
       const ctx = makeCtx({
         mediaGeneration: {
-          providers: [
-            {
-              id: "openai",
+          providers: {
+            openai: {
               kind: "openai-compatible",
               apiKey: "sk-test",
               baseUrl: "https://api.openai.com/v1",
               models: [{ name: "dall-e-3", mediaType: "image", adapter: "openai-images" }],
             },
-          ],
+          },
         },
       } as any);
 
@@ -323,15 +318,14 @@ describe("media_generate control op - Multi-Provider Integration", () => {
     it("routes to openai-chat-image for gpt-image models", async () => {
       const ctx = makeCtx({
         mediaGeneration: {
-          providers: [
-            {
-              id: "openai",
+          providers: {
+            openai: {
               kind: "openai-compatible",
               apiKey: "sk-test",
               baseUrl: "https://api.openai.com/v1",
               models: [{ name: "gpt-image-1", mediaType: "image", adapter: "openai-chat-image" }],
             },
-          ],
+          },
         },
       } as any);
 
@@ -413,15 +407,14 @@ describe("media_generate control op - Multi-Provider Integration", () => {
 
       const ctx = makeCtx({
         mediaGeneration: {
-          providers: [
-            {
-              id: "test",
+          providers: {
+            test: {
               kind: "gemini",
               apiKey: "key",
               baseUrl: "https://generativelanguage.googleapis.com",
               models: [{ name: "veo-3.1-generate-preview", mediaType: "video" }],
             },
-          ],
+          },
         },
       } as any);
 
@@ -472,16 +465,14 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
   it("accepts valid mediaGeneration with providers and nested models", () => {
     const fragment = {
       mediaGeneration: {
-        providers: [
-          {
-            id: "openai",
+        providers: {
+          openai: {
             kind: "openai-compatible",
             apiKey: "sk-test",
             baseUrl: "https://api.openai.com/v1",
             models: [{ name: "dall-e-3", mediaType: "image", adapter: "openai-images" }],
           },
-          {
-            id: "google",
+          google: {
             kind: "gemini",
             apiKey: "google-key",
             baseUrl: "https://generativelanguage.googleapis.com",
@@ -490,7 +481,7 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
               { name: "veo-3.1", mediaType: "video" },
             ],
           },
-        ],
+        },
       },
     };
     const result = shoggothConfigFragmentSchema.safeParse(fragment);
@@ -504,14 +495,13 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
   it("accepts mediaGeneration with only providers array", () => {
     const fragment = {
       mediaGeneration: {
-        providers: [
-          {
-            id: "my-provider",
+        providers: {
+          "my-provider": {
             kind: "openai-compatible",
             apiKey: "key",
             baseUrl: "https://api.example.com",
           },
-        ],
+        },
       },
     };
     const result = shoggothConfigFragmentSchema.safeParse(fragment);
@@ -525,13 +515,12 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
   it("accepts mediaGeneration with providers that have no models", () => {
     const fragment = {
       mediaGeneration: {
-        providers: [
-          {
-            id: "my-provider",
+        providers: {
+          "my-provider": {
             kind: "openai-compatible",
             baseUrl: "https://api.example.com",
           },
-        ],
+        },
       },
     };
     const result = shoggothConfigFragmentSchema.safeParse(fragment);
@@ -577,14 +566,13 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
   it("rejects invalid adapter values in provider models", () => {
     const fragment = {
       mediaGeneration: {
-        providers: [
-          {
-            id: "test",
+        providers: {
+          test: {
             kind: "openai-compatible",
             baseUrl: "https://example.com",
             models: [{ name: "bad-model", mediaType: "image", adapter: "invalidAdapter" }],
           },
-        ],
+        },
       },
     };
     const result = shoggothConfigFragmentSchema.safeParse(fragment);
@@ -595,7 +583,7 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
     const fragment = {
       mediaGeneration: {
         unknownField: true,
-        providers: [],
+        providers: {},
       },
     };
     const result = shoggothConfigFragmentSchema.safeParse(fragment);
@@ -620,7 +608,7 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
       memory: { paths: ["memory"], embeddings: { enabled: false } },
       skills: { scanRoots: ["skills"], disabledIds: [] },
       plugins: [],
-      mcp: { servers: [], poolScope: "global" },
+      mcp: { servers: {}, poolScope: "global" },
       policy: {
         operator: {
           controlOps: { allow: ["*"], deny: [], review: [] },
@@ -659,7 +647,7 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
       memory: { paths: ["memory"], embeddings: { enabled: false } },
       skills: { scanRoots: ["skills"], disabledIds: [] },
       plugins: [],
-      mcp: { servers: [], poolScope: "global" },
+      mcp: { servers: {}, poolScope: "global" },
       policy: {
         operator: {
           controlOps: { allow: ["*"], deny: [], review: [] },
@@ -672,9 +660,8 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
         auditRedaction: { jsonPaths: [] },
       },
       mediaGeneration: {
-        providers: [
-          {
-            id: "openai",
+        providers: {
+          openai: {
             kind: "openai-compatible",
             apiKey: "sk-test",
             baseUrl: "https://api.openai.com/v1",
@@ -683,8 +670,7 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
               { name: "gpt-image-1", mediaType: "image", adapter: "openai-chat-image" },
             ],
           },
-          {
-            id: "google",
+          google: {
             kind: "gemini",
             apiKey: "google-key",
             baseUrl: "https://generativelanguage.googleapis.com",
@@ -698,7 +684,7 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
               { name: "veo-3.1", mediaType: "video" },
             ],
           },
-        ],
+        },
       },
     };
     const result = shoggothConfigSchema.safeParse(config);

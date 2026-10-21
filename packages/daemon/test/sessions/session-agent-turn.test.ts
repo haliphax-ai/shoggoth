@@ -286,15 +286,14 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
   it("onContextUpdate falls back to the resolved model's window when the provider omits it", async () => {
     const config = defaultConfig(tmp);
     config.models = {
-      providers: [
-        {
-          id: "win",
+      providers: {
+        win: {
           kind: "openai-compatible" as const,
           baseUrl: "http://localhost:1/v1",
           apiKey: "fake",
           models: [{ name: "m", contextWindowTokens: 128_000 }],
         },
-      ],
+      },
       failoverChain: ["win/m"],
     };
     const sessions = createSessionStore(db);
@@ -353,14 +352,13 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
     const config = defaultConfig(tmp);
     // Configure a model with a tiny context window so the threshold is exceeded.
     config.models = {
-      providers: [
-        {
-          id: "tiny",
+      providers: {
+        tiny: {
           kind: "openai-compatible" as const,
           baseUrl: "http://localhost:1/v1",
           apiKey: "fake",
         },
-      ],
+      },
       failoverChain: [{ providerId: "tiny", model: "m", contextWindowTokens: 100 }],
       compaction: {
         preserveRecentMessages: 2,
@@ -425,14 +423,13 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
       // The model entry carries no contextWindowTokens, so there is no window
       // to threshold mid-turn compaction against.
       config.models = {
-        providers: [
-          {
-            id: "nowin",
+        providers: {
+          nowin: {
             kind: "openai-compatible" as const,
             baseUrl: "http://localhost:1/v1",
             apiKey: "fake",
           },
-        ],
+        },
         failoverChain: [{ providerId: "nowin", model: "m" }],
       };
 
@@ -496,14 +493,13 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
     try {
       const config = defaultConfig(tmp);
       config.models = {
-        providers: [
-          {
-            id: "nowin",
+        providers: {
+          nowin: {
             kind: "openai-compatible" as const,
             baseUrl: "http://localhost:1/v1",
             apiKey: "fake",
           },
-        ],
+        },
         failoverChain: [{ providerId: "nowin", model: "m" }],
       };
 
@@ -562,14 +558,13 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
     const config = defaultConfig(tmp);
     // Configure an openai-compatible provider so the codec resolves.
     config.models = {
-      providers: [
-        {
-          id: "test-oai",
+      providers: {
+        "test-oai": {
           kind: "openai-compatible" as const,
           baseUrl: "http://localhost:1234/v1",
           apiKey: "test-key",
         },
-      ],
+      },
       failoverChain: [{ providerId: "test-oai", model: "gpt-test" }],
     };
 
@@ -771,20 +766,18 @@ describe(
     it("prepends session modelSelection.model to the failover chain (deduped)", async () => {
       const config = defaultConfig(tmp);
       config.models = {
-        providers: [
-          {
-            id: "provA",
+        providers: {
+          provA: {
             kind: "openai-compatible" as const,
             baseUrl: "http://localhost:1/v1",
             apiKey: "k",
           },
-          {
-            id: "provB",
+          provB: {
             kind: "anthropic-messages" as const,
             baseUrl: "http://localhost:2",
             apiKey: "k",
           },
-        ],
+        },
         failoverChain: ["provA/modelA", "provB/modelB"],
       };
 
@@ -829,14 +822,13 @@ describe(
     it("falls back to config chain when session has no model in modelSelection", async () => {
       const config = defaultConfig(tmp);
       config.models = {
-        providers: [
-          {
-            id: "provA",
+        providers: {
+          provA: {
             kind: "openai-compatible" as const,
             baseUrl: "http://localhost:1/v1",
             apiKey: "k",
           },
-        ],
+        },
         failoverChain: ["provA/modelA"],
       };
 
@@ -880,14 +872,13 @@ describe(
     it("ignores bare model names (no /) in session modelSelection", async () => {
       const config = defaultConfig(tmp);
       config.models = {
-        providers: [
-          {
-            id: "provA",
+        providers: {
+          provA: {
             kind: "openai-compatible" as const,
             baseUrl: "http://localhost:1/v1",
             apiKey: "k",
           },
-        ],
+        },
         failoverChain: ["provA/modelA"],
       };
 
@@ -930,20 +921,18 @@ describe(
     it("resolves image block codec from session primary provider, not config chain head", async () => {
       const config = defaultConfig(tmp);
       config.models = {
-        providers: [
-          {
-            id: "provOai",
+        providers: {
+          provOai: {
             kind: "openai-compatible" as const,
             baseUrl: "http://localhost:1/v1",
             apiKey: "k",
           },
-          {
-            id: "provAnth",
+          provAnth: {
             kind: "anthropic-messages" as const,
             baseUrl: "http://localhost:2",
             apiKey: "k",
           },
-        ],
+        },
         failoverChain: ["provOai/gpt-test", "provAnth/claude-test"],
       };
 
@@ -987,7 +976,7 @@ describe(
         "session model should be first in chain so image codec resolves from anthropic provider",
       );
       const firstProviderId = (chain[0] as string).split("/")[0];
-      const firstProvider = capturedModels!.providers!.find((p) => p.id === firstProviderId);
+      const firstProvider = capturedModels!.providers![firstProviderId];
       assert.ok(firstProvider);
       assert.strictEqual(
         firstProvider!.kind,
@@ -999,20 +988,18 @@ describe(
     it("prepends session model even when it is absent from the config failover chain", async () => {
       const config = defaultConfig(tmp);
       config.models = {
-        providers: [
-          {
-            id: "provA",
+        providers: {
+          provA: {
             kind: "openai-compatible" as const,
             baseUrl: "http://localhost:1/v1",
             apiKey: "k",
           },
-          {
-            id: "provB",
+          provB: {
             kind: "anthropic-messages" as const,
             baseUrl: "http://localhost:2",
             apiKey: "k",
           },
-        ],
+        },
         failoverChain: ["provA/modelA"],
       };
 
@@ -1054,7 +1041,7 @@ describe(
     it("passes correctly formatted modelLabel to buildSessionSystemContext", async () => {
       const config = defaultConfig(tmp);
       config.models = {
-        providers: [{ id: "p1", kind: "openai-compatible", baseUrl: "b", apiKey: "k" }],
+        providers: { p1: { kind: "openai-compatible", baseUrl: "b", apiKey: "k" } },
         failoverChain: ["p1/m1"],
       };
       const sessions = createSessionStore(db);
@@ -1089,14 +1076,13 @@ describe(
     it("ignores malformed model refs (/model, provider/, empty) in session modelSelection", async () => {
       const config = defaultConfig(tmp);
       config.models = {
-        providers: [
-          {
-            id: "provA",
+        providers: {
+          provA: {
             kind: "openai-compatible" as const,
             baseUrl: "http://localhost:1/v1",
             apiKey: "k",
           },
-        ],
+        },
         failoverChain: ["provA/modelA"],
       };
 

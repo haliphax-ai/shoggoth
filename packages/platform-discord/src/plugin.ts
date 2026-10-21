@@ -9,6 +9,7 @@ import {
   type PlatformDeps,
   type PlatformDeliveryResolver,
 } from "@shoggoth/plugins";
+import { modelProvidersToEntries } from "@shoggoth/shared";
 import { discordPlatformRegistration } from "./platform-registration";
 import { createDiscordProbe } from "./probe";
 import { startDaemonDiscordMessaging, type DiscordMessagingRuntime } from "./bootstrap";
@@ -267,7 +268,8 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
             getModelsConfig: async () => {
               const cfg = configRef.current;
               const models = cfg?.models;
-              if (!models?.providers || models.providers.length === 0) return null;
+              if (!models?.providers || Object.keys(models.providers).length === 0) return null;
+              const providerEntries = modelProvidersToEntries(models.providers);
               const chain = models.failoverChain ?? [];
               // Parse failoverChain strings ("providerId/model") into structured entries
               const parsedChain = chain.map((entry: string) => {
@@ -276,7 +278,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
                 return { providerId: entry.slice(0, slashIdx), model: entry.slice(slashIdx + 1) };
               });
               return {
-                providers: models.providers.map(
+                providers: providerEntries.map(
                   (p: { id: string; kind: string; models?: Array<{ name: string }> }) => {
                     // Collect models from provider's own models array
                     const seen = new Set<string>();

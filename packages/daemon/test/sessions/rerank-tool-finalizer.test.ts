@@ -26,7 +26,7 @@ function makeConfig(overrides?: Partial<{ rerank: ShoggothConfig["rerank"] }>): 
     memory: { paths: ["memory"], embeddings: { enabled: false } },
     skills: { scanRoots: ["skills"], disabledIds: [] },
     plugins: [],
-    mcp: { servers: [], poolScope: "global" },
+    mcp: { servers: {}, poolScope: "global" },
     policy: {
       operator: {
         controlOps: { allow: ["*"], deny: [], review: [] },
@@ -38,17 +38,16 @@ function makeConfig(overrides?: Partial<{ rerank: ShoggothConfig["rerank"] }>): 
       },
       auditRedaction: { jsonPaths: [] },
     },
-    models: { providers: [] },
-    rerank: { providers: [] },
+    models: { providers: {} },
+    rerank: { providers: {} },
     ...overrides,
   } as ShoggothConfig;
 }
 
 const rerankConfigWithModels = {
   defaultModel: "openrouter-cohere/cohere/rerank-v3.5",
-  providers: [
-    {
-      id: "openrouter-cohere",
+  providers: {
+    "openrouter-cohere": {
       kind: "cohere" as const,
       baseUrl: "https://openrouter.ai/api",
       apiKeyEnv: "OPENROUTER_API_KEY",
@@ -57,7 +56,7 @@ const rerankConfigWithModels = {
         { name: "nvidia/llama-nemotron-rerank-vl-1b-v2:free" },
       ],
     },
-  ],
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -93,7 +92,7 @@ describe("createRerankToolFinalizer", () => {
     });
 
     it("does not inject tool when providers array is empty", () => {
-      const config = makeConfig({ rerank: { providers: [] } });
+      const config = makeConfig({ rerank: { providers: {} } });
       const finalizer = createRerankToolFinalizer(config);
       const ctx = buildBuiltinOnlySessionMcpToolContext();
       const result = finalizer(ctx, "agent:test:discord:channel:123");
@@ -105,14 +104,13 @@ describe("createRerankToolFinalizer", () => {
     it("does not inject tool when providers have no models", () => {
       const config = makeConfig({
         rerank: {
-          providers: [
-            {
-              id: "openrouter-cohere",
+          providers: {
+            "openrouter-cohere": {
               kind: "cohere",
               baseUrl: "https://openrouter.ai/api",
               models: [],
             },
-          ],
+          },
         },
       });
       const finalizer = createRerankToolFinalizer(config);

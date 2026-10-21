@@ -35,7 +35,7 @@ function minimalConfig(tmp: string, dynamicConfigDirectory?: string): ShoggothCo
     memory: { paths: [] as string[], embeddings: { enabled: false } },
     skills: { scanRoots: [] as string[], disabledIds: [] as string[] },
     plugins: [] as never[],
-    mcp: { servers: [] as never[], poolScope: "global" as const },
+    mcp: { servers: {} as never[], poolScope: "global" as const },
     policy: DEFAULT_POLICY_CONFIG,
     ...(dynamicConfigDirectory ? { dynamicConfigDirectory } : {}),
   } as ShoggothConfig;
@@ -76,8 +76,8 @@ describe("config_request control op", { concurrency: false }, () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("succeeds with a valid fragment and writes the file", async () => {
     const dynDir = join(tmp, "dynamic");
