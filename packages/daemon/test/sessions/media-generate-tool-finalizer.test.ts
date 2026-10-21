@@ -40,7 +40,7 @@ function makeConfig(
     memory: { paths: ["memory"], embeddings: { enabled: false } },
     skills: { scanRoots: ["skills"], disabledIds: [] },
     plugins: [],
-    mcp: { servers: [], poolScope: "global" },
+    mcp: { servers: {}, poolScope: "global" },
     policy: {
       operator: {
         controlOps: { allow: ["*"], deny: [], review: [] },
@@ -52,8 +52,8 @@ function makeConfig(
       },
       auditRedaction: { jsonPaths: [] },
     },
-    models: { providers: [] },
-    mediaGeneration: { providers: [] },
+    models: { providers: {} },
+    mediaGeneration: { providers: {} },
     ...overrides,
   } as ShoggothConfig;
 }
@@ -71,14 +71,13 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
     it("injects builtin-media-generate when a provider has models", () => {
       const config = makeConfig({
         mediaGeneration: {
-          providers: [
-            {
-              id: "openrouter",
+          providers: {
+            openrouter: {
               kind: "openai-compatible",
               baseUrl: "https://openrouter.ai/api",
-              models: [{ name: "black-forest-labs/flux.2-klein-4b", mediaType: "image" }],
+              models: { "black-forest-labs/flux.2-klein-4b": { mediaType: "image" } },
             },
-          ],
+          },
         },
       });
 
@@ -95,17 +94,16 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
     it("injects tool when gemini provider has models", () => {
       const config = makeConfig({
         mediaGeneration: {
-          providers: [
-            {
-              id: "google",
+          providers: {
+            google: {
               kind: "gemini",
               baseUrl: "https://generativelanguage.googleapis.com",
-              models: [
-                { name: "gemini-2.5-flash-image", mediaType: "image" },
-                { name: "veo-3.1", mediaType: "video" },
-              ],
+              models: {
+                "gemini-2.5-flash-image": { mediaType: "image" },
+                "veo-3.1": { mediaType: "video" },
+              },
             },
-          ],
+          },
         },
       });
 
@@ -139,7 +137,7 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
     it("does not inject tool when providers array is empty", () => {
       const config = makeConfig({
         mediaGeneration: {
-          providers: [],
+          providers: {},
         },
       });
 
@@ -156,14 +154,13 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
     it("does not inject tool when providers exist but have no models", () => {
       const config = makeConfig({
         mediaGeneration: {
-          providers: [
-            {
-              id: "openrouter",
+          providers: {
+            openrouter: {
               kind: "openai-compatible",
               baseUrl: "https://openrouter.ai/api",
-              models: [],
+              models: {},
             },
-          ],
+          },
         },
       });
 
@@ -197,14 +194,13 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
     it("does not duplicate tool if already present", () => {
       const config = makeConfig({
         mediaGeneration: {
-          providers: [
-            {
-              id: "openrouter",
+          providers: {
+            openrouter: {
               kind: "openai-compatible",
               baseUrl: "https://openrouter.ai/api",
-              models: [{ name: "test-model", mediaType: "image" }],
+              models: { "test-model": { mediaType: "image" } },
             },
-          ],
+          },
         },
       });
 
@@ -229,14 +225,13 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
       const config = makeConfig({
         mediaGeneration: undefined as unknown as ShoggothConfig["mediaGeneration"],
         models: {
-          providers: [
-            {
-              id: "gemini-default",
+          providers: {
+            "gemini-default": {
               kind: "gemini",
               apiKey: "test-key",
               baseUrl: "https://generativelanguage.googleapis.com",
             },
-          ],
+          },
         },
       } as any);
 
@@ -256,20 +251,18 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
     it("injects tool when multiple providers have models", () => {
       const config = makeConfig({
         mediaGeneration: {
-          providers: [
-            {
-              id: "openrouter",
+          providers: {
+            openrouter: {
               kind: "openai-compatible",
               baseUrl: "https://openrouter.ai/api",
-              models: [{ name: "black-forest-labs/flux.2-klein-4b", mediaType: "image" }],
+              models: { "black-forest-labs/flux.2-klein-4b": { mediaType: "image" } },
             },
-            {
-              id: "google",
+            google: {
               kind: "gemini",
               baseUrl: "https://generativelanguage.googleapis.com",
-              models: [{ name: "gemini-2.5-flash-image", mediaType: "image" }],
+              models: { "gemini-2.5-flash-image": { mediaType: "image" } },
             },
-          ],
+          },
         },
       });
 
@@ -286,20 +279,18 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
     it("injects tool when only one of multiple providers has models", () => {
       const config = makeConfig({
         mediaGeneration: {
-          providers: [
-            {
-              id: "empty-provider",
+          providers: {
+            "empty-provider": {
               kind: "openai-compatible",
               baseUrl: "https://example.com",
-              models: [],
+              models: {},
             },
-            {
-              id: "google",
+            google: {
               kind: "gemini",
               baseUrl: "https://generativelanguage.googleapis.com",
-              models: [{ name: "gemini-2.5-flash-image", mediaType: "image" }],
+              models: { "gemini-2.5-flash-image": { mediaType: "image" } },
             },
-          ],
+          },
         },
       });
 

@@ -2,6 +2,7 @@ import { createAggregateMcpCatalogResult, type McpSourceCatalog } from "@shoggot
 import type Database from "better-sqlite3";
 import {
   SHOGGOTH_DEFAULT_MCP_INSTANCE_IDLE_MS,
+  mcpServersToEntries,
   type ShoggothConfig,
   evaluateMcpServerRules,
   resolveEffectiveMcpServerRules,
@@ -228,7 +229,7 @@ export async function createSessionMcpRuntime(
   // Register tool discovery finalizer (must be last — sees the full catalog including web-search).
   finalizers.push(createToolDiscoveryFinalizer(opts.config, opts.db));
 
-  const mcpServers = opts.config.mcp?.servers ?? [];
+  const mcpServers = mcpServersToEntries(opts.config.mcp?.servers);
   const mcpPoolScope = opts.config.mcp?.poolScope ?? "global";
   const connectMcpPool = opts.deps?.connectShoggothMcpServers ?? connectShoggothMcpServers;
   const builtinMcpCtx = buildBuiltinOnlySessionMcpToolContext();

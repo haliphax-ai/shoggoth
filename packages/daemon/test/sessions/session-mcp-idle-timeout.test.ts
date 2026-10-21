@@ -51,9 +51,10 @@ function globalServer(id = "global-mcp"): ShoggothMcpServerEntry {
 /** Build a config with one per-session MCP server and a short idle timeout. */
 function configWithPerSessionMcp(workspacePath: string, idleMs = 5000): ShoggothConfig {
   const cfg = defaultConfig(workspacePath);
+  const { id, ...body } = perSessionServer();
   cfg.mcp = {
     ...cfg.mcp,
-    servers: [perSessionServer()],
+    servers: { [id]: body },
     poolScope: "per_session",
     perInstanceIdleTimeoutMs: idleMs,
   };
@@ -63,9 +64,10 @@ function configWithPerSessionMcp(workspacePath: string, idleMs = 5000): Shoggoth
 /** Build a config with one global MCP server and a short idle timeout. */
 function configWithGlobalMcp(workspacePath: string, idleMs = 5000): ShoggothConfig {
   const cfg = defaultConfig(workspacePath);
+  const { id, ...body } = globalServer();
   cfg.mcp = {
     ...cfg.mcp,
-    servers: [globalServer()],
+    servers: { [id]: body },
     poolScope: "global",
     perInstanceIdleTimeoutMs: idleMs,
   };
@@ -170,7 +172,7 @@ describe("unified MCP idle eviction — trackInstanceIdle", () => {
   it("trackInstanceIdle is false when no MCP servers are configured", async () => {
     const mockMcp = createMockConnectMcp();
     const cfg = defaultConfig(tmp);
-    cfg.mcp = { ...cfg.mcp, servers: [], perInstanceIdleTimeoutMs: 5000 };
+    cfg.mcp = { ...cfg.mcp, servers: {}, perInstanceIdleTimeoutMs: 5000 };
 
     const runtime = await createSessionMcpRuntime({
       config: cfg,
@@ -567,16 +569,23 @@ describe("unified MCP idle eviction — turn begin cancels all scopes", () => {
     const cfg = defaultConfig(tmp);
     cfg.mcp = {
       ...cfg.mcp,
-      servers: [
-        globalServer("g"),
-        {
-          id: "a",
+      servers: {
+        g: {
+          transport: "stdio" as const,
+          command: "echo",
+          poolScope: "global",
+        } as ShoggothMcpServerEntry,
+        a: {
           transport: "stdio" as const,
           command: "echo",
           poolScope: "per_agent",
         } as ShoggothMcpServerEntry,
-        perSessionServer("s"),
-      ],
+        s: {
+          transport: "stdio" as const,
+          command: "echo",
+          poolScope: "per_session",
+        } as ShoggothMcpServerEntry,
+      },
       poolScope: "global",
       perInstanceIdleTimeoutMs: idleMs,
     };
@@ -778,14 +787,13 @@ describe("reconnect on activity — failed connects and eviction", () => {
     const cfg = defaultConfig(tmp);
     cfg.mcp = {
       ...cfg.mcp,
-      servers: [
-        {
-          id: "agent-mcp",
+      servers: {
+        "agent-mcp": {
           transport: "stdio" as const,
           command: "echo",
           poolScope: "per_agent",
         } as ShoggothMcpServerEntry,
-      ],
+      },
       poolScope: "global" as const,
       perInstanceIdleTimeoutMs: 5000,
     };

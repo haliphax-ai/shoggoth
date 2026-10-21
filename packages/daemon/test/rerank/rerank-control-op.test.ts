@@ -59,18 +59,17 @@ function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
     memory: { paths: ["memory"], embeddings: { enabled: false } },
     skills: { scanRoots: ["skills"], disabledIds: [] },
     plugins: [],
-    mcp: { servers: [], poolScope: "global" },
+    mcp: { servers: {}, poolScope: "global" },
     policy: DEFAULT_POLICY_CONFIG,
     rerank: {
-      providers: [
-        {
-          id: "openrouter-cohere",
+      providers: {
+        "openrouter-cohere": {
           kind: "cohere",
           apiKey: "test-api-key",
           baseUrl: "https://openrouter.ai/api",
-          models: [{ name: "cohere/rerank-v3.5" }],
+          models: { "cohere/rerank-v3.5": {} },
         },
-      ],
+      },
     },
     ...overrides,
   } as ShoggothConfig;
@@ -340,14 +339,13 @@ describe("rerank_documents control op", () => {
     it("is invisible when providers exist but have no models", async () => {
       const ctx = makeCtx({
         rerank: {
-          providers: [
-            {
-              id: "openrouter-cohere",
+          providers: {
+            "openrouter-cohere": {
               kind: "cohere",
               baseUrl: "https://openrouter.ai/api",
-              models: [],
+              models: {},
             },
-          ],
+          },
         },
       });
       const req = makeReq(validPayload());
@@ -386,42 +384,42 @@ describe("rerank_documents control op", () => {
 // ---------------------------------------------------------------------------
 
 describe("shoggothRerankConfigSchema", () => {
-  const validProvider = {
-    id: "p1",
-    kind: "cohere" as const,
-    baseUrl: "https://api.cohere.com",
-    models: [],
+  const validProviders = {
+    p1: {
+      kind: "cohere" as const,
+      baseUrl: "https://api.cohere.com",
+      models: {},
+    },
   };
 
   it("accepts a valid config", () => {
-    const parsed = shoggothRerankConfigSchema.safeParse({ providers: [validProvider] });
+    const parsed = shoggothRerankConfigSchema.safeParse({ providers: validProviders });
     assert.ok(parsed.success);
   });
 
   it("rejects unknown provider kind", () => {
     const parsed = shoggothRerankConfigSchema.safeParse({
-      providers: [{ id: "p1", kind: "openai", baseUrl: "https://example.com", models: [] }],
+      providers: { p1: { kind: "openai", baseUrl: "https://example.com", models: {} } },
     });
     assert.ok(!parsed.success);
   });
 
   it("rejects provider without baseUrl", () => {
     const parsed = shoggothRerankConfigSchema.safeParse({
-      providers: [{ id: "p1", kind: "cohere", models: [] }],
+      providers: { p1: { kind: "cohere", models: {} } },
     });
     assert.ok(!parsed.success);
   });
 
-  it("rejects model without name", () => {
+  it("rejects a model record entry with an empty name key", () => {
     const parsed = shoggothRerankConfigSchema.safeParse({
-      providers: [
-        {
-          id: "p1",
+      providers: {
+        p1: {
           kind: "cohere",
           baseUrl: "https://example.com",
-          models: [{}],
+          models: { "": {} },
         },
-      ],
+      },
     });
     assert.ok(!parsed.success);
   });
@@ -429,7 +427,7 @@ describe("shoggothRerankConfigSchema", () => {
   it("rejects unknown fields (strict)", () => {
     const parsed = shoggothRerankConfigSchema.safeParse({
       nope: true,
-      providers: [validProvider],
+      providers: validProviders,
     });
     assert.ok(!parsed.success);
   });
@@ -437,14 +435,13 @@ describe("shoggothRerankConfigSchema", () => {
   it("rejects a defaultModel that matches no configured model", () => {
     const parsed = shoggothRerankConfigSchema.safeParse({
       defaultModel: "p1/rerank-typo",
-      providers: [
-        {
-          id: "p1",
+      providers: {
+        p1: {
           kind: "cohere",
           baseUrl: "https://example.com",
-          models: [{ name: "rerank-v3.5" }],
+          models: { "rerank-v3.5": {} },
         },
-      ],
+      },
     });
     assert.ok(!parsed.success);
   });
@@ -452,7 +449,7 @@ describe("shoggothRerankConfigSchema", () => {
   it("rejects a defaultModel when no providers are configured", () => {
     const parsed = shoggothRerankConfigSchema.safeParse({
       defaultModel: "p1/rerank-v3.5",
-      providers: [],
+      providers: {},
     });
     assert.ok(!parsed.success);
   });
@@ -460,14 +457,13 @@ describe("shoggothRerankConfigSchema", () => {
   it("rejects a raw defaultModel without the provider/model-id format", () => {
     const parsed = shoggothRerankConfigSchema.safeParse({
       defaultModel: "rerank-v3.5",
-      providers: [
-        {
-          id: "p1",
+      providers: {
+        p1: {
           kind: "cohere",
           baseUrl: "https://example.com",
-          models: [{ name: "rerank-v3.5" }],
+          models: { "rerank-v3.5": {} },
         },
-      ],
+      },
     });
     assert.ok(!parsed.success);
   });
@@ -475,14 +471,13 @@ describe("shoggothRerankConfigSchema", () => {
   it("accepts a defaultModel matching a configured provider/model pair", () => {
     const parsed = shoggothRerankConfigSchema.safeParse({
       defaultModel: "p1/rerank-v3.5",
-      providers: [
-        {
-          id: "p1",
+      providers: {
+        p1: {
           kind: "cohere",
           baseUrl: "https://example.com",
-          models: [{ name: "rerank-v3.5" }],
+          models: { "rerank-v3.5": {} },
         },
-      ],
+      },
     });
     assert.ok(parsed.success);
   });
@@ -490,19 +485,19 @@ describe("shoggothRerankConfigSchema", () => {
   it("accepts memorySearch.enabled; absent stanza stays absent, omitted enabled defaults true", () => {
     const disabled = shoggothRerankConfigSchema.safeParse({
       memorySearch: { enabled: false },
-      providers: [validProvider],
+      providers: validProviders,
     });
     assert.ok(disabled.success);
     assert.equal(disabled.success && disabled.data.memorySearch?.enabled, false);
 
     const defaulted = shoggothRerankConfigSchema.safeParse({
       memorySearch: {},
-      providers: [validProvider],
+      providers: validProviders,
     });
     assert.ok(defaulted.success);
     assert.equal(defaulted.success && defaulted.data.memorySearch?.enabled, true);
 
-    const absent = shoggothRerankConfigSchema.safeParse({ providers: [validProvider] });
+    const absent = shoggothRerankConfigSchema.safeParse({ providers: validProviders });
     assert.ok(absent.success);
     assert.equal(absent.success && absent.data.memorySearch, undefined);
   });
@@ -510,7 +505,7 @@ describe("shoggothRerankConfigSchema", () => {
   it("rejects a non-boolean memorySearch.enabled", () => {
     const parsed = shoggothRerankConfigSchema.safeParse({
       memorySearch: { enabled: "yes" },
-      providers: [validProvider],
+      providers: validProviders,
     });
     assert.ok(!parsed.success);
   });
@@ -518,7 +513,7 @@ describe("shoggothRerankConfigSchema", () => {
   it("rejects unknown fields inside memorySearch (strict)", () => {
     const parsed = shoggothRerankConfigSchema.safeParse({
       memorySearch: { enabled: true, nope: true },
-      providers: [validProvider],
+      providers: validProviders,
     });
     assert.ok(!parsed.success);
   });

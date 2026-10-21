@@ -12,17 +12,21 @@ import {
   createAggregateMcpCatalogResult,
 } from "@shoggoth/mcp-integration";
 import {
+  decisionModelEntriesFromRecord,
   effectiveMaxSpawnDepth,
   evaluateMcpServerRules,
   isSubagentSessionUrn,
   maySpawnSubagentAtDepth,
   parseAgentSessionUrn,
+  rerankModelEntriesFromRecord,
   resolveAgentIdFromSessionId,
   resolveContextLevel,
   resolveEffectiveMcpServerRules,
   type ContextLevel,
   type ContextLevelToolOverride,
   type ShoggothConfig,
+  type ShoggothDecisionProviderBody,
+  type ShoggothRerankProviderBody,
 } from "@shoggoth/shared";
 import { messageToolContextRef } from "../messaging/message-tool-context-ref";
 import { vaultServiceRef } from "../vault/vault-ref";
@@ -391,7 +395,9 @@ export function createMcpServerRulesFinalizer(
     // Server ids flagged `explicit` are never matched by wildcard/`*` allow
     // patterns — they must be named exactly in the effective allow list.
     const explicitServerIds = new Set(
-      config.mcp?.servers?.filter((s) => s.explicit).map((s) => s.id) ?? [],
+      Object.entries(config.mcp?.servers ?? {})
+        .filter(([, s]) => s.explicit)
+        .map(([id]) => id),
     );
 
     // Determine which external sourceIds are denied
@@ -521,14 +527,21 @@ const MEDIA_GENERATE_TOOL_DESCRIPTOR: AggregatedTool = {
  */
 function decisionToolDescriptor(config: ShoggothConfig): AggregatedTool {
   const decision = (config as any).decision;
-  const providers: { id?: string; models?: { name: string }[] }[] = decision?.providers ?? [];
+  const providers = Object.entries(
+    (decision?.providers ?? {}) as Record<string, ShoggothDecisionProviderBody>,
+  ).map(([id, p]) => ({
+    id,
+    ...p,
+    models: decisionModelEntriesFromRecord(p.models),
+  }));
   const defaultModel: string | undefined = decision?.defaultModel;
   // defaultModel is already in provider-id/model-name format; the provider
   // prefix names the combo explicitly, so no separate provider lookup is needed
   const defaultModelLabel = defaultModel != null ? `'${defaultModel}'` : undefined;
+  const firstModelName = providers[0]?.models?.[0]?.name;
   const exampleRef =
-    providers[0]?.id != null && providers[0]?.models?.[0]?.name != null
-      ? `${providers[0].id}/${providers[0].models[0].name}`
+    providers[0]?.id != null && firstModelName != null
+      ? `${providers[0].id}/${firstModelName}`
       : `provider-id/model-name`;
 
   const description =
@@ -587,14 +600,21 @@ function decisionToolDescriptor(config: ShoggothConfig): AggregatedTool {
  */
 function rerankToolDescriptor(config: ShoggothConfig): AggregatedTool {
   const rerank = config.rerank;
-  const providers: { id?: string; models?: { name: string }[] }[] = rerank?.providers ?? [];
+  const providers = Object.entries(
+    (rerank?.providers ?? {}) as Record<string, ShoggothRerankProviderBody>,
+  ).map(([id, p]) => ({
+    id,
+    ...p,
+    models: rerankModelEntriesFromRecord(p.models),
+  }));
   const defaultModel: string | undefined = rerank?.defaultModel;
   // defaultModel is already in provider-id/model-name format; the provider
   // prefix names the combo explicitly, so no separate provider lookup is needed
   const defaultModelLabel = defaultModel != null ? `'${defaultModel}'` : undefined;
+  const firstModelName = providers[0]?.models?.[0]?.name;
   const exampleRef =
-    providers[0]?.id != null && providers[0]?.models?.[0]?.name != null
-      ? `${providers[0].id}/${providers[0].models[0].name}`
+    providers[0]?.id != null && firstModelName != null
+      ? `${providers[0].id}/${firstModelName}`
       : `provider-id/model-name`;
 
   const description =
@@ -716,9 +736,9 @@ export function createMediaGenerateToolFinalizer(
   config: ShoggothConfig,
 ): (ctx: SessionMcpToolContext, sessionId: string) => SessionMcpToolContext {
   const hasMediaConfig =
-    (config.models?.providers ?? []).length > 0 ||
-    ((config as any).mediaGeneration?.providers ?? []).some(
-      (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
+    Object.keys(config.models?.providers ?? {}).length > 0 ||
+    Object.values(config.mediaGeneration?.providers ?? {}).some(
+      (p) => Object.keys(p.models ?? {}).length > 0,
     );
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   return (ctx, _sessionId) => {
@@ -749,8 +769,8 @@ export function createMediaGenerateToolFinalizer(
 export function createDecisionToolFinalizer(
   config: ShoggothConfig,
 ): (ctx: SessionMcpToolContext, sessionId: string) => SessionMcpToolContext {
-  const hasDecisionConfig = ((config as any).decision?.providers ?? []).some(
-    (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
+  const hasDecisionConfig = Object.values(config.decision?.providers ?? {}).some(
+    (p) => Object.keys(p.models ?? {}).length > 0,
   );
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   return (ctx, _sessionId) => {
@@ -782,7 +802,9 @@ export function createDecisionToolFinalizer(
 export function createRerankToolFinalizer(
   config: ShoggothConfig,
 ): (ctx: SessionMcpToolContext, sessionId: string) => SessionMcpToolContext {
-  const hasRerankConfig = (config.rerank?.providers ?? []).some((p) => (p.models?.length ?? 0) > 0);
+  const hasRerankConfig = Object.values(config.rerank?.providers ?? {}).some(
+    (p) => Object.keys(p.models ?? {}).length > 0,
+  );
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   return (ctx, _sessionId) => {
     if (!hasRerankConfig) return ctx;

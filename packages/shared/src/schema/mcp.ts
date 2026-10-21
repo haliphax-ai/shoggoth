@@ -101,9 +101,24 @@ export type ShoggothMcpHttpServerEntry = z.infer<typeof shoggothMcpHttpServerSch
 /** Default idle eviction for MCP pool instances when `perInstanceIdleTimeoutMs` is omitted. */
 export const SHOGGOTH_DEFAULT_MCP_INSTANCE_IDLE_MS = 30 * 60 * 1000;
 
+/** MCP server block as stored in `mcp.servers` (keyed by server id; the block itself carries no `id`). */
+export const shoggothMcpServerBodySchema = z.discriminatedUnion("transport", [
+  shoggothMcpStdioServerSchema.omit({ id: true }),
+  shoggothMcpTcpServerSchema.omit({ id: true }),
+  shoggothMcpHttpServerSchema.omit({ id: true }),
+]);
+export type ShoggothMcpServerBody = z.infer<typeof shoggothMcpServerBodySchema>;
+
+/** Expand a keyed `mcp.servers` map into runtime server entries (injecting the key as `id`). */
+export function mcpServersToEntries(
+  servers: Record<string, ShoggothMcpServerBody> = {},
+): ShoggothMcpServerEntry[] {
+  return Object.entries(servers).map(([id, s]) => ({ id, ...s }));
+}
+
 export const shoggothMcpConfigSchema = z
   .object({
-    servers: z.array(shoggothMcpServerEntrySchema),
+    servers: z.record(mcpSourceIdSchema, shoggothMcpServerBodySchema),
     /**
      * Default for servers that omit `poolScope` or set `poolScope: "inherit"`.
      * `global`: one MCP connection set shared across all platform-bound sessions.

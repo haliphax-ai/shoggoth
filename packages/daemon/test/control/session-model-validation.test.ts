@@ -51,7 +51,7 @@ function minimalConfig(socketPath: string): ShoggothConfig {
     memory: { paths: [], embeddings: { enabled: false } },
     skills: { scanRoots: [], disabledIds: [] },
     plugins: [],
-    mcp: { servers: [], poolScope: "global" },
+    mcp: { servers: {}, poolScope: "global" },
     policy: DEFAULT_POLICY_CONFIG,
   };
 }

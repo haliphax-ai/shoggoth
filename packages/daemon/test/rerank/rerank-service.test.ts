@@ -18,18 +18,17 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 const baseConfig: ShoggothRerankConfig = {
-  providers: [
-    {
-      id: "openrouter-cohere",
+  providers: {
+    "openrouter-cohere": {
       kind: "cohere",
       baseUrl: "https://openrouter.ai/api",
       apiKey: "or-key",
-      models: [
-        { name: "cohere/rerank-v3.5" },
-        { name: "nvidia/llama-nemotron-rerank-vl-1b-v2:free" },
-      ],
+      models: {
+        "cohere/rerank-v3.5": {},
+        "nvidia/llama-nemotron-rerank-vl-1b-v2:free": {},
+      },
     },
-  ],
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -136,7 +135,12 @@ describe("RerankService", () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({ results: [] }));
 
       const svc = RerankService.fromConfig({
-        providers: [{ ...baseConfig.providers[0]!, baseUrl: "https://openrouter.ai/api/" }],
+        providers: {
+          "openrouter-cohere": {
+            ...baseConfig.providers["openrouter-cohere"]!,
+            baseUrl: "https://openrouter.ai/api/",
+          },
+        },
       });
       await svc.rerank({
         model: "openrouter-cohere/cohere/rerank-v3.5",
@@ -154,15 +158,14 @@ describe("RerankService", () => {
 
       try {
         const svc = RerankService.fromConfig({
-          providers: [
-            {
-              id: "cohere-env",
+          providers: {
+            "cohere-env": {
               kind: "cohere",
               baseUrl: "https://api.cohere.com",
               apiKeyEnv: "TEST_RERANK_API_KEY",
-              models: [{ name: "rerank-v3.5" }],
+              models: { "rerank-v3.5": {} },
             },
-          ],
+          },
         });
         await svc.rerank({
           model: "cohere-env/rerank-v3.5",

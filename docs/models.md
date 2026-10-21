@@ -231,11 +231,11 @@ Determined by `isFailoverEligibleError()` in `classify.ts`:
 
 `createFailoverClientFromModelsConfig(modelsConfig, options)` reads `ShoggothModelsConfig`:
 
-- `models.providers[]` — array of provider definitions (`kind`, `id`, `baseUrl`, `apiKey`/`apiKeyEnv`, etc.) — see [Shared — Configuration Schema](shared.md#configuration-schema) for the full Zod schema
+- `models.providers` — map of provider id → provider definition (`kind`, `baseUrl`, `apiKey`/`apiKeyEnv`, etc.) — see [Shared — Configuration Schema](shared.md#configuration-schema) for the full Zod schema
 - `models.failoverChain[]` — array of `"providerId/modelName"` strings.
-- `models.providers[].models[]` — per-model overrides (`thinkingFormat`, `contextWindowTokens`).
+- `models.providers.<id>.models.<name>` — per-model overrides (`thinkingFormat`, `contextWindowTokens`), a map keyed by model name: the key is the model name and the body carries only the overrides.
 - `models.requestTimeoutMs` — top-level request timeout (ms) applied to all provider API requests.
-- `models.providers[].requestTimeoutMs` — per-provider request timeout (ms); overrides the top-level value for that provider only.
+- `models.providers.<id>.requestTimeoutMs` — per-provider request timeout (ms); overrides the top-level value for that provider only.
 
 When `failoverChain` is empty or absent, a single-hop provider is created from environment variables.
 
@@ -248,15 +248,14 @@ By default, provider API requests inherit Node's internal `fetch` timeouts (undi
   "models": {
     // Applies to every provider…
     "requestTimeoutMs": 600000,
-    "providers": [
-      {
-        "id": "ollama",
+    "providers": {
+      "ollama": {
         "kind": "openai-compatible",
         "baseUrl": "http://192.168.1.10:11434/v1",
         // …except this one, which overrides it.
         "requestTimeoutMs": 1800000,
       },
-    ],
+    },
   },
 }
 ```

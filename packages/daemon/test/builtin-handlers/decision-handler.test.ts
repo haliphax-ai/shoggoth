@@ -11,15 +11,14 @@ function makeConfig(decision?: ShoggothConfig["decision"]): ShoggothConfig {
 }
 
 const configuredDecision: NonNullable<ShoggothConfig["decision"]> = {
-  providers: [
-    {
-      id: "typesafe-main",
+  providers: {
+    "typesafe-main": {
       kind: "typesafe",
       baseUrl: "https://api.typesafe.ai",
       apiKeyEnv: "TYPESAFE_API_KEY",
-      models: [{ name: "jev-latest" }],
+      models: { "jev-latest": {} },
     },
-  ],
+  },
 };
 
 function makeCtx(
@@ -106,14 +105,13 @@ describe("decision-handler", () => {
   it("returns error when no provider has models", async () => {
     const ctx = makeCtx(
       makeConfig({
-        providers: [
-          {
-            id: "typesafe-main",
+        providers: {
+          "typesafe-main": {
             kind: "typesafe",
             baseUrl: "https://api.typesafe.ai",
-            models: [],
+            models: {},
           },
-        ],
+        },
       }),
     );
     const result = await registry.execute("decision", validArgs, ctx);

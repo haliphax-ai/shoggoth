@@ -133,7 +133,7 @@ MCP server environment variables can reference vault secrets using the `$vault:N
 ```yaml
 mcp:
   servers:
-    - id: my-api
+    my-api:
       transport: stdio
       command: node
       args: ["server.js"]

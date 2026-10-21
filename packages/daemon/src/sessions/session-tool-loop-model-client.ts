@@ -11,7 +11,7 @@ import {
   createFailoverClientFromModelsConfig,
   ModelRequestAbortedError,
 } from "@shoggoth/models";
-import type { ShoggothModelsConfig } from "@shoggoth/shared";
+import { modelProvidersToEntries, type ShoggothModelsConfig } from "@shoggoth/shared";
 import { compactSessionTranscript } from "../transcript-compact";
 import { loadSessionTranscriptAsModelChat } from "./transcript-to-chat";
 import { TurnAbortedError } from "./session-turn-abort";
@@ -239,11 +239,16 @@ export function createSessionToolLoopModelClient(input: {
               if (slash > 0 && slash < c.compactionModel.length - 1) {
                 const providerId = c.compactionModel.slice(0, slash);
                 const modelName = c.compactionModel.slice(slash + 1);
-                const provider = c.modelsConfig?.providers?.find((p) => p.id === providerId);
+                const provider = c.modelsConfig?.providers
+                  ? modelProvidersToEntries(c.modelsConfig.providers).find(
+                      (p) => p.id === providerId,
+                    )
+                  : undefined;
                 if (provider) {
+                  const { id, ...body } = provider;
                   compactionModelsConfig = {
-                    providers: [provider],
-                    failoverChain: [providerId + "/" + modelName],
+                    providers: { [id]: body },
+                    failoverChain: [id + "/" + modelName],
                   } as unknown as ShoggothModelsConfig;
                 }
               }

@@ -41,7 +41,7 @@ Set the default pool scope for all MCP servers in the `mcp` config block:
 ```jsonc
 {
   "mcp": {
-    "servers": [{ "id": "my-server", "transport": "stdio", "command": "my-mcp" }],
+    "servers": { "my-server": { "transport": "stdio", "command": "my-mcp" } },
     "poolScope": "per_agent",
   },
 }
@@ -56,27 +56,24 @@ Individual servers can override the top-level default using the `poolScope` fiel
 ```jsonc
 {
   "mcp": {
-    "servers": [
-      {
-        "id": "shared-db",
+    "servers": {
+      "shared-db": {
         "transport": "tcp",
         "host": "localhost",
         "port": 3000,
         "poolScope": "global",
       },
-      {
-        "id": "agent-tools",
+      "agent-tools": {
         "transport": "stdio",
         "command": "agent-mcp",
         "poolScope": "per_agent",
       },
-      {
-        "id": "session-state",
+      "session-state": {
         "transport": "stdio",
         "command": "state-mcp",
         "poolScope": "per_session",
       },
-    ],
+    },
     "poolScope": "global",
   },
 }
@@ -122,9 +119,9 @@ All pool scopes share a unified idle eviction mechanism controlled by `perInstan
 ```jsonc
 {
   "mcp": {
-    "servers": [
+    "servers": {
       /* ... */
-    ],
+    },
     "perInstanceIdleTimeoutMs": 1800000,
   },
 }

@@ -2,10 +2,16 @@ import type Database from "better-sqlite3";
 import type {
   ShoggothConfig,
   ShoggothModelsConfig,
+  ShoggothModelEntry,
+  ShoggothModelProviderEntry,
   FailoverChainEntry,
   ModelsRetry,
 } from "@shoggoth/shared";
-import { resolveEffectiveModelsConfig } from "@shoggoth/shared";
+import {
+  modelEntriesFromRecord,
+  modelProvidersToEntries,
+  resolveEffectiveModelsConfig,
+} from "@shoggoth/shared";
 import { isProviderFailed } from "./provider-failure-store";
 import { getLogger } from "../logging";
 
@@ -14,8 +20,8 @@ const log = getLogger("model-resolution");
 /** Default mark-failed duration when not configured (5 minutes). */
 const DEFAULT_MARK_FAILED_DURATION_MS = 300_000;
 
-type ProviderConfig = NonNullable<ShoggothModelsConfig["providers"]>[number];
-type ProviderModelDefinition = NonNullable<ProviderConfig["models"]>[number];
+type ProviderConfig = ShoggothModelProviderEntry;
+type ProviderModelDefinition = ShoggothModelEntry;
 
 export interface ResolvedModel {
   provider: ProviderConfig;
@@ -70,12 +76,13 @@ function findProvider(
   return providers.find((p) => p.id === providerId);
 }
 
-/** Find a model definition in a provider's models list. */
+/** Find a model definition in a provider's keyed `models` record. */
 function findModelDef(
   provider: ProviderConfig,
   modelName: string,
 ): ProviderModelDefinition | undefined {
-  return provider.models?.find((m) => m.name === modelName);
+  const body = provider.models?.[modelName];
+  return body ? { name: modelName, ...body } : undefined;
 }
 
 /**
@@ -94,7 +101,9 @@ export function validateModelRefExists(
     };
   }
 
-  const providers = modelsConfig?.providers;
+  const providers = modelsConfig?.providers
+    ? modelProvidersToEntries(modelsConfig.providers)
+    : undefined;
   if (!providers?.length) {
     // No providers configured — skip validation (nothing to check against).
     return { ok: true };
@@ -111,7 +120,11 @@ export function validateModelRefExists(
   if (!modelDef) {
     return {
       ok: false,
-      error: `Model "${parsed.modelName}" not found in provider "${parsed.providerId}" for model "${ref}". Available models: ${provider.models?.map((m) => m.name).join(", ") || "(none)"}`,
+      error: `Model "${parsed.modelName}" not found in provider "${parsed.providerId}" for model "${ref}". Available models: ${
+        modelEntriesFromRecord(provider.models)
+          .map((m) => m.name)
+          .join(", ") || "(none)"
+      }`,
     };
   }
 
@@ -183,7 +196,7 @@ function tryResolveRef(
  * 3. Check provider_failures: if failed and not stale → skip to failover; if stale → clear and try
  * 4. If provider down, find position in failover chain, walk from next entry until non-failed provider found
  * 5. If chain exhausted, return null + log warning
- * 6. Resolve model definition from provider's models list by name
+ * 6. Resolve model definition from provider's keyed `models` record by name
  */
 export function resolveModel(
   db: Database.Database,
@@ -199,7 +212,9 @@ export function resolveModel(
     return null;
   }
 
-  const providers = effectiveModels.providers;
+  const providers = effectiveModels.providers
+    ? modelProvidersToEntries(effectiveModels.providers)
+    : undefined;
   if (!providers?.length) {
     log.warn("no providers configured");
     return null;

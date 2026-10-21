@@ -41,15 +41,14 @@ function baseConfig(): ShoggothConfig {
       list: { test: { platforms: { discord: {} } } },
     },
     models: {
-      providers: [
-        {
-          id: "prov",
+      providers: {
+        prov: {
           kind: "openai-compatible",
           baseUrl: "http://x",
           apiKeyEnv: "K",
-          models: [{ name: "test-model" }],
+          models: { "test-model": {} },
         },
-      ],
+      },
       failoverChain: ["prov/test-model"],
     },
   } as unknown as ShoggothConfig;

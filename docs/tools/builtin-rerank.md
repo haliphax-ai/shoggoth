@@ -35,15 +35,14 @@ Results come back ordered by descending `relevance_score`; each `index` maps to 
 {
   "rerank": {
     "defaultModel": "openrouter-cohere/cohere/rerank-v3.5",
-    "providers": [
-      {
-        "id": "openrouter-cohere",
+    "providers": {
+      "openrouter-cohere": {
         "kind": "cohere",
         "baseUrl": "https://openrouter.ai/api",
         "apiKeyEnv": "OPENROUTER_API_KEY",
-        "models": [{ "name": "cohere/rerank-v3.5" }]
+        "models": { "cohere/rerank-v3.5": {} }
       }
-    ]
+    }
   }
 }
 ```

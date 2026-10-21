@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import type Database from "better-sqlite3";
-import { parseAgentSessionUrn } from "@shoggoth/shared";
+import { modelProvidersToEntries, parseAgentSessionUrn } from "@shoggoth/shared";
 import { buildSessionSystemContext } from "./session-system-prompt";
 import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import type {
@@ -200,24 +200,27 @@ function resolveImageBlockCodec(
   modelsConfig: ShoggothModelsConfig | undefined,
   primaryProviderId?: string,
 ): ImageBlockCodec | undefined {
-  if (!modelsConfig?.providers?.length) return undefined;
+  const providers = modelsConfig?.providers
+    ? modelProvidersToEntries(modelsConfig.providers)
+    : undefined;
+  if (!providers?.length) return undefined;
   // When a primary provider id is given (from session model ref), try it first.
   if (primaryProviderId) {
-    const provider = modelsConfig.providers.find((p) => p.id === primaryProviderId);
+    const provider = providers.find((p) => p.id === primaryProviderId);
     if (provider && IMAGE_CODEC_PROVIDER_KINDS.has(provider.kind)) {
       return getImageBlockCodec(
         provider.kind as "openai-compatible" | "anthropic-messages" | "gemini",
       );
     }
   }
-  const chain = modelsConfig.failoverChain;
+  const chain = modelsConfig?.failoverChain;
   if (chain?.length) {
     const entry = chain[0];
     const firstProviderId =
       typeof entry === "string"
         ? entry.split("/")[0]
         : (entry as { providerId: string }).providerId;
-    const provider = modelsConfig.providers.find((p) => p.id === firstProviderId);
+    const provider = providers.find((p) => p.id === firstProviderId);
     if (provider && IMAGE_CODEC_PROVIDER_KINDS.has(provider.kind)) {
       return getImageBlockCodec(
         provider.kind as "openai-compatible" | "anthropic-messages" | "gemini",
@@ -226,7 +229,7 @@ function resolveImageBlockCodec(
     return undefined;
   }
   // No failover chain — use the first provider's kind directly.
-  const first = modelsConfig.providers[0];
+  const first = providers[0];
   if (first && IMAGE_CODEC_PROVIDER_KINDS.has(first.kind)) {
     return getImageBlockCodec(first.kind as "openai-compatible" | "anthropic-messages" | "gemini");
   }

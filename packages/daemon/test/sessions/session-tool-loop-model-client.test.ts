@@ -911,18 +911,16 @@ describe("dedicated compaction model", () => {
     });
 
     const modelsConfig = {
-      providers: [
-        {
-          id: "main",
+      providers: {
+        main: {
           kind: "openai-compatible" as const,
           baseUrl: "http://main:8080",
         },
-        {
-          id: "local",
+        local: {
           kind: "openai-compatible" as const,
           baseUrl: "http://local:8080",
         },
-      ],
+      },
       failoverChain: [{ providerId: "main", model: "big-model" }],
     };
 
@@ -960,8 +958,8 @@ describe("dedicated compaction model", () => {
     const passedConfig = calls[0][0] as any;
     assert.equal(passedConfig.failoverChain.length, 1);
     assert.equal(passedConfig.failoverChain[0], "local/gemma4");
-    assert.equal(passedConfig.providers.length, 1);
-    assert.equal(passedConfig.providers[0].id, "local");
+    assert.equal(Object.keys(passedConfig.providers).length, 1);
+    assert.equal(Object.keys(passedConfig.providers)[0], "local");
   });
 
   it("falls back to full modelsConfig when compactionModel is not set", async () => {
@@ -972,13 +970,12 @@ describe("dedicated compaction model", () => {
     });
 
     const modelsConfig = {
-      providers: [
-        {
-          id: "main",
+      providers: {
+        main: {
           kind: "openai-compatible" as const,
           baseUrl: "http://main:8080",
         },
-      ],
+      },
       failoverChain: [{ providerId: "main", model: "big-model" }],
     };
 

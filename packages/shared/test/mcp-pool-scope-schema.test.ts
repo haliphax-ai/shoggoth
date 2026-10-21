@@ -32,7 +32,7 @@ describe("shoggothMcpServerPoolScopeSchema — per_agent value", () => {
 describe("shoggothMcpConfigSchema — top-level poolScope accepts per_agent", () => {
   it("accepts poolScope: 'per_agent' at the top level", () => {
     const result = shoggothMcpConfigSchema.safeParse({
-      servers: [],
+      servers: {},
       poolScope: "per_agent",
     });
     assert.ok(result.success, "top-level mcp.poolScope should accept 'per_agent'");
@@ -40,7 +40,7 @@ describe("shoggothMcpConfigSchema — top-level poolScope accepts per_agent", ()
 
   it("still accepts poolScope: 'global'", () => {
     const result = shoggothMcpConfigSchema.safeParse({
-      servers: [],
+      servers: {},
       poolScope: "global",
     });
     assert.ok(result.success);
@@ -48,7 +48,7 @@ describe("shoggothMcpConfigSchema — top-level poolScope accepts per_agent", ()
 
   it("still accepts poolScope: 'per_session'", () => {
     const result = shoggothMcpConfigSchema.safeParse({
-      servers: [],
+      servers: {},
       poolScope: "per_session",
     });
     assert.ok(result.success);
@@ -62,7 +62,7 @@ describe("shoggothMcpConfigSchema — top-level poolScope accepts per_agent", ()
 describe("shoggothMcpConfigSchema — perInstanceIdleTimeoutMs field", () => {
   it("accepts perInstanceIdleTimeoutMs as a valid field", () => {
     const result = shoggothMcpConfigSchema.safeParse({
-      servers: [],
+      servers: {},
       poolScope: "global",
       perInstanceIdleTimeoutMs: 60_000,
     });
@@ -71,7 +71,7 @@ describe("shoggothMcpConfigSchema — perInstanceIdleTimeoutMs field", () => {
 
   it("accepts perInstanceIdleTimeoutMs of 0 (disable)", () => {
     const result = shoggothMcpConfigSchema.safeParse({
-      servers: [],
+      servers: {},
       poolScope: "per_agent",
       perInstanceIdleTimeoutMs: 0,
     });
@@ -80,7 +80,7 @@ describe("shoggothMcpConfigSchema — perInstanceIdleTimeoutMs field", () => {
 
   it("rejects negative perInstanceIdleTimeoutMs", () => {
     const result = shoggothMcpConfigSchema.safeParse({
-      servers: [],
+      servers: {},
       poolScope: "global",
       perInstanceIdleTimeoutMs: -1,
     });

@@ -135,8 +135,8 @@ export function cruiseControlActivationWarnings(
     );
     return warnings;
   }
-  const decisionModels = (config.decision?.providers ?? []).flatMap((p) =>
-    (p.models ?? []).map((m) => `${p.id}/${m.name}`),
+  const decisionModels = Object.entries(config.decision?.providers ?? {}).flatMap(([id, p]) =>
+    Object.keys(p.models ?? {}).map((name) => `${id}/${name}`),
   );
   if (decisionModels.length === 0) {
     warnings.push("decision support is not configured; HITL requests will escalate to true HITL");
@@ -176,7 +176,7 @@ export async function judgeCruiseControl(input: CruiseJudgeInput): Promise<Cruis
     log.warn("cruise_judge_no_model", { sessionId: input.sessionId });
     return "escalate";
   }
-  if ((config.decision?.providers ?? []).length === 0) {
+  if (Object.keys(config.decision?.providers ?? {}).length === 0) {
     log.warn("cruise_judge_decision_unconfigured", { sessionId: input.sessionId });
     return "escalate";
   }
@@ -212,7 +212,7 @@ export async function judgeCruiseControl(input: CruiseJudgeInput): Promise<Cruis
         },
       };
 
-  const svc = DecisionService.fromConfig(config.decision ?? { providers: [] });
+  const svc = DecisionService.fromConfig(config.decision ?? { providers: {} });
   const res = await svc.evaluate({
     model,
     state,

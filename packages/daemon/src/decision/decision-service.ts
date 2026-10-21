@@ -1,5 +1,9 @@
 import { getLogger } from "../logging.js";
-import type { ShoggothDecisionConfig } from "@shoggoth/shared";
+import {
+  decisionModelEntriesFromRecord,
+  decisionProvidersToEntries,
+  type ShoggothDecisionConfig,
+} from "@shoggoth/shared";
 
 const log = getLogger("decision-service");
 
@@ -50,13 +54,15 @@ export class DecisionService {
   }
 
   static fromConfig(config: ShoggothDecisionConfig): DecisionService {
-    const providers: DecisionProviderConfig[] = (config.providers ?? []).map((p) => ({
-      id: p.id,
-      kind: "typesafe",
-      baseUrl: p.baseUrl,
-      apiKey: p.apiKey ?? (p.apiKeyEnv ? (process.env[p.apiKeyEnv] ?? "") : ""),
-      models: (p.models ?? []).map((m) => ({ name: m.name })),
-    }));
+    const providers: DecisionProviderConfig[] = decisionProvidersToEntries(config.providers).map(
+      (p) => ({
+        id: p.id,
+        kind: "typesafe",
+        baseUrl: p.baseUrl,
+        apiKey: p.apiKey ?? (p.apiKeyEnv ? (process.env[p.apiKeyEnv] ?? "") : ""),
+        models: decisionModelEntriesFromRecord(p.models).map((m) => ({ name: m.name })),
+      }),
+    );
 
     return new DecisionService({ providers, defaultModel: config.defaultModel });
   }

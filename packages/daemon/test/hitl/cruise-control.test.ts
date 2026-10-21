@@ -35,15 +35,14 @@ const SESSION = "agent:main:discord:channel:abc";
 function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
   return {
     decision: {
-      providers: [
-        {
-          id: "typesafe-main",
+      providers: {
+        "typesafe-main": {
           kind: "typesafe",
           apiKey: "k",
           baseUrl: "https://api.typesafe.ai",
-          models: [{ name: "jev-latest" }],
+          models: { "jev-latest": {} },
         },
-      ],
+      },
     },
     ...overrides,
   } as ShoggothConfig;

@@ -12,6 +12,8 @@ vi.mock("@shoggoth/shared", () => ({
   loadLayeredConfigAsync: (...args: unknown[]) => mockLoadLayeredConfig(...args),
   LAYOUT: { configDir: "/tmp/cfg" },
   VERSION: "0.0.0-test",
+  mediaGenerationModelEntriesFromRecord: (record: Record<string, Record<string, unknown>> = {}) =>
+    Object.entries(record).map(([name, body]) => ({ name, ...body })),
 }));
 
 import { parseMediaGenerateArgs, parseMediaPollArgs, runMediaCli } from "../src/run-media";
@@ -290,28 +292,26 @@ describe("runMediaCli models", () => {
     mockLoadLayeredConfig.mockReturnValue({
       socketPath: "/tmp/test.sock",
       mediaGeneration: {
-        providers: [
-          {
-            id: "google",
+        providers: {
+          google: {
             kind: "gemini",
             apiKey: "key",
             baseUrl: "https://generativelanguage.googleapis.com",
-            models: [
-              { name: "gemini-2.5-flash-image", mediaType: "image" },
-              { name: "veo-3.1-generate-preview", mediaType: "video" },
-            ],
+            models: {
+              "gemini-2.5-flash-image": { mediaType: "image" },
+              "veo-3.1-generate-preview": { mediaType: "video" },
+            },
           },
-          {
-            id: "openrouter",
+          openrouter: {
             kind: "openai-compatible",
             apiKey: "key2",
             baseUrl: "https://openrouter.ai/api",
-            models: [
-              { name: "recraft/recraft-v3", mediaType: "image" },
-              { name: "openai/gpt-5-image-mini", mediaType: "image", adapter: "openai-chat-image" },
-            ],
+            models: {
+              "recraft/recraft-v3": { mediaType: "image" },
+              "openai/gpt-5-image-mini": { mediaType: "image", adapter: "openai-chat-image" },
+            },
           },
-        ],
+        },
       },
     });
 
@@ -330,21 +330,19 @@ describe("runMediaCli models", () => {
     mockLoadLayeredConfig.mockReturnValue({
       socketPath: "/tmp/test.sock",
       mediaGeneration: {
-        providers: [
-          {
-            id: "google",
+        providers: {
+          google: {
             kind: "gemini",
             apiKey: "key",
             baseUrl: "https://generativelanguage.googleapis.com",
-            models: [
-              {
-                name: "imagen-4.0-fast-generate-001",
+            models: {
+              "imagen-4.0-fast-generate-001": {
                 mediaType: "image",
                 adapter: "gemini-predict",
               },
-            ],
+            },
           },
-        ],
+        },
       },
     });
 

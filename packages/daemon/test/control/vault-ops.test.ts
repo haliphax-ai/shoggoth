@@ -91,7 +91,7 @@ describe("vault-ops control handlers", () => {
         memory: { paths: [], embeddings: { enabled: false } },
         skills: { scanRoots: [], disabledIds: [] },
         plugins: [],
-        mcp: { servers: [], poolScope: "global" },
+        mcp: { servers: {}, poolScope: "global" },
         policy: {
           auditRedaction: { jsonPaths: [] },
         },
@@ -129,7 +129,12 @@ describe("vault-ops control handlers", () => {
         name: "TEST_KEY",
       });
       const getResult = await handleVaultGet(getReq, operatorPrincipal, ctx);
-      expect(getResult).toEqual({ ok: true, scope: "global", name: "TEST_KEY", value: "secret-value" });
+      expect(getResult).toEqual({
+        ok: true,
+        scope: "global",
+        name: "TEST_KEY",
+        value: "secret-value",
+      });
     });
 
     it("stores credential with metadata", async () => {
@@ -145,7 +150,7 @@ describe("vault-ops control handlers", () => {
 
       // List should show the metadata
       const listReq = makeWireRequest("vault.list", { scope: "global" });
-      const listResult = await handleVaultList(listReq, operatorPrincipal, ctx) as any;
+      const listResult = (await handleVaultList(listReq, operatorPrincipal, ctx)) as any;
       expect(listResult.entries).toHaveLength(1);
       expect(listResult.entries[0].metadata).toEqual({ expiresAt: "2026-12-31T23:59:59Z" });
     });
@@ -174,11 +179,11 @@ describe("vault-ops control handlers", () => {
       expect(result).toHaveProperty("ok", true);
 
       // Verify updated value
-      const getResult = await handleVaultGet(
+      const getResult = (await handleVaultGet(
         makeWireRequest("vault.get", { scope: "global", name: "SAME_KEY" }),
         operatorPrincipal,
         ctx,
-      ) as any;
+      )) as any;
       expect(getResult.value).toBe("updated");
     });
   });
@@ -275,11 +280,11 @@ describe("vault-ops control handlers", () => {
       expect(delResult).toEqual({ ok: true, deleted: true });
 
       // Verify it's gone
-      const getResult = await handleVaultGet(
+      const getResult = (await handleVaultGet(
         makeWireRequest("vault.get", { scope: "global", name: "TO_DELETE" }),
         operatorPrincipal,
         ctx,
-      ) as any;
+      )) as any;
       expect(getResult.value).toBeNull();
     });
 
@@ -391,18 +396,18 @@ API_KEY=secret123
       expect(res.imported).toBe(3); // FOO, EMPTY, DATABASE_URL, API_KEY = 4 actually
 
       // Verify entries were stored
-      const fooResult = await handleVaultGet(
+      const fooResult = (await handleVaultGet(
         makeWireRequest("vault.get", { scope: "global", name: "FOO" }),
         operatorPrincipal,
         ctx,
-      ) as any;
+      )) as any;
       expect(fooResult.value).toBe("bar");
 
-      const apiKeyResult = await handleVaultGet(
+      const apiKeyResult = (await handleVaultGet(
         makeWireRequest("vault.get", { scope: "global", name: "API_KEY" }),
         operatorPrincipal,
         ctx,
-      ) as any;
+      )) as any;
       expect(apiKeyResult.value).toBe("secret123");
     });
 
@@ -418,18 +423,18 @@ QUOTED_SINGLE='single quoted'
 
       await handleVaultImport(req, operatorPrincipal, ctx);
 
-      const doubleResult = await handleVaultGet(
+      const doubleResult = (await handleVaultGet(
         makeWireRequest("vault.get", { scope: "global", name: "QUOTED_DOUBLE" }),
         operatorPrincipal,
         ctx,
-      ) as any;
+      )) as any;
       expect(doubleResult.value).toBe("value with spaces");
 
-      const singleResult = await handleVaultGet(
+      const singleResult = (await handleVaultGet(
         makeWireRequest("vault.get", { scope: "global", name: "QUOTED_SINGLE" }),
         operatorPrincipal,
         ctx,
-      ) as any;
+      )) as any;
       expect(singleResult.value).toBe("single quoted");
     });
   });

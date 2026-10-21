@@ -68,11 +68,11 @@ if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
     const helpConfig = await loadLayeredConfigAsync(
       process.env.SHOGGOTH_CONFIG_DIR ?? LAYOUT.configDir,
     );
-    decisionEnabled = (helpConfig.decision?.providers ?? []).some(
-      (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
+    decisionEnabled = Object.values(helpConfig.decision?.providers ?? {}).some(
+      (p: { models?: Record<string, unknown> }) => Object.keys(p.models ?? {}).length > 0,
     );
-    rerankEnabled = (helpConfig.rerank?.providers ?? []).some(
-      (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
+    rerankEnabled = Object.values(helpConfig.rerank?.providers ?? {}).some(
+      (p: { models?: Record<string, unknown> }) => Object.keys(p.models ?? {}).length > 0,
     );
   } catch {
     decisionEnabled = false;

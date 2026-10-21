@@ -1,6 +1,10 @@
 import { getLogger } from "../logging.js";
 import type { FetchLike } from "@shoggoth/models";
-import type { ShoggothRerankConfig } from "@shoggoth/shared";
+import {
+  rerankModelEntriesFromRecord,
+  rerankProvidersToEntries,
+  type ShoggothRerankConfig,
+} from "@shoggoth/shared";
 
 const log = getLogger("rerank-service");
 
@@ -83,13 +87,15 @@ export class RerankService {
   }
 
   static fromConfig(config: ShoggothRerankConfig): RerankService {
-    const providers: RerankProviderConfig[] = (config.providers ?? []).map((p) => ({
-      id: p.id,
-      kind: "cohere",
-      baseUrl: p.baseUrl,
-      apiKey: p.apiKey ?? (p.apiKeyEnv ? (process.env[p.apiKeyEnv] ?? "") : ""),
-      models: (p.models ?? []).map((m) => ({ name: m.name })),
-    }));
+    const providers: RerankProviderConfig[] = rerankProvidersToEntries(config.providers).map(
+      (p) => ({
+        id: p.id,
+        kind: "cohere",
+        baseUrl: p.baseUrl,
+        apiKey: p.apiKey ?? (p.apiKeyEnv ? (process.env[p.apiKeyEnv] ?? "") : ""),
+        models: rerankModelEntriesFromRecord(p.models).map((m) => ({ name: m.name })),
+      }),
+    );
 
     return new RerankService({ providers, defaultModel: config.defaultModel });
   }

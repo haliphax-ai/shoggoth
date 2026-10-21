@@ -17,7 +17,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSessionMcpRuntime } from "../../src/sessions/session-mcp-runtime";
 import type { McpServerPool } from "../../src/mcp/mcp-server-pool";
 import type { ConnectShoggothMcpPoolOptions } from "../../src/mcp/mcp-server-pool";
-import type { ShoggothConfig, ShoggothMcpServerEntry } from "@shoggoth/shared";
+import type {
+  ShoggothConfig,
+  ShoggothMcpServerBody,
+  ShoggothMcpServerEntry,
+} from "@shoggoth/shared";
 import { defaultConfig, formatAgentSessionUrn } from "@shoggoth/shared";
 import type { McpSourceCatalog } from "@shoggoth/mcp-integration";
 import { mkdtempSync } from "node:fs";
@@ -67,9 +71,11 @@ function configWithServers(
   servers: ShoggothMcpServerEntry[],
 ): ShoggothConfig {
   const cfg = defaultConfig(workspacePath);
+  const keyed: Record<string, ShoggothMcpServerBody> = {};
+  for (const { id, ...body } of servers) keyed[id] = body;
   cfg.mcp = {
     ...cfg.mcp,
-    servers,
+    servers: keyed,
     poolScope: "global",
   };
   return cfg;
@@ -362,9 +368,11 @@ function configWithPerAgentIdleTimeout(
   idleMs = 5000,
 ): ShoggothConfig {
   const cfg = defaultConfig(workspacePath);
+  const keyed: Record<string, ShoggothMcpServerBody> = {};
+  for (const { id, ...body } of servers) keyed[id] = body;
   cfg.mcp = {
     ...cfg.mcp,
-    servers,
+    servers: keyed,
     poolScope: "global",
     perInstanceIdleTimeoutMs: idleMs,
   };

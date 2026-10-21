@@ -26,7 +26,7 @@ function makeConfig(overrides?: Partial<{ decision: ShoggothConfig["decision"] }
     memory: { paths: ["memory"], embeddings: { enabled: false } },
     skills: { scanRoots: ["skills"], disabledIds: [] },
     plugins: [],
-    mcp: { servers: [], poolScope: "global" },
+    mcp: { servers: {}, poolScope: "global" },
     policy: {
       operator: {
         controlOps: { allow: ["*"], deny: [], review: [] },
@@ -38,23 +38,22 @@ function makeConfig(overrides?: Partial<{ decision: ShoggothConfig["decision"] }
       },
       auditRedaction: { jsonPaths: [] },
     },
-    models: { providers: [] },
-    decision: { providers: [] },
+    models: { providers: {} },
+    decision: { providers: {} },
     ...overrides,
   } as ShoggothConfig;
 }
 
 const decisionConfigWithModels = {
   defaultModel: "typesafe-main/jev-latest",
-  providers: [
-    {
-      id: "typesafe-main",
+  providers: {
+    "typesafe-main": {
       kind: "typesafe" as const,
       baseUrl: "https://api.typesafe.ai",
       apiKeyEnv: "TYPESAFE_API_KEY",
-      models: [{ name: "jev-latest" }, { name: "jev-1.13.0" }],
+      models: { "jev-latest": {}, "jev-1.13.0": {} },
     },
-  ],
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -94,7 +93,7 @@ describe("createDecisionToolFinalizer", () => {
     });
 
     it("does not inject tool when providers array is empty", () => {
-      const config = makeConfig({ decision: { providers: [] } });
+      const config = makeConfig({ decision: { providers: {} } });
       const finalizer = createDecisionToolFinalizer(config);
       const ctx = buildBuiltinOnlySessionMcpToolContext();
       const result = finalizer(ctx, "agent:test:discord:channel:123");
@@ -108,14 +107,13 @@ describe("createDecisionToolFinalizer", () => {
     it("does not inject tool when providers have no models", () => {
       const config = makeConfig({
         decision: {
-          providers: [
-            {
-              id: "typesafe-main",
+          providers: {
+            "typesafe-main": {
               kind: "typesafe",
               baseUrl: "https://api.typesafe.ai",
-              models: [],
+              models: {},
             },
-          ],
+          },
         },
       });
       const finalizer = createDecisionToolFinalizer(config);

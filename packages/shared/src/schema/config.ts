@@ -287,7 +287,7 @@ export function defaultConfig(configDirectory: string): ShoggothConfig {
     memory: DEFAULT_MEMORY_CONFIG,
     skills: DEFAULT_SKILLS_CONFIG,
     plugins: [{ package: "@shoggoth/platform-discord" }],
-    mcp: { servers: [], poolScope: "global" },
+    mcp: { servers: {}, poolScope: "global" },
     prompts: DEFAULT_PROMPTS_CONFIG,
     policy: DEFAULT_POLICY_CONFIG,
     platforms: { discord: { enabled: true }, showThinking: true },

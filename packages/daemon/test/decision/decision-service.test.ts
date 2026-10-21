@@ -18,15 +18,14 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 const baseConfig: ShoggothDecisionConfig = {
-  providers: [
-    {
-      id: "typesafe-main",
+  providers: {
+    "typesafe-main": {
       kind: "typesafe",
       baseUrl: "https://api.typesafe.ai",
       apiKey: "ts-key",
-      models: [{ name: "jev-latest" }, { name: "jev-1.13.0" }],
+      models: { "jev-latest": {}, "jev-1.13.0": {} },
     },
-  ],
+  },
 };
 
 const noulQuestions = {
@@ -114,12 +113,12 @@ describe("DecisionService", () => {
       );
 
       const svc = DecisionService.fromConfig({
-        providers: [
-          {
-            ...baseConfig.providers[0]!,
+        providers: {
+          "typesafe-main": {
+            ...baseConfig.providers["typesafe-main"]!,
             baseUrl: "https://api.typesafe.ai/",
           },
-        ],
+        },
       });
       await svc.evaluate({
         model: "typesafe-main/jev-latest",
@@ -143,15 +142,14 @@ describe("DecisionService", () => {
 
       try {
         const svc = DecisionService.fromConfig({
-          providers: [
-            {
-              id: "typesafe-env",
+          providers: {
+            "typesafe-env": {
               kind: "typesafe",
               baseUrl: "https://api.typesafe.ai",
               apiKeyEnv: "TEST_DECISION_API_KEY",
-              models: [{ name: "jev-latest" }],
+              models: { "jev-latest": {} },
             },
-          ],
+          },
         });
         await svc.evaluate({
           model: "typesafe-env/jev-latest",

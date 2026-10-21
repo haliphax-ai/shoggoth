@@ -28,18 +28,17 @@ function makeConfig(): ShoggothConfig {
     memory: { paths: ["memory"], embeddings: { enabled: false } },
     skills: { scanRoots: ["skills"], disabledIds: [] },
     plugins: [],
-    mcp: { servers: [], poolScope: "global" },
+    mcp: { servers: {}, poolScope: "global" },
     policy: DEFAULT_POLICY_CONFIG,
     decision: {
-      providers: [
-        {
-          id: "typesafe-main",
+      providers: {
+        "typesafe-main": {
           kind: "typesafe",
           apiKey: "test-api-key",
           baseUrl: "https://api.typesafe.ai",
-          models: [{ name: "jev-latest" }],
+          models: { "jev-latest": {} },
         },
-      ],
+      },
     },
   } as ShoggothConfig;
 }

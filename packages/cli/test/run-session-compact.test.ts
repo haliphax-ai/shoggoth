@@ -49,13 +49,13 @@ describe("runSessionCompact", () => {
     const out = await runSessionCompact({
       stateDbPath: dbPath,
       models: {
-        providers: [
-          {
-            id: "p",
+        providers: {
+          p: {
             kind: "openai-compatible",
             baseUrl: "https://example.invalid/v1",
+            models: {},
           },
-        ],
+        },
         failoverChain: ["p/m"],
         compaction: { preserveRecentMessages: 2 },
       },

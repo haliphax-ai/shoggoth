@@ -118,15 +118,14 @@ Answers come back under the same question ids, with `usage` token counts:
 {
   "decision": {
     "defaultModel": "typesafe-main/jev-latest",
-    "providers": [
-      {
-        "id": "typesafe-main",
+    "providers": {
+      "typesafe-main": {
         "kind": "typesafe",
         "baseUrl": "https://api.typesafe.ai",
         "apiKeyEnv": "TYPESAFE_API_KEY",
-        "models": [{ "name": "jev-latest" }]
+        "models": { "jev-latest": {} }
       }
-    ]
+    }
   }
 }
 ```

@@ -16,7 +16,11 @@ import type {
   MediaGenerateParams,
 } from "./adapters/types";
 import { resolveModel, type MediaProviderConfig } from "./resolve-model.js";
-import type { ShoggothMediaGenerationConfig } from "@shoggoth/shared";
+import {
+  mediaGenerationModelEntriesFromRecord,
+  mediaGenerationProvidersToEntries,
+  type ShoggothMediaGenerationConfig,
+} from "@shoggoth/shared";
 
 export interface PollRequest {
   provider_id: string;
@@ -46,13 +50,15 @@ export class MediaGenerationService {
 
   static fromConfig(config: ShoggothMediaGenerationConfig): MediaGenerationService {
     // Resolve providers from config, nesting models inside
-    const resolvedProviders: MediaProviderConfig[] = (config.providers ?? []).map((p) => ({
+    const resolvedProviders: MediaProviderConfig[] = mediaGenerationProvidersToEntries(
+      config.providers,
+    ).map((p) => ({
       id: p.id,
       kind: p.kind as "openai-compatible" | "gemini",
       baseUrl: p.baseUrl,
       apiKey: p.apiKey ?? (p.apiKeyEnv ? (process.env[p.apiKeyEnv] ?? "") : ""),
       apiVersion: p.apiVersion,
-      models: (p.models ?? []).map((m) => ({
+      models: mediaGenerationModelEntriesFromRecord(p.models).map((m) => ({
         name: m.name,
         mediaType: m.mediaType as "image" | "video" | "audio",
         adapter: m.adapter,

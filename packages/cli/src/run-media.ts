@@ -1,5 +1,10 @@
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
-import { loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
+import {
+  loadLayeredConfigAsync,
+  LAYOUT,
+  mediaGenerationModelEntriesFromRecord,
+  VERSION,
+} from "@shoggoth/shared";
 
 function controlAuth(): { kind: "operator_token"; token: string } {
   const token = process.env.SHOGGOTH_OPERATOR_TOKEN?.trim();
@@ -129,21 +134,16 @@ export async function runMediaCli(argv: string[]): Promise<void> {
 
   if (sub === "models") {
     const config = await loadLayeredConfigAsync(configDir);
-    const providers = config.mediaGeneration?.providers ?? [];
+    const providers = Object.entries(config.mediaGeneration?.providers ?? {});
     if (!providers.length) {
       console.log("No media generation providers configured.");
       return;
     }
     const lines: string[] = [];
-    for (const provider of providers) {
-      const p = provider as {
-        id: string;
-        kind: string;
-        models?: { name: string; mediaType: string; adapter?: string }[];
-      };
-      for (const model of p.models ?? []) {
+    for (const [providerId, p] of providers) {
+      for (const model of mediaGenerationModelEntriesFromRecord(p.models)) {
         const adapter = model.adapter ?? `${p.kind}/${model.mediaType}`;
-        lines.push(`${model.name}  →  ${adapter}  [${p.id}]`);
+        lines.push(`${model.name}  →  ${adapter}  [${providerId}]`);
       }
     }
     console.log(lines.join("\n"));

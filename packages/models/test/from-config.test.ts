@@ -10,18 +10,18 @@ import type { ShoggothModelsConfig } from "@shoggoth/shared";
 describe("createFailoverClientFromModelsConfig", () => {
   it("builds chain from config providers + failoverChain", async () => {
     const cfg: ShoggothModelsConfig = {
-      providers: [
-        {
-          id: "a",
+      providers: {
+        a: {
           kind: "openai-compatible",
           baseUrl: "https://one.example/v1",
+          models: {},
         },
-        {
-          id: "b",
+        b: {
           kind: "openai-compatible",
           baseUrl: "https://two.example/v1",
+          models: {},
         },
-      ],
+      },
       failoverChain: ["a/m1", "b/m2"],
     };
     const c = createFailoverClientFromModelsConfig(cfg, {
@@ -42,7 +42,7 @@ describe("createFailoverClientFromModelsConfig", () => {
     assert.throws(() =>
       createFailoverClientFromModelsConfig(
         {
-          providers: [{ id: "a", kind: "openai-compatible", baseUrl: "https://x/v1" }],
+          providers: { a: { kind: "openai-compatible", baseUrl: "https://x/v1", models: {} } },
           failoverChain: ["nope/m"],
         },
         {},
@@ -52,15 +52,15 @@ describe("createFailoverClientFromModelsConfig", () => {
 
   it("builds failover chain with anthropic-messages provider", async () => {
     const cfg: ShoggothModelsConfig = {
-      providers: [
-        {
-          id: "anthropic-local",
+      providers: {
+        "anthropic-local": {
           kind: "anthropic-messages",
           baseUrl: "http://127.0.0.1:8000",
+          models: {},
           apiKeyEnv: "ANTHROPIC_API_KEY",
           anthropicVersion: "2023-06-01",
         },
-      ],
+      },
       failoverChain: ["anthropic-local/claude-sonnet"],
     };
     const c = createFailoverClientFromModelsConfig(cfg, {
@@ -82,14 +82,14 @@ describe("createFailoverClientFromModelsConfig", () => {
 
   it("uses bare apiKey for openai-compatible provider", async () => {
     const cfg: ShoggothModelsConfig = {
-      providers: [
-        {
-          id: "oai",
+      providers: {
+        oai: {
           kind: "openai-compatible",
           baseUrl: "https://x/v1",
+          models: {},
           apiKey: "bare-key",
         },
-      ],
+      },
       failoverChain: ["oai/m"],
     };
     let authHeader = "";
@@ -111,14 +111,14 @@ describe("createFailoverClientFromModelsConfig", () => {
 
   it("uses bare apiKey for anthropic-messages provider", async () => {
     const cfg: ShoggothModelsConfig = {
-      providers: [
-        {
-          id: "anth",
+      providers: {
+        anth: {
           kind: "anthropic-messages",
           baseUrl: "http://localhost:8000",
+          models: {},
           apiKey: "bare-key",
         },
-      ],
+      },
       failoverChain: ["anth/m"],
     };
     let apiKeyHeader = "";
@@ -141,15 +141,15 @@ describe("createFailoverClientFromModelsConfig", () => {
 
   it("bare apiKey takes precedence over apiKeyEnv", async () => {
     const cfg: ShoggothModelsConfig = {
-      providers: [
-        {
-          id: "oai",
+      providers: {
+        oai: {
           kind: "openai-compatible",
           baseUrl: "https://x/v1",
+          models: {},
           apiKey: "bare",
           apiKeyEnv: "MY_KEY",
         },
-      ],
+      },
       failoverChain: ["oai/m"],
     };
     let authHeader = "";
@@ -266,10 +266,10 @@ describe("createFailoverClientFromModelsConfig", () => {
 describe("requestTimeoutMs resolution", () => {
   it("applies top-level models.requestTimeoutMs to every provider", async () => {
     const cfg: ShoggothModelsConfig = {
-      providers: [
-        { id: "a", kind: "openai-compatible", baseUrl: "https://a.example/v1" },
-        { id: "b", kind: "anthropic-messages", baseUrl: "https://b.example" },
-      ],
+      providers: {
+        a: { kind: "openai-compatible", baseUrl: "https://a.example/v1", models: {} },
+        b: { kind: "anthropic-messages", baseUrl: "https://b.example", models: {} },
+      },
       failoverChain: ["a/m1", "b/m2"],
       requestTimeoutMs: 9_000,
     };
@@ -296,14 +296,14 @@ describe("requestTimeoutMs resolution", () => {
 
   it("provider-level requestTimeoutMs overrides the top-level value", async () => {
     const cfg: ShoggothModelsConfig = {
-      providers: [
-        {
-          id: "a",
+      providers: {
+        a: {
           kind: "openai-compatible",
           baseUrl: "https://a.example/v1",
+          models: {},
           requestTimeoutMs: 5_000,
         },
-      ],
+      },
       failoverChain: ["a/m1"],
       requestTimeoutMs: 9_000,
     };
@@ -323,7 +323,7 @@ describe("requestTimeoutMs resolution", () => {
 
   it("attaches no dispatcher when neither top-level nor provider timeout is set", async () => {
     const cfg: ShoggothModelsConfig = {
-      providers: [{ id: "a", kind: "openai-compatible", baseUrl: "https://a.example/v1" }],
+      providers: { a: { kind: "openai-compatible", baseUrl: "https://a.example/v1", models: {} } },
       failoverChain: ["a/m1"],
     };
     let dispatcherSeen = true;
