@@ -181,10 +181,12 @@ interface SpawnFixture {
   parentId: string;
   repoDir: string;
   dir: string;
+  /** Default workspace root stamped on the session row (not created on disk). */
+  workspaceDir: string;
   cleanup: () => Promise<void>;
 }
 
-async function makeFixture(withRepo = true): Promise<SpawnFixture> {
+async function makeFixture(withRepo = true, setWorkingDirectory = true): Promise<SpawnFixture> {
   const dir = await mkdtemp(join(tmpdir(), "spawn-contract-"));
   const db = new Database(join(dir, "state.db"));
   migrate(db, defaultMigrationsDir());
@@ -195,19 +197,26 @@ async function makeFixture(withRepo = true): Promise<SpawnFixture> {
     "channel",
     SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID,
   );
+  // The session's workspacePath: the contract resolution base when no cd
+  // working directory is set. Point it at the repo so the fallback is real.
+  const workspaceDir = setWorkingDirectory ? join(dir, "workspace") : repoDir;
   createSessionStore(db).create({
     id: parentId,
-    workspacePath: join(dir, "workspace"),
+    workspacePath: workspaceDir,
     status: "active",
   });
-  // working_directory drives contract path resolution at spawn time
-  db.prepare("UPDATE sessions SET working_directory = ? WHERE id = ?").run(repoDir, parentId);
+  if (setWorkingDirectory) {
+    // An explicit working directory (cd) drives contract path resolution;
+    // without one the resolution falls back to the session's workspacePath.
+    db.prepare("UPDATE sessions SET working_directory = ? WHERE id = ?").run(repoDir, parentId);
+  }
 
   return {
     db,
     parentId,
     repoDir,
     dir,
+    workspaceDir,
     cleanup: async () => {
       db.close();
       await rm(dir, { recursive: true, force: true });
@@ -314,6 +323,59 @@ describe("subagent_spawn contract mode", () => {
       };
       assert.equal(Object.keys(evaluateReq.questions).length, 1);
       assert.equal((evaluateReq.questions.contract_0 as { type: string }).type, "noul");
+    } finally {
+      await fx.cleanup();
+    }
+  });
+
+  it("falls back to the session workspace when there is no cd working directory", async () => {
+    const fx = await makeFixture(true, false);
+    try {
+      // The session never ran `cd`, so its workspacePath IS the resolution
+      // base (the fixture points it at the repo). The daemon's process cwd
+      // must never enter the picture — it is not a git repository.
+      const state = installRuntime(async () => {
+        await writeFile(join(fx.workspaceDir, "a.txt"), "one\ntwo\n");
+      });
+      mockEvaluate.mockResolvedValue({
+        status: "complete",
+        model: "jev-latest",
+        answers: { contract_0: { noul: 0.99 } },
+      });
+      const res = await spawn(minimalConfig(fx.workspaceDir), fx.db, fx.parentId, {
+        contract: CONTRACT,
+      });
+      assert.ok(res.ok, JSON.stringify(res.error));
+      const contract = (res.result as { contract?: { fulfilled?: boolean } }).contract;
+      assert.ok(contract, "contract verdict must be on the spawn response");
+      assert.equal(contract.fulfilled, true);
+      assert.equal(state.turns, 1);
+    } finally {
+      await fx.cleanup();
+    }
+  });
+
+  it("reports a repo-missing error only when the workspace is really not a repo", async () => {
+    const fx = await makeFixture(false, false);
+    try {
+      const state = installRuntime();
+      const res = await spawn(minimalConfig(fx.dir), fx.db, fx.parentId, {
+        contract: CONTRACT,
+      });
+      assert.ok(res);
+      if (res.ok) {
+        assert.fail("spawn must fail outside a git repository");
+      }
+      const msg = String((res.error as Record<string, unknown>)?.message ?? res.error ?? "");
+      assert.match(msg, /not in a git repository/);
+      // The reported directory must be the session's workspace, never the
+      // daemon cwd — otherwise the error misdirects every diagnosis.
+      assert.ok(
+        !msg.includes(process.cwd()) || process.cwd() === fx.workspaceDir,
+        `error must not point at the daemon cwd: ${msg}`,
+      );
+      assert.ok(msg.includes(fx.workspaceDir), `error must point at the workspace: ${msg}`);
+      assert.equal(state.turns, 0, "no model turn must run");
     } finally {
       await fx.cleanup();
     }

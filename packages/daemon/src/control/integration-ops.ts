@@ -1599,7 +1599,12 @@ export async function handleIntegrationControlOp(
         }
       }
       if (contract) {
-        const parentWorkingDirectory = parent.workingDirectory ?? process.cwd();
+        // Contract paths resolve against where the session actually lives: an
+        // explicit `cd` working directory, else the agent workspace root. The
+        // daemon's own cwd (`/app` in a container) must never enter the
+        // resolution — it is not the session's directory, so a check against
+        // it can only ever report ERR_CONTRACT_NOT_IN_REPO.
+        const parentWorkingDirectory = parent.workingDirectory ?? parent.workspacePath;
         // Contract git runs with the parent session's runtime creds so the
         // checks read the same workspace the agent session owns — not the
         // daemon's own uid.
@@ -1883,7 +1888,8 @@ export async function handleIntegrationControlOp(
           }
           try {
             return await verifyContract({
-              cwd: parent.workingDirectory ?? process.cwd(),
+              // Same resolution rule as spawn-time validation (see above).
+              cwd: parent.workingDirectory ?? parent.workspacePath,
               entries: contract,
               ...(contractBaselineRef ? { sourceBranch: contractBaselineRef } : {}),
               ...(contractCreds ? { creds: contractCreds } : {}),

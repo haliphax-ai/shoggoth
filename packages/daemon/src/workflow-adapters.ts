@@ -150,9 +150,8 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
     },
     async spawn(req: SpawnRequest): Promise<string> {
       const parentSessionId = deps.parentSessionId ?? req.replyTo;
-      const parentWorkingDirectory = parentSessionId
-        ? deps.sessions.getById(parentSessionId)?.workingDirectory
-        : undefined;
+      const parentSession = parentSessionId ? deps.sessions.getById(parentSessionId) : undefined;
+      const parentWorkingDirectory = parentSession?.workingDirectory;
 
       const { sessionId: childId } = await deps.sessionManager.spawn({
         parentSessionId,
@@ -208,7 +207,9 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
           }
         | undefined;
       if (req.contract?.length) {
-        const cwd = parentWorkingDirectory ?? process.cwd();
+        // Same resolution rule as the control op: explicit cd directory,
+        // else the agent workspace root — never the daemon's cwd.
+        const cwd = parentWorkingDirectory ?? parentSession?.workspacePath ?? process.cwd();
         // Contract git runs as the agent identity (workspace owner), not the
         // daemon uid, so validation and diffing can read the session's repo.
         const creds: ContractCreds = resolveAgentCreds();
