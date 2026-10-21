@@ -1,6 +1,6 @@
 import { describe, it } from "vitest";
 import assert from "node:assert";
-import { buildMessageToolDescriptor } from "../src/message-tool-descriptor";
+import { buildAskToolDescriptor, buildMessageToolDescriptor } from "../src/message-tool-descriptor";
 
 const fullSlice = {
   attachments: true,
@@ -38,7 +38,6 @@ describe("buildMessageToolDescriptor", () => {
       "create_thread",
       "delete_thread",
       "react",
-      "choice",
       "reactions",
       "search",
       "attachment-download",
@@ -119,9 +118,11 @@ describe("buildMessageToolDescriptor", () => {
     const action = d!.inputSchema.properties?.action;
     assert.ok(action && "enum" in action && Array.isArray(action.enum));
     assert.ok(action.enum.includes("react"));
+    assert.ok(!action.enum.includes("choice"));
     assert.ok(!action.enum.includes("reactions"));
     assert.ok(d!.inputSchema.properties?.emoji);
     assert.ok(d!.inputSchema.properties?.remove);
+    assert.equal(d!.inputSchema.properties?.choices, undefined);
     assert.equal(d!.inputSchema.properties?.query, undefined);
     assert.equal(d!.inputSchema.properties?.filename, undefined);
   });
@@ -221,5 +222,30 @@ describe("buildMessageToolDescriptor", () => {
     const action = d!.inputSchema.properties?.action;
     assert.ok(action && "enum" in action && Array.isArray(action.enum));
     assert.ok(!action.enum.includes("pin"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildAskToolDescriptor
+// ---------------------------------------------------------------------------
+
+describe("buildAskToolDescriptor", () => {
+  it("returns undefined when slice is undefined or react is unsupported", () => {
+    assert.equal(buildAskToolDescriptor(undefined), undefined);
+    assert.equal(buildAskToolDescriptor({ ...fullSlice, react: false }), undefined);
+  });
+
+  it("returns an ask descriptor when reactions are supported", () => {
+    const d = buildAskToolDescriptor(fullSlice);
+    assert.ok(d);
+    assert.equal(d!.name, "ask");
+    assert.equal(d!.inputSchema.type, "object");
+    assert.deepEqual(d!.inputSchema.required, ["choices"]);
+    assert.ok(d!.inputSchema.properties?.content);
+    assert.ok(d!.inputSchema.properties?.choices);
+    const choices = d!.inputSchema.properties?.choices;
+    assert.ok(choices && "items" in choices);
+    const items = (choices as { items: { required?: string[] } }).items;
+    assert.deepEqual(items.required, ["emoji", "label"]);
   });
 });

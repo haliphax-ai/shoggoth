@@ -7,6 +7,7 @@ import type {
   MessageToolPlatformSlice,
 } from "@shoggoth/mcp-integration";
 import {
+  buildAskToolDescriptor,
   buildMessageToolDescriptor,
   createAggregateMcpCatalogResult,
 } from "@shoggoth/mcp-integration";
@@ -63,21 +64,35 @@ export function openAiToolsFromCatalog(
 }
 
 /**
- * Appends `builtin-message` when a messaging runtime registers a capability slice.
+ * Appends `builtin-message` and `builtin-ask` when a messaging runtime
+ * registers a capability slice. `builtin-ask` is only added when the
+ * platform supports reactions (the ask tool is a choice prompt).
  */
-function augmentSessionMcpToolContextWithMessageTool(
+function augmentSessionMcpToolContextWithMessageTools(
   base: SessionMcpToolContext,
   slice: MessageToolPlatformSlice | undefined,
 ): SessionMcpToolContext {
+  const extras: AggregatedTool[] = [];
   const desc = buildMessageToolDescriptor(slice);
-  if (!desc) return base;
-  const extra: AggregatedTool = {
-    ...desc,
-    namespacedName: "builtin-message",
-    sourceId: "builtin",
-    originalName: "message",
-  };
-  const aggregated = createAggregateMcpCatalogResult([...base.aggregated.tools, extra]);
+  if (desc) {
+    extras.push({
+      ...desc,
+      namespacedName: "builtin-message",
+      sourceId: "builtin",
+      originalName: "message",
+    });
+  }
+  const askDesc = buildAskToolDescriptor(slice);
+  if (askDesc) {
+    extras.push({
+      ...askDesc,
+      namespacedName: "builtin-ask",
+      sourceId: "builtin",
+      originalName: "ask",
+    });
+  }
+  if (extras.length === 0) return base;
+  const aggregated = createAggregateMcpCatalogResult([...base.aggregated.tools, ...extras]);
   return {
     aggregated,
     toolsOpenAi: openAiToolsFromCatalog(aggregated),
@@ -219,14 +234,15 @@ function stripSubagentToolWhenSpawnDenied(
 }
 
 /**
- * Standalone finalizer: appends `builtin-message` when a messaging runtime is active.
+ * Standalone finalizer: appends `builtin-message` and `builtin-ask` when a
+ * messaging runtime is active.
  */
 export function messageToolFinalizer(
   ctx: SessionMcpToolContext,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _sessionId: string,
 ): SessionMcpToolContext {
-  return augmentSessionMcpToolContextWithMessageTool(ctx, messageToolContextRef.current?.slice);
+  return augmentSessionMcpToolContextWithMessageTools(ctx, messageToolContextRef.current?.slice);
 }
 
 /**

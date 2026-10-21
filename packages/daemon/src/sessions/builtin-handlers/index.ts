@@ -4,6 +4,7 @@ import type { BuiltinToolRegistry } from "../builtin-tool-registry";
 
 import { register as registerConfig } from "./config-handlers";
 import { register as registerMessage } from "./message-handler";
+import { register as registerAsk } from "./ask-handler";
 import { register as registerProcman } from "./procman-handlers";
 import { register as registerSkills } from "./skills-handlers";
 import { register as registerSession } from "./session-handlers";
@@ -35,6 +36,7 @@ import { register as registerVault } from "./vault-handler";
 export function registerAllBuiltinHandlers(registry: BuiltinToolRegistry): void {
   registerConfig(registry);
   registerMessage(registry);
+  registerAsk(registry);
   registerProcman(registry);
   registerSkills(registry);
   registerSession(registry);

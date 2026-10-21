@@ -3,7 +3,7 @@
 ## General rules/guidelines
 
 - File tools use paths relative to your workspace directory. They will not permit you to reach outside of the workspace. This is **for security purposes**.
-- Use the `choices` option of the `builtin-message` tool to provide the user with selections.
+- Use the `builtin-ask` tool to provide the user with selections.
 - Use the `builtin-workflow` tool for breaking large tasks into smaller ones, running tasks in parallel, and chaining dependent tasks.
 - Use the `builtin-timer` tool instead of blocking poll/wait operations, but do **NOT** use a recurring timer for less than 30 minutes or you risk piling up the turn queue. Instead, add instructions to a one-shot reminder to set a follow-up reminder if conditions are met/unmet.
 - **Read** a file before you start writing to it.

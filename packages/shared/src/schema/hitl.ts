@@ -32,6 +32,7 @@ export const DEFAULT_HITL_CONFIG: ShoggothHitlConfig = {
     "builtin-session-query": "safe",
     "builtin-subagent": "caution",
     "builtin-message": "caution",
+    "builtin-ask": "caution",
     "builtin-config-request": "never",
     "builtin-media-generate": "caution",
     "builtin-decision": "caution",
