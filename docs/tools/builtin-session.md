@@ -78,6 +78,36 @@ Registered as `subagent`. Spawn and manage subagent sessions. Availability follo
 | `platform_user_id`    | string   | no       | Persistent only                                                                   |
 | `reply_to_message_id` | string   | no       | Persistent only                                                                   |
 | `inactivity_minutes`  | number   | no       | Inactivity window in minutes (persistent only; resets on each delivered response) |
+| `contract`            | array    | no       | Contract mode entries (one_shot only): `{path, action, summary}` objects          |
+| `judge`               | string   | no       | Decision model (`provider-id/model-name`) for judging contract fulfillment        |
+
+##### contract (one_shot only)
+
+Optional contract mode: a non-empty `contract` array makes the spawn verifiable
+against explicit expectations. Each entry is `{ path, action, summary }` where
+`action` is `create`, `update`, or `delete`, and `summary` is a brief
+description of the expected change (no exact lines or contents).
+
+When active:
+
+- Every target must be inside a git repository at call time — otherwise the
+  spawn fails with an error (no session is created).
+- After the turn, a target that was not acted upon with its contractual action
+  breaks the contract (no decision call for it).
+- Otherwise the per-file `git diff` against the spawn-time HEAD is sent to the
+  decision model in batches (`agents.contract.batchSize`, default 5). Deleted
+  files are structural-only and never sent to the judge.
+- Any per-file "yes" probability below `agents.contract.yesMinimum` (default
+  `0.85`), any structural break, or any decision failure marks the contract
+  unfulfilled.
+
+The spawn response then carries an extra `contract` field: `{ fulfilled,
+broken, error?, yesMinimum, entries, judged, violated, deletedSkipped,
+baseline }`. Unset/empty `contract` leaves the mode inactive (no-op).
+
+`judge` overrides the decision model for this spawn (`agents.contract.model`
+or the decision config default applies when unset) and requires a non-empty
+`contract`.
 
 ##### delivery_mode
 
