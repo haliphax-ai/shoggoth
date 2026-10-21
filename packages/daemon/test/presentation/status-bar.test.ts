@@ -46,6 +46,8 @@ function createBar(
     cfg?: ResolvedStatusBarConfig;
     minIntervalMs?: number;
     notifiesCount?: () => number;
+    timersCount?: () => number;
+    subagentsCount?: () => { total: number; persistent: number };
   } = {},
 ) {
   const sink = opts.sink ?? makeSink();
@@ -57,6 +59,8 @@ function createBar(
     minIntervalMs: opts.minIntervalMs,
     now,
     ...(opts.notifiesCount ? { notifiesCount: opts.notifiesCount } : {}),
+    ...(opts.timersCount ? { timersCount: opts.timersCount } : {}),
+    ...(opts.subagentsCount ? { subagentsCount: opts.subagentsCount } : {}),
   });
   return { bar, sink, render };
 }
@@ -403,6 +407,134 @@ describe("createTurnStatusBar", () => {
     expect(snap.notifies).toBe(2);
   });
 
+  it("timersCount provider overrides the stale seeded count at start render", async () => {
+    const { bar, sink } = createBar({ timersCount: () => 0 });
+    await bar.start({ sequence: 40, compactions: 0, timers: 1 });
+    const snap = sink.setStatusBar.mock.calls[0]![0] as StatusBarSnapshot;
+    expect(snap.timers).toBe(0);
+  });
+
+  it("a timer firing mid-turn with no push event renders fresh (no stale section)", async () => {
+    // The scheduler marks the row fired without pushing a count-change event;
+    // the next render must re-read the provider and drop the section instead
+    // of showing a stale ⏰ 1.
+    let live = 1;
+    const { bar, sink } = createBar({ timersCount: () => live });
+    await bar.start({ sequence: 41, compactions: 0 });
+    bar.setTimers(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot).timers).toBe(1);
+    live = 0;
+    bar.markThinking();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot).timers).toBe(0);
+  });
+
+  it("the terminal timers render reflects the provider, not the cached value", async () => {
+    let live = 1;
+    const { bar, sink } = createBar({ timersCount: () => live });
+    await bar.start({ sequence: 42, compactions: 0 });
+    bar.setTimers(1);
+    live = 0;
+    await bar.finish("finished");
+    const snap = sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot;
+    expect(snap.phase).toBe("finished");
+    expect(snap.timers).toBe(0);
+  });
+
+  it("setTimers is ignored at render time when a provider is set", async () => {
+    const { bar, sink } = createBar({ timersCount: () => 0 });
+    await bar.start({ sequence: 43, compactions: 0 });
+    bar.setTimers(5);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot).timers).toBe(0);
+  });
+
+  it("a throwing timersCount provider falls back to the cached value", async () => {
+    const { bar, sink } = createBar({
+      timersCount: () => {
+        throw new Error("db closing");
+      },
+    });
+    await bar.start({ sequence: 44, compactions: 0, timers: 2 });
+    const snap = sink.setStatusBar.mock.calls[0]![0] as StatusBarSnapshot;
+    expect(snap.timers).toBe(2);
+  });
+
+  it("subagentsCount provider overrides the stale seeded counts at start render", async () => {
+    const { bar, sink } = createBar({
+      subagentsCount: () => ({ total: 0, persistent: 0 }),
+    });
+    await bar.start({
+      sequence: 45,
+      compactions: 0,
+      subagents: { total: 1, persistent: 1 },
+    });
+    const snap = sink.setStatusBar.mock.calls[0]![0] as StatusBarSnapshot;
+    expect(snap.subagents).toEqual({ total: 0, persistent: 0 });
+  });
+
+  it("a subagent terminating mid-turn with no push event renders fresh", async () => {
+    // Termination/kill fires no count-change event; the next render must
+    // re-read the provider instead of showing a stale 🕵️ count.
+    let live = { total: 1, persistent: 1 };
+    const { bar, sink } = createBar({ subagentsCount: () => live });
+    await bar.start({ sequence: 46, compactions: 0 });
+    bar.setSubagents({ total: 1, persistent: 1 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot).subagents).toEqual({
+      total: 1,
+      persistent: 1,
+    });
+    live = { total: 0, persistent: 0 };
+    bar.markThinking();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot).subagents).toEqual({
+      total: 0,
+      persistent: 0,
+    });
+  });
+
+  it("the terminal subagents render reflects the provider, not the cached value", async () => {
+    let live = { total: 2, persistent: 1 };
+    const { bar, sink } = createBar({ subagentsCount: () => live });
+    await bar.start({ sequence: 47, compactions: 0 });
+    bar.setSubagents({ total: 1, persistent: 1 });
+    live = { total: 0, persistent: 0 };
+    await bar.finish("finished");
+    const snap = sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot;
+    expect(snap.phase).toBe("finished");
+    expect(snap.subagents).toEqual({ total: 0, persistent: 0 });
+  });
+
+  it("setSubagents is ignored at render time when a provider is set", async () => {
+    const { bar, sink } = createBar({
+      subagentsCount: () => ({ total: 0, persistent: 0 }),
+    });
+    await bar.start({ sequence: 48, compactions: 0 });
+    bar.setSubagents({ total: 5, persistent: 2 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot).subagents).toEqual({
+      total: 0,
+      persistent: 0,
+    });
+  });
+
+  it("a throwing subagentsCount provider falls back to the cached value", async () => {
+    const { bar, sink } = createBar({
+      subagentsCount: () => {
+        throw new Error("db closing");
+      },
+    });
+    await bar.start({
+      sequence: 49,
+      compactions: 0,
+      subagents: { total: 2, persistent: 1 },
+    });
+    const snap = sink.setStatusBar.mock.calls[0]![0] as StatusBarSnapshot;
+    expect(snap.subagents).toEqual({ total: 2, persistent: 1 });
+  });
+
   it("setNotifies is a no-op after finish()", async () => {
     const { bar, sink } = createBar();
     await bar.start({ sequence: 31, compactions: 0, notifies: 1 });
@@ -707,6 +839,8 @@ describe("getStatusBarStats", () => {
       timers: 0,
       notifies: 0,
       liveNotifies: expect.any(Function),
+      liveTimers: expect.any(Function),
+      liveSubagents: expect.any(Function),
     });
   });
 
@@ -753,6 +887,36 @@ describe("getStatusBarStats", () => {
     expect(s.notifies).toBe(1);
     // … while the provider reflects the DB truth without re-collecting.
     expect(s.liveNotifies?.()).toBe(0);
+  });
+
+  it("supplies a live timers provider bound to the same session", () => {
+    createSessionStore(db).create({ id: "t2", workspacePath: tmp });
+    const insert = db.prepare(
+      "INSERT INTO timers (id, session_id, label, fire_at, message, fired) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    insert.run("tm-d", "t2", "d", "2030-01-01T00:00:00Z", "d", 0);
+    const s = getStatusBarStats(db, "t2");
+    expect(s.timers).toBe(1);
+    expect(s.liveTimers?.()).toBe(1);
+    // A timer firing after the snapshot: the seeded value stays stale …
+    db.prepare("UPDATE timers SET fired = 1 WHERE id = ?").run("tm-d");
+    expect(s.timers).toBe(1);
+    // … while the provider reflects the DB truth without re-collecting.
+    expect(s.liveTimers?.()).toBe(0);
+  });
+
+  it("supplies a live subagents provider bound to the same session", () => {
+    createSessionStore(db).create({ id: "p2", workspacePath: tmp });
+    seedSubagent("p2-child", "p2", { mode: "one_shot" });
+    const s = getStatusBarStats(db, "p2");
+    expect(s.subagents).toEqual({ total: 1, persistent: 0 });
+    expect(s.liveSubagents?.()).toEqual({ total: 1, persistent: 0 });
+    // A subagent terminating after the snapshot (no count-change event on
+    // the running turn): the seeded value stays stale …
+    db.prepare("UPDATE sessions SET status = 'terminated' WHERE id = ?").run("p2-child");
+    expect(s.subagents).toEqual({ total: 1, persistent: 0 });
+    // … while the provider reflects the DB truth without re-collecting.
+    expect(s.liveSubagents?.()).toEqual({ total: 0, persistent: 0 });
   });
 });
 
@@ -802,6 +966,54 @@ describe("createStatusBarTurnTracker", () => {
     tracker.onThinkingDelta?.("…");
     await vi.advanceTimersByTimeAsync(1_000);
     expect(lines.at(-1)).toBe("n0");
+  });
+
+  it("pulls the live timer count from the stats' provider at render", async () => {
+    let live = 2;
+    const statsWithProvider: StatusBarStats = {
+      ...stats,
+      timers: 2,
+      liveTimers: () => live,
+    };
+    const lines: string[] = [];
+    const render = (snap: StatusBarSnapshot) => {
+      const line = `t${snap.timers ?? "none"}`;
+      lines.push(line);
+      return line;
+    };
+    const { tracker } = createTracker({ render, stats: statsWithProvider });
+    tracker.onThinkingDelta?.("…");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(lines.at(-1)).toBe("t2");
+    // A timer fires with no push event: the render must not go stale.
+    live = 1;
+    tracker.onThinkingDelta?.("…");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(lines.at(-1)).toBe("t1");
+  });
+
+  it("pulls the live subagent counts from the stats' provider at render", async () => {
+    let live = { total: 2, persistent: 1 };
+    const statsWithProvider: StatusBarStats = {
+      ...stats,
+      subagents: { total: 2, persistent: 1 },
+      liveSubagents: () => live,
+    };
+    const lines: string[] = [];
+    const render = (snap: StatusBarSnapshot) => {
+      const line = `s${snap.subagents ? snap.subagents.total : "none"}`;
+      lines.push(line);
+      return line;
+    };
+    const { tracker } = createTracker({ render, stats: statsWithProvider });
+    tracker.onThinkingDelta?.("…");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(lines.at(-1)).toBe("s2");
+    // A subagent terminates with no push event: the render must not go stale.
+    live = { total: 1, persistent: 1 };
+    tracker.onThinkingDelta?.("…");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(lines.at(-1)).toBe("s1");
   });
 
   it("captures the ⏳ starting line synchronously; attachSink flushes it to the live sink", () => {

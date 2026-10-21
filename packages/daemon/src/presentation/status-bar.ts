@@ -83,7 +83,9 @@ export interface TurnStatusBar {
   toolFinished(): void; // records runtime for the last call
   updateContext(currentTokens: number, totalTokens?: number): void;
   setCompactions(count: number): void;
-  /** Live subagent count refresh (spawned/terminated mid-turn). */
+  /** Live subagent count refresh (spawned/terminated mid-turn).
+   *  Ignored at render time when a `subagentsCount` provider is set — the
+   *  provider is the render-time source of truth. */
   setSubagents(counts: { total: number; persistent: number }): void;
   /** Live timer count refresh (timers queued/cancelled mid-turn). */
   setTimers(count: number): void;
@@ -113,6 +115,21 @@ export function createTurnStatusBar(opts: {
    * back to the cache.
    */
   notifiesCount?: () => number;
+  /**
+   * Live subagent-count provider. When present, the subagents section is
+   * re-read from it on every render instead of the seeded/cached
+   * `setSubagents` value — a spawn, termination, or kill mid-turn is
+   * reflected immediately even when no push event fired. A provider throw
+   * falls back to the cache.
+   */
+  subagentsCount?: () => { total: number; persistent: number };
+  /**
+   * Live timer-count provider. When present, the timers section is re-read
+   * from it on every render instead of the seeded/cached `setTimers` value —
+   * a timer that fires or is cancelled mid-turn is reflected immediately
+   * even when no push event fired. A provider throw falls back to the cache.
+   */
+  timersCount?: () => number;
   /**
    * Live cruise-control activity provider. When present and true, the
    * snapshot carries `cruiseControl` so the platform renders the 🚗 section
@@ -160,6 +177,9 @@ export function createTurnStatusBar(opts: {
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   function snapshot(): StatusBarSnapshot {
+    const subagentsNow = effectiveSubagents();
+    const timersNow = effectiveTimers();
+    const notifiesNow = effectiveNotifies();
     return {
       phase,
       sequence,
@@ -169,9 +189,9 @@ export function createTurnStatusBar(opts: {
       },
       ...(context ? { context } : {}),
       compactions,
-      ...(subagents ? { subagents } : {}),
-      ...(timers !== undefined ? { timers } : {}),
-      ...(effectiveNotifies() !== undefined ? { notifies: effectiveNotifies() } : {}),
+      ...(subagentsNow ? { subagents: subagentsNow } : {}),
+      ...(timersNow !== undefined ? { timers: timersNow } : {}),
+      ...(notifiesNow !== undefined ? { notifies: notifiesNow } : {}),
       ...(effectiveCruiseControl() ? { cruiseControl: true } : {}),
     };
   }
@@ -184,6 +204,38 @@ export function createTurnStatusBar(opts: {
       return provider();
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * The counts the subagents section renders: the live provider when present
+   * (DB truth at render time — a spawn, termination, or kill mid-turn is
+   * reflected immediately, even without a push event), else the seeded/cached
+   * value. A provider throw falls back to the cache.
+   */
+  function effectiveSubagents(): { total: number; persistent: number } | undefined {
+    const provider = opts.subagentsCount;
+    if (!provider) return subagents;
+    try {
+      return provider();
+    } catch {
+      return subagents;
+    }
+  }
+
+  /**
+   * The count the timers section renders: the live provider when present
+   * (DB truth at render time — a timer that fires or is cancelled mid-turn
+   * is reflected immediately, even without a push event), else the
+   * seeded/cached value. A provider throw falls back to the cache.
+   */
+  function effectiveTimers(): number | undefined {
+    const provider = opts.timersCount;
+    if (!provider) return timers;
+    try {
+      return provider();
+    } catch {
+      return timers;
     }
   }
 
@@ -379,6 +431,20 @@ export interface StatusBarStats {
    * the bar. Absent in bare/test setups: the snapshot is used.
    */
   readonly liveNotifies?: () => number;
+  /**
+   * Live provider for the timer count (bound to the same session): the
+   * seeded `timers` value is a pre-turn snapshot, so renders pull through
+   * this provider instead — a timer queued, cancelled, or fired mid-turn
+   * must not leave a stale section on the bar.
+   */
+  readonly liveTimers?: () => number;
+  /**
+   * Live provider for the subagent counts (bound to the same session): the
+   * seeded `subagents` value is a pre-turn snapshot, so renders pull through
+   * this provider instead — a spawn, termination, or kill mid-turn must not
+   * leave a stale section on the bar.
+   */
+  readonly liveSubagents?: () => { total: number; persistent: number };
 }
 
 /** `<10K` → plain integer with thousands separators; `≥10K` → one-decimal K; `≥1M` → one-decimal M. */
@@ -437,11 +503,23 @@ export function getStatusBarStats(db: Database.Database, sessionId: string): Sta
   const subagents = getSessionSubagentCounts(db, sessionId);
   const timers = getSessionActiveTimerCount(db, sessionId);
   const notifies = getSessionActiveNotifyCount(db, sessionId);
-  // Renders pull the notify count live through this closure (the seeded
-  // value is a pre-turn snapshot and goes stale the moment a handle fires).
+  // Renders pull these counts live through closures (the seeded values are
+  // pre-turn snapshots and go stale the moment they change mid-turn).
   const liveNotifies = (): number => getSessionActiveNotifyCount(db, sessionId);
+  const liveTimers = (): number => getSessionActiveTimerCount(db, sessionId);
+  const liveSubagents = (): { total: number; persistent: number } =>
+    getSessionSubagentCounts(db, sessionId);
   if (currentTokens <= 0) {
-    return { sequence, compactions, subagents, timers, notifies, liveNotifies };
+    return {
+      sequence,
+      compactions,
+      subagents,
+      timers,
+      notifies,
+      liveNotifies,
+      liveTimers,
+      liveSubagents,
+    };
   }
   // Known context window: the session_stats gauge first, then model metadata
   // for the session's selected model; unknown (omitted) when neither knows.
@@ -454,6 +532,8 @@ export function getStatusBarStats(db: Database.Database, sessionId: string): Sta
     timers,
     notifies,
     liveNotifies,
+    liveTimers,
+    liveSubagents,
     context: windowTokens > 0 ? { currentTokens, totalTokens: windowTokens } : { currentTokens },
   };
 }
@@ -560,6 +640,16 @@ export function createStatusBarTurnTracker(opts: {
    */
   notifiesCount?: () => number;
   /**
+   * Overrides the live timer-count provider (defaults to the collected
+   * stats' bound `liveTimers` closure when present).
+   */
+  timersCount?: () => number;
+  /**
+   * Overrides the live subagent-count provider (defaults to the collected
+   * stats' bound `liveSubagents` closure when present).
+   */
+  subagentsCount?: () => { total: number; persistent: number };
+  /**
    * Live cruise-control activity provider — re-read on every render so an
    * activation/deactivation mid-turn is reflected immediately.
    */
@@ -583,17 +673,23 @@ export function createStatusBarTurnTracker(opts: {
     },
   };
 
-  // Live notify-count provider: an explicit opt wins, else the collected
-  // stats' bound closure (`getStatusBarStats` supplies it). With a provider
-  // present, every render — including the terminal one — reflects handles
-  // that fired or were cancelled mid-turn instead of the pre-turn snapshot.
+  // Live count providers: an explicit opt wins, else the collected stats'
+  // bound closures (`getStatusBarStats` supplies them). With a provider
+  // present, every render — including the terminal one — reflects counts
+  // that changed mid-turn (handles fired/cancelled, timers queued/fired/
+  // cancelled, subagents spawned/terminated) instead of the pre-turn
+  // snapshot, even when no push event fired on this path.
   const notifiesCount = opts.notifiesCount ?? opts.stats.liveNotifies;
+  const timersCount = opts.timersCount ?? opts.stats.liveTimers;
+  const subagentsCount = opts.subagentsCount ?? opts.stats.liveSubagents;
   const engine = createTurnStatusBar({
     cfg: opts.cfg,
     sink: captureSink,
     render: opts.render,
     ...(opts.minIntervalMs !== undefined ? { minIntervalMs: opts.minIntervalMs } : {}),
     ...(notifiesCount ? { notifiesCount } : {}),
+    ...(timersCount ? { timersCount } : {}),
+    ...(subagentsCount ? { subagentsCount } : {}),
     ...(opts.cruiseControlActive ? { cruiseControlActive: opts.cruiseControlActive } : {}),
   });
 
