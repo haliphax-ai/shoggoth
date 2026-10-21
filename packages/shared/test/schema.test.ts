@@ -100,7 +100,7 @@ describe("providerModelSchema", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Provider schema: models array + retry fields
+// Provider schema: models record + retry fields
 // ---------------------------------------------------------------------------
 describe("provider schema with models and retry fields", () => {
   const baseProvider = {
@@ -108,20 +108,20 @@ describe("provider schema with models and retry fields", () => {
     baseUrl: "https://api.example.com",
   };
 
-  it("accepts provider with models array", () => {
+  it("accepts provider with models record", () => {
     const r = shoggothModelsConfigSchema.safeParse({
-      providers: { "my-provider": { ...baseProvider, models: [{ name: "gpt-4o" }] } },
+      providers: { "my-provider": { ...baseProvider, models: { "gpt-4o": {} } } },
     });
     assert.ok(r.success);
-    assert.equal(Object.values(r.data!.providers!)[0].models![0].name, "gpt-4o");
+    assert.equal(Object.keys(Object.values(r.data!.providers!)[0].models!)[0], "gpt-4o");
   });
 
-  it("accepts provider without models (optional)", () => {
+  it("accepts provider without models (defaults to empty record)", () => {
     const r = shoggothModelsConfigSchema.safeParse({
       providers: { "my-provider": baseProvider },
     });
     assert.ok(r.success);
-    assert.equal(Object.values(r.data!.providers!)[0].models, undefined);
+    assert.deepStrictEqual(Object.values(r.data!.providers!)[0].models, {});
   });
 
   it("accepts provider with per-provider retry fields", () => {
@@ -171,13 +171,12 @@ describe("provider schema with models and retry fields", () => {
         anthropic: {
           kind: "anthropic-messages",
           baseUrl: "https://api.anthropic.com",
-          models: [
-            {
-              name: "claude-sonnet-4-20250514",
+          models: {
+            "claude-sonnet-4-20250514": {
               contextWindowTokens: 200_000,
               thinkingFormat: "native",
             },
-          ],
+          },
           maxRetries: 2,
         },
       },
@@ -190,7 +189,7 @@ describe("provider schema with models and retry fields", () => {
       providers: {
         gemini: {
           kind: "gemini",
-          models: [{ name: "gemini-2.5-pro" }],
+          models: { "gemini-2.5-pro": {} },
           retryDelayMs: 500,
         },
       },

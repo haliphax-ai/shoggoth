@@ -2402,13 +2402,13 @@ describe("control plane (unix socket + JSONL)", () => {
           dec: {
             kind: "typesafe",
             baseUrl: "http://127.0.0.1:1",
-            models: [{ name: "m" }],
+            models: { m: {} },
           },
         },
       },
       rerank: {
         providers: {
-          rr: { kind: "cohere", baseUrl: "http://127.0.0.1:1", models: [{ name: "m" }] },
+          rr: { kind: "cohere", baseUrl: "http://127.0.0.1:1", models: { m: {} } },
         },
       },
     };

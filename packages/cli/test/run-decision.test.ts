@@ -12,6 +12,8 @@ vi.mock("@shoggoth/shared", () => ({
   loadLayeredConfigAsync: (...args: unknown[]) => mockLoadLayeredConfig(...args),
   LAYOUT: { configDir: "/tmp/cfg" },
   VERSION: "0.0.0-test",
+  decisionModelEntriesFromRecord: (record: Record<string, Record<string, unknown>> = {}) =>
+    Object.entries(record).map(([name, body]) => ({ name, ...body })),
 }));
 
 /** Default: decision support configured (provider with models). */
@@ -24,7 +26,7 @@ function configuredDecisionConfig() {
         "typesafe-main": {
           kind: "typesafe",
           baseUrl: "https://api.typesafe.ai",
-          models: [{ name: "jev-latest" }, { name: "jev-1.13.0" }],
+          models: { "jev-latest": {}, "jev-1.13.0": {} },
         },
       },
     },
@@ -351,7 +353,7 @@ describe("runDecisionCli models", () => {
           "typesafe-main": {
             kind: "typesafe",
             baseUrl: "https://api.typesafe.ai",
-            models: [{ name: "jev-latest" }, { name: "jev-1.13.0" }],
+            models: { "jev-latest": {}, "jev-1.13.0": {} },
           },
         },
       },

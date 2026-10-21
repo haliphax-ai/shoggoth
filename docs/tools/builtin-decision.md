@@ -123,7 +123,7 @@ Answers come back under the same question ids, with `usage` token counts:
         "kind": "typesafe",
         "baseUrl": "https://api.typesafe.ai",
         "apiKeyEnv": "TYPESAFE_API_KEY",
-        "models": [{ "name": "jev-latest" }]
+        "models": { "jev-latest": {} }
       }
     }
   }

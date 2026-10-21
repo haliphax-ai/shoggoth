@@ -136,7 +136,7 @@ export function cruiseControlActivationWarnings(
     return warnings;
   }
   const decisionModels = Object.entries(config.decision?.providers ?? {}).flatMap(([id, p]) =>
-    (p.models ?? []).map((m) => `${id}/${m.name}`),
+    Object.keys(p.models ?? {}).map((name) => `${id}/${name}`),
   );
   if (decisionModels.length === 0) {
     warnings.push("decision support is not configured; HITL requests will escalate to true HITL");

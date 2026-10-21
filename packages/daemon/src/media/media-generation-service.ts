@@ -17,6 +17,7 @@ import type {
 } from "./adapters/types";
 import { resolveModel, type MediaProviderConfig } from "./resolve-model.js";
 import {
+  mediaGenerationModelEntriesFromRecord,
   mediaGenerationProvidersToEntries,
   type ShoggothMediaGenerationConfig,
 } from "@shoggoth/shared";
@@ -57,7 +58,7 @@ export class MediaGenerationService {
       baseUrl: p.baseUrl,
       apiKey: p.apiKey ?? (p.apiKeyEnv ? (process.env[p.apiKeyEnv] ?? "") : ""),
       apiVersion: p.apiVersion,
-      models: (p.models ?? []).map((m) => ({
+      models: mediaGenerationModelEntriesFromRecord(p.models).map((m) => ({
         name: m.name,
         mediaType: m.mediaType as "image" | "video" | "audio",
         adapter: m.adapter,

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { modelNameSchema } from "./common";
 
 export const shoggothPluginEntrySchema = z
   .object({
@@ -71,11 +72,23 @@ const mediaGenerationAdapterType = z.enum([
   "gemini-long-running",
 ]);
 const mediaGenerationModelSchema = z.object({
-  name: z.string().min(1),
+  name: modelNameSchema,
   mediaType: z.enum(["image", "video", "audio"]),
   adapter: mediaGenerationAdapterType.optional(),
   modalities: z.array(z.string()).optional(),
 });
+/** Media-generation model record body (`name` is carried by the record key). */
+export const mediaGenerationModelEntryBodySchema = mediaGenerationModelSchema.omit({ name: true });
+
+/** Expanded `mediaGeneration.providers.<id>.models` entry (the record key is injected as `name`). */
+export type ShoggothMediaGenerationModel = z.infer<typeof mediaGenerationModelSchema>;
+
+/** Expand a keyed provider `models` record into entry objects (injecting the key as `name`). */
+export function mediaGenerationModelEntriesFromRecord(
+  record: Record<string, z.infer<typeof mediaGenerationModelEntryBodySchema>> = {},
+): ShoggothMediaGenerationModel[] {
+  return Object.entries(record).map(([name, body]) => ({ name, ...body }));
+}
 const mediaGenerationProviderSchema = z.object({
   id: z.string().min(1),
   kind: z.enum(["openai-compatible", "gemini"]),
@@ -83,7 +96,7 @@ const mediaGenerationProviderSchema = z.object({
   apiKey: z.string().optional(),
   apiKeyEnv: z.string().optional(),
   apiVersion: z.string().optional(),
-  models: z.array(mediaGenerationModelSchema).optional().default([]),
+  models: z.record(modelNameSchema, mediaGenerationModelEntryBodySchema).optional().default({}),
 });
 export type ShoggothMediaGenerationProvider = z.infer<typeof mediaGenerationProviderSchema>;
 export type ShoggothMediaGenerationProviderBody = Omit<ShoggothMediaGenerationProvider, "id">;
@@ -117,14 +130,26 @@ export type ShoggothMediaGenerationConfig = z.infer<typeof shoggothMediaGenerati
  * Decision (classifier) model support — TypeSafe System One (`/v1/systemone`).
  * Providers serve typed `noul`, `choice`, and `score` questions against a state.
  */
-const decisionModelSchema = z.object({ name: z.string().min(1) });
+const decisionModelSchema = z.object({ name: modelNameSchema });
+/** Decision model record body (`name` is carried by the record key). */
+export const decisionModelEntryBodySchema = decisionModelSchema.omit({ name: true });
+
+/** Expanded `decision.providers.<id>.models` entry (the record key is injected as `name`). */
+export type ShoggothDecisionModel = z.infer<typeof decisionModelSchema>;
+
+/** Expand a keyed provider `models` record into entry objects (injecting the key as `name`). */
+export function decisionModelEntriesFromRecord(
+  record: Record<string, z.infer<typeof decisionModelEntryBodySchema>> = {},
+): ShoggothDecisionModel[] {
+  return Object.entries(record).map(([name, body]) => ({ name, ...body }));
+}
 const decisionProviderSchema = z.object({
   id: z.string().min(1),
   kind: z.enum(["typesafe"]),
   baseUrl: z.string().min(1),
   apiKey: z.string().optional(),
   apiKeyEnv: z.string().optional(),
-  models: z.array(decisionModelSchema).optional().default([]),
+  models: z.record(modelNameSchema, decisionModelEntryBodySchema).optional().default({}),
 });
 export type ShoggothDecisionProvider = z.infer<typeof decisionProviderSchema>;
 export type ShoggothDecisionProviderBody = Omit<ShoggothDecisionProvider, "id">;
@@ -150,7 +175,7 @@ export const shoggothDecisionConfigSchema = z
     if (!cfg.defaultModel) return;
     // must reference a configured model in provider-id/model-name format
     const known = Object.entries(cfg.providers ?? {}).some(([id, p]) =>
-      (p.models ?? []).some((m) => `${id}/${m.name}` === cfg.defaultModel),
+      Object.keys(p.models ?? {}).some((name) => `${id}/${name}` === cfg.defaultModel),
     );
     if (!known) {
       ctx.addIssue({
@@ -168,14 +193,26 @@ export type ShoggothDecisionConfig = z.infer<typeof shoggothDecisionConfigSchema
  * list of `documents` and results come back as `{ index, relevance_score }`
  * pairs ordered by relevance.
  */
-const rerankModelSchema = z.object({ name: z.string().min(1) });
+const rerankModelSchema = z.object({ name: modelNameSchema });
+/** Rerank model record body (`name` is carried by the record key). */
+export const rerankModelEntryBodySchema = rerankModelSchema.omit({ name: true });
+
+/** Expanded `rerank.providers.<id>.models` entry (the record key is injected as `name`). */
+export type ShoggothRerankModel = z.infer<typeof rerankModelSchema>;
+
+/** Expand a keyed provider `models` record into entry objects (injecting the key as `name`). */
+export function rerankModelEntriesFromRecord(
+  record: Record<string, z.infer<typeof rerankModelEntryBodySchema>> = {},
+): ShoggothRerankModel[] {
+  return Object.entries(record).map(([name, body]) => ({ name, ...body }));
+}
 const rerankProviderSchema = z.object({
   id: z.string().min(1),
   kind: z.enum(["cohere"]),
   baseUrl: z.string().min(1),
   apiKey: z.string().optional(),
   apiKeyEnv: z.string().optional(),
-  models: z.array(rerankModelSchema).optional().default([]),
+  models: z.record(modelNameSchema, rerankModelEntryBodySchema).optional().default({}),
 });
 export type ShoggothRerankProvider = z.infer<typeof rerankProviderSchema>;
 export type ShoggothRerankProviderBody = Omit<ShoggothRerankProvider, "id">;
@@ -215,7 +252,7 @@ export const shoggothRerankConfigSchema = z
     if (!cfg.defaultModel) return;
     // must reference a configured model in provider-id/model-name format
     const known = Object.entries(cfg.providers ?? {}).some(([id, p]) =>
-      (p.models ?? []).some((m) => `${id}/${m.name}` === cfg.defaultModel),
+      Object.keys(p.models ?? {}).some((name) => `${id}/${name}` === cfg.defaultModel),
     );
     if (!known) {
       ctx.addIssue({

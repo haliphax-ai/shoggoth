@@ -478,7 +478,7 @@ function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
           kind: "gemini",
           apiKey: "test-api-key",
           baseUrl: "https://generativelanguage.googleapis.com",
-          models: [{ name: "veo-3.1-generate-preview", mediaType: "video" }],
+          models: { "veo-3.1-generate-preview": { mediaType: "video" } },
         },
       },
     },

@@ -36,7 +36,7 @@ function makeConfig(): ShoggothConfig {
           kind: "typesafe",
           apiKey: "test-api-key",
           baseUrl: "https://api.typesafe.ai",
-          models: [{ name: "jev-latest" }],
+          models: { "jev-latest": {} },
         },
       },
     },

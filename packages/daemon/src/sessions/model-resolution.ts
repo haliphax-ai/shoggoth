@@ -2,11 +2,16 @@ import type Database from "better-sqlite3";
 import type {
   ShoggothConfig,
   ShoggothModelsConfig,
+  ShoggothModelEntry,
   ShoggothModelProviderEntry,
   FailoverChainEntry,
   ModelsRetry,
 } from "@shoggoth/shared";
-import { modelProvidersToEntries, resolveEffectiveModelsConfig } from "@shoggoth/shared";
+import {
+  modelEntriesFromRecord,
+  modelProvidersToEntries,
+  resolveEffectiveModelsConfig,
+} from "@shoggoth/shared";
 import { isProviderFailed } from "./provider-failure-store";
 import { getLogger } from "../logging";
 
@@ -16,7 +21,7 @@ const log = getLogger("model-resolution");
 const DEFAULT_MARK_FAILED_DURATION_MS = 300_000;
 
 type ProviderConfig = ShoggothModelProviderEntry;
-type ProviderModelDefinition = NonNullable<ProviderConfig["models"]>[number];
+type ProviderModelDefinition = ShoggothModelEntry;
 
 export interface ResolvedModel {
   provider: ProviderConfig;
@@ -71,12 +76,13 @@ function findProvider(
   return providers.find((p) => p.id === providerId);
 }
 
-/** Find a model definition in a provider's models list. */
+/** Find a model definition in a provider's keyed `models` record. */
 function findModelDef(
   provider: ProviderConfig,
   modelName: string,
 ): ProviderModelDefinition | undefined {
-  return provider.models?.find((m) => m.name === modelName);
+  const body = provider.models?.[modelName];
+  return body ? { name: modelName, ...body } : undefined;
 }
 
 /**
@@ -114,7 +120,11 @@ export function validateModelRefExists(
   if (!modelDef) {
     return {
       ok: false,
-      error: `Model "${parsed.modelName}" not found in provider "${parsed.providerId}" for model "${ref}". Available models: ${provider.models?.map((m) => m.name).join(", ") || "(none)"}`,
+      error: `Model "${parsed.modelName}" not found in provider "${parsed.providerId}" for model "${ref}". Available models: ${
+        modelEntriesFromRecord(provider.models)
+          .map((m) => m.name)
+          .join(", ") || "(none)"
+      }`,
     };
   }
 
@@ -186,7 +196,7 @@ function tryResolveRef(
  * 3. Check provider_failures: if failed and not stale → skip to failover; if stale → clear and try
  * 4. If provider down, find position in failover chain, walk from next entry until non-failed provider found
  * 5. If chain exhausted, return null + log warning
- * 6. Resolve model definition from provider's models list by name
+ * 6. Resolve model definition from provider's keyed `models` record by name
  */
 export function resolveModel(
   db: Database.Database,

@@ -75,7 +75,7 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
             openrouter: {
               kind: "openai-compatible",
               baseUrl: "https://openrouter.ai/api",
-              models: [{ name: "black-forest-labs/flux.2-klein-4b", mediaType: "image" }],
+              models: { "black-forest-labs/flux.2-klein-4b": { mediaType: "image" } },
             },
           },
         },
@@ -98,10 +98,10 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
             google: {
               kind: "gemini",
               baseUrl: "https://generativelanguage.googleapis.com",
-              models: [
-                { name: "gemini-2.5-flash-image", mediaType: "image" },
-                { name: "veo-3.1", mediaType: "video" },
-              ],
+              models: {
+                "gemini-2.5-flash-image": { mediaType: "image" },
+                "veo-3.1": { mediaType: "video" },
+              },
             },
           },
         },
@@ -158,7 +158,7 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
             openrouter: {
               kind: "openai-compatible",
               baseUrl: "https://openrouter.ai/api",
-              models: [],
+              models: {},
             },
           },
         },
@@ -198,7 +198,7 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
             openrouter: {
               kind: "openai-compatible",
               baseUrl: "https://openrouter.ai/api",
-              models: [{ name: "test-model", mediaType: "image" }],
+              models: { "test-model": { mediaType: "image" } },
             },
           },
         },
@@ -255,12 +255,12 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
             openrouter: {
               kind: "openai-compatible",
               baseUrl: "https://openrouter.ai/api",
-              models: [{ name: "black-forest-labs/flux.2-klein-4b", mediaType: "image" }],
+              models: { "black-forest-labs/flux.2-klein-4b": { mediaType: "image" } },
             },
             google: {
               kind: "gemini",
               baseUrl: "https://generativelanguage.googleapis.com",
-              models: [{ name: "gemini-2.5-flash-image", mediaType: "image" }],
+              models: { "gemini-2.5-flash-image": { mediaType: "image" } },
             },
           },
         },
@@ -283,12 +283,12 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
             "empty-provider": {
               kind: "openai-compatible",
               baseUrl: "https://example.com",
-              models: [],
+              models: {},
             },
             google: {
               kind: "gemini",
               baseUrl: "https://generativelanguage.googleapis.com",
-              models: [{ name: "gemini-2.5-flash-image", mediaType: "image" }],
+              models: { "gemini-2.5-flash-image": { mediaType: "image" } },
             },
           },
         },

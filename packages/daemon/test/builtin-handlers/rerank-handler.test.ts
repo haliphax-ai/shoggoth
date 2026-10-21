@@ -14,7 +14,7 @@ const configuredRerank: NonNullable<ShoggothConfig["rerank"]> = {
       kind: "cohere",
       baseUrl: "https://openrouter.ai/api",
       apiKeyEnv: "OPENROUTER_API_KEY",
-      models: [{ name: "cohere/rerank-v3.5" }],
+      models: { "cohere/rerank-v3.5": {} },
     },
   },
 };
@@ -124,7 +124,7 @@ describe("rerank-handler", () => {
           "openrouter-cohere": {
             kind: "cohere",
             baseUrl: "https://openrouter.ai/api",
-            models: [],
+            models: {},
           },
         },
       }),

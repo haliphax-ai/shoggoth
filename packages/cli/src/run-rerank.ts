@@ -1,5 +1,10 @@
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
-import { loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
+import {
+  loadLayeredConfigAsync,
+  LAYOUT,
+  rerankModelEntriesFromRecord,
+  VERSION,
+} from "@shoggoth/shared";
 
 function controlAuth(): { kind: "operator_token"; token: string } {
   const token = process.env.SHOGGOTH_OPERATOR_TOKEN?.trim();
@@ -114,7 +119,7 @@ export async function runRerankCli(argv: string[]): Promise<void> {
   // inert on every subcommand (including help) — the feature does not exist.
   const config = await loadLayeredConfigAsync(configDir);
   const rerankEnabled = Object.values(config.rerank?.providers ?? {}).some(
-    (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
+    (p: { models?: Record<string, unknown> }) => Object.keys(p.models ?? {}).length > 0,
   );
   if (!rerankEnabled) {
     console.error(
@@ -135,7 +140,7 @@ export async function runRerankCli(argv: string[]): Promise<void> {
     const lines: string[] = [];
     const defaultModel = config.rerank?.defaultModel;
     for (const [providerId, p] of Object.entries(config.rerank?.providers ?? {})) {
-      for (const model of p.models ?? []) {
+      for (const model of rerankModelEntriesFromRecord(p.models)) {
         const ref = `${providerId}/${model.name}`;
         const marker = ref === defaultModel ? "  (default)" : "";
         lines.push(`${ref}${marker}  →  ${p.kind}`);

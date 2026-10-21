@@ -53,6 +53,7 @@ describe("runSessionCompact", () => {
           p: {
             kind: "openai-compatible",
             baseUrl: "https://example.invalid/v1",
+            models: {},
           },
         },
         failoverChain: ["p/m"],

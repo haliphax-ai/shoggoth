@@ -3512,8 +3512,10 @@ export async function handleIntegrationControlOp(
       // indistinguishable from a nonexistent one (undefined → ERR_UNKNOWN_OP).
       const decisionConfig = (ctx.config as any).decision;
       const decisionEnabled = (
-        Object.values(decisionConfig?.providers ?? {}) as Array<{ models?: unknown[] }>
-      ).some((p) => (p.models?.length ?? 0) > 0);
+        Object.values(decisionConfig?.providers ?? {}) as Array<{
+          models?: Record<string, unknown>;
+        }>
+      ).some((p) => Object.keys(p.models ?? {}).length > 0);
       if (!decisionEnabled) {
         return undefined;
       }
@@ -3566,7 +3568,7 @@ export async function handleIntegrationControlOp(
       // indistinguishable from a nonexistent one (undefined → ERR_UNKNOWN_OP).
       const rerankConfig = ctx.config.rerank;
       const rerankEnabled = Object.values(rerankConfig?.providers ?? {}).some(
-        (p) => (p.models?.length ?? 0) > 0,
+        (p) => Object.keys(p.models ?? {}).length > 0,
       );
       if (!rerankEnabled) {
         return undefined;

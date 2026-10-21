@@ -51,10 +51,10 @@ const rerankConfigWithModels = {
       kind: "cohere" as const,
       baseUrl: "https://openrouter.ai/api",
       apiKeyEnv: "OPENROUTER_API_KEY",
-      models: [
-        { name: "cohere/rerank-v3.5" },
-        { name: "nvidia/llama-nemotron-rerank-vl-1b-v2:free" },
-      ],
+      models: {
+        "cohere/rerank-v3.5": {},
+        "nvidia/llama-nemotron-rerank-vl-1b-v2:free": {},
+      },
     },
   },
 };
@@ -108,7 +108,7 @@ describe("createRerankToolFinalizer", () => {
             "openrouter-cohere": {
               kind: "cohere",
               baseUrl: "https://openrouter.ai/api",
-              models: [],
+              models: {},
             },
           },
         },

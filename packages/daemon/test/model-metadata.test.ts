@@ -42,11 +42,11 @@ describe("model-metadata", () => {
         [
           {
             id: "prov1",
-            models: [{ name: "gpt-4o", contextWindowTokens: 128_000 }],
+            models: { "gpt-4o": { contextWindowTokens: 128_000 } },
           },
           {
             id: "prov2",
-            models: [{ name: "claude-3", contextWindowTokens: 200_000 }],
+            models: { "claude-3": { contextWindowTokens: 200_000 } },
           },
         ],
         store,
@@ -60,7 +60,7 @@ describe("model-metadata", () => {
       const store = createModelMetadataStore();
       initModelMetadataFromConfig(
         ["prov1/gpt-4o"],
-        [{ id: "prov1", models: [{ name: "gpt-4o" }] }],
+        [{ id: "prov1", models: { "gpt-4o": {} } }],
         store,
       );
 
@@ -83,7 +83,7 @@ describe("model-metadata", () => {
         [
           {
             id: "provOther",
-            models: [{ name: "x", contextWindowTokens: 999 }],
+            models: { x: { contextWindowTokens: 999 } },
           },
         ],
         store,

@@ -51,7 +51,7 @@ const decisionConfigWithModels = {
       kind: "typesafe" as const,
       baseUrl: "https://api.typesafe.ai",
       apiKeyEnv: "TYPESAFE_API_KEY",
-      models: [{ name: "jev-latest" }, { name: "jev-1.13.0" }],
+      models: { "jev-latest": {}, "jev-1.13.0": {} },
     },
   },
 };
@@ -111,7 +111,7 @@ describe("createDecisionToolFinalizer", () => {
             "typesafe-main": {
               kind: "typesafe",
               baseUrl: "https://api.typesafe.ai",
-              models: [],
+              models: {},
             },
           },
         },

@@ -16,7 +16,7 @@ const configuredDecision: NonNullable<ShoggothConfig["decision"]> = {
       kind: "typesafe",
       baseUrl: "https://api.typesafe.ai",
       apiKeyEnv: "TYPESAFE_API_KEY",
-      models: [{ name: "jev-latest" }],
+      models: { "jev-latest": {} },
     },
   },
 };
@@ -109,7 +109,7 @@ describe("decision-handler", () => {
           "typesafe-main": {
             kind: "typesafe",
             baseUrl: "https://api.typesafe.ai",
-            models: [],
+            models: {},
           },
         },
       }),

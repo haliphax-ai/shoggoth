@@ -1,5 +1,10 @@
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
-import { loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
+import {
+  loadLayeredConfigAsync,
+  LAYOUT,
+  mediaGenerationModelEntriesFromRecord,
+  VERSION,
+} from "@shoggoth/shared";
 
 function controlAuth(): { kind: "operator_token"; token: string } {
   const token = process.env.SHOGGOTH_OPERATOR_TOKEN?.trim();
@@ -136,7 +141,7 @@ export async function runMediaCli(argv: string[]): Promise<void> {
     }
     const lines: string[] = [];
     for (const [providerId, p] of providers) {
-      for (const model of p.models ?? []) {
+      for (const model of mediaGenerationModelEntriesFromRecord(p.models)) {
         const adapter = model.adapter ?? `${p.kind}/${model.mediaType}`;
         lines.push(`${model.name}  →  ${adapter}  [${providerId}]`);
       }

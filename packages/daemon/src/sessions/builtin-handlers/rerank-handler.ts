@@ -50,7 +50,7 @@ async function rerankHandler(
 
   // Check that rerank support is configured
   const hasRerankConfig = Object.values(ctx.config.rerank?.providers ?? {}).some(
-    (p) => (p.models?.length ?? 0) > 0,
+    (p) => Object.keys(p.models ?? {}).length > 0,
   );
   if (!hasRerankConfig) {
     return {

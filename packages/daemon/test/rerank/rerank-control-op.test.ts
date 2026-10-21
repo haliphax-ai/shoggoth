@@ -67,7 +67,7 @@ function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
           kind: "cohere",
           apiKey: "test-api-key",
           baseUrl: "https://openrouter.ai/api",
-          models: [{ name: "cohere/rerank-v3.5" }],
+          models: { "cohere/rerank-v3.5": {} },
         },
       },
     },
@@ -343,7 +343,7 @@ describe("rerank_documents control op", () => {
             "openrouter-cohere": {
               kind: "cohere",
               baseUrl: "https://openrouter.ai/api",
-              models: [],
+              models: {},
             },
           },
         },
@@ -388,7 +388,7 @@ describe("shoggothRerankConfigSchema", () => {
     p1: {
       kind: "cohere" as const,
       baseUrl: "https://api.cohere.com",
-      models: [],
+      models: {},
     },
   };
 
@@ -399,25 +399,25 @@ describe("shoggothRerankConfigSchema", () => {
 
   it("rejects unknown provider kind", () => {
     const parsed = shoggothRerankConfigSchema.safeParse({
-      providers: { p1: { kind: "openai", baseUrl: "https://example.com", models: [] } },
+      providers: { p1: { kind: "openai", baseUrl: "https://example.com", models: {} } },
     });
     assert.ok(!parsed.success);
   });
 
   it("rejects provider without baseUrl", () => {
     const parsed = shoggothRerankConfigSchema.safeParse({
-      providers: { p1: { kind: "cohere", models: [] } },
+      providers: { p1: { kind: "cohere", models: {} } },
     });
     assert.ok(!parsed.success);
   });
 
-  it("rejects model without name", () => {
+  it("rejects a model record entry with an empty name key", () => {
     const parsed = shoggothRerankConfigSchema.safeParse({
       providers: {
         p1: {
           kind: "cohere",
           baseUrl: "https://example.com",
-          models: [{}],
+          models: { "": {} },
         },
       },
     });
@@ -439,7 +439,7 @@ describe("shoggothRerankConfigSchema", () => {
         p1: {
           kind: "cohere",
           baseUrl: "https://example.com",
-          models: [{ name: "rerank-v3.5" }],
+          models: { "rerank-v3.5": {} },
         },
       },
     });
@@ -461,7 +461,7 @@ describe("shoggothRerankConfigSchema", () => {
         p1: {
           kind: "cohere",
           baseUrl: "https://example.com",
-          models: [{ name: "rerank-v3.5" }],
+          models: { "rerank-v3.5": {} },
         },
       },
     });
@@ -475,7 +475,7 @@ describe("shoggothRerankConfigSchema", () => {
         p1: {
           kind: "cohere",
           baseUrl: "https://example.com",
-          models: [{ name: "rerank-v3.5" }],
+          models: { "rerank-v3.5": {} },
         },
       },
     });

@@ -58,14 +58,14 @@ function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
         openai: {
           kind: "openai-compatible",
           baseUrl: "https://api.openai.com/v1",
-          models: [{ name: "gpt-4o" }],
+          models: { "gpt-4o": {} },
         },
         anthropic: {
           kind: "anthropic-messages",
           baseUrl: "https://api.anthropic.com",
-          models: [{ name: "claude-sonnet" }],
+          models: { "claude-sonnet": {} },
         },
-        gemini: { kind: "gemini", models: [{ name: "gemini-pro" }] },
+        gemini: { kind: "gemini", models: { "gemini-pro": {} } },
       },
       failoverChain: ["openai/gpt-4o", "anthropic/claude-sonnet", "gemini/gemini-pro"],
     },
@@ -159,7 +159,7 @@ describe("model-resolution", () => {
             openai: {
               kind: "openai-compatible" as const,
               baseUrl: "https://api.openai.com/v1",
-              models: [{ name: "gpt-4o" }],
+              models: { "gpt-4o": {} },
             },
           },
           failoverChain: [],
@@ -176,7 +176,7 @@ describe("model-resolution", () => {
             openai: {
               kind: "openai-compatible" as const,
               baseUrl: "https://api.openai.com/v1",
-              models: [{ name: "gpt-4o" }],
+              models: { "gpt-4o": {} },
             },
           },
           failoverChain: ["missing-provider/some-model"],
@@ -193,7 +193,7 @@ describe("model-resolution", () => {
             openai: {
               kind: "openai-compatible" as const,
               baseUrl: "https://api.openai.com/v1",
-              models: [{ name: "gpt-4o" }],
+              models: { "gpt-4o": {} },
             },
           },
           failoverChain: ["openai/nonexistent-model"],
@@ -210,7 +210,7 @@ describe("model-resolution", () => {
             openai: {
               kind: "openai-compatible" as const,
               baseUrl: "https://api.openai.com/v1",
-              models: [{ name: "gpt-4o" }],
+              models: { "gpt-4o": {} },
             },
           },
           failoverChain: ["openai/gpt-4o"],
@@ -248,13 +248,13 @@ describe("model-resolution", () => {
             openai: {
               kind: "openai-compatible" as const,
               baseUrl: "https://api.openai.com/v1",
-              models: [{ name: "gpt-4o" }],
+              models: { "gpt-4o": {} },
               markFailedDurationMs: 1000,
             },
             anthropic: {
               kind: "anthropic-messages" as const,
               baseUrl: "https://api.anthropic.com",
-              models: [{ name: "claude-sonnet" }],
+              models: { "claude-sonnet": {} },
             },
           },
           failoverChain: ["openai/gpt-4o", "anthropic/claude-sonnet"],
@@ -353,7 +353,7 @@ describe("model-resolution", () => {
             openai: {
               kind: "openai-compatible" as const,
               baseUrl: "https://api.openai.com/v1",
-              models: [{ name: "gpt-4o" }],
+              models: { "gpt-4o": {} },
             },
           },
           failoverChain: [],
@@ -370,7 +370,7 @@ describe("model-resolution", () => {
             openai: {
               kind: "openai-compatible" as const,
               baseUrl: "https://api.openai.com/v1",
-              models: [{ name: "gpt-4o" }],
+              models: { "gpt-4o": {} },
             },
           },
           failoverChain: ["gpt-4o"],

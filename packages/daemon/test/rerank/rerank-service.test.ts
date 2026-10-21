@@ -23,10 +23,10 @@ const baseConfig: ShoggothRerankConfig = {
       kind: "cohere",
       baseUrl: "https://openrouter.ai/api",
       apiKey: "or-key",
-      models: [
-        { name: "cohere/rerank-v3.5" },
-        { name: "nvidia/llama-nemotron-rerank-vl-1b-v2:free" },
-      ],
+      models: {
+        "cohere/rerank-v3.5": {},
+        "nvidia/llama-nemotron-rerank-vl-1b-v2:free": {},
+      },
     },
   },
 };
@@ -163,7 +163,7 @@ describe("RerankService", () => {
               kind: "cohere",
               baseUrl: "https://api.cohere.com",
               apiKeyEnv: "TEST_RERANK_API_KEY",
-              models: [{ name: "rerank-v3.5" }],
+              models: { "rerank-v3.5": {} },
             },
           },
         });

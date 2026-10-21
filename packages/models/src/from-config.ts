@@ -191,7 +191,7 @@ function buildFailoverChainFromConfig(
       throw new Error(`Unknown model provider id "${providerId}" in failoverChain`);
     }
     const providerConfig = providers?.find((p) => p.id === providerId);
-    const modelConfig = providerConfig?.models?.find((m) => m.name === modelName);
+    const modelConfig = providerConfig?.models?.[modelName];
     return {
       provider,
       model: modelName,

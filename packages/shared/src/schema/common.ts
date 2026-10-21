@@ -36,9 +36,12 @@ export const contextLevelToolsConfigSchema = z
   })
   .strict();
 
+/** Model name key used to identify a model within a provider's `models` record. */
+export const modelNameSchema = z.string().min(1);
+
 export const providerModelSchema = z
   .object({
-    name: z.string().min(1),
+    name: modelNameSchema,
     contextWindowTokens: z.number().int().positive().optional(),
     thinkingFormat: z.enum(["native", "xml-tags", "none"]).optional(),
   })
@@ -46,9 +49,15 @@ export const providerModelSchema = z
 
 export type ProviderModel = z.infer<typeof providerModelSchema>;
 
+/** Per-model provider fields (the record body; `name` is carried by the record key). */
+export const providerModelEntryBodySchema = providerModelSchema.omit({ name: true });
+
+export type ProviderModelEntryBody = z.infer<typeof providerModelEntryBodySchema>;
+
 /** Per-provider retry / failure fields shared across all provider kinds. */
 export const providerRetryFields = {
-  models: z.array(providerModelSchema).optional(),
+  /** Models offered by this provider, keyed by model name. */
+  models: z.record(modelNameSchema, providerModelEntryBodySchema).optional().default({}),
   maxRetries: z.number().int().nonnegative().optional(),
   retryDelayMs: z.number().int().nonnegative().optional(),
   retryBackoffMultiplier: z.number().positive().optional(),

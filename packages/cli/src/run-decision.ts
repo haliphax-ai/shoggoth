@@ -1,5 +1,10 @@
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
-import { loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
+import {
+  decisionModelEntriesFromRecord,
+  loadLayeredConfigAsync,
+  LAYOUT,
+  VERSION,
+} from "@shoggoth/shared";
 
 function controlAuth(): { kind: "operator_token"; token: string } {
   const token = process.env.SHOGGOTH_OPERATOR_TOKEN?.trim();
@@ -115,7 +120,7 @@ export async function runDecisionCli(argv: string[]): Promise<void> {
   // inert on every subcommand (including help) — the feature does not exist.
   const config = await loadLayeredConfigAsync(configDir);
   const decisionEnabled = Object.values(config.decision?.providers ?? {}).some(
-    (p: { models?: unknown[] }) => (p.models?.length ?? 0) > 0,
+    (p: { models?: Record<string, unknown> }) => Object.keys(p.models ?? {}).length > 0,
   );
   if (!decisionEnabled) {
     console.error(
@@ -136,7 +141,7 @@ export async function runDecisionCli(argv: string[]): Promise<void> {
     const lines: string[] = [];
     const defaultModel = (config.decision as { defaultModel?: string } | undefined)?.defaultModel;
     for (const [providerId, p] of Object.entries(config.decision?.providers ?? {})) {
-      for (const model of p.models ?? []) {
+      for (const model of decisionModelEntriesFromRecord(p.models)) {
         const ref = `${providerId}/${model.name}`;
         const marker = ref === defaultModel ? "  (default)" : "";
         lines.push(`${ref}${marker}  →  ${p.kind}`);

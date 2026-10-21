@@ -9,7 +9,7 @@ import {
   type PlatformDeps,
   type PlatformDeliveryResolver,
 } from "@shoggoth/plugins";
-import { modelProvidersToEntries } from "@shoggoth/shared";
+import { modelEntriesFromRecord, modelProvidersToEntries } from "@shoggoth/shared";
 import { discordPlatformRegistration } from "./platform-registration";
 import { createDiscordProbe } from "./probe";
 import { startDaemonDiscordMessaging, type DiscordMessagingRuntime } from "./bootstrap";
@@ -279,16 +279,14 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
               });
               return {
                 providers: providerEntries.map(
-                  (p: { id: string; kind: string; models?: Array<{ name: string }> }) => {
-                    // Collect models from provider's own models array
+                  (p: { id: string; kind: string; models?: Record<string, object> }) => {
+                    // Collect models from the provider's own models record
                     const seen = new Set<string>();
                     const modelList: Array<{ name: string }> = [];
-                    if (p.models && Array.isArray(p.models)) {
-                      for (const m of p.models) {
-                        if (m.name && !seen.has(m.name)) {
-                          seen.add(m.name);
-                          modelList.push({ name: m.name });
-                        }
+                    for (const m of modelEntriesFromRecord(p.models)) {
+                      if (m.name && !seen.has(m.name)) {
+                        seen.add(m.name);
+                        modelList.push({ name: m.name });
                       }
                     }
                     // Also add any from failoverChain that aren't already listed

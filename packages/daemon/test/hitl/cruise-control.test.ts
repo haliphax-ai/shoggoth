@@ -40,7 +40,7 @@ function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
           kind: "typesafe",
           apiKey: "k",
           baseUrl: "https://api.typesafe.ai",
-          models: [{ name: "jev-latest" }],
+          models: { "jev-latest": {} },
         },
       },
     },

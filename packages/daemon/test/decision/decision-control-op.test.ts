@@ -69,7 +69,7 @@ function makeConfig(overrides?: Partial<ShoggothConfig>): ShoggothConfig {
           kind: "typesafe",
           apiKey: "test-api-key",
           baseUrl: "https://api.typesafe.ai",
-          models: [{ name: "jev-latest" }, { name: "jev-1.13.0" }],
+          models: { "jev-latest": {}, "jev-1.13.0": {} },
         },
       },
     },
@@ -273,7 +273,7 @@ describe("decision_evaluate control op", () => {
             "typesafe-main": {
               kind: "typesafe",
               baseUrl: "https://api.typesafe.ai",
-              models: [],
+              models: {},
             },
           },
         },
@@ -322,7 +322,7 @@ describe("decision config schema", () => {
             kind: "typesafe",
             baseUrl: "https://api.typesafe.ai",
             apiKeyEnv: "TYPESAFE_API_KEY",
-            models: [{ name: "jev-latest" }],
+            models: { "jev-latest": {} },
           },
         },
       },
@@ -346,7 +346,7 @@ describe("decision config schema", () => {
   it("rejects unknown provider kind", () => {
     const fragment = {
       decision: {
-        providers: { p1: { kind: "openai", baseUrl: "https://example.com", models: [] } },
+        providers: { p1: { kind: "openai", baseUrl: "https://example.com", models: {} } },
       },
     };
     const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
@@ -356,21 +356,21 @@ describe("decision config schema", () => {
   it("rejects provider without baseUrl", () => {
     const fragment = {
       decision: {
-        providers: { p1: { kind: "typesafe", models: [] } },
+        providers: { p1: { kind: "typesafe", models: {} } },
       },
     };
     const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
     assert.ok(!parsed.success);
   });
 
-  it("rejects model without name", () => {
+  it("rejects a model record entry with an empty name key", () => {
     const fragment = {
       decision: {
         providers: {
           p1: {
             kind: "typesafe",
             baseUrl: "https://example.com",
-            models: [{ label: "jev" }],
+            models: { "": {} },
           },
         },
       },
@@ -418,7 +418,7 @@ describe("decision config schema", () => {
           "typesafe-main": {
             kind: "typesafe",
             baseUrl: "https://api.typesafe.ai",
-            models: [{ name: "jev-latest" }],
+            models: { "jev-latest": {} },
           },
         },
       },
@@ -435,7 +435,7 @@ describe("decision config schema", () => {
           "typesafe-main": {
             kind: "typesafe",
             baseUrl: "https://api.typesafe.ai",
-            models: [{ name: "jev-latest" }],
+            models: { "jev-latest": {} },
           },
         },
       },
@@ -458,7 +458,7 @@ describe("decision config schema", () => {
           "typesafe-main": {
             kind: "typesafe",
             baseUrl: "https://api.typesafe.ai",
-            models: [{ name: "jev-latest" }],
+            models: { "jev-latest": {} },
           },
         },
       },
@@ -475,7 +475,7 @@ describe("decision config schema", () => {
           "typesafe-main": {
             kind: "typesafe",
             baseUrl: "https://api.typesafe.ai",
-            models: [{ name: "jev-latest" }],
+            models: { "jev-latest": {} },
           },
         },
       },
@@ -491,7 +491,7 @@ describe("decision config schema", () => {
           "typesafe-main": {
             kind: "typesafe",
             baseUrl: "https://api.typesafe.ai",
-            models: [{ name: "jev-latest" }],
+            models: { "jev-latest": {} },
           },
         },
       },

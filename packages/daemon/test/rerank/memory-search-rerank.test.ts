@@ -22,7 +22,7 @@ const rerankConfigBase = {
       kind: "cohere" as const,
       baseUrl: "https://openrouter.ai/api",
       apiKey: "or-key",
-      models: [{ name: "cohere/rerank-v3.5" }, { name: "other-rerank-model" }],
+      models: { "cohere/rerank-v3.5": {}, "other-rerank-model": {} },
     },
   },
 };

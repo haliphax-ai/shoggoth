@@ -95,6 +95,7 @@ describe(
             kind: "openai-compatible" as const,
             baseUrl: "http://localhost:1/v1",
             apiKey: "k",
+            models: {},
           },
         },
         failoverChain: [{ providerId: "provA", model: "modelA" }],

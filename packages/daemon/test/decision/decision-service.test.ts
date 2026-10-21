@@ -23,7 +23,7 @@ const baseConfig: ShoggothDecisionConfig = {
       kind: "typesafe",
       baseUrl: "https://api.typesafe.ai",
       apiKey: "ts-key",
-      models: [{ name: "jev-latest" }, { name: "jev-1.13.0" }],
+      models: { "jev-latest": {}, "jev-1.13.0": {} },
     },
   },
 };
@@ -147,7 +147,7 @@ describe("DecisionService", () => {
               kind: "typesafe",
               baseUrl: "https://api.typesafe.ai",
               apiKeyEnv: "TEST_DECISION_API_KEY",
-              models: [{ name: "jev-latest" }],
+              models: { "jev-latest": {} },
             },
           },
         });

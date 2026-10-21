@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { providerRetryFields, responseSchemaSchema, structuredOutputModeSchema } from "./common";
+import {
+  providerRetryFields,
+  providerModelSchema,
+  responseSchemaSchema,
+  structuredOutputModeSchema,
+} from "./common";
 
 export const shoggothOpenAiCompatibleProviderSchema = z
   .object({
@@ -66,6 +71,21 @@ export const shoggothModelProviderBodySchema = z.discriminatedUnion("kind", [
   shoggothGeminiProviderSchema.omit({ id: true }),
 ]);
 export type ShoggothModelProviderBody = z.infer<typeof shoggothModelProviderBodySchema>;
+
+/** Model record body for provider `models` entries (the `name` is carried by the record key). */
+export const shoggothModelEntryBodySchema = providerModelSchema.omit({ name: true });
+
+export type ShoggothModelEntryBody = z.infer<typeof shoggothModelEntryBodySchema>;
+
+/** Expanded `models.providers.<id>.models` entry (the record key is injected as `name`). */
+export type ShoggothModelEntry = { name: string } & ShoggothModelEntryBody;
+
+/** Expand a keyed provider `models` record into entry objects (injecting the key as `name`). */
+export function modelEntriesFromRecord(
+  record: Record<string, ShoggothModelEntryBody> = {},
+): ShoggothModelEntry[] {
+  return Object.entries(record).map(([name, body]) => ({ name, ...body }));
+}
 
 /** Expand a keyed `models.providers` map into runtime provider entries (injecting the key as `id`). */
 export function modelProvidersToEntries(

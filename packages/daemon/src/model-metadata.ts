@@ -1,3 +1,5 @@
+import { modelEntriesFromRecord, type ShoggothModelEntryBody } from "@shoggoth/shared";
+
 export interface ModelMetadataEntry {
   /** Context window size in tokens. */
   contextWindowTokens: number;
@@ -35,7 +37,7 @@ export function initModelMetadataFromConfig(
   failoverChain: ReadonlyArray<string>,
   providers?: ReadonlyArray<{
     id: string;
-    models?: ReadonlyArray<{ name: string; contextWindowTokens?: number }>;
+    models?: Record<string, ShoggothModelEntryBody>;
   }>,
   store: ModelMetadataStore = defaultStore,
 ): void {
@@ -43,10 +45,10 @@ export function initModelMetadataFromConfig(
   // entries: a session may select any configured model, and window lookups
   // (status bar, session stats) are keyed by providerId + model name.
   for (const provider of providers ?? []) {
-    for (const model of provider.models ?? []) {
-      if (model.contextWindowTokens != null) {
-        store.set(makeKey(provider.id, model.name), {
-          contextWindowTokens: model.contextWindowTokens,
+    for (const { name, contextWindowTokens } of modelEntriesFromRecord(provider.models)) {
+      if (contextWindowTokens != null) {
+        store.set(makeKey(provider.id, name), {
+          contextWindowTokens,
           source: "config",
         });
       }
@@ -58,7 +60,7 @@ export function initModelMetadataFromConfig(
     const providerId = entry.slice(0, slash);
     const model = entry.slice(slash + 1);
     const providerConfig = providers?.find((p) => p.id === providerId);
-    const modelConfig = providerConfig?.models?.find((m) => m.name === model);
+    const modelConfig = providerConfig?.models?.[model];
     const contextWindowTokens = modelConfig?.contextWindowTokens;
     if (contextWindowTokens != null) {
       store.set(makeKey(providerId, model), {

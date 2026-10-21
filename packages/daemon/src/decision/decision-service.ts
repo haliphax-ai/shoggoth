@@ -1,5 +1,9 @@
 import { getLogger } from "../logging.js";
-import { decisionProvidersToEntries, type ShoggothDecisionConfig } from "@shoggoth/shared";
+import {
+  decisionModelEntriesFromRecord,
+  decisionProvidersToEntries,
+  type ShoggothDecisionConfig,
+} from "@shoggoth/shared";
 
 const log = getLogger("decision-service");
 
@@ -56,7 +60,7 @@ export class DecisionService {
         kind: "typesafe",
         baseUrl: p.baseUrl,
         apiKey: p.apiKey ?? (p.apiKeyEnv ? (process.env[p.apiKeyEnv] ?? "") : ""),
-        models: (p.models ?? []).map((m) => ({ name: m.name })),
+        models: decisionModelEntriesFromRecord(p.models).map((m) => ({ name: m.name })),
       }),
     );
 

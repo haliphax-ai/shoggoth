@@ -96,7 +96,11 @@ per-property, so a fragment holding several unrelated keys can land in several b
 Agent-mergeable collections (`mcp.servers`, `models.providers`, `mediaGeneration.providers`,
 `decision.providers`, `rerank.providers`) are keyed objects — provider/server id → config block —
 so a fragment that adds or overrides one entry deep-merges by id instead of replacing the whole
-list. Leave the id out of the value; it is the property key.
+list. Leave the id out of the value; it is the property key. The same applies one level down:
+each provider's `models` list is also a keyed record — model name → model config
+(`models.providers.<id>.models.<name>`, likewise for `mediaGeneration`/`decision`/`rerank`
+providers) — so a fragment that adds or overrides one model deep-merges by model name instead
+of replacing the whole array.
 
 Because routing is "first file that already has the key", adding a key to a file that sorts
 later will not steal it from an earlier file that owns it — matching the runtime load order,
