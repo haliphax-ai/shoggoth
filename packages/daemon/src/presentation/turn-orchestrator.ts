@@ -117,6 +117,12 @@ export interface PresentationTurnOrchestratorDeps {
       readonly compactions: number;
       readonly context?: { readonly currentTokens: number; readonly totalTokens?: number };
       readonly subagents?: { readonly total: number; readonly persistent: number };
+      readonly timers?: number;
+      readonly notifies?: number;
+      /** Live render-time count providers (same session binding). */
+      readonly liveNotifies?: () => number;
+      readonly liveTimers?: () => number;
+      readonly liveSubagents?: () => { total: number; persistent: number };
     };
     /**
      * Live cruise-control activity provider — re-read on every render so an

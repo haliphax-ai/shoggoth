@@ -81,6 +81,12 @@ export function buildStatusBarDep(
     sequence: number;
     compactions: number;
     context?: { currentTokens: number; totalTokens?: number };
+    subagents?: { total: number; persistent: number };
+    timers?: number;
+    notifies?: number;
+    liveNotifies?: () => number;
+    liveTimers?: () => number;
+    liveSubagents?: () => { total: number; persistent: number };
   };
   cruiseControlActive?: (sessionId: string) => boolean;
 } {
@@ -802,6 +808,13 @@ export async function startDiscordPlatform(
                   onHitlQueued: (call) => surfaceTracker?.onHitlQueued?.(call),
                   onCompaction: () => surfaceTracker?.onCompaction?.(),
                   onContextUpdate: (update) => surfaceTracker?.onContextUpdate?.(update),
+                  // Count-change events: keep the 🕵️/⏰/↩️ sections live on
+                  // this path (the inbound path forwards these too; the
+                  // render-time providers backstop changes that fire without
+                  // an event — subagent termination, timer fire).
+                  onSubagentsChanged: (counts) => surfaceTracker?.onSubagentsChanged?.(counts),
+                  onTimersChanged: (count) => surfaceTracker?.onTimersChanged?.(count),
+                  onNotifiesChanged: (count) => surfaceTracker?.onNotifiesChanged?.(count),
                   // Abort while the model call may still be streaming (or
                   // hung): stop the producers immediately — post-turn delivery
                   // never runs for a promise that never settles, so nothing

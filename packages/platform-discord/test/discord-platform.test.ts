@@ -2,6 +2,8 @@ import { describe, it, vi, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { mkdtempSync } from "node:fs";
 import { closeTestDb } from "../../daemon/test/helpers/close-test-db";
+import { setTimerScheduler } from "../../daemon/src/sessions/builtin-handlers/timer-handler";
+import { TimerScheduler } from "../../daemon/src/timers/timer-scheduler";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -3229,6 +3231,106 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
     );
     assert.ok(!delivered.startsWith("…"), `placeholder must be replaced, got: ${delivered}`);
     assert.ok(delivered.includes("✅"), `terminal bar must land, got: ${delivered}`);
+  });
+
+  it("a timer queued mid-turn by a real builtin-timer call lands on the terminal bar", async () => {
+    const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
+    createSessionStore(db).create({ id: sessionUrn, workspacePath: tmp });
+    seedStats(sessionUrn, { turn_count: 7 });
+    // The timer handler dispatches through the module-level scheduler ref
+    // (the daemon wires it at startup); give the harness a real one.
+    setTimerScheduler(new TimerScheduler(async () => {}));
+
+    let delivered = "";
+    let bar: string | null = null;
+    let body = "…";
+    const render = () => {
+      delivered = bar === null ? body : `${body}\n\n${bar}`;
+    };
+    const runtime: DiscordMessagingRuntime = {
+      ...baseRuntime(sessionUrn, []),
+      streamingForSession: () => ({
+        start: async () => ({
+          setFullContent: async (text: string) => {
+            body = text;
+            render();
+          },
+          pushUpdate: async (text: string) => {
+            body = text;
+            render();
+          },
+          setStatusBar: async (line: string | null) => {
+            bar = line;
+            render();
+          },
+        }),
+      }),
+    };
+
+    // This path (messaging_surface via runSessionModelTurn) historically never
+    // received the count-change events, and the counts were seed-cached with no
+    // render-time provider — a timer queued mid-turn stayed invisible for the
+    // whole turn and only appeared on the NEXT turn's seed. Real builtin-timer
+    // call through the tool loop: the terminal bar must carry ⏰ 1.
+    let round = 0;
+    const base = defaultConfig(tmp);
+    const platform = await startDiscordPlatform({
+      db,
+      config: {
+        ...base,
+        hitl: { ...base.hitl, bypassUpTo: "caution" },
+        platforms: { statusBar: { enabled: true } },
+      },
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord: runtime,
+      env: { SHOGGOTH_DISCORD_STREAM: "1" },
+      deps: {
+        createToolCallingClient: () => ({
+          async completeWithTools(input: {
+            onTextDelta?: (delta: string, accumulated: string) => void;
+          }) {
+            round += 1;
+            if (round === 1) {
+              return {
+                content: "",
+                toolCalls: [
+                  {
+                    id: "t1",
+                    name: "builtin-timer",
+                    arguments: JSON.stringify({ action: "set", label: "check-in", at: "2h" }),
+                  },
+                ],
+                usedModel: "m1",
+                usedProviderId: "p1",
+              };
+            }
+            input.onTextDelta?.("Timer set.", "Timer set.");
+            return {
+              content: "Timer set.",
+              toolCalls: [],
+              usedModel: "m1",
+              usedProviderId: "p1",
+            };
+          },
+        }),
+      },
+    });
+
+    await platform.runSessionModelTurn({
+      sessionId: sessionUrn,
+      userContent: "set a timer",
+      delivery: { kind: "messaging_surface", userId: "u-1" },
+    });
+    await platform.stop();
+
+    assert.ok(
+      delivered.includes("⏰"),
+      `terminal bar must carry the timer section, got: ${delivered}`,
+    );
+    assert.ok(
+      delivered.includes("⏰ `1`"),
+      `terminal bar must show the mid-turn timer (count 1), got: ${delivered}`,
+    );
   });
 
   it("streamed turn whose live display diverges mid-round delivers the clean turn-scoped prose exactly once", async () => {
