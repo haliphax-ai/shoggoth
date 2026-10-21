@@ -48,6 +48,8 @@ export interface SessionManagerOptions {
   readonly mintToken?: () => string;
   /** Default agent credentials (uid/gid) for workspace operations. */
   readonly agentCreds?: { uid: number; gid: number };
+  /** DI seam: defaults to the real `ensureAgentWorkspaceLayout`. Override in tests. */
+  readonly ensureAgentWorkspaceLayout?: typeof ensureAgentWorkspaceLayout;
 }
 
 export interface SpawnSessionInput {
@@ -162,7 +164,10 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
       }
       const wsPath = resolveAgentWorkspacePath(options.workspacesRoot, dirAgentId);
       try {
-        await ensureAgentWorkspaceLayout(wsPath, agentCreds);
+        await (options.ensureAgentWorkspaceLayout ?? ensureAgentWorkspaceLayout)(
+          wsPath,
+          agentCreds,
+        );
       } catch (e) {
         throw new SessionManagerError(
           "ERR_WORKSPACE_LAYOUT",

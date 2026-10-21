@@ -1,24 +1,17 @@
 import { describe, it, vi, beforeEach } from "vitest";
 import assert from "node:assert";
-
-// Mock node:fs/promises for file writing
-vi.mock("node:fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:fs/promises")>();
-  return {
-    ...actual,
-    writeFile: vi.fn().mockResolvedValue(undefined),
-    mkdir: vi.fn().mockResolvedValue(undefined),
-    readFile: vi.fn().mockResolvedValue(Buffer.from("fake-image-bytes")),
-  };
-});
-
-// Mock global fetch
-const mockFetch = vi.fn();
-vi.stubGlobal("fetch", mockFetch);
-
-import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { predictAdapter } from "../../src/media/adapters/predict-adapter";
 import type { MediaAdapterRequest, MediaAdapterResult } from "../../src/media/adapters/types";
+
+// DI: inject fakes via MediaAdapterDeps instead of mocking node:fs/promises or
+// stubbing global fetch (both are import-order dependent under --no-isolate).
+const mockFetch = vi.fn();
+const mockWriteFile = vi.fn().mockResolvedValue(undefined);
+const mockMkdir = vi.fn().mockResolvedValue(undefined);
+
+function makeDeps() {
+  return { fetchFn: mockFetch, writeFile: mockWriteFile, mkdir: mockMkdir };
+}
 
 function makeRequest(overrides?: Partial<MediaAdapterRequest>): MediaAdapterRequest {
   return {
@@ -57,7 +50,7 @@ describe("predictAdapter", () => {
     const base64 = Buffer.from("fake-png-bytes").toString("base64");
     mockFetch.mockResolvedValue(makePredictResponse([base64]));
 
-    await predictAdapter(makeRequest());
+    await predictAdapter(makeRequest(), makeDeps());
 
     assert.strictEqual(mockFetch.mock.calls.length, 1);
     const [url, opts] = mockFetch.mock.calls[0];
@@ -78,6 +71,7 @@ describe("predictAdapter", () => {
       makeRequest({
         params: { kind: "image", aspectRatio: "16:9", numberOfImages: 3 },
       }),
+      makeDeps(),
     );
 
     const [, opts] = mockFetch.mock.calls[0];
@@ -93,12 +87,12 @@ describe("predictAdapter", () => {
     const base64 = Buffer.from(rawBytes).toString("base64");
     mockFetch.mockResolvedValue(makePredictResponse([base64]));
 
-    await predictAdapter(makeRequest({ outputPath: "/tmp/media/result.png" }));
+    await predictAdapter(makeRequest({ outputPath: "/tmp/media/result.png" }), makeDeps());
 
-    assert.strictEqual(vi.mocked(mkdir).mock.calls.length, 1);
-    assert.strictEqual(vi.mocked(writeFile).mock.calls.length, 1);
+    assert.strictEqual(mockMkdir.mock.calls.length, 1);
+    assert.strictEqual(mockWriteFile.mock.calls.length, 1);
 
-    const [writePath, writeData] = vi.mocked(writeFile).mock.calls[0];
+    const [writePath, writeData] = mockWriteFile.mock.calls[0];
     assert.strictEqual(writePath, "/tmp/media/result.png");
     assert.ok(Buffer.isBuffer(writeData));
     assert.strictEqual(writeData.toString(), rawBytes);
@@ -108,7 +102,10 @@ describe("predictAdapter", () => {
     const base64 = Buffer.from("png-data").toString("base64");
     mockFetch.mockResolvedValue(makePredictResponse([base64]));
 
-    const result = await predictAdapter(makeRequest({ outputPath: "/tmp/media/out.png" }));
+    const result = await predictAdapter(
+      makeRequest({ outputPath: "/tmp/media/out.png" }),
+      makeDeps(),
+    );
 
     assert.strictEqual(result.status, "complete");
     const complete = result as MediaAdapterResult & { status: "complete" };
@@ -127,13 +124,14 @@ describe("predictAdapter", () => {
         outputPath: "/tmp/media/batch.png",
         params: { kind: "image", numberOfImages: 3 },
       }),
+      makeDeps(),
     );
 
     // Should write 3 files (e.g. batch.png, batch_1.png, batch_2.png or similar naming)
-    assert.strictEqual(vi.mocked(writeFile).mock.calls.length, 3);
+    assert.strictEqual(mockWriteFile.mock.calls.length, 3);
 
     // First file should use the original output path
-    const [firstPath] = vi.mocked(writeFile).mock.calls[0];
+    const [firstPath] = mockWriteFile.mock.calls[0];
     assert.strictEqual(firstPath, "/tmp/media/batch.png");
 
     // Result should still be complete
@@ -148,11 +146,8 @@ describe("predictAdapter", () => {
       makeRequest({
         params: { kind: "image", input_image: base64 },
       }),
+      makeDeps(),
     );
-
-    // The handler base64-encodes the input; the adapter should pass it through.
-    // No readFile call expected — adapters receive raw base64.
-    assert.strictEqual(vi.mocked(readFile).mock.calls.length, 0);
 
     // The request body should include the image in instances
     const [, opts] = mockFetch.mock.calls[0];
@@ -173,7 +168,7 @@ describe("predictAdapter", () => {
       text: vi.fn().mockResolvedValue('{"error":{"message":"Rate limit exceeded"}}'),
     });
 
-    const result = await predictAdapter(makeRequest());
+    const result = await predictAdapter(makeRequest(), makeDeps());
 
     assert.strictEqual(result.status, "error");
     const error = result as MediaAdapterResult & { status: "error" };
@@ -186,7 +181,7 @@ describe("predictAdapter", () => {
     mockFetch.mockResolvedValue(makePredictResponse([base64]));
 
     // Minimal params — only kind: "image", no aspectRatio or numberOfImages
-    await predictAdapter(makeRequest({ params: { kind: "image" } }));
+    await predictAdapter(makeRequest({ params: { kind: "image" } }), makeDeps());
 
     const [, opts] = mockFetch.mock.calls[0];
     const body = JSON.parse(opts.body);

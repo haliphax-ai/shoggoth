@@ -22,6 +22,30 @@ import {
   type ShoggothMediaGenerationConfig,
 } from "@shoggoth/shared";
 
+export type MediaAdapterFn = (req: MediaAdapterRequest) => Promise<MediaAdapterResult>;
+
+/** Adapter registry keyed by adapter name (see resolve-model MediaProviderConfig.adapter). */
+export interface MediaAdapterRegistry {
+  "gemini-generate-content": MediaAdapterFn;
+  "gemini-predict": MediaAdapterFn;
+  "gemini-long-running": MediaAdapterFn;
+  "openai-images": MediaAdapterFn;
+  "openai-chat-image": MediaAdapterFn;
+  "openai-video-async": MediaAdapterFn;
+  "openrouter-video": MediaAdapterFn;
+}
+
+const defaultAdapters: MediaAdapterRegistry = {
+  "gemini-generate-content": (req) => generateContentAdapter(req),
+  "gemini-predict": (req) => predictAdapter(req),
+  "gemini-long-running": (req) =>
+    longRunningAdapter(req as MediaAdapterRequest & { timeout_ms?: number }),
+  "openai-images": (req) => openAIImagesAdapter(req),
+  "openai-chat-image": (req) => openAIChatImageAdapter(req),
+  "openai-video-async": (req) => openaiVideoAsyncAdapter(req),
+  "openrouter-video": (req) => openrouterVideoAdapter(req),
+};
+
 export interface PollRequest {
   provider_id: string;
   operation_id: string;
@@ -39,13 +63,16 @@ interface GenerateRequest {
 export class MediaGenerationService {
   private readonly providers: MediaProviderConfig[];
   private readonly adapterDefaults?: Record<string, unknown>;
+  private readonly adapters: MediaAdapterRegistry;
 
   constructor(config: {
     providers: MediaProviderConfig[];
     adapterDefaults?: Record<string, unknown>;
+    adapters?: Partial<MediaAdapterRegistry>;
   }) {
     this.providers = config.providers;
     this.adapterDefaults = config.adapterDefaults;
+    this.adapters = { ...defaultAdapters, ...config.adapters };
   }
 
   static fromConfig(config: ShoggothMediaGenerationConfig): MediaGenerationService {
@@ -90,27 +117,14 @@ export class MediaGenerationService {
       ...(resolved.modalities ? { modalities: resolved.modalities } : {}),
     };
 
-    switch (adapterName) {
-      case "gemini-generate-content":
-        return generateContentAdapter(adapterReq);
-      case "gemini-predict":
-        return predictAdapter(adapterReq);
-      case "gemini-long-running":
-        return longRunningAdapter(adapterReq as MediaAdapterRequest & { timeout_ms?: number });
-      case "openai-images":
-        return openAIImagesAdapter(adapterReq);
-      case "openai-chat-image":
-        return openAIChatImageAdapter(adapterReq);
-      case "openai-video-async":
-        return openaiVideoAsyncAdapter(adapterReq);
-      case "openrouter-video":
-        return openrouterVideoAdapter(adapterReq);
-      default:
-        return {
-          status: "error",
-          error: `Unknown adapter: ${adapterName}`,
-        };
+    const adapter = this.adapters[adapterName as keyof MediaAdapterRegistry];
+    if (!adapter) {
+      return {
+        status: "error",
+        error: `Unknown adapter: ${adapterName}`,
+      };
     }
+    return adapter(adapterReq);
   }
 
   async poll(req: PollRequest): Promise<MediaAdapterResult> {

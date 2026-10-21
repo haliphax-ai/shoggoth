@@ -1,22 +1,16 @@
 import { describe, it, vi, beforeEach, afterEach, expect } from "vitest";
-
-// Mock node:fs/promises for file writing
-vi.mock("node:fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:fs/promises")>();
-  return {
-    ...actual,
-    writeFile: vi.fn().mockResolvedValue(undefined),
-    mkdir: vi.fn().mockResolvedValue(undefined),
-  };
-});
-
-// Mock global fetch
-const mockFetch = vi.fn();
-vi.stubGlobal("fetch", mockFetch);
-
-import { writeFile, mkdir } from "node:fs/promises";
 import { openaiVideoAsyncAdapter } from "../../src/media/adapters/openai-video-async-adapter";
 import type { MediaAdapterRequest, MediaAdapterResult } from "../../src/media/adapters/types";
+
+// DI: inject fakes via MediaAdapterDeps instead of mocking node:fs/promises or
+// stubbing global fetch (both are import-order dependent under --no-isolate).
+const mockFetch = vi.fn();
+const mockWriteFile = vi.fn().mockResolvedValue(undefined);
+const mockMkdir = vi.fn().mockResolvedValue(undefined);
+
+function makeDeps() {
+  return { fetchFn: mockFetch, writeFile: mockWriteFile, mkdir: mockMkdir };
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -151,6 +145,7 @@ describe("openaiVideoAsyncAdapter", () => {
 
       const result = await openaiVideoAsyncAdapter(
         makeRequest({ outputPath: "/tmp/media/video.mp4" }),
+        makeDeps(),
       );
 
       expect(result.status).toBe("complete");
@@ -159,8 +154,8 @@ describe("openaiVideoAsyncAdapter", () => {
       expect(complete.mime_type).toContain("video");
 
       // Verify file was written
-      expect(writeFile).toHaveBeenCalledTimes(1);
-      const [writePath, writeData] = (writeFile as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(mockWriteFile).toHaveBeenCalledTimes(1);
+      const [writePath, writeData] = mockWriteFile.mock.calls[0];
       expect(writePath).toBe("/tmp/media/video.mp4");
       expect(Buffer.isBuffer(writeData)).toBe(true);
       expect(writeData.toString()).toBe("downloaded-video-bytes");
@@ -179,6 +174,7 @@ describe("openaiVideoAsyncAdapter", () => {
 
       const promise = openaiVideoAsyncAdapter(
         makeRequest({ outputPath: "/tmp/media/multi-poll.mp4" }),
+        makeDeps(),
       );
 
       // Advance through polling intervals
@@ -207,6 +203,7 @@ describe("openaiVideoAsyncAdapter", () => {
         makeRequest({
           adapterDefaults: { timeoutMs: 500 }, // Short timeout for test
         }),
+        makeDeps(),
       );
 
       // Advance timers past the timeout
@@ -228,7 +225,7 @@ describe("openaiVideoAsyncAdapter", () => {
         .mockResolvedValueOnce(makePollCompleteResponse())
         .mockResolvedValueOnce(makeVideoDownloadResponse());
 
-      await openaiVideoAsyncAdapter(makeRequest());
+      await openaiVideoAsyncAdapter(makeRequest(), makeDeps());
 
       // The poll should use the generation_id from body
       const pollCall = mockFetch.mock.calls.find(([url]: [string]) => url.includes("/generation?"));
@@ -244,7 +241,7 @@ describe("openaiVideoAsyncAdapter", () => {
         .mockResolvedValueOnce(makePollCompleteResponse())
         .mockResolvedValueOnce(makeVideoDownloadResponse());
 
-      await openaiVideoAsyncAdapter(makeRequest());
+      await openaiVideoAsyncAdapter(makeRequest(), makeDeps());
 
       // The poll should use the generation_id from header
       const pollCall = mockFetch.mock.calls.find(([url]: [string]) => url.includes("/generation?"));
@@ -258,7 +255,7 @@ describe("openaiVideoAsyncAdapter", () => {
     it("returns error on failed submit (non-200)", async () => {
       mockFetch.mockResolvedValueOnce(makeErrorResponse(429, "Rate limit exceeded"));
 
-      const result = await openaiVideoAsyncAdapter(makeRequest());
+      const result = await openaiVideoAsyncAdapter(makeRequest(), makeDeps());
 
       expect(result.status).toBe("error");
       const error = result as MediaAdapterResult & { status: "error" };
@@ -277,6 +274,7 @@ describe("openaiVideoAsyncAdapter", () => {
 
       const result = await openaiVideoAsyncAdapter(
         makeRequest({ outputPath: "/tmp/media/final-output.mp4" }),
+        makeDeps(),
       );
 
       expect(result.status).toBe("complete");
@@ -284,8 +282,8 @@ describe("openaiVideoAsyncAdapter", () => {
       expect(complete.path).toBe("/tmp/media/final-output.mp4");
 
       // Verify mkdir and writeFile were called
-      expect(mkdir).toHaveBeenCalled();
-      expect(writeFile).toHaveBeenCalledWith("/tmp/media/final-output.mp4", expect.any(Buffer));
+      expect(mockMkdir).toHaveBeenCalled();
+      expect(mockWriteFile).toHaveBeenCalledWith("/tmp/media/final-output.mp4", expect.any(Buffer));
     });
   });
 });

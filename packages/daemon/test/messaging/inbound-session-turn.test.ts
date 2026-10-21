@@ -1,29 +1,27 @@
 import { describe, it, expect, vi } from "vitest";
-import { executeSessionAgentTurn } from "../../src/sessions/session-agent-turn";
 import { postTurnSurfaceNotice } from "../../src/presentation/active-turn-surface";
 
-vi.mock("../../src/sessions/session-agent-turn.js", () => ({
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  executeSessionAgentTurn: vi.fn().mockImplementation(async (input: any) => {
-    // Simulate streaming: the round's accumulated text grows beyond slice limit
-    if (input.stream?.onModelTextDelta) {
-      for (let i = 1; i <= 10; i++) {
-        input.stream.onModelTextDelta({
-          delta: "a".repeat(30),
-          accumulated: "a".repeat(i * 30),
-          round: 0,
-        });
-      }
+// DI: inject executeSessionAgentTurn via options instead of mocking the module
+// (import-order dependent under --no-isolate).
+const mockExecuteSessionAgentTurn = vi.fn().mockImplementation(async (input: any) => {
+  // Simulate streaming: the round's accumulated text grows beyond slice limit
+  if (input.stream?.onModelTextDelta) {
+    for (let i = 1; i <= 10; i++) {
+      input.stream.onModelTextDelta({
+        delta: "a".repeat(30),
+        accumulated: "a".repeat(i * 30),
+        round: 0,
+      });
     }
-    input.events?.onThinkingDelta?.({ accumulated: "private reasoning", round: 0 });
-    return {
-      latestAssistantText: "a".repeat(300),
-      assistantTurnProse: "a".repeat(300),
-      failoverMeta: undefined,
-      showAttachments: undefined,
-    };
-  }),
-}));
+  }
+  input.events?.onThinkingDelta?.({ accumulated: "private reasoning", round: 0 });
+  return {
+    latestAssistantText: "a".repeat(300),
+    assistantTurnProse: "a".repeat(300),
+    failoverMeta: undefined,
+    showAttachments: undefined,
+  };
+});
 
 const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn");
 
@@ -36,6 +34,7 @@ describe("runInboundSessionTurn streaming final delivery", () => {
     const streamStart = vi.fn().mockResolvedValue({ setFullContent, pushUpdate });
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: () =>
         Promise.resolve({
           sessionId: "s1",
@@ -75,6 +74,7 @@ describe("runInboundSessionTurn streaming final delivery", () => {
     const streamStart = vi.fn().mockResolvedValue({ setFullContent, pushUpdate });
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: () =>
         Promise.resolve({
           sessionId: "s1",
@@ -118,6 +118,7 @@ describe("runInboundSessionTurn in-turn surface notices", () => {
     const streamStart = vi.fn().mockResolvedValue({ setFullContent, pushUpdate });
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: () =>
         Promise.resolve({
           sessionId: "s1",
@@ -162,7 +163,7 @@ describe("runInboundSessionTurn chronological notice placement", () => {
     const streamStart = vi.fn().mockResolvedValue({ setFullContent, pushUpdate });
     const notice = "> ↩️ ✅ Exec notification delivered in-turn: *echo hi* `n1`";
 
-    vi.mocked(executeSessionAgentTurn).mockImplementationOnce(async (input: any) => {
+    mockExecuteSessionAgentTurn.mockImplementationOnce(async (input: any) => {
       input.stream?.onModelTextDelta?.({
         delta: "first",
         accumulated: "first",
@@ -187,6 +188,7 @@ describe("runInboundSessionTurn chronological notice placement", () => {
     });
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: () =>
         Promise.resolve({
           sessionId: "s1",
@@ -214,21 +216,27 @@ describe("runInboundSessionTurn chronological notice placement", () => {
     // The final body splices the notice chronologically — between the two
     // prose segments — not as a trailing block.
     expect(setFullContent).toHaveBeenLastCalledWith(`first\n\n${notice}\n\nsecond`);
-    // Live rendering folded the notice into the streamed display (the live
-    // view appends at the tail; the terminal body splices chronologically).
+    // The live frames place the notice at the same chronological position.
     // The coalescing pusher dispatches deferred microtasks that all read the
-    // latest state, so assert presence, not an intermediate snapshot.
-    expect(pushUpdate.mock.calls.some(([text]) => text.includes(notice))).toBe(true);
+    // LATEST state, so any frame carrying the notice carries the final
+    // render: find one such frame and pin its structure exactly — the notice
+    // must sit between the two committed segments, not pinned to the tail.
+    const liveFrame = pushUpdate.mock.calls
+      .map(([text]) => text as string)
+      .find((text) => text.includes(notice));
+    expect(liveFrame).toBeDefined();
+    expect(liveFrame).toBe(`first\n\n${notice}\n\nsecond`);
   });
 
   it("appends notices at the end of the error body", async () => {
     const sendErrorBody = vi.fn().mockResolvedValue(undefined);
-    vi.mocked(executeSessionAgentTurn).mockImplementationOnce(async (_input: any) => {
+    mockExecuteSessionAgentTurn.mockImplementationOnce(async (_input: any) => {
       postTurnSurfaceNotice("s1", "> note");
       throw new Error("boom");
     });
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: () =>
         Promise.resolve({
           sessionId: "s1",
@@ -260,6 +268,7 @@ describe("runInboundSessionTurn streaming delta delivery", () => {
     const streamStart = vi.fn().mockResolvedValue({ setFullContent, pushUpdate });
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: () =>
         Promise.resolve({
           sessionId: "s1",
@@ -303,6 +312,7 @@ describe("runInboundSessionTurn streaming delta delivery", () => {
     const streamStart = vi.fn().mockResolvedValue({ setFullContent, pushUpdate });
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: () =>
         Promise.resolve({
           sessionId: "s1",
@@ -339,6 +349,7 @@ describe("runInboundSessionTurn streaming delta delivery", () => {
     const streamStart = vi.fn().mockResolvedValue({ setFullContent, pushUpdate });
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: () =>
         Promise.resolve({
           sessionId: "s1",
@@ -404,6 +415,7 @@ describe("runInboundSessionTurn thinking display", () => {
     const setFullContent = vi.fn().mockResolvedValue(undefined);
     const pushUpdate = vi.fn().mockResolvedValue(undefined);
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn,
       streaming: {
         minIntervalMs: 0,
@@ -425,6 +437,7 @@ describe("runInboundSessionTurn thinking display", () => {
   it("includes reasoning in the final at-once reply without streaming", async () => {
     const sendAssistantBody = vi.fn().mockResolvedValue(undefined);
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn,
       sliceDisplayText: (text) => text,
       showThinking: true,
@@ -442,6 +455,7 @@ describe("runInboundSessionTurn thinking display", () => {
   it("does not expose reasoning when disabled", async () => {
     const sendAssistantBody = vi.fn().mockResolvedValue(undefined);
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn,
       sliceDisplayText: (text) => text,
       showThinking: false,
@@ -461,6 +475,7 @@ describe("runInboundSessionTurn non-streaming path", () => {
     const sendErrorBody = vi.fn().mockResolvedValue(undefined);
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: () =>
         Promise.resolve({
           sessionId: "s1",
@@ -502,6 +517,7 @@ describe("runInboundSessionTurn non-streaming path", () => {
     });
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: () =>
         Promise.resolve({
           sessionId: "s1",
@@ -541,6 +557,7 @@ describe("runInboundSessionTurn non-streaming path", () => {
     const sendAssistantBody = vi.fn().mockResolvedValue(undefined);
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: () =>
         Promise.resolve({
           sessionId: "s1",
@@ -579,7 +596,7 @@ describe("runInboundSessionTurn abort handling", () => {
     // The turn promise stays pending after the abort — a hung model call —
     // so no post-turn delivery ever runs to clean up the presentation
     // pipeline. Only the abort hook can stop the edits here.
-    vi.mocked(executeSessionAgentTurn).mockImplementationOnce(async (input: any) => {
+    mockExecuteSessionAgentTurn.mockImplementationOnce(async (input: any) => {
       input.stream?.onModelTextDelta?.({
         delta: "a".repeat(10),
         accumulated: "a".repeat(10),
@@ -618,6 +635,7 @@ describe("runInboundSessionTurn abort handling", () => {
     });
 
     const runPromise = runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: () =>
         Promise.resolve({
           sessionId: "s1",

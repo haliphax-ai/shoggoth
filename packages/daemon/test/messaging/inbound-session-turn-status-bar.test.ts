@@ -5,38 +5,34 @@ type ExecuteSessionAgentTurnInput = Parameters<
   typeof import("../../src/sessions/session-agent-turn").executeSessionAgentTurn
 >[0];
 
-vi.mock("../../src/sessions/session-agent-turn.js", () => {
-  let fail = false;
-  return {
-    __setFail: (v: boolean) => {
-      fail = v;
-    },
-    executeSessionAgentTurn: vi
-      .fn()
-      .mockImplementation(async (input: ExecuteSessionAgentTurnInput) => {
-        if (fail) throw new Error("boom");
-        if (input.stream?.onModelTextDelta) {
-          for (let i = 1; i <= 10; i++) {
-            input.stream.onModelTextDelta({
-              delta: "a".repeat(30),
-              accumulated: "a".repeat(i * 30),
-              round: 0,
-            });
-          }
-        }
-        input.events?.onContextUpdate?.({ currentTokens: 12_345, totalTokens: 100_000 });
-        input.events?.onSubagentsChanged?.({ total: 1, persistent: 1 });
-        input.events?.onTimersChanged?.(4);
-        return {
-          latestAssistantText: "a".repeat(300),
-          assistantTurnProse: "a".repeat(300),
-          failoverMeta: undefined,
-          showAttachments: undefined,
-          outcome: "completed",
-        };
-      }),
-  };
-});
+// DI: inject executeSessionAgentTurn via options instead of mocking the module
+// (import-order dependent under --no-isolate).
+let fail = false;
+
+const mockExecuteSessionAgentTurn = vi
+  .fn()
+  .mockImplementation(async (input: ExecuteSessionAgentTurnInput) => {
+    if (fail) throw new Error("boom");
+    if (input.stream?.onModelTextDelta) {
+      for (let i = 1; i <= 10; i++) {
+        input.stream.onModelTextDelta({
+          delta: "a".repeat(30),
+          accumulated: "a".repeat(i * 30),
+          round: 0,
+        });
+      }
+    }
+    input.events?.onContextUpdate?.({ currentTokens: 12_345, totalTokens: 100_000 });
+    input.events?.onSubagentsChanged?.({ total: 1, persistent: 1 });
+    input.events?.onTimersChanged?.(4);
+    return {
+      latestAssistantText: "a".repeat(300),
+      assistantTurnProse: "a".repeat(300),
+      failoverMeta: undefined,
+      showAttachments: undefined,
+      outcome: "completed",
+    };
+  });
 
 // Default turn builder shared across tests. `config`/`stateDb` are unused by
 // the status-bar paths under test, so stubs (repo convention) suffice here.
@@ -65,6 +61,7 @@ describe("runInboundSessionTurn status bar", () => {
     const create = vi.fn().mockResolvedValue({ setStatusBar, finish });
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: defaultBuildTurn,
       streaming: { minIntervalMs: 0, start: streamStart },
       statusBar: { enabled: true, create },
@@ -97,6 +94,7 @@ describe("runInboundSessionTurn status bar", () => {
     const finish = vi.fn().mockResolvedValue("✅ ｜ 🔢 `1`");
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: defaultBuildTurn,
       streaming: { minIntervalMs: 0, start: streamStart },
       statusBar: { enabled: false, create },
@@ -130,6 +128,7 @@ describe("runInboundSessionTurn status bar", () => {
     const finish = vi.fn();
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: defaultBuildTurn,
       streaming: { minIntervalMs: 0, start: streamStart },
       statusBar: { enabled: true, create },
@@ -184,6 +183,7 @@ describe("runInboundSessionTurn status bar", () => {
     });
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: defaultBuildTurn,
       streaming: { minIntervalMs: 0, start: streamStart },
       statusBar: { enabled: true, create, attachSink },
@@ -248,6 +248,7 @@ describe("runInboundSessionTurn status bar", () => {
     const sendErrorBody = vi.fn().mockResolvedValue(undefined);
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: defaultBuildTurn,
       streaming: { minIntervalMs: 0, start: streamStart },
       statusBar: { enabled: true, create, attachSink },
@@ -321,6 +322,7 @@ describe("runInboundSessionTurn status bar", () => {
     });
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: () => Promise.reject(new Error("boom")),
       streaming: { minIntervalMs: 0, start: streamStart },
       statusBar: { enabled: true, create, attachSink },
@@ -358,6 +360,7 @@ describe("runInboundSessionTurn status bar", () => {
     });
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: defaultBuildTurn,
       streaming: { minIntervalMs: 0, start: streamStart },
       statusBar: { enabled: true, create },
@@ -389,6 +392,7 @@ describe("runInboundSessionTurn status bar", () => {
     });
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: defaultBuildTurn,
       streaming: { minIntervalMs: 0, start: streamStart },
       statusBar: { enabled: true, create },
@@ -420,6 +424,7 @@ describe("runInboundSessionTurn status bar", () => {
     });
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: defaultBuildTurn,
       streaming: { minIntervalMs: 0, start: streamStart },
       statusBar: { enabled: true, create },
@@ -450,6 +455,7 @@ describe("runInboundSessionTurn status bar", () => {
     });
 
     await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
       buildTurn: defaultBuildTurn,
       streaming: { minIntervalMs: 0, start: streamStart },
       statusBar: { enabled: true, create },

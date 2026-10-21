@@ -420,6 +420,8 @@ export interface McpStdioConnectOptions {
   readonly gid?: number;
   /** Optional tap for server-initiated JSON-RPC notifications received on this session. */
   readonly onServerNotification?: McpServerNotificationHandler;
+  /** DI seam: defaults to the real `node:child_process` spawn. Override in tests. */
+  readonly spawnImpl?: typeof spawn;
 }
 
 export interface McpTcpConnectOptions {
@@ -451,7 +453,8 @@ async function connectMcpStdioSessionDirect(
   opts: McpStdioConnectOptions,
 ): Promise<McpJsonRpcSession> {
   const hasIdentity = opts.uid !== undefined || opts.gid !== undefined;
-  const proc = spawn(opts.command, opts.args ? [...opts.args] : [], {
+  const spawnFn = opts.spawnImpl ?? spawn;
+  const proc = spawnFn(opts.command, opts.args ? [...opts.args] : [], {
     cwd: opts.cwd,
     uid: opts.uid,
     gid: opts.gid,

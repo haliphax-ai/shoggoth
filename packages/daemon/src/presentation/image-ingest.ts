@@ -22,6 +22,8 @@ export interface ImageIngestOptions {
    * Used in hybrid mode to avoid re-fetching already-downloaded files.
    */
   readonly localFilePath?: string;
+  /** Injectable `readFile` for local file reads. Defaults to the real implementation. */
+  readonly readFileImpl?: typeof readFile;
 }
 
 /**
@@ -120,7 +122,8 @@ async function readFromDisk(
   const maxBytes = options.maxBytes ?? MAX_IMAGE_BLOCK_BYTES;
 
   try {
-    const buf = await readFile(options.localFilePath!);
+    const readFn = options.readFileImpl ?? readFile;
+    const buf = await readFn(options.localFilePath!);
     const buffer = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
 
     if (buffer.byteLength > maxBytes) {

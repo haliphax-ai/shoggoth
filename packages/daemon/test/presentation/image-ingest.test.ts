@@ -3,24 +3,9 @@ import type { MessageAttachment } from "@shoggoth/messaging";
 import type { ImageBlockCodec } from "@shoggoth/models";
 import { ingestAttachmentImage } from "../../src/presentation/image-ingest.js";
 
-// Suppress logger output in tests
-vi.mock("../../src/logging.js", () => ({
-  getLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
-}));
-
-// Mock node:fs/promises for localFilePath tests
-vi.mock("node:fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:fs/promises")>();
-  return {
-    ...actual,
-    readFile: vi.fn(),
-  };
-});
+// DI: inject readFile via options instead of mocking node:fs/promises
+// (import-order dependent under --no-isolate).
+const mockReadFile = vi.fn();
 
 function makeAttachment(overrides: Partial<MessageAttachment> = {}): MessageAttachment {
   return {
@@ -364,31 +349,29 @@ describe("ingestAttachmentImage", () => {
 
   describe("localFilePath option", () => {
     it("reads from disk instead of fetching the URL when localFilePath is provided", async () => {
-      const { readFile } = await import("node:fs/promises");
       // PNG magic bytes so detectMediaTypeFromBytes returns image/png
       const pngBytes = Buffer.from([
         0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
       ]);
-      vi.mocked(readFile).mockResolvedValue(pngBytes);
+      mockReadFile.mockResolvedValue(pngBytes);
 
       const codec = makeCodec(false);
       const fetchImpl = vi.fn();
       const attachment = makeAttachment();
 
-      // localFilePath is a new option that doesn't exist yet → this will FAIL
-      // because ImageIngestOptions doesn't have localFilePath.
       const result = await ingestAttachmentImage(attachment, {
         codec,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         fetchImpl: fetchImpl as any,
         localFilePath: "/workspace/media/inbound/msg123_photo.png",
-      } as any);
+        readFileImpl: mockReadFile,
+      });
 
       // Should NOT have fetched the URL
       expect(fetchImpl).not.toHaveBeenCalled();
 
       // Should have read from disk
-      expect(readFile).toHaveBeenCalledWith("/workspace/media/inbound/msg123_photo.png");
+      expect(mockReadFile).toHaveBeenCalledWith("/workspace/media/inbound/msg123_photo.png");
 
       // Should return a valid base64 ImageBlock
       expect(result).toEqual({
@@ -399,11 +382,10 @@ describe("ingestAttachmentImage", () => {
     });
 
     it("does NOT call fetch when localFilePath is set", async () => {
-      const { readFile } = await import("node:fs/promises");
       const jpegBytes = Buffer.from([
         0xff, 0xd8, 0xff, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
       ]);
-      vi.mocked(readFile).mockResolvedValue(jpegBytes);
+      mockReadFile.mockResolvedValue(jpegBytes);
 
       const codec = makeCodec(false);
       const fetchImpl = vi.fn();
@@ -414,7 +396,8 @@ describe("ingestAttachmentImage", () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         fetchImpl: fetchImpl as any,
         localFilePath: "/workspace/media/inbound/msg456_pic.jpg",
-      } as any);
+        readFileImpl: mockReadFile,
+      });
 
       // fetch must NOT be called
       expect(fetchImpl).not.toHaveBeenCalled();
@@ -426,7 +409,6 @@ describe("ingestAttachmentImage", () => {
     });
 
     it("returns correct base64 from the local file", async () => {
-      const { readFile } = await import("node:fs/promises");
       // WebP magic: RIFF....WEBP
       const webpBytes = Buffer.from([
         0x52,
@@ -446,7 +428,7 @@ describe("ingestAttachmentImage", () => {
         0x38,
         0x20, // VP8 chunk
       ]);
-      vi.mocked(readFile).mockResolvedValue(webpBytes);
+      mockReadFile.mockResolvedValue(webpBytes);
 
       const codec = makeCodec(false);
       const fetchImpl = vi.fn();
@@ -457,7 +439,8 @@ describe("ingestAttachmentImage", () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         fetchImpl: fetchImpl as any,
         localFilePath: "/workspace/media/inbound/msg789_anim.webp",
-      } as any);
+        readFileImpl: mockReadFile,
+      });
 
       expect(result).toEqual({
         type: "image",
@@ -467,14 +450,13 @@ describe("ingestAttachmentImage", () => {
     });
 
     it("rejects oversized local files", async () => {
-      const { readFile } = await import("node:fs/promises");
       const oversizedBuf = Buffer.alloc(5000);
       // Write PNG header so it's recognized as an image
       oversizedBuf[0] = 0x89;
       oversizedBuf[1] = 0x50;
       oversizedBuf[2] = 0x4e;
       oversizedBuf[3] = 0x47;
-      vi.mocked(readFile).mockResolvedValue(oversizedBuf);
+      mockReadFile.mockResolvedValue(oversizedBuf);
 
       const codec = makeCodec(false);
       const fetchImpl = vi.fn();
@@ -486,7 +468,8 @@ describe("ingestAttachmentImage", () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         fetchImpl: fetchImpl as any,
         localFilePath: "/workspace/media/inbound/msg999_huge.png",
-      } as any);
+        readFileImpl: mockReadFile,
+      });
 
       // Should be rejected due to size
       expect(result).toBeNull();
@@ -495,8 +478,7 @@ describe("ingestAttachmentImage", () => {
     });
 
     it("returns null when local file read fails", async () => {
-      const { readFile } = await import("node:fs/promises");
-      vi.mocked(readFile).mockRejectedValue(new Error("ENOENT: no such file"));
+      mockReadFile.mockRejectedValue(new Error("ENOENT: no such file"));
 
       const codec = makeCodec(false);
       const fetchImpl = vi.fn();
@@ -507,7 +489,8 @@ describe("ingestAttachmentImage", () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         fetchImpl: fetchImpl as any,
         localFilePath: "/workspace/media/inbound/missing.png",
-      } as any);
+        readFileImpl: mockReadFile,
+      });
 
       // Should gracefully return null, not throw
       expect(result).toBeNull();

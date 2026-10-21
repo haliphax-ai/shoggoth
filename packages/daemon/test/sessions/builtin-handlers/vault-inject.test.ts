@@ -7,12 +7,9 @@ import {
 import { register } from "../../../src/sessions/builtin-handlers/vault-handler";
 import { parseAgentSessionUrn } from "@shoggoth/shared";
 import type { VaultService } from "../../../src/vault/vault-service";
-import { createSecretFifo } from "../../../src/vault/fifo-proxy";
-
-// Mock the fifo-proxy module
-vi.mock("../../../src/vault/fifo-proxy.js", () => ({
-  createSecretFifo: vi.fn(),
-}));
+// DI: inject createSecretFifo via vault.injectFifo instead of mocking the
+// module (import-order dependent under --no-isolate).
+const mockCreateSecretFifo = vi.fn();
 
 // Mock vault service for testing
 interface MockVaultService extends VaultService {
@@ -36,6 +33,7 @@ function createMockVaultService(): MockVaultService {
     listScopes: vi.fn(),
     rotateKey: vi.fn(),
     publicKey: "age1test",
+    injectFifo: mockCreateSecretFifo,
   };
 }
 
@@ -90,7 +88,7 @@ describe("builtin-vault inject", () => {
     mockVault.resolve.mockResolvedValue("secret-value-from-vault");
 
     const mockFifoPath = "/tmp/.vault/test-fifo-123";
-    (createSecretFifo as ReturnType<typeof vi.fn>).mockResolvedValue(mockFifoPath);
+    mockCreateSecretFifo.mockResolvedValue(mockFifoPath);
 
     const ctx = stubCtx({
       sessionId: "agent:developer:discord:channel:123",
@@ -111,7 +109,7 @@ describe("builtin-vault inject", () => {
     expect(mockVault.resolve).toHaveBeenCalledWith("developer", "API_KEY");
 
     // Verify createSecretFifo was called with the secret and credentials
-    expect(createSecretFifo).toHaveBeenCalledWith(
+    expect(mockCreateSecretFifo).toHaveBeenCalledWith(
       "secret-value-from-vault",
       1000, // uid
       1000, // gid
@@ -129,7 +127,7 @@ describe("builtin-vault inject", () => {
     mockVault.get.mockResolvedValue("secret-from-global");
 
     const mockFifoPath = "/tmp/.vault/global-fifo-456";
-    (createSecretFifo as ReturnType<typeof vi.fn>).mockResolvedValue(mockFifoPath);
+    mockCreateSecretFifo.mockResolvedValue(mockFifoPath);
 
     const ctx = stubCtx({
       sessionId: "agent:developer:discord:channel:123",
@@ -174,7 +172,7 @@ describe("builtin-vault inject", () => {
     assert.strictEqual(parsed.path, undefined);
 
     // Verify createSecretFifo was NOT called
-    expect(createSecretFifo).not.toHaveBeenCalled();
+    expect(mockCreateSecretFifo).not.toHaveBeenCalled();
   });
 
   it("returns error when name is missing", async () => {
@@ -197,7 +195,7 @@ describe("builtin-vault inject", () => {
     mockVault.resolve.mockResolvedValue("secret-with-timeout");
 
     const mockFifoPath = "/tmp/.vault/timeout-fifo-789";
-    (createSecretFifo as ReturnType<typeof vi.fn>).mockResolvedValue(mockFifoPath);
+    mockCreateSecretFifo.mockResolvedValue(mockFifoPath);
 
     const ctx = stubCtx({
       sessionId: "agent:developer:discord:channel:123",
@@ -217,7 +215,7 @@ describe("builtin-vault inject", () => {
     assert.strictEqual(parsed.path, mockFifoPath);
 
     // Verify createSecretFifo was called with custom timeout
-    expect(createSecretFifo).toHaveBeenCalledWith("secret-with-timeout", 1000, 1000, 60000);
+    expect(mockCreateSecretFifo).toHaveBeenCalledWith("secret-with-timeout", 1000, 1000, 60000);
   });
 
   it("uses agent's UID/GID from context creds", async () => {
@@ -228,7 +226,7 @@ describe("builtin-vault inject", () => {
     mockVault.resolve.mockResolvedValue("secret-value");
 
     const mockFifoPath = "/tmp/.vault/creds-fifo";
-    (createSecretFifo as ReturnType<typeof vi.fn>).mockResolvedValue(mockFifoPath);
+    mockCreateSecretFifo.mockResolvedValue(mockFifoPath);
 
     const ctx = stubCtx({
       sessionId: "agent:developer:discord:channel:123",
@@ -240,6 +238,6 @@ describe("builtin-vault inject", () => {
     await reg.execute("vault", { action: "inject", name: "API_KEY" }, ctx);
 
     // Verify createSecretFifo was called with agent's UID/GID
-    expect(createSecretFifo).toHaveBeenCalledWith("secret-value", 900, 900, undefined);
+    expect(mockCreateSecretFifo).toHaveBeenCalledWith("secret-value", 900, 900, undefined);
   });
 });

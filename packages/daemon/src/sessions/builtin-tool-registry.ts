@@ -60,6 +60,17 @@ export interface BuiltinToolContext {
   readonly isSubagentSession: boolean;
 
   /**
+   * DI seam for os-exec calls (`toolExec` / `toolExecExtended` / `toolPoll`).
+   * Defaults to the real module implementations; tests inject fakes instead of
+   * mocking `@shoggoth/os-exec` (import-order dependent under `--no-isolate`).
+   */
+  readonly osExec?: {
+    readonly toolExec: typeof import("@shoggoth/os-exec").toolExec;
+    readonly toolExecExtended: typeof import("@shoggoth/os-exec").toolExecExtended;
+    readonly toolPoll: typeof import("@shoggoth/os-exec").toolPoll;
+  };
+
+  /**
    * Notified after a subagent spawn succeeds mid-turn with the recomputed
    * active subagent counts for this session (drives the live turn status bar).
    */

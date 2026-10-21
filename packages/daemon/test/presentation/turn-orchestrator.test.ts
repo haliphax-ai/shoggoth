@@ -7,6 +7,44 @@ import type { ShoggothConfig } from "@shoggoth/shared";
 import type { MessageAttachment } from "@shoggoth/messaging";
 import type { ImageBlockCodec } from "@shoggoth/models";
 
+// DI: inject fakes via constructor deps instead of mocking the modules
+// (import-order dependent under --no-isolate).
+
+const mockRunInboundSessionTurn = vi.fn().mockResolvedValue(undefined);
+
+const mockDownloadInboundAttachments = vi
+  .fn()
+  .mockImplementation(async (opts: { attachments: readonly MessageAttachment[] }) =>
+    opts.attachments.map((a) => ({
+      ...a,
+      localPath: `media/inbound/msg123_${a.filename}`,
+    })),
+  );
+
+const mockResolveAttachmentHandlingMode = vi.fn().mockReturnValue("download");
+
+const mockIngestAttachmentImage = vi.fn().mockImplementation(async (att: MessageAttachment) => {
+  // Only produce image blocks for image content types
+  if (att.contentType?.startsWith("image/")) {
+    return { type: "image", mediaType: att.contentType, base64: "AAAA" };
+  }
+  return null;
+});
+
+function makeOrchestrator(
+  overrides: Partial<ConstructorParameters<typeof PresentationTurnOrchestrator>[0]> = {},
+) {
+  return new PresentationTurnOrchestrator({
+    config: {} as ShoggothConfig,
+    adapter: createMockAdapter(),
+    runInboundSessionTurn: mockRunInboundSessionTurn,
+    downloadInboundAttachments: mockDownloadInboundAttachments,
+    resolveAttachmentHandlingMode: mockResolveAttachmentHandlingMode,
+    ingestAttachmentImage: mockIngestAttachmentImage,
+    ...overrides,
+  });
+}
+
 // Minimal notice resolver
 beforeEach(() => {
   setNoticeResolver((key) => `[${key}]`);
@@ -22,44 +60,10 @@ function createMockAdapter(overrides: Partial<PlatformAdapter> = {}): PlatformAd
   };
 }
 
-// We need to mock runInboundSessionTurn since it's the core dependency.
-// The orchestrator delegates to it, so we verify the wiring.
-vi.mock("../../src/messaging/inbound-session-turn.js", () => ({
-  runInboundSessionTurn: vi.fn().mockResolvedValue(undefined),
-}));
-
-// Mock downloadInboundAttachments — used by the orchestrator in download/hybrid modes.
-vi.mock("../../src/presentation/attachment-download.js", () => ({
-  downloadInboundAttachments: vi
-    .fn()
-    .mockImplementation(async (opts: { attachments: readonly MessageAttachment[] }) =>
-      opts.attachments.map((a) => ({
-        ...a,
-        localPath: `media/inbound/msg123_${a.filename}`,
-      })),
-    ),
-}));
-
-// Mock resolveAttachmentHandlingMode — the orchestrator should call this.
-vi.mock("../../src/presentation/attachment-mode.js", () => ({
-  resolveAttachmentHandlingMode: vi.fn().mockReturnValue("download"),
-}));
-
-// Mock ingestAttachmentImage — used by enrichTurnWithImageAttachments in inline/hybrid modes.
-vi.mock("../../src/presentation/image-ingest.js", () => ({
-  ingestAttachmentImage: vi.fn().mockImplementation(async (att: MessageAttachment) => {
-    // Only produce image blocks for image content types
-    if (att.contentType?.startsWith("image/")) {
-      return { type: "image", mediaType: att.contentType, base64: "AAAA" };
-    }
-    return null;
-  }),
-}));
-
 describe("PresentationTurnOrchestrator", () => {
   it("constructs with required deps", () => {
     const adapter = createMockAdapter();
-    const orch = new PresentationTurnOrchestrator({
+    const orch = makeOrchestrator({
       config: {} as ShoggothConfig,
       adapter,
     });
@@ -68,7 +72,7 @@ describe("PresentationTurnOrchestrator", () => {
 
   it("defaults streamingIntervalMs to 0", async () => {
     const adapter = createMockAdapter();
-    const orch = new PresentationTurnOrchestrator({
+    const orch = makeOrchestrator({
       config: {} as ShoggothConfig,
       adapter,
     });
@@ -79,7 +83,7 @@ describe("PresentationTurnOrchestrator", () => {
 
   it("uses provided streamingIntervalMs", () => {
     const adapter = createMockAdapter();
-    const orch = new PresentationTurnOrchestrator({
+    const orch = makeOrchestrator({
       config: {} as ShoggothConfig,
       adapter,
       streamingIntervalMs: 500,
@@ -88,9 +92,8 @@ describe("PresentationTurnOrchestrator", () => {
   });
 
   it("orchestrateInboundTurn calls runInboundSessionTurn", async () => {
-    const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn.js");
     const adapter = createMockAdapter();
-    const orch = new PresentationTurnOrchestrator({
+    const orch = makeOrchestrator({
       config: {} as ShoggothConfig,
       adapter,
     });
@@ -100,18 +103,17 @@ describe("PresentationTurnOrchestrator", () => {
       buildTurn: vi.fn().mockResolvedValue({}),
     });
 
-    expect(runInboundSessionTurn).toHaveBeenCalled();
+    expect(mockRunInboundSessionTurn).toHaveBeenCalled();
   });
 
   it("configures streaming when adapter has startStream and interval > 0", async () => {
-    const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn.js");
     const mockHandle: StreamHandle = {
       setFullContent: vi.fn().mockResolvedValue(undefined),
     };
     const adapter = createMockAdapter({
       startStream: vi.fn().mockResolvedValue(mockHandle),
     });
-    const orch = new PresentationTurnOrchestrator({
+    const orch = makeOrchestrator({
       config: {} as ShoggothConfig,
       adapter,
       streamingIntervalMs: 400,
@@ -122,17 +124,16 @@ describe("PresentationTurnOrchestrator", () => {
       buildTurn: vi.fn().mockResolvedValue({}),
     });
 
-    const call = vi.mocked(runInboundSessionTurn).mock.calls.at(-1)?.[0];
+    const call = mockRunInboundSessionTurn.mock.calls.at(-1)?.[0];
     expect(call.streaming).toBeDefined();
     expect(call.streaming.minIntervalMs).toBe(400);
   });
 
   it("does not configure streaming when interval is 0", async () => {
-    const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn.js");
     const adapter = createMockAdapter({
       startStream: vi.fn(),
     });
-    const orch = new PresentationTurnOrchestrator({
+    const orch = makeOrchestrator({
       config: {} as ShoggothConfig,
       adapter,
       streamingIntervalMs: 0,
@@ -143,14 +144,13 @@ describe("PresentationTurnOrchestrator", () => {
       buildTurn: vi.fn().mockResolvedValue({}),
     });
 
-    const call = vi.mocked(runInboundSessionTurn).mock.calls.at(-1)?.[0];
+    const call = mockRunInboundSessionTurn.mock.calls.at(-1)?.[0];
     expect(call.streaming).toBeUndefined();
   });
 
   it("sliceDisplayText truncates to maxBodyLength", async () => {
-    const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn.js");
     const adapter = createMockAdapter({ maxBodyLength: 10 });
-    const orch = new PresentationTurnOrchestrator({
+    const orch = makeOrchestrator({
       config: {} as ShoggothConfig,
       adapter,
     });
@@ -160,20 +160,19 @@ describe("PresentationTurnOrchestrator", () => {
       buildTurn: vi.fn().mockResolvedValue({}),
     });
 
-    const call = vi.mocked(runInboundSessionTurn).mock.calls.at(-1)?.[0];
+    const call = mockRunInboundSessionTurn.mock.calls.at(-1)?.[0];
     expect(call.sliceDisplayText("hello world!")).toBe("hello worl");
     expect(call.sliceDisplayText("short")).toBe("short");
   });
 
   it("adapts the statusBar dep into an enabled inbound-turn option with a live tracker", async () => {
-    const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn.js");
     const config = { ...DEFAULT_STATUS_BAR_CONFIG, enabled: true } as ResolvedStatusBarConfig;
     const render = vi.fn().mockReturnValue("✅ ｜ 🔢 `3`");
     const attachSink = vi.fn().mockReturnValue({
       setStatusBar: vi.fn().mockResolvedValue(undefined),
     });
     const adapter = createMockAdapter();
-    const orch = new PresentationTurnOrchestrator({
+    const orch = makeOrchestrator({
       config: {} as ShoggothConfig,
       adapter,
       statusBar: { config, render, attachSink },
@@ -184,7 +183,7 @@ describe("PresentationTurnOrchestrator", () => {
       buildTurn: vi.fn().mockResolvedValue({}),
     });
 
-    const call = vi.mocked(runInboundSessionTurn).mock.calls.at(-1)?.[0];
+    const call = mockRunInboundSessionTurn.mock.calls.at(-1)?.[0];
     expect(call.statusBar).toBeDefined();
     // Regression guard: the dep must be ADAPTED into the option shape. The old
     // pass-through cast left `enabled` undefined at runtime, so inbound turns
@@ -200,7 +199,6 @@ describe("PresentationTurnOrchestrator", () => {
     call.statusBar?.attachSink?.(fakeHandle);
     expect(attachSink).toHaveBeenCalledWith(fakeHandle);
 
-    // create() resolves a tracker whose terminal finish() renders a bar line.
     // create() resolves a tracker whose terminal finish() renders a bar line.
     const tracker = await call.statusBar?.create?.();
     expect(tracker).toBeDefined();
@@ -219,7 +217,6 @@ describe("PresentationTurnOrchestrator", () => {
   });
 
   it("threads cruiseControlActive into the tracker create()", async () => {
-    const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn.js");
     const config = { ...DEFAULT_STATUS_BAR_CONFIG, enabled: true } as ResolvedStatusBarConfig;
     const render = vi.fn().mockReturnValue("✅ ｜ 🔢 `3`");
     const attachSink = vi.fn().mockReturnValue({
@@ -227,7 +224,7 @@ describe("PresentationTurnOrchestrator", () => {
     });
     const adapter = createMockAdapter();
     const cruiseActive = vi.fn((sid: string) => sid === "s1");
-    const orch = new PresentationTurnOrchestrator({
+    const orch = makeOrchestrator({
       config: {} as ShoggothConfig,
       adapter,
       statusBar: { config, render, attachSink, cruiseControlActive: cruiseActive },
@@ -238,7 +235,7 @@ describe("PresentationTurnOrchestrator", () => {
       buildTurn: vi.fn().mockResolvedValue({}),
     });
 
-    const call = vi.mocked(runInboundSessionTurn).mock.calls.at(-1)?.[0];
+    const call = mockRunInboundSessionTurn.mock.calls.at(-1)?.[0];
     const tracker = await call.statusBar?.create?.();
     expect(tracker).toBeDefined();
     // The tracker expose the full event surface so the inbound path can drive live phase updates.
@@ -249,13 +246,12 @@ describe("PresentationTurnOrchestrator", () => {
   });
 
   it("create() then attachSink wires the live sink and flushes the captured starting line", async () => {
-    const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn.js");
     const config = { ...DEFAULT_STATUS_BAR_CONFIG, enabled: true } as ResolvedStatusBarConfig;
     const render = vi.fn().mockReturnValue("⏳ ｜ 🔢 `3`");
     const sink = { setStatusBar: vi.fn().mockResolvedValue(undefined) };
     const attachSink = vi.fn().mockReturnValue(sink);
     const adapter = createMockAdapter();
-    const orch = new PresentationTurnOrchestrator({
+    const orch = makeOrchestrator({
       config: {} as ShoggothConfig,
       adapter,
       statusBar: { config, render, attachSink },
@@ -266,7 +262,7 @@ describe("PresentationTurnOrchestrator", () => {
       buildTurn: vi.fn().mockResolvedValue({}),
     });
 
-    const call = vi.mocked(runInboundSessionTurn).mock.calls.at(-1)?.[0];
+    const call = mockRunInboundSessionTurn.mock.calls.at(-1)?.[0];
     await call.statusBar?.create?.();
     const fakeHandle: StreamHandle = {
       setFullContent: vi.fn().mockResolvedValue(undefined),
@@ -279,7 +275,6 @@ describe("PresentationTurnOrchestrator", () => {
     expect(sink.setStatusBar).toHaveBeenCalledWith("⏳ ｜ 🔢 `3`");
   });
   it("wraps stream handles with attachSink so handle.setStatusBar applies", async () => {
-    const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn.js");
     const config = { ...DEFAULT_STATUS_BAR_CONFIG } as ResolvedStatusBarConfig;
     const render = vi.fn();
 
@@ -292,7 +287,7 @@ describe("PresentationTurnOrchestrator", () => {
     const adapter = createMockAdapter({
       startStream: vi.fn().mockResolvedValue(baseHandle),
     });
-    const orch = new PresentationTurnOrchestrator({
+    const orch = makeOrchestrator({
       config: {} as ShoggothConfig,
       adapter,
       streamingIntervalMs: 400,
@@ -304,7 +299,7 @@ describe("PresentationTurnOrchestrator", () => {
       buildTurn: vi.fn().mockResolvedValue({}),
     });
 
-    const call = vi.mocked(runInboundSessionTurn).mock.calls.at(-1)?.[0];
+    const call = mockRunInboundSessionTurn.mock.calls.at(-1)?.[0];
     expect(call.statusBar).toBeDefined();
     // The start() function wraps the stream handle with attachSink so the
     // returned handle carries the applied setStatusBar method.
@@ -342,7 +337,7 @@ describe("PresentationTurnOrchestrator — mode-aware attachment handling", () =
 
   /**
    * Helper: orchestrate a turn with attachments and capture the wrappedBuildTurn
-   * output by intercepting the mocked runInboundSessionTurn's buildTurn arg.
+   * output by intercepting the injected runInboundSessionTurn's buildTurn arg.
    */
   async function orchestrateAndCaptureBuildTurn(opts: {
     mode: "download" | "inline" | "hybrid";
@@ -351,16 +346,11 @@ describe("PresentationTurnOrchestrator — mode-aware attachment handling", () =
     formatAttachmentMetadata?: (atts: readonly MessageAttachment[]) => string;
     imageUrlPassthrough?: boolean;
   }) {
-    const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn.js");
-    const { resolveAttachmentHandlingMode } =
-      await import("../../src/presentation/attachment-mode.js");
+    // Configure the mode fake for this test
+    mockResolveAttachmentHandlingMode.mockReturnValue(opts.mode);
 
-    // Configure the mode mock for this test
-    vi.mocked(resolveAttachmentHandlingMode).mockReturnValue(opts.mode);
-
-    const adapter = createMockAdapter();
     const config = {} as ShoggothConfig;
-    const orch = new PresentationTurnOrchestrator({ config, adapter });
+    const orch = makeOrchestrator({ config });
 
     const baseTurn = { sessionId, userContent: "Hello" };
 
@@ -374,7 +364,7 @@ describe("PresentationTurnOrchestrator — mode-aware attachment handling", () =
     });
 
     // Extract the wrappedBuildTurn that was passed to runInboundSessionTurn
-    const lastCall = vi.mocked(runInboundSessionTurn).mock.calls.at(-1)?.[0];
+    const lastCall = mockRunInboundSessionTurn.mock.calls.at(-1)?.[0];
     expect(lastCall).toBeDefined();
     expect(lastCall.buildTurn).toBeInstanceOf(Function);
 
@@ -384,16 +374,9 @@ describe("PresentationTurnOrchestrator — mode-aware attachment handling", () =
   }
 
   beforeEach(async () => {
-    const { runInboundSessionTurn } = await import("../../src/messaging/inbound-session-turn.js");
-    vi.mocked(runInboundSessionTurn).mockClear();
-
-    const { downloadInboundAttachments } =
-      await import("../../src/presentation/attachment-download.js");
-    vi.mocked(downloadInboundAttachments).mockClear();
-
-    const { resolveAttachmentHandlingMode } =
-      await import("../../src/presentation/attachment-mode.js");
-    vi.mocked(resolveAttachmentHandlingMode).mockClear();
+    mockRunInboundSessionTurn.mockClear();
+    mockDownloadInboundAttachments.mockClear();
+    mockResolveAttachmentHandlingMode.mockClear();
   });
 
   // -----------------------------------------------------------------------
@@ -415,7 +398,6 @@ describe("PresentationTurnOrchestrator — mode-aware attachment handling", () =
       });
 
       // In download mode, userContent should be plain text (not JSON with image blocks).
-      // The current code always inlines images when a codec is present, so this will FAIL.
       let parsed: unknown;
       try {
         parsed = JSON.parse(turn.userContent);
@@ -435,8 +417,6 @@ describe("PresentationTurnOrchestrator — mode-aware attachment handling", () =
     });
 
     it("calls downloadInboundAttachments for image attachments", async () => {
-      const { downloadInboundAttachments } =
-        await import("../../src/presentation/attachment-download.js");
       const codec = makeCodec();
       const attachments = [makeAttachment()];
       const formatMeta = (atts: readonly MessageAttachment[]) =>
@@ -450,8 +430,7 @@ describe("PresentationTurnOrchestrator — mode-aware attachment handling", () =
       });
 
       // The orchestrator should call downloadInboundAttachments in download mode.
-      // Current code never calls it → FAIL.
-      expect(downloadInboundAttachments).toHaveBeenCalled();
+      expect(mockDownloadInboundAttachments).toHaveBeenCalled();
     });
 
     it("appends metadata with localPath to userContent instead of image blocks", async () => {
@@ -475,7 +454,7 @@ describe("PresentationTurnOrchestrator — mode-aware attachment handling", () =
 
       // Should contain the original user text
       expect(turn.userContent).toContain("Hello");
-      // Should contain metadata with file paths (from downloadInboundAttachments mock)
+      // Should contain metadata with file paths (from downloadInboundAttachments fake)
       expect(turn.userContent).toContain("media/inbound/msg123_photo.png");
       expect(turn.userContent).toContain("media/inbound/msg123_data.csv");
       // Should NOT be a JSON array (no image blocks)
@@ -489,12 +468,7 @@ describe("PresentationTurnOrchestrator — mode-aware attachment handling", () =
 
   describe("inline mode", () => {
     it("does NOT call downloadInboundAttachments", async () => {
-      const { downloadInboundAttachments } =
-        await import("../../src/presentation/attachment-download.js");
       const codec = makeCodec();
-      const _imgBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
-      // We need to mock ingestAttachmentImage indirectly — the real function
-      // will be called. For inline mode the key assertion is that download is NOT called.
       const attachments = [makeAttachment()];
 
       await orchestrateAndCaptureBuildTurn({
@@ -504,10 +478,7 @@ describe("PresentationTurnOrchestrator — mode-aware attachment handling", () =
       });
 
       // In inline mode, no download should happen.
-      // Current code never calls downloadInboundAttachments, but it also never
-      // calls resolveAttachmentHandlingMode. The test verifies the orchestrator
-      // checks the mode and skips download for "inline".
-      expect(downloadInboundAttachments).not.toHaveBeenCalled();
+      expect(mockDownloadInboundAttachments).not.toHaveBeenCalled();
     });
 
     it("produces image blocks for image attachments (current behavior)", async () => {
@@ -521,11 +492,7 @@ describe("PresentationTurnOrchestrator — mode-aware attachment handling", () =
       });
 
       // Inline mode should produce image blocks (JSON-serialized ChatContentPart[]).
-      // This is the current behavior, but the test also implicitly requires
-      // resolveAttachmentHandlingMode to be called (which it currently isn't).
-      const { resolveAttachmentHandlingMode } =
-        await import("../../src/presentation/attachment-mode.js");
-      expect(resolveAttachmentHandlingMode).toHaveBeenCalledWith(expect.anything(), sessionId);
+      expect(mockResolveAttachmentHandlingMode).toHaveBeenCalledWith(expect.anything(), sessionId);
     });
 
     it("does not include localPath in metadata for non-image attachments", async () => {
@@ -554,8 +521,6 @@ describe("PresentationTurnOrchestrator — mode-aware attachment handling", () =
 
   describe("hybrid mode", () => {
     it("calls downloadInboundAttachments AND produces image blocks", async () => {
-      const { downloadInboundAttachments } =
-        await import("../../src/presentation/attachment-download.js");
       const codec = makeCodec();
       const attachments = [makeAttachment()];
 
@@ -566,7 +531,7 @@ describe("PresentationTurnOrchestrator — mode-aware attachment handling", () =
       });
 
       // Hybrid mode: download should be called
-      expect(downloadInboundAttachments).toHaveBeenCalled();
+      expect(mockDownloadInboundAttachments).toHaveBeenCalled();
 
       // AND image blocks should be present (JSON-serialized)
       let parsed: unknown;
@@ -611,9 +576,7 @@ describe("PresentationTurnOrchestrator — mode-aware attachment handling", () =
   // -----------------------------------------------------------------------
 
   it("calls resolveAttachmentHandlingMode with config and sessionId when attachments are present", async () => {
-    const { resolveAttachmentHandlingMode } =
-      await import("../../src/presentation/attachment-mode.js");
-    vi.mocked(resolveAttachmentHandlingMode).mockReturnValue("download");
+    mockResolveAttachmentHandlingMode.mockReturnValue("download");
 
     const codec = makeCodec();
     const attachments = [makeAttachment()];
@@ -628,8 +591,7 @@ describe("PresentationTurnOrchestrator — mode-aware attachment handling", () =
     });
 
     // The orchestrator should resolve the mode from config.
-    // Current code never calls resolveAttachmentHandlingMode → FAIL.
-    expect(resolveAttachmentHandlingMode).toHaveBeenCalledWith(
+    expect(mockResolveAttachmentHandlingMode).toHaveBeenCalledWith(
       expect.anything(), // config
       sessionId,
     );
