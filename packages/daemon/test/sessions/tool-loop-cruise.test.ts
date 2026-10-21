@@ -138,7 +138,10 @@ describe("runToolLoop cruise control", () => {
   /** Register a fake active turn surface and collect its in-place notices. */
   function captureNotices(sessionId: string): string[] {
     const notices: string[] = [];
-    registerActiveTurnSurface(sessionId, (notice) => notices.push(notice));
+    registerActiveTurnSurface(sessionId, {
+      captureAnchor: () => ({ committedProseSegments: 0, toolCalls: 0 }),
+      onNotice: (notice) => notices.push(notice),
+    });
     return notices;
   }
 

@@ -147,10 +147,13 @@ describe("createTurnBannerCollector", () => {
       expect(banners.terminalBody("A\n\nB", { segments: ["A", "B"] })).toBe("A\n\n> note\n\nB");
     });
 
-    it("mirrors legacy sink registration for producers", () => {
+    it("wraps an options object into a collector at registration", () => {
       const notices: string[] = [];
-      const surface = registerActiveTurnSurface("s2", (notice) => {
-        notices.push(notice);
+      const surface = registerActiveTurnSurface("s2", {
+        captureAnchor: () => anchor(0),
+        onNotice: (notice) => {
+          notices.push(notice);
+        },
       });
       expect(postTurnSurfaceNotice("s2", "> hello")).toBe(true);
       expect(notices).toEqual(["> hello"]);

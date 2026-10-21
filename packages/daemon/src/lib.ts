@@ -290,7 +290,6 @@ export {
   createTurnBannerCollector,
   registerActiveTurnSurface,
   postTurnSurfaceNotice,
-  type ActiveTurnNoticeSink,
   type TurnBannerCollector,
   type TurnBannerCollectorOptions,
   type TurnNoticeAnchor,

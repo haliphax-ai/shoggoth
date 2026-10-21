@@ -26,9 +26,6 @@
  * Mirrors the singleton-map pattern used by `sessions/steer-channel.ts`.
  */
 
-/** Accepts one banner/notice line to fold into the in-flight turn output. */
-export type ActiveTurnNoticeSink = (notice: string) => void;
-
 /** The turn position at which a notice fired. */
 export interface TurnNoticeAnchor {
   /** Committed (settled) prose segments before this notice fired. */
@@ -116,8 +113,6 @@ function locateSegmentBlocks(body: string, segments: readonly string[]): number[
   return result;
 }
 
-const zeroAnchor = (): TurnNoticeAnchor => ({ committedProseSegments: 0, toolCalls: 0 });
-
 /**
  * Creates a per-turn banner collector. The runner provides anchor capture
  * from its live state and, optionally, a live re-push hook (`onNotice`).
@@ -188,29 +183,18 @@ export function createTurnBannerCollector(
   };
 }
 
-export type ActiveTurnSurfaceInput =
-  | TurnBannerCollector
-  | TurnBannerCollectorOptions
-  | ActiveTurnNoticeSink;
+export type ActiveTurnSurfaceInput = TurnBannerCollector | TurnBannerCollectorOptions;
 
 /**
- * Normalizes a registered surface to a collector. The legacy sink form
- * `(notice) => void` is kept for backward compatibility: it receives every
- * notice as it is recorded, with a zero anchor (no positional splicing).
- * A ready-made collector is passed through unchanged (the runner keeps owning
- * it for terminal rendering after unregister).
+ * Normalizes a registered surface to a collector: a ready-made collector is
+ * passed through unchanged (the runner keeps owning it for terminal rendering
+ * after unregister), and an options object is wrapped in a fresh collector.
  */
 function toCollector(surface: ActiveTurnSurfaceInput): TurnBannerCollector {
-  if (typeof surface === "function") {
-    return createTurnBannerCollector({
-      captureAnchor: zeroAnchor,
-      onNotice: surface,
-    });
+  if ("add" in surface) {
+    return surface;
   }
-  if (typeof (surface as TurnBannerCollector).add === "function") {
-    return surface as TurnBannerCollector;
-  }
-  return createTurnBannerCollector(surface as TurnBannerCollectorOptions);
+  return createTurnBannerCollector(surface);
 }
 
 const surfaces = new Map<string, TurnBannerCollector>();
