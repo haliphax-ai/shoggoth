@@ -155,6 +155,104 @@ describe("runInboundSessionTurn in-turn surface notices", () => {
   });
 });
 
+describe("runInboundSessionTurn chronological notice placement", () => {
+  it("delivers a notice between the prose segments it fired between", async () => {
+    const setFullContent = vi.fn().mockResolvedValue(undefined);
+    const pushUpdate = vi.fn().mockResolvedValue(undefined);
+    const streamStart = vi.fn().mockResolvedValue({ setFullContent, pushUpdate });
+    const notice = "> ↩️ ✅ Exec notification delivered in-turn: *echo hi* `n1`";
+
+    vi.mocked(executeSessionAgentTurn).mockImplementationOnce(async (input: any) => {
+      input.stream?.onModelTextDelta?.({
+        delta: "first",
+        accumulated: "first",
+        round: 0,
+      });
+      input.stream?.onModelRoundEnd?.({ round: 0, content: "first" });
+      // Fires after the first prose segment committed, before the second.
+      postTurnSurfaceNotice("s1", notice);
+      input.stream?.onModelTextDelta?.({
+        delta: "second",
+        accumulated: "second",
+        round: 1,
+      });
+      input.stream?.onModelRoundEnd?.({ round: 1, content: "second" });
+      return {
+        latestAssistantText: "second",
+        assistantTurnProse: "first\n\nsecond",
+        failoverMeta: undefined,
+        showAttachments: undefined,
+        outcome: "completed",
+      };
+    });
+
+    await runInboundSessionTurn({
+      buildTurn: () =>
+        Promise.resolve({
+          sessionId: "s1",
+          agentId: "main",
+          userContent: "hi",
+          messages: [],
+          tools: [],
+          systemPrompt: "",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          config: {} as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          stateDb: {} as any,
+        }),
+      streaming: {
+        minIntervalMs: 0,
+        start: streamStart,
+      },
+      sliceDisplayText: (t) => t,
+      formatAssistantReply: (text) => text,
+      formatErrorReply: String,
+      sendAssistantBody: vi.fn().mockResolvedValue(undefined),
+      sendErrorBody: vi.fn().mockResolvedValue(undefined),
+    });
+
+    // The final body splices the notice chronologically — between the two
+    // prose segments — not as a trailing block.
+    expect(setFullContent).toHaveBeenLastCalledWith(`first\n\n${notice}\n\nsecond`);
+    // Live rendering folded the notice into the streamed display (the live
+    // view appends at the tail; the terminal body splices chronologically).
+    // The coalescing pusher dispatches deferred microtasks that all read the
+    // latest state, so assert presence, not an intermediate snapshot.
+    expect(pushUpdate.mock.calls.some(([text]) => text.includes(notice))).toBe(true);
+  });
+
+  it("appends notices at the end of the error body", async () => {
+    const sendErrorBody = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(executeSessionAgentTurn).mockImplementationOnce(async (_input: any) => {
+      postTurnSurfaceNotice("s1", "> note");
+      throw new Error("boom");
+    });
+
+    await runInboundSessionTurn({
+      buildTurn: () =>
+        Promise.resolve({
+          sessionId: "s1",
+          agentId: "main",
+          userContent: "hi",
+          messages: [],
+          tools: [],
+          systemPrompt: "",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          config: {} as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          stateDb: {} as any,
+        }),
+      sliceDisplayText: (t) => t,
+      formatAssistantReply: (text) => text,
+      formatErrorReply: String,
+      sendAssistantBody: vi.fn().mockResolvedValue(undefined),
+      sendErrorBody,
+    });
+
+    expect(sendErrorBody).toHaveBeenCalledWith("Error: boom\n\n> note");
+  });
+});
+
 describe("runInboundSessionTurn streaming delta delivery", () => {
   it("calls pushUpdate during model text deltas (not setFullContent)", async () => {
     const setFullContent = vi.fn().mockResolvedValue(undefined);

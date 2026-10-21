@@ -11,6 +11,7 @@ import {
   type SystemContext,
 } from "@shoggoth/shared";
 import {
+  createTurnBannerCollector,
   registerActiveTurnSurface,
   createCoalescingStreamPusher,
   createThinkingOutput,
@@ -739,6 +740,10 @@ export async function startDiscordPlatform(
       // thinking composer is disabled (showThinking === false surfaces still
       // show every round, separated by the transcript's blank line).
       let surfacePriorRoundsProse = "";
+      // In-turn banner anchors: the runner's live position (committed prose
+      // segments / tool calls) captured at notice-fire time.
+      let surfaceCommittedProseSegments = 0;
+      let surfaceToolCalls = 0;
       const executeTurn = (
         afterHitlQueued?: (row: PendingActionRow) => void | Promise<void>,
         streamOverride?: ExecuteSessionAgentTurnInput["stream"],
@@ -790,7 +795,10 @@ export async function startDiscordPlatform(
                     }
                     surfaceTracker?.onThinkingDelta?.(ev.accumulated);
                   },
-                  onToolCall: (ev) => surfaceTracker?.onToolCall?.(ev),
+                  onToolCall: (ev) => {
+                    surfaceToolCalls += 1;
+                    surfaceTracker?.onToolCall?.(ev);
+                  },
                   onHitlQueued: (call) => surfaceTracker?.onHitlQueued?.(call),
                   onCompaction: () => surfaceTracker?.onCompaction?.(),
                   onContextUpdate: (update) => surfaceTracker?.onContextUpdate?.(update),
@@ -887,22 +895,25 @@ export async function startDiscordPlatform(
 
         // In-turn surface notices: banners landing mid-turn are folded into
         // this messaging_surface turn's output (streamed display and final
-        // body) instead of being posted as standalone messages.
-        const surfaceNotices: string[] = [];
-        const renderSurfaceNotices = (): string =>
-          surfaceNotices.length ? `\n\n${surfaceNotices.join("\n\n")}` : "";
+        // body) instead of being posted as standalone messages. A single
+        // per-turn banner manager owns capture (anchored to the runner's live
+        // position), live rendering, and terminal splicing.
+        const surfaceBanners = createTurnBannerCollector({
+          captureAnchor: () => ({
+            committedProseSegments: surfaceCommittedProseSegments,
+            toolCalls: surfaceToolCalls,
+          }),
+          onNotice: () => {
+            if (surfaceStreamPusher) pushDisplay(surfaceDisplay || "…");
+          },
+        });
         let surfaceDisplay = "";
         const pushDisplay = (display: string): void => {
           surfaceDisplay = display;
           if (!surfaceStreamPusher) return;
-          surfaceStreamPusher.push(
-            surfaceNotices.length ? `${display}\n\n${surfaceNotices.join("\n\n")}` : display,
-          );
+          surfaceStreamPusher.push(surfaceBanners.liveBody(display));
         };
-        const surfaceUnregister = registerActiveTurnSurface(sid, (notice) => {
-          surfaceNotices.push(notice);
-          if (surfaceStreamPusher) pushDisplay(surfaceDisplay || "…");
-        }).unregister;
+        const surfaceUnregister = registerActiveTurnSurface(sid, surfaceBanners).unregister;
 
         try {
           await adapter.withTypingIndicator(sid, async () => {
@@ -920,6 +931,11 @@ export async function startDiscordPlatform(
                       surfaceTracker?.onProse?.(ev.accumulated);
                     },
                     onModelRoundEnd: (ev: { round: number; content: string }) => {
+                      // A settled round commits exactly one prose segment when
+                      // its content is non-blank — the same condition that
+                      // admits it into the composed turn prose — so anchors
+                      // map 1:1 onto final body positions.
+                      if (ev.content.trim()) surfaceCommittedProseSegments += 1;
                       let display: string;
                       if (thinkingOutput) {
                         display = thinkingOutput.endRound(ev);
@@ -952,8 +968,10 @@ export async function startDiscordPlatform(
               replyText,
               turnResult.failoverMeta,
             );
-            const fullBody =
-              (thinkingOutput?.render(formattedBody) ?? formattedBody) + renderSurfaceNotices();
+            const fullBody = surfaceBanners.terminalBody(
+              thinkingOutput?.render(formattedBody) ?? formattedBody,
+              { segments: replyText.split("\n\n") },
+            );
             // ONE terminal composition: the tracker's finish() renders the
             // frozen bar (✅/🛑/❌) through the same renderer as the live bar and
             // returns the line for delivery — the terminal snapshot carries this

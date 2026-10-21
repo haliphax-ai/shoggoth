@@ -10,7 +10,10 @@ import {
 import type { ToolCallEvent } from "../sessions/tool-loop";
 import type { OutboundAttachment, StreamHandle } from "../presentation/platform-adapter";
 import { createCoalescingStreamPusher } from "../presentation/stream-coordinator";
-import { registerActiveTurnSurface } from "../presentation/active-turn-surface";
+import {
+  createTurnBannerCollector,
+  registerActiveTurnSurface,
+} from "../presentation/active-turn-surface";
 import { getLogger } from "../logging";
 import { createThinkingOutput, normalizeRoundProse } from "./thinking-output";
 
@@ -196,29 +199,31 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
 
   // In-turn surface notices: banners that land while this turn runs are
   // folded into the turn's active output — the streamed display and the
-  // final/error bodies — instead of being posted as standalone messages.
-  const surfaceNotices: string[] = [];
-  const renderSurfaceNotices = (): string =>
-    surfaceNotices.length ? `\n\n${surfaceNotices.join("\n\n")}` : "";
+  // final/error bodies — instead of being posted as standalone messages. A
+  // single per-turn banner manager owns capture (anchored to the runner's
+  // live position), live rendering, and terminal splicing.
+  let committedProseSegments = 0;
+  let toolCalls = 0;
+  const banners = createTurnBannerCollector({
+    captureAnchor: () => ({ committedProseSegments, toolCalls }),
+    onNotice: () => {
+      // Re-render immediately so the banner lands mid-turn, not on the next
+      // model delta; show the placeholder when no display exists yet.
+      if (streamPusher) pushDisplay(surfaceDisplay || "…");
+    },
+  });
   let surfaceDisplay = "";
   const pushDisplay = (display: string): void => {
     surfaceDisplay = display;
     if (!streamPusher) return;
-    streamPusher.push(
-      surfaceNotices.length ? `${display}\n\n${surfaceNotices.join("\n\n")}` : display,
-    );
+    streamPusher.push(banners.liveBody(display));
   };
   let surfaceUnregister: (() => void) | undefined;
 
   try {
     const turn = await options.buildTurn();
     if (turn.sessionId) {
-      surfaceUnregister = registerActiveTurnSurface(turn.sessionId, (notice) => {
-        surfaceNotices.push(notice);
-        // Re-render immediately so the banner lands mid-turn, not on the next
-        // model delta; show the placeholder when no display exists yet.
-        if (streamPusher) pushDisplay(surfaceDisplay || "…");
-      }).unregister;
+      surfaceUnregister = registerActiveTurnSurface(turn.sessionId, banners).unregister;
     }
 
     // Thread sentinel (core inbound path, upstream of the turn): a thread-bound
@@ -264,6 +269,12 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
                       statusBar?.onProse?.(ev.accumulated);
                     },
                     onModelRoundEnd: (ev: { round: number; content: string }) => {
+                      // A settled round commits exactly one prose segment when
+                      // its normalized content is non-blank — the same
+                      // condition that admits it into the display and the
+                      // turn's composed prose, so anchors map 1:1 onto final
+                      // body positions.
+                      if (normalizeRoundProse(ev.content)) committedProseSegments += 1;
                       let display: string;
                       if (thinkingOutput) {
                         display = thinkingOutput.endRound(ev);
@@ -296,7 +307,10 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
                 }
                 statusBar?.onThinkingDelta?.(ev.accumulated);
               },
-              onToolCall: (ev) => statusBar?.onToolCall?.(ev),
+              onToolCall: (ev) => {
+                toolCalls += 1;
+                statusBar?.onToolCall?.(ev);
+              },
               onHitlQueued: (call) => statusBar?.onHitlQueued?.(call),
               onCompaction: () => statusBar?.onCompaction?.(),
               onContextUpdate: (update) => statusBar?.onContextUpdate?.(update),
@@ -372,8 +386,9 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       // by the quotes-plus-last-round fallback.
       const replyText = turnResult.assistantTurnProse ?? turnResult.latestAssistantText;
       const formattedBody = formatAssistantReply(replyText, turnResult.failoverMeta);
-      const rawBody =
-        (thinkingOutput?.render(formattedBody) ?? formattedBody) + renderSurfaceNotices();
+      const rawBody = banners.terminalBody(thinkingOutput?.render(formattedBody) ?? formattedBody, {
+        segments: replyText.split("\n\n"),
+      });
 
       const attachments = turnResult.showAttachments;
 
@@ -475,7 +490,7 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       options.onTurnExecutionFailed?.(e);
       log.warn("inbound_session_turn.failed", { ...ctx, err: String(e) });
       try {
-        const errorText = `${formatErrorReply(e)}${renderSurfaceNotices()}`;
+        const errorText = banners.terminalBody(formatErrorReply(e), { segments: [] });
         const errorBody = barLine ? `${errorText}\n\n${barLine}` : errorText;
         await options.sendErrorBody(sliceDisplayText(errorBody));
       } catch (sendErr) {
