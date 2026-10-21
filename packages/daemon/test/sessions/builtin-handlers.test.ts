@@ -7,6 +7,7 @@ import {
 import { register as registerConfig } from "../../src/sessions/builtin-handlers/config-handlers";
 import { register as registerProcman } from "../../src/sessions/builtin-handlers/procman-handlers";
 import { register as registerMessage } from "../../src/sessions/builtin-handlers/message-handler";
+import { register as registerAsk } from "../../src/sessions/builtin-handlers/ask-handler";
 
 function stubCtx(overrides: Partial<BuiltinToolContext> = {}): BuiltinToolContext {
   return {
@@ -420,5 +421,50 @@ describe("fs-handlers read truncation", () => {
     } finally {
       rmSync(ws, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ask handler
+// ---------------------------------------------------------------------------
+
+describe("ask handler", () => {
+  it("returns error when message tool context is unavailable", async () => {
+    const reg = new BuiltinToolRegistry();
+    registerAsk(reg);
+    const result = await reg.execute("ask", { choices: [] }, stubCtx());
+    assert.deepStrictEqual(JSON.parse(result.resultJson), {
+      error: "ask_tool_unavailable",
+    });
+  });
+
+  it("delegates to message tool context execute with the choice action", async () => {
+    const reg = new BuiltinToolRegistry();
+    registerAsk(reg);
+    let capturedArgs: Record<string, unknown> | undefined;
+    const ctx = stubCtx({
+      messageToolCtx: {
+        execute: async (_sid: string, args: Record<string, unknown>) => {
+          capturedArgs = args;
+          return { ok: true, message_id: "m1", choices: 2 };
+        },
+      },
+    });
+    const result = await reg.execute(
+      "ask",
+      {
+        content: "Pick one:",
+        choices: [{ emoji: "👍", label: "Approve" }],
+      },
+      ctx,
+    );
+    const parsed = JSON.parse(result.resultJson);
+    assert.strictEqual(parsed.ok, true);
+    assert.strictEqual(parsed.message_id, "m1");
+    assert.deepStrictEqual(capturedArgs, {
+      action: "choice",
+      content: "Pick one:",
+      choices: [{ emoji: "👍", label: "Approve" }],
+    });
   });
 });

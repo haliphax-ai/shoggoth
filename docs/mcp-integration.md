@@ -403,9 +403,9 @@ const catalog = builtinShoggothToolsCatalog();
 
 ---
 
-## Message Tool Descriptor
+## Message & Ask Tool Descriptors
 
-The `message` tool schema is generated dynamically based on the active messaging platform's capabilities.
+The `message` and `ask` tool schemas are generated dynamically based on the active messaging platform's capabilities. The `message` tool handles messaging CRUD, reactions, search, and attachment download; the `ask` tool handles reaction-based choice prompts.
 
 ```typescript
 import { buildMessageToolDescriptor } from "@shoggoth/mcp-integration";
@@ -428,22 +428,24 @@ const descriptor = buildMessageToolDescriptor({
 
 ### Platform Capability Flags (`MessageToolPlatformSlice`)
 
-| Flag                 | Effect on Schema                                                                                           |
-| -------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `attachments`        | Adds `attachments` array property (base64 file uploads).                                                   |
-| `messageEdit`        | Adds `edit` to the `action` enum.                                                                          |
-| `messageDelete`      | Adds `delete` to the `action` enum.                                                                        |
-| `threadCreate`       | Adds `create_thread` action and `auto_archive_duration_minutes`.                                           |
-| `threadDelete`       | Adds `delete_thread` action.                                                                               |
-| `replies`            | Adds `reply_to_message_id` property.                                                                       |
-| `messageGet`         | Adds `get` action with `channel_id`, `limit`, `anchor_message_id`, `list_direction`.                       |
-| `react`              | Adds `react` and `choice` actions with `emoji`, `remove`, `choices` properties.                            |
-| `reactions`          | Adds `reactions` action with `emoji` filter.                                                               |
-| `search`             | Adds `search` action with `query`, `author_id`, `author_ids`, `before`, `after`, `from_me`, `channel_ids`. |
-| `attachmentDownload` | Adds `attachment-download` action with `filename`, `index`, `path`.                                        |
-| `pin`                | Adds `pin` action (pins a message by `message_id`).                                                        |
+| Flag                 | Effect on Schema                                                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `attachments`        | Adds `attachments` array property (base64 file uploads).                                                                        |
+| `messageEdit`        | Adds `edit` to the `action` enum.                                                                                               |
+| `messageDelete`      | Adds `delete` to the `action` enum.                                                                                             |
+| `threadCreate`       | Adds `create_thread` action and `auto_archive_duration_minutes`.                                                                |
+| `threadDelete`       | Adds `delete_thread` action.                                                                                                    |
+| `replies`            | Adds `reply_to_message_id` property.                                                                                            |
+| `messageGet`         | Adds `get` action with `channel_id`, `limit`, `anchor_message_id`, `list_direction`.                                            |
+| `react`              | Adds the `react` action with `emoji` / `remove` properties, and enables the `builtin-ask` tool (reaction-based choice prompts). |
+| `reactions`          | Adds `reactions` action with `emoji` filter.                                                                                    |
+| `search`             | Adds `search` action with `query`, `author_id`, `author_ids`, `before`, `after`, `from_me`, `channel_ids`.                      |
+| `attachmentDownload` | Adds `attachment-download` action with `filename`, `index`, `path`.                                                             |
+| `pin`                | Adds `pin` action (pins a message by `message_id`).                                                                             |
 
 The schema is intentionally flat (no `oneOf`/`anyOf`/`allOf` at the top level) for compatibility with Anthropic Messages API and similar gateways. Per-action field requirements are enforced at execution time, not in the schema.
+
+The `ask` tool descriptor is built with `buildAskToolDescriptor(slice)` and is only present when the platform supports reactions. It exposes `content` and `choices`, keeping the `message` schema free of `choices`.
 
 ---
 

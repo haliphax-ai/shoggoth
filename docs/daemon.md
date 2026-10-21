@@ -194,7 +194,7 @@ The `gates` config section extends the same two gates to any tool whose namespac
 
 `BuiltinToolRegistry` is a typed `Map<string, BuiltinToolHandler>` dispatching tool calls to handler functions. Each handler receives a `BuiltinToolContext` with the session's DB, config, workspace path, credentials, and more. Handlers are stateless — all per-invocation state flows through the context.
 
-Registered builtins include: exec, fetch, fs operations, ls, cd, read/write, search-replace, kv, memory, message, session management, show, skills, timer, web-search, workflow, config, discover, elevate, and process manager operations.
+Registered builtins include: exec, fetch, fs operations, ls, cd, read/write, search-replace, kv, memory, message, ask, session management, show, skills, timer, web-search, workflow, config, discover, elevate, and process manager operations.
 
 ---
 

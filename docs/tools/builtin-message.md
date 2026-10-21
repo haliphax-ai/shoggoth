@@ -4,33 +4,32 @@ Messaging surface control for the session's bound channel. Pure passthrough — 
 
 ## Parameters
 
-| Param                           | Type    | Required | Actions                                                                      | Notes                                                                                                                                                                                       |
-| ------------------------------- | ------- | -------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `action`                        | string  | yes      | all                                                                          | One of: `post`, `get`, `edit`, `delete`, `pin`, `create_thread`, `delete_thread`, `react`, `choice`, `reactions`, `search`, `attachment-download`. Platform determines which are available. |
-| `content`                       | string  | no       | post, choice, edit                                                           | Message body. For `choice`, preamble text before the choice legend. For `edit`, replacement text.                                                                                           |
-| `message_id`                    | string  | no       | get, edit, delete, pin, create_thread, react, reactions, attachment-download | Target message identifier. For `get`, fetches a single message. For `create_thread`, optional anchor message (omit for standalone thread). For `pin`, the message to pin.                   |
-| `name`                          | string  | no       | create_thread                                                                | Thread name.                                                                                                                                                                                |
-| `thread_id`                     | string  | no       | delete_thread                                                                | Thread/channel identifier.                                                                                                                                                                  |
-| `channel_id`                    | string  | no       | get                                                                          | Channel or thread id; defaults to session's bound channel. Returns messages with `attachments` array (id, filename, url, content_type, size) when available.                                |
-| `limit`                         | integer | no       | get, search                                                                  | Max messages to return (get default 10, max 100; search default 25).                                                                                                                        |
-| `anchor_message_id`             | string  | no       | get                                                                          | Pivot message for pagination; use with `list_direction`.                                                                                                                                    |
-| `list_direction`                | string  | no       | get                                                                          | `before`, `after`, or `around` relative to `anchor_message_id`.                                                                                                                             |
-| `reply_to_message_id`           | string  | no       | post                                                                         | Platform message id to reply to.                                                                                                                                                            |
-| `attachments`                   | array   | no       | post                                                                         | Files as `[{ filename, content_base64 }]`.                                                                                                                                                  |
-| `auto_archive_duration_minutes` | integer | no       | create_thread                                                                | One of: 60, 1440, 4320, 10080.                                                                                                                                                              |
-| `emoji`                         | string  | no       | react, reactions                                                             | Unicode or platform shortcode (e.g. `✅`, `<:custom:123>`).                                                                                                                                 |
-| `remove`                        | boolean | no       | react                                                                        | If true, remove the reaction. Default false.                                                                                                                                                |
-| `choices`                       | array   | no       | choice                                                                       | `[{ emoji, label }]` pairs for reaction-based choice prompt.                                                                                                                                |
-| `query`                         | string  | no       | search                                                                       | Free-text keyword search.                                                                                                                                                                   |
-| `author_id`                     | string  | no       | search                                                                       | Filter to a specific user id.                                                                                                                                                               |
-| `author_ids`                    | array   | no       | search                                                                       | Filter to any of these user ids.                                                                                                                                                            |
-| `before`                        | string  | no       | search                                                                       | Messages before this message id or ISO timestamp.                                                                                                                                           |
-| `after`                         | string  | no       | search                                                                       | Messages after this message id or ISO timestamp.                                                                                                                                            |
-| `from_me`                       | boolean | no       | search                                                                       | Filter to bot/agent's own messages.                                                                                                                                                         |
-| `channel_ids`                   | array   | no       | search                                                                       | Search across multiple channels.                                                                                                                                                            |
-| `filename`                      | string  | no       | attachment-download                                                          | Specific filename when message has multiple attachments.                                                                                                                                    |
-| `index`                         | integer | no       | attachment-download                                                          | 0-based attachment index (default 0).                                                                                                                                                       |
-| `path`                          | string  | no       | attachment-download                                                          | Local save path; defaults to workspace downloads dir.                                                                                                                                       |
+| Param                           | Type    | Required | Actions                                                                      | Notes                                                                                                                                                                             |
+| ------------------------------- | ------- | -------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `action`                        | string  | yes      | all                                                                          | One of: `post`, `get`, `edit`, `delete`, `pin`, `create_thread`, `delete_thread`, `react`, `reactions`, `search`, `attachment-download`. Platform determines which are available. |
+| `content`                       | string  | no       | post, edit                                                                   | Message body. For `edit`, replacement text.                                                                                                                                       |
+| `message_id`                    | string  | no       | get, edit, delete, pin, create_thread, react, reactions, attachment-download | Target message identifier. For `get`, fetches a single message. For `create_thread`, optional anchor message (omit for standalone thread). For `pin`, the message to pin.         |
+| `name`                          | string  | no       | create_thread                                                                | Thread name.                                                                                                                                                                      |
+| `thread_id`                     | string  | no       | delete_thread                                                                | Thread/channel identifier.                                                                                                                                                        |
+| `channel_id`                    | string  | no       | get                                                                          | Channel or thread id; defaults to session's bound channel. Returns messages with `attachments` array (id, filename, url, content_type, size) when available.                      |
+| `limit`                         | integer | no       | get, search                                                                  | Max messages to return (get default 10, max 100; search default 25).                                                                                                              |
+| `anchor_message_id`             | string  | no       | get                                                                          | Pivot message for pagination; use with `list_direction`.                                                                                                                          |
+| `list_direction`                | string  | no       | get                                                                          | `before`, `after`, or `around` relative to `anchor_message_id`.                                                                                                                   |
+| `reply_to_message_id`           | string  | no       | post                                                                         | Platform message id to reply to.                                                                                                                                                  |
+| `attachments`                   | array   | no       | post                                                                         | Files as `[{ filename, content_base64 }]`.                                                                                                                                        |
+| `auto_archive_duration_minutes` | integer | no       | create_thread                                                                | One of: 60, 1440, 4320, 10080.                                                                                                                                                    |
+| `emoji`                         | string  | no       | react, reactions                                                             | Unicode or platform shortcode (e.g. `✅`, `<:custom:123>`).                                                                                                                       |
+| `remove`                        | boolean | no       | react                                                                        | If true, remove the reaction. Default false.                                                                                                                                      |
+| `query`                         | string  | no       | search                                                                       | Free-text keyword search.                                                                                                                                                         |
+| `author_id`                     | string  | no       | search                                                                       | Filter to a specific user id.                                                                                                                                                     |
+| `author_ids`                    | array   | no       | search                                                                       | Filter to any of these user ids.                                                                                                                                                  |
+| `before`                        | string  | no       | search                                                                       | Messages before this message id or ISO timestamp.                                                                                                                                 |
+| `after`                         | string  | no       | search                                                                       | Messages after this message id or ISO timestamp.                                                                                                                                  |
+| `from_me`                       | boolean | no       | search                                                                       | Filter to bot/agent's own messages.                                                                                                                                               |
+| `channel_ids`                   | array   | no       | search                                                                       | Search across multiple channels.                                                                                                                                                  |
+| `filename`                      | string  | no       | attachment-download                                                          | Specific filename when message has multiple attachments.                                                                                                                          |
+| `index`                         | integer | no       | attachment-download                                                          | 0-based attachment index (default 0).                                                                                                                                             |
+| `path`                          | string  | no       | attachment-download                                                          | Local save path; defaults to workspace downloads dir.                                                                                                                             |
 
 ## Response format
 
@@ -145,18 +144,9 @@ Response includes rich attachment metadata:
 { "action": "react", "message_id": "123456", "emoji": "✅" }
 ```
 
-**Post a reaction choice prompt:**
+**Present a choice prompt (reaction-based):**
 
-```json
-{
-  "action": "choice",
-  "content": "Pick one:",
-  "choices": [
-    { "emoji": "👍", "label": "Approve" },
-    { "emoji": "👎", "label": "Reject" }
-  ]
-}
-```
+Use the dedicated `builtin-ask` tool instead — it posts the preamble and seeds one emoji reaction per choice. See [builtin-ask](builtin-ask.md).
 
 **Search messages:**
 
@@ -197,9 +187,11 @@ Response includes rich attachment metadata:
   ```
   The file is already in your workspace at the indicated path.
 - **Message delivery banner:** When a message is sent via `builtin-message` from a subagent (rather than directly by the agent), the message will include a provenance banner at the top:
+
   ```
   > 📨 Message delivery: `<sender session id>`
-  
+
   <message content>
   ```
-  This banner helps the operator distinguish between direct agent responses and tool-originated messages. The banner is automatically added for `post` and `choice` actions and is based on the sender session ID stored in the sessions table.
+
+  This banner helps the operator distinguish between direct agent responses and tool-originated messages. The banner is automatically added for `post` actions and choice prompts (via `builtin-ask`) and is based on the sender session ID stored in the sessions table.

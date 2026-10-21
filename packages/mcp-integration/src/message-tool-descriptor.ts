@@ -2,8 +2,9 @@ import type { JsonSchemaLike } from "./json-schema";
 import type { McpToolDescriptor } from "./mcp-tool";
 
 /**
- * Subset of messaging adapter flags used to build the `builtin-message` JSON schema.
- * Populated by the daemon from the active messaging platform.
+ * Subset of messaging adapter flags used to build the `builtin-message` and
+ * `builtin-ask` JSON schemas. Populated by the daemon from the active
+ * messaging platform.
  */
 export interface MessageToolPlatformSlice {
   readonly attachments: boolean;
@@ -38,7 +39,6 @@ export function buildMessageToolDescriptor(
   if (slice.threadCreate) actions.push("create_thread");
   if (slice.threadDelete) actions.push("delete_thread");
   if (slice.react) actions.push("react");
-  if (slice.react) actions.push("choice");
   if (slice.reactions) actions.push("reactions");
   if (slice.search) actions.push("search");
   if (slice.attachmentDownload) actions.push("attachment-download");
@@ -49,12 +49,11 @@ export function buildMessageToolDescriptor(
       type: "string",
       enum: actions,
       description:
-        "get: read message(s). post/edit/delete/create_thread/delete_thread: message CRUD. react: add/remove emoji reaction. choice: post a reaction-based choice prompt with seeded emoji. reactions: read reactions on a message. search: filtered message fetch by keyword/author/time. attachment-download: download a file attachment. Only actions supported by the current platform appear in action's enum. Regular assistant replies are delivered by the platform and do not use this tool.",
+        "get: read message(s). post/edit/delete/create_thread/delete_thread: message CRUD. react: add/remove emoji reaction. reactions: read reactions on a message. search: filtered message fetch by keyword/author/time. attachment-download: download a file attachment. Only actions supported by the current platform appear in action's enum. Regular assistant replies are delivered by the platform and do not use this tool.",
     },
     content: {
       type: "string",
-      description:
-        "post/choice: message body (preamble text before the choice legend for choice action). edit: replacement text.",
+      description: "post: message body. edit: replacement text.",
     },
     message_id: {
       type: "string",
@@ -143,21 +142,6 @@ export function buildMessageToolDescriptor(
       type: "boolean",
       description: "react only: if true, remove the reaction instead of adding it. Default false.",
     };
-    properties.choices = {
-      type: "array",
-      description: "choice only: array of emoji + label pairs for the reaction choice prompt.",
-      items: {
-        type: "object",
-        properties: {
-          emoji: {
-            type: "string",
-            description: "Emoji for this choice (Unicode or platform shortcode).",
-          },
-          label: { type: "string", description: "Label text for this choice." },
-        },
-        required: ["emoji", "label"],
-      },
-    };
   }
 
   // --- Search ---
@@ -231,6 +215,52 @@ export function buildMessageToolDescriptor(
       type: "object",
       properties,
       required: ["action"],
+    },
+  };
+}
+
+/**
+ * When `slice` indicates the platform supports reactions, returns the `ask`
+ * tool descriptor. This is the dedicated surface for reaction-based choice
+ * prompts — keeping the `message` tool focused on general messaging, so its
+ * schema is not polluted with `choices`.
+ */
+export function buildAskToolDescriptor(
+  slice: MessageToolPlatformSlice | undefined,
+): McpToolDescriptor | undefined {
+  if (!slice?.react) return undefined;
+
+  const properties: Record<string, JsonSchemaLike> = {
+    content: {
+      type: "string",
+      description: "Preamble text shown above the choice legend.",
+    },
+    choices: {
+      type: "array",
+      description:
+        "Non-empty array of { emoji, label } pairs for the reaction-based choice prompt.",
+      items: {
+        type: "object",
+        properties: {
+          emoji: {
+            type: "string",
+            description: "Emoji for this choice (Unicode or platform shortcode).",
+          },
+          label: { type: "string", description: "Label text for this choice." },
+        },
+        required: ["emoji", "label"],
+      },
+    },
+  };
+
+  return {
+    name: "ask",
+    description:
+      "Present the user with a reaction-based choice prompt on the session's bound channel. Posts a message with the preamble and one emoji per choice; users pick by reacting. Available only on platforms that support reactions.",
+    inputSchema: {
+      type: "object",
+      properties,
+      required: ["choices"],
     },
   };
 }

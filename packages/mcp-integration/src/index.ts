@@ -22,6 +22,7 @@ export {
 } from "./acp-bridge";
 export { builtinShoggothToolsCatalog, BUILTIN_SOURCE_ID } from "./builtin-shoggoth-tools";
 export {
+  buildAskToolDescriptor,
   buildMessageToolDescriptor,
   type MessageToolPlatformSlice,
 } from "./message-tool-descriptor";
