@@ -1,10 +1,3 @@
-import { vi } from "vitest";
-
-vi.mock("../../src/workspaces/agent-workspace-layout", () => ({
-  ensureAgentWorkspaceLayout: async () => {},
-  resolveAgentTemplateDir: () => "/tmp/templates",
-}));
-
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,6 +33,7 @@ describe("createSessionManager", () => {
       },
     };
     const mgr = createSessionManager({
+      ensureAgentWorkspaceLayout: async () => {},
       db,
       sessions,
       agentTokens,
@@ -78,6 +72,7 @@ describe("createSessionManager", () => {
       },
     };
     const mgr = createSessionManager({
+      ensureAgentWorkspaceLayout: async () => {},
       db,
       sessions,
       agentTokens,
@@ -97,6 +92,7 @@ describe("createSessionManager", () => {
     const agentTokens = createSqliteAgentTokenStore(db);
     const workspacesRoot = mkdtempSync(join(tmpdir(), "shoggoth-ws-"));
     const mgr = createSessionManager({
+      ensureAgentWorkspaceLayout: async () => {},
       db,
       sessions,
       agentTokens,
@@ -119,6 +115,7 @@ describe("createSessionManager", () => {
     const agentTokens = createSqliteAgentTokenStore(db);
     const workspacesRoot = mkdtempSync(join(tmpdir(), "shoggoth-ws-"));
     const mgr = createSessionManager({
+      ensureAgentWorkspaceLayout: async () => {},
       db,
       sessions,
       agentTokens,
@@ -164,6 +161,7 @@ describe("createSessionManager", () => {
       },
     };
     const mgr = createSessionManager({
+      ensureAgentWorkspaceLayout: async () => {},
       db,
       sessions,
       agentTokens,
@@ -186,6 +184,7 @@ describe("createSessionManager kill descendant cascade", () => {
     const agentTokens = createSqliteAgentTokenStore(db);
     const workspacesRoot = mkdtempSync(join(tmpdir(), "shoggoth-ws-"));
     const mgr = createSessionManager({
+      ensureAgentWorkspaceLayout: async () => {},
       db,
       sessions,
       agentTokens,

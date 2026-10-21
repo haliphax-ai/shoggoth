@@ -1,11 +1,22 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { MediaAdapterRequest, MediaAdapterResult, ImageGenerateParams } from "./types";
+import type {
+  MediaAdapterRequest,
+  MediaAdapterResult,
+  MediaAdapterDeps,
+  ImageGenerateParams,
+} from "./types";
 import { normalizeBaseUrl } from "./utils";
 import { resolveImageSize } from "./aspect-ratio-utils";
 
-export async function openAIImagesAdapter(req: MediaAdapterRequest): Promise<MediaAdapterResult> {
+export async function openAIImagesAdapter(
+  req: MediaAdapterRequest,
+  deps: MediaAdapterDeps = {},
+): Promise<MediaAdapterResult> {
   try {
+    const f = deps.fetchFn ?? fetch;
+    const wf = deps.writeFile ?? writeFile;
+    const md = deps.mkdir ?? mkdir;
     const { baseUrl, apiKey } = req.provider;
     const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
     const imageParams = req.params as ImageGenerateParams;
@@ -13,7 +24,7 @@ export async function openAIImagesAdapter(req: MediaAdapterRequest): Promise<Med
     if (resolved.error) {
       return { status: "error", error: resolved.error };
     }
-    const response = await fetch(`${normalizedBaseUrl}/images/generations`, {
+    const response = await f(`${normalizedBaseUrl}/images/generations`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -54,7 +65,7 @@ export async function openAIImagesAdapter(req: MediaAdapterRequest): Promise<Med
       imageBytes = Buffer.from(imageData.b64_json, "base64");
     } else if (imageData.url) {
       // Download from URL
-      const imageResponse = await fetch(imageData.url, { method: "GET" });
+      const imageResponse = await f(imageData.url, { method: "GET" });
       if (!imageResponse.ok) {
         return {
           status: "error",
@@ -70,8 +81,8 @@ export async function openAIImagesAdapter(req: MediaAdapterRequest): Promise<Med
       };
     }
 
-    await mkdir(dirname(req.outputPath), { recursive: true });
-    await writeFile(req.outputPath, imageBytes);
+    await md(dirname(req.outputPath), { recursive: true });
+    await wf(req.outputPath, imageBytes);
 
     return {
       status: "complete",

@@ -2,18 +2,9 @@ import { describe, it, expect, vi } from "vitest";
 import type { MessageAttachment } from "@shoggoth/messaging";
 import { downloadInboundAttachments } from "../../src/presentation/attachment-download.js";
 
-vi.mock("../../src/logging.js", () => ({
-  getLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
-}));
-
-vi.mock("@shoggoth/os-exec", () => ({
-  runAsUser: vi.fn().mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" }),
-}));
+// DI: inject runAsUser via options instead of mocking @shoggoth/os-exec
+// (import-order dependent under --no-isolate).
+const mockRunAsUser = vi.fn().mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
 
 function makeAttachment(overrides: Partial<MessageAttachment> = {}): MessageAttachment {
   return {
@@ -53,6 +44,7 @@ describe("downloadInboundAttachments", () => {
       ...baseOpts,
       attachments: [attachment],
       fetchImpl: fetchImpl as unknown as typeof fetch,
+      runAsUserImpl: mockRunAsUser,
     });
 
     expect(result).toHaveLength(1);
@@ -72,6 +64,7 @@ describe("downloadInboundAttachments", () => {
       ...baseOpts,
       attachments,
       fetchImpl: fetchImpl as unknown as typeof fetch,
+      runAsUserImpl: mockRunAsUser,
     });
 
     expect(result).toHaveLength(3);
@@ -96,6 +89,7 @@ describe("downloadInboundAttachments", () => {
       attachments: [attachment],
       maxBytes: 1000,
       fetchImpl: fetchImpl as unknown as typeof fetch,
+      runAsUserImpl: mockRunAsUser,
     });
 
     expect(result).toHaveLength(1);
@@ -112,6 +106,7 @@ describe("downloadInboundAttachments", () => {
       ...baseOpts,
       attachments: [attachment],
       fetchImpl: fetchImpl as unknown as typeof fetch,
+      runAsUserImpl: mockRunAsUser,
     });
 
     expect(result).toHaveLength(1);
@@ -130,6 +125,7 @@ describe("downloadInboundAttachments", () => {
       ...baseOpts,
       attachments: [attachment],
       fetchImpl: fetchImpl as unknown as typeof fetch,
+      runAsUserImpl: mockRunAsUser,
     });
 
     expect(result).toHaveLength(1);
@@ -146,6 +142,7 @@ describe("downloadInboundAttachments", () => {
       ...baseOpts,
       attachments: [attachment],
       fetchImpl: fetchImpl as unknown as typeof fetch,
+      runAsUserImpl: mockRunAsUser,
     });
 
     expect(result).toHaveLength(1);
@@ -165,6 +162,7 @@ describe("downloadInboundAttachments", () => {
       ...baseOpts,
       attachments: [],
       fetchImpl: fetchImpl as unknown as typeof fetch,
+      runAsUserImpl: mockRunAsUser,
     });
 
     expect(result).toEqual([]);
@@ -189,6 +187,7 @@ describe("downloadInboundAttachments", () => {
       attachments: [attachment],
       maxBytes: 1000,
       fetchImpl: fetchImpl as unknown as typeof fetch,
+      runAsUserImpl: mockRunAsUser,
     });
 
     expect(result).toHaveLength(1);
@@ -196,8 +195,7 @@ describe("downloadInboundAttachments", () => {
   });
 
   it("calls runAsUser to write files with correct path and creds", async () => {
-    const { runAsUser } = await import("@shoggoth/os-exec");
-    vi.mocked(runAsUser).mockClear();
+    mockRunAsUser.mockClear();
 
     const fetchImpl = makeFetchOk();
     const attachment = makeAttachment();
@@ -206,10 +204,11 @@ describe("downloadInboundAttachments", () => {
       ...baseOpts,
       attachments: [attachment],
       fetchImpl: fetchImpl as unknown as typeof fetch,
+      runAsUserImpl: mockRunAsUser,
     });
 
-    expect(runAsUser).toHaveBeenCalled();
-    const call = vi.mocked(runAsUser).mock.calls[0][0];
+    expect(mockRunAsUser).toHaveBeenCalled();
+    const call = mockRunAsUser.mock.calls[0][0];
     expect(call.uid).toBe(1000);
     expect(call.gid).toBe(1000);
   });

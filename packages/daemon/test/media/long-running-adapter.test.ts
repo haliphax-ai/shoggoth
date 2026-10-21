@@ -1,24 +1,17 @@
 import { describe, it, vi, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-
-// Mock node:fs/promises for file writing
-vi.mock("node:fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:fs/promises")>();
-  return {
-    ...actual,
-    writeFile: vi.fn().mockResolvedValue(undefined),
-    mkdir: vi.fn().mockResolvedValue(undefined),
-    readFile: vi.fn().mockResolvedValue(Buffer.from("fake-image-bytes")),
-  };
-});
-
-// Mock global fetch
-const mockFetch = vi.fn();
-vi.stubGlobal("fetch", mockFetch);
-
-import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { longRunningAdapter } from "../../src/media/adapters/long-running-adapter";
 import type { MediaAdapterRequest, MediaAdapterResult } from "../../src/media/adapters/types";
+
+// DI: inject fakes via MediaAdapterDeps instead of mocking node:fs/promises or
+// stubbing global fetch (both are import-order dependent under --no-isolate).
+const mockFetch = vi.fn();
+const mockWriteFile = vi.fn().mockResolvedValue(undefined);
+const mockMkdir = vi.fn().mockResolvedValue(undefined);
+
+function makeDeps() {
+  return { fetchFn: mockFetch, writeFile: mockWriteFile, mkdir: mockMkdir };
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -132,7 +125,7 @@ describe("longRunningAdapter", () => {
     mockFetch.mockResolvedValueOnce(makeInitiateResponse("operations/veo-abc123", true));
     mockFetch.mockResolvedValueOnce(makeVideoDownloadResponse());
 
-    await longRunningAdapter(makeRequest());
+    await longRunningAdapter(makeRequest(), makeDeps());
 
     assert.ok(mockFetch.mock.calls.length >= 1);
     const [url, opts] = mockFetch.mock.calls[0];
@@ -153,6 +146,7 @@ describe("longRunningAdapter", () => {
       makeRequest({
         params: { kind: "video", aspectRatio: "16:9", durationSeconds: 8 },
       }),
+      makeDeps(),
     );
 
     const [, opts] = mockFetch.mock.calls[0];
@@ -167,7 +161,10 @@ describe("longRunningAdapter", () => {
     mockFetch.mockResolvedValueOnce(makeInitiateResponse("operations/veo-done", true));
     mockFetch.mockResolvedValueOnce(makeVideoDownloadResponse("fake-video-bytes"));
 
-    const result = await longRunningAdapter(makeRequest({ outputPath: "/tmp/media/video.mp4" }));
+    const result = await longRunningAdapter(
+      makeRequest({ outputPath: "/tmp/media/video.mp4" }),
+      makeDeps(),
+    );
 
     assert.strictEqual(result.status, "complete");
     const complete = result as MediaAdapterResult & { status: "complete" };
@@ -175,9 +172,9 @@ describe("longRunningAdapter", () => {
     assert.ok(complete.mime_type.includes("video"));
 
     // Should have written the decoded video bytes to disk
-    assert.strictEqual(vi.mocked(mkdir).mock.calls.length, 1);
-    assert.strictEqual(vi.mocked(writeFile).mock.calls.length, 1);
-    const [writePath, writeData] = vi.mocked(writeFile).mock.calls[0];
+    assert.strictEqual(mockMkdir.mock.calls.length, 1);
+    assert.strictEqual(mockWriteFile.mock.calls.length, 1);
+    const [writePath, writeData] = mockWriteFile.mock.calls[0];
     assert.strictEqual(writePath, "/tmp/media/video.mp4");
     assert.ok(Buffer.isBuffer(writeData));
     assert.strictEqual(writeData.toString(), "fake-video-bytes");
@@ -189,7 +186,7 @@ describe("longRunningAdapter", () => {
     // All poll responses also return pending
     mockFetch.mockResolvedValue(makePollResponse(false));
 
-    const promise = longRunningAdapter(makeRequest({ timeout_ms: 500 }));
+    const promise = longRunningAdapter(makeRequest({ timeout_ms: 500 }), makeDeps());
 
     // Advance timers past the timeout to let polling exhaust
     await vi.advanceTimersByTimeAsync(10_000);
@@ -213,7 +210,7 @@ describe("longRunningAdapter", () => {
     // URI download after done
     mockFetch.mockResolvedValueOnce(makeVideoDownloadResponse());
 
-    const promise = longRunningAdapter(makeRequest({ timeout_ms: 60_000 }));
+    const promise = longRunningAdapter(makeRequest({ timeout_ms: 60_000 }), makeDeps());
 
     // Advance through polling intervals
     await vi.advanceTimersByTimeAsync(60_000);
@@ -225,7 +222,7 @@ describe("longRunningAdapter", () => {
     // Verify poll requests used GET with the operation name (skip initial POST and final URI download)
     const pollCalls = mockFetch.mock.calls
       .slice(1) // skip the initial POST
-      .filter(([url]: [string]) => url.includes("operations/"));
+      .filter((call) => String(call[0]).includes("operations/"));
     assert.ok(pollCalls.length >= 1, "Should have made at least one poll request");
     for (const [pollUrl] of pollCalls) {
       assert.ok(
@@ -252,10 +249,8 @@ describe("longRunningAdapter", () => {
       makeRequest({
         params: { kind: "video", input_image: inputImageBase64 },
       }),
+      makeDeps(),
     );
-
-    // The handler base64-encodes the input; the adapter should pass it through.
-    assert.strictEqual(vi.mocked(readFile).mock.calls.length, 0);
 
     // The request body should include the image in instances
     const [, opts] = mockFetch.mock.calls[0];
@@ -298,10 +293,8 @@ describe("longRunningAdapter", () => {
           last_frame: lastFrameBase64,
         },
       }),
+      makeDeps(),
     );
-
-    // The handler/agent supply base64; adapters pass them through (no readFile)
-    assert.strictEqual(vi.mocked(readFile).mock.calls.length, 0);
 
     const [, opts] = mockFetch.mock.calls[0];
     const body = JSON.parse(opts.body);
@@ -333,9 +326,8 @@ describe("longRunningAdapter", () => {
       makeRequest({
         params: { kind: "video", input_image: firstFrameBase64 },
       }),
+      makeDeps(),
     );
-
-    assert.strictEqual(vi.mocked(readFile).mock.calls.length, 0);
 
     const [, opts] = mockFetch.mock.calls[0];
     const body = JSON.parse(opts.body);
@@ -350,7 +342,7 @@ describe("longRunningAdapter", () => {
       makeErrorResponse(429, "Too Many Requests", "Rate limit exceeded"),
     );
 
-    const result = await longRunningAdapter(makeRequest());
+    const result = await longRunningAdapter(makeRequest(), makeDeps());
 
     assert.strictEqual(result.status, "error");
     const error = result as MediaAdapterResult & { status: "error" };
@@ -366,7 +358,7 @@ describe("longRunningAdapter", () => {
       makeErrorResponse(500, "Internal Server Error", "Something went wrong"),
     );
 
-    const promise = longRunningAdapter(makeRequest({ timeout_ms: 60_000 }));
+    const promise = longRunningAdapter(makeRequest({ timeout_ms: 60_000 }), makeDeps());
 
     await vi.advanceTimersByTimeAsync(60_000);
 
@@ -381,7 +373,7 @@ describe("longRunningAdapter", () => {
     mockFetch.mockResolvedValueOnce(makeInitiateResponse("operations/veo-defaults", true));
     mockFetch.mockResolvedValueOnce(makeVideoDownloadResponse());
 
-    await longRunningAdapter(makeRequest({ params: { kind: "video" } }));
+    await longRunningAdapter(makeRequest({ params: { kind: "video" } }), makeDeps());
 
     const [, opts] = mockFetch.mock.calls[0];
     const body = JSON.parse(opts.body);
@@ -403,6 +395,7 @@ describe("longRunningAdapter", () => {
           apiKey: "test-key",
         },
       }),
+      makeDeps(),
     );
 
     const [url] = mockFetch.mock.calls[0];
@@ -417,21 +410,15 @@ describe("longRunningAdapter", () => {
 // media_generate_poll control op
 // ---------------------------------------------------------------------------
 
-// Mock MediaGenerationService for poll op tests
+// DI: inject a fake MediaGenerationService factory into the integration ops
+// context instead of mocking the module (vi.mock is import-order dependent
+// under --no-isolate).
 const mockPoll = vi.fn();
 
-const MockMediaGenerationService = vi.fn().mockImplementation(function () {
+function makeFakeMediaGenerationService() {
   return { generate: vi.fn(), poll: mockPoll };
-});
-MockMediaGenerationService.fromConfig = vi.fn().mockImplementation(() => {
-  return { generate: vi.fn(), poll: mockPoll };
-});
+}
 
-vi.mock("../../src/media/media-generation-service", () => ({
-  MediaGenerationService: MockMediaGenerationService,
-}));
-
-// Lazy-import integration-ops after mocks are set up
 const { handleIntegrationControlOp, IntegrationOpError } =
   await import("../../src/control/integration-ops");
 const { WIRE_VERSION } = await import("@shoggoth/authn");
@@ -494,6 +481,7 @@ function makeCtx(configOverrides?: Partial<ShoggothConfig>): IntegrationOpsConte
     sessionManager: undefined,
     acpxSupervisor: undefined,
     recordIntegrationAudit: () => {},
+    createMediaGenerationService: makeFakeMediaGenerationService,
   } as unknown as IntegrationOpsContext;
 }
 

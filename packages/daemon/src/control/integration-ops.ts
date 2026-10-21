@@ -179,7 +179,20 @@ export type IntegrationOpsContext = {
   /** The service tool registry for managed services. */
   readonly serviceToolRegistry?: import("../service-tool-registry").ServiceToolRegistry;
   /** The service key store for age key management. */
-  readonly serviceKeyStore?: import("../service-key-store").ServiceKeyStore;
+  /**
+   * Media generation service factory. Defaults to {@link MediaGenerationService.fromConfig}.
+   * Override in tests to inject a fake instead of mocking the module.
+   */
+  readonly createMediaGenerationService?: (
+    config: import("@shoggoth/shared").ShoggothMediaGenerationConfig,
+  ) => import("../media/media-generation-service").MediaGenerationService;
+  /**
+   * Rerank service factory. Defaults to {@link RerankService.fromConfig}.
+   * Override in tests to inject a fake instead of mocking the module.
+   */
+  readonly createRerankService?: (
+    config: import("@shoggoth/shared").ShoggothRerankConfig,
+  ) => import("../rerank/rerank-service").RerankService;
   readonly cancelMcpHttpRequest?: (input: {
     readonly sessionId: string;
     readonly sourceId: string;
@@ -3469,7 +3482,9 @@ export async function handleIntegrationControlOp(
       if (!mediaGenConfig) {
         return { status: "error", error: `No mediaGeneration config found` };
       }
-      const svc = MediaGenerationService.fromConfig(mediaGenConfig);
+      const svc = (ctx.createMediaGenerationService ?? MediaGenerationService.fromConfig)(
+        mediaGenConfig,
+      );
       return svc.generate({
         model: model,
         prompt: prompt,
@@ -3499,7 +3514,9 @@ export async function handleIntegrationControlOp(
       if (!mediaGenConfig2) {
         return { status: "error", error: `Provider not found: ${providerId}` };
       }
-      const svc2 = MediaGenerationService.fromConfig(mediaGenConfig2);
+      const svc2 = (ctx.createMediaGenerationService ?? MediaGenerationService.fromConfig)(
+        mediaGenConfig2,
+      );
       return svc2.poll({
         provider_id: providerId,
         operation_id: operationId,
@@ -3624,7 +3641,7 @@ export async function handleIntegrationControlOp(
           "rerank_documents top_n must be a positive number",
         );
       }
-      const svc = RerankService.fromConfig(rerankConfig!);
+      const svc = (ctx.createRerankService ?? RerankService.fromConfig)(rerankConfig!);
       return svc.rerank({
         model: model,
         query: queryRaw,

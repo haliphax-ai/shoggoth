@@ -1,6 +1,11 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { MediaAdapterRequest, MediaAdapterResult, ImageGenerateParams } from "./types";
+import type {
+  MediaAdapterRequest,
+  MediaAdapterResult,
+  MediaAdapterDeps,
+  ImageGenerateParams,
+} from "./types";
 import { normalizeBaseUrl } from "./utils";
 import { resolveImageTier } from "./aspect-ratio-utils";
 
@@ -36,7 +41,10 @@ function inferMimeFromUrl(url: string): string {
  * Extract image bytes from a URL string.
  * Handles data URIs, HTTP URLs, and raw base64.
  */
-async function extractImageBytes(url: string): Promise<{ data: Buffer; mime: string } | null> {
+async function extractImageBytes(
+  url: string,
+  f: typeof fetch = fetch,
+): Promise<{ data: Buffer; mime: string } | null> {
   // Try data URI first
   const parsed = parseDataUri(url);
   if (parsed) {
@@ -46,7 +54,7 @@ async function extractImageBytes(url: string): Promise<{ data: Buffer; mime: str
   // Try as HTTP(S) URL — download the image
   if (url.startsWith("http://") || url.startsWith("https://")) {
     try {
-      const imageResponse = await fetch(url, { method: "GET" });
+      const imageResponse = await f(url, { method: "GET" });
       if (!imageResponse.ok) {
         return null;
       }
@@ -130,8 +138,12 @@ function findImageInObject(obj: AnyObj, depth = 0): string | null {
 
 export async function openAIChatImageAdapter(
   req: MediaAdapterRequest,
+  deps: MediaAdapterDeps = {},
 ): Promise<MediaAdapterResult> {
   try {
+    const f = deps.fetchFn ?? fetch;
+    const wf = deps.writeFile ?? writeFile;
+    const md = deps.mkdir ?? mkdir;
     const { baseUrl, apiKey } = req.provider;
     const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
     const modalities = req.modalities ?? ["image"];
@@ -156,7 +168,7 @@ export async function openAIChatImageAdapter(
       requestBody.aspect_ratio = resolvedTier.aspect_ratio;
     }
 
-    const response = await fetch(`${normalizedBaseUrl}/chat/completions`, {
+    const response = await f(`${normalizedBaseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -179,10 +191,10 @@ export async function openAIChatImageAdapter(
     const imageUrl = findImageInObject(json);
 
     if (imageUrl) {
-      const extracted = await extractImageBytes(imageUrl);
+      const extracted = await extractImageBytes(imageUrl, f);
       if (extracted) {
-        await mkdir(dirname(req.outputPath), { recursive: true });
-        await writeFile(req.outputPath, extracted.data);
+        await md(dirname(req.outputPath), { recursive: true });
+        await wf(req.outputPath, extracted.data);
         return {
           status: "complete",
           path: req.outputPath,

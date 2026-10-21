@@ -1,8 +1,8 @@
 /**
  * Tests: verify that McpStdioConnectOptions forwards uid/gid to spawn().
  *
- * These tests mock node:child_process so they don't conflict with the
- * integration tests in mcp-jsonrpc-transport.test.ts.
+ * DI: the spawn implementation is injected via `opts.spawnImpl` instead of
+ * mocking `node:child_process` (import-order dependent under `--no-isolate`).
  */
 import assert from "node:assert";
 import { EventEmitter } from "node:events";
@@ -10,33 +10,31 @@ import { PassThrough } from "node:stream";
 import { describe, it, vi, beforeEach } from "vitest";
 
 // ---------------------------------------------------------------------------
-// Mock child_process.spawn so we can inspect the options it receives.
+// Fake spawn: records args and returns a minimal ChildProcess-like object.
 // ---------------------------------------------------------------------------
 const spawnMock = vi.fn();
 
-vi.mock("node:child_process", () => ({
-  spawn: (...args: unknown[]) => {
-    spawnMock(...args);
-    // Return a minimal ChildProcess-like object with piped stdio
-    const stdout = new PassThrough();
-    const stdin = new PassThrough();
-    const proc = Object.assign(new EventEmitter(), {
-      stdout,
-      stdin,
-      stderr: null,
-      pid: 99999,
-      kill: vi.fn(),
-    });
-    // Real ChildProcess emits 'spawn' asynchronously after a successful start;
-    // the connect handshake awaits it before returning the session. Zero-delay
-    // setImmediate ticks keep both events on the loop, in order, with no
-    // wall-clock wait.
-    setImmediate(() => proc.emit("spawn"));
-    // End stdout right after so the session doesn't hang.
-    setImmediate(() => stdout.end());
-    return proc;
-  },
-}));
+function fakeSpawn(...args: unknown[]) {
+  spawnMock(...args);
+  // Return a minimal ChildProcess-like object with piped stdio
+  const stdout = new PassThrough();
+  const stdin = new PassThrough();
+  const proc = Object.assign(new EventEmitter(), {
+    stdout,
+    stdin,
+    stderr: null,
+    pid: 99999,
+    kill: vi.fn(),
+  });
+  // Real ChildProcess emits 'spawn' asynchronously after a successful start;
+  // the connect handshake awaits it before returning the session. Zero-delay
+  // setImmediate ticks keep both events on the loop, in order, with no
+  // wall-clock wait.
+  setImmediate(() => proc.emit("spawn"));
+  // End stdout right after so the session doesn't hang.
+  setImmediate(() => stdout.end());
+  return proc;
+}
 
 import { connectMcpStdioSession, type McpStdioConnectOptions } from "../src/mcp-jsonrpc-transport";
 
@@ -51,13 +49,14 @@ describe("connectMcpStdioSession — uid/gid forwarding", () => {
       args: ["hello"],
       uid: 1001,
       gid: 1001,
-    } as McpStdioConnectOptions; // cast: uid/gid fields don't exist yet
+      spawnImpl: fakeSpawn as typeof import("node:child_process").spawn,
+    } as McpStdioConnectOptions;
 
     let session;
     try {
       session = await connectMcpStdioSession(opts);
     } catch {
-      // spawn mock doesn't produce a real MCP server — that's fine
+      // spawn fake doesn't produce a real MCP server — that's fine
     }
 
     assert.ok(spawnMock.mock.calls.length > 0, "spawn should have been called");
@@ -73,13 +72,14 @@ describe("connectMcpStdioSession — uid/gid forwarding", () => {
     const opts: McpStdioConnectOptions = {
       command: "/usr/bin/echo",
       args: ["hello"],
+      spawnImpl: fakeSpawn as typeof import("node:child_process").spawn,
     };
 
     let session;
     try {
       session = await connectMcpStdioSession(opts);
     } catch {
-      // spawn mock doesn't produce a real MCP server — that's fine
+      // spawn fake doesn't produce a real MCP server — that's fine
     }
 
     assert.ok(spawnMock.mock.calls.length > 0, "spawn should have been called");

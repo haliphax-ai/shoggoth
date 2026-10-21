@@ -1,60 +1,46 @@
 import { describe, it, vi, beforeEach, expect } from "vitest";
+import {
+  MediaGenerationService,
+  type MediaAdapterRegistry,
+} from "../../src/media/media-generation-service";
+import type { MediaAdapterResult } from "../../src/media/adapters/types";
+import type { MediaProviderConfig } from "../../src/media/resolve-model";
 
-// Mock all adapters
-vi.mock("../../src/media/adapters/openai-images-adapter", () => ({
-  openAIImagesAdapter: vi.fn().mockResolvedValue({
-    status: "complete",
-    path: "/tmp/media/output.png",
-    mime_type: "image/png",
-  }),
-}));
+// -----------------------------------------------------------------------------
+// DI: inject fake adapters via the constructor registry instead of mocking the
+// adapter modules (vi.mock is import-order dependent under --no-isolate).
+// -----------------------------------------------------------------------------
 
-vi.mock("../../src/media/adapters/openai-chat-image-adapter", () => ({
-  openAIChatImageAdapter: vi.fn().mockResolvedValue({
-    status: "complete",
-    path: "/tmp/media/output.png",
-    mime_type: "image/png",
-  }),
-}));
+function completeImage(): MediaAdapterResult {
+  return { status: "complete", path: "/tmp/media/output.png", mime_type: "image/png" };
+}
 
-vi.mock("../../src/media/adapters/openai-video-async-adapter", () => ({
-  openaiVideoAsyncAdapter: vi.fn().mockResolvedValue({
-    status: "complete",
-    path: "/tmp/media/output.mp4",
-    mime_type: "video/mp4",
-  }),
-}));
+function makeAdapters(overrides?: Partial<MediaAdapterRegistry>): MediaAdapterRegistry {
+  return {
+    "gemini-generate-content": vi.fn().mockResolvedValue(completeImage()),
+    "gemini-predict": vi.fn().mockResolvedValue(completeImage()),
+    "gemini-long-running": vi.fn().mockResolvedValue({
+      status: "in_progress",
+      operation_id: "operations/abc123",
+    }),
+    "openai-images": vi.fn().mockResolvedValue(completeImage()),
+    "openai-chat-image": vi.fn().mockResolvedValue(completeImage()),
+    "openai-video-async": vi.fn().mockResolvedValue({
+      status: "complete",
+      path: "/tmp/media/output.mp4",
+      mime_type: "video/mp4",
+    }),
+    "openrouter-video": vi.fn().mockResolvedValue(completeImage()),
+    ...overrides,
+  };
+}
 
-vi.mock("../../src/media/adapters/generate-content-adapter", () => ({
-  generateContentAdapter: vi.fn().mockResolvedValue({
-    status: "complete",
-    path: "/tmp/media/output.png",
-    mime_type: "image/png",
-  }),
-}));
-
-vi.mock("../../src/media/adapters/predict-adapter", () => ({
-  predictAdapter: vi.fn().mockResolvedValue({
-    status: "complete",
-    path: "/tmp/media/output.png",
-    mime_type: "image/png",
-  }),
-}));
-
-vi.mock("../../src/media/adapters/long-running-adapter", () => ({
-  longRunningAdapter: vi.fn().mockResolvedValue({
-    status: "in_progress",
-    operation_id: "operations/abc123",
-  }),
-}));
-
-import { openAIImagesAdapter } from "../../src/media/adapters/openai-images-adapter";
-import { openAIChatImageAdapter } from "../../src/media/adapters/openai-chat-image-adapter";
-import { openaiVideoAsyncAdapter } from "../../src/media/adapters/openai-video-async-adapter";
-import { generateContentAdapter } from "../../src/media/adapters/generate-content-adapter";
-import { predictAdapter } from "../../src/media/adapters/predict-adapter";
-import { longRunningAdapter } from "../../src/media/adapters/long-running-adapter";
-import { MediaGenerationService } from "../../src/media/media-generation-service";
+function makeService(
+  providers: MediaProviderConfig[],
+  adapters: MediaAdapterRegistry = makeAdapters(),
+): MediaGenerationService {
+  return new MediaGenerationService({ providers, adapters });
+}
 
 // -----------------------------------------------------------------------------
 // Tests
@@ -67,8 +53,9 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
 
   describe("Routes to correct adapter based on provider.kind + model.mediaType", () => {
     it("openai-compatible + image → openai-chat-image", async () => {
-      const service = new MediaGenerationService({
-        providers: [
+      const adapters = makeAdapters();
+      const service = makeService(
+        [
           {
             id: "openrouter",
             kind: "openai-compatible",
@@ -77,7 +64,8 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
             models: [{ name: "black-forest-labs/flux.2-klein-4b", mediaType: "image" }],
           },
         ],
-      });
+        adapters,
+      );
 
       const result = await service.generate({
         model: "black-forest-labs/flux.2-klein-4b",
@@ -87,13 +75,14 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
       });
 
       expect(result.status).toBe("complete");
-      expect(openAIChatImageAdapter).toHaveBeenCalledTimes(1);
-      expect(openAIImagesAdapter).not.toHaveBeenCalled();
+      expect(adapters["openai-chat-image"]).toHaveBeenCalledTimes(1);
+      expect(adapters["openai-images"]).not.toHaveBeenCalled();
     });
 
     it("openai-compatible + video → openai-video-async", async () => {
-      const service = new MediaGenerationService({
-        providers: [
+      const adapters = makeAdapters();
+      const service = makeService(
+        [
           {
             id: "openrouter",
             kind: "openai-compatible",
@@ -102,7 +91,8 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
             models: [{ name: "google/veo-3.1", mediaType: "video" }],
           },
         ],
-      });
+        adapters,
+      );
 
       const result = await service.generate({
         model: "google/veo-3.1",
@@ -112,12 +102,13 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
       });
 
       expect(result.status).toBe("complete");
-      expect(openaiVideoAsyncAdapter).toHaveBeenCalledTimes(1);
+      expect(adapters["openai-video-async"]).toHaveBeenCalledTimes(1);
     });
 
     it("gemini + image → gemini-generate-content", async () => {
-      const service = new MediaGenerationService({
-        providers: [
+      const adapters = makeAdapters();
+      const service = makeService(
+        [
           {
             id: "google",
             kind: "gemini",
@@ -127,7 +118,8 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
             models: [{ name: "gemini-2.5-flash-image", mediaType: "image" }],
           },
         ],
-      });
+        adapters,
+      );
 
       const result = await service.generate({
         model: "gemini-2.5-flash-image",
@@ -137,12 +129,13 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
       });
 
       expect(result.status).toBe("complete");
-      expect(generateContentAdapter).toHaveBeenCalledTimes(1);
+      expect(adapters["gemini-generate-content"]).toHaveBeenCalledTimes(1);
     });
 
     it("gemini + video → gemini-long-running", async () => {
-      const service = new MediaGenerationService({
-        providers: [
+      const adapters = makeAdapters();
+      const service = makeService(
+        [
           {
             id: "google",
             kind: "gemini",
@@ -152,7 +145,8 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
             models: [{ name: "veo-3.1", mediaType: "video" }],
           },
         ],
-      });
+        adapters,
+      );
 
       const result = await service.generate({
         model: "veo-3.1",
@@ -162,14 +156,15 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
       });
 
       expect(result.status).toBe("in_progress");
-      expect(longRunningAdapter).toHaveBeenCalledTimes(1);
+      expect(adapters["gemini-long-running"]).toHaveBeenCalledTimes(1);
     });
   });
 
   describe("Explicit adapter override on model", () => {
     it("uses openai-images when explicitly set despite openai-compatible + image default", async () => {
-      const service = new MediaGenerationService({
-        providers: [
+      const adapters = makeAdapters();
+      const service = makeService(
+        [
           {
             id: "openai-direct",
             kind: "openai-compatible",
@@ -178,7 +173,8 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
             models: [{ name: "dall-e-3", mediaType: "image", adapter: "openai-images" }],
           },
         ],
-      });
+        adapters,
+      );
 
       const result = await service.generate({
         model: "dall-e-3",
@@ -188,13 +184,14 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
       });
 
       expect(result.status).toBe("complete");
-      expect(openAIImagesAdapter).toHaveBeenCalledTimes(1);
-      expect(openAIChatImageAdapter).not.toHaveBeenCalled();
+      expect(adapters["openai-images"]).toHaveBeenCalledTimes(1);
+      expect(adapters["openai-chat-image"]).not.toHaveBeenCalled();
     });
 
     it("uses gemini-predict when explicitly set on a gemini image model", async () => {
-      const service = new MediaGenerationService({
-        providers: [
+      const adapters = makeAdapters();
+      const service = makeService(
+        [
           {
             id: "google",
             kind: "gemini",
@@ -209,7 +206,8 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
             ],
           },
         ],
-      });
+        adapters,
+      );
 
       const result = await service.generate({
         model: "imagen-4.0-fast-generate-001",
@@ -219,24 +217,22 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
       });
 
       expect(result.status).toBe("complete");
-      expect(predictAdapter).toHaveBeenCalledTimes(1);
-      expect(generateContentAdapter).not.toHaveBeenCalled();
+      expect(adapters["gemini-predict"]).toHaveBeenCalledTimes(1);
+      expect(adapters["gemini-generate-content"]).not.toHaveBeenCalled();
     });
   });
 
   describe("Error cases", () => {
     it("returns error for unknown model", async () => {
-      const service = new MediaGenerationService({
-        providers: [
-          {
-            id: "openrouter",
-            kind: "openai-compatible",
-            baseUrl: "https://openrouter.ai/api",
-            apiKey: "sk-test",
-            models: [{ name: "black-forest-labs/flux.2-klein-4b", mediaType: "image" }],
-          },
-        ],
-      });
+      const service = makeService([
+        {
+          id: "openrouter",
+          kind: "openai-compatible",
+          baseUrl: "https://openrouter.ai/api",
+          apiKey: "sk-test",
+          models: [{ name: "black-forest-labs/flux.2-klein-4b", mediaType: "image" }],
+        },
+      ]);
 
       const result = await service.generate({
         model: "totally-unknown-model-xyz",
@@ -250,7 +246,7 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
     });
 
     it("returns error when no providers configured", async () => {
-      const service = new MediaGenerationService({ providers: [] });
+      const service = makeService([]);
 
       const result = await service.generate({
         model: "any-model",
@@ -265,8 +261,9 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
 
   describe("Provider info passed to adapter", () => {
     it("passes provider with id, kind, baseUrl, and apiKey to adapter", async () => {
-      const service = new MediaGenerationService({
-        providers: [
+      const adapters = makeAdapters();
+      const service = makeService(
+        [
           {
             id: "my-provider",
             kind: "openai-compatible",
@@ -275,7 +272,8 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
             models: [{ name: "test-model", mediaType: "image" }],
           },
         ],
-      });
+        adapters,
+      );
 
       await service.generate({
         model: "test-model",
@@ -284,8 +282,9 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
         output_path: "/tmp/out.png",
       });
 
-      expect(openAIChatImageAdapter).toHaveBeenCalledTimes(1);
-      const adapterCall = (openAIChatImageAdapter as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(adapters["openai-chat-image"]).toHaveBeenCalledTimes(1);
+      const adapterCall = (adapters["openai-chat-image"] as ReturnType<typeof vi.fn>).mock
+        .calls[0][0];
       expect(adapterCall.provider.id).toBe("my-provider");
       expect(adapterCall.provider.kind).toBe("openai-compatible");
       expect(adapterCall.provider.baseUrl).toBe("https://custom.api.example.com");
@@ -295,8 +294,9 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
 
   describe("Multiple providers", () => {
     it("routes to correct provider based on model name", async () => {
-      const service = new MediaGenerationService({
-        providers: [
+      const adapters = makeAdapters();
+      const service = makeService(
+        [
           {
             id: "openrouter",
             kind: "openai-compatible",
@@ -319,7 +319,8 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
             ],
           },
         ],
-      });
+        adapters,
+      );
 
       // OpenRouter image
       await service.generate({
@@ -337,8 +338,35 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
         output_path: "/tmp/out2.png",
       });
 
-      expect(openAIChatImageAdapter).toHaveBeenCalledTimes(1);
-      expect(generateContentAdapter).toHaveBeenCalledTimes(1);
+      expect(adapters["openai-chat-image"]).toHaveBeenCalledTimes(1);
+      expect(adapters["gemini-generate-content"]).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("Unknown adapter name", () => {
+    it("returns error when adapter name is not in the registry", async () => {
+      const service = makeService(
+        [
+          {
+            id: "x",
+            kind: "openai-compatible",
+            baseUrl: "https://api.example.com",
+            apiKey: "k",
+            models: [{ name: "m", mediaType: "image", adapter: "not-a-real-adapter" }],
+          },
+        ],
+        makeAdapters(),
+      );
+
+      const result = await service.generate({
+        model: "m",
+        prompt: "hi",
+        params: { kind: "image" },
+        output_path: "/tmp/out.png",
+      });
+
+      expect(result.status).toBe("error");
+      expect((result as { error: string }).error).toContain("Unknown adapter");
     });
   });
 });

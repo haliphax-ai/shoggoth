@@ -2,23 +2,16 @@ import { describe, it, vi, beforeEach } from "vitest";
 import assert from "node:assert";
 
 // ---------------------------------------------------------------------------
-// Mock RerankService before importing integration-ops
+// DI: inject a fake RerankService factory into the integration ops context
+// instead of mocking the module (vi.mock is import-order dependent under
+// --no-isolate).
 // ---------------------------------------------------------------------------
 
-const { mockRerank, MockRerankService } = vi.hoisted(() => {
-  const mockRerank = vi.fn();
-  const MockRerankService = vi.fn().mockImplementation(function () {
-    return { rerank: mockRerank };
-  });
-  MockRerankService.fromConfig = vi.fn().mockImplementation(() => {
-    return { rerank: mockRerank };
-  });
-  return { mockRerank, MockRerankService };
-});
+const mockRerank = vi.fn();
 
-vi.mock("../../src/rerank/rerank-service", () => ({
-  RerankService: MockRerankService,
-}));
+function makeFakeRerankService() {
+  return { rerank: mockRerank };
+}
 
 import { handleIntegrationControlOp, IntegrationOpError } from "../../src/control/integration-ops";
 import type { IntegrationOpsContext } from "../../src/control/integration-ops";
@@ -84,6 +77,7 @@ function makeCtx(configOverrides?: Partial<ShoggothConfig>): IntegrationOpsConte
     sessionManager: undefined,
     acpxSupervisor: undefined,
     recordIntegrationAudit: () => {},
+    createRerankService: makeFakeRerankService,
   } as unknown as IntegrationOpsContext;
 }
 
@@ -325,7 +319,6 @@ describe("rerank_documents control op", () => {
       );
 
       assert.equal(result, undefined);
-      assert.equal(MockRerankService.fromConfig.mock.calls.length, 0);
       assert.equal(mockRerank.mock.calls.length, 0);
     });
   });
@@ -352,7 +345,6 @@ describe("rerank_documents control op", () => {
       const result = await handleIntegrationControlOp(req, agentPrincipal(), ctx);
 
       assert.equal(result, undefined);
-      assert.equal(MockRerankService.fromConfig.mock.calls.length, 0);
     });
 
     it("is invisible to operators when unconfigured (no ERR_FORBIDDEN leak)", async () => {

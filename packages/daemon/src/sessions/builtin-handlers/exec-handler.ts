@@ -4,6 +4,10 @@
 
 import { randomUUID } from "node:crypto";
 import { toolExec, toolExecExtended, toolPoll } from "@shoggoth/os-exec";
+
+function osExec(ctx: BuiltinToolContext) {
+  return ctx.osExec ?? { toolExec, toolExecExtended, toolPoll };
+}
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
 import { resolveUserPath } from "../builtin-tool-registry";
 import { truncateToolOutput } from "./truncate-output";
@@ -118,7 +122,7 @@ async function execHandlerInner(
     const command = (argv as string[])
       .map((a) => (/[^a-zA-Z0-9_\-./=:]/.test(a) ? `'${a.replace(/'/g, "'\\''")}'` : a))
       .join(" ");
-    const r = await toolExecExtended(
+    const r = await osExec(ctx).toolExecExtended(
       ctx.workspacePath,
       {
         command,
@@ -215,7 +219,12 @@ async function execHandlerInner(
       }),
     };
   }
-  const r = await toolExec(ctx.workspacePath, argv as string[], ctx.creds, execCwd(ctx));
+  const r = await osExec(ctx).toolExec(
+    ctx.workspacePath,
+    argv as string[],
+    ctx.creds,
+    execCwd(ctx),
+  );
   return {
     resultJson: JSON.stringify({
       exitCode: r.exitCode,
@@ -227,8 +236,7 @@ async function execHandlerInner(
 
 async function pollHandler(
   args: Record<string, unknown>,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _ctx: BuiltinToolContext,
+  ctx: BuiltinToolContext,
 ): Promise<{ resultJson: string }> {
   const pid = typeof args.pid === "number" ? args.pid : undefined;
   if (pid === undefined) {
@@ -236,7 +244,7 @@ async function pollHandler(
       resultJson: JSON.stringify({ error: "poll requires a numeric pid" }),
     };
   }
-  const r = await toolPoll({
+  const r = await osExec(ctx).toolPoll({
     pid,
     timeout: typeof args.timeout === "number" ? Math.ceil(args.timeout / 1000) : undefined,
     streams: typeof args.streams === "boolean" ? args.streams : undefined,

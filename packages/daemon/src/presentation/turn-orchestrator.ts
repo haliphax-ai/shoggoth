@@ -101,6 +101,15 @@ export interface PresentationTurnOrchestratorDeps {
   readonly configRef?: { readonly current: ShoggothConfig };
   /** Prefix prepended to error replies (e.g. "⚠️ "). Default: "". */
   readonly errorReplyPrefix?: string;
+  /**
+   * DI seams. Default to the real implementations imported above; tests inject
+   * fakes instead of mocking the modules (import-order dependent under
+   * `--no-isolate`).
+   */
+  readonly runInboundSessionTurn?: typeof runInboundSessionTurn;
+  readonly downloadInboundAttachments?: typeof downloadInboundAttachments;
+  readonly resolveAttachmentHandlingMode?: typeof resolveAttachmentHandlingMode;
+  readonly ingestAttachmentImage?: typeof ingestAttachmentImage;
   readonly statusBar?: {
     readonly config: ResolvedStatusBarConfig;
     readonly render: StatusBarRenderer;
@@ -209,7 +218,8 @@ export class PresentationTurnOrchestrator {
       }
 
       // Resolve the attachment handling mode.
-      const mode = resolveAttachmentHandlingMode(config, sessionId);
+      const modeFn = this.deps.resolveAttachmentHandlingMode ?? resolveAttachmentHandlingMode;
+      const mode = modeFn(config, sessionId);
 
       // When no codec is available, fall back to text metadata for all attachments.
       if (!input.imageBlockCodec) {
@@ -222,9 +232,11 @@ export class PresentationTurnOrchestrator {
         return turn;
       }
 
+      const downloadFn = this.deps.downloadInboundAttachments ?? downloadInboundAttachments;
+
       // --- download mode ---
       if (mode === "download") {
-        const enrichedAttachments = await downloadInboundAttachments({
+        const enrichedAttachments = await downloadFn({
           attachments,
           messageId: input.messageId ?? "",
           workspacePath: input.workspacePath ?? "",
@@ -244,7 +256,7 @@ export class PresentationTurnOrchestrator {
 
       // --- hybrid mode ---
       if (mode === "hybrid") {
-        const enrichedAttachments = await downloadInboundAttachments({
+        const enrichedAttachments = await downloadFn({
           attachments,
           messageId: input.messageId ?? "",
           workspacePath: input.workspacePath ?? "",
@@ -257,6 +269,7 @@ export class PresentationTurnOrchestrator {
           input.imageBlockCodec,
           input.formatAttachmentMetadata,
           input.imageUrlPassthrough,
+          this.deps.ingestAttachmentImage ?? ingestAttachmentImage,
         );
       }
 
@@ -267,6 +280,7 @@ export class PresentationTurnOrchestrator {
         input.imageBlockCodec,
         input.formatAttachmentMetadata,
         input.imageUrlPassthrough,
+        this.deps.ingestAttachmentImage ?? ingestAttachmentImage,
       );
     };
 
@@ -326,7 +340,8 @@ export class PresentationTurnOrchestrator {
         }
       : undefined;
 
-    await runInboundSessionTurn({
+    const runTurn = this.deps.runInboundSessionTurn ?? runInboundSessionTurn;
+    await runTurn({
       buildTurn: wrappedBuildTurn,
       streaming,
       sliceDisplayText,
@@ -377,6 +392,7 @@ async function enrichTurnWithImageAttachments(
   codec: ImageBlockCodec,
   formatFallback?: (attachments: readonly MessageAttachment[]) => string,
   imageUrlPassthrough?: boolean,
+  ingest: typeof ingestAttachmentImage = ingestAttachmentImage,
 ): Promise<InboundSessionTurnInput> {
   const imageBlocks: ChatContentPart[] = [];
   const nonImageAttachments: MessageAttachment[] = [];
@@ -386,7 +402,7 @@ async function enrichTurnWithImageAttachments(
       // When the attachment has a localPath (hybrid mode), pass it as localFilePath
       // so ingestAttachmentImage reads from disk instead of re-fetching.
       const localFilePath = att.localPath ? att.localPath : undefined;
-      return ingestAttachmentImage(att, { codec, imageUrlPassthrough, localFilePath }).then(
+      return ingest(att, { codec, imageUrlPassthrough, localFilePath }).then(
         (block) => ({ attachment: att, block }),
         (err) => {
           log.warn("turn_orchestrator.image_ingest_error", {

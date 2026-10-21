@@ -1,6 +1,6 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { MediaAdapterRequest, MediaAdapterResult } from "./types";
+import type { MediaAdapterRequest, MediaAdapterResult, MediaAdapterDeps } from "./types";
 import { isRawPcmMime, parsePcmMimeParams, wrapPcmAsWav } from "../pcm-to-wav";
 
 function getResponseModalities(params: MediaAdapterRequest["params"]): string[] {
@@ -58,8 +58,12 @@ async function buildParts(req: MediaAdapterRequest): Promise<Array<Record<string
 
 export async function generateContentAdapter(
   req: MediaAdapterRequest,
+  deps: MediaAdapterDeps = {},
 ): Promise<MediaAdapterResult> {
   try {
+    const f = deps.fetchFn ?? fetch;
+    const wf = deps.writeFile ?? writeFile;
+    const md = deps.mkdir ?? mkdir;
     const parts = await buildParts(req);
 
     const apiVersion = req.provider.apiVersion ?? "v1beta";
@@ -70,7 +74,7 @@ export async function generateContentAdapter(
       generationConfig: buildGenerationConfig(req),
     };
 
-    const response = await fetch(url, {
+    const response = await f(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -108,8 +112,8 @@ export async function generateContentAdapter(
       effectiveMime = "audio/wav";
     }
 
-    await mkdir(dirname(req.outputPath), { recursive: true });
-    await writeFile(req.outputPath, decoded);
+    await md(dirname(req.outputPath), { recursive: true });
+    await wf(req.outputPath, decoded);
 
     return {
       status: "complete",

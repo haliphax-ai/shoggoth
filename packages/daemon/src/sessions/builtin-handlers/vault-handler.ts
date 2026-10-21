@@ -162,7 +162,10 @@ async function vaultInject(
 
   const { uid, gid } = ctx.creds;
   const timeoutMs = args.timeoutMs != null ? Number(args.timeoutMs) : undefined;
-  const path = await createSecretFifo(value, uid, gid, timeoutMs);
+  const createFifo =
+    (vault as VaultService & { injectFifo?: typeof createSecretFifo }).injectFifo ??
+    createSecretFifo;
+  const path = await createFifo(value, uid, gid, timeoutMs);
 
   return {
     resultJson: JSON.stringify({
