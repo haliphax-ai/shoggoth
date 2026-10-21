@@ -35,6 +35,33 @@ export const shoggothCruiseControlConfigSchema = z
   .strict();
 export type ShoggothCruiseControlConfig = z.infer<typeof shoggothCruiseControlConfigSchema>;
 
+// Subagent contract mode — one-shot spawn contract verification defaults.
+// Activation is per-spawn (non-empty `contract` array); this block only tunes
+// the verification: which decision model judges, how sure it must be, and how
+// many contract entries are judged per decision call.
+export const shoggothContractConfigSchema = z
+  .object({
+    /** Decision model (`provider-id/model-name`) used to judge contract fulfillment. Unset implies the default decision model. */
+    model: z.string().min(1).optional(),
+    /** Minimum "yes" probability for a contract file decision to count as fulfilled (default 0.85). */
+    yesMinimum: z.number().min(0).max(1).optional(),
+    /** Contract entries judged per concurrent decision call (default 5). */
+    batchSize: z.number().int().positive().optional(),
+  })
+  .strict();
+export type ShoggothContractConfig = z.infer<typeof shoggothContractConfigSchema>;
+
+// One contract entry: a target path, the modification type required on it,
+// and a brief summary of the expected change (no exact lines or contents).
+export const shoggothContractEntrySchema = z
+  .object({
+    path: z.string().min(1),
+    action: z.enum(["create", "update", "delete"]),
+    summary: z.string().min(1),
+  })
+  .strict();
+export type ShoggothContractEntry = z.infer<typeof shoggothContractEntrySchema>;
+
 // Session Query
 export const shoggothSessionQueryAllowSchema = z
   .object({ allowedAgentIds: z.array(z.string().min(1)).optional() })
@@ -147,6 +174,8 @@ export const shoggothAgentsConfigSchema = z
     threadSubagents: z.boolean().optional(),
     /** Cruise control (HITL auto-pilot) defaults; activated per-session via control plane. */
     cruiseControl: shoggothCruiseControlConfigSchema.optional(),
+    /** Contract mode defaults for one-shot subagent spawns (activated per-spawn via a non-empty `contract`). */
+    contract: shoggothContractConfigSchema.optional(),
   })
   .strict();
 export type ShoggothAgentsConfig = z.infer<typeof shoggothAgentsConfigSchema>;
