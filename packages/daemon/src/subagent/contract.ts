@@ -105,34 +105,55 @@ function gitOptions(
   };
 }
 
-/** True when spawning failed because the uid/gid switch was not permitted. */
-function isCredsEperm(e: unknown): boolean {
+/**
+ * True when spawning failed because the uid/gid switch was not permitted.
+ * Covers EPERM and EACCES: the platform may reject the switch before exec or
+ * at setuid inside the child, and either way the daemon simply lacks the
+ * capability to become another user.
+ */
+function isCredsUnsupported(e: unknown): boolean {
   const err = e as { code?: unknown; error?: { code?: unknown } } | null;
-  return err?.code === "EPERM" || err?.error?.code === "EPERM";
+  const codes = [err?.code, err?.error?.code];
+  return codes.includes("EPERM") || codes.includes("EACCES");
 }
 
 /**
- * Run `git` as the resolved contract credentials. When the switch to the
- * agent UID is not permitted (no `CAP_SETUID`, e.g. plain user-namespace CI
- * runs) the command is retried as the current user rather than failing every
- * contract check outright.
+ * Run `git` as the resolved contract credentials.
+ *
+ * Two portability measures:
+ *
+ * - `safe.directory` is relaxed for these invocations only. Contract checks
+ *   are read-only inspections of the caller's own working directory, and git
+ *   otherwise refuses a repository owned by a different uid (its "dubious
+ *   ownership" guard) even when DAC permissions allow reading it — which is
+ *   exactly the daemon/agent uid split this feature runs under.
+ * - When the switch to the target uid is not permitted (no `CAP_SETUID`, e.g.
+ *   CI runners) the command is retried as the current user rather than
+ *   failing every contract check outright. This applies to explicit creds
+ *   too: callers always pass them, so gating the retry on an absent override
+ *   would defeat it.
  */
 function runGit(args: string[], cwd: string | undefined, creds?: ContractCreds): string {
   const target = creds ?? defaultCreds();
+  const safeArgs = ["-c", "safe.directory=*", ...args];
   try {
-    return execFileSync("git", args, gitOptions(cwd, target));
+    return execFileSync("git", safeArgs, gitOptions(cwd, target));
   } catch (e) {
     if (
-      creds === undefined &&
-      isCredsEperm(e) &&
+      isCredsUnsupported(e) &&
       typeof process.getuid === "function" &&
       typeof process.getgid === "function"
     ) {
-      return execFileSync(
-        "git",
-        args,
-        gitOptions(cwd, { uid: process.getuid(), gid: process.getgid() }),
-      );
+      const fallback = { uid: process.getuid(), gid: process.getgid() };
+      if (fallback.uid !== target.uid || fallback.gid !== target.gid) {
+        log.warn("contract_git_uid_switch_failed", {
+          requestedUid: target.uid,
+          requestedGid: target.gid,
+          fallbackUid: fallback.uid,
+          fallbackGid: fallback.gid,
+        });
+        return execFileSync("git", safeArgs, gitOptions(cwd, fallback));
+      }
     }
     throw e;
   }

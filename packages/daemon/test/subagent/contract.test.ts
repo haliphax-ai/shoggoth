@@ -199,25 +199,59 @@ describe("contract git credentials", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("retries as the current user when the uid switch is not permitted", async () => {
+  for (const [label, creds] of [
+    ["default creds", undefined],
+    ["explicit creds", { uid: 900, gid: 900 }],
+  ] as const) {
+    it(`retries as the current user when the uid switch is not permitted (${label})`, async () => {
+      if (typeof process.getuid !== "function" || typeof process.getgid !== "function") return;
+      const selfUid = process.getuid();
+      const dir = await makeRepo();
+      execFileSyncSpy.mockImplementation((...args: unknown[]) => {
+        const opts = args[2] as { uid?: number } | undefined;
+        if (opts?.uid !== selfUid) {
+          const err = new Error("EPERM: operation not permitted, uv_spawn") as Error & {
+            code?: string;
+          };
+          err.code = "EPERM";
+          throw err;
+        }
+        return Reflect.apply(actualChildProcess.execFileSync, null, args);
+      });
+      try {
+        const res = validateContractRepository(
+          dir,
+          [entry("a.txt", "update")],
+          creds as { uid: number; gid: number } | undefined,
+        );
+        assert.equal(res.ok, true, JSON.stringify(res));
+        assert.equal(res.repoDir, dir);
+      } finally {
+        resetExecDelegate();
+      }
+      await rm(dir, { recursive: true, force: true });
+    });
+  }
+
+  it("falls back when the switch is refused with EACCES", async () => {
     if (typeof process.getuid !== "function" || typeof process.getgid !== "function") return;
     const selfUid = process.getuid();
     const dir = await makeRepo();
     execFileSyncSpy.mockImplementation((...args: unknown[]) => {
       const opts = args[2] as { uid?: number } | undefined;
       if (opts?.uid !== selfUid) {
-        const err = new Error("EPERM: operation not permitted, uv_spawn") as Error & {
-          code?: string;
-        };
-        err.code = "EPERM";
+        const err = new Error("EACCES: permission denied, uv_spawn") as Error & { code?: string };
+        err.code = "EACCES";
         throw err;
       }
       return Reflect.apply(actualChildProcess.execFileSync, null, args);
     });
     try {
-      const res = validateContractRepository(dir, [entry("a.txt", "update")]);
-      assert.equal(res.ok, true);
-      assert.equal(res.repoDir, dir);
+      const res = validateContractRepository(dir, [entry("a.txt", "update")], {
+        uid: 900,
+        gid: 900,
+      });
+      assert.equal(res.ok, true, JSON.stringify(res));
     } finally {
       resetExecDelegate();
     }
