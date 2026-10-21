@@ -5,14 +5,14 @@ import {
 } from "@shoggoth/models";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import { connectShoggothMcpServers } from "../mcp/mcp-server-pool";
-import { runToolLoop, type RunToolLoopOptions } from "./tool-loop";
+import { runToolLoop, type RunToolLoopOptions, type ToolLoopResult } from "./tool-loop";
 
 export interface PlatformAssistantDeps {
   readonly createToolCallingClient: (
     models: ShoggothConfig["models"],
     options?: CreateFailoverFromConfigOptions,
   ) => FailoverToolCallingClient;
-  readonly runToolLoopImpl: (opts: RunToolLoopOptions) => Promise<void>;
+  readonly runToolLoopImpl: (opts: RunToolLoopOptions) => Promise<ToolLoopResult>;
   readonly connectShoggothMcpServers: typeof connectShoggothMcpServers;
 }
 

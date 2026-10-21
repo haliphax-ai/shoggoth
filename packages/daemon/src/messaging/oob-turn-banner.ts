@@ -15,7 +15,7 @@
  */
 
 /** Terminal outcome of an OOB turn, mirroring the status bar's terminal emoji. */
-export type OobTurnOutcome = "finished" | "aborted" | "failed";
+export type OobTurnOutcome = "finished" | "aborted" | "canceled" | "failed";
 
 export interface OobTurnBannerText {
   /** Block-quoted "processing" line posted when the turn starts. */
@@ -32,11 +32,14 @@ function truncate(text: string, maxChars: number): string {
 }
 
 function terminalEmoji(outcome: OobTurnOutcome): string {
-  return outcome === "finished" ? "✅" : outcome === "aborted" ? "🛑" : "❌";
+  if (outcome === "finished") return "✅";
+  return outcome === "failed" ? "❌" : "🛑";
 }
 
 function terminalVerb(outcome: OobTurnOutcome): string {
-  return outcome === "finished" ? "processed" : outcome === "aborted" ? "aborted" : "failed";
+  if (outcome === "finished") return "processed";
+  if (outcome === "failed") return "failed";
+  return outcome === "aborted" ? "aborted" : "canceled";
 }
 
 export function buildTimerTurnBanner(input: {

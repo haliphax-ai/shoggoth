@@ -960,7 +960,9 @@ export async function startDiscordPlatform(
             // turn's real tool-call count (the tracker, not a stats-derived
             // parallel composition, is the source).
             const outcome =
-              turnResult.outcome === "aborted" || turnResult.outcome === "failed"
+              turnResult.outcome === "aborted" ||
+              turnResult.outcome === "failed" ||
+              turnResult.outcome === "canceled"
                 ? turnResult.outcome
                 : "finished";
             const barLine = surfaceTracker ? await surfaceTracker.finish(outcome) : undefined;
@@ -1052,7 +1054,9 @@ export async function startDiscordPlatform(
       // `oobTurnBanner.finish` clears the sink and edits the body afterwards.
       if (surfaceTracker) {
         const outcome =
-          turnResult.outcome === "aborted" || turnResult.outcome === "failed"
+          turnResult.outcome === "aborted" ||
+          turnResult.outcome === "failed" ||
+          turnResult.outcome === "canceled"
             ? turnResult.outcome
             : "finished";
         try {

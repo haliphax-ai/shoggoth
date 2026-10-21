@@ -26,6 +26,7 @@ describe("buildTimerTurnBanner", () => {
     const b = buildTimerTurnBanner({ timerId: "t-1", message: "m" });
     assert.equal(b.terminal("finished"), "> ⏰ ✅ Timer processed: `t-1`");
     assert.equal(b.terminal("aborted"), "> ⏰ 🛑 Timer aborted: `t-1`");
+    assert.equal(b.terminal("canceled"), "> ⏰ 🛑 Timer canceled: `t-1`");
     assert.equal(b.terminal("failed"), "> ⏰ ❌ Timer failed: `t-1`");
   });
 });

@@ -80,12 +80,7 @@ describe("runToolLoop runaway circuit breaker", () => {
       toolRuns: createToolRunStore(db),
     });
 
-    // Three identical calls trip the breaker; the third still executes, the
-    // steer is injected before the next model hop, which then recovers.
-    assert.equal(steers.length, 1);
-    assert.match(steers[0]!, /runaway/i);
-    assert.match(steers[0]!, /same-tool/);
-    assert.equal(executor.mock.calls.length, 3);
+    // Three identical calls trip the breaker; the third is prevented before\n    // execution — only the first two reach the executor — and the steer is\n    // injected before the next model hop, which then recovers.\n    assert.equal(steers.length, 1);\n    assert.match(steers[0]!, /runaway/i);\n    assert.match(steers[0]!, /same-tool/);\n    assert.equal(executor.mock.calls.length, 2);
   });
 
   it("cancels the turn when the pattern persists after a steer", async () => {
@@ -123,18 +118,19 @@ describe("runToolLoop runaway circuit breaker", () => {
       toolRuns: createToolRunStore(db),
     });
 
-    // Hop 1-2: ok. Hop 3: steer (3rd identical, still executed). Window
-    // resets. Hop 4-5: ok. Hop 6: executes, then the cancel verdict stops
-    // the loop without a 7th model call.
+    // Hop 1-2: ok. Hop 3: steer (3rd identical, prevented before execution).
+    // Window resets. Hop 4-5: ok. Hop 6: the cancel verdict also trips
+    // BEFORE execution, so only 4 calls reach the executor (hops 1, 2, 4,
+    // 5); the loop stops without a 7th model call (completions stay at 6).
     assert.equal(completions.length, 6);
-    assert.equal(executor.mock.calls.length, 6);
+    assert.equal(executor.mock.calls.length, 4);
     assert.ok(
       audits.some((a) => a.phase === "runaway_breaker_cancel"),
       "cancel must be recorded in the audit trail",
     );
   });
 
-  it("appends the cancel warning to the transcript so it reaches the caller", async () => {
+  it("delivers the cancel notice exactly once via the surface and never via the transcript", async () => {
     let step = 0;
     const model: ModelClient = {
       async complete() {
@@ -149,11 +145,15 @@ describe("runToolLoop runaway circuit breaker", () => {
     };
     const tr = createTranscriptStore(db);
     const seg = getSessionContextSegmentId(db, "sess");
+    const notices: string[] = [];
+    registerActiveTurnSurface("sess", (n) => {
+      notices.push(n);
+    });
 
     await runToolLoop({
       db,
       sessionId: "sess",
-      runId: "run-cancel-tx",
+      runId: "run-cancel-delivery",
       principalId: "p",
       policy: { check: () => ({ allow: true }) },
       audit: { record: () => {} },
@@ -165,53 +165,23 @@ describe("runToolLoop runaway circuit breaker", () => {
       contextSegmentId: seg,
     });
 
-    const page = tr.listPage({ sessionId: "sess", contextSegmentId: seg, afterSeq: 0, limit: 100 });
-    const warning = page.messages.find(
+    const cancelNotices = notices.filter((n) => n.includes("canceled"));
+    assert.equal(
+      cancelNotices.length,
+      1,
+      `expected exactly one cancel notice among ${JSON.stringify(notices)}`,
+    );
+    assert.ok(cancelNotices[0]!.includes("same-tool"));
+
+    const page = tr.listPage({ sessionId: "sess", contextSegmentId: seg, afterSeq: 0, limit: 200 });
+    const leaked = page.messages.find(
       (m) =>
         m.role === "assistant" &&
-        !m.toolCalls?.length &&
-        (m.content ?? "").includes("canceled") &&
-        (m.metadata as { runawayBreakerCancel?: boolean } | undefined)?.runawayBreakerCancel ===
-          true,
+        ((m.content ?? "").includes("canceled") ||
+          (m.metadata as { runawayBreakerCancel?: boolean } | undefined)?.runawayBreakerCancel ===
+            true),
     );
-    assert.ok(warning, "cancel warning should be the turn's terminal assistant message");
-  });
-
-  it("posts an in-turn banner on cancel via the active turn surface", async () => {
-    let step = 0;
-    const model: ModelClient = {
-      async complete() {
-        step += 1;
-        return {
-          content: null,
-          toolCalls: [{ id: `c${step}`, name: "same-tool", argsJson: '{"path":"loop.txt"}' }],
-        };
-      },
-      pushToolMessage() {},
-      pushSteerMessage() {},
-    };
-    const notices: string[] = [];
-    registerActiveTurnSurface("sess", (n) => {
-      notices.push(n);
-    });
-
-    await runToolLoop({
-      db,
-      sessionId: "sess",
-      runId: "run-cancel-banner",
-      principalId: "p",
-      policy: { check: () => ({ allow: true }) },
-      audit: { record: () => {} },
-      model,
-      tools: [{ name: "same-tool" }],
-      executor: { execute: async () => ({ resultJson: "{}" }) },
-      toolRuns: createToolRunStore(db),
-    });
-
-    assert.ok(
-      notices.some((n) => n.includes("breaker") && n.includes("same-tool")),
-      `expected a cancel banner among ${JSON.stringify(notices)}`,
-    );
+    assert.ok(!leaked, "cancel notice must not be appended to the transcript");
   });
 
   it("leaves varied tool call patterns alone", async () => {
@@ -362,15 +332,14 @@ describe("runToolLoop runaway circuit breaker", () => {
       "prose cancel must be audited with an excessive_prose trigger",
     );
 
-    const page = tr.listPage({ sessionId: "sess", contextSegmentId: seg, afterSeq: 0, limit: 100 });
-    const warning = page.messages.find(
+    const page = tr.listPage({ sessionId: "sess", contextSegmentId: seg, afterSeq: 0, limit: 200 });
+    const leaked = page.messages.find(
       (m) =>
         m.role === "assistant" &&
-        !m.toolCalls?.length &&
         (m.metadata as { runawayBreakerCancel?: boolean } | undefined)?.runawayBreakerCancel ===
           true,
     );
-    assert.ok(warning, "prose cancel warning should be the turn's terminal assistant message");
+    assert.ok(!leaked, "prose cancel notice must not be appended to the transcript");
   });
 
   it("never charges the terminal response against the prose budget", async () => {
@@ -455,5 +424,131 @@ describe("runToolLoop runaway circuit breaker", () => {
         (m.metadata as { runawayBreakerSteer?: boolean } | undefined)?.runawayBreakerSteer === true,
     );
     assert.ok(steerRow, "steer message should be persisted in the transcript");
+  });
+
+  it("discards the rest of the batch on a steer, answers every prevented id, and steers the next hop", async () => {
+    const events: string[] = [];
+    const pushed: Array<{ toolCallId: string; content: string }> = [];
+    const tr = createTranscriptStore(db);
+    const seg = getSessionContextSegmentId(db, "sess");
+    let hop = 0;
+    const model: ModelClient = {
+      async complete() {
+        hop += 1;
+        events.push(`complete:${hop}`);
+        if (hop === 1) {
+          // Four identical calls: the third trips the steer before executing;
+          // the fourth is discarded with the batch.
+          return {
+            content: null,
+            toolCalls: [
+              { id: "a1", name: "t", argsJson: '{"n":1}' },
+              { id: "a2", name: "t", argsJson: '{"n":1}' },
+              { id: "a3", name: "t", argsJson: '{"n":1}' },
+              { id: "a4", name: "t", argsJson: '{"n":1}' },
+            ],
+          };
+        }
+        if (hop === 2) {
+          // The turn continues after the steer: this hop must run, having
+          // received the steer message before any further tool execution.
+          return {
+            content: null,
+            toolCalls: [{ id: "b1", name: "t", argsJson: '{"n":99}' }],
+          };
+        }
+        return { content: "recovered", toolCalls: [] };
+      },
+      pushToolMessage(input) {
+        pushed.push(input);
+      },
+      pushSteerMessage() {
+        events.push("steer");
+      },
+    };
+    const executor = vi.fn(async (input: { toolCallId: string }) => {
+      events.push(`exec:${input.toolCallId}`);
+      return { resultJson: "{}" };
+    });
+
+    await runToolLoop({
+      db,
+      sessionId: "sess",
+      runId: "run-midbatch",
+      principalId: "p",
+      policy: { check: () => ({ allow: true }) },
+      audit: { record: () => {} },
+      model,
+      tools: [{ name: "t" }],
+      executor: { execute: executor },
+      toolRuns: createToolRunStore(db),
+      transcript: tr,
+      contextSegmentId: seg,
+      onToolCallEvent: (ev) => {
+        if (ev.phase === "start") events.push(`start:${ev.argsJson}`);
+      },
+    });
+
+    // The tripping call (a3) and the discarded remainder (a4) never reach the
+    // executor; no start/end tool-call events fire for them either.
+    assert.ok(
+      !events.some((e) => e === "exec:a3" || e === "exec:a4"),
+      "prevented calls must not execute",
+    );
+    assert.ok(events.includes("exec:a1") && events.includes("exec:a2"));
+    assert.ok(events.includes('start:{"n":1}'), "executed calls emit start events");
+    const steerIdx = events.indexOf("steer");
+    const hop2Idx = events.indexOf("complete:2");
+    const b1Idx = events.indexOf("exec:b1");
+    assert.ok(
+      steerIdx < hop2Idx && hop2Idx < b1Idx,
+      "steer precedes the next hop, which precedes its tool execution",
+    );
+    assert.equal(executor.mock.calls.length, 3, "a1, a2, and b1 execute; a3 and a4 are prevented");
+
+    // Synthetic results answer every prevented tool_call id.
+    const blocked = pushed.find((p) => p.toolCallId === "a3");
+    const skipped = pushed.find((p) => p.toolCallId === "a4");
+    assert.ok(blocked && blocked.content.includes("runaway_breaker_blocked"));
+    assert.ok(skipped && skipped.content.includes("runaway_breaker_skipped"));
+    assert.equal(pushed.filter((p) => p.toolCallId === "a1" || p.toolCallId === "a2").length, 2);
+
+    // And they are persisted as tool rows so the next hop sees a consistent transcript.
+    const page = tr.listPage({ sessionId: "sess", contextSegmentId: seg, afterSeq: 0, limit: 200 });
+    for (const id of ["a3", "a4"]) {
+      const row = page.messages.find((m) => m.role === "tool" && m.toolCallId === id);
+      assert.ok(row, `synthetic tool result for ${id} must be in the transcript`);
+    }
+  });
+
+  it("returns canceledBy runaway when the breaker cancels the turn", async () => {
+    let step = 0;
+    const model: ModelClient = {
+      async complete() {
+        step += 1;
+        return {
+          content: null,
+          toolCalls: [{ id: `c${step}`, name: "same-tool", argsJson: '{"path":"loop.txt"}' }],
+        };
+      },
+      pushToolMessage() {},
+      pushSteerMessage() {},
+    };
+
+    const result = await runToolLoop({
+      db,
+      sessionId: "sess",
+      runId: "run-canceled-by",
+      principalId: "p",
+      policy: { check: () => ({ allow: true }) },
+      audit: { record: () => {} },
+      model,
+      tools: [{ name: "same-tool" }],
+      executor: { execute: async () => ({ resultJson: "{}" }) },
+      toolRuns: createToolRunStore(db),
+      runawayBreaker: { maxDuplicates: 0 },
+    });
+
+    assert.equal(result?.canceledBy, "runaway");
   });
 });
