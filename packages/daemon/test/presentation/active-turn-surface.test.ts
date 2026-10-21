@@ -22,16 +22,95 @@ describe("createTurnBannerCollector", () => {
       const banners = createTurnBannerCollector({
         captureAnchor: () => anchor(0),
       });
-      expect(banners.liveBody("Hello")).toBe("Hello");
+      expect(banners.liveBody("Hello", { segments: ["Hello"] })).toBe("Hello");
     });
 
-    it("appends recorded notices as one trailing block", () => {
+    it("splices a notice between the prose segments it fired between", () => {
+      const banners = createTurnBannerCollector({
+        captureAnchor: () => anchor(1),
+      });
+      banners.add("> note");
+      expect(banners.liveBody("Hello\n\nWorld", { segments: ["Hello", "World"] })).toBe(
+        "Hello\n\n> note\n\nWorld",
+      );
+    });
+
+    it("places a pre-prose notice before the first segment", () => {
       const banners = createTurnBannerCollector({
         captureAnchor: () => anchor(0),
       });
+      banners.add("> note");
+      expect(banners.liveBody("Hello\n\nWorld", { segments: ["Hello", "World"] })).toBe(
+        "> note\n\nHello\n\nWorld",
+      );
+    });
+
+    it("keeps firing order for notices anchored at the same position", () => {
+      const banners = createTurnBannerCollector({
+        captureAnchor: () => anchor(1),
+      });
       banners.add("> first");
       banners.add("> second");
-      expect(banners.liveBody("Hello")).toBe("Hello\n\n> first\n\n> second");
+      expect(banners.liveBody("Hello\n\nWorld", { segments: ["Hello", "World"] })).toBe(
+        "Hello\n\n> first\n\n> second\n\nWorld",
+      );
+    });
+
+    it("clamps an anchor beyond the committed segment count to the tail", () => {
+      const banners = createTurnBannerCollector({
+        captureAnchor: () => anchor(9),
+      });
+      banners.add("> note");
+      expect(banners.liveBody("Hello\n\nWorld", { segments: ["Hello", "World"] })).toBe(
+        "Hello\n\nWorld\n\n> note",
+      );
+    });
+
+    it("places notices across a mid-stream turn at their committed slots", () => {
+      let committed = 0;
+      const banners = createTurnBannerCollector({
+        captureAnchor: () => anchor(committed),
+      });
+      banners.add("> pre");
+      committed = 1;
+      banners.add("> after-one");
+      committed = 2;
+      banners.add("> after-two");
+      // "Thr" is still streaming (not yet a committed segment), so the
+      // last notice clamps to the tail of the display.
+      expect(banners.liveBody("One\n\nTwo\n\nThr", { segments: ["One", "Two"] })).toBe(
+        "> pre\n\nOne\n\n> after-one\n\nTwo\n\nThr\n\n> after-two",
+      );
+    });
+
+    it("falls back to the tail-append when the live segment list is empty", () => {
+      const banners = createTurnBannerCollector({
+        captureAnchor: () => anchor(1),
+      });
+      banners.add("> note");
+      expect(banners.liveBody("…", { segments: [] })).toBe("…\n\n> note");
+    });
+
+    it("falls back to the tail-append when a live segment cannot be located", () => {
+      const banners = createTurnBannerCollector({
+        captureAnchor: () => anchor(1),
+      });
+      banners.add("> note");
+      // The display was rewritten away from the committed prose (e.g. a
+      // mid-stream failover hop): nothing may be dropped or throw.
+      expect(banners.liveBody("Something else entirely", { segments: ["Hello", "World"] })).toBe(
+        "Something else entirely\n\n> note",
+      );
+    });
+
+    it("tolerates a decoration glued onto the same block as a live segment", () => {
+      const banners = createTurnBannerCollector({
+        captureAnchor: () => anchor(1),
+      });
+      banners.add("> note");
+      expect(banners.liveBody("**Rook:** Hello\n\nWorld", { segments: ["Hello", "World"] })).toBe(
+        "**Rook:** Hello\n\n> note\n\nWorld",
+      );
     });
   });
 

@@ -13,15 +13,21 @@
  * The collector owns both capture and rendering of notices:
  *  - capture: notices are recorded with an anchor captured from the runner's
  *    live state at fire time (`{ committedProseSegments, toolCalls }`);
- *  - live render: the current display plus the recorded notices is re-pushed
- *    immediately at fire time, so a banner lands mid-turn;
- *  - terminal render: notices are spliced into the composed body at their
- *    anchor positions (between committed prose segments) instead of being
- *    appended as one trailing block, so a notice that fired between two
- *    prose segments lands between them in the delivered message. When an
- *    anchor cannot be resolved — it exceeded the committed segment count, or
- *    the body's segment boundaries are not locatable — the notice falls back
- *    to the end-of-body block; it is never dropped.
+ *  - live render: on every push the current display is re-rendered FROM
+ *    SCRATCH with the recorded notices spliced in at their anchors — the
+ *    banner lands mid-turn, in chronological position, not pinned to the
+ *    tail of the streamed message;
+ *  - terminal render: the same splice runs against the composed body at
+ *    delivery, so the live stream and the delivered message place each
+ *    notice between the prose segments it fired between.
+ *
+ * Both renders share one splice helper: slot s = after the s-th committed
+ * prose segment (s=0 → before the first block; s=K → at the end), clamped to
+ * the segment list the caller passes, firing order preserved within a slot.
+ * When an anchor cannot be resolved — it exceeded the committed segment
+ * count, or the body's segment boundaries are not locatable — the notices
+ * fall back to the end-of-body block; they are never dropped and never throw
+ * mid-stream.
  *
  * Mirrors the singleton-map pattern used by `sessions/steer-channel.ts`.
  */
@@ -53,12 +59,15 @@ export interface TurnBannerCollector {
   /** Record a notice with the current anchor. */
   readonly add: (notice: string) => void;
   /**
-   * Live render: `display` plus the recorded notices appended as one block.
-   * The live display cannot know final segment boundaries mid-stream, so it
-   * keeps the legacy append-at-tail shape; the terminal render splices
-   * chronologically instead.
+   * Live render: splice the recorded notices into `display` at their anchor
+   * positions — the same slot semantics as {@link terminalBody}, so the
+   * in-flight message shows each notice between the prose segments it fired
+   * between. `segments` are the display's committed prose segments in order
+   * (the runner's settled prose so far; the round still streaming is not
+   * among them). Falls back to appending the block at the tail when anchors
+   * cannot be resolved. Re-renders from scratch on every push.
    */
-  readonly liveBody: (display: string) => string;
+  readonly liveBody: (display: string, opts: { readonly segments: readonly string[] }) => string;
   /**
    * Terminal render: splice the recorded notices into `body` at their anchor
    * positions. `segments` are the turn's committed prose segments, in order
@@ -116,69 +125,78 @@ function locateSegmentBlocks(body: string, segments: readonly string[]): number[
 /**
  * Creates a per-turn banner collector. The runner provides anchor capture
  * from its live state and, optionally, a live re-push hook (`onNotice`).
+ * Both render paths run the SAME splice helper, so the live stream and the
+ * delivered body can never disagree on where a notice lands.
  */
 export function createTurnBannerCollector(
   options: TurnBannerCollectorOptions,
 ): TurnBannerCollector {
   const notices: BannerEntry[] = [];
-  const noticeBlock = (): string => notices.map((entry) => entry.notice).join("\n\n");
+  // The ONE placement rule: slot s = after the s-th committed prose segment
+  // (s=0 → before the first block; s=K → at the end), clamped to the segment
+  // count, firing order preserved within a slot. Falls back to one trailing
+  // block when anchors cannot be resolved (no prose segments, or the segment
+  // boundaries are not locatable in `body`) — a notice is never dropped and
+  // this never throws.
+  const splice = (body: string, segments: readonly string[]): string => {
+    if (notices.length === 0) return body;
+    const noticeBlock = notices.map((entry) => entry.notice).join("\n\n");
+    const proseSegments = segments.filter((segment) => segment.trim().length > 0);
+    if (proseSegments.length === 0) {
+      // No prose segments to anchor against (tool-only turn, error body,
+      // pre-prose live placeholder): one block at the end of the body.
+      return `${body}\n\n${noticeBlock}`;
+    }
+    const segmentBlockIndexes = locateSegmentBlocks(body, proseSegments);
+    if (!segmentBlockIndexes) {
+      // Unresolvable anchors: keep the legacy placement — one block at the
+      // end of the body. Never drop a notice.
+      return `${body}\n\n${noticeBlock}`;
+    }
+    // Group notices by their clamped slot: slot s = after the s-th
+    // committed prose segment (s=0 → before the first segment; s=K → at
+    // the end of the body). Firing order is preserved within a slot.
+    const bySlot = new Map<number, string[]>();
+    for (const entry of notices) {
+      const slot = Math.max(0, Math.min(entry.anchor.committedProseSegments, proseSegments.length));
+      const group = bySlot.get(slot);
+      if (group) group.push(entry.notice);
+      else bySlot.set(slot, [entry.notice]);
+    }
+    const blocks = splitBlocks(body);
+    const insertAt = new Map<number, string[]>();
+    for (const slot of [...bySlot.keys()].sort((a, b) => a - b)) {
+      const afterIndex =
+        slot <= 0
+          ? -1
+          : slot >= proseSegments.length
+            ? blocks.length - 1
+            : segmentBlockIndexes[slot - 1]!;
+      const at = afterIndex + 1;
+      const group = bySlot.get(slot)!;
+      insertAt.set(at, (insertAt.get(at) ?? []).concat(group));
+    }
+    const out: string[] = [];
+    for (let index = 0; index < blocks.length; index += 1) {
+      const extra = insertAt.get(index);
+      if (extra) out.push(...extra);
+      out.push(blocks[index]!);
+    }
+    const tailExtra = insertAt.get(blocks.length);
+    if (tailExtra) out.push(...tailExtra);
+    return out.join("\n\n");
+  };
+
   return {
     add(notice) {
       notices.push({ notice, anchor: options.captureAnchor() });
       options.onNotice?.(notice);
     },
-    liveBody(display) {
-      return notices.length ? `${display}\n\n${noticeBlock()}` : display;
+    liveBody(display, { segments }) {
+      return splice(display, segments);
     },
     terminalBody(body, { segments }) {
-      if (notices.length === 0) return body;
-      const proseSegments = segments.filter((segment) => segment.trim().length > 0);
-      if (proseSegments.length === 0) {
-        // No prose segments to anchor against (tool-only turn, error body):
-        // one block at the end of the body — the legacy placement.
-        return `${body}\n\n${noticeBlock()}`;
-      }
-      const segmentBlockIndexes = locateSegmentBlocks(body, proseSegments);
-      if (!segmentBlockIndexes) {
-        // Unresolvable anchors: keep the legacy placement — one block at the
-        // end of the body. Never drop a notice.
-        return `${body}\n\n${noticeBlock()}`;
-      }
-      // Group notices by their clamped slot: slot s = after the s-th
-      // committed prose segment (s=0 → before the first segment; s=K → at
-      // the end of the body). Firing order is preserved within a slot.
-      const bySlot = new Map<number, string[]>();
-      for (const entry of notices) {
-        const slot = Math.max(
-          0,
-          Math.min(entry.anchor.committedProseSegments, proseSegments.length),
-        );
-        const group = bySlot.get(slot);
-        if (group) group.push(entry.notice);
-        else bySlot.set(slot, [entry.notice]);
-      }
-      const blocks = splitBlocks(body);
-      const insertAt = new Map<number, string[]>();
-      for (const slot of [...bySlot.keys()].sort((a, b) => a - b)) {
-        const afterIndex =
-          slot <= 0
-            ? -1
-            : slot >= proseSegments.length
-              ? blocks.length - 1
-              : segmentBlockIndexes[slot - 1]!;
-        const at = afterIndex + 1;
-        const group = bySlot.get(slot)!;
-        insertAt.set(at, (insertAt.get(at) ?? []).concat(group));
-      }
-      const out: string[] = [];
-      for (let index = 0; index < blocks.length; index += 1) {
-        const extra = insertAt.get(index);
-        if (extra) out.push(...extra);
-        out.push(blocks[index]!);
-      }
-      const tailExtra = insertAt.get(blocks.length);
-      if (tailExtra) out.push(...tailExtra);
-      return out.join("\n\n");
+      return splice(body, segments);
     },
   };
 }
