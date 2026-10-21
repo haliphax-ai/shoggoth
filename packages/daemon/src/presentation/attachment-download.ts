@@ -15,6 +15,8 @@ export interface DownloadInboundAttachmentsOptions {
   readonly creds?: { readonly uid: number; readonly gid: number };
   readonly maxBytes?: number;
   readonly fetchImpl?: typeof fetch;
+  /** Injectable `runAsUser` for sandboxed writes. Defaults to the real implementation. */
+  readonly runAsUserImpl?: typeof runAsUser;
 }
 
 function sanitizeFilename(raw: string): string {
@@ -35,6 +37,7 @@ async function downloadOne(
   creds: { readonly uid: number; readonly gid: number } | undefined,
   maxBytes: number,
   fetchFn: typeof fetch,
+  runAsUserFn: typeof runAsUser = runAsUser,
 ): Promise<MessageAttachment> {
   const safeName = sanitizeFilename(attachment.filename);
   const relativePath = `media/inbound/${messageId}_${safeName}`;
@@ -77,7 +80,7 @@ async function downloadOne(
     if (creds) {
       // Sandboxed: write via runAsUser to drop privileges
       const b64 = buffer.toString("base64");
-      await runAsUser({
+      await runAsUserFn({
         file: process.execPath,
         args: [
           "-e",
@@ -114,13 +117,14 @@ export async function downloadInboundAttachments(
     creds,
     maxBytes = MAX_IMAGE_BLOCK_BYTES,
     fetchImpl = globalThis.fetch,
+    runAsUserImpl,
   } = options;
 
   if (attachments.length === 0) return [];
 
   const results = await Promise.allSettled(
     attachments.map((att) =>
-      downloadOne(att, messageId, workspacePath, creds, maxBytes, fetchImpl),
+      downloadOne(att, messageId, workspacePath, creds, maxBytes, fetchImpl, runAsUserImpl),
     ),
   );
 

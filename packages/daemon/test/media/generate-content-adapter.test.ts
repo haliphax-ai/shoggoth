@@ -1,24 +1,17 @@
 import { describe, it, vi, beforeEach } from "vitest";
 import assert from "node:assert";
-
-// Mock node:fs/promises for file writing
-vi.mock("node:fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:fs/promises")>();
-  return {
-    ...actual,
-    writeFile: vi.fn().mockResolvedValue(undefined),
-    mkdir: vi.fn().mockResolvedValue(undefined),
-    readFile: vi.fn().mockResolvedValue(Buffer.from("fake-image-bytes")),
-  };
-});
-
-// Mock global fetch
-const mockFetch = vi.fn();
-vi.stubGlobal("fetch", mockFetch);
-
-import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { generateContentAdapter } from "../../src/media/adapters/generate-content-adapter";
 import type { MediaAdapterRequest, MediaAdapterResult } from "../../src/media/adapters/types";
+
+// DI: inject fakes via MediaAdapterDeps instead of mocking node:fs/promises or
+// stubbing global fetch (both are import-order dependent under --no-isolate).
+const mockFetch = vi.fn();
+const mockWriteFile = vi.fn().mockResolvedValue(undefined);
+const mockMkdir = vi.fn().mockResolvedValue(undefined);
+
+function makeDeps() {
+  return { fetchFn: mockFetch, writeFile: mockWriteFile, mkdir: mockMkdir };
+}
 
 function makeRequest(overrides?: Partial<MediaAdapterRequest>): MediaAdapterRequest {
   return {
@@ -68,7 +61,7 @@ describe("generateContentAdapter", () => {
     const base64 = Buffer.from("fake-png-bytes").toString("base64");
     mockFetch.mockResolvedValue(makeGenerateContentResponse("image/png", base64));
 
-    await generateContentAdapter(makeRequest({ model: "gemini-2.5-flash-image" }));
+    await generateContentAdapter(makeRequest({ model: "gemini-2.5-flash-image" }), makeDeps());
 
     assert.strictEqual(mockFetch.mock.calls.length, 1);
     const [url, opts] = mockFetch.mock.calls[0];
@@ -90,6 +83,7 @@ describe("generateContentAdapter", () => {
         prompt: "Hello world",
         params: { kind: "speech", voice: "Kore" },
       }),
+      makeDeps(),
     );
 
     assert.strictEqual(mockFetch.mock.calls.length, 1);
@@ -112,6 +106,7 @@ describe("generateContentAdapter", () => {
         prompt: "upbeat jazz",
         params: { kind: "music" },
       }),
+      makeDeps(),
     );
 
     assert.strictEqual(mockFetch.mock.calls.length, 1);
@@ -127,12 +122,12 @@ describe("generateContentAdapter", () => {
     const base64 = Buffer.from(rawBytes).toString("base64");
     mockFetch.mockResolvedValue(makeGenerateContentResponse("image/png", base64));
 
-    await generateContentAdapter(makeRequest({ outputPath: "/tmp/media/result.png" }));
+    await generateContentAdapter(makeRequest({ outputPath: "/tmp/media/result.png" }), makeDeps());
 
-    assert.strictEqual(vi.mocked(mkdir).mock.calls.length, 1);
-    assert.strictEqual(vi.mocked(writeFile).mock.calls.length, 1);
+    assert.strictEqual(mockMkdir.mock.calls.length, 1);
+    assert.strictEqual(mockWriteFile.mock.calls.length, 1);
 
-    const [writePath, writeData] = vi.mocked(writeFile).mock.calls[0];
+    const [writePath, writeData] = mockWriteFile.mock.calls[0];
     assert.strictEqual(writePath, "/tmp/media/result.png");
     // Should be a Buffer containing the decoded base64 data
     assert.ok(Buffer.isBuffer(writeData));
@@ -143,7 +138,10 @@ describe("generateContentAdapter", () => {
     const base64 = Buffer.from("png-data").toString("base64");
     mockFetch.mockResolvedValue(makeGenerateContentResponse("image/png", base64));
 
-    const result = await generateContentAdapter(makeRequest({ outputPath: "/tmp/media/out.png" }));
+    const result = await generateContentAdapter(
+      makeRequest({ outputPath: "/tmp/media/out.png" }),
+      makeDeps(),
+    );
 
     assert.strictEqual(result.status, "complete");
     assert.strictEqual(
@@ -164,7 +162,7 @@ describe("generateContentAdapter", () => {
       text: vi.fn().mockResolvedValue('{"error":{"message":"Rate limit exceeded"}}'),
     });
 
-    const result = await generateContentAdapter(makeRequest());
+    const result = await generateContentAdapter(makeRequest(), makeDeps());
 
     assert.strictEqual(result.status, "error");
     assert.ok((result as MediaAdapterResult & { status: "error" }).error.length > 0);
@@ -178,6 +176,7 @@ describe("generateContentAdapter", () => {
       makeRequest({
         params: { kind: "image", aspectRatio: "16:9" },
       }),
+      makeDeps(),
     );
 
     const [, opts] = mockFetch.mock.calls[0];
@@ -189,7 +188,7 @@ describe("generateContentAdapter", () => {
     const base64 = Buffer.from("fake-png-bytes").toString("base64");
     mockFetch.mockResolvedValue(makeGenerateContentResponse("image/png", base64));
 
-    await generateContentAdapter(makeRequest());
+    await generateContentAdapter(makeRequest(), makeDeps());
 
     const [, opts] = mockFetch.mock.calls[0];
     const body = JSON.parse(opts.body);
@@ -205,6 +204,7 @@ describe("generateContentAdapter", () => {
         model: "gemini-2.5-flash-preview-tts",
         params: { kind: "speech", voice: "Kore" },
       }),
+      makeDeps(),
     );
 
     const [, opts] = mockFetch.mock.calls[0];
@@ -220,11 +220,8 @@ describe("generateContentAdapter", () => {
       makeRequest({
         params: { kind: "image", input_image: base64 },
       }),
+      makeDeps(),
     );
-
-    // The handler base64-encodes the input; the adapter should pass it through.
-    // No readFile call expected — adapters receive raw base64.
-    assert.strictEqual(vi.mocked(readFile).mock.calls.length, 0);
 
     // The request body should include the image as an inlineData part
     const [, opts] = mockFetch.mock.calls[0];

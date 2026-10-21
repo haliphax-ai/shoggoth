@@ -1,6 +1,11 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { MediaAdapterRequest, MediaAdapterResult, VideoGenerateParams } from "./types";
+import type {
+  MediaAdapterRequest,
+  MediaAdapterResult,
+  MediaAdapterDeps,
+  VideoGenerateParams,
+} from "./types";
 import { normalizeBaseUrl } from "./utils";
 
 interface VideoRequest extends MediaAdapterRequest {
@@ -14,7 +19,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function openaiVideoAsyncAdapter(req: VideoRequest): Promise<MediaAdapterResult> {
+export async function openaiVideoAsyncAdapter(
+  req: VideoRequest,
+  deps: MediaAdapterDeps = {},
+): Promise<MediaAdapterResult> {
+  const f = deps.fetchFn ?? fetch;
+  const wf = deps.writeFile ?? writeFile;
+  const md = deps.mkdir ?? mkdir;
   const pollIntervalMs = req.adapterDefaults?.pollIntervalMs ?? 5000;
   const timeoutMs = req.adapterDefaults?.timeoutMs ?? 300000;
 
@@ -30,7 +41,7 @@ export async function openaiVideoAsyncAdapter(req: VideoRequest): Promise<MediaA
 
   try {
     // Submit generation request
-    const submitResponse = await fetch(`${normalizedBaseUrl}/chat/completions`, {
+    const submitResponse = await f(`${normalizedBaseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -91,7 +102,7 @@ export async function openaiVideoAsyncAdapter(req: VideoRequest): Promise<MediaA
         await sleep(pollIntervalMs);
       }
 
-      const pollResponse = await fetch(`${normalizedBaseUrl}/generation?id=${generationId}`, {
+      const pollResponse = await f(`${normalizedBaseUrl}/generation?id=${generationId}`, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -120,7 +131,7 @@ export async function openaiVideoAsyncAdapter(req: VideoRequest): Promise<MediaA
         }
 
         // Download the video
-        const videoResponse = await fetch(pollJson.video_url, {
+        const videoResponse = await f(pollJson.video_url, {
           method: "GET",
         });
 
@@ -134,8 +145,8 @@ export async function openaiVideoAsyncAdapter(req: VideoRequest): Promise<MediaA
         const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
 
         // Write to output path
-        await mkdir(dirname(req.outputPath), { recursive: true });
-        await writeFile(req.outputPath, videoBuffer);
+        await md(dirname(req.outputPath), { recursive: true });
+        await wf(req.outputPath, videoBuffer);
 
         return {
           status: "complete",

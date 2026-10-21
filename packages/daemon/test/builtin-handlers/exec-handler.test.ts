@@ -4,14 +4,11 @@ import { BuiltinToolRegistry } from "../../src/sessions/builtin-tool-registry";
 import { register } from "../../src/sessions/builtin-handlers/exec-handler";
 import { defaultConfig, type ShoggothConfig } from "@shoggoth/shared";
 
-// Mock the os-exec module
-vi.mock("@shoggoth/os-exec", () => ({
-  toolExec: vi.fn(),
-  toolExecExtended: vi.fn(),
-  toolPoll: vi.fn(),
-}));
-
-import { toolExecExtended, toolExec } from "@shoggoth/os-exec";
+// DI: inject os-exec fakes via ctx.osExec instead of mocking the module
+// (import-order dependent under --no-isolate).
+const toolExec = vi.fn();
+const toolExecExtended = vi.fn();
+const toolPoll = vi.fn();
 
 function makeConfig(): ShoggothConfig {
   return { ...defaultConfig("/tmp/cfg") } as ShoggothConfig;
@@ -33,6 +30,7 @@ function makeCtx(config: ShoggothConfig): BuiltinToolContext {
     memoryConfig: config.memory,
     runtimeOpenaiBaseUrl: undefined,
     isSubagentSession: false,
+    osExec: { toolExec, toolExecExtended, toolPoll },
   };
 }
 
@@ -54,7 +52,7 @@ describe("exec-handler", () => {
       const ctx = makeCtx(makeConfig());
 
       // Mock toolExecExtended to return a result with file output
-      vi.mocked(toolExecExtended).mockResolvedValueOnce({
+      toolExecExtended.mockResolvedValueOnce({
         kind: "foreground",
         exitCode: 0,
         signal: null,
@@ -68,14 +66,14 @@ describe("exec-handler", () => {
       expect(toolExec).not.toHaveBeenCalled();
 
       // Should have passed the outputFile parameter
-      const callArgs = vi.mocked(toolExecExtended).mock.calls[0];
+      const callArgs = toolExecExtended.mock.calls[0];
       expect(callArgs[1]).toHaveProperty("outputFile", "output.txt");
     });
 
     it("detects stdoutFile as extended usage", async () => {
       const ctx = makeCtx(makeConfig());
 
-      vi.mocked(toolExecExtended).mockResolvedValueOnce({
+      toolExecExtended.mockResolvedValueOnce({
         kind: "foreground",
         exitCode: 0,
         signal: null,
@@ -86,14 +84,14 @@ describe("exec-handler", () => {
       await registry.execute("exec", { argv: ["echo", "hello"], stdoutFile: "stdout.txt" }, ctx);
 
       expect(toolExecExtended).toHaveBeenCalledOnce();
-      const callArgs = vi.mocked(toolExecExtended).mock.calls[0];
+      const callArgs = toolExecExtended.mock.calls[0];
       expect(callArgs[1]).toHaveProperty("stdoutFile", "stdout.txt");
     });
 
     it("detects stderrFile as extended usage", async () => {
       const ctx = makeCtx(makeConfig());
 
-      vi.mocked(toolExecExtended).mockResolvedValueOnce({
+      toolExecExtended.mockResolvedValueOnce({
         kind: "foreground",
         exitCode: 0,
         signal: null,
@@ -104,14 +102,14 @@ describe("exec-handler", () => {
       await registry.execute("exec", { argv: ["echo", "hello"], stderrFile: "stderr.txt" }, ctx);
 
       expect(toolExecExtended).toHaveBeenCalledOnce();
-      const callArgs = vi.mocked(toolExecExtended).mock.calls[0];
+      const callArgs = toolExecExtended.mock.calls[0];
       expect(callArgs[1]).toHaveProperty("stderrFile", "stderr.txt");
     });
 
     it("returns outputFile in resultJson when present in tool result", async () => {
       const ctx = makeCtx(makeConfig());
 
-      vi.mocked(toolExecExtended).mockResolvedValueOnce({
+      toolExecExtended.mockResolvedValueOnce({
         kind: "foreground",
         exitCode: 0,
         signal: null,
@@ -134,7 +132,7 @@ describe("exec-handler", () => {
     it("returns stdoutFile in resultJson when present in tool result", async () => {
       const ctx = makeCtx(makeConfig());
 
-      vi.mocked(toolExecExtended).mockResolvedValueOnce({
+      toolExecExtended.mockResolvedValueOnce({
         kind: "foreground",
         exitCode: 0,
         signal: null,
@@ -158,7 +156,7 @@ describe("exec-handler", () => {
     it("returns stderrFile in resultJson when present in tool result", async () => {
       const ctx = makeCtx(makeConfig());
 
-      vi.mocked(toolExecExtended).mockResolvedValueOnce({
+      toolExecExtended.mockResolvedValueOnce({
         kind: "foreground",
         exitCode: 0,
         signal: null,
@@ -182,7 +180,7 @@ describe("exec-handler", () => {
     it("returns both stdoutFile and stderrFile in resultJson when both are present", async () => {
       const ctx = makeCtx(makeConfig());
 
-      vi.mocked(toolExecExtended).mockResolvedValueOnce({
+      toolExecExtended.mockResolvedValueOnce({
         kind: "foreground",
         exitCode: 0,
         signal: null,
@@ -209,7 +207,7 @@ describe("exec-handler", () => {
 
       // Note: truncateToolOutput should not be called for file paths
 
-      vi.mocked(toolExecExtended).mockResolvedValueOnce({
+      toolExecExtended.mockResolvedValueOnce({
         kind: "foreground",
         exitCode: 0,
         signal: null,
@@ -226,7 +224,7 @@ describe("exec-handler", () => {
     it("includes exitCode in resultJson regardless of file output mode", async () => {
       const ctx = makeCtx(makeConfig());
 
-      vi.mocked(toolExecExtended).mockResolvedValueOnce({
+      toolExecExtended.mockResolvedValueOnce({
         kind: "foreground",
         exitCode: 42,
         signal: null,
@@ -247,7 +245,7 @@ describe("exec-handler", () => {
     it("still calls toolExec when no file output params are present", async () => {
       const ctx = makeCtx(makeConfig());
 
-      vi.mocked(toolExec).mockResolvedValueOnce({
+      toolExec.mockResolvedValueOnce({
         exitCode: 0,
         stdout: "hello",
         stderr: "",
@@ -288,7 +286,7 @@ describe("exec-handler", () => {
       };
       (ctx as any).vault = mockVault;
 
-      vi.mocked(toolExecExtended).mockResolvedValueOnce({
+      toolExecExtended.mockResolvedValueOnce({
         kind: "foreground",
         exitCode: 0,
         signal: null,
@@ -305,7 +303,7 @@ describe("exec-handler", () => {
       );
 
       expect(toolExecExtended).toHaveBeenCalledOnce();
-      const callArgs = vi.mocked(toolExecExtended).mock.calls[0];
+      const callArgs = toolExecExtended.mock.calls[0];
       // The env should have the vault reference resolved
       expect(callArgs[1].env).toEqual({ SECRET: "resolved-secret", PLAIN: "hello" });
     });
@@ -315,7 +313,7 @@ describe("exec-handler", () => {
       const ctx = makeCtx(config);
       // No vault on ctx
 
-      vi.mocked(toolExecExtended).mockResolvedValueOnce({
+      toolExecExtended.mockResolvedValueOnce({
         kind: "foreground",
         exitCode: 0,
         signal: null,
@@ -332,7 +330,7 @@ describe("exec-handler", () => {
       );
 
       expect(toolExecExtended).toHaveBeenCalledOnce();
-      const callArgs = vi.mocked(toolExecExtended).mock.calls[0];
+      const callArgs = toolExecExtended.mock.calls[0];
       // Without vault, env passes through as-is
       expect(callArgs[1].env).toEqual({ SECRET: "$vault:MY_SECRET", PLAIN: "hello" });
     });

@@ -1,6 +1,6 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { MediaAdapterRequest, MediaAdapterResult } from "./types";
+import type { MediaAdapterRequest, MediaAdapterResult, MediaAdapterDeps } from "./types";
 import { getLogger } from "../../logging.js";
 import { detectMediaTypeFromBytes } from "../../presentation/image-ingest.js";
 
@@ -48,15 +48,23 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function downloadFromUri(uri: string, outputPath: string, apiKey?: string): Promise<Buffer> {
+async function downloadFromUri(
+  uri: string,
+  outputPath: string,
+  apiKey?: string,
+  deps: MediaAdapterDeps = {},
+): Promise<Buffer> {
+  const f = deps.fetchFn ?? fetch;
+  const wf = deps.writeFile ?? writeFile;
+  const md = deps.mkdir ?? mkdir;
   const downloadUrl = apiKey ? `${uri}&key=${apiKey}` : uri;
-  const res = await fetch(downloadUrl, { redirect: "follow" });
+  const res = await f(downloadUrl, { redirect: "follow" });
   if (!res.ok) {
     throw new Error(`Video download failed: HTTP ${res.status}`);
   }
   const buf = Buffer.from(await res.arrayBuffer());
-  await mkdir(dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, buf);
+  await md(dirname(outputPath), { recursive: true });
+  await wf(outputPath, buf);
   return buf;
 }
 
@@ -64,6 +72,7 @@ async function parseCompletedResponse(
   responseBody: Record<string, unknown>,
   outputPath: string,
   apiKey?: string,
+  deps: MediaAdapterDeps = {},
 ): Promise<MediaAdapterResult> {
   const resp = responseBody.response as Record<string, unknown> | undefined;
   const videoResp = resp?.generateVideoResponse as Record<string, unknown> | undefined;
@@ -95,7 +104,7 @@ async function parseCompletedResponse(
 
   if (videoUri) {
     try {
-      await downloadFromUri(videoUri, outputPath, apiKey);
+      await downloadFromUri(videoUri, outputPath, apiKey, deps);
       return { status: "complete", path: outputPath, mime_type: encoding };
     } catch (err) {
       log.warn("long_running.uri_download_failed", {
@@ -113,8 +122,8 @@ async function parseCompletedResponse(
 
   if (base64Data) {
     const decoded = Buffer.from(base64Data, "base64");
-    await mkdir(dirname(outputPath), { recursive: true });
-    await writeFile(outputPath, decoded);
+    await (deps.mkdir ?? mkdir)(dirname(outputPath), { recursive: true });
+    await (deps.writeFile ?? writeFile)(outputPath, decoded);
     return { status: "complete", path: outputPath, mime_type: encoding };
   }
 
@@ -125,8 +134,12 @@ async function parseCompletedResponse(
   return { status: "error", error: "No video URI or bytesBase64Encoded in video response" };
 }
 
-export async function longRunningAdapter(req: LongRunningRequest): Promise<MediaAdapterResult> {
+export async function longRunningAdapter(
+  req: LongRunningRequest,
+  deps: MediaAdapterDeps = {},
+): Promise<MediaAdapterResult> {
   try {
+    const f = deps.fetchFn ?? fetch;
     // Input image (first frame) — base64 already provided by the handler.
     let inputImageBase64: string | undefined;
     if (req.params.kind === "video" && req.params.input_image) {
@@ -143,7 +156,7 @@ export async function longRunningAdapter(req: LongRunningRequest): Promise<Media
     const initiateUrl = `${req.provider.baseUrl}/${apiVersion}/models/${req.model}:predictLongRunning?key=${req.provider.apiKey}`;
     const body = buildRequestBody(req, inputImageBase64, lastFrameBase64);
 
-    const response = await fetch(initiateUrl, {
+    const response = await f(initiateUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -162,7 +175,7 @@ export async function longRunningAdapter(req: LongRunningRequest): Promise<Media
 
     // If already done on first response
     if (json.done === true) {
-      return parseCompletedResponse(json, req.outputPath, req.provider.apiKey);
+      return parseCompletedResponse(json, req.outputPath, req.provider.apiKey, deps);
     }
 
     // Poll loop
@@ -173,7 +186,7 @@ export async function longRunningAdapter(req: LongRunningRequest): Promise<Media
       await sleep(DEFAULT_POLL_INTERVAL_MS);
 
       const pollUrl = `${req.provider.baseUrl}/${apiVersion}/${operationName}?key=${req.provider.apiKey}`;
-      const pollResponse = await fetch(pollUrl);
+      const pollResponse = await f(pollUrl);
 
       if (!pollResponse.ok) {
         const errorText = await pollResponse.text();
@@ -186,7 +199,7 @@ export async function longRunningAdapter(req: LongRunningRequest): Promise<Media
       const pollJson = (await pollResponse.json()) as Record<string, unknown>;
 
       if (pollJson.done === true) {
-        return parseCompletedResponse(pollJson, req.outputPath, req.provider.apiKey);
+        return parseCompletedResponse(pollJson, req.outputPath, req.provider.apiKey, deps);
       }
     }
 

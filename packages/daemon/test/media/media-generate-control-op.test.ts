@@ -2,22 +2,15 @@ import { describe, it, vi, beforeEach } from "vitest";
 import assert from "node:assert";
 
 // ---------------------------------------------------------------------------
-// Mock MediaGenerationService before importing integration-ops
+// DI: inject a fake MediaGenerationService factory into the integration ops
+// context instead of mocking the module (vi.mock is import-order dependent
+// under --no-isolate).
 
-const { mockGenerate, MockMediaGenerationService } = vi.hoisted(() => {
-  const mockGenerate = vi.fn();
-  const MockMediaGenerationService = vi.fn().mockImplementation(function () {
-    return { generate: mockGenerate, poll: vi.fn() };
-  });
-  MockMediaGenerationService.fromConfig = vi.fn().mockImplementation(() => {
-    return { generate: mockGenerate, poll: vi.fn() };
-  });
-  return { mockGenerate, MockMediaGenerationService };
-});
+const mockGenerate = vi.fn();
 
-vi.mock("../../src/media/media-generation-service", () => ({
-  MediaGenerationService: MockMediaGenerationService,
-}));
+function makeFakeMediaGenerationService() {
+  return { generate: mockGenerate, poll: vi.fn() };
+}
 
 import { handleIntegrationControlOp, IntegrationOpError } from "../../src/control/integration-ops";
 import type { IntegrationOpsContext } from "../../src/control/integration-ops";
@@ -97,6 +90,7 @@ function makeCtx(configOverrides?: Partial<ShoggothConfig>): IntegrationOpsConte
     sessionManager: undefined,
     acpxSupervisor: undefined,
     recordIntegrationAudit: () => {},
+    createMediaGenerationService: makeFakeMediaGenerationService,
   } as unknown as IntegrationOpsContext;
 }
 

@@ -1,6 +1,6 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname, basename, extname, join } from "node:path";
-import type { MediaAdapterRequest, MediaAdapterResult } from "./types";
+import type { MediaAdapterRequest, MediaAdapterResult, MediaAdapterDeps } from "./types";
 
 function buildRequestBody(req: MediaAdapterRequest, inputImageBase64?: string) {
   const instance: Record<string, unknown> = { prompt: req.prompt };
@@ -27,8 +27,14 @@ function outputPathForIndex(basePath: string, index: number): string {
   return join(dir, `${name}_${index}${ext}`);
 }
 
-export async function predictAdapter(req: MediaAdapterRequest): Promise<MediaAdapterResult> {
+export async function predictAdapter(
+  req: MediaAdapterRequest,
+  deps: MediaAdapterDeps = {},
+): Promise<MediaAdapterResult> {
   try {
+    const f = deps.fetchFn ?? fetch;
+    const wf = deps.writeFile ?? writeFile;
+    const md = deps.mkdir ?? mkdir;
     let inputImageBase64: string | undefined;
     if (req.params.kind === "image" && req.params.input_image) {
       // Handler already base64-encoded the input; adapters receive raw base64.
@@ -40,7 +46,7 @@ export async function predictAdapter(req: MediaAdapterRequest): Promise<MediaAda
     const apiVersion = req.provider.apiVersion ?? "v1beta";
     const url = `${req.provider.baseUrl}/${apiVersion}/models/${req.model}:predict?key=${req.provider.apiKey}`;
 
-    const response = await fetch(url, {
+    const response = await f(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -64,11 +70,11 @@ export async function predictAdapter(req: MediaAdapterRequest): Promise<MediaAda
       };
     }
 
-    await mkdir(dirname(req.outputPath), { recursive: true });
+    await md(dirname(req.outputPath), { recursive: true });
 
     for (let i = 0; i < predictions.length; i++) {
       const decoded = Buffer.from(predictions[i].bytesBase64Encoded, "base64");
-      await writeFile(outputPathForIndex(req.outputPath, i), decoded);
+      await wf(outputPathForIndex(req.outputPath, i), decoded);
     }
 
     return {

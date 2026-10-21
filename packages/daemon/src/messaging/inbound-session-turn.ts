@@ -40,6 +40,8 @@ export interface RunInboundSessionTurnOptions {
    * `onTurnEnd`.
    */
   readonly buildTurn: () => Promise<InboundSessionTurnInput>;
+  /** DI seam: defaults to the real `executeSessionAgentTurn`. Override in tests. */
+  readonly executeSessionAgentTurn?: typeof executeSessionAgentTurn;
   readonly streaming?: InboundSessionTurnStreaming;
   /** Transport limits / normalization applied to stream chunks and final bodies. */
   readonly sliceDisplayText: (text: string) => string;
@@ -248,7 +250,8 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       return;
     }
 
-    const turnResult = await executeSessionAgentTurn({
+    const runAgentTurn = options.executeSessionAgentTurn ?? executeSessionAgentTurn;
+    const turnResult = await runAgentTurn({
       ...turn,
       stream:
         streamPusher || thinkingOutput

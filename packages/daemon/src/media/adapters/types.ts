@@ -54,3 +54,14 @@ export type MediaAdapterResult =
   | { status: "complete"; path: string; mime_type: string }
   | { status: "in_progress"; operation_id: string }
   | { status: "error"; error: string };
+
+/**
+ * Injectable dependencies for media adapters. When omitted, adapters use the
+ * real globals (`fetch`, `node:fs/promises`). Tests inject fakes here instead
+ * of mocking shared modules (import-order dependent under `--no-isolate`).
+ */
+export interface MediaAdapterDeps {
+  fetchFn?: typeof fetch;
+  writeFile?: typeof import("node:fs/promises").writeFile;
+  mkdir?: typeof import("node:fs/promises").mkdir;
+}
