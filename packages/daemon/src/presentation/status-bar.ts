@@ -17,6 +17,7 @@ export type TurnStatusPhase =
   | "paused"
   | "finished"
   | "aborted"
+  | "canceled"
   | "failed";
 
 export interface StatusBarToolCall {
@@ -91,7 +92,7 @@ export interface TurnStatusBar {
    *  provider is the render-time source of truth. */
   setNotifies(count: number): void;
   /** Terminal render (✅/🛑/❌); after this the bar is frozen and timers cleared. */
-  finish(outcome: "finished" | "aborted" | "failed"): Promise<void>;
+  finish(outcome: "finished" | "aborted" | "canceled" | "failed"): Promise<void>;
   /** Abandon without a terminal render (e.g. turn dispatch failed before delivery). */
   dispose(): void;
 }
@@ -518,7 +519,7 @@ export interface TurnStatusBarTracker {
   attachSink(sink: StatusBarSink): void;
   /** Terminal render (✅/🛑/❌) via the injected renderer; returns the
    *  rendered line for final delivery (the ONE terminal composition). */
-  finish(outcome: "finished" | "aborted" | "failed"): Promise<string | undefined>;
+  finish(outcome: "finished" | "aborted" | "canceled" | "failed"): Promise<string | undefined>;
   /** Abandon without a terminal render. */
   dispose(): void;
   /** Assistant prose is streaming from the model (💬). */

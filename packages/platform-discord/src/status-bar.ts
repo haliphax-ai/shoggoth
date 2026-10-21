@@ -12,6 +12,7 @@ const PHASE_EMOJI: Record<TurnStatusPhase, string> = {
   paused: "⏸️",
   finished: "✅",
   aborted: "🛑",
+  canceled: "🛑",
   failed: "❌",
 };
 

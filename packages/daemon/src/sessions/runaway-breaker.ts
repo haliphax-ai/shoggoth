@@ -18,10 +18,9 @@
  *    telling it to change approach; the window resets so it gets a fresh
  *    chance to recover.
  * 2. Second trip — `cancel`: the turn is terminated cleanly (same
- *    `break`-style as the other in-loop circuit breakers) and a warning is
- *    raised — folded into the turn's transcript output so it rides the normal
- *    delivery path to the parent session (subagents) or message surface
- *    (top-level agents).
+ *    `break`-style as the other in-loop circuit breakers) and an operator
+ *    notice is posted once through the active turn surface's in-turn banner
+ *    path (silently skipped when no live surface exists).
  */
 
 /** Rolling window of recent tool calls inspected per trip. */
@@ -190,21 +189,22 @@ export function buildRunawaySteerBanner(trigger: RunawayTrigger): string {
 }
 
 /**
- * Operator-facing cancel warning. Deliberately plain text: it is appended to
- * the turn's transcript as assistant prose, so it rides the same delivery
- * path as any other reply — parent session for subagents, message surface
- * for top-level agents.
+ * Operator-facing cancel notice, delivered exactly once as a standard
+ * in-turn surface banner (same path as the steer banner); silently skipped
+ * when no live turn surface exists.
  */
 export function buildRunawayCancelNotice(trigger: RunawayTrigger): string {
+  const tail = `the final call was blocked and no further tool calls were executed.`;
   if (trigger.kind === "excessive_prose") {
     return (
-      `⚠️ Runaway circuit breaker: turn canceled — the turn generated ${trigger.chars} ` +
-      `characters of prose without sufficient tool activity despite a steering warning.`
+      `> ⚠️ Runaway breaker: turn canceled — the turn generated ${trigger.chars} ` +
+      `characters of prose without sufficient tool activity despite a steering warning; ` +
+      tail
     );
   }
   return (
-    `⚠️ Runaway circuit breaker: turn canceled — the identical tool call ` +
-    `\`${preview(trigger)}\` was issued ${trigger.count} times despite a steering ` +
-    `warning. No further tool calls were executed.`
+    `> ⚠️ Runaway breaker: turn canceled — the identical tool call ` +
+    `\`${preview(trigger)}\` was issued ${trigger.count} times despite a steering warning; ` +
+    tail
   );
 }

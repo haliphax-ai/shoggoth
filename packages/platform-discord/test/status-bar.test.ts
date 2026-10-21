@@ -44,6 +44,10 @@ describe("renderDiscordStatusBar", () => {
     expect(renderDiscordStatusBar(snap({ phase: "aborted" }), defaultCfg)).toContain("🛑");
   });
 
+  it("renders the canceled status emoji", () => {
+    expect(renderDiscordStatusBar(snap({ phase: "canceled" }), defaultCfg)).toContain("🛑");
+  });
+
   it("renders the failed status emoji", () => {
     expect(renderDiscordStatusBar(snap({ phase: "failed" }), defaultCfg)).toContain("❌");
   });

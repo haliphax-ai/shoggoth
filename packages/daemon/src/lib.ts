@@ -94,6 +94,7 @@ export {
   type ToolLoopAudit,
   type RunToolLoopOptions,
   type RunToolLoopHitl,
+  type ToolLoopResult,
 } from "./sessions/tool-loop";
 export {
   buildAggregatedMcpCatalog,

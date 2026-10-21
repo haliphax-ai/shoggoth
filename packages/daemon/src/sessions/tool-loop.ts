@@ -215,12 +215,15 @@ export type ToolCallDispatchResultKind =
   | "skip_review_unavailable"
   | "skip_system_gated"
   | "skip_hitl_denied"
+  | "prevented"
   | "proceed";
 
 export interface ToolCallDispatchResult {
   readonly kind: ToolCallDispatchResultKind;
   /** Present when kind === "proceed" – the resolved compound resource name. */
   readonly compoundResource?: string;
+  /** Present when kind === "prevented" – the runaway trip verdict recorded at the pre-execute hook. */
+  readonly runawayVerdict?: RunawayVerdict;
 }
 
 // ---------------------------------------------------------------------------
@@ -548,9 +551,18 @@ async function hitlApprovalGate(
  *   1. Name / thinking-leak / unknown-tool validation
  *   2. Args validation
  *   3. Policy check
- *   4. HITL approval gate
+ *   4. System gates + HITL approval gate
+ *   4.5. `beforeExecute` hook — fired at the proceed-decision point, BEFORE
+ *        execution, so the runaway breaker can record the call and trip
+ *        (steer/cancel) while preventing a tripping call from ever running
  *   5. Execution with timeout
  *   6. Result feedback to model + transcript
+ *
+ * `beforeExecute` returns `{ kind: "prevented", runawayVerdict }` when the
+ * runaway breaker trips on this call: the call is answered with a synthetic
+ * tool result (written by the hook), never reaches the executor, and the
+ * caller discards the rest of the batch. Otherwise it returns `{ kind: "ok" }`
+ * and execution proceeds normally.
  */
 async function processSingleToolCall(
   ctx: ToolLoopContext,
@@ -560,6 +572,7 @@ async function processSingleToolCall(
   badArgIds: Set<string>,
   turnAbortSignal: AbortSignal | undefined,
   runId: string,
+  beforeExecute?: () => { kind: "ok" } | { kind: "prevented"; runawayVerdict: RunawayVerdict },
 ): Promise<ToolCallDispatchResult> {
   const { options, appendTx } = ctx;
 
@@ -877,6 +890,16 @@ async function processSingleToolCall(
     }
   }
 
+  // ---- Stage 4.5: pre-execute hook (runaway breaker trip point) ----
+  // Runs only for calls that would otherwise execute — validation, policy,
+  // system-gate, and HITL paths above keep their existing behavior and stay
+  // owned by the consecutive-invalid backstop. A "prevent" verdict means the
+  // call never reaches the executor and emits no onToolCallEvent start/end.
+  const preExecute = beforeExecute?.();
+  if (preExecute && preExecute.kind !== "ok") {
+    return { kind: "prevented", runawayVerdict: preExecute.runawayVerdict };
+  }
+
   // ---- Stage 5: execute with timeout ----
 
   options.audit.record({
@@ -1054,7 +1077,13 @@ async function processSingleToolCall(
 // Main entry point
 // ---------------------------------------------------------------------------
 
-export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
+/** How the tool loop ended. `canceledBy` is set when a circuit breaker canceled the turn. */
+export interface ToolLoopResult {
+  readonly canceledBy?: "runaway";
+}
+
+export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoopResult> {
+  const result: { canceledBy?: "runaway" } = {};
   void options.db;
   let names = allowedNames(options.tools);
   let schemas = buildSchemaMap(options.tools);
@@ -1121,7 +1150,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
       const trigger = runaway.trigger;
       if (runaway.verdict === "steer") {
         const steerMsg = buildRunawaySteerMessage(trigger);
-        log.warn("runaway circuit breaker steered", {
+        log.warn("runaway breaker steered", {
           sessionId: options.sessionId,
           trigger,
         });
@@ -1143,7 +1172,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         return false;
       }
       const notice = buildRunawayCancelNotice(trigger);
-      log.error("runaway circuit breaker canceled turn", {
+      log.error("runaway breaker canceled turn", {
         sessionId: options.sessionId,
         trigger,
       });
@@ -1152,15 +1181,10 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         sessionId: options.sessionId,
         trigger,
       });
+      // Delivered exactly once, through the same in-turn banner path as the
+      // steer banner; silently skipped when no live surface is registered.
       postTurnSurfaceNotice(options.sessionId, notice);
-      if (options.transcript) {
-        appendTx({
-          role: "assistant",
-          content: notice,
-          metadata: { runawayBreakerCancel: true },
-        });
-        emitStats?.({ transcriptMessageCount: getTranscriptCount() });
-      }
+      result.canceledBy = "runaway";
       return true;
     };
     // Consecutive invalid tool calls (unknown name, unparseable args, or
@@ -1321,7 +1345,8 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         emitStats?.({ transcriptMessageCount: getTranscriptCount() });
       }
 
-      for (const tc of sanitizedToolCalls) {
+      for (let callIdx = 0; callIdx < sanitizedToolCalls.length; callIdx++) {
+        const tc = sanitizedToolCalls[callIdx]!;
         const dispatch = await processSingleToolCall(
           ctx,
           tc,
@@ -1330,7 +1355,62 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
           badArgIds,
           options.turnAbortSignal,
           options.runId,
+          runawayBreaker
+            ? () => {
+                const verdict = runawayBreaker.record(tc.name, tc.argsJson);
+                if (verdict.verdict === "ok") return { kind: "ok" as const };
+                // Answer the tripping call FIRST, before the steer/cancel
+                // handling, so the tool result stays contiguous with the
+                // tool-call round in the transcript and model history.
+                const blocked = JSON.stringify({
+                  error: "runaway_breaker_blocked",
+                  message: "not executed — circuit breaker tripped; see the steering warning",
+                });
+                options.model.pushToolMessage?.({ toolCallId: tc.id, content: blocked });
+                if (options.transcript) {
+                  appendTx({
+                    role: "tool",
+                    content: blocked,
+                    toolCallId: tc.id,
+                    metadata: { tool: tc.name },
+                  });
+                }
+                return { kind: "prevented" as const, runawayVerdict: verdict };
+              }
+            : undefined,
         );
+
+        if (dispatch.kind === "prevented") {
+          const verdict = dispatch.runawayVerdict!;
+          // Discard the rest of the batch: every remaining id gets a
+          // synthetic answer, so the next hop (steer) or the next turn
+          // (cancel) never sees an unanswered tool_call id.
+          for (let rest = callIdx + 1; rest < sanitizedToolCalls.length; rest++) {
+            const skippedTc = sanitizedToolCalls[rest]!;
+            const skipped = JSON.stringify({
+              error: "runaway_breaker_skipped",
+              message: "skipped — batch discarded after a circuit breaker trip",
+            });
+            options.model.pushToolMessage?.({ toolCallId: skippedTc.id, content: skipped });
+            if (options.transcript) {
+              appendTx({
+                role: "tool",
+                content: skipped,
+                toolCallId: skippedTc.id,
+                metadata: { tool: skippedTc.name },
+              });
+            }
+          }
+          if (options.transcript) {
+            emitStats?.({ transcriptMessageCount: getTranscriptCount() });
+          }
+          // Steer: queue the model warning + banner, then continue into the
+          // next hop (which consumes the steer). Cancel: post the notice and
+          // end the turn — handleRunawayVerdict also marks result.canceledBy.
+          handleRunawayVerdict(verdict);
+          if (verdict.verdict === "cancel") breakerTripped = "runaway_cancel";
+          break;
+        }
 
         if (dispatch.kind === "skip_structured_output_near_miss") {
           // Charge the structured-output retry budget (shared with the
@@ -1380,18 +1460,11 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
         }
 
         // --- Runaway agent circuit breaker ---
-        // Records every call that actually EXECUTED (post-dispatch `proceed`):
-        // a repeating pattern (same tool + same truncated args within a
-        // rolling window) steers once; a second trigger cancels the turn and
-        // raises a warning that rides the normal transcript delivery path.
-        // Calls that never dispatched (unknown tool, bad args, …) are left to
-        // the consecutive-invalid backstop above.
-        if (runawayBreaker && dispatch.kind === "proceed") {
-          if (handleRunawayVerdict(runawayBreaker.record(tc.name, tc.argsJson))) {
-            breakerTripped = "runaway_cancel";
-            break;
-          }
-        }
+        // Recording happens at the pre-execute hook above (stage 4.5 of
+        // processSingleToolCall), before executor.execute, so a tripping
+        // call is prevented rather than executed. Validation/policy/HITL/
+        // system-gate skips never reach the hook and stay owned by the
+        // consecutive-invalid backstop above.
 
         // --- Mid-loop tool refresh (tool discovery) ---
         if (toolRefreshNeeded.get(options.sessionId) && options.refreshTools) {
@@ -1432,6 +1505,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<void> {
 
     options.toolRuns.markCompleted(options.runId);
     steerHandle.unregister();
+    return result;
   } catch (e) {
     steerHandle.unregister();
     const row = options.db

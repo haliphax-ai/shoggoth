@@ -114,6 +114,53 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
     assert.equal(result.failoverMeta?.degraded, false);
   });
 
+  it("maps a runaway-canceled tool loop to outcome canceled", async () => {
+    const config = defaultConfig(tmp);
+    const sessions = createSessionStore(db);
+    const session = sessions.getById("sess-core");
+    assert.ok(session);
+    const transcript = createTranscriptStore(db);
+    const toolRuns = createToolRunStore(db);
+    const hitlStack = createHitlPendingResolutionStack(db);
+    const builtin = buildBuiltinOnlySessionMcpToolContext();
+
+    const result = await executeSessionAgentTurn({
+      db,
+      sessionId: "sess-core",
+      session: session!,
+      transcript,
+      toolRuns,
+      userContent: "runaway cancel mapping test",
+      userMetadata: undefined,
+      env: process.env,
+      config,
+      policyEngine: createPolicyEngine(config.policy),
+      getHitlConfig: () => ({ ...DEFAULT_HITL_CONFIG, ...config.hitl }),
+      hitl: {
+        bypassUpTo: "safe",
+        pending: hitlStack.pending,
+        clock: { nowMs: () => Date.now() },
+        newPendingId: () => randomUUID(),
+        waitForHitlResolution: hitlStack.waitForHitlResolution,
+      },
+      loopImpl: async () => ({ canceledBy: "runaway" as const }),
+      createToolCallingClient: () => ({
+        async completeWithTools() {
+          return {
+            content: "CANCELED_REPLY",
+            toolCalls: [],
+            usedModel: "stub",
+            usedProviderId: "stub",
+            degraded: false,
+          };
+        },
+      }),
+      resolveMcpContext: async () => builtin,
+    } as any);
+
+    assert.equal(result.outcome, "canceled");
+  });
+
   it("assistantTurnProse carries every prose segment of the turn across tool rounds", async () => {
     const config = defaultConfig(tmp);
     const sessions = createSessionStore(db);

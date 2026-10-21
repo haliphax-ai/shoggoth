@@ -188,9 +188,11 @@ describe("runaway breaker copy", () => {
     expect(banner.startsWith("> ")).toBe(true);
   });
 
-  it("cancel notice names the tool", () => {
+  it("cancel notice is a blockquote naming the tool and the block", () => {
     const notice = buildRunawayCancelNotice(DUPE);
+    expect(notice.startsWith("> ")).toBe(true);
     expect(notice).toContain("builtin-read");
+    expect(notice).toContain("blocked");
   });
 
   it("prose steer message cites the budget and demands tools or brevity", () => {
@@ -205,9 +207,11 @@ describe("runaway breaker copy", () => {
     expect(banner).toContain("21000");
   });
 
-  it("prose cancel notice explains why the turn was canceled", () => {
+  it("prose cancel notice is a blockquote explaining why the turn was canceled", () => {
     const notice = buildRunawayCancelNotice({ kind: "excessive_prose", chars: 42000 });
+    expect(notice.startsWith("> ")).toBe(true);
     expect(notice.toLowerCase()).toContain("prose");
     expect(notice).toContain("42000");
+    expect(notice).toContain("blocked");
   });
 });

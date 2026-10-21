@@ -44,6 +44,7 @@ import {
   type RunToolLoopHitl,
   type RunToolLoopOptions,
   type ToolCallEvent,
+  type ToolLoopResult,
 } from "./tool-loop";
 import type { TranscriptStore } from "./transcript-store";
 import type { ToolRunStore } from "./tool-run-store";
@@ -104,7 +105,7 @@ export interface ExecuteSessionAgentTurnInput {
   readonly policyEngine: PolicyEngine;
   readonly getHitlConfig: () => ShoggothConfig["hitl"];
   readonly hitl: Omit<RunToolLoopHitl, "config">;
-  readonly loopImpl?: (opts: RunToolLoopOptions) => Promise<void>;
+  readonly loopImpl?: (opts: RunToolLoopOptions) => Promise<ToolLoopResult>;
   readonly createToolCallingClient?: (
     models: ShoggothConfig["models"],
     options?: CreateFailoverFromConfigOptions,
@@ -174,8 +175,8 @@ export interface SessionAgentTurnResult {
   readonly aborted?: boolean;
   /** Outbound attachments extracted from `show` tool results in this turn. */
   readonly showAttachments?: readonly OutboundAttachment[];
-  /** Maps to 🛑/❌/✅ in the status bar. */
-  readonly outcome: "completed" | "aborted" | "failed";
+  /** Maps to 🛑/❌/✅ in the status bar; "canceled" is the runaway breaker's cancel. */
+  readonly outcome: "completed" | "aborted" | "failed" | "canceled";
   /** Rendered terminal status-bar line (✅/🛑/❌), set only by the OOB banner
    *  internal-delivery path when a tracker existed, so the banner's final
    *  edit can carry the bar. Undefined on messaging_surface and inbound turns. */
@@ -656,8 +657,9 @@ export async function executeSessionAgentTurn(
     userContent: effectiveContent,
     systemContext: input.systemContext ?? null,
   });
+  let loopResult: ToolLoopResult | undefined;
   try {
-    await loopImpl({
+    loopResult = await loopImpl({
       db: input.db,
       sessionId: input.sessionId,
       runId,
@@ -853,7 +855,7 @@ export async function executeSessionAgentTurn(
     latestAssistantText,
     assistantTurnProse,
     showAttachments: showAttachments.length > 0 ? showAttachments : undefined,
-    outcome: "completed",
+    outcome: loopResult?.canceledBy === "runaway" ? "canceled" : "completed",
   };
 }
 
