@@ -170,8 +170,11 @@ describe("deliverExecNotifyMessage in-turn delivery", () => {
       },
     } as never);
     const { unregister } = registerSteerChannel("sess-1");
-    const surface = registerActiveTurnSurface("sess-1", (notice) => {
-      notices.push(notice);
+    const surface = registerActiveTurnSurface("sess-1", {
+      captureAnchor: () => ({ committedProseSegments: 0, toolCalls: 0 }),
+      onNotice: (notice) => {
+        notices.push(notice);
+      },
     });
 
     await deliverExecNotifyMessage(completion);

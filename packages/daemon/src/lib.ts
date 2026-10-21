@@ -287,9 +287,12 @@ export type {
   OutboundAttachment,
 } from "./presentation/platform-adapter";
 export {
+  createTurnBannerCollector,
   registerActiveTurnSurface,
   postTurnSurfaceNotice,
-  type ActiveTurnNoticeSink,
+  type TurnBannerCollector,
+  type TurnBannerCollectorOptions,
+  type TurnNoticeAnchor,
 } from "./presentation/active-turn-surface";
 export {
   PresentationTurnOrchestrator,

@@ -146,8 +146,11 @@ describe("runToolLoop runaway circuit breaker", () => {
     const tr = createTranscriptStore(db);
     const seg = getSessionContextSegmentId(db, "sess");
     const notices: string[] = [];
-    registerActiveTurnSurface("sess", (n) => {
-      notices.push(n);
+    registerActiveTurnSurface("sess", {
+      captureAnchor: () => ({ committedProseSegments: 0, toolCalls: 0 }),
+      onNotice: (n) => {
+        notices.push(n);
+      },
     });
 
     await runToolLoop({
