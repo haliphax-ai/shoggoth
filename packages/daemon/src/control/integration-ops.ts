@@ -87,8 +87,10 @@ import {
   parseContract,
   validateContractRepository,
   verifyContract,
+  type ContractCreds,
   type ContractStatus,
 } from "../subagent/contract";
+import { sessionCreds } from "../sessions/session-agent-turn";
 import { terminatePersistentSubagentSession } from "../subagent/subagent-kill";
 import {
   buildThreadSubagentCreatedBanner,
@@ -1579,6 +1581,7 @@ export async function handleIntegrationControlOp(
       let contract: ShoggothContractEntry[] | undefined;
       let contractRepoDir: string | undefined;
       let contractBaselineRef: string | undefined;
+      let contractCreds: ContractCreds | undefined;
       if (pl.contract !== undefined && pl.contract !== null) {
         if (modeRaw !== "one_shot") {
           throw new IntegrationOpError(
@@ -1597,7 +1600,11 @@ export async function handleIntegrationControlOp(
       }
       if (contract) {
         const parentWorkingDirectory = parent.workingDirectory ?? process.cwd();
-        const check = validateContractRepository(parentWorkingDirectory, contract);
+        // Contract git runs with the parent session's runtime creds so the
+        // checks read the same workspace the agent session owns — not the
+        // daemon's own uid.
+        contractCreds = sessionCreds(parent.runtimeUid, parent.runtimeGid);
+        const check = validateContractRepository(parentWorkingDirectory, contract, contractCreds);
         if (!check.ok || !check.repoDir) {
           throw new IntegrationOpError(
             "ERR_CONTRACT_NOT_IN_REPO",
@@ -1609,7 +1616,7 @@ export async function handleIntegrationControlOp(
         // branch" is the state the subagent is expected to modify). Captured
         // now so mid-turn commits by the subagent still count.
         try {
-          contractBaselineRef = captureGitHead(contractRepoDir);
+          contractBaselineRef = captureGitHead(contractRepoDir, contractCreds);
         } catch {
           throw new IntegrationOpError(
             "ERR_CONTRACT_NOT_IN_REPO",
@@ -1879,6 +1886,7 @@ export async function handleIntegrationControlOp(
               cwd: parent.workingDirectory ?? process.cwd(),
               entries: contract,
               ...(contractBaselineRef ? { sourceBranch: contractBaselineRef } : {}),
+              ...(contractCreds ? { creds: contractCreds } : {}),
               config: ctx.config,
               ...(judgeModel ? { judgeModel } : {}),
               runDecision: runContractDecision,

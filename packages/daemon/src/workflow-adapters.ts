@@ -33,8 +33,10 @@ import {
   captureGitHead,
   validateContractRepository,
   verifyContract,
+  type ContractCreds,
   type ContractStatus,
 } from "./subagent/contract";
+import { resolveAgentCreds } from "./agent-creds";
 import type Database from "better-sqlite3";
 import { getLogger } from "./logging";
 import { randomUUID } from "node:crypto";
@@ -202,18 +204,22 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
             cwd: string;
             baseline: string;
             judgeModel?: string;
+            creds?: ContractCreds;
           }
         | undefined;
       if (req.contract?.length) {
         const cwd = parentWorkingDirectory ?? process.cwd();
-        const check = validateContractRepository(cwd, req.contract);
+        // Contract git runs as the agent identity (workspace owner), not the
+        // daemon uid, so validation and diffing can read the session's repo.
+        const creds: ContractCreds = resolveAgentCreds();
+        const check = validateContractRepository(cwd, req.contract, creds);
         if (!check.ok || !check.repoDir) {
           deps.sessionManager.kill(childId);
           throw new Error(check.error ?? "contract target is not in a git repository");
         }
         let baseline: string;
         try {
-          baseline = captureGitHead(check.repoDir);
+          baseline = captureGitHead(check.repoDir, creds);
         } catch {
           deps.sessionManager.kill(childId);
           throw new Error("contract repository has no HEAD to diff against");
@@ -241,6 +247,7 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
           entries: req.contract,
           cwd,
           baseline,
+          creds,
           ...(req.judge ? { judgeModel: req.judge } : {}),
         };
       }
@@ -280,6 +287,7 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
                 cwd: contractCtx.cwd,
                 entries: contractCtx.entries,
                 sourceBranch: contractCtx.baseline,
+                ...(contractCtx.creds ? { creds: contractCtx.creds } : {}),
                 ...(contractCtx.judgeModel ? { judgeModel: contractCtx.judgeModel } : {}),
                 config: contractConfig ?? EMPTY_CONTRACT_CONFIG,
               });

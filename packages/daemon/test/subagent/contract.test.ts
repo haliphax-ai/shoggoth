@@ -3,9 +3,15 @@
  * batched decision-model judging of per-file diffs.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+
+vi.mock("node:child_process", async () => {
+  const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
+});
+
+import * as childProcess from "node:child_process";
 import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -18,8 +24,26 @@ import {
 import type { ShoggothContractEntry } from "@shoggoth/shared";
 import type { ShoggothConfig } from "@shoggoth/shared";
 
+type ExecSpied = ReturnType<typeof vi.fn> & { getMockImplementation(): unknown };
+
+/** Tracked spy on `node:child_process.execFileSync` (mocked above). */
+const execFileSyncSpy = childProcess.execFileSync as unknown as ExecSpied;
+
+/** Delegate handed to the spy by default: the real implementation. */
+const actualChildProcess =
+  await vi.importActual<typeof import("node:child_process")>("node:child_process");
+
+function resetExecDelegate(): void {
+  execFileSyncSpy.mockImplementation(actualChildProcess.execFileSync as never);
+}
+
+beforeEach(() => {
+  resetExecDelegate();
+  execFileSyncSpy.mockClear();
+});
+
 function git(dir: string, ...args: string[]): void {
-  execFileSync("git", args, {
+  childProcess.execFileSync("git", args, {
     cwd: dir,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
@@ -134,6 +158,69 @@ describe("validateContractRepository", () => {
     const res = validateContractRepository(dir, [entry("a.txt", "update")]);
     assert.equal(res.ok, true);
     assert.equal(res.repoDir, dir);
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe("contract git credentials", () => {
+  it("passes explicit credentials to every git invocation", async () => {
+    const dir = await makeRepo();
+    execFileSyncSpy.mockImplementationOnce(() => `${dir}\n`);
+    const res = validateContractRepository(dir, [entry("a.txt", "update")], {
+      uid: 4242,
+      gid: 4242,
+    });
+    assert.equal(res.ok, true);
+    const opts = execFileSyncSpy.mock.calls.at(-1)?.[2] as
+      | { uid?: number; gid?: number }
+      | undefined;
+    assert.equal(opts?.uid, 4242);
+    assert.equal(opts?.gid, 4242);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("defaults to the configured agent credentials", async () => {
+    const dir = await makeRepo();
+    const prev = process.env.SHOGGOTH_AGENT_UID;
+    process.env.SHOGGOTH_AGENT_UID = "4343";
+    try {
+      execFileSyncSpy.mockImplementationOnce(() => `${dir}\n`);
+      const res = validateContractRepository(dir, [entry("a.txt", "update")]);
+      assert.equal(res.ok, true);
+      const opts = execFileSyncSpy.mock.calls.at(-1)?.[2] as
+        | { uid?: number; gid?: number }
+        | undefined;
+      assert.equal(opts?.uid, 4343);
+      assert.equal(opts?.gid, 4343);
+    } finally {
+      if (prev === undefined) delete process.env.SHOGGOTH_AGENT_UID;
+      else process.env.SHOGGOTH_AGENT_UID = prev;
+    }
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("retries as the current user when the uid switch is not permitted", async () => {
+    if (typeof process.getuid !== "function" || typeof process.getgid !== "function") return;
+    const selfUid = process.getuid();
+    const dir = await makeRepo();
+    execFileSyncSpy.mockImplementation((...args: unknown[]) => {
+      const opts = args[2] as { uid?: number } | undefined;
+      if (opts?.uid !== selfUid) {
+        const err = new Error("EPERM: operation not permitted, uv_spawn") as Error & {
+          code?: string;
+        };
+        err.code = "EPERM";
+        throw err;
+      }
+      return Reflect.apply(actualChildProcess.execFileSync, null, args);
+    });
+    try {
+      const res = validateContractRepository(dir, [entry("a.txt", "update")]);
+      assert.equal(res.ok, true);
+      assert.equal(res.repoDir, dir);
+    } finally {
+      resetExecDelegate();
+    }
     await rm(dir, { recursive: true, force: true });
   });
 });

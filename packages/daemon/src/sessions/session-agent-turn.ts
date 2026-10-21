@@ -183,7 +183,13 @@ export interface SessionAgentTurnResult {
   readonly statusBarLine?: string;
 }
 
-function sessionCreds(uid?: number, gid?: number): AgentCredentials {
+/**
+ * Effective runtime credentials for a session row: the row's stamped uid/gid
+ * when present, otherwise the configured agent credentials. Shared with the
+ * contract engine so contract git runs under the same identity as the
+ * session's own exec calls.
+ */
+export function sessionCreds(uid?: number, gid?: number): AgentCredentials {
   const defaults = resolveAgentCreds();
   const u = uid ?? defaults.uid;
   const g = gid ?? defaults.gid;

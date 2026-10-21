@@ -18,10 +18,11 @@
 //    contract as not fulfilled.
 // ---------------------------------------------------------------------------
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, type ExecFileSyncOptions } from "node:child_process";
 import { existsSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { ShoggothConfig, ShoggothContractEntry } from "@shoggoth/shared";
+import { resolveAgentCreds } from "../agent-creds.js";
 import { DecisionService } from "../decision/decision-service.js";
 import { getLogger } from "../logging.js";
 
@@ -72,28 +73,86 @@ function gitEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-function git(repoDir: string, args: string[]): string {
-  return execFileSync("git", args, {
-    cwd: repoDir,
+/**
+ * POSIX credentials for contract git invocations. Contract checks read and
+ * diff the working tree the subagent session edits, so they must run as the
+ * agent UID — the daemon's own UID would get EACCES on agent-owned workspaces
+ * (and vice versa).
+ */
+export interface ContractCreds {
+  uid: number;
+  gid: number;
+}
+
+/** Fallback contract git credentials: the configured agent UID/GID. */
+function defaultCreds(): ContractCreds {
+  return resolveAgentCreds();
+}
+
+function gitOptions(
+  cwd: string | undefined,
+  creds: ContractCreds,
+): ExecFileSyncOptions & { encoding: "utf8" } {
+  return {
+    cwd,
     encoding: "utf8",
     timeout: 30_000,
     maxBuffer: 64 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
     env: gitEnv(),
-  });
+    uid: creds.uid,
+    gid: creds.gid,
+  };
 }
 
-function tryGit(repoDir: string, args: string): string | undefined {
+/** True when spawning failed because the uid/gid switch was not permitted. */
+function isCredsEperm(e: unknown): boolean {
+  const err = e as { code?: unknown; error?: { code?: unknown } } | null;
+  return err?.code === "EPERM" || err?.error?.code === "EPERM";
+}
+
+/**
+ * Run `git` as the resolved contract credentials. When the switch to the
+ * agent UID is not permitted (no `CAP_SETUID`, e.g. plain user-namespace CI
+ * runs) the command is retried as the current user rather than failing every
+ * contract check outright.
+ */
+function runGit(args: string[], cwd: string | undefined, creds?: ContractCreds): string {
+  const target = creds ?? defaultCreds();
   try {
-    return git(repoDir, args.split(" "));
+    return execFileSync("git", args, gitOptions(cwd, target));
+  } catch (e) {
+    if (
+      creds === undefined &&
+      isCredsEperm(e) &&
+      typeof process.getuid === "function" &&
+      typeof process.getgid === "function"
+    ) {
+      return execFileSync(
+        "git",
+        args,
+        gitOptions(cwd, { uid: process.getuid(), gid: process.getgid() }),
+      );
+    }
+    throw e;
+  }
+}
+
+function git(repoDir: string, args: string[], creds?: ContractCreds): string {
+  return runGit(args, repoDir, creds);
+}
+
+function tryGit(repoDir: string, args: string, creds?: ContractCreds): string | undefined {
+  try {
+    return git(repoDir, args.split(" "), creds);
   } catch {
     return undefined;
   }
 }
 
 /** Repository worktree root for a directory, or undefined when not a repo. */
-export function repoTopLevel(cwd: string): string | undefined {
-  const out = tryGit(cwd, "rev-parse --show-toplevel");
+export function repoTopLevel(cwd: string, creds?: ContractCreds): string | undefined {
+  const out = tryGit(cwd, "rev-parse --show-toplevel", creds);
   return out?.trim();
 }
 
@@ -112,8 +171,9 @@ export interface ContractRepoCheck {
 export function validateContractRepository(
   cwd: string,
   entries: ShoggothContractEntry[],
+  creds?: ContractCreds,
 ): ContractRepoCheck {
-  const repoDir = repoTopLevel(cwd);
+  const repoDir = repoTopLevel(cwd, creds);
   if (!repoDir) {
     return {
       ok: false,
@@ -134,20 +194,24 @@ export function validateContractRepository(
 }
 
 /** Resolve the diff baseline: the source branch HEAD when available, else spawn HEAD. */
-export function resolveContractBaseline(repoDir: string, sourceBranch?: string): string {
+export function resolveContractBaseline(
+  repoDir: string,
+  sourceBranch?: string,
+  creds?: ContractCreds,
+): string {
   if (sourceBranch) {
-    const ref = tryGit(repoDir, `rev-parse --verify ${sourceBranch}^{commit}`);
+    const ref = tryGit(repoDir, `rev-parse --verify ${sourceBranch}^{commit}`, creds);
     if (ref?.trim()) return sourceBranch;
     log.warn("contract_baseline_branch_missing", { sourceBranch });
   }
-  const head = tryGit(repoDir, "rev-parse HEAD");
+  const head = tryGit(repoDir, "rev-parse HEAD", creds);
   if (head?.trim()) return head.trim();
   throw new Error("contract baseline unavailable: repository has no HEAD");
 }
 
-function inBaseline(repoDir: string, ref: string, relPath: string): boolean {
+function inBaseline(repoDir: string, ref: string, relPath: string, creds?: ContractCreds): boolean {
   try {
-    git(repoDir, ["cat-file", "-e", `${ref}:${relPath}`]);
+    git(repoDir, ["cat-file", "-e", `${ref}:${relPath}`], creds);
     return true;
   } catch {
     return false;
@@ -155,24 +219,23 @@ function inBaseline(repoDir: string, ref: string, relPath: string): boolean {
 }
 
 /** `git diff <ref> -- <path>` (ref vs working tree). Empty string when unchanged. */
-function diffAgainstBaseline(repoDir: string, ref: string, relPath: string): string {
+function diffAgainstBaseline(
+  repoDir: string,
+  ref: string,
+  relPath: string,
+  creds?: ContractCreds,
+): string {
   try {
-    return git(repoDir, ["diff", ref, "--", relPath]);
+    return git(repoDir, ["diff", ref, "--", relPath], creds);
   } catch {
     return "";
   }
 }
 
 /** Diff of an untracked/new file against /dev/null (create entries). */
-function diffNewFile(absPath: string): string {
+function diffNewFile(absPath: string, repoDir: string, creds?: ContractCreds): string {
   try {
-    execFileSync("git", ["diff", "--no-index", "--", "/dev/null", absPath], {
-      encoding: "utf8",
-      timeout: 30_000,
-      maxBuffer: 64 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: gitEnv(),
-    });
+    runGit(["diff", "--no-index", "--", "/dev/null", absPath], repoDir, creds);
     return "";
   } catch (e) {
     // --no-index exits 1 when files differ; the diff is on stdout.
@@ -182,11 +245,40 @@ function diffNewFile(absPath: string): string {
 }
 
 /**
+ * Whether a contract target is present in the working tree.
+ *
+ * The fast path is a direct stat, but the daemon process may not be able to
+ * read an agent-owned workspace (different UID), in which case `existsSync`
+ * reports "missing" for files that are really there. When the direct stat
+ * fails, the presence check is redone through git running as the contract
+ * credentials, so permission-denied never looks like an absent file.
+ */
+function targetExists(
+  abs: string,
+  repoDir: string,
+  relPath: string,
+  creds?: ContractCreds,
+): boolean {
+  if (existsSync(abs)) return true;
+  try {
+    if (git(repoDir, ["ls-files", "--others", "--", relPath], creds).trim()) return true;
+    const tracked = git(repoDir, ["ls-files", "--", relPath], creds).trim();
+    if (!tracked) return false;
+    const deleted = git(repoDir, ["ls-files", "--deleted", "--", relPath], creds).trim();
+    if (!deleted) return true;
+    // Some entries of a directory target may still be present.
+    return deleted.split("\n").length < tracked.split("\n").length;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Capture the repository HEAD as a spawn-time contract baseline. Throws when
  * the repository has no HEAD. Git env vars exported by hooks/CI are stripped.
  */
-export function captureGitHead(repoDir: string): string {
-  const head = tryGit(repoDir, "rev-parse HEAD");
+export function captureGitHead(repoDir: string, creds?: ContractCreds): string {
+  const head = tryGit(repoDir, "rev-parse HEAD", creds);
   if (!head?.trim()) throw new Error("contract repository has no HEAD to diff against");
   return head.trim();
 }
@@ -224,6 +316,8 @@ export interface VerifyContractInput {
   entries: ShoggothContractEntry[];
   /** Source branch for the baseline; omitted → spawn HEAD. */
   sourceBranch?: string;
+  /** Credentials for git invocations; defaults to the agent UID/GID. */
+  creds?: ContractCreds;
   config: ShoggothConfig;
   /** Per-spawn judge model (`provider-id/model-name`); wins over agents.contract.model. */
   judgeModel?: string;
@@ -265,7 +359,8 @@ export async function verifyContract(input: VerifyContractInput): Promise<Contra
   const batchSize = contractCfg?.batchSize ?? CONTRACT_BATCH_SIZE_DEFAULT;
   const model = input.judgeModel ?? contractCfg?.model;
 
-  const repo = validateContractRepository(cwd, entries);
+  const creds = input.creds;
+  const repo = validateContractRepository(cwd, entries, creds);
   if (!repo.ok || !repo.repoDir) {
     return emptyStatus(entries, yesMinimum, { error: repo.error });
   }
@@ -273,7 +368,7 @@ export async function verifyContract(input: VerifyContractInput): Promise<Contra
 
   let baseline: string;
   try {
-    baseline = resolveContractBaseline(repoDir, input.sourceBranch);
+    baseline = resolveContractBaseline(repoDir, input.sourceBranch, creds);
   } catch (e) {
     return emptyStatus(entries, yesMinimum, {
       error: e instanceof Error ? e.message : String(e),
@@ -289,8 +384,8 @@ export async function verifyContract(input: VerifyContractInput): Promise<Contra
   for (const entry of entries) {
     const abs = isAbsolute(entry.path) ? entry.path : resolve(cwd, entry.path);
     const relPath = relative(repoDir, abs);
-    const inBase = inBaseline(repoDir, baseline, relPath);
-    const exists = existsSync(abs);
+    const inBase = inBaseline(repoDir, baseline, relPath, creds);
+    const exists = targetExists(abs, repoDir, relPath, creds);
 
     if (entry.action === "create") {
       if (inBase) {
@@ -298,14 +393,14 @@ export async function verifyContract(input: VerifyContractInput): Promise<Contra
       } else if (!exists) {
         violated.push(entry.path);
       } else {
-        diffs.set(entry.path, diffNewFile(abs));
+        diffs.set(entry.path, diffNewFile(abs, repoDir, creds));
         toJudge.push(entry);
       }
     } else if (entry.action === "update") {
       if (!inBase || !exists) {
         violated.push(entry.path);
       } else {
-        const diff = diffAgainstBaseline(repoDir, baseline, relPath);
+        const diff = diffAgainstBaseline(repoDir, baseline, relPath, creds);
         if (!diff) {
           violated.push(entry.path);
         } else {
