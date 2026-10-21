@@ -1,3 +1,5 @@
+import type { ShoggothContractEntry } from "@shoggoth/shared";
+
 // Task status lifecycle
 export type TaskStatus = "pending" | "in_progress" | "done" | "failed" | "paused" | "skipped";
 
@@ -50,6 +52,18 @@ export interface AgentTaskDef extends TaskDefBase {
    * session. Added to the configured defaults.
    */
   enableTools?: string[];
+  /**
+   * Contract mode: target files with the required modification type and a
+   * brief expectation. When present (non-empty), the task succeeds only if
+   * every target was acted on with its contractual type and the resulting
+   * `git diff` is judged fulfilled by the decision model.
+   */
+  contract?: ShoggothContractEntry[];
+  /**
+   * Decision model (`provider-id/model-name`) used to judge contract
+   * fulfillment. When unset, the configured contract/decision default is used.
+   */
+  judge?: string;
 }
 
 /** Tool task — invokes an MCP tool directly (Phase 2). */

@@ -20,7 +20,7 @@ import type {
 } from "@shoggoth/workflow";
 import { routeMcpToolInvocation } from "@shoggoth/mcp-integration";
 import type { ModelInvocationParams } from "@shoggoth/models";
-import type { ContextLevel } from "@shoggoth/shared";
+import type { ContextLevel, ShoggothContractEntry } from "@shoggoth/shared";
 import type { SessionManager } from "./sessions/session-manager.js";
 import type { SessionStore } from "./sessions/session-store.js";
 import { createSessionStore } from "./sessions/session-store.js";
@@ -28,11 +28,24 @@ import type { SessionMcpRuntime } from "./sessions/session-mcp-runtime.js";
 import type { BuiltinToolRegistry } from "./sessions/builtin-tool-registry.js";
 import { pushSystemContext } from "./sessions/system-context-buffer";
 import { enableToolsForSession } from "./sessions/session-tool-discovery";
+import {
+  CONTRACT_YES_MINIMUM_DEFAULT,
+  captureGitHead,
+  validateContractRepository,
+  verifyContract,
+  type ContractStatus,
+} from "./subagent/contract";
 import type Database from "better-sqlite3";
 import { getLogger } from "./logging";
 import { randomUUID } from "node:crypto";
 
 const log = getLogger("workflow-adapters");
+
+/** Fallback config for contract verification when no live config getter is wired. */
+const EMPTY_CONTRACT_CONFIG = {
+  agents: {},
+  decision: { providers: {} },
+} as import("@shoggoth/shared").ShoggothConfig;
 
 // ---------------------------------------------------------------------------
 // Logger adapter: convert daemon Logger to workflow logger interface
@@ -58,8 +71,8 @@ function adaptLogger(daemonLogger: ReturnType<typeof getLogger>): {
 // ---------------------------------------------------------------------------
 
 export type CompletionEntry =
-  | { ok: true; output: string; completedAt: number }
-  | { ok: false; error: string; completedAt: number };
+  | { ok: true; output: string; completedAt: number; contract?: ContractStatus }
+  | { ok: false; error: string; completedAt: number; contract?: ContractStatus };
 
 export type CompletionMap = Map<string, CompletionEntry>;
 
@@ -114,6 +127,12 @@ export interface DaemonSpawnAdapterDeps {
   readonly subagentModel?: string;
   /** State DB for recording spawn-time enableTools entries (exact IDs or glob patterns). */
   readonly stateDb?: Database.Database;
+  /**
+   * Live config for contract mode: `agents.contract` thresholds and the
+   * `decision` providers used to judge fulfillment. Injected as a getter so
+   * config hot-reload is read per spawn/verification.
+   */
+  readonly getContractConfig?: () => import("@shoggoth/shared").ShoggothConfig | undefined;
 }
 
 export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAdapter & {
@@ -173,6 +192,59 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
         enableToolsForSession(deps.stateDb, childId, req.enableTools);
       }
 
+      // Contract mode: validate every target is inside a git repository at
+      // call time and capture the spawn-time HEAD as the diff baseline.
+      // A failure aborts the spawn (the orchestrator fails + notifies the task).
+      const contractConfig = deps.getContractConfig?.();
+      let contractCtx:
+        | {
+            entries: ShoggothContractEntry[];
+            cwd: string;
+            baseline: string;
+            judgeModel?: string;
+          }
+        | undefined;
+      if (req.contract?.length) {
+        const cwd = parentWorkingDirectory ?? process.cwd();
+        const check = validateContractRepository(cwd, req.contract);
+        if (!check.ok || !check.repoDir) {
+          deps.sessionManager.kill(childId);
+          throw new Error(check.error ?? "contract target is not in a git repository");
+        }
+        let baseline: string;
+        try {
+          baseline = captureGitHead(check.repoDir);
+        } catch {
+          deps.sessionManager.kill(childId);
+          throw new Error("contract repository has no HEAD to diff against");
+        }
+        if (req.judge) {
+          const slash = req.judge.indexOf("/");
+          const providerId = slash > 0 ? req.judge.slice(0, slash) : "";
+          const modelName =
+            slash > 0 && slash < req.judge.length - 1 ? req.judge.slice(slash + 1) : "";
+          const provider = providerId
+            ? (
+                contractConfig?.decision?.providers as
+                  | Record<string, { models?: Record<string, unknown> }>
+                  | undefined
+              )?.[providerId]
+            : undefined;
+          if (!provider || !provider.models?.[modelName]) {
+            deps.sessionManager.kill(childId);
+            throw new Error(
+              `judge model is not a configured decision provider/model: ${req.judge}`,
+            );
+          }
+        }
+        contractCtx = {
+          entries: req.contract,
+          cwd,
+          baseline,
+          ...(req.judge ? { judgeModel: req.judge } : {}),
+        };
+      }
+
       // Fire off the model turn without awaiting — poll adapter tracks completion.
       pushSystemContext(childId, "Workflow task execution.");
       const turnPromise = deps.runSessionModelTurn({
@@ -197,11 +269,45 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
       });
 
       turnPromise
-        .then((result) => {
+        .then(async (result) => {
+          // Contract mode: verify the turn's diffs against the contract
+          // before recording completion. The verdict rides on the completion
+          // entry so the poll adapter can fail the task on unfulfillment.
+          let contract: ContractStatus | undefined;
+          if (contractCtx) {
+            try {
+              contract = await verifyContract({
+                cwd: contractCtx.cwd,
+                entries: contractCtx.entries,
+                sourceBranch: contractCtx.baseline,
+                ...(contractCtx.judgeModel ? { judgeModel: contractCtx.judgeModel } : {}),
+                config: contractConfig ?? EMPTY_CONTRACT_CONFIG,
+              });
+            } catch (e) {
+              contract = {
+                fulfilled: false,
+                broken: false,
+                error: e instanceof Error ? e.message : String(e),
+                yesMinimum: CONTRACT_YES_MINIMUM_DEFAULT,
+                entries: contractCtx.entries,
+                judged: [],
+                violated: [],
+                deletedSkipped: [],
+                baseline: contractCtx.baseline,
+              };
+            }
+            log.info("task contract judged", {
+              sessionId: childId,
+              taskId: req.taskId,
+              fulfilled: contract.fulfilled,
+              broken: contract.broken,
+            });
+          }
           completionMap.set(childId, {
             ok: true,
             output: result.latestAssistantText,
             completedAt: Date.now(),
+            ...(contract ? { contract } : {}),
           });
           log.debug("task turn completed", {
             sessionId: childId,
@@ -251,10 +357,31 @@ export function createDaemonPollAdapter(deps: DaemonPollAdapterDeps): PollAdapte
       const completion = deps.completionMap.get(sessionKey);
       if (completion) {
         if (completion.ok) {
+          if (completion.contract && !completion.contract.fulfilled) {
+            // Contract mode: the turn succeeded but the contract did not —
+            // the task's success is determined by the contract verdict.
+            const reason = completion.contract.broken
+              ? "contract broken: a target was not acted upon with its contractual type"
+              : completion.contract.error
+                ? `contract decision failed: ${completion.contract.error}`
+                : `contract not fulfilled: ${completion.contract.judged
+                    .filter((j) => !j.fulfilled)
+                    .map((j) => `${j.path} (yes=${j.yes.toFixed(3)})`)
+                    .join(", ")}`;
+            return {
+              status: "failed",
+              error: reason,
+              completedAt: completion.completedAt,
+              contract: { fulfilled: false, broken: completion.contract.broken, error: reason },
+            };
+          }
           return {
             status: "done",
             output: completion.output,
             completedAt: completion.completedAt,
+            ...(completion.contract
+              ? { contract: { fulfilled: completion.contract.fulfilled } }
+              : {}),
           };
         }
         return {

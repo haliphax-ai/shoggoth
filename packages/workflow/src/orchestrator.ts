@@ -7,7 +7,7 @@ import { canSpawn } from "./depth.js";
 import { saveWorkflow } from "./state.js";
 import { buildGateContext, evaluateGateCondition } from "./gate-eval.js";
 import type { StatusManager } from "./status-manager.js";
-import { getLogger } from "@shoggoth/shared";
+import { getLogger, type ShoggothContractEntry } from "@shoggoth/shared";
 const log = getLogger("workflow");
 
 // --- Adapter interfaces (dependency injection for testability) ---
@@ -24,6 +24,10 @@ export interface SpawnRequest {
   modelOptions?: { model?: string };
   /** Tool IDs or glob patterns to enable for the spawned session, forwarded to the spawn adapter. */
   enableTools?: string[];
+  /** Contract mode: target files with required modification types and summaries, forwarded to the spawn adapter. */
+  contract?: ShoggothContractEntry[];
+  /** Decision model (`provider-id/model-name`) for judging contract fulfillment, forwarded to the spawn adapter. */
+  judge?: string;
 }
 
 export interface PollResult {
@@ -32,6 +36,12 @@ export interface PollResult {
   error?: string;
   /** Actual completion timestamp (epoch ms). When absent, the orchestrator uses Date.now(). */
   completedAt?: number;
+  /**
+   * Contract verdict when the task defined a contract. A verdict whose
+   * `fulfilled` flag is false turns a "done" result into a failure, so the
+   * task's success is determined by the contract (not just a clean turn).
+   */
+  contract?: { fulfilled: boolean; broken?: boolean; error?: string };
 }
 
 export interface SpawnAdapter {
@@ -973,6 +983,8 @@ export class Orchestrator {
           ...(task.taskDef.responseSchema ? { responseSchema: task.taskDef.responseSchema } : {}),
           ...(task.taskDef.modelOptions ? { modelOptions: task.taskDef.modelOptions } : {}),
           ...(task.taskDef.enableTools ? { enableTools: task.taskDef.enableTools } : {}),
+          ...(task.taskDef.contract ? { contract: task.taskDef.contract } : {}),
+          ...(task.taskDef.judge ? { judge: task.taskDef.judge } : {}),
         });
 
         task.status = "in_progress";

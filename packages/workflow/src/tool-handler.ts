@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { isAbsolute, resolve, dirname } from "node:path";
-import { DEFAULT_MAX_TTL_MS, clampTtlMs } from "@shoggoth/shared";
+import { DEFAULT_MAX_TTL_MS, clampTtlMs, type ShoggothContractEntry } from "@shoggoth/shared";
 import type { TaskDef, FailureBehavior, FailureNotification } from "./types.js";
 import type { WorkflowServer } from "./server.js";
 import type { ControlPlane } from "./control.js";
@@ -25,6 +25,8 @@ interface TaskInput {
   condition?: string;
   template?: string;
   message?: string;
+  contract?: ShoggothContractEntry[];
+  judge?: string;
   channel?: string;
   output_template?: string;
   response_schema?: {
@@ -142,6 +144,44 @@ function toTaskDefs(inputs: TaskInput[]): TaskDef[] {
           }
           enableTools = t.enable_tools.map((x) => x.trim());
         }
+        let contract: ShoggothContractEntry[] | undefined;
+        if (t.contract !== undefined) {
+          if (!Array.isArray(t.contract) || t.contract.length === 0) {
+            throw new Error(
+              `tasks[${t.id}].contract must be a non-empty array of {path, action, summary} entries`,
+            );
+          }
+          contract = t.contract.map((e, i) => {
+            if (!e || typeof e !== "object" || Array.isArray(e)) {
+              throw new Error(`tasks[${t.id}].contract[${i}] must be an object`);
+            }
+            const path = typeof e.path === "string" ? e.path.trim() : "";
+            const action =
+              e.action === "create" || e.action === "update" || e.action === "delete"
+                ? e.action
+                : "";
+            const summary = typeof e.summary === "string" ? e.summary.trim() : "";
+            if (!path) {
+              throw new Error(`tasks[${t.id}].contract[${i}].path must be a non-empty string`);
+            }
+            if (!action) {
+              throw new Error(
+                `tasks[${t.id}].contract[${i}].action must be create, update, or delete`,
+              );
+            }
+            if (!summary) {
+              throw new Error(`tasks[${t.id}].contract[${i}].summary must be a non-empty string`);
+            }
+            return { path, action, summary };
+          });
+        }
+        let judge: string | undefined;
+        if (t.judge !== undefined) {
+          if (typeof t.judge !== "string" || !t.judge.trim()) {
+            throw new Error(`tasks[${t.id}].judge must be a non-empty string`);
+          }
+          judge = t.judge.trim();
+        }
         return {
           ...base,
           kind: "agent" as const,
@@ -149,6 +189,8 @@ function toTaskDefs(inputs: TaskInput[]): TaskDef[] {
           ...(t.response_schema ? { responseSchema: t.response_schema } : {}),
           ...(t.model_options ? { modelOptions: t.model_options } : {}),
           ...(enableTools ? { enableTools } : {}),
+          ...(contract ? { contract } : {}),
+          ...(judge ? { judge } : {}),
         };
       }
       case "tool": {
