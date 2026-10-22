@@ -19,7 +19,10 @@
  *    tail of the streamed message;
  *  - terminal render: the same splice runs against the composed body at
  *    delivery, so the live stream and the delivered message place each
- *    notice between the prose segments it fired between.
+ *    notice between the prose segments it fired between. Each body renders
+ *    at most once — the delivered body's first render is the final one and
+ *    later calls return it untouched — so termination can never produce an
+ *    intermediate layout or render the delivered body more than once.
  *
  * Both renders share one splice helper: slot s = after the s-th committed
  * prose segment (s=0 → before the first block; s=K → at the end), clamped to
@@ -73,6 +76,12 @@ export interface TurnBannerCollector {
    * positions. `segments` are the turn's committed prose segments, in order
    * (the split of the turn's composed prose). Falls back to appending the
    * whole block at the end of `body` when anchors cannot be resolved.
+   *
+   * Renders each body at most once: the first render of `body` is the final
+   * one — calling again with that same body returns it untouched, so a
+   * re-run of the termination sequence can never produce a second (or
+   * bottom-smashed) layout for the delivered body. A distinct body (e.g.
+   * the error body after a failed delivery) gets its own single render.
    */
   readonly terminalBody: (body: string, opts: { readonly segments: readonly string[] }) => string;
 }
@@ -187,6 +196,14 @@ export function createTurnBannerCollector(
     return out.join("\n\n");
   };
 
+  // The terminal path renders each body at most once: the first render of a
+  // body is memoized, so a re-run of the termination sequence against the
+  // delivered body can never splice a second (bottom-smashed) layout — there
+  // is no phase where the banners are dropped to the bottom — while a
+  // distinct body (e.g. the error body after a failed delivery) still gets
+  // its own single render.
+  const terminalRenders = new Map<string, string>();
+
   return {
     add(notice) {
       notices.push({ notice, anchor: options.captureAnchor() });
@@ -196,7 +213,11 @@ export function createTurnBannerCollector(
       return splice(display, segments);
     },
     terminalBody(body, { segments }) {
-      return splice(body, segments);
+      const rendered = terminalRenders.get(body);
+      if (rendered !== undefined) return rendered;
+      const final = splice(body, segments);
+      terminalRenders.set(body, final);
+      return final;
     },
   };
 }

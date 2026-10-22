@@ -65,3 +65,30 @@ export function createCoalescingStreamPusher(
 
   return { push, flush, stop };
 }
+
+/** One output-shaping step applied during turn termination. */
+export type TurnTerminationShapingStep = (body: string) => string;
+
+/**
+ * One-shot termination-shaping coordinator.
+ *
+ * Turns the final delivery body over through the supplied shaping steps
+ * (banner splice, thinking composition, …) against ONE in-memory copy:
+ * every step transforms that copy in place and only the very final result
+ * is ever yielded, so there is no intermediate layout the surface could
+ * render — no phase where every banner is smashed to the bottom before
+ * being interleaved again. The whole pass is fail-open: any step that
+ * throws, and any interruption, rejects the returned promise without ever
+ * yielding anything, so the caller keeps the already-streamed output as
+ * the delivered record instead of a partially shaped body.
+ */
+export async function renderTurnTerminationBody(
+  body: string,
+  steps: readonly TurnTerminationShapingStep[],
+): Promise<string> {
+  let working = body;
+  for (const step of steps) {
+    working = await step(working);
+  }
+  return working;
+}

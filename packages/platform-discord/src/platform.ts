@@ -65,6 +65,7 @@ import { DiscordPlatformAdapter } from "./discord-platform-adapter";
 import { resolveStatusBarConfig, type ResolvedStatusBarConfig } from "@shoggoth/shared";
 import type { CruiseControlHandle } from "@shoggoth/shared";
 import { renderDiscordStatusBar } from "./status-bar";
+import { renderTurnTerminationBody } from "../../daemon/src/presentation/stream-coordinator";
 
 /** Minimal status-bar dep: config from resolveStatusBarConfig, render from renderDiscordStatusBar,
  *  attachSink for live-bar stream wrapping, and stats seeded from session_stats (turn.db is
@@ -995,17 +996,6 @@ export async function startDiscordPlatform(
             // latestAssistantText carries. Both delivery paths (streamed and
             // at-once) deliver this same composition.
             const replyText = turnResult.assistantTurnProse ?? turnResult.latestAssistantText;
-            const formattedBody = formatAssistantReply(
-              cfg,
-              sid,
-              env,
-              replyText,
-              turnResult.failoverMeta,
-            );
-            const fullBody = surfaceBanners.terminalBody(
-              thinkingOutput?.render(formattedBody) ?? formattedBody,
-              { segments: replyText.split("\n\n") },
-            );
             // ONE terminal composition: the tracker's finish() renders the
             // frozen bar (✅/🛑/❌) through the same renderer as the live bar and
             // returns the line for delivery — the terminal snapshot carries this
@@ -1019,6 +1009,11 @@ export async function startDiscordPlatform(
                 : "finished";
             const barLine = surfaceTracker ? await surfaceTracker.finish(outcome) : undefined;
             if (surfaceStreamPusher && surfaceStreamHandle) {
+              // The final streamed edit first — it renders ONLY the live display
+              // re-spliced with the banners (never the terminal composition), so
+              // the in-flight message can never show an intermediate layout with
+              // the banners smashed to the bottom while the turn is in the act
+              // of terminating.
               await surfaceStreamPusher.flush();
               // Clear the in-flight handle's active-bar state first — a
               // state-only operation that makes no edit — so the delivery edit
@@ -1029,28 +1024,53 @@ export async function startDiscordPlatform(
                   await surfaceStreamHandle.setStatusBar(null);
                 } catch (e) {
                   opts.logger.warn("discord.platform.status_bar_clear_failed", {
-                    err: String(e),
                     sessionId: sid,
+                    err: String(e),
                   });
                 }
               }
-              // ONE terminal delivery: always replace the live streamed display
-              // with fullBody — the turn-scoped composition (every prose segment
-              // of THIS turn via assistantTurnProse, rendered thinking quotes,
-              // formatted decorations). The live display is only a view of the
-              // in-flight accumulation and may carry cross-round artifacts
-              // (round restarts after steering/failover in a session-long tool
-              // loop); the delivered message must be the clean turn record.
-              await surfaceStreamHandle.setFullContent(
-                barLine ? `${fullBody}\n\n${barLine}` : fullBody,
+            }
+            // Termination shaping runs ONE final body through ONE terminal
+            // render: the banner collector claims its single terminal splice
+            // inside this pass, so no intermediate bottom-smashed layout can
+            // exist and the termination can never render more than once. The
+            // pass is fail-open — if shaping throws or is interrupted, do
+            // nothing: the already-streamed output stands as the delivery.
+            const formattedBody = formatAssistantReply(
+              cfg,
+              sid,
+              env,
+              replyText,
+              turnResult.failoverMeta,
+            );
+            let fullBody: string;
+            try {
+              const shaped = await renderTurnTerminationBody(
+                thinkingOutput?.render(formattedBody) ?? formattedBody,
+                [
+                  (body: string) =>
+                    surfaceBanners.terminalBody(body, { segments: replyText.split("\n\n") }),
+                ],
               );
+              fullBody = barLine ? `${shaped}\n\n${barLine}` : shaped;
+            } catch (e) {
+              opts.logger.warn("discord.platform.termination_shaping_failed", {
+                sessionId: sid,
+                err: String(e),
+              });
+              return;
+            }
+            // The ONE terminal render: exactly one delivery edit/send carries
+            // the final shaped body.
+            if (surfaceStreamPusher && surfaceStreamHandle) {
+              await surfaceStreamHandle.setFullContent(fullBody);
               // Stream edits can't carry file attachments — send as follow-up.
               const attachments = turnResult.showAttachments;
               if (attachments?.length) {
                 await adapter.sendBody(sid, "", { attachments: [...attachments] });
               }
             } else {
-              await adapter.sendBody(sid, barLine ? `${fullBody}\n\n${barLine}` : fullBody, {
+              await adapter.sendBody(sid, fullBody, {
                 replyTo: delivery.replyToMessageId,
               });
             }
