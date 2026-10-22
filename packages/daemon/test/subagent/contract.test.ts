@@ -59,6 +59,12 @@ function gitFixtureEnv(): NodeJS.ProcessEnv {
     GIT_AUTHOR_EMAIL: "test@test.local",
     GIT_COMMITTER_NAME: "test",
     GIT_COMMITTER_EMAIL: "test@test.local",
+    // Fixture repos must not inherit the operator's global/system git config
+    // (commit signing, credential helpers, includes): identity comes from the
+    // GIT_* vars above and repo-local `git config`, and a signing key or
+    // include chain that fails on this host would fail every fixture commit.
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_SYSTEM: "/dev/null",
   };
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
@@ -159,6 +165,89 @@ describe("validateContractRepository", () => {
     assert.equal(res.ok, true);
     assert.equal(res.repoDir, dir);
     await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe("validateContractRepository (nested repositories)", () => {
+  async function makeNestedRepo(): Promise<{ base: string; repo: string }> {
+    const base = await mkdtemp(join(tmpdir(), "contract-nested-ws-"));
+    const repo = join(base, "tmp", "contract-test");
+    await mkdir(repo, { recursive: true });
+    git(repo, "init");
+    git(repo, "config", "user.email", "test@test.local");
+    git(repo, "config", "user.name", "test");
+    await writeFile(join(repo, "a.txt"), "one\n");
+    git(repo, "add", ".");
+    git(repo, "commit", "-m", "baseline");
+    return { base, repo };
+  }
+
+  it("discovers a repository nested below the base directory (relative target)", async () => {
+    const { base, repo } = await makeNestedRepo();
+    try {
+      const res = validateContractRepository(base, [entry("tmp/contract-test/a.txt", "update")]);
+      assert.equal(res.ok, true, JSON.stringify(res));
+      assert.equal(res.repoDir, repo);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it("discovers a nested repository for an absolute target path", async () => {
+    const { base, repo } = await makeNestedRepo();
+    try {
+      const res = validateContractRepository(base, [entry(join(repo, "a.txt"), "update")]);
+      assert.equal(res.ok, true, JSON.stringify(res));
+      assert.equal(res.repoDir, repo);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it("discovers a nested repository for a create target in a not-yet-created directory", async () => {
+    const { base, repo } = await makeNestedRepo();
+    try {
+      const res = validateContractRepository(base, [
+        entry("tmp/contract-test/newdir/file.txt", "create"),
+      ]);
+      assert.equal(res.ok, true, JSON.stringify(res));
+      assert.equal(res.repoDir, repo);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects targets spanning two repositories", async () => {
+    const a = await makeRepo();
+    const b = await makeRepo();
+    const base = await mkdtemp(join(tmpdir(), "contract-two-repos-"));
+    try {
+      const res = validateContractRepository(base, [
+        entry(join(a, "a.txt"), "update"),
+        entry(join(b, "a.txt"), "update"),
+      ]);
+      assert.equal(res.ok, false);
+      assert.match(res.error ?? "", /span multiple git repositories/);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+      await rm(a, { recursive: true, force: true });
+      await rm(b, { recursive: true, force: true });
+    }
+  });
+
+  it("reports the unresolved target and the base directory when no repo applies", async () => {
+    const base = await mkdtemp(join(tmpdir(), "contract-no-repo-"));
+    try {
+      const res = validateContractRepository(base, [entry("nowhere/file.txt", "create")]);
+      assert.equal(res.ok, false);
+      assert.match(res.error ?? "", /not in a git repository: nowhere\/file\.txt/);
+      assert.ok(
+        (res.error ?? "").includes(base),
+        `error must name the base directory: ${res.error}`,
+      );
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
   });
 });
 

@@ -19,8 +19,8 @@
 // ---------------------------------------------------------------------------
 
 import { execFileSync, type ExecFileSyncOptions } from "node:child_process";
-import { existsSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { existsSync, readdirSync, statSync, type Dirent } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { ShoggothConfig, ShoggothContractEntry } from "@shoggoth/shared";
 import { resolveAgentCreds } from "../agent-creds.js";
 import { DecisionService } from "../decision/decision-service.js";
@@ -36,6 +36,13 @@ export const CONTRACT_BATCH_SIZE_DEFAULT = 5;
 export const CONTRACT_JUDGE_TIMEOUT_MS = 60_000;
 
 const CONTRACT_ACTIONS = new Set(["create", "update", "delete"]);
+
+/**
+ * Upper bound on downward repo-discovery probes (directory children probed
+ * with `git rev-parse`). Keeps the nested-repo search bounded on sprawling
+ * trees; a workspace's scratch repos sit within the first couple of levels.
+ */
+const MAX_REPO_PROBES = 512;
 
 /**
  * Parse and validate a raw spawn-time `contract` payload. Returns `undefined`
@@ -173,8 +180,58 @@ function tryGit(repoDir: string, args: string, creds?: ContractCreds): string | 
 
 /** Repository worktree root for a directory, or undefined when not a repo. */
 export function repoTopLevel(cwd: string, creds?: ContractCreds): string | undefined {
-  const out = tryGit(cwd, "rev-parse --show-toplevel", creds);
-  return out?.trim();
+  return findRepoTopLevel(cwd, cwd, creds);
+}
+
+/**
+ * Discover the repository containing `start`, or undefined.
+ *
+ * Discovery runs in two directions because git's own discovery only ever
+ * walks *upward* from its cwd:
+ *
+ * 1. Upward from `start` — a repo containing `start`.
+ * 2. Downward from `downFrom` (BFS over directory names, probing each
+ *    candidate upward) — a repo *nested below* `downFrom`. The session
+ *    workspace is the natural base for this direction: a scratch repo like
+ *    `workspace/tmp/contract-test` sits below the workspace root, so an
+ *    upward-only probe from the root can never find it.
+ *
+ * With `downFrom === start` this is pure upward discovery — the historical
+ * behavior.
+ */
+function findRepoTopLevel(
+  start: string,
+  downFrom: string,
+  creds?: ContractCreds,
+): string | undefined {
+  const up = tryGit(start, "rev-parse --show-toplevel", creds)?.trim();
+  if (up) return up;
+
+  const queue: string[] = [downFrom];
+  const seen = new Set<string>([downFrom]);
+  let probed = 0;
+  while (queue.length > 0 && probed < MAX_REPO_PROBES) {
+    const dir = queue.shift()!;
+    probed += 1;
+    const top = tryGit(dir, "rev-parse --show-toplevel", creds)?.trim();
+    if (top) return top;
+    let entries: Dirent[];
+    try {
+      // Real directories only: linked trees (node_modules symlinks) are not
+      // worth probing and would otherwise dominate the traversal.
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const child = join(dir, e.name);
+      if (seen.has(child)) continue;
+      seen.add(child);
+      queue.push(child);
+    }
+  }
+  return undefined;
 }
 
 export interface ContractRepoCheck {
@@ -188,32 +245,56 @@ export interface ContractRepoCheck {
  * Validate that every contract target resolves inside a git repository at call
  * time. Called before the child session exists so a bad contract fails and
  * notifies the agent instead of spawning a doomed session.
+ *
+ * Repositories are discovered *per target* — starting at the target's own
+ * directory (upward) and then from the session base directory downward — so a
+ * contract pointing at a nested scratch repo validates on its own merits
+ * instead of demanding that the base directory itself be a repository.
+ * Every target must land in the same repository: the contract is diffed as a
+ * single unit against one baseline, so split targets are rejected rather than
+ * silently judged from the wrong repo.
+ *
+ * When no target resolves, the error names the base directory and the
+ * unwalked target so the failure is diagnosable.
  */
 export function validateContractRepository(
-  cwd: string,
+  base: string,
   entries: ShoggothContractEntry[],
   creds?: ContractCreds,
 ): ContractRepoCheck {
-  const repoDir = repoTopLevel(cwd, creds);
-  if (!repoDir) {
-    return {
-      ok: false,
-      error: `contract target is not in a git repository: ${cwd}`,
-    };
-  }
-  for (const entry of entries) {
-    const abs = isAbsolute(entry.path) ? entry.path : resolve(cwd, entry.path);
-    const rel = relative(repoDir, abs);
+  const targets = entries.map((entry) =>
+    isAbsolute(entry.path) ? entry.path : resolve(base, entry.path),
+  );
+
+  let repoDir: string | undefined;
+  for (let i = 0; i < targets.length; i += 1) {
+    const target = targets[i]!;
+    const start = existsSync(target) && statSync(target).isDirectory() ? target : dirname(target);
+    const top = findRepoTopLevel(start, base, creds);
+    if (!top) {
+      return {
+        ok: false,
+        error: `contract target is not in a git repository: ${entries[i]!.path} (resolved against ${base})`,
+      };
+    }
+    if (repoDir === undefined) {
+      repoDir = top;
+    } else if (top !== repoDir) {
+      return {
+        ok: false,
+        error: `contract targets span multiple git repositories: ${entries[i]!.path} is in ${top}, not ${repoDir}`,
+      };
+    }
+    const rel = relative(repoDir, target);
     if (rel.startsWith("..") || isAbsolute(rel)) {
       return {
         ok: false,
-        error: `contract target escapes the git repository: ${entry.path}`,
+        error: `contract target escapes the git repository: ${entries[i]!.path}`,
       };
     }
   }
   return { ok: true, repoDir };
 }
-
 /** Resolve the diff baseline: the source branch HEAD when available, else spawn HEAD. */
 export function resolveContractBaseline(
   repoDir: string,
