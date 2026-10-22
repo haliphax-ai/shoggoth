@@ -1034,8 +1034,10 @@ export async function startDiscordPlatform(
             // render: the banner collector claims its single terminal splice
             // inside this pass, so no intermediate bottom-smashed layout can
             // exist and the termination can never render more than once. The
-            // pass is fail-open — if shaping throws or is interrupted, do
-            // nothing: the already-streamed output stands as the delivery.
+            // pass is fail-open per delivery path — if shaping throws or is
+            // interrupted, the streamed path makes no edit (the
+            // already-streamed output stands) while the non-streamed path
+            // still delivers the unshaped body.
             const formattedBody = formatAssistantReply(
               cfg,
               sid,
@@ -1058,7 +1060,15 @@ export async function startDiscordPlatform(
                 sessionId: sid,
                 err: String(e),
               });
-              return;
+              if (surfaceStreamPusher && surfaceStreamHandle) {
+                // Streamed path fails open: the already-streamed output
+                // stands unchanged, so no terminal edit is made.
+                return;
+              }
+              // The non-streamed path has nothing streamed to fall back on —
+              // deliver the body unshaped, exactly once, with the bar the
+              // tracker already rendered.
+              fullBody = barLine ? `${formattedBody}\n\n${barLine}` : formattedBody;
             }
             // The ONE terminal render: exactly one delivery edit/send carries
             // the final shaped body.

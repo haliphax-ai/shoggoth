@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { createTurnBannerCollector } from "../../src/presentation/active-turn-surface";
-import { renderTurnTerminationBody } from "../../src/presentation/stream-coordinator";
+import {
+  renderTurnTerminationBody,
+  type TurnTerminationShapingStep,
+} from "../../src/presentation/stream-coordinator";
 
 const segments = ["One", "Two"];
 
@@ -16,6 +19,36 @@ const deliverOnce = (): { renders: string[]; deliver: (body: string) => void } =
       renders.push(body);
     },
   };
+};
+
+/**
+ * The terminal decision, per delivery path: shaping runs once against an
+ * in-memory copy and either yields the body or throws. The streamed path
+ * (a stream sink exists) then fails open — no edit, the already-streamed
+ * output stands — while the non-streamed path falls back to the unshaped
+ * body and still delivers exactly once. Returns the bodies the terminal
+ * path applied to its surface: an edit for the streamed path, a send for
+ * the non-streamed one.
+ */
+const deliverAtTermination = async (opts: {
+  streamed: boolean;
+  body: string;
+  steps: readonly TurnTerminationShapingStep[];
+  barLine?: string;
+}): Promise<string[]> => {
+  const applied: string[] = [];
+  let fullBody: string;
+  try {
+    const shaped = await renderTurnTerminationBody(opts.body, opts.steps);
+    fullBody = opts.barLine ? `${shaped}\n\n${opts.barLine}` : shaped;
+  } catch {
+    if (opts.streamed) return applied;
+    // The non-streamed path has nothing streamed to fall back on: it
+    // delivers the body unshaped, with the bar the tracker rendered.
+    fullBody = opts.barLine ? `${opts.body}\n\n${opts.barLine}` : opts.body;
+  }
+  applied.push(fullBody);
+  return applied;
 };
 
 describe("turn termination shaping", () => {
@@ -142,6 +175,52 @@ describe("turn termination shaping", () => {
     // is still available and still produces the interleaved layout — no
     // partial or bottom-smashed layout was produced by the failed pass.
     expect(banners.terminalBody("One\n\nTwo", { segments })).toBe("One\n\n> ⚙️ banner\n\nTwo");
+  });
+
+  it("leaves the streamed output untouched when shaping fails", async () => {
+    const banners = createTurnBannerCollector({
+      captureAnchor: () => ({ committedProseSegments: 1, toolCalls: 0 }),
+    });
+    banners.add("> ⚙️ banner");
+
+    const rendered = await deliverAtTermination({
+      streamed: true,
+      body: "One\n\nTwo",
+      barLine: "✅ done",
+      steps: [
+        () => {
+          throw new Error("shaping interrupted");
+        },
+        (body) => banners.terminalBody(body, { segments }),
+      ],
+    });
+
+    // The streamed path makes no edit — the already-streamed output stands
+    // as the final record.
+    expect(rendered).toEqual([]);
+  });
+
+  it("still delivers the non-streamed body once when shaping fails", async () => {
+    const banners = createTurnBannerCollector({
+      captureAnchor: () => ({ committedProseSegments: 1, toolCalls: 0 }),
+    });
+    banners.add("> ⚙️ banner");
+
+    const applied = await deliverAtTermination({
+      streamed: false,
+      body: "One\n\nTwo",
+      barLine: "✅ done",
+      steps: [
+        () => {
+          throw new Error("shaping interrupted");
+        },
+        (body) => banners.terminalBody(body, { segments }),
+      ],
+    });
+
+    // Nothing was shaped, but the non-streamed path still sends the body —
+    // exactly once, unshaped, with the terminal bar.
+    expect(applied).toEqual(["One\n\nTwo\n\n✅ done"]);
   });
 
   it("passes an empty step list through untouched", async () => {
