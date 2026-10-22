@@ -1,7 +1,7 @@
 /**
  * DAC integration: needs root + uid 901 spawn; CI matrix in shoggoth/docs/runbook.md.
  */
-import { describe, it, beforeEach, afterEach, beforeAll } from "vitest";
+import { describe, it, beforeEach, afterEach, beforeAll, vi } from "vitest";
 import assert from "node:assert";
 import { chmodSync, chownSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -34,6 +34,37 @@ function requireRootForDac(t: { skip: (m?: string) => void }, canDrop: boolean):
     return false;
   }
   return true;
+}
+
+/**
+ * Drive an async operation to completion without any wall-clock wait: install
+ * fake timers, then repeatedly advance the (fake) clock and yield event-loop
+ * ticks so real child-process I/O settles, until the operation's promise
+ * settles. Restores real timers in `finally` whether it succeeds or fails.
+ */
+async function runUnderFakeTimers<T>(op: () => Promise<T>, maxTicks = 10_000): Promise<T> {
+  // Fake only the wall-clock timers; setImmediate stays real so the event-gate
+  // loop below keeps turning the event loop while child I/O settles.
+  vi.useFakeTimers({
+    toFake: ["setTimeout", "setInterval", "clearTimeout", "clearInterval", "Date"],
+  });
+  try {
+    const promise = op();
+    let settled = false;
+    const markSettled = (): void => {
+      settled = true;
+    };
+    // Observe settlement without altering the promise the caller will await.
+    void promise.then(markSettled, markSettled);
+    for (let i = 0; i < maxTicks && !settled; i++) {
+      await vi.advanceTimersByTimeAsync(60_000);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    assert.ok(settled, `operation did not settle after ${maxTicks} ticks`);
+    return await promise;
+  } finally {
+    vi.useRealTimers();
+  }
 }
 
 /** Exit 0 if read fails with EACCES/EPERM; 2 if read succeeded; 3 other error. */
@@ -99,14 +130,16 @@ describe("DAC + deny sensitive paths (integration)", () => {
     writeFileSync(path, "classified", { mode: 0o600 });
     chownSync(path, 0, 0);
     chmodSync(path, 0o600);
-    await assert.rejects(
-      () =>
-        toolRead(ws, "root-secret.txt", {
-          uid: AGENT_TEST_UID,
-          gid: AGENT_TEST_GID,
-        }),
-      (e: unknown) =>
-        e instanceof Error && /toolRead failed|EACCES|EPERM/i.test((e as Error).message),
+    await runUnderFakeTimers(() =>
+      assert.rejects(
+        () =>
+          toolRead(ws, "root-secret.txt", {
+            uid: AGENT_TEST_UID,
+            gid: AGENT_TEST_GID,
+          }),
+        (e: unknown) =>
+          e instanceof Error && /toolRead failed|EACCES|EPERM/i.test((e as Error).message),
+      ),
     );
   });
 
@@ -125,7 +158,7 @@ describe("DAC + deny sensitive paths (integration)", () => {
       chmodSync(join(fakeState, "nested"), 0o700);
       chownSync(fakeState, 0, 0);
       chmodSync(fakeState, 0o700);
-      await assertAgentCannotReadAbsolutePath(secret);
+      await runUnderFakeTimers(() => assertAgentCannotReadAbsolutePath(secret));
     } finally {
       rmSync(fakeState, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
@@ -143,7 +176,7 @@ describe("DAC + deny sensitive paths (integration)", () => {
       chmodSync(secret, 0o600);
       chownSync(fakeState, SHOGGOTH_TEST_UID, SHOGGOTH_TEST_GID);
       chmodSync(fakeState, 0o700);
-      await assertAgentCannotReadAbsolutePath(secret);
+      await runUnderFakeTimers(() => assertAgentCannotReadAbsolutePath(secret));
     } finally {
       rmSync(fakeState, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
@@ -164,7 +197,7 @@ describe("DAC + deny sensitive paths (integration)", () => {
       chmodSync(join(fakeOp, "nested"), 0o750);
       chownSync(fakeOp, SHOGGOTH_TEST_UID, SHOGGOTH_TEST_GID);
       chmodSync(fakeOp, 0o750);
-      await assertAgentCannotReadAbsolutePath(token);
+      await runUnderFakeTimers(() => assertAgentCannotReadAbsolutePath(token));
     } finally {
       rmSync(fakeOp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
@@ -188,7 +221,7 @@ describe("DAC + deny sensitive paths (integration)", () => {
       chmodSync(wsB, 0o700);
       chownSync(wsA, 0, 0);
       chmodSync(wsA, 0o777);
-      await assertAgentCannotReadAbsolutePath(peerSecret);
+      await runUnderFakeTimers(() => assertAgentCannotReadAbsolutePath(peerSecret));
     } finally {
       rmSync(parent, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
