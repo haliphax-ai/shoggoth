@@ -348,49 +348,161 @@ export async function executeSessionAgentTurn(
 
   const createToolClient =
     input.createToolCallingClient ?? createFailoverToolCallingClientFromModelsConfig;
-  let modelsForSession =
+  const baseModels =
     resolveEffectiveModelsConfig(input.config, input.sessionId) ?? input.config.models;
 
-  // If the session's modelSelection specifies a valid "providerId/model" ref, prepend it
-  // to the failover chain so it becomes the primary while keeping failover intact.
-  // This is how subagentModel config and session_model op take effect.
-  const sessionModelRef = getSessionPrimaryModelRef(input.session.modelSelection);
-  if (sessionModelRef && modelsForSession) {
-    const existingChain = modelsForSession.failoverChain ?? [];
-    const filtered = existingChain.filter((e) => e !== sessionModelRef);
-    modelsForSession = {
-      ...modelsForSession,
-      failoverChain: [sessionModelRef, ...filtered],
-    };
+  // Snapshot of everything the turn resolved from the current model selection:
+  // failover chain (with the session's model prepended), tool client, merged
+  // invocation params, context window, and image block codec. Re-resolved on
+  // every tool-loop round so a session_model switch mid-turn takes effect on
+  // the NEXT round (next tool call / generation), not only on the next turn.
+  interface TurnModelResolution {
+    readonly models: ShoggothModelsConfig | undefined;
+    readonly modelRef: string | undefined;
+    readonly toolClient: FailoverToolCallingClient;
+    readonly modelInvocation: ModelInvocationParams;
+    readonly ctxWindowTokens: number | undefined;
+    readonly imageBlockCodec: ImageBlockCodec | undefined;
+    /** Raw `model_selection_json` the snapshot was resolved from (change detection). */
+    readonly selectionJson: string | null;
   }
 
-  const toolClient = createToolClient(modelsForSession, {
-    env: input.env,
-    hooks: {
-      onProviderExhausted(providerId, error, nextRef) {
-        log.warn("model provider failover", {
-          sessionId: input.sessionId,
-          failedProviderId: providerId,
-          error,
-          nextRef,
-          isSubagent: isSubagentSessionUrn(input.sessionId),
-        });
+  // Re-read the session row: the session_model op updates it mid-turn, and
+  // every round must observe the latest selection (failover chain, tool
+  // client, invocation params, and context window are all derived from it).
+  const readLatestModelSelection = (): { selection: unknown; json: string | null } => {
+    const latestRow = input.db
+      .prepare(`SELECT model_selection_json FROM sessions WHERE id = ?`)
+      .get(input.sessionId) as { model_selection_json: string | null } | undefined;
+    if (!latestRow) return { selection: input.session.modelSelection, json: null };
+    const json = latestRow.model_selection_json;
+    if (json == null) return { selection: undefined, json: null };
+    try {
+      return { selection: JSON.parse(json), json };
+    } catch {
+      // Unreadable JSON: keep the turn-start selection, but still track the
+      // raw value so an equivalent re-write is not treated as a switch.
+      return { selection: input.session.modelSelection, json };
+    }
+  };
+
+  const resolveTurnModel = (
+    modelSelection: unknown,
+    selectionJson: string | null,
+  ): TurnModelResolution => {
+    let models = baseModels;
+    // If the modelSelection specifies a valid "providerId/model" ref, prepend it
+    // to the failover chain so it becomes the primary while keeping failover intact.
+    // This is how subagentModel config and session_model op take effect.
+    const modelRef = getSessionPrimaryModelRef(modelSelection);
+    if (modelRef && models) {
+      const existingChain = models.failoverChain ?? [];
+      const filtered = existingChain.filter((e) => e !== modelRef);
+      models = {
+        ...models,
+        failoverChain: [modelRef, ...filtered],
+      };
+    }
+
+    const toolClient = createToolClient(models, {
+      env: input.env,
+      hooks: {
+        onProviderExhausted(providerId, error, nextRef) {
+          log.warn("model provider failover", {
+            sessionId: input.sessionId,
+            failedProviderId: providerId,
+            error,
+            nextRef,
+            isSubagent: isSubagentSessionUrn(input.sessionId),
+          });
+        },
       },
-    },
-  });
+    });
 
-  const baseInvocation = mergeModelInvocationParams(modelsForSession, input.session.modelSelection);
-  const modelInvocation = input.modelInvocationOverride
-    ? { ...baseInvocation, ...input.modelInvocationOverride }
-    : baseInvocation;
+    const baseInvocation = mergeModelInvocationParams(models, modelSelection);
+    const modelInvocation = input.modelInvocationOverride
+      ? { ...baseInvocation, ...input.modelInvocationOverride }
+      : baseInvocation;
 
-  const sessionPrimaryProviderId = sessionModelRef
-    ? sessionModelRef.slice(0, sessionModelRef.indexOf("/"))
-    : undefined;
-  const imageBlockCodec = resolveImageBlockCodec(modelsForSession, sessionPrimaryProviderId);
+    const modelProviderId = modelRef ? modelRef.slice(0, modelRef.indexOf("/")) : undefined;
+    const imageBlockCodec = resolveImageBlockCodec(models, modelProviderId);
 
+    let ctxWindowTokens: number | undefined;
+    if (!input.minimalContext) {
+      if (modelRef) {
+        const slashIdx = modelRef.indexOf("/");
+        ctxWindowTokens = getModelContextWindowTokens(
+          modelRef.slice(0, slashIdx),
+          modelRef.slice(slashIdx + 1),
+        );
+      } else {
+        ctxWindowTokens = resolveModel(input.db, input.config, {
+          sessionId: input.sessionId,
+        })?.model?.contextWindowTokens;
+      }
+      if (!ctxWindowTokens) {
+        // Without a window there is no mid-turn compaction threshold, so the
+        // check stays off for the whole turn — make that visible instead of
+        // silently degrading.
+        log.warn(
+          "mid-turn compaction disabled for this turn: context window could not be resolved",
+          {
+            sessionId: input.sessionId,
+            modelRef: modelRef ?? null,
+          },
+        );
+      }
+    }
+
+    return {
+      models,
+      modelRef,
+      toolClient,
+      modelInvocation,
+      ctxWindowTokens,
+      imageBlockCodec,
+      selectionJson,
+    };
+  };
+
+  const initialSelection = readLatestModelSelection();
+  let turnModel = resolveTurnModel(initialSelection.selection, initialSelection.json);
+  let modelsForSession = turnModel.models;
+  let sessionModelRef = turnModel.modelRef;
+  let toolClient = turnModel.toolClient;
+  let modelInvocation = turnModel.modelInvocation;
+  let ctxWindowTokens = turnModel.ctxWindowTokens;
+  let imageBlockCodec = turnModel.imageBlockCodec;
   const effectiveModel =
     sessionModelRef ?? resolveModel(input.db, input.config, { sessionId: input.sessionId })?.ref;
+
+  // Called by the round-dynamic tool client wrapper before every round:
+  // re-resolve the model snapshot so a mid-turn session_model switch lands on
+  // the very next round, and return true when a NEW snapshot was installed.
+  const refreshTurnModelForRound = (): boolean => {
+    const latest = readLatestModelSelection();
+    // Nothing changed since the current snapshot: keep it (stable identity
+    // for reference equality checks downstream).
+    if (latest.json === turnModel.selectionJson) return false;
+    const fresh = resolveTurnModel(latest.selection, latest.json);
+    if (fresh.modelRef === sessionModelRef) {
+      // Invocation-only tweak (same model ref): refresh just the invocation
+      // params so the tool client and context window stay stable.
+      modelInvocation = fresh.modelInvocation;
+      turnModel = { ...turnModel, modelInvocation, selectionJson: fresh.selectionJson };
+      return true;
+    }
+    // Full model switch: swap failover chain, tool client, invocation params,
+    // context window / compaction config, and image block codec.
+    turnModel = fresh;
+    modelsForSession = fresh.models;
+    sessionModelRef = fresh.modelRef;
+    toolClient = fresh.toolClient;
+    modelInvocation = fresh.modelInvocation;
+    ctxWindowTokens = fresh.ctxWindowTokens;
+    if (fresh.imageBlockCodec) imageBlockCodec = fresh.imageBlockCodec;
+    return true;
+  };
 
   // --- System Prompt Assembly ---
   const buffered = drainSystemContext(input.sessionId);
@@ -456,29 +568,6 @@ export async function executeSessionAgentTurn(
   // --- Mutable tools ref for mid-loop refresh (tool discovery) ---
   let currentToolsOpenAi: readonly OpenAIToolFunctionDefinition[] = mcpCtx.toolsOpenAi;
 
-  let ctxWindowTokens: number | undefined;
-  if (!input.minimalContext) {
-    if (sessionModelRef) {
-      const slashIdx = sessionModelRef.indexOf("/");
-      const primaryProviderId = sessionModelRef.slice(0, slashIdx);
-      const primaryModelName = sessionModelRef.slice(slashIdx + 1);
-      ctxWindowTokens = getModelContextWindowTokens(primaryProviderId, primaryModelName);
-    } else {
-      ctxWindowTokens = resolveModel(input.db, input.config, {
-        sessionId: input.sessionId,
-      })?.model?.contextWindowTokens;
-    }
-    if (!ctxWindowTokens) {
-      // Without a window there is no mid-turn compaction threshold, so the
-      // check stays off for the whole turn — make that visible instead of
-      // silently degrading.
-      log.warn("mid-turn compaction disabled for this turn: context window could not be resolved", {
-        sessionId: input.sessionId,
-        modelRef: sessionModelRef ?? null,
-      });
-    }
-  }
-
   const { signal: turnAbortSignal, end: endTurnAbortScope } = beginSessionTurnAbortScope(
     input.sessionId,
   );
@@ -492,11 +581,31 @@ export async function executeSessionAgentTurn(
   const notifyTurnAborted = () => input.events?.onTurnAborted?.();
   notifyOnTurnAbort(turnAbortSignal, notifyTurnAborted);
 
+  // The tool loop calls this client once per round. Re-resolving INSIDE the
+  // wrapper (rather than at loop construction) is what makes a mid-turn
+  // session_model switch land on the very next round: every round's
+  // completeWithTools first re-reads the session's model selection and swaps
+  // the whole snapshot (failover chain, tool client, invocation params,
+  // context window / compaction config), then delegates to the current client.
+  const roundDynamicToolClient: FailoverToolCallingClient = {
+    get capabilities() {
+      return toolClient.capabilities;
+    },
+    async completeWithTools(req) {
+      refreshTurnModelForRound();
+      return toolClient.completeWithTools(req);
+    },
+  };
+
   const model: SessionToolLoopModelClient = createSessionToolLoopModelClient({
-    toolClient,
+    toolClient: roundDynamicToolClient,
     initialMessages,
     tools: () => currentToolsOpenAi,
-    modelInvocation,
+    // Getter: every round reads the CURRENT snapshot's invocation params, so
+    // an invocation-only update (or a full switch) applies from the next round.
+    get modelInvocation() {
+      return modelInvocation;
+    },
     turnAbortSignal,
     streamModel: Boolean(input.stream?.streamModel),
     onModelTextDelta: input.stream?.onModelTextDelta,
@@ -521,23 +630,31 @@ export async function executeSessionAgentTurn(
         totalTokens: delta.contextWindowTokens ?? ctxWindowTokens,
       });
     },
-    compaction: ctxWindowTokens
-      ? {
-          db: input.db,
-          sessionId: input.sessionId,
-          contextSegmentId: ctxSeg,
-          ctxWindowTokens,
-          reserveTokens: modelsForSession?.compaction?.contextWindowReserveTokens ?? 20_000,
-          modelsConfig: modelsForSession,
-          compactionModel: modelsForSession?.compaction?.model,
-          env: input.env,
-          systemPromptChars: effectiveSystemPrompt.length,
-          toolSchemaChars: JSON.stringify(currentToolsOpenAi).length,
-          turnAbortSignal,
-          compactionAbortTimeoutMs:
-            modelsForSession?.compaction?.compactionAbortTimeoutMs ?? 60_000,
-        }
-      : undefined,
+    // Getter: rebuilt from the CURRENT snapshot on each round, so a
+    // mid-turn switch swaps ctxWindowTokens and the compaction config
+    // derived from it (models config, reserve, compaction model, timeout).
+    get compaction():
+      | NonNullable<Parameters<typeof createSessionToolLoopModelClient>[0]["compaction"]>
+      | undefined {
+      // This getter is read at the start of each model-client round, before
+      // its compaction check, so the new window/config applies immediately.
+      refreshTurnModelForRound();
+      if (!ctxWindowTokens) return undefined;
+      return {
+        db: input.db,
+        sessionId: input.sessionId,
+        contextSegmentId: ctxSeg,
+        ctxWindowTokens,
+        reserveTokens: modelsForSession?.compaction?.contextWindowReserveTokens ?? 20_000,
+        modelsConfig: modelsForSession,
+        compactionModel: modelsForSession?.compaction?.model,
+        env: input.env,
+        systemPromptChars: effectiveSystemPrompt.length,
+        toolSchemaChars: JSON.stringify(currentToolsOpenAi).length,
+        turnAbortSignal,
+        compactionAbortTimeoutMs: modelsForSession?.compaction?.compactionAbortTimeoutMs ?? 60_000,
+      };
+    },
   });
 
   const principal: AuthenticatedPrincipal = {
