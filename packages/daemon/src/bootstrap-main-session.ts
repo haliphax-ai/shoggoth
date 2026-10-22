@@ -1,8 +1,8 @@
 import type Database from "better-sqlite3";
-import { readFileSync } from "node:fs";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import { resolveAgentPlatformConfig, resolveAgentWorkspacePath } from "@shoggoth/shared";
 import { createSessionStore } from "./sessions/session-store";
+import { resolveAgentCreds } from "./agent-creds";
 import { ensureAgentWorkspaceLayout } from "./workspaces/agent-workspace-layout";
 import { resolveBootstrapPrimarySessionUrn } from "@shoggoth/messaging";
 import { pushSystemContext } from "./sessions/system-context-buffer";
@@ -16,7 +16,8 @@ interface BootstrapMainSessionOptions {
 /**
  * Ensures every configured agent's workspace and primary session row exist.
  *
- * Iterates `config.agents.list` — for each agent:
+ * 1. Creates workspace directory + subdirs (skills, memory, tmp, prompts,
+ *    media/inbound + template files) with default ACLs for the daemon uid
  * 1. Creates workspace directory + subdirs (memory, tmp, skills, template files)
  * 2. Resolves session id from the agent's first platform route
  * 3. Inserts the session row if missing
@@ -69,44 +70,34 @@ async function bootstrapAgent(
   const firstRoute = (agentPlatform?.routes as Array<{ sessionId?: string }> | undefined)?.[0];
   const id = firstRoute?.sessionId?.trim() || resolveBootstrapPrimarySessionUrn(agentId, platform);
 
-  // Resolve agent UID/GID for the session row (must happen before workspace creation)
-  let runtimeUid: number;
-  let runtimeGid: number;
+  // Resolve agent UID/GID for the session row (must happen before workspace
+  // creation). The daemon is never the agent user: process credentials are the
+  // daemon's identity, so they must never be stamped onto the session row.
+  const { uid: runtimeUid, gid: runtimeGid } = resolveAgentCreds();
 
-  const processUid = process.getuid?.();
-  const processGid = process.getgid?.();
-
-  if (processUid !== undefined && processGid !== undefined && processUid !== 0) {
-    // Running as the agent user directly — use process credentials
-    runtimeUid = processUid;
-    runtimeGid = processGid;
-  } else {
-    // Running as root or in an environment without getuid/getgid — resolve from /etc/passwd
-    try {
-      const passwd = readFileSync("/etc/passwd", "utf8");
-      const agentLine = passwd.split("\n").find((line) => line.startsWith("agent:"));
-      if (agentLine) {
-        const fields = agentLine.split(":");
-        runtimeUid = Number(fields[2]);
-        runtimeGid = Number(fields[3]);
-      } else {
-        runtimeUid = 900;
-        runtimeGid = 900;
-      }
-    } catch {
-      runtimeUid = 900;
-      runtimeGid = 900;
-    }
-  }
-
-  // Create workspace layout (dirs + template files) as the agent user
+  // Create workspace layout (dirs + template files, incl. default ACLs for the
+  // daemon uid) as the agent user
   await ensureAgentWorkspaceLayout(dir, { uid: runtimeUid, gid: runtimeGid });
 
   const store = createSessionStore(db);
   const existing = store.getById(id);
 
   if (existing) {
-    log.debug("bootstrap.agent.session_exists", { sessionId: id, agentId });
+    if (existing.runtimeUid !== runtimeUid || existing.runtimeGid !== runtimeGid) {
+      // Repair rows stamped by older bootstraps (e.g. with the daemon's own
+      // process credentials) so exec runs as the agent user.
+      store.update(id, { runtimeUid, runtimeGid });
+      log.info("bootstrap.agent.session_creds_repaired", {
+        sessionId: id,
+        agentId,
+        fromUid: existing.runtimeUid,
+        toUid: runtimeUid,
+        fromGid: existing.runtimeGid,
+        toGid: runtimeGid,
+      });
+    } else {
+      log.debug("bootstrap.agent.session_exists", { sessionId: id, agentId });
+    }
     return;
   }
 
