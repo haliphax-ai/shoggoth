@@ -293,4 +293,39 @@ describe("bootstrapMainSession", () => {
       teardown();
     }
   });
+
+  it("repairs session rows with stale runtime credentials", async () => {
+    setup();
+    try {
+      const db = new Database(":memory:");
+      migrate(db, defaultMigrationsDir());
+      const stub = stubLogger();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setRootLogger(stub.logger as any);
+      await bootstrapMainSession({ db, config: makeConfig() });
+
+      const store = createSessionStore(db);
+      const id = "agent:main:discord:channel:1234567890123456789";
+      // Simulate a row stamped by an old bootstrap with daemon process creds
+      store.update(id, { runtimeUid: 4242, runtimeGid: 4242 });
+      stub.logs.length = 0;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setRootLogger(stub.logger as any);
+      await bootstrapMainSession({ db, config: makeConfig() });
+
+      const repaired = stub.logs.find((l) => l.msg === "bootstrap.agent.session_creds_repaired");
+      assert.ok(repaired, "should log credential repair");
+
+      const session = store.getById(id);
+      const { resolveAgentCreds } = await import("../src/agent-creds");
+      const expected = resolveAgentCreds();
+      assert.equal(session!.runtimeUid, expected.uid, "uid should be repaired");
+      assert.equal(session!.runtimeGid, expected.gid, "gid should be repaired");
+
+      db.close();
+    } finally {
+      teardown();
+    }
+  });
 });
