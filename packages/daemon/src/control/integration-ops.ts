@@ -23,6 +23,7 @@ import {
   parseAgentSessionUrn,
   redactDeep,
   resolveEffectiveModelsConfig,
+  modelProvidersToEntries,
   shoggothConfigFragmentSchema,
   shoggothConfigSchema,
 } from "@shoggoth/shared";
@@ -75,7 +76,9 @@ import {
 } from "../subagent/persistent-subagent-timers";
 import { enableToolsForSession } from "../sessions/session-tool-discovery";
 import { requestSessionTurnAbort } from "../sessions/session-turn-abort";
-import { validateModelRefExists } from "../sessions/model-resolution";
+import { validateModelRefExists, getSessionPrimaryModelRef } from "../sessions/model-resolution";
+import { getModelContextWindowTokens } from "../model-metadata";
+import { postTurnSurfaceNotice } from "../presentation/active-turn-surface";
 import { getSubagentHandles, rememberSubagentHandles } from "../subagent/subagent-disposables";
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
 import type { OobTurnBannerHandle } from "../subagent/subagent-extension-ref";
@@ -3308,17 +3311,90 @@ export async function handleIntegrationControlOp(
             }
           }
         }
+
+        // Model-switch guards (mid-turn AND idle). Only apply when the new
+        // selection actually changes the session's primary model ref: an
+        // invocation-only tweak (no `model`) or re-selecting the current
+        // model is always allowed.
+        const effective = resolveEffectiveModelsConfig(ctx.config, sessionId) ?? ctx.config.models;
+        const previousRef =
+          getSessionPrimaryModelRef(row.modelSelection) ??
+          (typeof effective?.failoverChain?.[0] === "string"
+            ? effective.failoverChain[0]
+            : undefined);
+        const requestedRef = getSessionPrimaryModelRef(val);
+        if (requestedRef && requestedRef !== previousRef) {
+          // Compatibility guard: the ref must resolve in the session's
+          // effective models config (same tool-calling interface — every
+          // configured provider serves completeWithTools), otherwise the
+          // daemon could not serve it.
+          const exists = validateModelRefExists(effective, requestedRef);
+          if (!exists.ok) {
+            throw new IntegrationOpError("ERR_MODEL_NOT_FOUND", exists.error);
+          }
+          // Context window for a "providerId/model" ref: metadata store
+          // first (provider-reported/default), effective config as fallback.
+          const lookupWindow = (ref: string): number | undefined => {
+            const p = ref.indexOf("/");
+            const providerId = ref.slice(0, p);
+            const modelName = ref.slice(p + 1);
+            return (
+              getModelContextWindowTokens(providerId, modelName) ??
+              modelProvidersToEntries(effective?.providers).find((pr) => pr.id === providerId)
+                ?.models?.[modelName]?.contextWindowTokens
+            );
+          };
+          // Context-window guard: the new model's window must be large
+          // enough for the session's estimated context usage, else the
+          // session would overflow it.
+          const newWindow = lookupWindow(requestedRef);
+          const estimatedUsage = ctx.stateDb
+            ? getContextFill(ctx.stateDb, sessionId, row.contextSegmentId)
+            : 0;
+          if (newWindow != null && estimatedUsage > newWindow) {
+            throw new IntegrationOpError(
+              "ERR_CONTEXT_WINDOW_TOO_SMALL",
+              `model "${requestedRef}" has a context window of ${newWindow} tokens, smaller than the session's estimated context usage of ${estimatedUsage} tokens`,
+            );
+          }
+          // Cap-reduction warning: the switch is allowed but reduces the
+          // context window cap — tell the user through the banner system.
+          const oldWindow = previousRef ? lookupWindow(previousRef) : undefined;
+          if (newWindow != null && oldWindow != null && newWindow < oldWindow) {
+            const notice = `> ⚠️ Context window cap reduced by model switch: ${oldWindow.toLocaleString("en-US")} → ${newWindow.toLocaleString("en-US")} tokens (\`${requestedRef}\`)`;
+            // Folded into the live turn's output when one is running;
+            // standalone status post only when no turn surface exists.
+            if (!postTurnSurfaceNotice(sessionId, notice)) {
+              const ext = subagentRuntimeExtensionRef.current;
+              void ext?.sendStatusMessage?.(sessionId, notice).catch((e) => {
+                ioLog.warn("session_model reduced-window notice failed", {
+                  sessionId,
+                  error: e instanceof Error ? e.message : String(e),
+                });
+              });
+            }
+          }
+        }
+
         const modelSelection = val === null ? undefined : val;
         ctx.sessions.update(sessionId, {
           modelSelection: modelSelection ?? null,
         });
         const updated = ctx.sessions.getById(sessionId);
-        const effective = resolveEffectiveModelsConfig(ctx.config, sessionId) ?? null;
+        if (requestedRef && requestedRef !== previousRef) {
+          // Notify the live turn when a mid-turn switch takes effect: this
+          // folds into the in-flight turn's output, and is a no-op when the
+          // session is idle (the next turn simply starts on the new model).
+          postTurnSurfaceNotice(
+            sessionId,
+            `> 🔄 Model switch applied mid-turn: \`${requestedRef}\` serves the next round`,
+          );
+        }
         return {
           ok: true,
           session_id: sessionId,
           model_selection: updated?.modelSelection ?? null,
-          effective_models: effective,
+          effective_models: resolveEffectiveModelsConfig(ctx.config, sessionId) ?? null,
         };
       }
       const effective = resolveEffectiveModelsConfig(ctx.config, sessionId) ?? null;
