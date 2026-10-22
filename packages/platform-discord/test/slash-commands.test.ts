@@ -539,6 +539,166 @@ describe("createDiscordInteractionHandler", () => {
     assert.strictEqual(body.type, 9, "Expected response type 9 (MODAL)");
   });
 
+  it("sets the model directly when model_id is provided", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransport(calls);
+    const invokeOps: Array<{ op: string; payload: Record<string, unknown> }> = [];
+    const handler = createDiscordInteractionHandler({
+      transport,
+      applicationId: "app-123",
+      logger: stubLogger(),
+      abortSession: async () => false,
+      invokeControlOp: async (op, payload) => {
+        invokeOps.push({ op, payload });
+        return { ok: true };
+      },
+      getModelsConfig: async () => ({ providers: [{ id: "anthropic", name: "Anthropic" }] }),
+      resolveSessionForChannel: () => "agent:main:discord:channel:abc",
+    });
+
+    const ev: DiscordInteractionEvent = {
+      kind: "interaction_create",
+      id: "int-20",
+      token: "tok-20",
+      type: 2,
+      channelId: "ch-1",
+      userId: "u-1",
+      data: {
+        name: "model",
+        options: [{ name: "model_id", type: 3, value: "anthropic/claude-3-5-sonnet" }],
+      },
+    };
+
+    handler(ev);
+    await vi.advanceTimersByTimeAsync(50);
+
+    assert.strictEqual(invokeOps.length, 1, "Expected exactly one control op");
+    assert.strictEqual(invokeOps[0]!.op, "session_model");
+    assert.deepStrictEqual(invokeOps[0]!.payload, {
+      session_id: "agent:main:discord:channel:abc",
+      model_selection: { model: "anthropic/claude-3-5-sonnet" },
+    });
+
+    assert.strictEqual(calls.length, 1);
+    const [, , body] = calls[0]!.args as [
+      string,
+      string,
+      { type: number; data: Record<string, unknown> },
+    ];
+    assert.strictEqual(body.type, 4, "Expected response type 4 (CHANNEL_MESSAGE_WITH_SOURCE)");
+    assert.ok(
+      String(body.data.content).includes("Model set to"),
+      `Expected confirmation, got: ${String(body.data.content)}`,
+    );
+    const components = body.data.components as unknown[] | undefined;
+    assert.ok(
+      components === undefined || components.length === 0,
+      "Must not respond with a modal or select menu",
+    );
+  });
+
+  it("rejects an invalid model_id without invoking session_model", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransport(calls);
+    const invokeOps: Array<{ op: string; payload: Record<string, unknown> }> = [];
+    const handler = createDiscordInteractionHandler({
+      transport,
+      applicationId: "app-123",
+      logger: stubLogger(),
+      abortSession: async () => false,
+      invokeControlOp: async (op, payload) => {
+        invokeOps.push({ op, payload });
+        return { ok: true };
+      },
+      getModelsConfig: async () => ({ providers: [{ id: "anthropic", name: "Anthropic" }] }),
+      resolveSessionForChannel: () => "agent:main:discord:channel:abc",
+    });
+
+    const ev: DiscordInteractionEvent = {
+      kind: "interaction_create",
+      id: "int-21",
+      token: "tok-21",
+      type: 2,
+      channelId: "ch-1",
+      userId: "u-1",
+      data: {
+        name: "model",
+        options: [{ name: "model_id", type: 3, value: "gpt-4o" }],
+      },
+    };
+
+    handler(ev);
+    await vi.advanceTimersByTimeAsync(50);
+
+    assert.strictEqual(
+      invokeOps.length,
+      0,
+      "Must not invoke session_model for an invalid model_id",
+    );
+    assert.strictEqual(calls.length, 1);
+    const [, , body] = calls[0]!.args as [
+      string,
+      string,
+      { type: number; data: { content: string } },
+    ];
+    assert.ok(
+      body.data.content.includes("Invalid model format"),
+      `Expected validation error, got: ${body.data.content}`,
+    );
+  });
+
+  it("keeps the picker flow when model_id is omitted", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const transport = stubTransport(calls);
+    const invokeOps: Array<{ op: string; payload: Record<string, unknown> }> = [];
+    const handler = createDiscordInteractionHandler({
+      transport,
+      applicationId: "app-123",
+      logger: stubLogger(),
+      abortSession: async () => false,
+      invokeControlOp: async (op, payload) => {
+        invokeOps.push({ op, payload });
+        return { ok: true, result: { effective_models: null } };
+      },
+      getModelsConfig: async () => ({ providers: [{ id: "anthropic", name: "Anthropic" }] }),
+      resolveSessionForChannel: () => "agent:main:discord:channel:abc",
+    });
+
+    const ev: DiscordInteractionEvent = {
+      kind: "interaction_create",
+      id: "int-22",
+      token: "tok-22",
+      type: 2,
+      channelId: "ch-1",
+      userId: "u-1",
+      data: { name: "model" },
+    };
+
+    handler(ev);
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Only the read-only lookup runs; nothing sets a model selection.
+    assert.ok(
+      invokeOps.every((o) => !("model_selection" in o.payload)),
+      "Must not set a model selection without model_id",
+    );
+
+    assert.strictEqual(calls.length, 1);
+    const [, , body] = calls[0]!.args as [
+      string,
+      string,
+      { type: number; data: Record<string, unknown> },
+    ];
+    assert.strictEqual(body.type, 4, "Expected response type 4 (CHANNEL_MESSAGE_WITH_SOURCE)");
+    assert.ok(Array.isArray(body.data.components), "Expected picker components");
+    const actionRow = body.data.components[0] as { components: Array<{ custom_id?: string }> };
+    const selectComponent = actionRow.components[0];
+    assert.ok(
+      selectComponent.custom_id?.startsWith("model_select"),
+      `Expected select menu, got custom_id: ${selectComponent.custom_id}`,
+    );
+  });
+
   it("steers the channel's session when no session_id is provided", async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
     const transport = stubTransport(calls);
@@ -1030,6 +1190,12 @@ describe("registerDiscordSlashCommands", () => {
     assert.ok(
       options.some((o) => o.name === "agent_id"),
       "Should have agent_id option",
+    );
+
+    // Should have the optional model_id shortcut option
+    assert.ok(
+      options.some((o) => o.name === "model_id"),
+      "Should have model_id option",
     );
 
     // Should NOT have model_selection option (dropdown flow)

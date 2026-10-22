@@ -165,6 +165,12 @@ const SLASH_COMMANDS = [
         description: "Agent ID (alternative to session_id)",
         required: false,
       },
+      {
+        name: "model_id",
+        type: 3,
+        description: "Set the model directly as provider/model instead of opening the picker",
+        required: false,
+      },
     ],
   },
   {
@@ -1587,6 +1593,59 @@ async function handleInteraction(
   }
 
   if (controlOp.op === "session_model") {
+    // Optional `model_id` shortcut: assign the model directly and skip the
+    // modal/dropdown picker. Same provider/model validation as the modal path.
+    const modelId = parsed.command.options.model_id?.trim();
+    if (modelId) {
+      const slashIdx = modelId.indexOf("/");
+      if (slashIdx < 1 || slashIdx === modelId.length - 1) {
+        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+          data: {
+            content: `⚠️ Invalid model format. Expected \`provider/model\`, got \`${modelId}\``,
+          },
+        });
+        return;
+      }
+
+      const shortcutPayload = { ...controlOp.payload };
+      if (!shortcutPayload.session_id && !shortcutPayload.agent_id) {
+        const resolved = deps.resolveSessionForChannel
+          ? deps.resolveSessionForChannel(parsed.channelId, parsed.guildId)
+          : undefined;
+        if (resolved) shortcutPayload.session_id = resolved;
+      }
+      if (!shortcutPayload.session_id && !shortcutPayload.agent_id) {
+        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+          data: {
+            content: "⚠️ No session bound to this channel. Provide a session_id or agent_id.",
+          },
+        });
+        return;
+      }
+
+      try {
+        const res = await deps.invokeControlOp("session_model", {
+          ...shortcutPayload,
+          model_selection: { model: modelId },
+        });
+        const content = res.ok
+          ? `✅ Model set to \`${modelId}\``
+          : `⚠️ Failed to set model: ${res.error ?? "unknown error"}`;
+        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+          data: { content },
+        });
+      } catch (err) {
+        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+          data: { content: `⚠️ Failed to set model: ${String(err)}` },
+        });
+      }
+      return;
+    }
+
     try {
       const payload = { ...controlOp.payload };
       if (!payload.session_id && deps.resolveSessionForChannel) {
