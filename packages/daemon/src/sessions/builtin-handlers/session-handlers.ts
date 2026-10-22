@@ -478,6 +478,17 @@ async function subagentHandler(
     payload.enable_tools = (enableToolsArg as string[]).map((x) => x.trim());
   }
 
+  // contract mode for one-shot spawns: array of {path, action, summary};
+  // forwarded verbatim and validated authoritatively at the control op.
+  if (action === "spawn_one_shot" && args.contract !== undefined && args.contract !== null) {
+    payload.contract = args.contract;
+  }
+
+  // judge: explicit decision model (provider-id/model-name) for contract judging
+  if (action === "spawn_one_shot" && typeof args.judge === "string" && args.judge.trim()) {
+    payload.judge = args.judge.trim();
+  }
+
   log.info("subagent invoked", { action, sessionId: ctx.sessionId });
   if (spawnAction) {
     log.info("subagent spawned", {

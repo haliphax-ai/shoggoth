@@ -1,10 +1,10 @@
-import { SHOGGOTH_AGENT_TOKEN_ENV } from "@shoggoth/authn";
+import { SHOGGOTH_AGENT_TOKEN_ENV, WIRE_VERSION } from "@shoggoth/authn";
 import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import type { WireRequest } from "@shoggoth/authn";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
-import type { ShoggothConfig, SystemContext } from "@shoggoth/shared";
+import type { ShoggothConfig, ShoggothContractEntry, SystemContext } from "@shoggoth/shared";
 import { getLogger } from "../logging";
 import { resolveConfiguredSubagentModel } from "../config/effective-runtime";
 const ioLog = getLogger("integration-ops");
@@ -81,6 +81,17 @@ import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref"
 import type { OobTurnBannerHandle } from "../subagent/subagent-extension-ref";
 import { buildSessionMessageTurnBanner } from "../messaging/oob-turn-banner";
 import type { OobTurnOutcome } from "../messaging/oob-turn-banner";
+import {
+  CONTRACT_YES_MINIMUM_DEFAULT,
+  captureGitHead,
+  contractInstruction,
+  parseContract,
+  validateContractRepository,
+  verifyContract,
+  type ContractCreds,
+  type ContractStatus,
+} from "../subagent/contract";
+import { sessionCreds } from "../sessions/session-agent-turn";
 import { terminatePersistentSubagentSession } from "../subagent/subagent-kill";
 import {
   buildThreadSubagentCreatedBanner,
@@ -1517,7 +1528,7 @@ export async function handleIntegrationControlOp(
       const pl = payloadObject(req);
       const parentSessionId = requireString(pl, "parent_session_id");
       assertAgentMayUseSubagentSpawn(principal, parentSessionId, sessions, ctx.config);
-      const prompt = requireString(pl, "prompt");
+      let prompt = requireString(pl, "prompt");
       const agentIdRaw = pl.agent_id;
       const reservedAgentIds = new Set(Object.keys(ctx.config.agents?.list ?? {}));
       const parentAgentIdForSubagent = parseAgentSessionUrn(parentSessionId)?.agentId;
@@ -1562,6 +1573,97 @@ export async function handleIntegrationControlOp(
         );
       }
       const modelOptions = optionalRecordObject(pl, "model_options");
+
+      // Contract mode (one-shot only): an optional list of target files with
+      // the required modification type and a brief expectation. Validation
+      // runs BEFORE the child session exists so a target outside a git
+      // repository (or a malformed entry) fails the spawn and notifies the
+      // agent. An unset/empty contract leaves the mode inactive.
+      let contract: ShoggothContractEntry[] | undefined;
+      let contractRepoDir: string | undefined;
+      let contractBaselineRef: string | undefined;
+      let contractCreds: ContractCreds | undefined;
+      if (pl.contract !== undefined && pl.contract !== null) {
+        if (modeRaw !== "one_shot") {
+          throw new IntegrationOpError(
+            "ERR_INVALID_PAYLOAD",
+            "contract is only supported for one_shot subagent spawns",
+          );
+        }
+        try {
+          contract = parseContract(pl.contract);
+        } catch (e) {
+          throw new IntegrationOpError(
+            "ERR_INVALID_PAYLOAD",
+            e instanceof Error ? e.message : String(e),
+          );
+        }
+      }
+      if (contract) {
+        // Contract paths resolve against where the session actually lives: an
+        // explicit `cd` working directory, else the agent workspace root. The
+        // daemon's own cwd (`/app` in a container) must never enter the
+        // resolution — it is not the session's directory, so a check against
+        // it can only ever report ERR_CONTRACT_NOT_IN_REPO.
+        const parentWorkingDirectory = parent.workingDirectory ?? parent.workspacePath;
+        // Contract git runs with the parent session's runtime creds so the
+        // checks read the same workspace the agent session owns — not the
+        // daemon's own uid.
+        contractCreds = sessionCreds(parent.runtimeUid, parent.runtimeGid);
+        // The child sees its own contract in the task prompt (see the tool
+        // descriptor) — it must not be restated in the prompt body.
+        prompt += `\n\n${contractInstruction(contract, parentWorkingDirectory)}`;
+        const check = validateContractRepository(parentWorkingDirectory, contract, contractCreds);
+        if (!check.ok || !check.repoDir) {
+          throw new IntegrationOpError(
+            "ERR_CONTRACT_NOT_IN_REPO",
+            check.error ?? "contract target is not in a git repository",
+          );
+        }
+        contractRepoDir = check.repoDir;
+        // Baseline for the post-turn diff: HEAD at spawn time (the "source
+        // branch" is the state the subagent is expected to modify). Captured
+        // now so mid-turn commits by the subagent still count.
+        try {
+          contractBaselineRef = captureGitHead(contractRepoDir, contractCreds);
+        } catch {
+          throw new IntegrationOpError(
+            "ERR_CONTRACT_NOT_IN_REPO",
+            "contract repository has no HEAD to diff against",
+          );
+        }
+      }
+
+      // `judge`: explicit decision model (provider-id/model-name) for contract
+      // judging. Validated against the decision config at call time; unset
+      // falls back to agents.contract.model, then the decision default model.
+      let judgeModel: string | undefined;
+      if (typeof pl.judge === "string" && pl.judge.trim()) {
+        if (!contract) {
+          throw new IntegrationOpError(
+            "ERR_INVALID_PAYLOAD",
+            "judge requires a non-empty contract",
+          );
+        }
+        const ref = pl.judge.trim();
+        const slash = ref.indexOf("/");
+        const providerId = slash > 0 ? ref.slice(0, slash) : "";
+        const modelName = slash > 0 && slash < ref.length - 1 ? ref.slice(slash + 1) : "";
+        const provider = providerId
+          ? (
+              ctx.config.decision?.providers as
+                | Record<string, { models?: Record<string, unknown> }>
+                | undefined
+            )?.[providerId]
+          : undefined;
+        if (!provider || !provider.models?.[modelName]) {
+          throw new IntegrationOpError(
+            "ERR_INVALID_JUDGE",
+            `judge model is not a configured decision provider/model: ${ref}`,
+          );
+        }
+        judgeModel = ref;
+      }
 
       // Resolve effective subagentModel from config (per-agent override > global default).
       // Only applies when per-spawn model_options doesn't already set a model.
@@ -1734,6 +1836,85 @@ export async function handleIntegrationControlOp(
           promptLen: prompt.length,
         });
         pushSystemContext(childId, "One-shot subagent task spawned by parent session.");
+        // Contract mode: verify after the turn that every target was acted
+        // upon with its contractual type, then judge each resulting diff with
+        // the decision model in batches. A broken contract or any "yes"
+        // below agents.contract.yesMinimum marks the contract unfulfilled.
+        const runContractDecision = async (req: {
+          state: unknown;
+          questions: Record<string, unknown>;
+          model?: string;
+        }): Promise<Record<string, unknown>> => {
+          const res = await handleIntegrationControlOp(
+            {
+              v: WIRE_VERSION,
+              id: `contract-${Date.now()}`,
+              op: "decision_evaluate",
+              auth: { kind: "agent", session_id: childId, token: "" },
+              payload: {
+                ...(req.model ? { model: req.model } : {}),
+                state: req.state,
+                questions: req.questions,
+              },
+            },
+            principal,
+            ctx,
+          );
+          if (res === undefined) {
+            // Feature gating: decision_evaluate returns undefined when no
+            // decision provider with models is configured.
+            return { error: "decision model not configured" };
+          }
+          if (res && typeof res === "object" && "error" in res) {
+            return { error: String((res as { error: unknown }).error) };
+          }
+          if (res && typeof res === "object" && "answers" in res) {
+            const wrapped = res as { status?: string; answers?: unknown };
+            if (wrapped.status !== "complete") {
+              return { error: `decision status: ${wrapped.status ?? "unknown"}` };
+            }
+            return (wrapped.answers ?? {}) as Record<string, unknown>;
+          }
+          return (res ?? {}) as Record<string, unknown>;
+        };
+        const judgeContract = async (): Promise<ContractStatus> => {
+          if (!contract) {
+            return {
+              broken: false,
+              yesMinimum: CONTRACT_YES_MINIMUM_DEFAULT,
+              entries: [],
+              judged: [],
+              violated: [],
+              deletedSkipped: [],
+              baseline: "",
+            };
+          }
+          try {
+            return await verifyContract({
+              // Same resolution rule as spawn-time validation (see above).
+              cwd: parent.workingDirectory ?? parent.workspacePath,
+              entries: contract,
+              ...(contractBaselineRef ? { sourceBranch: contractBaselineRef } : {}),
+              ...(contractCreds ? { creds: contractCreds } : {}),
+              config: ctx.config,
+              ...(judgeModel ? { judgeModel } : {}),
+              runDecision: runContractDecision,
+            });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            subLog.warn("contract verification errored", { childId, error: msg });
+            return {
+              broken: true,
+              reason: `verification failed: ${msg}`,
+              yesMinimum: CONTRACT_YES_MINIMUM_DEFAULT,
+              entries: contract,
+              judged: [],
+              violated: [],
+              deletedSkipped: [],
+              baseline: "",
+            };
+          }
+        };
         const backgroundSpawn = pl.background === true;
         if (backgroundSpawn) {
           // Fire-and-forget: run the model turn asynchronously and return immediately.
@@ -1761,11 +1942,19 @@ export async function handleIntegrationControlOp(
               },
               delivery: { kind: "internal" },
             })
-            .then((turn) => {
+            .then(async (turn) => {
               subLog.info("subagent one_shot (background) model turn completed", {
                 childId,
                 replyLen: turn.latestAssistantText?.length ?? 0,
               });
+              if (contract) {
+                const contractStatus = await judgeContract();
+                subLog.info("subagent contract judged (background)", {
+                  childId,
+                  broken: contractStatus.broken,
+                  ...(contractStatus.reason ? { reason: contractStatus.reason } : {}),
+                });
+              }
               return deliverSubagentResult(ext, {
                 deliveryMode,
                 childSessionId: childId,
@@ -1809,6 +1998,7 @@ export async function handleIntegrationControlOp(
             background: true,
             respond_to: respondTo,
             internal: internalDelivery,
+            ...(contract ? { contract: { active: true, pending: true } } : {}),
           };
         }
         let turn: { latestAssistantText: string; failoverMeta?: unknown };
@@ -1848,6 +2038,17 @@ export async function handleIntegrationControlOp(
             ctx.hitlClear?.autoApproveGate,
           );
         }
+        // Contract mode: judge the turn's diffs against the contract and
+        // return the verdict as an extra field on the spawn response.
+        let contractStatus: ContractStatus | undefined;
+        if (contract) {
+          contractStatus = await judgeContract();
+          subLog.info("subagent contract judged", {
+            childId,
+            broken: contractStatus.broken,
+            ...(contractStatus.reason ? { reason: contractStatus.reason } : {}),
+          });
+        }
         ctx.recordIntegrationAudit({
           action: "subagent.spawn_one_shot",
           resource: childId,
@@ -1865,6 +2066,7 @@ export async function handleIntegrationControlOp(
             respond_to: respondTo,
             internal: internalDelivery,
             failover: turn.failoverMeta ?? null,
+            ...(contractStatus ? { contract: contractStatus } : {}),
           };
         }
         // queue or drop: route through deliverSubagentResult, suppress reply in response
@@ -1885,6 +2087,7 @@ export async function handleIntegrationControlOp(
           respond_to: respondTo,
           internal: internalDelivery,
           delivery_mode: deliveryMode,
+          ...(contractStatus ? { contract: contractStatus } : {}),
         };
       }
       // `inactivity_minutes` (if provided) is the inactivity window: the session is

@@ -128,6 +128,36 @@ const workflowToolArgs = {
             description:
               "Optional: tool IDs or glob patterns (e.g. 'kanban-*') to enable for the agent task's subagent session. Added to the configured defaults.",
           },
+          contract: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                path: {
+                  type: "string",
+                  description:
+                    "File or folder path (relative to the task's working directory, or absolute inside its git repository)",
+                },
+                action: {
+                  type: "string",
+                  enum: ["create", "update", "delete"],
+                  description: "The required modification type on this path",
+                },
+                summary: {
+                  type: "string",
+                  description: "Brief summary of the expected change (not exact lines or contents)",
+                },
+              },
+              required: ["path", "action", "summary"],
+            },
+            description:
+              "Optional: contract mode for agent tasks. When a non-empty array is given, the task succeeds only if every target was inside a git repository at spawn time, was acted upon with its contractual action, no file outside the listed targets changed, and the resulting git diff is judged fulfilled by a decision model in batches (any yes-probability below agents.contract.yesMinimum, default 0.85, counts as not fulfilled). THE CONTRACT IS AUTOMATICALLY APPENDED TO THE TASK PROMPT — task prompts carry the task only, never a restatement of the contract. A failed task carries a `reason` naming what broke the contract; it is absent when the contract holds.",
+          },
+          judge: {
+            type: "string",
+            description:
+              "Optional: decision model id (provider-id/model-name) used to judge the task's contract; must be a configured decision provider/model. Unset uses agents.contract.model or the decision config default.",
+          },
         },
         required: ["id"],
       },

@@ -239,6 +239,36 @@ export const subagentToolArgs = {
       description:
         "spawn_one_shot, spawn_persistent: tool IDs or glob patterns (e.g. 'kanban-*') to enable for the subagent session. Added to the configured defaults, not a replacement.",
     },
+    contract: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description:
+              "File or folder path (relative to the spawning session's working directory, or absolute inside its git repository)",
+          },
+          action: {
+            type: "string",
+            enum: ["create", "update", "delete"],
+            description: "The required modification type on this path",
+          },
+          summary: {
+            type: "string",
+            description: "Brief summary of the expected change (not exact lines or contents)",
+          },
+        },
+        required: ["path", "action", "summary"],
+      },
+      description:
+        "spawn_one_shot: optional contract for one-shot subagents. When a non-empty array is given, contract mode activates: every target must be inside a git repository at call time (spawn fails otherwise), each target must end up acted upon with its contractual action (create/update/delete), no file in the repository outside the listed targets may change, and each resulting git diff against the spawn-time HEAD is judged by a decision model (batched, see agents.contract.batchSize) with any yes-probability below agents.contract.yesMinimum (default 0.85) counting as not fulfilled. THE CONTRACT IS AUTOMATICALLY APPENDED TO THE SUBAGENT'S TASK PROMPT — do not restate it in `prompt`; write only the task itself. The spawn response carries an extra `contract` field: `broken` (boolean) with a `reason` naming what broke it (a target not acted upon with its contractual type, an unlisted file change, a judge rejection, or a verification failure) — `reason` is absent when the contract holds — plus the per-file scores. No-op when unset or empty.",
+    },
+    judge: {
+      type: "string",
+      description:
+        "spawn_one_shot: optional decision model id (provider-id/model-name) used to judge contract fulfillment; when unset the default decision model implied by agents.contract.model or the decision config default is used.",
+    },
   },
   required: ["action"],
 } as const;

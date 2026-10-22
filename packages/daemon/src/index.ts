@@ -610,6 +610,7 @@ async function initWorkflowServer(
       const agentId = parseAgentSessionUrn(parentSessionId)?.agentId;
       return resolveConfiguredSubagentModel(configRef.current, agentId);
     },
+    getContractConfig: () => configRef.current,
     stateDb: db,
     runSessionModelTurn: (input) => {
       const ext = subagentRuntimeExtensionRef.current;
