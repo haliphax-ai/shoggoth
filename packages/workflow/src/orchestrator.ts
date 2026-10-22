@@ -37,19 +37,13 @@ export interface PollResult {
   /** Actual completion timestamp (epoch ms). When absent, the orchestrator uses Date.now(). */
   completedAt?: number;
   /**
-   * Contract verdict when the task defined a contract. A verdict whose
-   * `status` is not `fulfilled` accompanies a failed result, so the task's
-   * success is determined by the contract (not just a clean turn). `status`
-   * names the single phase that decided the verdict — `file_ops` (targets
-   * not acted on with their contractual type), `judge` (decision model
-   * rejected the diffs), or `error` (verification infrastructure failed) —
-   * and `reason` carries phase detail that is absent when fulfilled.
+   * Contract verdict when the task defined a contract. A `broken` verdict
+   * accompanies a failed result, so the task's success is determined by the
+   * contract (not just a clean turn); `reason` names what broke it (a
+   * structural miss, an unlisted file change, a judge rejection, or a
+   * verification failure) and is absent while the contract holds.
    */
-  contract?: {
-    status: "fulfilled" | "file_ops" | "judge" | "error";
-    reason?: string;
-    error?: string;
-  };
+  contract?: { broken: boolean; reason?: string };
 }
 
 export interface SpawnAdapter {

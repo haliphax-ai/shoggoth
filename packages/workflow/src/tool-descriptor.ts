@@ -151,7 +151,7 @@ const workflowToolArgs = {
               required: ["path", "action", "summary"],
             },
             description:
-              "Optional: contract mode for agent tasks. When a non-empty array is given, the task succeeds only if every target was inside a git repository at spawn time, was acted upon with its contractual action, and the resulting git diff is judged fulfilled by a decision model in batches (any yes-probability below agents.contract.yesMinimum, default 0.85, counts as not fulfilled). The task verdict reports a single status naming the phase that decided it (file_ops, judge, or error) when it did not succeed.",
+              "Optional: contract mode for agent tasks. When a non-empty array is given, the task succeeds only if every target was inside a git repository at spawn time, was acted upon with its contractual action, no file outside the listed targets changed, and the resulting git diff is judged fulfilled by a decision model in batches (any yes-probability below agents.contract.yesMinimum, default 0.85, counts as not fulfilled). THE CONTRACT IS AUTOMATICALLY APPENDED TO THE TASK PROMPT — task prompts carry the task only, never a restatement of the contract. A failed task carries a `reason` naming what broke the contract; it is absent when the contract holds.",
           },
           judge: {
             type: "string",

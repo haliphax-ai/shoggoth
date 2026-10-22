@@ -212,8 +212,8 @@ describe("workflow spawn adapter contract mode", () => {
       const contract = entry.contract as ContractStatus | undefined;
       assert.ok(contract, "contract verdict must be recorded");
       // No decision provider configured for the fake → decision fails closed.
-      assert.equal(contract.status, "error");
-      assert.match(contract.error ?? "", /decision/);
+      assert.equal(contract.broken, true);
+      assert.match(contract.reason ?? "", /decision/);
     }
     await rm(dir, { recursive: true, force: true });
   });
@@ -229,7 +229,7 @@ describe("workflow poll adapter contract mode", () => {
           output: "work product",
           completedAt: Date.now(),
           contract: {
-            status: "judge",
+            broken: true,
             reason: "rejected by the judge: a.txt",
             yesMinimum: 0.85,
             entries: [],
@@ -250,8 +250,8 @@ describe("workflow poll adapter contract mode", () => {
 
     const res = await poller.poll("child-1");
     assert.equal(res.status, "failed");
-    assert.match(res.error ?? "", /contract rejected by the judge.*a\.txt/);
-    assert.equal(res.contract?.status, "judge");
+    assert.match(res.error ?? "", /rejected by the judge.*a\.txt/);
+    assert.equal(res.contract?.broken, true);
   });
 
   it("returns failed with a broken-contract reason", async () => {
@@ -263,7 +263,7 @@ describe("workflow poll adapter contract mode", () => {
           output: "work product",
           completedAt: Date.now(),
           contract: {
-            status: "file_ops",
+            broken: true,
             reason: "not acted upon with the contractual type: b.txt",
             yesMinimum: 0.85,
             entries: [],
@@ -284,7 +284,7 @@ describe("workflow poll adapter contract mode", () => {
 
     const res = await poller.poll("child-1");
     assert.equal(res.status, "failed");
-    assert.match(res.error ?? "", /file-op phase.*b\.txt/);
+    assert.match(res.error ?? "", /not acted upon.*b\.txt/);
   });
 
   it("returns done with the verdict when the contract is fulfilled", async () => {
@@ -296,7 +296,7 @@ describe("workflow poll adapter contract mode", () => {
           output: "work product",
           completedAt: Date.now(),
           contract: {
-            status: "fulfilled",
+            broken: false,
             yesMinimum: 0.85,
             entries: [],
             judged: [{ path: "a.txt", action: "update", yes: 0.97, fulfilled: true }],
@@ -317,6 +317,6 @@ describe("workflow poll adapter contract mode", () => {
     const res = await poller.poll("child-1");
     assert.equal(res.status, "done");
     assert.equal(res.output, "work product");
-    assert.equal(res.contract?.status, "fulfilled");
+    assert.equal(res.contract?.broken, false);
   });
 });

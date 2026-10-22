@@ -356,8 +356,8 @@ describe("verifyContract", () => {
       entries: [entry("a.txt", "update")],
       config: config(),
     });
-    assert.equal(status.status, "error");
-    assert.match(status.error ?? "", /not in a git repository/);
+    assert.equal(status.broken, true);
+    assert.match(status.reason ?? "", /not in a git repository/);
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -370,7 +370,7 @@ describe("verifyContract", () => {
       config: config(),
       runDecision: async () => ({ contract_0: { noul: 0.97 } }),
     });
-    assert.equal(status.status, "fulfilled");
+    assert.equal(status.broken, false);
     assert.equal(status.reason, undefined);
     assert.equal(status.judged.length, 1);
     assert.equal(status.judged[0].yes, 0.97);
@@ -386,7 +386,7 @@ describe("verifyContract", () => {
       config: config(),
       runDecision: async () => ({ contract_0: { noul: 0.9 } }),
     });
-    assert.equal(status.status, "fulfilled");
+    assert.equal(status.broken, false);
     assert.match(status.judged[0].path, /a\.txt/);
     await rm(dir, { recursive: true, force: true });
   });
@@ -403,7 +403,7 @@ describe("verifyContract", () => {
         return { contract_0: { noul: 0.99 } };
       },
     });
-    assert.equal(status.status, "file_ops");
+    assert.equal(status.broken, true);
     assert.match(status.reason ?? "", /not acted upon/);
     assert.deepEqual(status.violated, ["a.txt"]);
     assert.equal(decided, false, "decision must not run for a structural break");
@@ -418,7 +418,7 @@ describe("verifyContract", () => {
       config: config(),
       runDecision: async () => ({ contract_0: { noul: 0.99 } }),
     });
-    assert.equal(status.status, "file_ops");
+    assert.equal(status.broken, true);
     assert.match(status.reason ?? "", /not acted upon/);
     assert.deepEqual(status.violated, ["a.txt"]);
     await rm(dir, { recursive: true, force: true });
@@ -437,7 +437,7 @@ describe("verifyContract", () => {
         return {};
       },
     });
-    assert.equal(status.status, "fulfilled");
+    assert.equal(status.broken, false);
     assert.deepEqual(status.deletedSkipped, ["a.txt"]);
     assert.equal(status.judged.length, 0);
     assert.equal(decided, false, "deleted files are not sent to the decision model");
@@ -453,7 +453,8 @@ describe("verifyContract", () => {
       config: config(),
       runDecision: async () => ({ contract_0: { noul: CONTRACT_YES_MINIMUM_DEFAULT - 0.1 } }),
     });
-    assert.equal(status.status, "judge");
+    assert.equal(status.broken, true);
+    assert.match(status.reason ?? "", /rejected by the judge/);
     assert.equal(status.judged[0].fulfilled, false);
     await rm(dir, { recursive: true, force: true });
   });
@@ -467,7 +468,7 @@ describe("verifyContract", () => {
       config: config({ agents: { contract: { yesMinimum: 0.5 } } }),
       runDecision: async () => ({ contract_0: { noul: 0.6 } }),
     });
-    assert.equal(status.status, "fulfilled");
+    assert.equal(status.broken, false);
     assert.equal(status.yesMinimum, 0.5);
     await rm(dir, { recursive: true, force: true });
   });
@@ -494,8 +495,77 @@ describe("verifyContract", () => {
     });
     assert.deepEqual(batchSizes, [5, 2]);
     assert.equal(status.judged.length, 7);
-    assert.equal(status.status, "fulfilled");
+    assert.equal(status.broken, false);
     await rm(dir, { recursive: true, force: true });
+  });
+
+  it("breaks when files outside the contract were modified", async () => {
+    const dir = await makeRepo();
+    try {
+      await writeFile(join(dir, "b.txt"), "surprise\n");
+      await writeFile(join(dir, "a.txt"), "one\ntwo\n");
+      let decided = false;
+      const status = await verifyContract({
+        cwd: dir,
+        entries: [entry("a.txt", "update", "append a line")],
+        config: config(),
+        runDecision: async () => {
+          decided = true;
+          return { contract_0: { noul: 0.99 } };
+        },
+      });
+      assert.equal(status.broken, true);
+      assert.match(status.reason ?? "", /outside the contract were modified: b\.txt/);
+      assert.deepEqual(status.unlisted, ["b.txt"]);
+      assert.equal(decided, false, "unlisted changes must break before judging");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not flag changes covered by a listed directory target", async () => {
+    const dir = await makeRepo();
+    try {
+      await mkdir(join(dir, "src"));
+      await writeFile(join(dir, "src", "m.ts"), "export const m = 1;\n");
+      const status = await verifyContract({
+        cwd: dir,
+        entries: [entry("src/m.ts", "create", "add module")],
+        config: config(),
+        runDecision: async () => ({ contract_0: { noul: 0.97 } }),
+      });
+      assert.equal(status.broken, false, status.reason);
+      assert.equal(status.unlisted?.length ?? 0, 0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when changed files cannot be enumerated", async () => {
+    const dir = await makeRepo();
+    await writeFile(join(dir, "a.txt"), "changed\n");
+    execFileSyncSpy.mockImplementation((...args: unknown[]) => {
+      if ((args[1] as string[])?.includes("--name-status")) {
+        const err = new Error("listing exploded") as Error & { code?: string };
+        err.code = "ENOSPC";
+        throw err;
+      }
+      return Reflect.apply(actualChildProcess.execFileSync, null, args);
+    });
+    try {
+      const status = await verifyContract({
+        cwd: dir,
+        entries: [entry("a.txt", "update", "append a line")],
+        config: config(),
+        runDecision: async () => ({ contract_0: { noul: 0.99 } }),
+      });
+      assert.equal(status.broken, true);
+      assert.match(status.reason ?? "", /files outside the contract were modified/);
+      assert.ok(status.unlisted?.length, "must not claim a clean change set");
+    } finally {
+      resetExecDelegate();
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("fails closed when the decision call errors", async () => {
@@ -507,8 +577,8 @@ describe("verifyContract", () => {
       config: config(),
       runDecision: async () => ({ error: "provider down" }),
     });
-    assert.equal(status.status, "error");
-    assert.match(status.error ?? "", /provider down/);
+    assert.equal(status.broken, true);
+    assert.match(status.reason ?? "", /provider down/);
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -522,7 +592,7 @@ describe("verifyContract", () => {
       config: config(),
       runDecision: async () => ({ contract_0: { noul: 0.95 } }),
     });
-    assert.equal(status.status, "fulfilled");
+    assert.equal(status.broken, false);
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -537,7 +607,7 @@ describe("verifyContract", () => {
       config: config(),
       runDecision: async () => ({ contract_0: { noul: 0.99 } }),
     });
-    assert.equal(status.status, "fulfilled");
+    assert.equal(status.broken, false);
     assert.equal(status.baseline, "feature-x");
     await rm(dir, { recursive: true, force: true });
   });
@@ -552,7 +622,7 @@ describe("verifyContract", () => {
       config: config(),
       runDecision: async () => ({ contract_0: { noul: 0.99 } }),
     });
-    assert.equal(status.status, "fulfilled");
+    assert.equal(status.broken, false);
     assert.notEqual(status.baseline, "no-such-branch");
     await rm(dir, { recursive: true, force: true });
   });

@@ -31,6 +31,7 @@ import { enableToolsForSession } from "./sessions/session-tool-discovery";
 import {
   CONTRACT_YES_MINIMUM_DEFAULT,
   captureGitHead,
+  contractInstruction,
   validateContractRepository,
   verifyContract,
   type ContractCreds,
@@ -206,6 +207,9 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
             creds?: ContractCreds;
           }
         | undefined;
+      // Set when a contract is active: the child sees its own contract in the
+      // task prompt (see the tool descriptor) so it is not restated there.
+      let taskPrompt = req.prompt;
       if (req.contract?.length) {
         // Same resolution rule as the control op: explicit cd directory,
         // else the agent workspace root — never the daemon's cwd.
@@ -244,6 +248,7 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
             );
           }
         }
+        taskPrompt = `${req.prompt}\n\n${contractInstruction(req.contract, cwd)}`;
         contractCtx = {
           entries: req.contract,
           cwd,
@@ -257,7 +262,7 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
       pushSystemContext(childId, "Workflow task execution.");
       const turnPromise = deps.runSessionModelTurn({
         sessionId: childId,
-        userContent: req.prompt,
+        userContent: taskPrompt,
         userMetadata: {
           workflow_task_id: req.taskId,
           subagent_one_shot: true,
@@ -294,8 +299,8 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
               });
             } catch (e) {
               contract = {
-                status: "error",
-                error: e instanceof Error ? e.message : String(e),
+                broken: true,
+                reason: `verification failed: ${e instanceof Error ? e.message : String(e)}`,
                 yesMinimum: CONTRACT_YES_MINIMUM_DEFAULT,
                 entries: contractCtx.entries,
                 judged: [],
@@ -307,7 +312,7 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
             log.info("task contract judged", {
               sessionId: childId,
               taskId: req.taskId,
-              status: contract.status,
+              broken: contract.broken,
               ...(contract.reason ? { reason: contract.reason } : {}),
             });
           }
@@ -366,36 +371,30 @@ export function createDaemonPollAdapter(deps: DaemonPollAdapterDeps): PollAdapte
       if (completion) {
         if (completion.ok) {
           const c = completion.contract;
-          if (c && c.status !== "fulfilled") {
+          if (c?.broken) {
             // Contract mode: the turn succeeded but the contract did not —
-            // the task's success is determined by the contract verdict.
-            const reason =
-              c.status === "file_ops"
-                ? `contract broken in the file-op phase: ${c.violated.join(", ")} not acted upon with its contractual type`
-                : c.status === "judge"
-                  ? `contract rejected by the judge: ${c.judged
-                      .filter((j) => !j.fulfilled)
-                      .map((j) => `${j.path} (yes=${j.yes.toFixed(3)})`)
-                      .join(", ")}`
-                  : `contract verification failed: ${c.error ?? "unknown error"}`;
+            // the task's success is determined by the contract verdict. The
+            // per-file scores augment the reason for triage.
+            const reason = `${c.reason ?? "contract broken"}${
+              c.judged.some((j) => !j.fulfilled)
+                ? ` (${c.judged
+                    .filter((j) => !j.fulfilled)
+                    .map((j) => `${j.path} yes=${j.yes.toFixed(3)}`)
+                    .join(", ")})`
+                : ""
+            }`;
             return {
               status: "failed",
               error: reason,
               completedAt: completion.completedAt,
-              contract: {
-                status: c.status,
-                ...(c.reason ? { reason: c.reason } : {}),
-                error: reason,
-              },
+              contract: { broken: true, reason },
             };
           }
           return {
             status: "done",
             output: completion.output,
             completedAt: completion.completedAt,
-            ...(c
-              ? { contract: { status: c.status, ...(c.reason ? { reason: c.reason } : {}) } }
-              : {}),
+            ...(c ? { contract: { broken: false } } : {}),
           };
         }
         return {

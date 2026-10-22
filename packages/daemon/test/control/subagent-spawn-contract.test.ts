@@ -320,7 +320,7 @@ describe("subagent_spawn contract mode", () => {
       const contract = (res.result as { contract?: { fulfilled?: boolean; judged?: unknown[] } })
         .contract;
       assert.ok(contract, "contract verdict must be on the spawn response");
-      assert.equal(contract.status, "fulfilled");
+      assert.equal(contract.broken, false);
       assert.equal(state.turns, 1);
       // The decision model must have been asked a noul question in one batch.
       assert.equal(mockEvaluate.mock.calls.length, 1);
@@ -354,7 +354,7 @@ describe("subagent_spawn contract mode", () => {
       assert.ok(res.ok, JSON.stringify(res.error));
       const contract = (res.result as { contract?: { fulfilled?: boolean } }).contract;
       assert.ok(contract, "contract verdict must be on the spawn response");
-      assert.equal(contract.status, "fulfilled");
+      assert.equal(contract.broken, false);
       assert.equal(state.turns, 1);
     } finally {
       await fx.cleanup();
@@ -387,6 +387,36 @@ describe("subagent_spawn contract mode", () => {
     }
   });
 
+  it("appends the contract to the subagent task prompt", async () => {
+    const fx = await makeFixture();
+    try {
+      let seen = "";
+      const state = installRuntime((input) => {
+        seen = input.userContent;
+      });
+      mockEvaluate.mockResolvedValue({
+        status: "complete",
+        model: "jev-latest",
+        answers: { contract_0: { noul: 0.99 } },
+      });
+      const res = await spawn(minimalConfig(fx.workspaceDir), fx.db, fx.parentId, {
+        contract: CONTRACT,
+        prompt: "do the thing",
+      });
+      assert.ok(res.ok, JSON.stringify(res.error));
+      assert.equal(state.turns, 1);
+      // The parent's prompt body stays untouched; the contract rides along as
+      // its own section so the child sees it without the parent restating it.
+      assert.ok(seen.startsWith("do the thing"), seen);
+      assert.match(seen, /\n\n## Contract\n/);
+      assert.match(seen, /`update` `.*a\.txt`/);
+      assert.match(seen, /Only the paths listed above may change/);
+      assert.match(seen, /append a line to a\.txt/);
+    } finally {
+      await fx.cleanup();
+    }
+  });
+
   it("breaks the contract without consulting the decision model when nothing changed", async () => {
     const fx = await makeFixture();
     try {
@@ -401,7 +431,8 @@ describe("subagent_spawn contract mode", () => {
         }
       ).contract;
       assert.ok(contract);
-      assert.equal(contract.status, "file_ops");
+      assert.equal(contract.broken, true);
+      assert.match(contract.reason ?? "", /not acted upon/);
       assert.deepEqual(contract.violated, ["a.txt"]);
       assert.equal(mockEvaluate.mock.calls.length, 0, "decision must not run");
     } finally {
@@ -426,7 +457,8 @@ describe("subagent_spawn contract mode", () => {
       assert.ok(res.ok, JSON.stringify(res.error));
       const contract = (res.result as { contract?: { fulfilled?: boolean } }).contract;
       assert.ok(contract);
-      assert.equal(contract.status, "judge");
+      assert.equal(contract.broken, true);
+      assert.match(contract.reason ?? "", /rejected by the judge/);
     } finally {
       await fx.cleanup();
     }

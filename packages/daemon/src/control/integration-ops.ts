@@ -84,6 +84,7 @@ import type { OobTurnOutcome } from "../messaging/oob-turn-banner";
 import {
   CONTRACT_YES_MINIMUM_DEFAULT,
   captureGitHead,
+  contractInstruction,
   parseContract,
   validateContractRepository,
   verifyContract,
@@ -1527,7 +1528,7 @@ export async function handleIntegrationControlOp(
       const pl = payloadObject(req);
       const parentSessionId = requireString(pl, "parent_session_id");
       assertAgentMayUseSubagentSpawn(principal, parentSessionId, sessions, ctx.config);
-      const prompt = requireString(pl, "prompt");
+      let prompt = requireString(pl, "prompt");
       const agentIdRaw = pl.agent_id;
       const reservedAgentIds = new Set(Object.keys(ctx.config.agents?.list ?? {}));
       const parentAgentIdForSubagent = parseAgentSessionUrn(parentSessionId)?.agentId;
@@ -1609,6 +1610,9 @@ export async function handleIntegrationControlOp(
         // checks read the same workspace the agent session owns — not the
         // daemon's own uid.
         contractCreds = sessionCreds(parent.runtimeUid, parent.runtimeGid);
+        // The child sees its own contract in the task prompt (see the tool
+        // descriptor) — it must not be restated in the prompt body.
+        prompt += `\n\n${contractInstruction(contract, parentWorkingDirectory)}`;
         const check = validateContractRepository(parentWorkingDirectory, contract, contractCreds);
         if (!check.ok || !check.repoDir) {
           throw new IntegrationOpError(
@@ -1876,7 +1880,7 @@ export async function handleIntegrationControlOp(
         const judgeContract = async (): Promise<ContractStatus> => {
           if (!contract) {
             return {
-              status: "fulfilled",
+              broken: false,
               yesMinimum: CONTRACT_YES_MINIMUM_DEFAULT,
               entries: [],
               judged: [],
@@ -1900,8 +1904,8 @@ export async function handleIntegrationControlOp(
             const msg = e instanceof Error ? e.message : String(e);
             subLog.warn("contract verification errored", { childId, error: msg });
             return {
-              status: "error",
-              error: msg,
+              broken: true,
+              reason: `verification failed: ${msg}`,
               yesMinimum: CONTRACT_YES_MINIMUM_DEFAULT,
               entries: contract,
               judged: [],
@@ -1947,7 +1951,7 @@ export async function handleIntegrationControlOp(
                 const contractStatus = await judgeContract();
                 subLog.info("subagent contract judged (background)", {
                   childId,
-                  status: contractStatus.status,
+                  broken: contractStatus.broken,
                   ...(contractStatus.reason ? { reason: contractStatus.reason } : {}),
                 });
               }
@@ -2041,7 +2045,7 @@ export async function handleIntegrationControlOp(
           contractStatus = await judgeContract();
           subLog.info("subagent contract judged", {
             childId,
-            status: contractStatus.status,
+            broken: contractStatus.broken,
             ...(contractStatus.reason ? { reason: contractStatus.reason } : {}),
           });
         }

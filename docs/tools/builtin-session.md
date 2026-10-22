@@ -97,17 +97,22 @@ When active:
 - Otherwise the per-file `git diff` against the spawn-time HEAD is sent to the
   decision model in batches (`agents.contract.batchSize`, default 5). Deleted
   files are structural-only and never sent to the judge.
+- Any file in the repository outside the listed targets that changes breaks
+  the contract (it is exhaustive), and an unenumerable change set fails
+  closed.
 - Any per-file "yes" probability below `agents.contract.yesMinimum` (default
   `0.85`), any structural break, or any decision failure marks the contract
   unfulfilled.
 
-The spawn response then carries an extra `contract` field with a single
-`status` — `fulfilled`, or the one phase that broke it (`file_ops`: a target
-not acted upon with its contractual type; `judge`: the decision model
-rejected the diffs; `error`: verification failed) — plus `reason?`/`error?`
-detail when not fulfilled, and `{ yesMinimum, entries, judged, violated,
-deletedSkipped, baseline }`. Unset/empty `contract` leaves the mode
-inactive (no-op).
+The contract is automatically appended to the subagent's task prompt as a
+`## Contract` section — write only the task in `prompt`, never restate the
+contract.
+
+The spawn response then carries an extra `contract` field: `broken`
+(boolean) with `reason` naming what broke it, plus `{ yesMinimum, entries,
+judged, violated, unlisted, deletedSkipped, baseline }`. `reason` is absent
+while the contract holds. Unset/empty `contract` leaves the mode inactive
+(no-op).
 
 `judge` overrides the decision model for this spawn (`agents.contract.model`
 or the decision config default applies when unset) and requires a non-empty

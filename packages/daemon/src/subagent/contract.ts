@@ -70,6 +70,33 @@ export function parseContract(raw: unknown): ShoggothContractEntry[] | undefined
   });
 }
 
+/**
+ * Render the contract as the block appended to the subagent's task prompt, so
+ * the child always sees its own contract and the parent does not need to
+ * restate it (the spawn tool descriptor says as much). Paths are absolute
+ * because the child may share or override the parent's working directory.
+ */
+export function contractInstruction(entries: ShoggothContractEntry[], cwd: string): string {
+  const lines = entries.map((e) => {
+    const abs = isAbsolute(e.path) ? e.path : resolve(cwd, e.path);
+    return `- \`${e.action}\` \`${abs}\` — ${e.summary}`;
+  });
+  return [
+    "## Contract",
+    "",
+    "This spawn is governed by a contract. It is shown here so you do not",
+    "need to ask for it; the spawning session already has it too.",
+    "",
+    ...lines,
+    "",
+    "Only the paths listed above may change. Any file in the repository",
+    "outside this list that you create, modify, or delete breaks the",
+    "contract, even when every listed change is perfect. After your turn the",
+    "diffs of the listed paths are judged against their summaries (a",
+    "yes-probability below the configured minimum fails the contract).",
+  ].join("\n");
+}
+
 // Git hook / CI environments can export GIT_DIR, GIT_WORK_TREE, etc., which
 // would make `git` resolve to an unrelated repository regardless of cwd.
 // Contract checks must be based on the working directory alone.
@@ -392,20 +419,16 @@ export interface ContractJudgedFile {
   fulfilled: boolean;
 }
 
-/** Phase that decided a non-fulfilled contract — exactly one can be true. */
-export type ContractBreakPhase = "file_ops" | "judge" | "error";
-
 export interface ContractStatus {
   /**
-   * Single verdict. `file_ops`: a target was not acted upon with its
-   * contractual type (the judge never runs). `judge`: the decision model
-   * rejected the diffs. `error`: verification infrastructure failed.
-   * `reason` carries the phase detail and is absent when fulfilled.
+   * True when the contract did not hold. When true, `reason` names the phase
+   * that broke it and what broke: a target not acted upon with its contractual
+   * type, files outside the contract being modified, the judge rejecting the
+   * diffs, or a verification failure. Absent (along with `reason`) while the
+   * contract is unbroken — a fulfilled verdict carries no reason.
    */
-  status: "fulfilled" | ContractBreakPhase;
+  broken: boolean;
   reason?: string;
-  /** Verification failure message (status `error` only). */
-  error?: string;
   /** Decision model ref used for judging (undefined → default decision model). */
   model?: string;
   yesMinimum: number;
@@ -413,6 +436,11 @@ export interface ContractStatus {
   judged: ContractJudgedFile[];
   /** Paths that failed the structural (modification type) check. */
   violated: string[];
+  /**
+   * Repository files changed against the baseline that are NOT covered by the
+   * contract — any entry here breaks the contract (structural, pre-judge).
+   */
+  unlisted?: string[];
   /** Deleted targets — structural pass only; never sent to the decision model. */
   deletedSkipped: string[];
   /** Baseline the diffs were taken against. */
@@ -439,13 +467,16 @@ export interface VerifyContractInput {
   }) => Promise<Record<string, unknown>>;
 }
 
-function emptyStatus(
+/** Failure-path status: always broken, with the caller supplying the reason. */
+function brokenStatus(
   entries: ShoggothContractEntry[],
   yesMinimum: number,
+  reason: string,
   partial: Partial<ContractStatus> = {},
 ): ContractStatus {
   return {
-    status: "error",
+    broken: true,
+    reason,
     yesMinimum,
     entries,
     judged: [],
@@ -454,6 +485,67 @@ function emptyStatus(
     baseline: "",
     ...partial,
   };
+}
+
+/** Normalize one line of `git diff --name-status` to a repo-relative path. */
+function normalizeDiffName(raw: string): string {
+  // `M<tab>path` (2 fields) → path; `R100<tab>old<tab>new` (3 fields) → new
+  // path — the last field is always the path of interest. Plain `ls-files`
+  // lines are a single field.
+  const parts = raw.split("\t");
+  const path = parts.length >= 2 ? parts[parts.length - 1]! : parts[0]!;
+  // Git quotes paths with special characters in porcelain output.
+  return path.replace(/^"(.*)"$/s, "$1").replace(/\\([\\"])/g, "$1");
+}
+
+/**
+ * Repository paths changed against the baseline that no contract entry covers
+ * (an entry covers a path when the path equals it or lies below it). The
+ * contract is exhaustive: anything else the subagent touched breaks it.
+ *
+ * Changed paths come from git itself — tracked diffs, deletions, and untracked
+ * files — so a file the daemon cannot stat still counts as modified.
+ */
+function listUnlistedChanges(
+  repoDir: string,
+  baseline: string,
+  entries: ShoggothContractEntry[],
+  cwd: string,
+  creds?: ContractCreds,
+): string[] {
+  const covered = entries.map((entry) =>
+    isAbsolute(entry.path) ? entry.path : resolve(cwd, entry.path),
+  );
+  const isCovered = (abs: string): boolean =>
+    covered.some((base) => {
+      const rel = relative(base, abs);
+      return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+    });
+
+  const changed = new Set<string>();
+  const collect = (listing: string): void => {
+    for (const line of listing.split("\n")) {
+      if (!line.trim()) continue;
+      const rel = normalizeDiffName(line);
+      if (!rel || rel === ".git" || rel.startsWith(".git/")) continue;
+      const abs = resolve(repoDir, rel);
+      if (!isCovered(abs)) changed.add(rel);
+    }
+  };
+
+  try {
+    collect(git(repoDir, ["diff", "--name-status", baseline], creds));
+    collect(git(repoDir, ["ls-files", "--others", "--exclude-standard"], creds));
+  } catch (e) {
+    // Cannot enumerate changes: fail closed rather than judge a contract we
+    // could not fully verify.
+    log.warn("contract_change_listing_failed", {
+      baseline,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    return ["<unable to list changed files>"];
+  }
+  return [...changed].sort();
 }
 
 /**
@@ -470,7 +562,7 @@ export async function verifyContract(input: VerifyContractInput): Promise<Contra
   const creds = input.creds;
   const repo = validateContractRepository(cwd, entries, creds);
   if (!repo.ok || !repo.repoDir) {
-    return emptyStatus(entries, yesMinimum, { status: "error", error: repo.error });
+    return brokenStatus(entries, yesMinimum, `verification failed: ${repo.error}`);
   }
   const repoDir = repo.repoDir;
 
@@ -478,10 +570,11 @@ export async function verifyContract(input: VerifyContractInput): Promise<Contra
   try {
     baseline = resolveContractBaseline(repoDir, input.sourceBranch, creds);
   } catch (e) {
-    return emptyStatus(entries, yesMinimum, {
-      status: "error",
-      error: e instanceof Error ? e.message : String(e),
-    });
+    return brokenStatus(
+      entries,
+      yesMinimum,
+      `verification failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
 
   // Structural check: was each target acted upon with its contractual type?
@@ -530,12 +623,21 @@ export async function verifyContract(input: VerifyContractInput): Promise<Contra
   if (violated.length > 0) {
     const reason = `not acted upon with the contractual type: ${violated.join(", ")}`;
     log.warn("contract_broken", { phase: "file_ops", violated, baseline });
-    return emptyStatus(entries, yesMinimum, {
-      status: "file_ops",
-      reason,
+    return brokenStatus(entries, yesMinimum, reason, { baseline, violated, deletedSkipped });
+  }
+
+  // Structural check: the contract is exhaustive — no repository file outside
+  // the listed targets may change. Any unlisted modification breaks the
+  // contract before the judge runs.
+  const unlisted = listUnlistedChanges(repoDir, baseline, entries, cwd, creds);
+  if (unlisted.length > 0) {
+    const reason = `files outside the contract were modified: ${unlisted.join(", ")}`;
+    log.warn("contract_broken", { phase: "file_ops", unlisted, baseline });
+    return brokenStatus(entries, yesMinimum, reason, {
       baseline,
       violated,
       deletedSkipped,
+      unlisted,
     });
   }
 
@@ -584,12 +686,9 @@ export async function verifyContract(input: VerifyContractInput): Promise<Contra
       answers = { error: e instanceof Error ? e.message : String(e) };
     }
     if (typeof answers.error === "string") {
-      const error = `contract decision failed: ${answers.error}`;
-      log.warn("contract_judge_failed", { error, baseline });
-      return emptyStatus(entries, yesMinimum, {
-        status: "error",
-        error,
-        reason: error,
+      const reason = `contract decision failed: ${answers.error}`;
+      log.warn("contract_judge_failed", { reason, baseline });
+      return brokenStatus(entries, yesMinimum, reason, {
         baseline,
         deletedSkipped,
         judged,
@@ -608,23 +707,24 @@ export async function verifyContract(input: VerifyContractInput): Promise<Contra
   }
 
   const rejected = judged.filter((j) => !j.fulfilled).map((j) => j.path);
-  const fulfilled = rejected.length === 0;
+  const broken = rejected.length > 0;
   log.info("contract_judged", {
     baseline,
     judged: judged.length,
     deletedSkipped: deletedSkipped.length,
-    fulfilled,
+    broken,
     ...(rejected.length > 0 ? { rejected } : {}),
   });
   return {
-    status: fulfilled ? "fulfilled" : "judge",
-    // Absent when fulfilled — no reason for a contract that held.
-    ...(fulfilled ? {} : { reason: `rejected by the judge: ${rejected.join(", ")}` }),
+    broken,
+    // Absent while unbroken — a contract that held carries no reason.
+    ...(broken ? { reason: `rejected by the judge: ${rejected.join(", ")}` } : {}),
     ...(model ? { model } : {}),
     yesMinimum,
     entries,
     judged,
     violated,
+    unlisted,
     deletedSkipped,
     baseline,
   };
