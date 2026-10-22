@@ -84,7 +84,6 @@ export function buildThreadSubagentCreatedBanner(input: {
     input.agentId ?? createSessionStore(input.db).getById(input.sessionId)?.subagentAgentId;
   return [
     "> 🧵 Thread subagent session created.",
-    "> ",
     `> - 🎯 **Session:** \`${input.sessionId}\`${agentId ? ` (**${agentId}**)` : ""}`,
     `> - 🥸 **Model:** \`${modelLabel}\``,
   ].join("\n");
