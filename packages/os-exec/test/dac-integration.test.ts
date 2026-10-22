@@ -37,12 +37,23 @@ function requireRootForDac(t: { skip: (m?: string) => void }, canDrop: boolean):
 }
 
 /**
- * Drive an async operation to completion without any wall-clock wait: install
- * fake timers, then repeatedly advance the (fake) clock and yield event-loop
- * ticks so real child-process I/O settles, until the operation's promise
- * settles. Restores real timers in `finally` whether it succeeds or fails.
+ * Drive an async operation to completion with no wall-clock waits: install
+ * fake timers, then yield real event-loop ticks (setImmediate is deliberately
+ * left un-faked) so real child-process I/O can settle, until the operation's
+ * promise settles, `maxTicks` turns pass, or the `maxWallMs` safety cap
+ * elapses. The tick cap is generous enough that even a multi-second
+ * child-process spawn cannot exhaust it, and the loop exits the moment the
+ * promise settles, so the bound costs nothing when healthy. The wall cap uses
+ * `process.hrtime.bigint()`, which vitest fake timers do not intercept — it
+ * only bounds the failure path; the wait itself remains purely tick-based.
+ * Fake timers keep every timeout based delay frozen — nothing in the gate
+ * ever sleeps. Restores real timers in `finally` whether it succeeds or fails.
  */
-async function runUnderFakeTimers<T>(op: () => Promise<T>, maxTicks = 10_000): Promise<T> {
+async function runUnderFakeTimers<T>(
+  op: () => Promise<T>,
+  maxTicks = 5_000_000,
+  maxWallMs = 60_000,
+): Promise<T> {
   // Fake only the wall-clock timers; setImmediate stays real so the event-gate
   // loop below keeps turning the event loop while child I/O settles.
   vi.useFakeTimers({
@@ -56,11 +67,14 @@ async function runUnderFakeTimers<T>(op: () => Promise<T>, maxTicks = 10_000): P
     };
     // Observe settlement without altering the promise the caller will await.
     void promise.then(markSettled, markSettled);
+    const deadlineNs = process.hrtime.bigint() + BigInt(maxWallMs) * 1_000_000n;
     for (let i = 0; i < maxTicks && !settled; i++) {
-      await vi.advanceTimersByTimeAsync(60_000);
+      if (process.hrtime.bigint() >= deadlineNs) {
+        break;
+      }
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    assert.ok(settled, `operation did not settle after ${maxTicks} ticks`);
+    assert.ok(settled, `operation did not settle after ${maxTicks} ticks or ${maxWallMs}ms`);
     return await promise;
   } finally {
     vi.useRealTimers();
