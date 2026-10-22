@@ -1876,8 +1876,7 @@ export async function handleIntegrationControlOp(
         const judgeContract = async (): Promise<ContractStatus> => {
           if (!contract) {
             return {
-              fulfilled: true,
-              broken: false,
+              status: "fulfilled",
               yesMinimum: CONTRACT_YES_MINIMUM_DEFAULT,
               entries: [],
               judged: [],
@@ -1901,8 +1900,7 @@ export async function handleIntegrationControlOp(
             const msg = e instanceof Error ? e.message : String(e);
             subLog.warn("contract verification errored", { childId, error: msg });
             return {
-              fulfilled: false,
-              broken: false,
+              status: "error",
               error: msg,
               yesMinimum: CONTRACT_YES_MINIMUM_DEFAULT,
               entries: contract,
@@ -1949,8 +1947,8 @@ export async function handleIntegrationControlOp(
                 const contractStatus = await judgeContract();
                 subLog.info("subagent contract judged (background)", {
                   childId,
-                  fulfilled: contractStatus.fulfilled,
-                  broken: contractStatus.broken,
+                  status: contractStatus.status,
+                  ...(contractStatus.reason ? { reason: contractStatus.reason } : {}),
                 });
               }
               return deliverSubagentResult(ext, {
@@ -2043,8 +2041,8 @@ export async function handleIntegrationControlOp(
           contractStatus = await judgeContract();
           subLog.info("subagent contract judged", {
             childId,
-            fulfilled: contractStatus.fulfilled,
-            broken: contractStatus.broken,
+            status: contractStatus.status,
+            ...(contractStatus.reason ? { reason: contractStatus.reason } : {}),
           });
         }
         ctx.recordIntegrationAudit({

@@ -262,7 +262,7 @@ export const subagentToolArgs = {
         required: ["path", "action", "summary"],
       },
       description:
-        "spawn_one_shot: optional contract for one-shot subagents. When a non-empty array is given, contract mode activates: every target must be inside a git repository at call time (spawn fails otherwise), each target must end up acted upon with its contractual action (create/update/delete), and each resulting git diff against the spawn-time HEAD is judged by a decision model (batched, see agents.contract.batchSize) with any yes-probability below agents.contract.yesMinimum (default 0.85) counting as not fulfilled. The spawn response then carries an extra `contract` field with the verdict (fulfilled/broken/error, per-file scores). No-op when unset or empty.",
+        "spawn_one_shot: optional contract for one-shot subagents. When a non-empty array is given, contract mode activates: every target must be inside a git repository at call time (spawn fails otherwise), each target must end up acted upon with its contractual action (create/update/delete), and each resulting git diff against the spawn-time HEAD is judged by a decision model (batched, see agents.contract.batchSize) with any yes-probability below agents.contract.yesMinimum (default 0.85) counting as not fulfilled. The spawn response then carries an extra `contract` field with a single `status` — `fulfilled`, or the one phase that broke it: `file_ops` (a target not acted upon with its contractual type), `judge` (the decision model rejected the diffs), or `error` (verification failed) — plus `reason`/`error` detail when not fulfilled and the per-file scores. No-op when unset or empty.",
     },
     judge: {
       type: "string",

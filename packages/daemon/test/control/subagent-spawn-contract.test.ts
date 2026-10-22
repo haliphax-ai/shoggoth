@@ -320,7 +320,7 @@ describe("subagent_spawn contract mode", () => {
       const contract = (res.result as { contract?: { fulfilled?: boolean; judged?: unknown[] } })
         .contract;
       assert.ok(contract, "contract verdict must be on the spawn response");
-      assert.equal(contract.fulfilled, true);
+      assert.equal(contract.status, "fulfilled");
       assert.equal(state.turns, 1);
       // The decision model must have been asked a noul question in one batch.
       assert.equal(mockEvaluate.mock.calls.length, 1);
@@ -354,7 +354,7 @@ describe("subagent_spawn contract mode", () => {
       assert.ok(res.ok, JSON.stringify(res.error));
       const contract = (res.result as { contract?: { fulfilled?: boolean } }).contract;
       assert.ok(contract, "contract verdict must be on the spawn response");
-      assert.equal(contract.fulfilled, true);
+      assert.equal(contract.status, "fulfilled");
       assert.equal(state.turns, 1);
     } finally {
       await fx.cleanup();
@@ -401,8 +401,7 @@ describe("subagent_spawn contract mode", () => {
         }
       ).contract;
       assert.ok(contract);
-      assert.equal(contract.fulfilled, false);
-      assert.equal(contract.broken, true);
+      assert.equal(contract.status, "file_ops");
       assert.deepEqual(contract.violated, ["a.txt"]);
       assert.equal(mockEvaluate.mock.calls.length, 0, "decision must not run");
     } finally {
@@ -427,7 +426,7 @@ describe("subagent_spawn contract mode", () => {
       assert.ok(res.ok, JSON.stringify(res.error));
       const contract = (res.result as { contract?: { fulfilled?: boolean } }).contract;
       assert.ok(contract);
-      assert.equal(contract.fulfilled, false);
+      assert.equal(contract.status, "judge");
     } finally {
       await fx.cleanup();
     }

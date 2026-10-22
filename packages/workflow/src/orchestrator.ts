@@ -38,10 +38,18 @@ export interface PollResult {
   completedAt?: number;
   /**
    * Contract verdict when the task defined a contract. A verdict whose
-   * `fulfilled` flag is false turns a "done" result into a failure, so the
-   * task's success is determined by the contract (not just a clean turn).
+   * `status` is not `fulfilled` accompanies a failed result, so the task's
+   * success is determined by the contract (not just a clean turn). `status`
+   * names the single phase that decided the verdict — `file_ops` (targets
+   * not acted on with their contractual type), `judge` (decision model
+   * rejected the diffs), or `error` (verification infrastructure failed) —
+   * and `reason` carries phase detail that is absent when fulfilled.
    */
-  contract?: { fulfilled: boolean; broken?: boolean; error?: string };
+  contract?: {
+    status: "fulfilled" | "file_ops" | "judge" | "error";
+    reason?: string;
+    error?: string;
+  };
 }
 
 export interface SpawnAdapter {

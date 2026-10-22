@@ -101,9 +101,13 @@ When active:
   `0.85`), any structural break, or any decision failure marks the contract
   unfulfilled.
 
-The spawn response then carries an extra `contract` field: `{ fulfilled,
-broken, error?, yesMinimum, entries, judged, violated, deletedSkipped,
-baseline }`. Unset/empty `contract` leaves the mode inactive (no-op).
+The spawn response then carries an extra `contract` field with a single
+`status` — `fulfilled`, or the one phase that broke it (`file_ops`: a target
+not acted upon with its contractual type; `judge`: the decision model
+rejected the diffs; `error`: verification failed) — plus `reason?`/`error?`
+detail when not fulfilled, and `{ yesMinimum, entries, judged, violated,
+deletedSkipped, baseline }`. Unset/empty `contract` leaves the mode
+inactive (no-op).
 
 `judge` overrides the decision model for this spawn (`agents.contract.model`
 or the decision config default applies when unset) and requires a non-empty

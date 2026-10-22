@@ -294,8 +294,7 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
               });
             } catch (e) {
               contract = {
-                fulfilled: false,
-                broken: false,
+                status: "error",
                 error: e instanceof Error ? e.message : String(e),
                 yesMinimum: CONTRACT_YES_MINIMUM_DEFAULT,
                 entries: contractCtx.entries,
@@ -308,8 +307,8 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
             log.info("task contract judged", {
               sessionId: childId,
               taskId: req.taskId,
-              fulfilled: contract.fulfilled,
-              broken: contract.broken,
+              status: contract.status,
+              ...(contract.reason ? { reason: contract.reason } : {}),
             });
           }
           completionMap.set(childId, {
@@ -366,30 +365,36 @@ export function createDaemonPollAdapter(deps: DaemonPollAdapterDeps): PollAdapte
       const completion = deps.completionMap.get(sessionKey);
       if (completion) {
         if (completion.ok) {
-          if (completion.contract && !completion.contract.fulfilled) {
+          const c = completion.contract;
+          if (c && c.status !== "fulfilled") {
             // Contract mode: the turn succeeded but the contract did not —
             // the task's success is determined by the contract verdict.
-            const reason = completion.contract.broken
-              ? "contract broken: a target was not acted upon with its contractual type"
-              : completion.contract.error
-                ? `contract decision failed: ${completion.contract.error}`
-                : `contract not fulfilled: ${completion.contract.judged
-                    .filter((j) => !j.fulfilled)
-                    .map((j) => `${j.path} (yes=${j.yes.toFixed(3)})`)
-                    .join(", ")}`;
+            const reason =
+              c.status === "file_ops"
+                ? `contract broken in the file-op phase: ${c.violated.join(", ")} not acted upon with its contractual type`
+                : c.status === "judge"
+                  ? `contract rejected by the judge: ${c.judged
+                      .filter((j) => !j.fulfilled)
+                      .map((j) => `${j.path} (yes=${j.yes.toFixed(3)})`)
+                      .join(", ")}`
+                  : `contract verification failed: ${c.error ?? "unknown error"}`;
             return {
               status: "failed",
               error: reason,
               completedAt: completion.completedAt,
-              contract: { fulfilled: false, broken: completion.contract.broken, error: reason },
+              contract: {
+                status: c.status,
+                ...(c.reason ? { reason: c.reason } : {}),
+                error: reason,
+              },
             };
           }
           return {
             status: "done",
             output: completion.output,
             completedAt: completion.completedAt,
-            ...(completion.contract
-              ? { contract: { fulfilled: completion.contract.fulfilled } }
+            ...(c
+              ? { contract: { status: c.status, ...(c.reason ? { reason: c.reason } : {}) } }
               : {}),
           };
         }

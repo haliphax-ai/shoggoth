@@ -392,12 +392,19 @@ export interface ContractJudgedFile {
   fulfilled: boolean;
 }
 
+/** Phase that decided a non-fulfilled contract — exactly one can be true. */
+export type ContractBreakPhase = "file_ops" | "judge" | "error";
+
 export interface ContractStatus {
-  /** True only when every contract entry was acted on and judged fulfilled. */
-  fulfilled: boolean;
-  /** True when a target was not acted upon with its contractual type. */
-  broken: boolean;
-  /** Verification failure (git/decision infrastructure); implies not fulfilled. */
+  /**
+   * Single verdict. `file_ops`: a target was not acted upon with its
+   * contractual type (the judge never runs). `judge`: the decision model
+   * rejected the diffs. `error`: verification infrastructure failed.
+   * `reason` carries the phase detail and is absent when fulfilled.
+   */
+  status: "fulfilled" | ContractBreakPhase;
+  reason?: string;
+  /** Verification failure message (status `error` only). */
   error?: string;
   /** Decision model ref used for judging (undefined → default decision model). */
   model?: string;
@@ -438,8 +445,7 @@ function emptyStatus(
   partial: Partial<ContractStatus> = {},
 ): ContractStatus {
   return {
-    fulfilled: false,
-    broken: false,
+    status: "error",
     yesMinimum,
     entries,
     judged: [],
@@ -464,7 +470,7 @@ export async function verifyContract(input: VerifyContractInput): Promise<Contra
   const creds = input.creds;
   const repo = validateContractRepository(cwd, entries, creds);
   if (!repo.ok || !repo.repoDir) {
-    return emptyStatus(entries, yesMinimum, { error: repo.error });
+    return emptyStatus(entries, yesMinimum, { status: "error", error: repo.error });
   }
   const repoDir = repo.repoDir;
 
@@ -473,6 +479,7 @@ export async function verifyContract(input: VerifyContractInput): Promise<Contra
     baseline = resolveContractBaseline(repoDir, input.sourceBranch, creds);
   } catch (e) {
     return emptyStatus(entries, yesMinimum, {
+      status: "error",
       error: e instanceof Error ? e.message : String(e),
     });
   }
@@ -521,9 +528,11 @@ export async function verifyContract(input: VerifyContractInput): Promise<Contra
   }
 
   if (violated.length > 0) {
-    log.warn("contract_broken", { violated, baseline });
+    const reason = `not acted upon with the contractual type: ${violated.join(", ")}`;
+    log.warn("contract_broken", { phase: "file_ops", violated, baseline });
     return emptyStatus(entries, yesMinimum, {
-      broken: true,
+      status: "file_ops",
+      reason,
       baseline,
       violated,
       deletedSkipped,
@@ -575,9 +584,12 @@ export async function verifyContract(input: VerifyContractInput): Promise<Contra
       answers = { error: e instanceof Error ? e.message : String(e) };
     }
     if (typeof answers.error === "string") {
-      log.warn("contract_judge_failed", { error: answers.error, baseline });
+      const error = `contract decision failed: ${answers.error}`;
+      log.warn("contract_judge_failed", { error, baseline });
       return emptyStatus(entries, yesMinimum, {
-        error: `contract decision failed: ${answers.error}`,
+        status: "error",
+        error,
+        reason: error,
         baseline,
         deletedSkipped,
         judged,
@@ -595,16 +607,19 @@ export async function verifyContract(input: VerifyContractInput): Promise<Contra
     });
   }
 
-  const allFulfilled = judged.every((j) => j.fulfilled);
+  const rejected = judged.filter((j) => !j.fulfilled).map((j) => j.path);
+  const fulfilled = rejected.length === 0;
   log.info("contract_judged", {
     baseline,
     judged: judged.length,
     deletedSkipped: deletedSkipped.length,
-    fulfilled: allFulfilled,
+    fulfilled,
+    ...(rejected.length > 0 ? { rejected } : {}),
   });
   return {
-    fulfilled: allFulfilled,
-    broken: false,
+    status: fulfilled ? "fulfilled" : "judge",
+    // Absent when fulfilled — no reason for a contract that held.
+    ...(fulfilled ? {} : { reason: `rejected by the judge: ${rejected.join(", ")}` }),
     ...(model ? { model } : {}),
     yesMinimum,
     entries,
