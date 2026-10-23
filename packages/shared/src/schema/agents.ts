@@ -176,6 +176,8 @@ export const shoggothAgentsConfigSchema = z
     cruiseControl: shoggothCruiseControlConfigSchema.optional(),
     /** Contract mode defaults for one-shot subagent spawns (activated per-spawn via a non-empty `contract`). */
     contract: shoggothContractConfigSchema.optional(),
+    /** Maximum number of tool calls the model may issue in a single batch; oversized batches are rejected with a failure response for every call. Defaults to 10 when unset. */
+    maxToolsPerBatch: z.number().int().positive().optional(),
   })
   .strict();
 export type ShoggothAgentsConfig = z.infer<typeof shoggothAgentsConfigSchema>;
