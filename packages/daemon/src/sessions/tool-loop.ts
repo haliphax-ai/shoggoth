@@ -152,6 +152,8 @@ export interface RunToolLoopOptions {
   readonly subResourceRegistry?: SubResourceExtractorRegistry;
   /** Maximum milliseconds a single tool call may run. When exceeded the call is killed and a timeout error is injected. */
   readonly toolCallTimeoutMs?: number;
+  /** Maximum tool calls permitted in a single model batch; oversized batches execute nothing and every call receives a failure response. Defaults to 10 when unset. */
+  readonly maxToolsPerBatch?: number;
   /** Called after each model.complete() and tool execution for incremental stats updates. */
   readonly onStatsUpdate?: (update: ToolLoopStatsUpdate) => void;
   /**
@@ -1343,6 +1345,39 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
           metadata: turn.reasoningContent ? { reasoningContent: turn.reasoningContent } : undefined,
         });
         emitStats?.({ transcriptMessageCount: getTranscriptCount() });
+      }
+
+      // --- Tool call batch limit ---
+      // Reject an oversized batch wholesale: none of its calls execute, and
+      // every tool_call id receives a structured failure response so the
+      // conversation stays well-formed and the model can retry with a
+      // smaller batch.
+      const effectiveMaxToolsPerBatch = options.maxToolsPerBatch ?? 10;
+      if (sanitizedToolCalls.length > effectiveMaxToolsPerBatch) {
+        log.warn("tool call batch exceeds limit; rejecting", {
+          sessionId: options.sessionId,
+          batch: sanitizedToolCalls.length,
+          maxToolsPerBatch: effectiveMaxToolsPerBatch,
+        });
+        for (const oversizedTc of sanitizedToolCalls) {
+          const rejection = JSON.stringify({
+            error: "tool_batch_limit_exceeded",
+            message: `batch of ${sanitizedToolCalls.length} tool calls exceeds maxToolsPerBatch (${effectiveMaxToolsPerBatch}) — none were executed; retry with a smaller batch`,
+          });
+          options.model.pushToolMessage?.({ toolCallId: oversizedTc.id, content: rejection });
+          if (options.transcript) {
+            appendTx({
+              role: "tool",
+              content: rejection,
+              toolCallId: oversizedTc.id,
+              metadata: { tool: oversizedTc.name },
+            });
+          }
+        }
+        if (options.transcript) {
+          emitStats?.({ transcriptMessageCount: getTranscriptCount() });
+        }
+        continue;
       }
 
       for (let callIdx = 0; callIdx < sanitizedToolCalls.length; callIdx++) {

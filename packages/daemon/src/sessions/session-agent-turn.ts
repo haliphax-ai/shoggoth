@@ -817,6 +817,7 @@ export async function executeSessionAgentTurn(
       },
       onToolCallEvent: input.events?.onToolCall,
       toolCallTimeoutMs: resolveToolCallTimeoutMs(input.config, input.sessionId),
+      maxToolsPerBatch: input.config.agents?.maxToolsPerBatch ?? 10,
       onStatsUpdate: (update) => {
         // `estimatedInputTokens` (char heuristics for tool args/results) is
         // intentionally NOT added to session_stats.input_tokens: tool content
