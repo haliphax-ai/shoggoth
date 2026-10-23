@@ -335,6 +335,12 @@ async function subagentHandler(
     if (args.background === true) payload.background = true;
     const dm = args.delivery_mode;
     if (dm === "inline" || dm === "queue" || dm === "drop") payload.delivery_mode = dm;
+    // Wall-clock TTL in minutes (positive integer), mirroring inactivity_minutes
+    // on persistent spawns; the control op clamps it to runtime.maxTtlMs.
+    const tmin = args.ttl_minutes;
+    if (typeof tmin === "number" && Number.isFinite(tmin) && tmin > 0) {
+      payload.ttl_minutes = Math.trunc(tmin);
+    }
   } else if (action === "spawn_persistent") {
     const prompt = String(args.prompt ?? "").trim();
     const threadId = String(args.thread_id ?? "").trim();
