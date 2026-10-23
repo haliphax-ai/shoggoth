@@ -50,6 +50,29 @@ const SLASH_COMMANDS = [
     ],
   },
   {
+    name: "yolo",
+    description: "Toggle yolo mode: auto-approve HITL for a session (no elevation)",
+    options: [
+      {
+        name: "action",
+        type: 3, // STRING
+        description: "on, off, or status (default: on)",
+        required: false,
+        choices: [
+          { name: "on", value: "on" },
+          { name: "off", value: "off" },
+          { name: "status", value: "status" },
+        ],
+      },
+      {
+        name: "session_id",
+        type: 3,
+        description: "Session URN or agent ID (defaults to this channel's session)",
+        required: false,
+      },
+    ],
+  },
+  {
     name: "abort",
     description: "Abort the current session turn",
     options: [
@@ -1963,6 +1986,53 @@ async function handleInteraction(
       await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
         type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
         data: { content: `⚠️ Elevation failed: ${String(err)}` },
+      });
+    }
+    return;
+  }
+
+  if (controlOp.op === "yolo_mode") {
+    try {
+      const payload = { ...controlOp.payload };
+      if (!payload.session_id && deps.resolveSessionForChannel) {
+        const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
+        if (resolved) payload.session_id = resolved;
+      }
+      if (!payload.session_id) {
+        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+          data: {
+            content: "⚠️ No session bound to this channel. Provide a session_id.",
+          },
+        });
+        return;
+      }
+      const res = await deps.invokeControlOp(controlOp.op, payload);
+      let content: string;
+      if (res.ok && res.result) {
+        const r = res.result as Record<string, unknown>;
+        const sessionId = r.sessionId ?? payload.session_id;
+        const isStatus = payload.action === "status";
+        if (r.enabled === true) {
+          content = isStatus
+            ? `🤖 Yolo mode status for \`${sessionId}\`: ON — HITL auto-approved until cleared.`
+            : `🤖 Yolo mode ON for \`${sessionId}\` — HITL auto-approved until cleared.`;
+        } else {
+          content = isStatus
+            ? `🤖 Yolo mode status for \`${sessionId}\`: OFF.`
+            : `🤖 Yolo mode OFF for \`${sessionId}\`.`;
+        }
+      } else {
+        content = `⚠️ \`yolo_mode\` failed: ${res.error ?? "unknown error"}`;
+      }
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content },
+      });
+    } catch (err) {
+      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content: `⚠️ Yolo mode failed: ${String(err)}` },
       });
     }
     return;

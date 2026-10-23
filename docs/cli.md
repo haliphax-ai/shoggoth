@@ -351,6 +351,20 @@ Output: JSON.
 
 ---
 
+### `shoggoth yolo`
+
+Toggle [yolo mode](daemon.md#yolo-mode) — a persistent per-session flag that auto-approves HITL without elevating.
+
+```
+shoggoth yolo on <session-id>     # Auto-approve HITL until cleared
+shoggoth yolo off <session-id>    # Clear the flag
+shoggoth yolo status <session-id> # Show whether the flag is set
+```
+
+Output: JSON.
+
+---
+
 ### `shoggoth retention`
 
 Data retention job runner.

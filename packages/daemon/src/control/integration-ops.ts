@@ -3904,6 +3904,41 @@ export async function handleIntegrationControlOp(
       return { ok: true, revokedCount: revokeCount };
     }
 
+    case "yolo_mode": {
+      if (principal.kind !== "operator") {
+        throw new IntegrationOpError("ERR_FORBIDDEN", "yolo_mode is operator-only");
+      }
+      const yoloPl = payloadObject(req);
+      const yoloSessionIdRaw =
+        typeof yoloPl.session_id === "string" ? yoloPl.session_id : undefined;
+      if (!yoloSessionIdRaw) {
+        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "payload.session_id is required");
+      }
+      const yoloSessionId = resolveTargetSessionIdOrThrow(
+        yoloSessionIdRaw,
+        ctx.config,
+        ctx.sessions,
+      );
+      if (!ctx.stateDb) {
+        throw new IntegrationOpError("ERR_STATE_DB_REQUIRED", "yolo mode requires state DB");
+      }
+      const yoloAction =
+        typeof yoloPl.action === "string" && yoloPl.action.length > 0 ? yoloPl.action : "on";
+      if (yoloAction !== "on" && yoloAction !== "off" && yoloAction !== "status") {
+        throw new IntegrationOpError(
+          "ERR_INVALID_PAYLOAD",
+          "payload.action must be on, off, or status",
+        );
+      }
+      const { createYoloModeStore: createYoloStore } = await import("../hitl/yolo-mode-store");
+      const yoloStore = createYoloStore(ctx.stateDb);
+      if (yoloAction === "status") {
+        return { ok: true, sessionId: yoloSessionId, enabled: yoloStore.isEnabled(yoloSessionId) };
+      }
+      yoloStore.setEnabled(yoloSessionId, yoloAction === "on");
+      return { ok: true, sessionId: yoloSessionId, enabled: yoloAction === "on" };
+    }
+
     case "vault.set":
       return handleVaultSet(req, principal, ctx);
     case "vault.get":

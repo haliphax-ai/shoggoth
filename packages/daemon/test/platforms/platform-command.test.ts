@@ -280,4 +280,37 @@ describe("translateCommandToControlOp", () => {
       },
     });
   });
+
+  it("translates yolo with no action to yolo_mode defaulting to on", () => {
+    const cmd: PlatformCommand = { name: "yolo", options: {} };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "yolo_mode",
+      payload: { action: "on" },
+    });
+  });
+
+  it("translates yolo off with an explicit session_id", () => {
+    const cmd: PlatformCommand = {
+      name: "yolo",
+      options: { action: "off", session_id: "agent:main:discord:channel:abc" },
+    };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "yolo_mode",
+      payload: { action: "off", session_id: "agent:main:discord:channel:abc" },
+    });
+  });
+
+  it("translates yolo status", () => {
+    const cmd: PlatformCommand = {
+      name: "yolo",
+      options: { action: "status", session_id: "agent:main:discord:channel:abc" },
+    };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "yolo_mode",
+      payload: { action: "status", session_id: "agent:main:discord:channel:abc" },
+    });
+  });
 });

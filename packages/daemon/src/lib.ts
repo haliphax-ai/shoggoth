@@ -127,6 +127,7 @@ export {
 } from "./events/heartbeat-consumer";
 export { listDeadLetterEvents, type DeadLetterEventRow } from "./events/dlq";
 export { createHitlPendingResolutionStack, type HitlPendingStack } from "./hitl/hitl-pending-stack";
+export { createYoloModeStore } from "./hitl/yolo-mode-store";
 export type { HitlNotifier } from "./hitl/hitl-notifier";
 export { createHitlResolutionHub, type HitlResolutionHub } from "./hitl/hitl-resolution-hub";
 export {

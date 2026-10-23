@@ -1106,7 +1106,8 @@ describe("registerDiscordSlashCommands", () => {
     ];
     assert.strictEqual(appId, "app-123");
     assert.strictEqual(guildId, "g-1");
-    assert.strictEqual(commands.length, 12);
+    assert.strictEqual(commands.length, 13);
+    assert.ok(commands.some((c) => c.name === "yolo"));
     assert.ok(commands.some((c) => c.name === "abort"));
     assert.ok(commands.some((c) => c.name === "close"));
     assert.ok(commands.some((c) => c.name === "steer"));

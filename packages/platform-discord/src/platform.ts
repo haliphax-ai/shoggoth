@@ -17,6 +17,7 @@ import {
   createThinkingOutput,
   createHitlPendingResolutionStack,
   createPolicyEngine,
+  createYoloModeStore,
   createSessionStore,
   createTranscriptStore,
   createToolRunStore,
@@ -223,6 +224,16 @@ export async function startDiscordPlatform(
   const toolRuns = createToolRunStore(opts.db);
   const hitlStack = opts.hitlPending ?? createHitlPendingResolutionStack(opts.db);
   const { pending, waitForHitlResolution } = hitlStack;
+  const yoloMode = createYoloModeStore(opts.db);
+  // A state DB that has not run the yolo migration yet must not break a turn:
+  // the flag simply reads as off.
+  const yoloActive = (sessionId: string): boolean => {
+    try {
+      return yoloMode.isEnabled(sessionId);
+    } catch {
+      return false;
+    }
+  };
 
   const assistantDeps = pickDiscordAssistantDeps(opts.deps);
   const hitlNotifier =
@@ -654,6 +665,7 @@ export async function startDiscordPlatform(
                   getHitlConfig,
                   hitl: {
                     bypassUpTo: resolveSessionBypassUpTo(msg.sessionId, opts.config),
+                    yoloActive,
                     pending,
                     clock: { nowMs: () => Date.now() },
                     newPendingId: () => randomUUID(),
@@ -804,6 +816,7 @@ export async function startDiscordPlatform(
           getHitlConfig,
           hitl: {
             bypassUpTo: resolveSessionBypassUpTo(sid, opts.config),
+            yoloActive,
             pending,
             clock: { nowMs: () => Date.now() },
             newPendingId: () => randomUUID(),

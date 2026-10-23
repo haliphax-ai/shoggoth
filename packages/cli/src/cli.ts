@@ -14,6 +14,7 @@ import { runQueueCli } from "./run-queue";
 import { runPromptCli } from "./run-prompt";
 import { printConfigHelp, runConfigShow } from "./run-config";
 import { runElevationCli } from "./run-elevation";
+import { runYoloCli } from "./run-yolo";
 import { runMediaCli } from "./run-media";
 import { runDecisionCli } from "./run-decision";
 import { runRerankCli } from "./run-rerank";
@@ -54,6 +55,7 @@ Usage:
   shoggoth queue                Turn queue management (see: shoggoth queue --help)
   shoggoth prompt               Run a canned prompt (see: shoggoth prompt --help)
   shoggoth elevation            Permission elevation (see: shoggoth elevation --help)
+  shoggoth yolo                 Yolo mode: auto-approve HITL for a session (see: shoggoth yolo --help)
   shoggoth media                Media generation (see: shoggoth media --help)
 ${rerankLine}${decisionLine}  shoggoth service               Service management (see: shoggoth service --help)
   shoggoth vault                Credential vault (see: shoggoth vault --help)
@@ -278,6 +280,16 @@ if (argv[0] === "prompt") {
 if (argv[0] === "elevation") {
   try {
     await runElevationCli(argv.slice(1));
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  }
+  process.exit(process.exitCode ?? 0);
+}
+
+if (argv[0] === "yolo") {
+  try {
+    await runYoloCli(argv.slice(1));
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
     process.exit(1);
