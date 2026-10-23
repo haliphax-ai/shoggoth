@@ -34,6 +34,8 @@ import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import {
   DEFAULT_POLICY_CONFIG,
   formatAgentSessionUrn,
+  resolveMaxOneShotTtlMs,
+  resolveMaxTtlMs,
   SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID,
   type ShoggothConfig,
 } from "@shoggoth/shared";
@@ -492,5 +494,68 @@ describe("subagent_spawn one-shot wall-clock TTL", () => {
       vi.useRealTimers();
       db.close();
     }
+  });
+
+  it("falls back to resolveMaxTtlMs for the one-shot ceiling when runtime.maxOneShotTtlMs is absent", () => {
+    const cfg: ShoggothConfig = { ...minimalConfig(sharedDir), runtime: { maxTtlMs: 300_000 } };
+    assert.equal(resolveMaxOneShotTtlMs(cfg), resolveMaxTtlMs(cfg));
+    assert.equal(
+      resolveMaxOneShotTtlMs({ runtime: { maxTtlMs: 300_000 } }),
+      resolveMaxTtlMs({ runtime: { maxTtlMs: 300_000 } }),
+    );
+  });
+
+  it("clamps a runtime.maxOneShotTtlMs larger than runtime.maxTtlMs down to the global tier", () => {
+    assert.equal(
+      resolveMaxOneShotTtlMs({ runtime: { maxTtlMs: 300_000, maxOneShotTtlMs: 900_000 } }),
+      300_000,
+    );
+  });
+
+  it("uses a runtime.maxOneShotTtlMs smaller than runtime.maxTtlMs as the one-shot ceiling", async () => {
+    assert.equal(
+      resolveMaxOneShotTtlMs({ runtime: { maxTtlMs: 900_000, maxOneShotTtlMs: 300_000 } }),
+      300_000,
+    );
+
+    // The lower tier is also the ceiling the spawn op enforces: an absent
+    // ttl_minutes resolves to the tier, not to the global maxTtlMs.
+    if (process.platform !== "linux") return;
+    const { db, config, parentId } = await setupDb();
+    const tieredConfig: ShoggothConfig = {
+      ...config,
+      runtime: { maxTtlMs: 900_000, maxOneShotTtlMs: 300_000 },
+    };
+
+    const before = Date.now();
+    const r = await spawnOneShot(db, tieredConfig, parentId, {});
+
+    const row = createSessionStore(db).getById(r.session_id);
+    assert.ok(row);
+    assert.equal(typeof row.subagentExpiresAtMs, "number");
+    assert.ok(row.subagentExpiresAtMs! >= before + 300_000);
+    assert.ok(row.subagentExpiresAtMs! <= Date.now() + 300_000);
+    db.close();
+  });
+
+  it("caps a ttl_minutes above the one-shot tier at that tier with a non-null deadline", async () => {
+    if (process.platform !== "linux") return;
+    const { db, config, parentId } = await setupDb();
+    const tieredConfig: ShoggothConfig = {
+      ...config,
+      runtime: { maxTtlMs: 900_000, maxOneShotTtlMs: 300_000 },
+    };
+
+    const before = Date.now();
+    const r = await spawnOneShot(db, tieredConfig, parentId, { ttl_minutes: 100_000 });
+
+    const row = createSessionStore(db).getById(r.session_id);
+    assert.ok(row);
+    assert.equal(typeof row.subagentExpiresAtMs, "number");
+    // Above the 300_000 ms tier: capped there, never at the 900_000 ms global max.
+    assert.ok(row.subagentExpiresAtMs! >= before + 300_000);
+    assert.ok(row.subagentExpiresAtMs! <= Date.now() + 300_000);
+    assert.ok(row.subagentExpiresAtMs! < before + 900_000);
+    db.close();
   });
 });

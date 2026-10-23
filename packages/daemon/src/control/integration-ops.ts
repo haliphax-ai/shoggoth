@@ -17,6 +17,7 @@ import {
   crossAgentSessionSendAllowed,
   deepMerge,
   resolveMaxTtlMs,
+  resolveMaxOneShotTtlMs,
   effectiveMaxSpawnDepth,
   loadLayeredConfigAsync,
   maySpawnSubagentAtDepth,
@@ -1928,9 +1929,12 @@ export async function handleIntegrationControlOp(
         // terminated when the deadline fires. The deadline is absolute — one-shot
         // turns are non-resumable, so unlike the persistent inactivity clock there
         // is nothing to reset. It is never "forever": an absent `ttl_minutes`
-        // defaults to the configured max TTL, and a provided value is capped at
-        // that same max TTL, so the persisted expiry below is always finite.
-        const maxTtlMs = resolveMaxTtlMs(ctx.config);
+        // defaults to the tiered one-shot ceiling, and a provided value is
+        // capped at that same ceiling, so the persisted expiry below is always
+        // finite. The ceiling is `runtime.maxOneShotTtlMs` when set (clamped
+        // down to `runtime.maxTtlMs`, which remains the global cap), falling
+        // back to `runtime.maxTtlMs` when that tier is unset.
+        const maxTtlMs = resolveMaxOneShotTtlMs(ctx.config);
         const oneShotTtlMs = clampTtlMs(
           oneShotTtlMinutes !== undefined ? oneShotTtlMinutes * 60_000 : undefined,
           maxTtlMs,

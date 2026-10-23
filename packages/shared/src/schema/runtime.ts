@@ -316,6 +316,14 @@ export const shoggothRuntimeConfigSchema = z
      * "forever". Default: 24 hours (86_400_000).
      */
     maxTtlMs: z.number().int().positive().optional(),
+    /**
+     * Maximum TTL (ms) for one-shot subagent spawns. Used both as the default
+     * when a one-shot TTL is unspecified and as the cap for a provided one. Falls
+     * back to `runtime.maxTtlMs` when unset, and is itself clamped to
+     * `runtime.maxTtlMs` so this tier can never exceed the global ceiling. An
+     * absent value never means "forever".
+     */
+    maxOneShotTtlMs: z.number().int().positive().optional(),
     modelResilience: z
       .object({
         maxRetries: z.number().int().nonnegative().optional(),
