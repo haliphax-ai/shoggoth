@@ -234,6 +234,7 @@ Guild-scoped slash commands are registered on startup via `PUT /applications/{id
 | Command    | Description                                                                                                                                                                     |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/elevate` | Grant or revoke [elevated privileges](daemon.md#elevation). Options: `action` (grant/revoke), `session_id`, `duration`, `grant_id`.                                             |
+| `/yolo`    | Toggle [yolo mode](daemon.md#yolo-mode) (auto-approve HITL, no elevation). Options: `action` (on/off/status, default on), `session_id`.                                         |
 | `/abort`   | Abort the current session turn. Option: `session_id`.                                                                                                                           |
 | `/close`   | Kill a [subagent session](daemon.md#subagents) (defaults to this channel's session). Option: `session_id`. Refuses top-level agent sessions, which stay bound to their channel. |
 | `/steer`   | Steer a session with an operator prompt. Options: `prompt` (required), `session_id`, `delivery` (surface/internal).                                                             |

@@ -49,6 +49,14 @@ const COMMAND_TO_OP: Record<string, (opts: Readonly<Record<string, string>>) => 
       }
       return { op: "elevation_grant", payload };
     },
+    // `/yolo` — persistent HITL bypass flag (no elevation). Defaults to "on".
+    yolo: (opts) => ({
+      op: "yolo_mode",
+      payload: {
+        action: opts.action?.trim() || "on",
+        ...(opts.session_id ? { session_id: opts.session_id } : {}),
+      },
+    }),
     abort: (opts) => ({
       op: "session_abort",
       payload: opts.session_id ? { session_id: opts.session_id } : {},

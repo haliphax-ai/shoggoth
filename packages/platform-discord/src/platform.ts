@@ -17,6 +17,7 @@ import {
   createThinkingOutput,
   createHitlPendingResolutionStack,
   createPolicyEngine,
+  createYoloModeStore,
   createSessionStore,
   createTranscriptStore,
   createToolRunStore,
@@ -74,6 +75,7 @@ export function buildStatusBarDep(
   db: Database.Database,
   cfg: ResolvedStatusBarConfig,
   cruiseControlActive?: (sessionId: string) => boolean,
+  yoloModeActive?: (sessionId: string) => boolean,
 ): {
   config: ResolvedStatusBarConfig;
   render: (snap: StatusBarSnapshot, c: ResolvedStatusBarConfig) => string;
@@ -90,6 +92,7 @@ export function buildStatusBarDep(
     liveSubagents?: () => { total: number; persistent: number };
   };
   cruiseControlActive?: (sessionId: string) => boolean;
+  yoloModeActive?: (sessionId: string) => boolean;
 } {
   return {
     config: cfg,
@@ -112,6 +115,8 @@ export function buildStatusBarDep(
     stats: (sessionId: string) => getStatusBarStats(db, sessionId),
     // Live cruise-control activity provider — re-read on every render.
     ...(cruiseControlActive ? { cruiseControlActive } : {}),
+    // Live yolo-mode activity provider — re-read on every render.
+    ...(yoloModeActive ? { yoloModeActive } : {}),
   };
 }
 
@@ -223,6 +228,21 @@ export async function startDiscordPlatform(
   const toolRuns = createToolRunStore(opts.db);
   const hitlStack = opts.hitlPending ?? createHitlPendingResolutionStack(opts.db);
   const { pending, waitForHitlResolution } = hitlStack;
+  const yoloMode = createYoloModeStore(opts.db);
+  // A state DB that has not run the yolo migration yet must not break a turn:
+  // the flag simply reads as off.
+  const yoloActive = (sessionId: string): boolean => {
+    try {
+      return yoloMode.isEnabled(sessionId);
+    } catch {
+      return false;
+    }
+  };
+
+  /** Spread into a status-bar tracker creation to render the 😎 section. */
+  const yoloStatusBarProvider = (sessionId: string) => ({
+    yoloModeActive: () => yoloActive(sessionId),
+  });
 
   const assistantDeps = pickDiscordAssistantDeps(opts.deps);
   const hitlNotifier =
@@ -245,6 +265,7 @@ export async function startDiscordPlatform(
       const provider = cruiseStatusBarProvider(opts, sessionId).cruiseControlActive;
       return provider ? provider() : false;
     },
+    (sessionId) => yoloActive(sessionId),
   );
 
   const mcpRuntime = await createSessionMcpRuntime({
@@ -654,6 +675,7 @@ export async function startDiscordPlatform(
                   getHitlConfig,
                   hitl: {
                     bypassUpTo: resolveSessionBypassUpTo(msg.sessionId, opts.config),
+                    yoloActive,
                     pending,
                     clock: { nowMs: () => Date.now() },
                     newPendingId: () => randomUUID(),
@@ -804,6 +826,7 @@ export async function startDiscordPlatform(
           getHitlConfig,
           hitl: {
             bypassUpTo: resolveSessionBypassUpTo(sid, opts.config),
+            yoloActive,
             pending,
             clock: { nowMs: () => Date.now() },
             newPendingId: () => randomUUID(),
@@ -886,6 +909,7 @@ export async function startDiscordPlatform(
             render: statusBarDep.render,
             stats: getStatusBarStats(opts.db, sid),
             ...cruiseStatusBarProvider(opts, sid),
+            ...yoloStatusBarProvider(sid),
           });
         }
 
@@ -1117,6 +1141,7 @@ export async function startDiscordPlatform(
           render: statusBarDep.render,
           stats: getStatusBarStats(opts.db, sid),
           ...cruiseStatusBarProvider(opts, sid),
+          ...yoloStatusBarProvider(sid),
         });
         surfaceTracker.attachSink(input.statusBarSink);
       }

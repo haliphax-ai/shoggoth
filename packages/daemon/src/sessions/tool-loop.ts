@@ -125,6 +125,13 @@ export interface RunToolLoopHitl {
       readonly argsJson: string;
     }) => Promise<CruiseControlDecision>;
   };
+  /**
+   * Yolo mode: when set and active for the session, the effective bypass tier
+   * is treated as `never` for that call, so every risk-tier request runs
+   * without entering the HITL queue. Policy hard-denies, policy
+   * `requires_review` verdicts, and system gates are unaffected.
+   */
+  readonly yoloActive?: (sessionId: string) => boolean;
 }
 
 export interface RunToolLoopOptions {
@@ -362,7 +369,11 @@ async function hitlApprovalGate(
 
   h.pending.expireDue(new Date(h.clock.nowMs()).toISOString());
   const tier = classifyToolRisk(compoundResource, h.config.toolRisk);
-  const bypass = h.bypassUpTo;
+  const configuredBypass = h.bypassUpTo;
+  // Yolo mode: the session's effective bypass tier is `never` while the flag
+  // is on — every risk tier runs without entering the HITL queue.
+  const yoloActive = h.yoloActive?.(options.sessionId) ?? false;
+  const bypass = yoloActive ? "never" : configuredBypass;
   const needsApproval = requiresHumanApproval(tier, bypass);
   const autoApproved =
     needsApproval &&
@@ -370,6 +381,12 @@ async function hitlApprovalGate(
     h.autoApprove?.shouldAutoApprove(options.sessionId, compoundResource);
   if (autoApproved) {
     log.info("hitl auto-approve fired", {
+      toolName: compoundResource,
+      sessionId: options.sessionId,
+    });
+  }
+  if (yoloActive && requiresHumanApproval(tier, configuredBypass)) {
+    log.info("hitl yolo mode auto-approved", {
       toolName: compoundResource,
       sessionId: options.sessionId,
     });

@@ -138,6 +138,11 @@ export interface PresentationTurnOrchestratorDeps {
      * activation/deactivation mid-turn is reflected immediately.
      */
     readonly cruiseControlActive?: (sessionId: string) => boolean;
+    /**
+     * Live yolo-mode activity provider — re-read on every render so an
+     * enable/disable mid-turn is reflected immediately.
+     */
+    readonly yoloModeActive?: (sessionId: string) => boolean;
   };
 }
 
@@ -317,6 +322,11 @@ export class PresentationTurnOrchestrator {
               ...(statusBarDep.cruiseControlActive
                 ? {
                     cruiseControlActive: () => statusBarDep.cruiseControlActive!(sessionId),
+                  }
+                : {}),
+              ...(statusBarDep.yoloModeActive
+                ? {
+                    yoloModeActive: () => statusBarDep.yoloModeActive!(sessionId),
                   }
                 : {}),
             });

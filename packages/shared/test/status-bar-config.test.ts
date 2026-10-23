@@ -60,6 +60,7 @@ describe("resolveStatusBarConfig", () => {
     assert.equal(r.notifyEnabled, true);
     assert.equal(r.contextWindowEnabled, true);
     assert.equal(r.compactionsEnabled, true);
+    assert.equal(r.yoloModeEnabled, true);
   });
 
   it("returns all-true defaults when platforms is absent entirely", () => {
@@ -84,12 +85,18 @@ describe("resolveStatusBarConfig", () => {
       contextWindowEnabled: false,
       compactionsEnabled: true,
       cruiseControlEnabled: true,
+      yoloModeEnabled: true,
     });
   });
 
   it("honors cruiseControlEnabled:false over the default", () => {
     const r = resolveStatusBarConfig(cfgWith({ statusBar: { cruiseControlEnabled: false } }));
     assert.equal(r.cruiseControlEnabled, false);
+  });
+
+  it("honors yoloModeEnabled:false over the default", () => {
+    const r = resolveStatusBarConfig(cfgWith({ statusBar: { yoloModeEnabled: false } }));
+    assert.equal(r.yoloModeEnabled, false);
   });
 
   it("honors timersEnabled:false over the default", () => {

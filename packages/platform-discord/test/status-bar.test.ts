@@ -77,6 +77,32 @@ describe("renderDiscordStatusBar", () => {
     ).not.toContain("🚗");
   });
 
+  it("renders the yolo mode section after the sequence when enabled", () => {
+    const line = renderDiscordStatusBar(snap({ sequence: 7, yoloMode: true }), defaultCfg);
+    expect(line).toContain("😎");
+    expect(line.indexOf("😎")).toBeGreaterThan(line.indexOf("🔢"));
+  });
+
+  it("places the yolo mode section immediately after the sequence and before cruise control", () => {
+    const line = renderDiscordStatusBar(
+      snap({ sequence: 5, yoloMode: true, cruiseControl: true }),
+      defaultCfg,
+    );
+    // The 😎 section is joined directly onto the sequence counter, and the
+    // 🚗 section follows it.
+    expect(line).toMatch(/🔢 `5` ｜ 😎 ｜ 🚗/);
+  });
+
+  it("omits the yolo mode section when inactive or disabled", () => {
+    expect(renderDiscordStatusBar(snap(), defaultCfg)).not.toContain("😎");
+    expect(
+      renderDiscordStatusBar(snap({ yoloMode: true }), {
+        ...defaultCfg,
+        yoloModeEnabled: false,
+      }),
+    ).not.toContain("😎");
+  });
+
   it("omits the tool section when total is 0 and no queued tool", () => {
     const line = renderDiscordStatusBar(snap({ toolCalls: { total: 0 } }), defaultCfg);
     expect(line).not.toContain("🔧");

@@ -83,4 +83,16 @@ describe("buildStatusBarDep stats", () => {
     const dep = buildStatusBarDep(db, cfg);
     expect(dep.cruiseControlActive).toBeUndefined();
   });
+
+  it("exposes yoloModeActive when provided", () => {
+    const yoloActive = (sid: string) => sid === "s1";
+    const dep = buildStatusBarDep(db, cfg, undefined, yoloActive);
+    expect(dep.yoloModeActive?.("s1")).toBe(true);
+    expect(dep.yoloModeActive?.("s2")).toBe(false);
+  });
+
+  it("omits yoloModeActive when not provided", () => {
+    const dep = buildStatusBarDep(db, cfg);
+    expect(dep.yoloModeActive).toBeUndefined();
+  });
 });

@@ -60,6 +60,7 @@ Migrations live in `shoggoth/migrations/` as numbered SQL files (e.g. `0001_init
 | `cron_jobs`                      | Scheduled recurring jobs                                                                                                                          |
 | `timers`                         | Deferred timer actions (fire_at, message, session)                                                                                                |
 | `elevation_grants`               | Time-limited elevated execution grants                                                                                                            |
+| `session_yolo_mode`              | Persistent per-session yolo flag (HITL bypass; no expiry until cleared)                                                                           |
 | `pending_actions`                | HITL approval queue                                                                                                                               |
 | `hitl_session_tool_auto_approve` | Per-session tool auto-approve state                                                                                                               |
 | `session_tool_state`             | Tool discovery enable/disable state per session                                                                                                   |
@@ -347,6 +348,35 @@ Elevation grants temporary privileged execution to a session.
 ### Elevated Execution
 
 `handleElevate(args, ctx)` runs a command via `execFileSync` only if an active elevation grant exists. Commands run with a 30s default timeout (max 120s) and 256 KB output cap.
+
+---
+
+## Yolo Mode
+
+Yolo mode is a flag stamped on a session that bypasses HITL approval **by auto-approving** — it does **not** elevate. Commands still route normally and execute as the agent.
+
+It differs from [Elevation](#elevation) in three ways:
+
+- **Persistent, not time-boxed.** The flag lives in the `session_yolo_mode` table for the session's lifetime and never expires; only the operator clearing it turns it off.
+- **No elevation.** Nothing about execution privileges changes — the session runs every command as the agent, exactly as before.
+- **Risk-tier HITL only.** While the flag is on, the session's effective bypass tier is `never`, so every risk tier (including `never`) runs without queueing. Policy hard-denies, policy `requires_review` verdicts, system gates (AGENTS.md / re-read), and elevation behavior are all unaffected.
+
+While yolo mode is enabled, a 😎 section appears in the turn status bar immediately after the sequence counter.
+
+### Yolo Mode Store
+
+`createYoloModeStore(db)` manages `session_yolo_mode` rows:
+
+- `isEnabled(sessionId)` — true while the flag is set.
+- `setEnabled(sessionId, enabled)` — upserts the row when enabling, deletes it when disabling.
+- `getStatus(sessionId)` — returns the flag plus `updated_at`.
+
+### Control Op
+
+`yolo_mode` (operator-only) with payload `{ action: "on" | "off" | "status", session_id }` returns `{ ok, sessionId, enabled }`.
+
+- CLI: `shoggoth yolo on|off|status <session-id>` (see [CLI](cli.md#shoggoth-yolo)).
+- Discord: `/yolo` (see [Platform — Discord](platform-discord.md)).
 
 ---
 
