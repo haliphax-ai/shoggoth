@@ -17,6 +17,7 @@ import {
   crossAgentSessionSendAllowed,
   deepMerge,
   resolveMaxTtlMs,
+  resolveMaxOneShotTtlMs,
   effectiveMaxSpawnDepth,
   loadLayeredConfigAsync,
   maySpawnSubagentAtDepth,
@@ -110,6 +111,7 @@ import { pushSteer } from "../sessions/steer-channel";
 import { getTurnQueue } from "../sessions/session-turn-queue-singleton";
 import {
   formatOobFailureNotice,
+  OOB_NO_SENDER_GUIDANCE,
   OOB_NUDGE_NO_SENDER,
   OOB_NUDGE_WITH_SENDER,
   OOB_SCHEMA_NO_SENDER,
@@ -279,6 +281,99 @@ function optionalBooleanFlag(obj: Record<string, unknown>, key: string): boolean
     throw new IntegrationOpError("ERR_INVALID_PAYLOAD", `payload.${key} must be a boolean`);
   }
   return v;
+}
+
+/** Structured failure delivered to the spawning session when a one-shot subagent
+ * outlives its wall-clock TTL. The code travels on every delivery path (steer
+ * injection, OOB structured payload, and the spawn op response) so the parent can
+ * detect it uniformly. */
+export const ONE_SHOT_TTL_EXPIRED_CODE = "ERR_SUBAGENT_TTL_EXPIRED";
+
+/** Terminate a one-shot child that outlived its wall-clock TTL: abort the in-flight
+ * turn, dispose runtime handles, and kill the session (idempotent with the normal
+ * completion path's `finally` teardown). */
+function terminateOneShotAfterTtl(
+  sessionManager: SessionManager,
+  childId: string,
+  autoApproveGate?: HitlAutoApproveGate,
+): void {
+  try {
+    terminatePersistentSubagentSession(sessionManager, childId, "ttl_expired", autoApproveGate);
+  } catch (e) {
+    ioLog.warn("subagent.one_shot.ttl_terminate_failed", { childId, error: String(e) });
+  }
+}
+
+/**
+ * Deliver `ERR_SUBAGENT_TTL_EXPIRED` to the spawning session: steer-injected when a
+ * turn is active, otherwise an OOB structured payload (mirroring subagent result
+ * delivery) so the parent always learns that the child was cut off and may decide
+ * whether to respawn with a larger budget. Best-effort: failures are logged, never
+ * rethrown — the child is already terminated and nothing else can be done here.
+ */
+async function deliverOneShotTtlExpiredFailure(opts: {
+  readonly ext: NonNullable<typeof subagentRuntimeExtensionRef.current>;
+  readonly parentSessionId: string;
+  readonly childId: string;
+  readonly childAgentId: string;
+  readonly subLog: ReturnType<typeof getLogger>;
+}): Promise<void> {
+  const { ext, parentSessionId, childId, childAgentId, subLog } = opts;
+  const detail = `one-shot subagent \`${childId}\` (**${childAgentId}**) terminated at its wall-clock TTL`;
+  const steerBody = `[${ONE_SHOT_TTL_EXPIRED_CODE}] ${detail}\n\nRespawn with a larger \`ttl_minutes\` if the task needs more time.`;
+  if (pushSteer(parentSessionId, steerBody)) {
+    subLog.info("subagent one_shot ttl failure delivered in-turn", {
+      parentSessionId,
+      childId,
+    });
+    return;
+  }
+  const systemContext: SystemContext = {
+    kind: "subagent.ttlExpired",
+    summary: "A one-shot subagent was terminated at its wall-clock TTL.",
+    data: {
+      code: ONE_SHOT_TTL_EXPIRED_CODE,
+      child_session_id: childId,
+      agent_id: childAgentId,
+    },
+    guidance: OOB_NO_SENDER_GUIDANCE,
+  };
+  try {
+    const turn = await ext.runSessionModelTurn({
+      sessionId: parentSessionId,
+      userContent: `[${ONE_SHOT_TTL_EXPIRED_CODE}] ${detail}`,
+      userMetadata: {
+        subagent_ttl_expired: true,
+        error: ONE_SHOT_TTL_EXPIRED_CODE,
+        child_session_id: childId,
+        agent_id: childAgentId,
+      },
+      systemContext,
+      delivery: { kind: "internal" },
+      modelInvocationOverride: {
+        responseSchema: { schema: OOB_SCHEMA_NO_SENDER },
+        structuredOutputMode: "best-effort",
+      },
+    });
+    if (turn?.aborted || turn?.latestAssistantText) {
+      await deliverOobStructuredResponse({
+        structuredResponse: turn.latestAssistantText,
+        aborted: turn.aborted,
+        respondTo: parentSessionId,
+        childSessionId: childId,
+        ext,
+        subLog,
+        hasSender: false,
+        systemContext,
+      });
+    }
+  } catch (e) {
+    subLog.warn("failed to deliver one-shot subagent TTL failure", {
+      parentSessionId,
+      childId,
+      error: String(e),
+    });
+  }
 }
 
 function optionalNonEmptySessionId(pl: Record<string, unknown>): string | undefined {
@@ -1568,6 +1663,11 @@ export async function handleIntegrationControlOp(
           "payload.mode must be one_shot or persistent",
         );
       }
+      // `ttl_minutes` (one-shot wall-clock TTL): validated before the child
+      // session exists so an invalid value can never strand a freshly spawned
+      // child — one-shot sessions are not covered by the startup reconcile.
+      const oneShotTtlMinutes =
+        modeRaw === "one_shot" ? optionalFinitePositiveInt(pl, "ttl_minutes") : undefined;
       const parent = sessions.getById(parentSessionId);
       if (!parent || parent.status === "terminated") {
         throw new IntegrationOpError(
@@ -1825,11 +1925,26 @@ export async function handleIntegrationControlOp(
         enableToolsForSession(ctx.stateDb, childId, enableTools);
       }
       if (modeRaw === "one_shot") {
+        // `ttl_minutes` (if provided) is the wall-clock lifetime: the child is
+        // terminated when the deadline fires. The deadline is absolute — one-shot
+        // turns are non-resumable, so unlike the persistent inactivity clock there
+        // is nothing to reset. It is never "forever": an absent `ttl_minutes`
+        // defaults to the tiered one-shot ceiling, and a provided value is
+        // capped at that same ceiling, so the persisted expiry below is always
+        // finite. The ceiling is `runtime.maxOneShotTtlMs` when set (clamped
+        // down to `runtime.maxTtlMs`, which remains the global cap), falling
+        // back to `runtime.maxTtlMs` when that tier is unset.
+        const maxTtlMs = resolveMaxOneShotTtlMs(ctx.config);
+        const oneShotTtlMs = clampTtlMs(
+          oneShotTtlMinutes !== undefined ? oneShotTtlMinutes * 60_000 : undefined,
+          maxTtlMs,
+        );
+        const oneShotExpiresAtMs = Date.now() + oneShotTtlMs;
         sessions.update(childId, {
           parentSessionId,
           subagentMode: "one_shot",
           subagentPlatformThreadId: null,
-          subagentExpiresAtMs: null,
+          subagentExpiresAtMs: oneShotExpiresAtMs,
         });
         const subLog = getLogger("subagent");
         subLog.info("subagent one_shot model turn starting", {
@@ -1920,6 +2035,26 @@ export async function handleIntegrationControlOp(
         };
         const backgroundSpawn = pl.background === true;
         if (backgroundSpawn) {
+          // Wall-clock TTL for the fire-and-forget turn: at the absolute deadline
+          // the child is terminated, the structured failure is delivered to the
+          // spawning session, and any still-pending completion handlers are
+          // ignored so a killed child can never surface a spurious result.
+          let oneShotTtlFired = false;
+          const ttlTimer = setTimeout(() => {
+            oneShotTtlFired = true;
+            subLog.warn("subagent one_shot (background) wall-clock TTL expired", {
+              childId,
+              ttlMs: oneShotTtlMs,
+            });
+            terminateOneShotAfterTtl(sessionManager, childId, ctx.hitlClear?.autoApproveGate);
+            void deliverOneShotTtlExpiredFailure({
+              ext,
+              parentSessionId,
+              childId,
+              childAgentId,
+              subLog,
+            });
+          }, oneShotTtlMs);
           // Fire-and-forget: run the model turn asynchronously and return immediately.
           ext
             .runSessionModelTurn({
@@ -1946,6 +2081,7 @@ export async function handleIntegrationControlOp(
               delivery: { kind: "internal" },
             })
             .then(async (turn) => {
+              if (oneShotTtlFired) return;
               subLog.info("subagent one_shot (background) model turn completed", {
                 childId,
                 replyLen: turn.latestAssistantText?.length ?? 0,
@@ -1971,12 +2107,14 @@ export async function handleIntegrationControlOp(
               });
             })
             .catch((err) => {
+              if (oneShotTtlFired) return;
               subLog.warn("subagent one_shot (background) model turn failed", {
                 childId,
                 error: String(err),
               });
             })
             .finally(() => {
+              clearTimeout(ttlTimer);
               terminatePersistentSubagentSession(
                 sessionManager,
                 childId,
@@ -2004,9 +2142,34 @@ export async function handleIntegrationControlOp(
             ...(contract ? { contract: { active: true, pending: true } } : {}),
           };
         }
+        // Wall-clock TTL for the awaited foreground turn: at the absolute deadline
+        // the child is terminated (aborting its in-flight turn) and the awaited
+        // race is settled with the structured failure, so the spawn op can never
+        // hang past its TTL. The child's turn result is discarded after expiry.
+        let oneShotTtlFired = false;
+        let settleTurn: (() => void) | undefined;
+        const ttlTimer = setTimeout(() => {
+          oneShotTtlFired = true;
+          subLog.warn("subagent one_shot wall-clock TTL expired", {
+            childId,
+            ttlMs: oneShotTtlMs,
+          });
+          terminateOneShotAfterTtl(sessionManager, childId, ctx.hitlClear?.autoApproveGate);
+          // Deliver the structured failure to the spawning session (the spawn
+          // response also carries the same code), then settle the spawn; the
+          // killed child's turn drains in the background and its result is dropped.
+          void deliverOneShotTtlExpiredFailure({
+            ext,
+            parentSessionId,
+            childId,
+            childAgentId,
+            subLog,
+          });
+          settleTurn?.();
+        }, oneShotTtlMs);
         let turn: { latestAssistantText: string; failoverMeta?: unknown };
         try {
-          turn = await ext.runSessionModelTurn({
+          const turnPromise = ext.runSessionModelTurn({
             sessionId: childId,
             userContent: prompt,
             userMetadata: {
@@ -2029,11 +2192,43 @@ export async function handleIntegrationControlOp(
             },
             delivery: { kind: "internal" },
           });
+          const settlePromise = new Promise<never>((_, reject) => {
+            settleTurn = () =>
+              reject(
+                new IntegrationOpError(
+                  ONE_SHOT_TTL_EXPIRED_CODE,
+                  `one-shot subagent ${childId} terminated at its wall-clock TTL`,
+                ),
+              );
+          });
+          turn = await Promise.race([turnPromise, settlePromise]);
+          if (oneShotTtlFired) {
+            throw new IntegrationOpError(
+              ONE_SHOT_TTL_EXPIRED_CODE,
+              `one-shot subagent ${childId} terminated at its wall-clock TTL`,
+            );
+          }
           subLog.info("subagent one_shot model turn completed", {
             childId,
             replyLen: turn.latestAssistantText?.length ?? 0,
           });
+        } catch (e) {
+          // Expiry (or the killed turn's abort rejection) surfaces as the
+          // structured failure so the spawning session can decide whether to
+          // respawn with a larger budget.
+          if (
+            oneShotTtlFired &&
+            !(e instanceof IntegrationOpError && e.code === ONE_SHOT_TTL_EXPIRED_CODE)
+          ) {
+            throw new IntegrationOpError(
+              ONE_SHOT_TTL_EXPIRED_CODE,
+              `one-shot subagent ${childId} terminated at its wall-clock TTL`,
+            );
+          }
+          throw e;
         } finally {
+          clearTimeout(ttlTimer);
+          settleTurn = undefined;
           terminatePersistentSubagentSession(
             sessionManager,
             childId,

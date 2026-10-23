@@ -175,6 +175,12 @@ export const subagentToolArgs = {
       description:
         "spawn_persistent: optional inactivity window in minutes (session is terminated after this long without a delivered response; the clock resets on each delivered response)",
     },
+    ttl_minutes: {
+      type: "integer",
+      minimum: 1,
+      description:
+        "spawn_one_shot: optional wall-clock TTL in minutes, clamped to runtime.maxTtlMs (absent defaults to that max) — the child is terminated with ERR_SUBAGENT_TTL_EXPIRED when it expires",
+    },
     session_id: {
       type: "string",
       description:

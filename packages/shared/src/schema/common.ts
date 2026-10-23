@@ -113,6 +113,23 @@ export function resolveMaxTtlMs(cfg?: { runtime?: { maxTtlMs?: number } }): numb
 }
 
 /**
+ * Resolve the one-shot subagent TTL ceiling (ms), tiered under the global
+ * `runtime.maxTtlMs`: when `runtime.maxOneShotTtlMs` is unset or invalid the
+ * global ceiling ({@link resolveMaxTtlMs}) is used directly, otherwise the
+ * configured tier is clamped down to that global ceiling so the tier can never
+ * exceed it. The result is always a finite value in `(0, resolveMaxTtlMs]` —
+ * never "forever".
+ */
+export function resolveMaxOneShotTtlMs(cfg?: {
+  runtime?: { maxTtlMs?: number; maxOneShotTtlMs?: number };
+}): number {
+  const globalMax = resolveMaxTtlMs(cfg);
+  const v = cfg?.runtime?.maxOneShotTtlMs;
+  if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return globalMax;
+  return Math.min(v, globalMax);
+}
+
+/**
  * Resolve an effective TTL (ms) against the configured maximum: an absent TTL
  * defaults to `maxTtlMs`, and a provided TTL is capped at `maxTtlMs`. The result is
  * always a finite value in `(0, maxTtlMs]` — never "forever".

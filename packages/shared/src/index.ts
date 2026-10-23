@@ -73,6 +73,7 @@ export {
   DEFAULT_SESSION_SEND_YIELD_MS,
   DEFAULT_MAX_TTL_MS,
   resolveMaxTtlMs,
+  resolveMaxOneShotTtlMs,
   clampTtlMs,
   type HitlRiskTier,
   type ContextLevel,
