@@ -75,6 +75,7 @@ export function buildStatusBarDep(
   db: Database.Database,
   cfg: ResolvedStatusBarConfig,
   cruiseControlActive?: (sessionId: string) => boolean,
+  yoloModeActive?: (sessionId: string) => boolean,
 ): {
   config: ResolvedStatusBarConfig;
   render: (snap: StatusBarSnapshot, c: ResolvedStatusBarConfig) => string;
@@ -91,6 +92,7 @@ export function buildStatusBarDep(
     liveSubagents?: () => { total: number; persistent: number };
   };
   cruiseControlActive?: (sessionId: string) => boolean;
+  yoloModeActive?: (sessionId: string) => boolean;
 } {
   return {
     config: cfg,
@@ -113,6 +115,8 @@ export function buildStatusBarDep(
     stats: (sessionId: string) => getStatusBarStats(db, sessionId),
     // Live cruise-control activity provider — re-read on every render.
     ...(cruiseControlActive ? { cruiseControlActive } : {}),
+    // Live yolo-mode activity provider — re-read on every render.
+    ...(yoloModeActive ? { yoloModeActive } : {}),
   };
 }
 
@@ -235,6 +239,11 @@ export async function startDiscordPlatform(
     }
   };
 
+  /** Spread into a status-bar tracker creation to render the 😎 section. */
+  const yoloStatusBarProvider = (sessionId: string) => ({
+    yoloModeActive: () => yoloActive(sessionId),
+  });
+
   const assistantDeps = pickDiscordAssistantDeps(opts.deps);
   const hitlNotifier =
     opts.deps?.hitlNotifier ??
@@ -256,6 +265,7 @@ export async function startDiscordPlatform(
       const provider = cruiseStatusBarProvider(opts, sessionId).cruiseControlActive;
       return provider ? provider() : false;
     },
+    (sessionId) => yoloActive(sessionId),
   );
 
   const mcpRuntime = await createSessionMcpRuntime({
@@ -899,6 +909,7 @@ export async function startDiscordPlatform(
             render: statusBarDep.render,
             stats: getStatusBarStats(opts.db, sid),
             ...cruiseStatusBarProvider(opts, sid),
+            ...yoloStatusBarProvider(sid),
           });
         }
 
@@ -1130,6 +1141,7 @@ export async function startDiscordPlatform(
           render: statusBarDep.render,
           stats: getStatusBarStats(opts.db, sid),
           ...cruiseStatusBarProvider(opts, sid),
+          ...yoloStatusBarProvider(sid),
         });
         surfaceTracker.attachSink(input.statusBarSink);
       }

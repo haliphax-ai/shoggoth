@@ -55,6 +55,8 @@ export interface StatusBarSnapshot {
   readonly notifies?: number;
   /** True while cruise control (HITL auto-pilot) is active for the session. */
   readonly cruiseControl?: boolean;
+  /** True while yolo mode is enabled for the session. */
+  readonly yoloMode?: boolean;
 }
 
 /** Platform-supplied sink: applies the rendered bar line to the in-flight message. */
@@ -136,6 +138,12 @@ export function createTurnStatusBar(opts: {
    * (reflected immediately when activated/deactivated mid-turn).
    */
   cruiseControlActive?: () => boolean;
+  /**
+   * Live yolo-mode activity provider. When present and true, the snapshot
+   * carries `yoloMode` so the platform renders the 😎 section (reflected
+   * immediately when enabled/disabled mid-turn).
+   */
+  yoloModeActive?: () => boolean;
 }): TurnStatusBar {
   const cfg = opts.cfg;
   const sink = opts.sink;
@@ -153,7 +161,8 @@ export function createTurnStatusBar(opts: {
       !cfg.notifyEnabled &&
       !cfg.contextWindowEnabled &&
       !cfg.compactionsEnabled &&
-      !cfg.cruiseControlEnabled);
+      !cfg.cruiseControlEnabled &&
+      !cfg.yoloModeEnabled);
 
   let finished = false;
   let phase: TurnStatusPhase = "starting";
@@ -193,12 +202,24 @@ export function createTurnStatusBar(opts: {
       ...(timersNow !== undefined ? { timers: timersNow } : {}),
       ...(notifiesNow !== undefined ? { notifies: notifiesNow } : {}),
       ...(effectiveCruiseControl() ? { cruiseControl: true } : {}),
+      ...(effectiveYoloMode() ? { yoloMode: true } : {}),
     };
   }
 
   /** True while the cruise-control provider (when present) reports active. */
   function effectiveCruiseControl(): boolean {
     const provider = opts.cruiseControlActive;
+    if (!provider) return false;
+    try {
+      return provider();
+    } catch {
+      return false;
+    }
+  }
+
+  /** True while the yolo-mode provider (when present) reports active. */
+  function effectiveYoloMode(): boolean {
+    const provider = opts.yoloModeActive;
     if (!provider) return false;
     try {
       return provider();
@@ -654,6 +675,10 @@ export function createStatusBarTurnTracker(opts: {
    * activation/deactivation mid-turn is reflected immediately.
    */
   cruiseControlActive?: () => boolean;
+  /** Live yolo-mode activity provider — re-read on every render so an
+   * enable/disable mid-turn is reflected immediately.
+   */
+  yoloModeActive?: () => boolean;
 }): TurnStatusBarTracker {
   let liveSink: StatusBarSink | undefined;
   let capturedLine: string | undefined;
@@ -691,6 +716,7 @@ export function createStatusBarTurnTracker(opts: {
     ...(timersCount ? { timersCount } : {}),
     ...(subagentsCount ? { subagentsCount } : {}),
     ...(opts.cruiseControlActive ? { cruiseControlActive: opts.cruiseControlActive } : {}),
+    ...(opts.yoloModeActive ? { yoloModeActive: opts.yoloModeActive } : {}),
   });
 
   void engine

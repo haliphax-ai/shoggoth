@@ -36,6 +36,11 @@ export function renderDiscordStatusBar(
     sections.push(`🔢 \`${snap.sequence}\``);
   }
 
+  // 😎 — yolo mode is enabled for the session (immediately after the sequence counter).
+  if (cfg.yoloModeEnabled && snap.yoloMode) {
+    sections.push("😎");
+  }
+
   // 🚗 — cruise control (HITL auto-pilot) is active for the session.
   if (cfg.cruiseControlEnabled && snap.cruiseControl) {
     sections.push("🚗");

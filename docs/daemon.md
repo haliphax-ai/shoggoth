@@ -361,6 +361,8 @@ It differs from [Elevation](#elevation) in three ways:
 - **No elevation.** Nothing about execution privileges changes — the session runs every command as the agent, exactly as before.
 - **Risk-tier HITL only.** While the flag is on, the session's effective bypass tier is `never`, so every risk tier (including `never`) runs without queueing. Policy hard-denies, policy `requires_review` verdicts, system gates (AGENTS.md / re-read), and elevation behavior are all unaffected.
 
+While yolo mode is enabled, a 😎 section appears in the turn status bar immediately after the sequence counter.
+
 ### Yolo Mode Store
 
 `createYoloModeStore(db)` manages `session_yolo_mode` rows:

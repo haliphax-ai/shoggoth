@@ -245,6 +245,35 @@ describe("PresentationTurnOrchestrator", () => {
     expect(barLine?.length ?? 0).toBeGreaterThan(0);
   });
 
+  it("threads yoloModeActive into the tracker create()", async () => {
+    const config = { ...DEFAULT_STATUS_BAR_CONFIG, enabled: true } as ResolvedStatusBarConfig;
+    const render = vi.fn().mockReturnValue("✅ ｜ 🔢 `3`");
+    const attachSink = vi.fn().mockReturnValue({
+      setStatusBar: vi.fn().mockResolvedValue(undefined),
+    });
+    const adapter = createMockAdapter();
+    const yoloActive = vi.fn((sid: string) => sid === "s1");
+    const orch = makeOrchestrator({
+      config: {} as ShoggothConfig,
+      adapter,
+      statusBar: { config, render, attachSink, yoloModeActive: yoloActive },
+    });
+
+    await orch.orchestrateInboundTurn({
+      sessionId: "s1",
+      buildTurn: vi.fn().mockResolvedValue({}),
+    });
+
+    const call = mockRunInboundSessionTurn.mock.calls.at(-1)?.[0];
+    const tracker = await call.statusBar?.create?.();
+    expect(tracker).toBeDefined();
+    const barLine = await tracker?.finish?.("completed");
+    expect(typeof barLine).toBe("string");
+    expect(barLine?.length ?? 0).toBeGreaterThan(0);
+    // The render path reads the provider through the bound session id.
+    expect(yoloActive).toHaveBeenCalledWith("s1");
+  });
+
   it("create() then attachSink wires the live sink and flushes the captured starting line", async () => {
     const config = { ...DEFAULT_STATUS_BAR_CONFIG, enabled: true } as ResolvedStatusBarConfig;
     const render = vi.fn().mockReturnValue("⏳ ｜ 🔢 `3`");

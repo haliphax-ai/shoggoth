@@ -74,6 +74,7 @@ export const statusBarConfigSchema = z
     contextWindowEnabled: z.boolean().optional(),
     compactionsEnabled: z.boolean().optional(),
     cruiseControlEnabled: z.boolean().optional(),
+    yoloModeEnabled: z.boolean().optional(),
   })
   .strict()
   .optional();
