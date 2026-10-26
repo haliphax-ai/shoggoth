@@ -44,8 +44,8 @@ describe("session context segment re-read clearing", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("applySessionContextSegmentNew clears re-read rows for the session", () => {
     const sessions = createSessionStore(db);
@@ -70,6 +70,7 @@ describe("session context segment re-read clearing", () => {
 
     const newSegment = sessions.getById(SESSION_ID)!.contextSegmentId;
     assert.equal(checkReReadRequired(db, SESSION_ID, newSegment, "/ws/a.ts"), null);
+    assert.equal(newSegment, originalSegment, "reset must keep the current segment");
   });
 
   it("only clears rows for the targeted session", () => {

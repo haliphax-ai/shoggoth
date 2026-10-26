@@ -8,6 +8,7 @@ import { resetSegmentStats } from "./session-stats-store";
 import { pushSystemContext } from "./system-context-buffer";
 import { clearSessionReReadRequired } from "./re-read-required";
 import { clearSessionToolState } from "./session-tool-discovery";
+import { createTranscriptStore } from "./transcript-store";
 
 function denyPendingForSession(pending: PendingActionsStore | undefined, sessionId: string): void {
   if (!pending) return;
@@ -31,13 +32,16 @@ function killableSubagentChildIds(sessions: SessionStore, sessionId: string): st
  * Transport-agnostic session context segments (`sessions.context_segment_id`). Callers: control-plane
  * ops (`session_context_new` / `session_context_reset`), messaging adapters, future CLI.
  *
- * Neither operation deletes transcript rows — old messages are abandoned (excluded from model context
- * by the new segment id) and left for the retention workflow to clean up.
+ * **New** mints a new segment id, so the previous segment's transcript rows are abandoned (excluded
+ * from model context by the new segment id) and left for the retention workflow to clean up. **Reset**
+ * does NOT mint a new segment id: it wipes the transcript of the CURRENT segment — the rows are
+ * deleted, not abandoned — and the session continues with the segment it already had.
  *
- * Both **New** and **Reset** mint a new segment id, deny pending HITL for the session, clear the
- * re-read-required list (stale line numbers no longer apply to the new segment), reset the
- * session's tool state to the agent's defaults (session tool discovery overlays from the previous
- * segment do not carry over), and kill the session's still-running **one-shot** subagents (via the optional `killSubagents` callback).
+ * Both **New** and **Reset** deny pending HITL for the session, clear the re-read-required list
+ * (stale line numbers no longer apply to a fresh transcript), reset the session's tool state to the
+ * agent's defaults (session tool discovery overlays from the previous transcript do not carry over),
+ * regenerate the system-context token, reset the segment stats, and kill the session's
+ * still-running **one-shot** subagents (via the optional `killSubagents` callback).
  * **Persistent** subagents (`subagentMode === "persistent"`) are never killed by either operation —
  * they outlive the parent's context lifecycle and are torn down only by TTL/inactivity or an
  * explicit subagent kill.
@@ -92,9 +96,10 @@ export function applySessionContextSegmentReset(input: {
   denyPendingForSession(input.pending, sessionId);
   clearSessionReReadRequired(input.db, sessionId);
   clearSessionToolState(input.db, sessionId);
-  const contextSegmentId = randomUUID();
+  // Reset keeps the current segment: the transcript is wiped in place (deleted, not
+  // abandoned) so the session continues with the segment id it already had.
+  createTranscriptStore(input.db).deleteForSessionSegment(sessionId, previousContextSegmentId);
   input.sessions.update(sessionId, {
-    contextSegmentId,
     systemContextToken: generateSystemContextToken(),
   });
   resetSegmentStats(input.db, sessionId);
@@ -103,5 +108,5 @@ export function applySessionContextSegmentReset(input: {
     if (children.length > 0) input.killSubagents(children);
   }
   pushSystemContext(sessionId, "Fresh session. No prior conversation history.");
-  return { previousContextSegmentId, contextSegmentId };
+  return { previousContextSegmentId, contextSegmentId: previousContextSegmentId };
 }

@@ -1036,15 +1036,15 @@ describe("control plane (unix socket + JSONL)", () => {
           previousContextSegmentId: string;
           contextSegmentId: string;
         };
+        // Reset keeps the current segment id and wipes its transcript in place.
         assert.equal(rr.previousContextSegmentId, seg2);
-        assert.notEqual(rr.contextSegmentId, seg2);
-        // Transcript rows for seg2 are abandoned, not deleted.
+        assert.equal(rr.contextSegmentId, seg2);
         const nSeg2 = db
           .prepare(
             `SELECT COUNT(*) AS c FROM transcript_messages WHERE session_id = ? AND context_segment_id = ?`,
           )
           .get("agent:test:discord:channel:sess-cx", seg2) as { c: number };
-        assert.equal(nSeg2.c, 1);
+        assert.equal(nSeg2.c, 0);
         assert.equal(countSessionAutoApprove(), 1);
       },
     );
