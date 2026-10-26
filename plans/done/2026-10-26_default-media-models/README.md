@@ -1,6 +1,6 @@
 ---
 date: 2026-10-26 # Date the plan was created (YYYY-MM-DD)
-completed: never # Date completed (YYYY-MM-DD), or "never"
+completed: 2026-10-26 # Date completed (YYYY-MM-DD), or "never"
 ---
 
 # Default models per media generation type
