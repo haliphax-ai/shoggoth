@@ -58,6 +58,7 @@ export const DEFINED_CONTROL_OPS = [
   "session_queue_manage",
   "elevation_grant",
   "elevation_revoke",
+  "elevation_list",
   "yolo_mode",
   "media_generate",
   "media_generate_poll",

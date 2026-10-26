@@ -17,16 +17,17 @@ import {
 const SLASH_COMMANDS = [
   {
     name: "elevate",
-    description: "Grant or revoke elevated privileges for a session",
+    description: "Grant, revoke, or list elevated privileges for a session",
     options: [
       {
         name: "action",
         type: 3, // STRING
-        description: "grant or revoke (default: grant)",
+        description: "grant, revoke, or list (default: grant)",
         required: false,
         choices: [
           { name: "grant", value: "grant" },
           { name: "revoke", value: "revoke" },
+          { name: "list", value: "list" },
         ],
       },
       {
@@ -1949,7 +1950,11 @@ async function handleInteraction(
     return;
   }
 
-  if (controlOp.op === "elevation_grant" || controlOp.op === "elevation_revoke") {
+  if (
+    controlOp.op === "elevation_grant" ||
+    controlOp.op === "elevation_revoke" ||
+    controlOp.op === "elevation_list"
+  ) {
     try {
       const payload = { ...controlOp.payload };
       if (!payload.session_id && deps.resolveSessionForChannel) {
@@ -1971,6 +1976,20 @@ async function handleInteraction(
         const r = res.result as Record<string, unknown>;
         if (controlOp.op === "elevation_grant") {
           content = `🔓 Elevation granted for \`${r.sessionId ?? payload.session_id}\` (expires: ${r.expiresAt ?? "unknown"}, grant: \`${r.id ?? "?"}\`)`;
+        } else if (controlOp.op === "elevation_list") {
+          const grants = (r.grants ?? []) as Array<{
+            id: string;
+            sessionId: string;
+            expiresAt: string;
+          }>;
+          if (grants.length === 0) {
+            content = "📋 No active elevation grants.";
+          } else {
+            const lines = grants.map(
+              (g) => `• \`${g.id}\` — \`${g.sessionId}\` (expires: ${g.expiresAt})`,
+            );
+            content = `📋 Active elevation grants (${grants.length}):\n${lines.join("\n")}`;
+          }
         } else {
           const count = r.revokedCount ?? (r.revoked === true ? 1 : 0);
           content = `🔒 Elevation revoked. ${count} grant(s) removed.`;

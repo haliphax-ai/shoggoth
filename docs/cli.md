@@ -343,8 +343,18 @@ shoggoth elevation grant <session-id> [--duration 5m]
 #### Revoke elevation
 
 ```
-shoggoth elevation revoke <session-id>                # Revoke all grants for session
+shoggoth elevation revoke <session-id>                # Revoke all active grants for session
 shoggoth elevation revoke --id <grant-id>             # Revoke a specific grant
+```
+
+- Expired grants are inert: they are never counted as revoked.
+
+Output: JSON.
+
+#### List elevation grants
+
+```
+shoggoth elevation list [--session <session-id>]      # List active (non-expired) grants
 ```
 
 Output: JSON.

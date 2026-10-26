@@ -28,8 +28,9 @@ function printElevationHelp(): void {
   console.log(`shoggoth ${VERSION}
 Usage:
   shoggoth elevation grant <session-id> [--duration 5m]   Grant elevation (default 5m, max 30m)
-  shoggoth elevation revoke <session-id>                  Revoke all grants for session
-  shoggoth elevation revoke --id <grant-id>               Revoke a specific grant`);
+  shoggoth elevation revoke <session-id>                  Revoke all active grants for session
+  shoggoth elevation revoke --id <grant-id>               Revoke a specific grant
+  shoggoth elevation list [--session <session-id>]        List active (non-expired) grants`);
 }
 
 export async function runElevationCli(argv: string[]): Promise<void> {
@@ -105,6 +106,29 @@ export async function runElevationCli(argv: string[]): Promise<void> {
       auth,
       op: "elevation_revoke",
       payload: { session_id: sessionId },
+    });
+    console.log(JSON.stringify(res, null, 2));
+    if (!res.ok) process.exitCode = 1;
+    return;
+  }
+
+  if (sub === "list") {
+    const sessionIdx = argv.indexOf("--session");
+    const payload: Record<string, unknown> = {};
+    if (sessionIdx >= 0) {
+      const sessionId = argv[sessionIdx + 1]?.trim();
+      if (!sessionId) {
+        console.error("--session requires a session ID");
+        process.exitCode = 1;
+        return;
+      }
+      payload.session_id = sessionId;
+    }
+    const res = await invokeControlRequest({
+      socketPath,
+      auth,
+      op: "elevation_list",
+      payload,
     });
     console.log(JSON.stringify(res, null, 2));
     if (!res.ok) process.exitCode = 1;

@@ -2388,6 +2388,7 @@ describe("control plane (unix socket + JSONL)", () => {
     "decision_evaluate",
     "elevation_grant",
     "elevation_revoke",
+    "elevation_list",
     "media_generate",
     "media_generate_poll",
     "rerank_documents",

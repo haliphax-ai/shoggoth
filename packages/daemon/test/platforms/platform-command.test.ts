@@ -47,6 +47,27 @@ describe("translateCommandToControlOp", () => {
     assert.strictEqual(op, null);
   });
 
+  it("translates elevate list command to elevation_list control op", () => {
+    const cmd: PlatformCommand = {
+      name: "elevate",
+      options: { action: "list", session_id: "agent:main:discord:channel:abc" },
+    };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "elevation_list",
+      payload: { session_id: "agent:main:discord:channel:abc" },
+    });
+  });
+
+  it("translates elevate list command without a session filter", () => {
+    const cmd: PlatformCommand = { name: "elevate", options: { action: "list" } };
+    const op = translateCommandToControlOp(cmd);
+    assert.deepStrictEqual(op, {
+      op: "elevation_list",
+      payload: {},
+    });
+  });
+
   it("translates abort with no session_id (caller must resolve)", () => {
     const cmd: PlatformCommand = { name: "abort", options: {} };
     const op = translateCommandToControlOp(cmd);

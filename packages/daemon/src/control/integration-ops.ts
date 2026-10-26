@@ -3904,6 +3904,32 @@ export async function handleIntegrationControlOp(
       return { ok: true, revokedCount: revokeCount };
     }
 
+    case "elevation_list": {
+      if (principal.kind !== "operator") {
+        throw new IntegrationOpError("ERR_FORBIDDEN", "elevation_list is operator-only");
+      }
+      const elevListPl = payloadObject(req);
+      if (!ctx.stateDb) {
+        throw new IntegrationOpError("ERR_STATE_DB_REQUIRED", "elevation requires state DB");
+      }
+      const elevListSessionIdRaw =
+        typeof elevListPl.session_id === "string" ? elevListPl.session_id : undefined;
+      const { createElevationStore: createElevStoreList } =
+        await import("../elevation/elevation-store");
+      const elevStoreList = createElevStoreList(ctx.stateDb);
+      if (elevListSessionIdRaw) {
+        const elevListSessionId = resolveTargetSessionIdOrThrow(
+          elevListSessionIdRaw,
+          ctx.config,
+          ctx.sessions,
+        );
+        const grants = elevStoreList.list(elevListSessionId);
+        return { ok: true, grants, count: grants.length };
+      }
+      const grants = elevStoreList.list();
+      return { ok: true, grants, count: grants.length };
+    }
+
     case "yolo_mode": {
       if (principal.kind !== "operator") {
         throw new IntegrationOpError("ERR_FORBIDDEN", "yolo_mode is operator-only");

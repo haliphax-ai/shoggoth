@@ -35,6 +35,12 @@ const COMMAND_TO_OP: Record<string, (opts: Readonly<Record<string, string>>) => 
           },
         };
       }
+      if (action === "list") {
+        return {
+          op: "elevation_list",
+          payload: opts.session_id ? { session_id: opts.session_id } : {},
+        };
+      }
       // Default: grant
       const payload: Record<string, unknown> = {};
       if (opts.session_id) payload.session_id = opts.session_id;
