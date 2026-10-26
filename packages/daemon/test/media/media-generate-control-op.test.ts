@@ -573,6 +573,126 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
     assert.equal(result.success, false);
   });
 
+  it("accepts defaults with valid provider-id/model-id references", () => {
+    const fragment = {
+      mediaGeneration: {
+        defaults: {
+          image: "google/gemini-2.5-flash-image",
+          video: "google/veo-3.1",
+          audio: "google/lyria-3-pro-preview",
+          suggestions: {
+            music: "google/lyria-3-pro-preview",
+            tts: "google/gemini-2.5-flash-preview-tts",
+          },
+        },
+        providers: {
+          google: {
+            kind: "gemini",
+            apiKey: "google-key",
+            baseUrl: "https://generativelanguage.googleapis.com",
+            models: {
+              "gemini-2.5-flash-image": { mediaType: "image" },
+              "veo-3.1": { mediaType: "video" },
+              "lyria-3-pro-preview": { mediaType: "audio" },
+              "gemini-2.5-flash-preview-tts": { mediaType: "audio" },
+            },
+          },
+        },
+      },
+    };
+    const result = shoggothConfigFragmentSchema.safeParse(fragment);
+    assert.equal(
+      result.success,
+      true,
+      `Parse failed: ${result.success ? "" : result.error.message}`,
+    );
+  });
+
+  it("accepts mediaGeneration with partial defaults", () => {
+    const fragment = {
+      mediaGeneration: {
+        defaults: { image: "google/gemini-2.5-flash-image" },
+        providers: {
+          google: {
+            kind: "gemini",
+            baseUrl: "https://generativelanguage.googleapis.com",
+            models: { "gemini-2.5-flash-image": { mediaType: "image" } },
+          },
+        },
+      },
+    };
+    const result = shoggothConfigFragmentSchema.safeParse(fragment);
+    assert.equal(result.success, true);
+  });
+
+  it("rejects a default that matches no configured model", () => {
+    const fragment = {
+      mediaGeneration: {
+        defaults: { image: "google/nonexistent-model" },
+        providers: {
+          google: {
+            kind: "gemini",
+            baseUrl: "https://generativelanguage.googleapis.com",
+            models: { "gemini-2.5-flash-image": { mediaType: "image" } },
+          },
+        },
+      },
+    };
+    const result = shoggothConfigFragmentSchema.safeParse(fragment);
+    assert.equal(result.success, false);
+  });
+
+  it("rejects a default without provider-id/model-id format", () => {
+    const fragment = {
+      mediaGeneration: {
+        defaults: { image: "gemini-2.5-flash-image" },
+        providers: {
+          google: {
+            kind: "gemini",
+            baseUrl: "https://generativelanguage.googleapis.com",
+            models: { "gemini-2.5-flash-image": { mediaType: "image" } },
+          },
+        },
+      },
+    };
+    const result = shoggothConfigFragmentSchema.safeParse(fragment);
+    assert.equal(result.success, false);
+  });
+
+  it("rejects an unknown suggestion kind", () => {
+    const fragment = {
+      mediaGeneration: {
+        defaults: { suggestions: { podcast: "google/lyria-3-pro-preview" } },
+        providers: {
+          google: {
+            kind: "gemini",
+            baseUrl: "https://generativelanguage.googleapis.com",
+            models: { "lyria-3-pro-preview": { mediaType: "audio" } },
+          },
+        },
+      },
+    };
+    const result = shoggothConfigFragmentSchema.safeParse(fragment);
+    assert.equal(result.success, false);
+  });
+
+  it("rejects a suggestion that matches no configured model", () => {
+    const fragment = {
+      mediaGeneration: {
+        defaults: { suggestions: { tts: "google/missing-tts" } },
+        providers: {
+          google: {
+            kind: "gemini",
+            baseUrl: "https://generativelanguage.googleapis.com",
+            models: { "lyria-3-pro-preview": { mediaType: "audio" } },
+          },
+        },
+      },
+    };
+    const result = shoggothConfigFragmentSchema.safeParse(fragment);
+    assert.equal(result.success, false);
+  });
+
   it("rejects unknown fields in mediaGeneration (strict)", () => {
     const fragment = {
       mediaGeneration: {
