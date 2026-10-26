@@ -41,7 +41,7 @@ export interface TranscriptStore {
     afterSeq: number;
     limit: number;
   }): { messages: TranscriptMessageRow[]; nextCursor: number | undefined };
-  /** Removes all transcript rows for a session + segment (`new` / `reset` commands). */
+  /** Removes all transcript rows for a session + segment (the `reset` command wipes the current segment in place; also used by retention). */
   deleteForSessionSegment(sessionId: string, contextSegmentId: string): number;
 }
 

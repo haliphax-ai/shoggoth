@@ -79,7 +79,7 @@ Migrations live in `shoggoth/migrations/` as numbered SQL files (e.g. `0001_init
 `createSessionStore(db)` provides CRUD over the `sessions` table. Each session row contains:
 
 - `id` — a URN like `agent:main:discord:channel:<channelId>:<uuid>` (minted by `mintAgentSessionUrn`).
-- `contextSegmentId` — a UUID scoping which transcript messages the model sees. Changed on `new`/`reset` operations.
+- `contextSegmentId` — a UUID scoping which transcript messages the model sees. `new` mints a fresh UUID; `reset` keeps the current one and wipes its transcript.
 - `systemContextToken` — a per-session anti-spoofing token embedded in trusted system context dividers to prevent prompt injection.
 - `contextLevel` — one of `none`, `minimal`, `light`, `full`. Controls system prompt assembly and tool surface.
 - `workingDirectory` — per-session CWD override (relative commands resolve against this).
