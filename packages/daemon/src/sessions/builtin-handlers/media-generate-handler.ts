@@ -38,11 +38,12 @@ async function mediaGenerateHandler(
   args: Record<string, unknown>,
   ctx: BuiltinToolContext,
 ): Promise<BuiltinToolResult> {
+  // model is optional — falls back to the configured mediaGeneration defaults
+  // resolved by the media_generate control op / generation service.
   const model = args.model as string | undefined;
   const prompt = args.prompt as string | undefined;
   const params = args.params as Record<string, unknown> | undefined;
 
-  if (!model) return { resultJson: JSON.stringify({ error: "model is required" }) };
   if (!prompt) return { resultJson: JSON.stringify({ error: "prompt is required" }) };
   if (!params || typeof params !== "object" || !params.kind) {
     return { resultJson: JSON.stringify({ error: "params with kind is required" }) };

@@ -82,9 +82,11 @@ describe("parseMediaGenerateArgs", () => {
     });
   });
 
-  it("requires --model", () => {
+  it("model is optional (defaults to the configured media-type default)", () => {
     const result = parseMediaGenerateArgs(["--prompt", "hello"]);
-    assert.strictEqual(result.ok, false);
+    assert.ok(result.ok);
+    assert.strictEqual(result.payload.model, undefined);
+    assert.strictEqual(result.payload.prompt, "hello");
   });
 
   it("requires --prompt", () => {
@@ -164,6 +166,21 @@ describe("runMediaCli generate", () => {
     assert.strictEqual(call.payload.prompt, "a cat on a roof");
     assert.strictEqual(call.payload.output_path, "/tmp/out.png");
     assert.deepStrictEqual(call.payload.params, { kind: "image" });
+  });
+
+  it("forwards omitted model for default resolution", async () => {
+    mockInvoke.mockResolvedValue({
+      ok: true,
+      result: { status: "complete", path: "/tmp/out.png", mime_type: "image/png" },
+    });
+
+    await runMediaCli(["generate", "--prompt", "a cat", "--param", "kind=image"]);
+
+    assert.strictEqual(mockInvoke.mock.calls.length, 1);
+    const call = mockInvoke.mock.calls[0][0];
+    assert.strictEqual(call.op, "media_generate");
+    assert.strictEqual(call.payload.model, undefined);
+    assert.strictEqual(call.payload.prompt, "a cat");
   });
 
   it("displays result path on success", async () => {

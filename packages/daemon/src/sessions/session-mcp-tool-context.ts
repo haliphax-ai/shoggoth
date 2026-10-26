@@ -451,73 +451,111 @@ export function createMcpServerRulesFinalizer(
 // Web-search tool (SearXNG) — conditionally injected via finalizer
 // ---------------------------------------------------------------------------
 
-const MEDIA_GENERATE_TOOL_DESCRIPTOR: AggregatedTool = {
-  namespacedName: "builtin-media-generate",
-  sourceId: "builtin",
-  originalName: "media-generate",
-  name: "media-generate",
-  description:
-    "Generate images, audio, video, or music using Google AI models. Results are always saved to disk at the required output_path.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      model: {
-        type: "string",
-        description:
-          "Model name (e.g. gemini-2.5-flash-image, gemini-3-pro-image-preview, gemini-3.1-flash-image-preview, veo-3.1-generate-preview, lyria-3-pro-preview, gemini-2.5-flash-preview-tts)",
-      },
-      prompt: { type: "string", description: "Generation prompt" },
-      params: {
-        type: "object",
-        description:
-          "Parameters discriminated by 'kind': image (aspectRatio, size, numberOfImages, input_path), video (aspectRatio, durationSeconds, input_path, last_frame), speech (voice), music (durationSeconds)",
-        properties: {
-          kind: {
-            type: "string",
-            enum: ["image", "video", "speech", "music"],
-            description: "Media type to generate",
-          },
-          aspectRatio: {
-            type: "string",
-            description:
-              "Normalized aspect ratio string (e.g. '16:9', '1:1', '9:16', '4:3', '3:4'). Passed through to providers as-is. For OpenAI DALL-E (images endpoint), it maps to fixed pixel sizes. For OpenRouter and GPT-image chat completions, it maps to the provider's normalized ratio and a tiered resolution (default '2K'). Providers may clamp to their supported subset.",
-          },
-          size: {
-            type: "string",
-            description:
-              "Image size. Can be a pixel string (e.g. '1024x1024') for DALL-E, a tier string ('512', '1K', '2K', '4K'), or auto-inferred from a pixel string. For chat-image adapters the pixel string is converted to a tiered resolution. Ignored when aspectRatio is set.",
-          },
-          numberOfImages: {
-            type: "number",
-            description: "Number of images to generate (image only)",
-          },
-          input_path: {
-            type: "string",
-            description: "Workspace-relative path to an input image file for editing (image/video)",
-          },
-          last_frame: {
-            type: "string",
-            description: "Base64-encoded last frame (video only)",
-          },
-          durationSeconds: {
-            type: "number",
-            description: "Duration in seconds (video/music)",
-          },
-          voice: {
-            type: "string",
-            description: "Voice name for TTS (speech only)",
-          },
+/**
+ * Build the `builtin-media-generate` tool descriptor from config. When a
+ * default model is configured for every generic media type, the `model` input
+ * becomes optional and the descriptions name the configured defaults (and the
+ * specialized music/tts suggestions) so the agent sees them as hints.
+ */
+function mediaGenerateToolDescriptor(config: ShoggothConfig): AggregatedTool {
+  const defaults = config.mediaGeneration?.defaults;
+  const genericKinds = ["image", "video", "audio"] as const;
+  const allDefaultsConfigured = genericKinds.every((k) => defaults?.[k]);
+  const defaultLabel = genericKinds
+    .filter((k) => defaults?.[k])
+    .map((k) => `${k} '${defaults![k]}'`)
+    .join(", ");
+  const suggestionEntries = Object.entries(defaults?.suggestions ?? {});
+  const suggestionLabel = suggestionEntries.map(([kind, ref]) => `${kind} '${ref}'`).join(", ");
+
+  const modelDescription = defaultLabel
+    ? `Optional. Model name; defaults to the configured default model for the ` +
+      `request's media type (${defaultLabel}).` +
+      (suggestionLabel ? ` Suggested models: ${suggestionLabel}.` : "")
+    : "Model name (e.g. gemini-2.5-flash-image, veo-3.1-generate-preview, lyria-3-pro-preview) — required when no default model is configured for the request's media type.";
+
+  const description =
+    "Generate images, audio, video, or music using Google AI models. Results are always saved to disk at the required output_path." +
+    (defaultLabel ? ` Default models: ${defaultLabel}.` : "") +
+    (suggestionLabel ? ` Suggested models: ${suggestionLabel}.` : "");
+
+  return mediaGenerateDescriptor(description, modelDescription, allDefaultsConfigured);
+}
+
+function mediaGenerateDescriptor(
+  description: string,
+  modelDescription: string,
+  modelOptional: boolean,
+): AggregatedTool {
+  return {
+    namespacedName: "builtin-media-generate",
+    sourceId: "builtin",
+    originalName: "media-generate",
+    name: "media-generate",
+    description,
+    inputSchema: {
+      type: "object",
+      properties: {
+        model: {
+          type: "string",
+          description: modelDescription,
         },
-        required: ["kind"],
+        prompt: { type: "string", description: "Generation prompt" },
+        params: {
+          type: "object",
+          description:
+            "Parameters discriminated by 'kind': image (aspectRatio, size, numberOfImages, input_path), video (aspectRatio, durationSeconds, input_path, last_frame), speech (voice), music (durationSeconds)",
+          properties: {
+            kind: {
+              type: "string",
+              enum: ["image", "video", "speech", "music"],
+              description: "Media type to generate",
+            },
+            aspectRatio: {
+              type: "string",
+              description:
+                "Normalized aspect ratio string (e.g. '16:9', '1:1', '9:16', '4:3', '3:4'). Passed through to providers as-is. For OpenAI DALL-E (images endpoint), it maps to fixed pixel sizes. For OpenRouter and GPT-image chat completions, it maps to the provider's normalized ratio and a tiered resolution (default '2K'). Providers may clamp to their supported subset.",
+            },
+            size: {
+              type: "string",
+              description:
+                "Image size. Can be a pixel string (e.g. '1024x1024') for DALL-E, a tier string ('512', '1K', '2K', '4K'), or auto-inferred from a pixel string. For chat-image adapters the pixel string is converted to a tiered resolution. Ignored when aspectRatio is set.",
+            },
+            numberOfImages: {
+              type: "number",
+              description: "Number of images to generate (image only)",
+            },
+            input_path: {
+              type: "string",
+              description:
+                "Workspace-relative path to an input image file for editing (image/video)",
+            },
+            last_frame: {
+              type: "string",
+              description: "Base64-encoded last frame (video only)",
+            },
+            durationSeconds: {
+              type: "number",
+              description: "Duration in seconds (video/music)",
+            },
+            voice: {
+              type: "string",
+              description: "Voice name for TTS (speech only)",
+            },
+          },
+          required: ["kind"],
+        },
+        output_path: {
+          type: "string",
+          description: "Workspace-relative output path for the generated file (required).",
+        },
       },
-      output_path: {
-        type: "string",
-        description: "Workspace-relative output path for the generated file (required).",
-      },
+      required: modelOptional
+        ? ["prompt", "params", "output_path"]
+        : ["model", "prompt", "params", "output_path"],
     },
-    required: ["model", "prompt", "params", "output_path"],
-  },
-};
+  };
+}
 
 /**
  * Build the `builtin-decision` tool descriptor from config. When a
@@ -746,7 +784,7 @@ export function createMediaGenerateToolFinalizer(
     if (ctx.aggregated.tools.some((t) => t.namespacedName === "builtin-media-generate")) return ctx;
     const aggregated = createAggregateMcpCatalogResult([
       ...ctx.aggregated.tools,
-      MEDIA_GENERATE_TOOL_DESCRIPTOR,
+      mediaGenerateToolDescriptor(config),
     ]);
     return {
       aggregated,
