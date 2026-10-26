@@ -112,8 +112,23 @@ const mediaGenerationAdapterDefaults = z.object({
   pollIntervalMs: z.number().int().positive().optional(),
   timeoutMs: z.number().int().positive().optional(),
 });
+const mediaGenerationDefaultKind = z.enum(["image", "video", "audio"]);
+const mediaGenerationSuggestionKind = z.enum(["music", "tts"]);
 export const shoggothMediaGenerationConfigSchema = z
   .object({
+    /** Default models per generic media type, in `provider-id/model-id`
+     * format; must each reference a configured provider model. Used when a
+     * request omits `model`. `suggestions` holds optional per-specialized-type
+     * models (music, tts) exposed as hints only — never auto-applied. */
+    defaults: z
+      .object({
+        image: z.string().min(1).optional(),
+        video: z.string().min(1).optional(),
+        audio: z.string().min(1).optional(),
+        suggestions: z.record(mediaGenerationSuggestionKind, z.string().min(1)).optional(),
+      })
+      .strict()
+      .optional(),
     providers: z
       .record(z.string().min(1), mediaGenerationProviderSchema.omit({ id: true }))
       .optional()
@@ -123,7 +138,34 @@ export const shoggothMediaGenerationConfigSchema = z
       .optional(),
     outputDirectory: z.string().min(1).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((cfg, ctx) => {
+    // Every default/suggestion reference must resolve to a configured
+    // provider model in provider-id/model-id format.
+    const check = (ref: string | undefined, path: (string | number)[]) => {
+      if (!ref) return;
+      const known = Object.entries(cfg.providers ?? {}).some(([id, p]) =>
+        Object.keys(p.models ?? {}).some((name) => `${id}/${name}` === ref),
+      );
+      if (!known) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path,
+          message: `"${ref}" must be a configured model in provider-id/model-id format`,
+        });
+      }
+    };
+    const d = cfg.defaults;
+    if (!d) return;
+    for (const kind of mediaGenerationDefaultKind.options) {
+      check(d[kind], ["defaults", kind]);
+    }
+    if (d.suggestions) {
+      for (const kind of mediaGenerationSuggestionKind.options) {
+        check(d.suggestions[kind], ["defaults", "suggestions", kind]);
+      }
+    }
+  });
 export type ShoggothMediaGenerationConfig = z.infer<typeof shoggothMediaGenerationConfigSchema>;
 
 /**

@@ -3999,10 +3999,19 @@ export async function handleIntegrationControlOp(
         );
       }
       const pl = payloadObject(req);
-      const model = pl.model;
-      if (typeof model !== "string" || !model) {
-        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "media_generate requires model");
+      // model is optional — falls back to the configured media-type default
+      const modelRaw = pl.model;
+      if (
+        modelRaw !== undefined &&
+        modelRaw !== null &&
+        (typeof modelRaw !== "string" || !modelRaw)
+      ) {
+        throw new IntegrationOpError(
+          "ERR_INVALID_PAYLOAD",
+          "media_generate model must be a non-empty string",
+        );
       }
+      const model = typeof modelRaw === "string" && modelRaw ? modelRaw : undefined;
       const prompt = pl.prompt;
       if (typeof prompt !== "string" || prompt === undefined) {
         throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "media_generate requires prompt");
@@ -4022,8 +4031,8 @@ export async function handleIntegrationControlOp(
         mediaGenConfig,
       );
       return svc.generate({
-        model: model,
-        prompt: prompt,
+        model,
+        prompt,
         params: params as any,
         output_path:
           typeof pl.output_path === "string" ? pl.output_path : `/tmp/media/${Date.now()}.bin`,

@@ -5,6 +5,7 @@ import {
 } from "../../src/media/media-generation-service";
 import type { MediaAdapterResult } from "../../src/media/adapters/types";
 import type { MediaProviderConfig } from "../../src/media/resolve-model";
+import type { ShoggothMediaGenerationConfig } from "@shoggoth/shared";
 
 // -----------------------------------------------------------------------------
 // DI: inject fake adapters via the constructor registry instead of mocking the
@@ -38,8 +39,9 @@ function makeAdapters(overrides?: Partial<MediaAdapterRegistry>): MediaAdapterRe
 function makeService(
   providers: MediaProviderConfig[],
   adapters: MediaAdapterRegistry = makeAdapters(),
+  defaults?: ShoggothMediaGenerationConfig["defaults"],
 ): MediaGenerationService {
-  return new MediaGenerationService({ providers, adapters });
+  return new MediaGenerationService({ providers, adapters, defaults });
 }
 
 // -----------------------------------------------------------------------------
@@ -340,6 +342,186 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
 
       expect(adapters["openai-chat-image"]).toHaveBeenCalledTimes(1);
       expect(adapters["gemini-generate-content"]).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("Default model resolution (model omitted)", () => {
+    const providers: MediaProviderConfig[] = [
+      {
+        id: "google",
+        kind: "gemini",
+        baseUrl: "https://generativelanguage.googleapis.com",
+        apiKey: "g-key",
+        models: [
+          { name: "gemini-2.5-flash-image", mediaType: "image" },
+          { name: "veo-3.1", mediaType: "video" },
+          { name: "lyria-3-pro-preview", mediaType: "audio" },
+          { name: "gemini-2.5-flash-preview-tts", mediaType: "audio" },
+        ],
+      },
+    ];
+    const allDefaults: ShoggothMediaGenerationConfig["defaults"] = {
+      image: "google/gemini-2.5-flash-image",
+      video: "google/veo-3.1",
+      audio: "google/lyria-3-pro-preview",
+      suggestions: {
+        music: "google/lyria-3-pro-preview",
+        tts: "google/gemini-2.5-flash-preview-tts",
+      },
+    };
+
+    it("uses the configured default for the request's media kind", async () => {
+      const adapters = makeAdapters();
+      const service = makeService(providers, adapters, allDefaults);
+
+      const result = await service.generate({
+        prompt: "a cat",
+        params: { kind: "image" },
+        output_path: "/tmp/out.png",
+      });
+
+      expect(result.status).toBe("complete");
+      const call = (adapters["gemini-generate-content"] as ReturnType<typeof vi.fn>).mock
+        .calls[0][0];
+      expect(call.model).toBe("gemini-2.5-flash-image");
+    });
+
+    it("prefers the audio default over suggestions for speech", async () => {
+      const adapters = makeAdapters();
+      const service = makeService(providers, adapters, allDefaults);
+
+      await service.generate({
+        prompt: "hello",
+        params: { kind: "speech" },
+        output_path: "/tmp/out.wav",
+      });
+
+      const call = (adapters["gemini-generate-content"] as ReturnType<typeof vi.fn>).mock
+        .calls[0][0];
+      expect(call.model).toBe("lyria-3-pro-preview");
+    });
+
+    it("does not auto-apply suggestions when no generic default is configured", async () => {
+      const service = makeService(providers, makeAdapters(), {
+        image: "google/gemini-2.5-flash-image",
+        suggestions: { tts: "google/gemini-2.5-flash-preview-tts" },
+      });
+
+      const result = await service.generate({
+        prompt: "hello",
+        params: { kind: "speech" },
+        output_path: "/tmp/out.wav",
+      });
+
+      expect(result.status).toBe("error");
+      expect((result as { error: string }).error).toContain("no default model configured");
+    });
+
+    it("applies the audio default for music requests when configured", async () => {
+      const adapters = makeAdapters();
+      const service = makeService(providers, adapters, {
+        image: "google/gemini-2.5-flash-image",
+        audio: "google/lyria-3-pro-preview",
+        suggestions: { music: "google/gemini-2.5-flash-preview-tts" },
+      });
+
+      await service.generate({
+        prompt: "a happy tune",
+        params: { kind: "music" },
+        output_path: "/tmp/out.wav",
+      });
+
+      const call = (adapters["gemini-generate-content"] as ReturnType<typeof vi.fn>).mock
+        .calls[0][0];
+      expect(call.model).toBe("lyria-3-pro-preview");
+    });
+
+    it("uses the video default for video requests", async () => {
+      const adapters = makeAdapters();
+      const service = makeService(providers, adapters, allDefaults);
+
+      await service.generate({
+        prompt: "a rocket launch",
+        params: { kind: "video" },
+        output_path: "/tmp/out.mp4",
+      });
+
+      expect(adapters["gemini-long-running"]).toHaveBeenCalledTimes(1);
+    });
+
+    it("explicit model wins over the configured default", async () => {
+      const adapters = makeAdapters();
+      const service = makeService(providers, adapters, allDefaults);
+
+      await service.generate({
+        model: "veo-3.1",
+        prompt: "a cat",
+        params: { kind: "image" },
+        output_path: "/tmp/out.png",
+      });
+
+      const call = (adapters["gemini-long-running"] as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(call.model).toBe("veo-3.1");
+    });
+
+    it("returns error when no model and no default are configured", async () => {
+      const service = makeService(providers, makeAdapters(), {});
+
+      const result = await service.generate({
+        prompt: "a cat",
+        params: { kind: "image" },
+        output_path: "/tmp/out.png",
+      });
+
+      expect(result.status).toBe("error");
+      expect((result as { error: string }).error).toContain("no default model configured");
+    });
+
+    it("returns error when defaults block is absent entirely", async () => {
+      const service = makeService(providers, makeAdapters());
+
+      const result = await service.generate({
+        prompt: "a cat",
+        params: { kind: "image" },
+        output_path: "/tmp/out.png",
+      });
+
+      expect(result.status).toBe("error");
+      expect((result as { error: string }).error).toContain("no default model configured");
+    });
+
+    it("fromConfig passes defaults through to generate", async () => {
+      const adapters = makeAdapters();
+      const service = MediaGenerationService.fromConfig(
+        {
+          defaults: allDefaults,
+          providers: {
+            google: {
+              kind: "gemini",
+              apiKey: "g-key",
+              baseUrl: "https://generativelanguage.googleapis.com",
+              models: {
+                "gemini-2.5-flash-image": { mediaType: "image" },
+                "veo-3.1": { mediaType: "video" },
+                "lyria-3-pro-preview": { mediaType: "audio" },
+                "gemini-2.5-flash-preview-tts": { mediaType: "audio" },
+              },
+            },
+          },
+        },
+        adapters,
+      );
+
+      const result = await service.generate({
+        prompt: "a cat",
+        params: { kind: "image" },
+        output_path: "/tmp/out.png",
+      });
+
+      expect(result.status).toBe("complete");
+      const call = (adapters["gemini-generate-content"] as ReturnType<typeof vi.fn>).mock
+        .calls[0][0];
+      expect(call.model).toBe("gemini-2.5-flash-image");
     });
   });
 

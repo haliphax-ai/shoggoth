@@ -17,6 +17,10 @@ import type {
 } from "./adapters/types";
 import { resolveModel, type MediaProviderConfig } from "./resolve-model.js";
 import {
+  resolveMediaDefaultModel,
+  type ShoggothMediaGenerationDefaults,
+} from "./media-defaults.js";
+import {
   mediaGenerationModelEntriesFromRecord,
   mediaGenerationProvidersToEntries,
   type ShoggothMediaGenerationConfig,
@@ -53,7 +57,8 @@ export interface PollRequest {
 }
 
 interface GenerateRequest {
-  model: string;
+  /** Omitted when the caller relies on the configured media-type default. */
+  model?: string;
   prompt: string;
   params: MediaGenerateParams;
   output_path: string;
@@ -64,18 +69,24 @@ export class MediaGenerationService {
   private readonly providers: MediaProviderConfig[];
   private readonly adapterDefaults?: Record<string, unknown>;
   private readonly adapters: MediaAdapterRegistry;
+  private readonly defaults?: ShoggothMediaGenerationDefaults;
 
   constructor(config: {
     providers: MediaProviderConfig[];
     adapterDefaults?: Record<string, unknown>;
     adapters?: Partial<MediaAdapterRegistry>;
+    defaults?: ShoggothMediaGenerationDefaults;
   }) {
     this.providers = config.providers;
     this.adapterDefaults = config.adapterDefaults;
     this.adapters = { ...defaultAdapters, ...config.adapters };
+    this.defaults = config.defaults;
   }
 
-  static fromConfig(config: ShoggothMediaGenerationConfig): MediaGenerationService {
+  static fromConfig(
+    config: ShoggothMediaGenerationConfig,
+    adapters?: Partial<MediaAdapterRegistry>,
+  ): MediaGenerationService {
     // Resolve providers from config, nesting models inside
     const resolvedProviders: MediaProviderConfig[] = mediaGenerationProvidersToEntries(
       config.providers,
@@ -95,21 +106,53 @@ export class MediaGenerationService {
     return new MediaGenerationService({
       providers: resolvedProviders,
       adapterDefaults: config.adapterDefaults,
+      defaults: config.defaults,
+      ...(adapters ? { adapters } : {}),
     });
   }
 
+  /**
+   * Resolve a model reference to provider + adapter. Accepts either a
+   * `provider-id/model-id` reference (the format used by `defaults`) or a
+   * bare model name (matched against all providers by name).
+   */
+  private resolveModelRef(ref: string): ReturnType<typeof resolveModel> {
+    const slash = ref.indexOf("/");
+    if (slash > 0 && slash < ref.length - 1) {
+      const providerId = ref.slice(0, slash);
+      const modelName = ref.slice(slash + 1);
+      const provider = this.providers.find((p) => p.id === providerId);
+      if (provider) {
+        return resolveModel(modelName, [provider]);
+      }
+    }
+    return resolveModel(ref, this.providers);
+  }
+
   async generate(req: GenerateRequest): Promise<MediaAdapterResult> {
-    const resolved = resolveModel(req.model, this.providers);
+    const model = req.model ?? resolveMediaDefaultModel(this.defaults, req.params.kind);
+    if (!model) {
+      return {
+        status: "error",
+        error: `model is required: no model given and no default model configured for media type "${req.params.kind}"`,
+      };
+    }
+
+    const resolved = this.resolveModelRef(model);
     if (!resolved) {
       return {
         status: "error",
-        error: `No provider/adapter found for model: ${req.model}`,
+        error: `No provider/adapter found for model: ${model}`,
       };
     }
 
     const adapterName = resolved.adapter;
+    // The wire format is the raw model name — the provider prefix is only
+    // Shoggoth's routing concern.
+    const slash = model.indexOf("/");
+    const wireModel = slash > 0 && slash < model.length - 1 ? model.slice(slash + 1) : model;
     const adapterReq: MediaAdapterRequest = {
-      model: req.model,
+      model: wireModel,
       prompt: req.prompt,
       provider: resolved.provider,
       outputPath: req.output_path,

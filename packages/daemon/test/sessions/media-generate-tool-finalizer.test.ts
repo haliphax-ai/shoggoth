@@ -190,7 +190,99 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
     });
   });
 
-  describe("3. Tool already present - idempotency", () => {
+  describe("3. Default models in descriptor", () => {
+    function descriptor(config: ShoggothConfig) {
+      const finalizer = createMediaGenerateToolFinalizer(config);
+      const ctx = buildBuiltinOnlySessionMcpToolContext();
+      const result = finalizer(ctx, "agent:test:discord:channel:123");
+      return result.aggregated.tools.find((t) => t.namespacedName === "builtin-media-generate");
+    }
+
+    const providers = {
+      google: {
+        kind: "gemini" as const,
+        baseUrl: "https://generativelanguage.googleapis.com",
+        models: {
+          "gemini-2.5-flash-image": { mediaType: "image" as const },
+          "veo-3.1": { mediaType: "video" as const },
+          "lyria-3-pro-preview": { mediaType: "audio" as const },
+        },
+      },
+    };
+
+    it("makes model optional and lists defaults when all types configured", () => {
+      const config = makeConfig({
+        mediaGeneration: {
+          defaults: {
+            image: "google/gemini-2.5-flash-image",
+            video: "google/veo-3.1",
+            audio: "google/lyria-3-pro-preview",
+            suggestions: { music: "google/lyria-3-pro-preview" },
+          },
+          providers,
+        },
+      });
+
+      const tool = descriptor(config);
+      expect(tool).toBeDefined();
+      const schema = tool!.inputSchema as {
+        required: string[];
+        properties: Record<string, { description: string }>;
+      };
+      expect(schema.required).not.toContain("model");
+      expect(schema.properties.model!.description).toContain("google/gemini-2.5-flash-image");
+      expect(schema.properties.model!.description).toContain("google/veo-3.1");
+      expect(schema.properties.model!.description).toContain("google/lyria-3-pro-preview");
+      // suggestions exposed alongside defaults as hints
+      expect(tool!.description).toContain("music 'google/lyria-3-pro-preview'");
+    });
+
+    it("keeps model required when defaults are not configured", () => {
+      const config = makeConfig({
+        mediaGeneration: { providers },
+      });
+
+      const tool = descriptor(config);
+      expect(tool).toBeDefined();
+      const schema = tool!.inputSchema as { required: string[] };
+      expect(schema.required).toContain("model");
+    });
+
+    it("keeps model required when only some defaults are configured", () => {
+      const config = makeConfig({
+        mediaGeneration: {
+          defaults: { image: "google/gemini-2.5-flash-image" },
+          providers,
+        },
+      });
+
+      const tool = descriptor(config);
+      expect(tool).toBeDefined();
+      const schema = tool!.inputSchema as { required: string[] };
+      expect(schema.required).toContain("model");
+    });
+
+    it("lists suggestions in the model description too", () => {
+      const config = makeConfig({
+        mediaGeneration: {
+          defaults: {
+            image: "google/gemini-2.5-flash-image",
+            video: "google/veo-3.1",
+            audio: "google/lyria-3-pro-preview",
+            suggestions: { tts: "google/gemini-2.5-flash-image" },
+          },
+          providers,
+        },
+      });
+
+      const tool = descriptor(config);
+      const schema = tool!.inputSchema as { properties: Record<string, { description: string }> };
+      expect(schema.properties.model!.description).toContain("Suggested models");
+      expect(schema.properties.model!.description).toContain("google/gemini-2.5-flash-image");
+    });
+  });
+
+  describe("4. Tool already present - idempotency", () => {
     it("does not duplicate tool if already present", () => {
       const config = makeConfig({
         mediaGeneration: {
