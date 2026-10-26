@@ -122,9 +122,23 @@ describe("media_generate control op - Multi-Provider Integration", () => {
   });
 
   describe("payload validation", () => {
-    it("rejects missing model", async () => {
+    it("accepts missing model and forwards it for default resolution", async () => {
+      mockGenerate.mockResolvedValueOnce({
+        status: "complete",
+        path: "/tmp/media/output.png",
+        mime_type: "image/png",
+      });
       const req = makeReq(validPayload({ model: undefined }));
       delete (req.payload as Record<string, unknown>).model;
+      const result = await handleIntegrationControlOp(req, agentPrincipal(), makeCtx());
+      assert.ok(result != null);
+      assert.equal(mockGenerate.mock.calls.length, 1);
+      const callArg = mockGenerate.mock.calls[0][0];
+      assert.equal(callArg.model, undefined);
+    });
+
+    it("rejects non-string model", async () => {
+      const req = makeReq(validPayload({ model: 42 }));
       await assert.rejects(
         () => handleIntegrationControlOp(req, agentPrincipal(), makeCtx()),
         (err: IntegrationOpError) => {
