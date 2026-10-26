@@ -341,7 +341,8 @@ Elevation grants temporary privileged execution to a session.
 `createElevationStore(db)` manages `elevation_grants` rows:
 
 - `grant(sessionId, durationMs)` — creates a time-limited grant (default 5 min, max 30 min).
-- `revoke(grantId)` / `revokeAllForSession(sessionId)` — immediately revoke.
+- `revoke(grantId)` / `revokeAllForSession(sessionId)` — immediately revoke an active grant; expired grants are inert and are never counted as revoked.
+- `list(sessionId?)` — returns active (non-revoked, non-expired) grants, optionally filtered by session.
 - `isActive(sessionId)` — true if any non-revoked, non-expired grant exists.
 - `getStatus(sessionId)` — returns active grant details and remaining time.
 

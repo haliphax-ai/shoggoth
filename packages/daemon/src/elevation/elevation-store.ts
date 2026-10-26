@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 
-interface ElevationGrant {
+export interface ElevationGrant {
   id: string;
   sessionId: string;
   grantedAt: string;
@@ -39,17 +39,61 @@ export function createElevationStore(db: Database.Database) {
     },
 
     revoke(grantId: string): boolean {
+      // Expired grants are inert: they are never listed and never counted as revoked.
       const r = db
-        .prepare(`UPDATE elevation_grants SET revoked = 1 WHERE id = ? AND revoked = 0`)
-        .run(grantId);
+        .prepare(
+          `UPDATE elevation_grants SET revoked = 1
+         WHERE id = ? AND revoked = 0 AND expires_at > ?`,
+        )
+        .run(grantId, new Date().toISOString());
       return r.changes > 0;
     },
 
     revokeAllForSession(sessionId: string): number {
       const r = db
-        .prepare(`UPDATE elevation_grants SET revoked = 1 WHERE session_id = ? AND revoked = 0`)
-        .run(sessionId);
+        .prepare(
+          `UPDATE elevation_grants SET revoked = 1
+         WHERE session_id = ? AND revoked = 0 AND expires_at > ?`,
+        )
+        .run(sessionId, new Date().toISOString());
       return r.changes;
+    },
+
+    /** Active (non-revoked, non-expired) grants, optionally filtered by session. */
+    list(sessionId?: string): ElevationGrant[] {
+      const now = new Date().toISOString();
+      const rows = (
+        sessionId
+          ? db
+              .prepare(
+                `SELECT id, session_id, granted_at, expires_at, revoked
+             FROM elevation_grants
+             WHERE session_id = ? AND revoked = 0 AND expires_at > ?
+             ORDER BY expires_at DESC`,
+              )
+              .all(sessionId, now)
+          : db
+              .prepare(
+                `SELECT id, session_id, granted_at, expires_at, revoked
+             FROM elevation_grants
+             WHERE revoked = 0 AND expires_at > ?
+             ORDER BY expires_at DESC`,
+              )
+              .all(now)
+      ) as Array<{
+        id: string;
+        session_id: string;
+        granted_at: string;
+        expires_at: string;
+        revoked: number;
+      }>;
+      return rows.map((row) => ({
+        id: row.id,
+        sessionId: row.session_id,
+        grantedAt: row.granted_at,
+        expiresAt: row.expires_at,
+        revoked: false,
+      }));
     },
 
     isActive(sessionId: string): boolean {
