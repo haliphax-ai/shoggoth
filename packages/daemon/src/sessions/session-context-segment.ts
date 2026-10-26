@@ -7,6 +7,7 @@ import type { SessionStore } from "./session-store";
 import { resetSegmentStats } from "./session-stats-store";
 import { pushSystemContext } from "./system-context-buffer";
 import { clearSessionReReadRequired } from "./re-read-required";
+import { clearSessionToolState } from "./session-tool-discovery";
 
 function denyPendingForSession(pending: PendingActionsStore | undefined, sessionId: string): void {
   if (!pending) return;
@@ -34,8 +35,9 @@ function killableSubagentChildIds(sessions: SessionStore, sessionId: string): st
  * by the new segment id) and left for the retention workflow to clean up.
  *
  * Both **New** and **Reset** mint a new segment id, deny pending HITL for the session, clear the
- * re-read-required list (stale line numbers no longer apply to the new segment), and kill the
- * session's still-running **one-shot** subagents (via the optional `killSubagents` callback).
+ * re-read-required list (stale line numbers no longer apply to the new segment), reset the
+ * session's tool state to the agent's defaults (session tool discovery overlays from the previous
+ * segment do not carry over), and kill the session's still-running **one-shot** subagents (via the optional `killSubagents` callback).
  * **Persistent** subagents (`subagentMode === "persistent"`) are never killed by either operation —
  * they outlive the parent's context lifecycle and are torn down only by TTL/inactivity or an
  * explicit subagent kill.
@@ -59,6 +61,7 @@ export function applySessionContextSegmentNew(input: {
   denyPendingForSession(input.pending, sessionId);
   clearSessionToolAutoApproveForSession(input.db, sessionId);
   clearSessionReReadRequired(input.db, sessionId);
+  clearSessionToolState(input.db, sessionId);
   const contextSegmentId = randomUUID();
   input.sessions.update(sessionId, {
     contextSegmentId,
@@ -88,6 +91,7 @@ export function applySessionContextSegmentReset(input: {
   if (!previousContextSegmentId) throw new Error("session missing context_segment_id");
   denyPendingForSession(input.pending, sessionId);
   clearSessionReReadRequired(input.db, sessionId);
+  clearSessionToolState(input.db, sessionId);
   const contextSegmentId = randomUUID();
   input.sessions.update(sessionId, {
     contextSegmentId,
