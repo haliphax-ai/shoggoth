@@ -1,4 +1,9 @@
-import { describe, it } from "vitest";
+import { describe, it, afterEach } from "vitest";
+import {
+  flushAsks,
+  resetAskDeferralForTests,
+  setAskTurnQueue,
+} from "../../src/sessions/builtin-handlers/ask-defer";
 import assert from "node:assert";
 import {
   BuiltinToolRegistry,
@@ -429,6 +434,8 @@ describe("fs-handlers read truncation", () => {
 // ---------------------------------------------------------------------------
 
 describe("ask handler", () => {
+  afterEach(resetAskDeferralForTests);
+
   it("returns error when message tool context is unavailable", async () => {
     const reg = new BuiltinToolRegistry();
     registerAsk(reg);
@@ -438,7 +445,7 @@ describe("ask handler", () => {
     });
   });
 
-  it("delegates to message tool context execute with the choice action", async () => {
+  it("posts immediately with the choice action when no turn is running", async () => {
     const reg = new BuiltinToolRegistry();
     registerAsk(reg);
     let capturedArgs: Record<string, unknown> | undefined;
@@ -466,5 +473,62 @@ describe("ask handler", () => {
       content: "Pick one:",
       choices: [{ emoji: "👍", label: "Approve" }],
     });
+  });
+
+  it("rejects invalid choices inline without posting", async () => {
+    const reg = new BuiltinToolRegistry();
+    registerAsk(reg);
+    let executed = false;
+    const ctx = stubCtx({
+      messageToolCtx: {
+        execute: async () => {
+          executed = true;
+          return { ok: true };
+        },
+      },
+    });
+    const result = await reg.execute("ask", { choices: [] }, ctx);
+    const parsed = JSON.parse(result.resultJson);
+    assert.strictEqual(parsed.ok, false);
+    assert.match(parsed.error, /non-empty array/);
+    assert.strictEqual(executed, false);
+  });
+
+  it("defers the prompt to turn end while a turn is running", async () => {
+    const reg = new BuiltinToolRegistry();
+    registerAsk(reg);
+    const executed: Record<string, unknown>[] = [];
+    setAskTurnQueue({ isRunning: () => true });
+    const ctx = stubCtx({
+      messageToolCtx: {
+        execute: async (_sid: string, args: Record<string, unknown>) => {
+          executed.push(args);
+          return { ok: true, message_id: "m9" };
+        },
+      },
+    });
+    const result = await reg.execute(
+      "ask",
+      { content: "Pick:", choices: [{ emoji: "✅", label: "Yes" }] },
+      ctx,
+    );
+    const parsed = JSON.parse(result.resultJson);
+    assert.strictEqual(parsed.ok, true);
+    assert.strictEqual(parsed.deferred, true);
+    // Nothing posted yet — the turn is still streaming.
+    assert.strictEqual(executed.length, 0);
+
+    // Turn ends → the queued prompt is posted exactly once.
+    await flushAsks(ctx.sessionId);
+    assert.strictEqual(executed.length, 1);
+    assert.deepStrictEqual(executed[0], {
+      action: "choice",
+      content: "Pick:",
+      choices: [{ emoji: "✅", label: "Yes" }],
+    });
+
+    // Flushing again is a no-op.
+    await flushAsks(ctx.sessionId);
+    assert.strictEqual(executed.length, 1);
   });
 });

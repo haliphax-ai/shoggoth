@@ -30,6 +30,21 @@ Each choice item:
 }
 ```
 
+## Deferred posting (turn end)
+
+While a turn is streaming, the prompt is **not** posted immediately. It is queued and posted when the turn ends — the same flush mechanism timers use — so a choice prompt can never land mid-stream between split messages of long output. When deferred, the tool returns a queued result instead of the created message:
+
+```json
+{
+  "ok": true,
+  "deferred": true,
+  "choices": 2,
+  "note": "prompt will be posted when the current turn ends"
+}
+```
+
+When no turn is running (e.g. an out-of-band call), the prompt posts immediately and returns the live result below. Invalid arguments are still rejected inline during the turn.
+
 ## Response format
 
 The tool returns the created message plus counts of seeded reactions:
@@ -50,5 +65,6 @@ If some reactions could not be added, `reactions_failed` and `failed_reactions` 
 ## Tips
 
 - The posted message includes a "React to choose:" legend under the preamble.
+- During an active turn the prompt is posted at turn end, so follow-up text you write in the same turn arrives _before_ the prompt.
 - When invoked from a subagent, the posted prompt includes the standard provenance banner.
 - Choice execution requires the platform's reaction capability; the tool is not advertised when reactions are unsupported.
