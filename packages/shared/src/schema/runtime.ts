@@ -114,7 +114,13 @@ const mediaGenerationAdapterDefaults = z.object({
 });
 const mediaGenerationDefaultKind = z.enum(["image", "video", "audio"]);
 const mediaGenerationSuggestionKind = z.enum(["music", "tts"]);
-export const shoggothMediaGenerationConfigSchema = z
+/**
+ * Structural mediaGeneration schema used by config fragments: a fragment is
+ * only one layer, so `defaults` refs cannot be resolved until all layers are
+ * merged (they may reference providers declared in a different file). The
+ * cross-field referential checks live on the full config schema below.
+ */
+export const shoggothMediaGenerationConfigFragmentSchema = z
   .object({
     /** Default models per generic media type, in `provider-id/model-id`
      * format; must each reference a configured provider model. Used when a
@@ -138,8 +144,15 @@ export const shoggothMediaGenerationConfigSchema = z
       .optional(),
     outputDirectory: z.string().min(1).optional(),
   })
-  .strict()
-  .superRefine((cfg, ctx) => {
+  .strict();
+/**
+ * Full-config mediaGeneration schema: structural checks plus cross-field
+ * referential checks (every default/suggestion ref must resolve against
+ * `providers` of the fully merged config). Fragments use
+ * {@link shoggothMediaGenerationConfigFragmentSchema}.
+ */
+export const shoggothMediaGenerationConfigSchema =
+  shoggothMediaGenerationConfigFragmentSchema.superRefine((cfg, ctx) => {
     // Every default/suggestion reference must resolve to a configured
     // provider model in provider-id/model-id format.
     const check = (ref: string | undefined, path: (string | number)[]) => {
@@ -202,7 +215,13 @@ export function decisionProvidersToEntries(
 ): ShoggothDecisionProvider[] {
   return Object.entries(providers).map(([id, p]) => ({ id, ...p }));
 }
-export const shoggothDecisionConfigSchema = z
+/**
+ * Structural decision schema used by config fragments: a fragment is only one
+ * layer, so `defaultModel` cannot be resolved until all layers are merged (it
+ * may reference a provider declared in a different file). The referential
+ * check lives on the full config schema below.
+ */
+export const shoggothDecisionConfigFragmentSchema = z
   .object({
     /** Model used when a request omits `model`, in `provider-id/model-name`
      * format. Must match a configured provider model. */
@@ -212,8 +231,12 @@ export const shoggothDecisionConfigSchema = z
       .optional()
       .default({}),
   })
-  .strict()
-  .superRefine((cfg, ctx) => {
+  .strict();
+/** Full-config decision schema: structural checks plus the `defaultModel`
+ * referential check against the fully merged config. Fragments use
+ * {@link shoggothDecisionConfigFragmentSchema}. */
+export const shoggothDecisionConfigSchema = shoggothDecisionConfigFragmentSchema.superRefine(
+  (cfg, ctx) => {
     if (!cfg.defaultModel) return;
     // must reference a configured model in provider-id/model-name format
     const known = Object.entries(cfg.providers ?? {}).some(([id, p]) =>
@@ -226,7 +249,8 @@ export const shoggothDecisionConfigSchema = z
         message: `defaultModel "${cfg.defaultModel}" must be a configured model in provider-id/model-name format`,
       });
     }
-  });
+  },
+);
 export type ShoggothDecisionConfig = z.infer<typeof shoggothDecisionConfigSchema>;
 
 /**
@@ -265,7 +289,13 @@ export function rerankProvidersToEntries(
 ): ShoggothRerankProvider[] {
   return Object.entries(providers).map(([id, p]) => ({ id, ...p }));
 }
-export const shoggothRerankConfigSchema = z
+/**
+ * Structural rerank schema used by config fragments: a fragment is only one
+ * layer, so `defaultModel` cannot be resolved until all layers are merged (it
+ * may reference a provider declared in a different file). The referential
+ * check lives on the full config schema below.
+ */
+export const shoggothRerankConfigFragmentSchema = z
   .object({
     /** Model used when a request omits `model`, in `provider-id/model-name`
      * format. Must match a configured provider model. */
@@ -289,8 +319,12 @@ export const shoggothRerankConfigSchema = z
       .optional()
       .default({}),
   })
-  .strict()
-  .superRefine((cfg, ctx) => {
+  .strict();
+/** Full-config rerank schema: structural checks plus the `defaultModel`
+ * referential check against the fully merged config. Fragments use
+ * {@link shoggothRerankConfigFragmentSchema}. */
+export const shoggothRerankConfigSchema = shoggothRerankConfigFragmentSchema.superRefine(
+  (cfg, ctx) => {
     if (!cfg.defaultModel) return;
     // must reference a configured model in provider-id/model-name format
     const known = Object.entries(cfg.providers ?? {}).some(([id, p]) =>
@@ -303,7 +337,8 @@ export const shoggothRerankConfigSchema = z
         message: `defaultModel "${cfg.defaultModel}" must be a configured model in provider-id/model-name format`,
       });
     }
-  });
+  },
+);
 export type ShoggothRerankConfig = z.infer<typeof shoggothRerankConfigSchema>;
 
 export const shoggothRuntimeConfigSchema = z

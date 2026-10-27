@@ -32,8 +32,11 @@ import { processDeclarationSchema } from "./processes";
 import {
   shoggothRuntimeConfigSchema,
   shoggothMediaGenerationConfigSchema,
+  shoggothMediaGenerationConfigFragmentSchema,
   shoggothDecisionConfigSchema,
+  shoggothDecisionConfigFragmentSchema,
   shoggothRerankConfigSchema,
+  shoggothRerankConfigFragmentSchema,
   shoggothPluginEntrySchema,
   shoggothSkillsConfigSchema,
   shoggothAcpxConfigSchema,
@@ -191,6 +194,14 @@ const sharedConfigFields = {
 export const shoggothConfigFragmentSchema = z
   .object({
     ...sharedConfigFields,
+    // A fragment is only one config layer: cross-field referential checks
+    // (e.g. mediaGeneration.defaults refs resolving against providers) would
+    // falsely fail when providers live in a different layer, so fragments use
+    // the structural schemas here and the full config schema below applies the
+    // referential checks on the merged result.
+    mediaGeneration: shoggothMediaGenerationConfigFragmentSchema.optional(),
+    decision: shoggothDecisionConfigFragmentSchema.optional(),
+    rerank: shoggothRerankConfigFragmentSchema.optional(),
     logLevel: z.enum(["debug", "info", "warn", "error"]).optional(),
     stateDbPath: z.string().min(1).optional(),
     socketPath: z.string().min(1).optional(),

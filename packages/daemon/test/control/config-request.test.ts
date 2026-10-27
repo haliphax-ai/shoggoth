@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -252,5 +252,83 @@ describe("config_request control op", { concurrency: false }, () => {
         return true;
       },
     );
+  });
+
+  it("accepts a defaults-only mediaGeneration fragment (refs resolve at merge time)", async () => {
+    const dynDir = join(tmp, "dynamic");
+    mkdirSync(dynDir, { recursive: true });
+    // Providers already live in the existing dynamic file (as in production);
+    // the submitted fragment is defaults-only and must merge against them.
+    writeFileSync(
+      join(dynDir, "mediaGeneration.json"),
+      JSON.stringify({
+        mediaGeneration: {
+          providers: {
+            openrouter: {
+              kind: "openai-compatible",
+              baseUrl: "https://openrouter.ai/api/v1",
+              models: {
+                "google/gemini-3.1-flash-image-preview": { mediaType: "image" },
+                "google/lyria-3-pro-preview": { mediaType: "audio" },
+              },
+            },
+          },
+        },
+      }),
+    );
+    const config = minimalConfig(tmp, dynDir);
+    const ctx: IntegrationOpsContext = {
+      config,
+      stateDb: db,
+      acpxStore: undefined,
+      sessions: undefined,
+      sessionManager: undefined,
+      acpxSupervisor: undefined,
+      recordIntegrationAudit: () => {},
+    };
+    const req = makeWireRequest("config_request", {
+      key: "mediaGeneration",
+      fragment: {
+        defaults: {
+          image: "openrouter/google/gemini-3.1-flash-image-preview",
+          suggestions: { music: "openrouter/google/lyria-3-pro-preview" },
+        },
+      },
+    });
+    const result = (await handleIntegrationControlOp(req, agentPrincipal, ctx)) as {
+      ok: boolean;
+      path: string;
+    };
+    assert.strictEqual(result.ok, true);
+    const written = JSON.parse(readFileSync(result.path, "utf8"));
+    assert.strictEqual(
+      written.mediaGeneration.defaults.image,
+      "openrouter/google/gemini-3.1-flash-image-preview",
+    );
+  });
+
+  it("returns validation_failed when a defaults ref resolves against no provider after merge", async () => {
+    const dynDir = join(tmp, "dynamic");
+    mkdirSync(dynDir, { recursive: true });
+    const config = minimalConfig(tmp, dynDir);
+    const ctx: IntegrationOpsContext = {
+      config,
+      stateDb: db,
+      acpxStore: undefined,
+      sessions: undefined,
+      sessionManager: undefined,
+      acpxSupervisor: undefined,
+      recordIntegrationAudit: () => {},
+    };
+    const req = makeWireRequest("config_request", {
+      key: "mediaGeneration",
+      fragment: { defaults: { image: "google/does-not-exist" } },
+    });
+    const result = (await handleIntegrationControlOp(req, agentPrincipal, ctx)) as {
+      ok: boolean;
+      error: string;
+    };
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.error, "validation_failed");
   });
 });
