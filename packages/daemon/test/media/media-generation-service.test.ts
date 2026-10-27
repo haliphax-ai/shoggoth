@@ -70,7 +70,7 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
       );
 
       const result = await service.generate({
-        model: "black-forest-labs/flux.2-klein-4b",
+        model: "openrouter/black-forest-labs/flux.2-klein-4b",
         prompt: "a cat",
         params: { kind: "image" },
         output_path: "/tmp/out.png",
@@ -97,7 +97,7 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
       );
 
       const result = await service.generate({
-        model: "google/veo-3.1",
+        model: "openrouter/google/veo-3.1",
         prompt: "a sunset",
         params: { kind: "video" },
         output_path: "/tmp/out.mp4",
@@ -124,7 +124,7 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
       );
 
       const result = await service.generate({
-        model: "gemini-2.5-flash-image",
+        model: "google/gemini-2.5-flash-image",
         prompt: "a cat",
         params: { kind: "image" },
         output_path: "/tmp/out.png",
@@ -151,7 +151,7 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
       );
 
       const result = await service.generate({
-        model: "veo-3.1",
+        model: "google/veo-3.1",
         prompt: "a sunset timelapse",
         params: { kind: "video" },
         output_path: "/tmp/out.mp4",
@@ -179,7 +179,7 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
       );
 
       const result = await service.generate({
-        model: "dall-e-3",
+        model: "openai-direct/dall-e-3",
         prompt: "a cat",
         params: { kind: "image" },
         output_path: "/tmp/out.png",
@@ -212,7 +212,7 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
       );
 
       const result = await service.generate({
-        model: "imagen-4.0-fast-generate-001",
+        model: "google/imagen-4.0-fast-generate-001",
         prompt: "a landscape",
         params: { kind: "image" },
         output_path: "/tmp/out.png",
@@ -237,7 +237,7 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
       ]);
 
       const result = await service.generate({
-        model: "totally-unknown-model-xyz",
+        model: "openrouter/totally-unknown-model-xyz",
         prompt: "something",
         params: { kind: "image" },
         output_path: "/tmp/out.png",
@@ -278,7 +278,7 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
       );
 
       await service.generate({
-        model: "test-model",
+        model: "my-provider/test-model",
         prompt: "a cat",
         params: { kind: "image" },
         output_path: "/tmp/out.png",
@@ -326,7 +326,7 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
 
       // OpenRouter image
       await service.generate({
-        model: "black-forest-labs/flux.2-klein-4b",
+        model: "openrouter/black-forest-labs/flux.2-klein-4b",
         prompt: "cat",
         params: { kind: "image" },
         output_path: "/tmp/out1.png",
@@ -334,7 +334,7 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
 
       // Google Gemini image
       await service.generate({
-        model: "gemini-2.5-flash-image",
+        model: "google/gemini-2.5-flash-image",
         prompt: "dog",
         params: { kind: "image" },
         output_path: "/tmp/out2.png",
@@ -454,7 +454,7 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
       const service = makeService(providers, adapters, allDefaults);
 
       await service.generate({
-        model: "veo-3.1",
+        model: "google/veo-3.1",
         prompt: "a cat",
         params: { kind: "image" },
         output_path: "/tmp/out.png",
@@ -525,6 +525,91 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
     });
   });
 
+  describe("Strict provider/model-id references", () => {
+    const openrouterProviders: MediaProviderConfig[] = [
+      {
+        id: "openrouter",
+        kind: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api",
+        apiKey: "sk-test",
+        models: [{ name: "black-forest-labs/flux.2-klein-4b", mediaType: "image" }],
+      },
+    ];
+
+    it("rejects a bare model ref without a provider prefix", async () => {
+      const service = makeService(openrouterProviders, makeAdapters());
+
+      const result = await service.generate({
+        model: "black-forest-labs/flux.2-klein-4b",
+        prompt: "a cat",
+        params: { kind: "image" },
+        output_path: "/tmp/out.png",
+      });
+
+      expect(result.status).toBe("error");
+      expect((result as { error: string }).error).toContain("black-forest-labs/flux.2-klein-4b");
+      expect((result as { error: string }).error).toContain("provider");
+    });
+
+    it("rejects a ref whose provider prefix is not configured", async () => {
+      const service = makeService(
+        [
+          {
+            id: "google",
+            kind: "gemini",
+            baseUrl: "https://generativelanguage.googleapis.com",
+            apiKey: "g-key",
+            models: [{ name: "gemini-2.5-flash-image", mediaType: "image" }],
+          },
+        ],
+        makeAdapters(),
+      );
+
+      const result = await service.generate({
+        model: "openrouter/gemini-2.5-flash-image",
+        prompt: "a cat",
+        params: { kind: "image" },
+        output_path: "/tmp/out.png",
+      });
+
+      expect(result.status).toBe("error");
+    });
+
+    it("sends the full model id (slashes included) on the wire for a provider-prefixed ref", async () => {
+      const adapters = makeAdapters();
+      const service = makeService(openrouterProviders, adapters);
+
+      const result = await service.generate({
+        model: "openrouter/black-forest-labs/flux.2-klein-4b",
+        prompt: "a cat",
+        params: { kind: "image" },
+        output_path: "/tmp/out.png",
+      });
+
+      expect(result.status).toBe("complete");
+      const call = (adapters["openai-chat-image"] as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      // only the provider prefix is stripped — the slashed model id survives
+      expect(call.model).toBe("black-forest-labs/flux.2-klein-4b");
+    });
+
+    it("resolves a default whose model id contains slashes", async () => {
+      const adapters = makeAdapters();
+      const service = makeService(openrouterProviders, adapters, {
+        image: "openrouter/black-forest-labs/flux.2-klein-4b",
+      });
+
+      const result = await service.generate({
+        prompt: "a cat",
+        params: { kind: "image" },
+        output_path: "/tmp/out.png",
+      });
+
+      expect(result.status).toBe("complete");
+      const call = (adapters["openai-chat-image"] as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(call.model).toBe("black-forest-labs/flux.2-klein-4b");
+    });
+  });
+
   describe("Unknown adapter name", () => {
     it("returns error when adapter name is not in the registry", async () => {
       const service = makeService(
@@ -541,7 +626,7 @@ describe("MediaGenerationService - Multi-Provider Routing", () => {
       );
 
       const result = await service.generate({
-        model: "m",
+        model: "x/m",
         prompt: "hi",
         params: { kind: "image" },
         output_path: "/tmp/out.png",

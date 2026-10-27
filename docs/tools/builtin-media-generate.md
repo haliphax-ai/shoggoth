@@ -2,14 +2,20 @@ Generate images, audio, video, or music using configured AI providers. Results a
 
 ## Parameters
 
-| Param         | Type    | Required | Notes                                                                                        |
-| ------------- | ------- | -------- | -------------------------------------------------------------------------------------------- |
-| `model`       | string  | yes      | Model name (e.g. `gpt-4o`, `dall-e-3`, `gemini-2.5-flash-image`, `veo-3.1-generate-preview`) |
-| `prompt`      | string  | yes      | Generation prompt                                                                            |
-| `params`      | object  | yes      | Discriminated by `kind` (see below)                                                          |
-| `output_path` | string  | no       | Workspace-relative output path. Auto-generated if omitted.                                   |
-| `show`        | boolean | no       | Include generated image as content parts in result. Default `true`.                          |
-| `timeout_ms`  | number  | no       | Timeout for async generation (e.g. video).                                                   |
+| Param         | Type    | Required | Notes                                                                                                                                                                                                 |
+| ------------- | ------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model`       | string  | no¹      | Model in `provider-id/model-id` format (e.g. `google/gemini-2.5-flash-image`, `openrouter/black-forest-labs/flux.2-klein-4b`). The model id may contain slashes; the first segment names the provider |
+| `prompt`      | string  | yes      | Generation prompt                                                                                                                                                                                     |
+| `params`      | object  | yes      | Discriminated by `kind` (see below)                                                                                                                                                                   |
+| `output_path` | string  | no       | Workspace-relative output path. Auto-generated if omitted.                                                                                                                                            |
+| `show`        | boolean | no       | Include generated image as content parts in result. Default `true`.                                                                                                                                   |
+| `timeout_ms`  | number  | no       | Timeout for async generation (e.g. video).                                                                                                                                                            |
+
+¹ Required unless a default model is configured for the request's media type in
+`mediaGeneration.defaults` (`image`/`video`/`audio`); omitted `model` falls
+back to that default, and an error is returned when neither exists. The
+`mediaGeneration.defaults.suggestions` block (`music`, `tts`) is surfaced in
+the tool descriptor as a hint only — suggestions are never auto-applied.
 
 ### `params` fields
 
@@ -49,7 +55,7 @@ Providers may clamp to their supported subset. Unsupported ratios return an erro
 
 ```json
 {
-  "model": "gpt-4o",
+  "model": "openai/gpt-4o",
   "prompt": "a sunset over mountains",
   "params": { "kind": "image", "aspectRatio": "16:9" }
 }
@@ -59,7 +65,7 @@ Providers may clamp to their supported subset. Unsupported ratios return an erro
 
 ```json
 {
-  "model": "dall-e-3",
+  "model": "openai/dall-e-3",
   "prompt": "a cat wearing a hat",
   "params": { "kind": "image", "size": "1024x1024" }
 }
@@ -69,7 +75,7 @@ Providers may clamp to their supported subset. Unsupported ratios return an erro
 
 ```json
 {
-  "model": "veo-3.1-generate-preview",
+  "model": "google/veo-3.1-generate-preview",
   "prompt": "a cat playing in snow",
   "params": { "kind": "video", "aspectRatio": "16:9", "durationSeconds": 5 }
 }
@@ -79,7 +85,7 @@ Providers may clamp to their supported subset. Unsupported ratios return an erro
 
 ```json
 {
-  "model": "gemini-2.5-flash-preview-tts",
+  "model": "google/gemini-2.5-flash-preview-tts",
   "prompt": "Hello, world!",
   "params": { "kind": "speech", "voice": "Kore" }
 }

@@ -469,10 +469,14 @@ function mediaGenerateToolDescriptor(config: ShoggothConfig): AggregatedTool {
   const suggestionLabel = suggestionEntries.map(([kind, ref]) => `${kind} '${ref}'`).join(", ");
 
   const modelDescription = defaultLabel
-    ? `Optional. Model name; defaults to the configured default model for the ` +
-      `request's media type (${defaultLabel}).` +
+    ? `Optional. Model in provider-id/model-id format; defaults to the ` +
+      `configured default model for the request's media type (${defaultLabel}).` +
       (suggestionLabel ? ` Suggested models: ${suggestionLabel}.` : "")
-    : "Model name (e.g. gemini-2.5-flash-image, veo-3.1-generate-preview, lyria-3-pro-preview) — required when no default model is configured for the request's media type.";
+    : `Required. Model in provider-id/model-id format (e.g. ` +
+      `google/gemini-2.5-flash-image, google/veo-3.1-generate-preview, ` +
+      `openrouter/black-forest-labs/flux.2-klein-4b) — required when no default ` +
+      `model is configured for the request's media type. The model id may ` +
+      `contain slashes; the first segment names the provider.`;
 
   const description =
     "Generate images, audio, video, or music using Google AI models. Results are always saved to disk at the required output_path." +

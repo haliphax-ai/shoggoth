@@ -112,21 +112,18 @@ export class MediaGenerationService {
   }
 
   /**
-   * Resolve a model reference to provider + adapter. Accepts either a
-   * `provider-id/model-id` reference (the format used by `defaults`) or a
-   * bare model name (matched against all providers by name).
+   * Resolve a model reference to provider + adapter. References are strictly
+   * `provider-id/model-id`, split on the FIRST slash — the model id itself
+   * may contain slashes (e.g. `openrouter/black-forest-labs/flux.2-klein-4b`
+   * or `openrouter/google/gemini-2.5-pro-preview-tts`). Bare model ids are
+   * rejected: the provider prefix is Shoggoth's routing concern.
    */
   private resolveModelRef(ref: string): ReturnType<typeof resolveModel> {
     const slash = ref.indexOf("/");
-    if (slash > 0 && slash < ref.length - 1) {
-      const providerId = ref.slice(0, slash);
-      const modelName = ref.slice(slash + 1);
-      const provider = this.providers.find((p) => p.id === providerId);
-      if (provider) {
-        return resolveModel(modelName, [provider]);
-      }
-    }
-    return resolveModel(ref, this.providers);
+    if (slash <= 0 || slash === ref.length - 1) return undefined;
+    const provider = this.providers.find((p) => p.id === ref.slice(0, slash));
+    if (!provider) return undefined;
+    return resolveModel(ref.slice(slash + 1), [provider]);
   }
 
   async generate(req: GenerateRequest): Promise<MediaAdapterResult> {
@@ -142,7 +139,7 @@ export class MediaGenerationService {
     if (!resolved) {
       return {
         status: "error",
-        error: `No provider/adapter found for model: ${model}`,
+        error: `No provider/adapter found for model: ${model} (expected provider-id/model-id)`,
       };
     }
 

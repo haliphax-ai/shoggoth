@@ -49,14 +49,14 @@ describe("parseMediaGenerateArgs", () => {
   it("parses --model, --prompt, --output flags", () => {
     const result = parseMediaGenerateArgs([
       "--model",
-      "gemini-2.5-flash-image",
+      "google/gemini-2.5-flash-image",
       "--prompt",
       "a cat",
       "--output",
       "/tmp/out.png",
     ]);
     assert.ok(result.ok);
-    assert.strictEqual(result.payload.model, "gemini-2.5-flash-image");
+    assert.strictEqual(result.payload.model, "google/gemini-2.5-flash-image");
     assert.strictEqual(result.payload.prompt, "a cat");
     assert.strictEqual(result.payload.output_path, "/tmp/out.png");
   });
@@ -64,7 +64,7 @@ describe("parseMediaGenerateArgs", () => {
   it("parses --param key=value pairs into params object", () => {
     const result = parseMediaGenerateArgs([
       "--model",
-      "gemini-2.5-flash-image",
+      "google/gemini-2.5-flash-image",
       "--prompt",
       "a dog",
       "--param",
@@ -82,6 +82,17 @@ describe("parseMediaGenerateArgs", () => {
     });
   });
 
+  it("rejects a bare model without a provider prefix", () => {
+    const result = parseMediaGenerateArgs([
+      "--model",
+      "gemini-2.5-flash-image",
+      "--prompt",
+      "hello",
+    ]);
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) assert.match(result.error, /provider-id\/model-id/);
+  });
+
   it("model is optional (defaults to the configured media-type default)", () => {
     const result = parseMediaGenerateArgs(["--prompt", "hello"]);
     assert.ok(result.ok);
@@ -95,7 +106,14 @@ describe("parseMediaGenerateArgs", () => {
   });
 
   it("rejects --param without key=value syntax", () => {
-    const result = parseMediaGenerateArgs(["--model", "m", "--prompt", "p", "--param", "noequals"]);
+    const result = parseMediaGenerateArgs([
+      "--model",
+      "google/m",
+      "--prompt",
+      "p",
+      "--param",
+      "noequals",
+    ]);
     assert.strictEqual(result.ok, false);
     if (!result.ok) assert.match(result.error, /--param must be key=value/);
   });
@@ -150,7 +168,7 @@ describe("runMediaCli generate", () => {
     await runMediaCli([
       "generate",
       "--model",
-      "gemini-2.5-flash-image",
+      "google/gemini-2.5-flash-image",
       "--prompt",
       "a cat on a roof",
       "--output",
@@ -162,7 +180,7 @@ describe("runMediaCli generate", () => {
     assert.strictEqual(mockInvoke.mock.calls.length, 1);
     const call = mockInvoke.mock.calls[0][0];
     assert.strictEqual(call.op, "media_generate");
-    assert.strictEqual(call.payload.model, "gemini-2.5-flash-image");
+    assert.strictEqual(call.payload.model, "google/gemini-2.5-flash-image");
     assert.strictEqual(call.payload.prompt, "a cat on a roof");
     assert.strictEqual(call.payload.output_path, "/tmp/out.png");
     assert.deepStrictEqual(call.payload.params, { kind: "image" });
@@ -189,7 +207,7 @@ describe("runMediaCli generate", () => {
       result: { status: "complete", path: "/workspace/img.png", mime_type: "image/png" },
     });
 
-    await runMediaCli(["generate", "--model", "gemini-2.5-flash-image", "--prompt", "test"]);
+    await runMediaCli(["generate", "--model", "google/gemini-2.5-flash-image", "--prompt", "test"]);
 
     const output = logged.join("\n");
     assert.ok(output.includes("/workspace/img.png"), `Expected path in output: ${output}`);
@@ -201,7 +219,7 @@ describe("runMediaCli generate", () => {
       result: { status: "error", error: "Rate limit exceeded" },
     });
 
-    await runMediaCli(["generate", "--model", "gemini-2.5-flash-image", "--prompt", "test"]);
+    await runMediaCli(["generate", "--model", "google/gemini-2.5-flash-image", "--prompt", "test"]);
 
     const allOutput = [...logged, ...errored].join("\n");
     assert.ok(allOutput.includes("Rate limit exceeded"), `Expected error in output: ${allOutput}`);
@@ -213,7 +231,7 @@ describe("runMediaCli generate", () => {
       error: { message: "socket unreachable" },
     });
 
-    await runMediaCli(["generate", "--model", "m", "--prompt", "p"]);
+    await runMediaCli(["generate", "--model", "google/m", "--prompt", "p"]);
 
     assert.ok(process.exitCode === 1);
   });
@@ -335,12 +353,21 @@ describe("runMediaCli models", () => {
     await runMediaCli(["models"]);
 
     const output = logged.join("\n");
-    assert.ok(output.includes("gemini-2.5-flash-image"), `Expected gemini model: ${output}`);
-    assert.ok(output.includes("veo-3.1-generate-preview"), `Expected veo model: ${output}`);
-    assert.ok(output.includes("recraft/recraft-v3"), `Expected recraft model: ${output}`);
-    assert.ok(output.includes("openai/gpt-5-image-mini"), `Expected gpt model: ${output}`);
-    assert.ok(output.includes("[google]"), `Expected provider tag [google]: ${output}`);
-    assert.ok(output.includes("[openrouter]"), `Expected provider tag [openrouter]: ${output}`);
+    // listed refs are provider-prefixed so they can be passed back to --model
+    assert.ok(
+      output.includes("google/gemini-2.5-flash-image"),
+      `Expected provider-prefixed gemini ref: ${output}`,
+    );
+    assert.ok(
+      output.includes("openrouter/recraft/recraft-v3"),
+      `Expected provider-prefixed recraft ref: ${output}`,
+    );
+    assert.ok(
+      output.includes("openrouter/openai/gpt-5-image-mini"),
+      `Expected provider-prefixed gpt ref: ${output}`,
+    );
+    assert.ok(!output.includes("[google]"), `Provider tag replaced by prefix: ${output}`);
+    assert.ok(!output.includes("[openrouter]"), `Provider tag replaced by prefix: ${output}`);
   });
 
   it("shows adapter override when specified", async () => {
@@ -366,7 +393,10 @@ describe("runMediaCli models", () => {
     await runMediaCli(["models"]);
 
     const output = logged.join("\n");
-    assert.ok(output.includes("imagen-4.0-fast-generate-001"), `Expected imagen model: ${output}`);
+    assert.ok(
+      output.includes("google/imagen-4.0-fast-generate-001"),
+      `Expected provider-prefixed imagen ref: ${output}`,
+    );
     assert.ok(output.includes("gemini-predict"), `Expected adapter override: ${output}`);
   });
 });

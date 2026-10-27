@@ -4012,6 +4012,12 @@ export async function handleIntegrationControlOp(
         );
       }
       const model = typeof modelRaw === "string" && modelRaw ? modelRaw : undefined;
+      if (model && (model.indexOf("/") <= 0 || model.indexOf("/") === model.length - 1)) {
+        throw new IntegrationOpError(
+          "ERR_INVALID_PAYLOAD",
+          "media_generate model must be in provider-id/model-id format",
+        );
+      }
       const prompt = pl.prompt;
       if (typeof prompt !== "string" || prompt === undefined) {
         throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "media_generate requires prompt");

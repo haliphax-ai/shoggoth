@@ -22,11 +22,12 @@ async function socketPathFromEnv(configPath: string): Promise<string> {
 function printMediaHelp(): void {
   console.log(`shoggoth ${VERSION}
 Usage:
-  shoggoth media generate [--model <model>] --prompt <prompt> [--output <path>] [--param key=value...]
+  shoggoth media generate [--model <provider-id/model-id>] --prompt <prompt> [--output <path>] [--param key=value...]
   shoggoth media poll --provider <id> --operation <id> [--output <path>]
   shoggoth media models    List configured media generation models
 
-  --model defaults to the configured mediaGeneration default model for the
+  --model is in provider-id/model-id format (the model id may contain slashes)
+  and defaults to the configured mediaGeneration default model for the
   request's media type (params kind); an error is returned when neither is set.`);
 }
 
@@ -75,6 +76,12 @@ export function parseMediaGenerateArgs(args: string[]):
   }
 
   if (!prompt) return { ok: false, error: "--prompt is required" };
+  if (model && (model.indexOf("/") <= 0 || model.indexOf("/") === model.length - 1)) {
+    return {
+      ok: false,
+      error: `--model must be in provider-id/model-id format, got "${model}"`,
+    };
+  }
 
   const payload: {
     model?: string;
@@ -147,7 +154,9 @@ export async function runMediaCli(argv: string[]): Promise<void> {
     for (const [providerId, p] of providers) {
       for (const model of mediaGenerationModelEntriesFromRecord(p.models)) {
         const adapter = model.adapter ?? `${p.kind}/${model.mediaType}`;
-        lines.push(`${model.name}  →  ${adapter}  [${providerId}]`);
+        // list refs in provider-id/model-id format so they can be passed
+        // straight to --model (the model id may itself contain slashes)
+        lines.push(`${providerId}/${model.name}  →  ${adapter}`);
       }
     }
     console.log(lines.join("\n"));
@@ -160,7 +169,7 @@ export async function runMediaCli(argv: string[]): Promise<void> {
     if (!parsed.ok) {
       console.error(parsed.error);
       console.error(
-        "usage: shoggoth media generate [--model <model>] --prompt <prompt> [--output <path>] [--param key=value...]",
+        "usage: shoggoth media generate [--model <provider-id/model-id>] --prompt <prompt> [--output <path>] [--param key=value...]",
       );
       process.exitCode = 1;
       return;

@@ -105,7 +105,7 @@ function makeReq(payload: Record<string, unknown>): WireRequest {
 
 function validPayload(overrides?: Record<string, unknown>): Record<string, unknown> {
   return {
-    model: "gemini-2.5-flash-image",
+    model: "gemini-default/gemini-2.5-flash-image",
     prompt: "a cute cat",
     params: { kind: "image" },
     ...overrides,
@@ -135,6 +135,34 @@ describe("media_generate control op - Multi-Provider Integration", () => {
       assert.equal(mockGenerate.mock.calls.length, 1);
       const callArg = mockGenerate.mock.calls[0][0];
       assert.equal(callArg.model, undefined);
+    });
+
+    it("rejects a model without provider-id/model-id format", async () => {
+      const req = makeReq(validPayload({ model: "gemini-2.5-flash-image" }));
+      await assert.rejects(
+        () => handleIntegrationControlOp(req, agentPrincipal(), makeCtx()),
+        (err: IntegrationOpError) => {
+          assert.equal(err.code, "ERR_INVALID_PAYLOAD");
+          assert.ok(err.message.includes("provider-id/model-id"));
+          return true;
+        },
+      );
+    });
+
+    it("accepts a provider-prefixed model id containing slashes", async () => {
+      mockGenerate.mockResolvedValueOnce({
+        status: "complete",
+        path: "/tmp/media/output.png",
+        mime_type: "image/png",
+      });
+      const req = makeReq({
+        ...validPayload(),
+        model: "google/gemini-2.5-flash-image",
+      });
+      const result = await handleIntegrationControlOp(req, agentPrincipal(), makeCtx());
+      assert.ok(result != null);
+      const callArg = mockGenerate.mock.calls[0][0];
+      assert.equal(callArg.model, "google/gemini-2.5-flash-image");
     });
 
     it("rejects non-string model", async () => {
@@ -207,12 +235,12 @@ describe("media_generate control op - Multi-Provider Integration", () => {
         mime_type: "image/png",
       });
 
-      const req = makeReq(validPayload({ model: "gemini-2.5-flash-image" }));
+      const req = makeReq(validPayload({ model: "gemini-default/gemini-2.5-flash-image" }));
       await handleIntegrationControlOp(req, agentPrincipal(), makeCtx());
 
       assert.equal(mockGenerate.mock.calls.length, 1);
       const callArg = mockGenerate.mock.calls[0][0];
-      assert.equal(callArg.model, "gemini-2.5-flash-image");
+      assert.equal(callArg.model, "gemini-default/gemini-2.5-flash-image");
       assert.equal(callArg.prompt, "a cute cat");
       assert.deepStrictEqual(callArg.params, { kind: "image" });
     });
@@ -236,7 +264,7 @@ describe("media_generate control op - Multi-Provider Integration", () => {
         },
       } as any);
 
-      const req = makeReq(validPayload({ model: "unknown-model" }));
+      const req = makeReq(validPayload({ model: "gemini-default/unknown-model" }));
       const result = await handleIntegrationControlOp(req, agentPrincipal(), ctx);
 
       assert.ok(result != null);
@@ -253,7 +281,10 @@ describe("media_generate control op - Multi-Provider Integration", () => {
       });
 
       const req = makeReq(
-        validPayload({ model: "veo-3.1-generate-preview", params: { kind: "video" } }),
+        validPayload({
+          model: "gemini-default/veo-3.1-generate-preview",
+          params: { kind: "video" },
+        }),
       );
       const result = await handleIntegrationControlOp(req, agentPrincipal(), makeCtx());
 
@@ -287,7 +318,7 @@ describe("media_generate control op - Multi-Provider Integration", () => {
         mime_type: "image/png",
       });
 
-      const req = makeReq(validPayload({ model: "dall-e-3" }));
+      const req = makeReq(validPayload({ model: "openai/dall-e-3" }));
       const result = await handleIntegrationControlOp(req, agentPrincipal(), ctx);
 
       assert.ok(result != null);
@@ -315,12 +346,12 @@ describe("media_generate control op - Multi-Provider Integration", () => {
         mime_type: "image/png",
       });
 
-      const req = makeReq(validPayload({ model: "dall-e-3" }));
+      const req = makeReq(validPayload({ model: "openai/dall-e-3" }));
       await handleIntegrationControlOp(req, agentPrincipal(), ctx);
 
       assert.equal(mockGenerate.mock.calls.length, 1);
       const callArg = mockGenerate.mock.calls[0][0];
-      assert.equal(callArg.model, "dall-e-3");
+      assert.equal(callArg.model, "openai/dall-e-3");
     });
 
     it("routes to openai-chat-image for gpt-image models", async () => {
@@ -343,7 +374,7 @@ describe("media_generate control op - Multi-Provider Integration", () => {
         mime_type: "image/png",
       });
 
-      const req = makeReq(validPayload({ model: "gpt-image-1" }));
+      const req = makeReq(validPayload({ model: "openai/gpt-image-1" }));
       const result = await handleIntegrationControlOp(req, agentPrincipal(), ctx);
 
       assert.ok(result != null);
@@ -370,7 +401,7 @@ describe("media_generate control op - Multi-Provider Integration", () => {
 
       assert.equal(mockGenerate.mock.calls.length, 1);
       const callArg = mockGenerate.mock.calls[0][0];
-      assert.equal(callArg.model, "gemini-2.5-flash-image");
+      assert.equal(callArg.model, "gemini-default/gemini-2.5-flash-image");
       assert.equal(callArg.prompt, "a cute cat");
       assert.deepStrictEqual(callArg.params, { kind: "image" });
     });
@@ -427,7 +458,10 @@ describe("media_generate control op - Multi-Provider Integration", () => {
       } as any);
 
       const req = makeReq(
-        validPayload({ model: "veo-3.1-generate-preview", params: { kind: "video" } }),
+        validPayload({
+          model: "gemini-default/veo-3.1-generate-preview",
+          params: { kind: "video" },
+        }),
       );
       const result = await handleIntegrationControlOp(req, agentPrincipal(), ctx);
 
