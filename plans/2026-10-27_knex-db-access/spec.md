@@ -96,14 +96,39 @@ export function assertMigrationsDirReadable(dir: string): void;
 - Legacy guard: on first run, if `_schema_migrations` exists and `knex_migrations` does not, throw `State DB predates the knex migrator; recreate the state database (pre-release schema).`
 - Applied-name capture: `[first, last] = await knex.migrate.latest()`; the batch's applied names are the trailing entries of the completed list — implement via `knex.migrate.list()` diff or by reading `knex_migrations` rows inserted in this call (batch number from `latest()` result is the reliable signal).
 
-### Test helper — `packages/daemon/test/helpers/` (new or extended)
+### Collapsed entry-point helpers — `packages/daemon/src/db/migrate.ts` (new; exported via `lib.ts`)
 
 ```ts
-/** openStateDb + migrate, the two-line preamble repeated in ~90 test files. */
-export async function openMigratedDb(dbPath: string): Promise<Database.Database>;
+/**
+ * assertMigrationsDirReadable(defaultMigrationsDir()) + openStateDb + migrate.
+ * The supported way for the daemon and CLI entry points to open the state DB:
+ * no caller repeats the open/migrate dance or passes defaultMigrationsDir().
+ */
+export async function openMigratedStateDb(
+  databasePath: string,
+  options?: OpenStateDbOptions,
+): Promise<Database.Database>;
+
+/**
+ * Same schema guarantee for a handle the caller already owns
+ * (tests using `new Database(":memory:")`, ad-hoc tooling).
+ * Defaults to defaultMigrationsDir() unless a directory is given.
+ */
+export async function migrateStateDb(
+  db: Database.Database,
+  migrationsDir?: string,
+): Promise<MigrateResult>;
 ```
 
-Optional ergonomic win in Phase 1; not required for correctness.
+Call-site collapse (Phase 1):
+
+| Before (per opener)                                                                                                    | After                                                      |
+| ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| daemon `index.ts`: `openStateDb(...)` then `migrate(db, defaultMigrationsDir())`                                       | `const db = await openMigratedStateDb(config.stateDbPath)` |
+| 3 CLI files: `dir = defaultMigrationsDir(); assertMigrationsDirReadable(dir); db = openStateDb(...); migrate(db, dir)` | `const db = await openMigratedStateDb(config.stateDbPath)` |
+| ~90 test files: `migrate(db, defaultMigrationsDir())`                                                                  | `await migrateStateDb(db)`                                 |
+
+Low-level `migrate(db, migrationsDir?)` stays exported: the duplicate-version test passes a bad directory, and the persistence test drives it twice to assert idempotency. After the sweep no production call site passes `defaultMigrationsDir()` explicitly.
 
 ## Data Structures / Schemas
 

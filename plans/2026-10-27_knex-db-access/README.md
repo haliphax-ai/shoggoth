@@ -28,6 +28,7 @@ Schema management currently lives in 24 ad-hoc `migrations/NNNN_*.sql` files app
 
 4. **Migrations: one starter migration, then the standard knex process.**
    The 24 numbered SQL files concatenate (in order) into `migrations/initial_schema.sql`, applied by a single starter migration module `migrations/20261027000000_initial_schema.ts`. Because the legacy runner applied the files sequentially inside transactions, concatenation in the same order yields an identical schema by construction. Bookkeeping moves to knex's `knex_migrations` / `knex_migrations_lock`; `_schema_migrations` and the custom runner disappear. Future migrations are scaffolded with `knex.migrate.make()` (wrapped in an npm script, see `spec.md`).
+   The repeated per-entry-point open/migrate sequence collapses into two helpers: `openMigratedStateDb(path)` for the daemon and the three CLI programs, `migrateStateDb(db)` for tests and callers that already hold a handle. No caller passes `defaultMigrationsDir()` explicitly anymore (see `spec.md`).
 
 5. **Async is contagious — conversion is phased, not flag-day.**
    knex's builder only returns promises; the codebase's `.prepare().run()` calls are synchronous and sit on hot paths (tool loop, event queue, schedulers). Each subsystem is converted in its own phase, keeping `typecheck` + tests green at every step, so phases can be delegated to subagents/PRs independently.
@@ -40,7 +41,7 @@ Schema management currently lives in 24 ad-hoc `migrations/NNNN_*.sql` files app
 ```
 packages/daemon/src/db/
   knex.ts       # getKnex(db), createKnex(db, opts), shared-connection pool adapter (new)
-  migrate.ts    # rewritten: async knex-based migrate(); defaultMigrationsDir(); assertMigrationsDirReadable()
+  migrate.ts    # rewritten: async migrate(); openMigratedStateDb()/migrateStateDb() helpers; defaultMigrationsDir(); assertMigrationsDirReadable()
   open.ts       # unchanged (WAL/journal pragmas on the shared handle)
   backup.ts     # unchanged (better-sqlite3 online backup API)
 migrations/

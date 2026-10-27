@@ -12,8 +12,9 @@ Adds the shared-connection knex layer, merges the 24 legacy migrations into one 
 - Build `migrations/initial_schema.sql` by concatenating `0001…0024` in order; script it once (ordered `cat`), then verify by migrating a fresh DB with the **old** runner and the **new** starter and diffing `sqlite_master` output — must be identical.
 - `migrations/20261027000000_initial_schema.ts` (`up` = exec merged SQL; `down` = drop all created objects, test asserts empty schema).
 - Delete the 24 legacy `migrations/NNNN_*.sql` files.
-- Rewrite `db/migrate.ts`: async `migrate(db, migrationsDir?)` per `spec.md`, legacy `_schema_migrations` guard, `defaultMigrationsDir`/`assertMigrationsDirReadable` unchanged.
-- Mechanical `await migrate(...)` sweep: `packages/daemon/src/index.ts`, `packages/cli/src/run-*.ts`, and all test files (grep-driven; TS will flag non-async callbacks).
+- Rewrite `db/migrate.ts`: async `migrate(db, migrationsDir?)` per `spec.md`, plus the collapsed helpers `openMigratedStateDb()` and `migrateStateDb()` (exported from `lib.ts`); legacy `_schema_migrations` guard; `defaultMigrationsDir`/`assertMigrationsDirReadable` unchanged.
+- Collapse the 4 entry-point call sites: daemon `index.ts` and the 3 CLI files become `const db = await openMigratedStateDb(config.stateDbPath)` (CLI `assertMigrationsDirReadable`/`defaultMigrationsDir` imports drop away).
+- Mechanical `await` sweep: `migrateStateDb(db)` replaces `migrate(db, defaultMigrationsDir())` in ~90 test files (grep-driven; TS will flag non-async callbacks).
 - Add knex `^3.3.0` to `packages/daemon/package.json` (CLI scaffold usage may add a root devDependency in Phase 6). After installing, verify the worktree's `node_modules` symlinks still resolve (worktree script warning: never `npm install` against the main checkout's install).
 - Update `docs/daemon.md` migration paragraphs.
 - `knip.json`: keep `scripts/**` ignored; ensure the new migration dir isn't flagged.
