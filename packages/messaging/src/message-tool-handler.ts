@@ -364,7 +364,7 @@ async function handleGetAction(
  * Format:
  * ```
  * > 📨 Message delivery: `<sender session id>`
- * 
+ *
  * <message content>
  * ```
  */
@@ -594,6 +594,36 @@ async function handleReactAction(
   };
 }
 
+/**
+ * Shared "choice" argument validation: normalized choices or an error.
+ * The ask handler reuses this so invalid prompts fail fast inside the
+ * caller's turn instead of surfacing only when the deferred post runs.
+ */
+export function validateChoiceArgs(
+  args: Record<string, unknown>,
+):
+  | { readonly ok: true; readonly choices: { emoji: string; label: string }[] }
+  | { readonly ok: false; readonly error: string } {
+  const choicesRaw = args.choices;
+  if (!Array.isArray(choicesRaw) || choicesRaw.length === 0) {
+    return { ok: false, error: "choices must be a non-empty array of { emoji, label }" };
+  }
+  const choices: { emoji: string; label: string }[] = [];
+  for (const c of choicesRaw) {
+    if (c === null || typeof c !== "object" || Array.isArray(c)) {
+      return { ok: false, error: "each choice must be an object with emoji and label" };
+    }
+    const o = c as Record<string, unknown>;
+    const emoji = typeof o.emoji === "string" ? o.emoji.trim() : "";
+    const label = typeof o.label === "string" ? o.label.trim() : "";
+    if (!emoji || !label) {
+      return { ok: false, error: "each choice requires non-empty emoji and label" };
+    }
+    choices.push({ emoji, label });
+  }
+  return { ok: true, choices };
+}
+
 async function handleChoiceAction(
   ctx: ChannelActionContext,
   args: Record<string, unknown>,
@@ -602,36 +632,16 @@ async function handleChoiceAction(
   const { capabilities: caps, transport: t } = deps;
   const x = caps.extensions;
   if (!x.react) return { ok: false, error: "choice not supported on this platform" };
-  const choicesRaw = args.choices;
-  if (!Array.isArray(choicesRaw) || choicesRaw.length === 0) {
-    return {
-      ok: false,
-      error: "choices must be a non-empty array of { emoji, label }",
-    };
-  }
-  const choices: { emoji: string; label: string }[] = [];
-  for (const c of choicesRaw) {
-    if (c === null || typeof c !== "object" || Array.isArray(c)) {
-      return {
-        ok: false,
-        error: "each choice must be an object with emoji and label",
-      };
-    }
-    const o = c as Record<string, unknown>;
-    const emoji = typeof o.emoji === "string" ? o.emoji.trim() : "";
-    const label = typeof o.label === "string" ? o.label.trim() : "";
-    if (!emoji || !label)
-      return {
-        ok: false,
-        error: "each choice requires non-empty emoji and label",
-      };
-    choices.push({ emoji, label });
-  }
+  const validated = validateChoiceArgs(args);
+  if (!validated.ok) return validated;
+  const choices = validated.choices;
   const preamble = typeof args.content === "string" ? args.content.trim() : "";
   const legendLines = choices.map((c) => `${c.emoji} ${c.label}`);
 
   // Build the message body, optionally prepended with sender provenance banner
-  let bodyContent = [...(preamble ? [preamble, ""] : []), "React to choose:", ...legendLines].join("\n");
+  let bodyContent = [...(preamble ? [preamble, ""] : []), "React to choose:", ...legendLines].join(
+    "\n",
+  );
   if (deps.getSessionSenderIdForProvenance) {
     const senderId = deps.getSessionSenderIdForProvenance(sid);
     if (senderId) {

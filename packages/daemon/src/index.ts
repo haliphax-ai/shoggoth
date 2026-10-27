@@ -128,6 +128,7 @@ import { TimerScheduler } from "./timers/timer-scheduler";
 import { deliverTimerMessage } from "./timers/timer-delivery";
 import { buildWorkflowTurnBanner } from "./messaging/oob-turn-banner";
 import { setTimerScheduler } from "./sessions/builtin-handlers/timer-handler";
+import { flushAsks, setAskTurnQueue } from "./sessions/builtin-handlers/ask-defer";
 import { ExecNotifyScheduler, setExecNotifyScheduler } from "./exec/exec-notify-scheduler";
 import { deliverExecNotifyMessage } from "./exec/exec-notify-delivery";
 import { deliverSessionSendNotifyMessage } from "./messaging/session-send-notify-delivery";
@@ -431,8 +432,13 @@ async function initTimerScheduler(db: ReturnType<typeof openStateDb>) {
   const timerScheduler = new TimerScheduler(deliverTimerMessage);
 
   setTimerScheduler(timerScheduler);
+  setAskTurnQueue(getTurnQueue());
   getTurnQueue().setOnTurnEnd((sessionId) => {
     timerScheduler.flushSession(sessionId);
+    // Post builtin-ask choice prompts queued during the turn: like timer
+    // flushes, prompts are deferred so they never land mid-stream between
+    // split messages of long output (fire-and-forget: logging inside).
+    void flushAsks(sessionId);
     // Reset the persistent-subagent inactivity clock at turn end: a completed turn
     // means an assistant response was delivered, which restarts the clock. No-op for
     // sessions without an armed inactivity timer (regular and one-shot sessions).
