@@ -230,6 +230,7 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
         properties: Record<string, { description: string }>;
       };
       expect(schema.required).not.toContain("model");
+      expect(schema.properties.model!.description).toContain("provider-id/model-id");
       expect(schema.properties.model!.description).toContain("google/gemini-2.5-flash-image");
       expect(schema.properties.model!.description).toContain("google/veo-3.1");
       expect(schema.properties.model!.description).toContain("google/lyria-3-pro-preview");
@@ -244,8 +245,14 @@ describe("createMediaGenerateToolFinalizer - Multi-Provider Integration", () => 
 
       const tool = descriptor(config);
       expect(tool).toBeDefined();
-      const schema = tool!.inputSchema as { required: string[] };
+      const schema = tool!.inputSchema as {
+        required: string[];
+        properties: Record<string, { description: string }>;
+      };
       expect(schema.required).toContain("model");
+      // format and example must be provider-prefixed, never a bare model-id
+      expect(schema.properties.model!.description).toContain("provider-id/model-id");
+      expect(schema.properties.model!.description).toContain("google/gemini-2.5-flash-image");
     });
 
     it("keeps model required when only some defaults are configured", () => {
