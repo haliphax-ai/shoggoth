@@ -15,6 +15,7 @@ import {
   registerActiveTurnSurface,
   createCoalescingStreamPusher,
   createThinkingOutput,
+  normalizeRoundProse,
   createHitlPendingResolutionStack,
   createPolicyEngine,
   createYoloModeStore,
@@ -987,14 +988,18 @@ export async function startDiscordPlatform(
                     },
                     onModelRoundEnd: (ev: { round: number; content: string }) => {
                       // A settled round commits exactly one prose segment when
-                      // its content is non-blank — the same condition that
-                      // admits it into the composed turn prose — so anchors
-                      // map 1:1 onto final body positions. Whitespace-only
-                      // round content must never enter the display, the
-                      // committed segment list, or the anchors.
-                      if (ev.content.trim()) {
+                      // its NORMALIZED content is non-blank — the same
+                      // condition and the same normalization as the inbound
+                      // path (inbound-session-turn) and the display builder
+                      // (thinking-output endRound), so the segment list
+                      // matches the rendered display block-for-block and
+                      // anchors map 1:1 onto final body positions.
+                      // Whitespace-only round content must never enter the
+                      // display, the committed segment list, or the anchors.
+                      const prose = normalizeRoundProse(ev.content);
+                      if (prose) {
                         surfaceCommittedProseSegments += 1;
-                        surfaceCommittedProse.push(ev.content);
+                        surfaceCommittedProse.push(prose);
                       }
                       let display: string;
                       if (thinkingOutput) {
@@ -1019,6 +1024,16 @@ export async function startDiscordPlatform(
             // turns deliver ALL segments, not only the last one that
             // latestAssistantText carries. Both delivery paths (streamed and
             // at-once) deliver this same composition.
+            //
+            // A FAILED turn is delivered differently: the body is what the
+            // operator already saw streamed — the raw live display snapshot
+            // (or the turn's transcript prose when nothing streamed) — with
+            // `failureNotice` appended as a trailing block after the banner
+            // splice. Recomposing from `latestAssistantText` would REPLACE
+            // the streamed output with a stale whole-session reply (or the
+            // bare notice) and un-locate every in-turn banner anchor.
+            const failed = turnResult.outcome === "failed";
+            const snapshot = surfaceDisplay.trim() && surfaceDisplay !== "…" ? surfaceDisplay : "";
             const replyText = turnResult.assistantTurnProse ?? turnResult.latestAssistantText;
             // ONE terminal composition: the tracker's finish() renders the
             // frozen bar (✅/🛑/❌) through the same renderer as the live bar and
@@ -1069,16 +1084,32 @@ export async function startDiscordPlatform(
               replyText,
               turnResult.failoverMeta,
             );
+            // Failed: the display snapshot IS the formatted body (it already
+            // carries whatever decoration/degraded prefix was rendered live);
+            // normal: format the reply text and let the thinking composer
+            // wrap it. Segments for the banner splice are cut from the same
+            // source (exact block match for the snapshot, decoration
+            // endsWith rule for the plain reply text).
+            const terminationBase = failed
+              ? snapshot || turnResult.assistantTurnProse || ""
+              : (thinkingOutput?.render(formattedBody) ?? formattedBody);
+            const terminationSegments = (failed ? terminationBase : replyText).split("\n\n");
             let fullBody: string;
             try {
-              const shaped = await renderTurnTerminationBody(
-                thinkingOutput?.render(formattedBody) ?? formattedBody,
-                [
-                  (body: string) =>
-                    surfaceBanners.terminalBody(body, { segments: replyText.split("\n\n") }),
-                ],
-              );
-              fullBody = barLine ? `${shaped}\n\n${barLine}` : shaped;
+              const shaped = await renderTurnTerminationBody(terminationBase, [
+                (body: string) =>
+                  surfaceBanners.terminalBody(body, { segments: terminationSegments }),
+              ]);
+              // The failure notice is the LAST block: appended after the
+              // banner splice so it can never fall into an
+              // unresolvable-anchor fallback slot ahead of in-turn banners.
+              const withNotice =
+                failed && turnResult.failureNotice
+                  ? shaped
+                    ? `${shaped}\n\n${turnResult.failureNotice}`
+                    : turnResult.failureNotice
+                  : shaped;
+              fullBody = barLine ? `${withNotice}\n\n${barLine}` : withNotice;
             } catch (e) {
               opts.logger.warn("discord.platform.termination_shaping_failed", {
                 sessionId: sid,
@@ -1086,13 +1117,22 @@ export async function startDiscordPlatform(
               });
               if (surfaceStreamPusher && surfaceStreamHandle) {
                 // Streamed path fails open: the already-streamed output
-                // stands unchanged, so no terminal edit is made.
+                // stands unchanged, so no terminal edit is made. On a failed
+                // turn the streamed output already shows what streamed — the
+                // failure notice is lost here rather than risking a wrong
+                // body (the bar still carries the ❌ outcome).
                 return;
               }
               // The non-streamed path has nothing streamed to fall back on —
               // deliver the body unshaped, exactly once, with the bar the
-              // tracker already rendered.
-              fullBody = barLine ? `${formattedBody}\n\n${barLine}` : formattedBody;
+              // tracker already rendered (and the failure notice, when the
+              // turn failed: the notice rides with the unshaped body rather
+              // than being dropped).
+              const unshaped =
+                failed && turnResult.failureNotice && terminationBase
+                  ? `${terminationBase}\n\n${turnResult.failureNotice}`
+                  : terminationBase;
+              fullBody = barLine ? `${unshaped}\n\n${barLine}` : unshaped;
             }
             // The ONE terminal render: exactly one delivery edit/send carries
             // the final shaped body.

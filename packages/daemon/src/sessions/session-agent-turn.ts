@@ -168,9 +168,15 @@ export interface SessionAgentTurnResult {
   /** Every assistant text segment of THIS turn, concatenated in order
    *  (pre-tools and post-tools prose, including prose emitted alongside a
    *  tool-call round). Undefined when the turn produced no prose (tool-only
-   *  turns) — and on aborted/failed turns — so non-streaming delivery can
-   *  fall back to `latestAssistantText`. */
+   *  turns) — and on aborted turns — so non-streaming delivery can fall
+   *  back to `latestAssistantText`. On FAILED turns it carries the turn's
+   *  streamed-so-far prose so delivery never replaces the streamed output
+   *  with a transcript-stale fallback. */
   readonly assistantTurnProse?: string;
+  /** Set only on `outcome: "failed"`: the trailing failure-notice block
+   *  (`_Turn failed: …_`) delivery appends after the streamed body instead
+   *  of composing a replacement body. */
+  readonly failureNotice?: string;
   /** Cancellation is separate from partial text, which may itself be valid JSON. */
   readonly aborted?: boolean;
   /** Outbound attachments extracted from `show` tool results in this turn. */
@@ -887,12 +893,28 @@ export async function executeSessionAgentTurn(
     pushSystemContext(input.sessionId, `Previous turn encountered an error: ${errMsg}`);
     const failoverMeta2 = model.getSessionToolLoopFailoverState();
     const primaryModel2 = modelsForSession?.failoverChain?.[0];
-    const latestAssistantText2 =
-      extractLatestTranscriptAssistantText(input.db, input.sessionId, ctxSeg) ??
-      `_Turn failed: ${errMsg}_`;
+    // Compose the FAILED body from what THIS turn streamed — every assistant
+    // segment written since seqBefore — plus a trailing failure notice. The
+    // whole-session `extractLatestTranscriptAssistantText` fallback is
+    // deliberately NOT used: it would replace the streamed output with a
+    // stale older reply (or with the bare notice when no tool-free row
+    // exists), and the replacement body's different segment boundaries would
+    // additionally un-locate every in-turn banner anchor. Callers append
+    // `failureNotice` as the final block AFTER the banner splice, so the
+    // notice never lands inside an unresolvable-anchor fallback slot.
+    const failureNotice = `_Turn failed: ${errMsg}_`;
+    const turnProse = extractTurnTranscriptAssistantProse(
+      input.db,
+      input.sessionId,
+      ctxSeg,
+      seqBefore,
+    );
+    const latestAssistantText2 = turnProse ? `${turnProse}\n\n${failureNotice}` : failureNotice;
     return {
       failoverMeta: failoverMeta2 ? { ...failoverMeta2, primaryModel: primaryModel2 } : undefined,
       latestAssistantText: latestAssistantText2,
+      assistantTurnProse: turnProse,
+      failureNotice,
       outcome: "failed",
     };
   } finally {

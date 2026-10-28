@@ -1305,18 +1305,6 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
         | "runaway_cancel"
         | undefined;
 
-      // --- Runaway prose budget ---
-      // The hop continues the loop (it carries tool calls), so its prose is
-      // charged against the turn's budget — a runaway monologue is prose
-      // generated hop after hop without concluding. A terminal response is
-      // the turn's deliverable and is never charged.
-      if (runawayBreaker && turn.content) {
-        if (handleRunawayVerdict(runawayBreaker.recordProse(turn.content.length))) {
-          breakerTripped = "runaway_cancel";
-          break;
-        }
-      }
-
       // ---- Per-tool-call dispatch ----
 
       // Sanitize malformed argsJson before transcript storage.
@@ -1362,6 +1350,50 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
           metadata: turn.reasoningContent ? { reasoningContent: turn.reasoningContent } : undefined,
         });
         emitStats?.({ transcriptMessageCount: getTranscriptCount() });
+      }
+
+      // --- Runaway prose budget ---
+      // The hop continues the loop (it carries tool calls), so its prose is
+      // charged against the turn's budget — a runaway monologue is prose
+      // generated hop after hop without concluding. A terminal response is
+      // the turn's deliverable and is never charged.
+      //
+      // Charged AFTER the per-hop assistant row above: the prose already
+      // streamed live (onModelRoundEnd fired when the round settled), so a
+      // cancel must still persist this hop's assistant row — otherwise the
+      // transcript-derived turn prose is one segment shorter than the
+      // streamed display and delivery would drop the trip hop's final
+      // paragraph. On cancel the trip hop's tool calls are answered with
+      // synthetic tool rows below so the next turn's history never carries
+      // a dangling assistant tool_calls entry.
+      if (runawayBreaker && turn.content) {
+        if (handleRunawayVerdict(runawayBreaker.recordProse(turn.content.length))) {
+          if (options.transcript) {
+            // Answer every tool-call id of the canceled hop: same synthetic
+            // results the dispatch-path breaker uses (blocked for the call it
+            // would have tripped on, skipped for the rest of the batch).
+            for (let i = 0; i < sanitizedToolCalls.length; i += 1) {
+              const canceledTc = sanitizedToolCalls[i]!;
+              const canceled = JSON.stringify({
+                error: "runaway_breaker_canceled",
+                message:
+                  i === 0
+                    ? "not executed — circuit breaker canceled the turn; see the cancellation notice"
+                    : "skipped — batch discarded after the circuit breaker canceled the turn",
+              });
+              options.model.pushToolMessage?.({ toolCallId: canceledTc.id, content: canceled });
+              appendTx({
+                role: "tool",
+                content: canceled,
+                toolCallId: canceledTc.id,
+                metadata: { tool: canceledTc.name },
+              });
+            }
+            emitStats?.({ transcriptMessageCount: getTranscriptCount() });
+          }
+          breakerTripped = "runaway_cancel";
+          break;
+        }
       }
 
       // --- Tool call batch limit ---

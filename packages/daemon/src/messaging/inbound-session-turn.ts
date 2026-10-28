@@ -404,11 +404,37 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       // also keeps the streamed display's snapshot matching the final body
       // so the streamed thinking quotes interleave instead of being replaced
       // by the quotes-plus-last-round fallback.
+      //
+      // A FAILED turn is delivered differently: the body is WHAT THE
+      // OPERATOR ALREADY SAW STREAMED — the raw live display snapshot — with
+      // `failureNotice` appended as a trailing block after the banner splice.
+      // Recomposing a failed body from a transcript-derived fallback would
+      // REPLACE the streamed output (with a stale older reply, or the bare
+      // notice) and its different segment boundaries would un-locate every
+      // in-turn banner anchor.
+      const failed = turnResult.outcome === "failed";
+      const snapshot = surfaceDisplay.trim() && surfaceDisplay !== "…" ? surfaceDisplay : "";
       const replyText = turnResult.assistantTurnProse ?? turnResult.latestAssistantText;
-      const formattedBody = formatAssistantReply(replyText, turnResult.failoverMeta);
-      const rawBody = banners.terminalBody(thinkingOutput?.render(formattedBody) ?? formattedBody, {
-        segments: replyText.split("\n\n"),
+      const baseBody = failed
+        ? // Display snapshot first; the turn's transcript prose only when
+          // nothing streamed (non-streaming surface, failure before the
+          // first delta); never `latestAssistantText` — on failure it is
+          // already prose + notice, which would duplicate the append below.
+          snapshot || turnResult.assistantTurnProse || ""
+        : formatAssistantReply(replyText, turnResult.failoverMeta);
+      const renderedBase = failed ? baseBody : (thinkingOutput?.render(baseBody) ?? baseBody);
+      const splicedBody = banners.terminalBody(renderedBase, {
+        // Failed: segments are cut from the snapshot itself (exact block
+        // match, including any decorations it carries). Normal: from the
+        // undecorated reply text, matched via the endsWith decoration rule.
+        segments: (failed ? baseBody : replyText).split("\n\n"),
       });
+      const rawBody =
+        failed && turnResult.failureNotice
+          ? splicedBody
+            ? `${splicedBody}\n\n${turnResult.failureNotice}`
+            : turnResult.failureNotice
+          : splicedBody;
 
       const attachments = turnResult.showAttachments;
 

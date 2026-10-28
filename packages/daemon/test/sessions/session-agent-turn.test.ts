@@ -666,6 +666,85 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
     assert.ok(result.latestAssistantText.includes("Bad Gateway"));
   });
 
+  it("composes a failed turn from this turn's prose plus a trailing notice, never a stale reply", async () => {
+    const config = defaultConfig(tmp);
+    const sessions = createSessionStore(db);
+    const session = sessions.getById("sess-core");
+    assert.ok(session);
+    const transcript = createTranscriptStore(db);
+    const toolRuns = createToolRunStore(db);
+    const hitlStack = createHitlPendingResolutionStack(db);
+    const builtin = buildBuiltinOnlySessionMcpToolContext();
+    const seg = session.contextSegmentId;
+
+    // An OLDER tool-free assistant reply from a previous turn: the failed
+    // body must never fall back to it (the old bug replaced the streamed
+    // output with exactly this stale row).
+    transcript.append({
+      sessionId: "sess-core",
+      contextSegmentId: seg,
+      role: "assistant",
+      content: "STALE_OLD_REPLY",
+      metadata: {},
+    });
+
+    const result = await executeSessionAgentTurn({
+      db,
+      sessionId: "sess-core",
+      session: session!,
+      transcript,
+      toolRuns,
+      userContent: "failure composition test",
+      userMetadata: undefined,
+      env: process.env,
+      config,
+      policyEngine: createPolicyEngine(config.policy),
+      getHitlConfig: () => ({ ...DEFAULT_HITL_CONFIG, ...config.hitl }),
+      hitl: {
+        bypassUpTo: "safe",
+        pending: hitlStack.pending,
+        clock: { nowMs: () => Date.now() },
+        newPendingId: () => randomUUID(),
+        waitForHitlResolution: hitlStack.waitForHitlResolution,
+      },
+      // The turn streamed one prose segment (persisted by the loop), then
+      // the loop blew up — the catch-all must keep that segment.
+      loopImpl: async (opts) => {
+        opts.transcript!.append({
+          sessionId: "sess-core",
+          contextSegmentId: seg,
+          role: "assistant",
+          content: "\n\nSTREAMED_SO_FAR\n\n\n",
+          metadata: {},
+        });
+        throw new Error("kaboom");
+      },
+      createToolCallingClient: () => ({
+        async completeWithTools() {
+          return {
+            content: "unreachable",
+            toolCalls: [],
+            usedModel: "stub",
+            usedProviderId: "stub",
+            degraded: false,
+          };
+        },
+      }),
+      resolveMcpContext: async () => builtin,
+    } as any);
+
+    assert.equal(result.outcome, "failed");
+    // The failure notice is carried separately so delivery can append it as
+    // the LAST block after the banner splice.
+    assert.equal(result.failureNotice, "_Turn failed: kaboom_");
+    // This turn's streamed prose survives…
+    assert.equal(result.assistantTurnProse, "STREAMED_SO_FAR");
+    // …is the base of the delivered body, with the notice trailing — and the
+    // stale whole-session reply is nowhere in it.
+    assert.equal(result.latestAssistantText, "STREAMED_SO_FAR\n\n_Turn failed: kaboom_");
+    assert.ok(!result.latestAssistantText.includes("STALE_OLD_REPLY"));
+  });
+
   it("re-throws tool loop errors when throwOnError is true", async () => {
     const config = defaultConfig(tmp);
     const sessions = createSessionStore(db);
