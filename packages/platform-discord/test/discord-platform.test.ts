@@ -21,6 +21,7 @@ import {
   loadDaemonNotices,
   migrate,
   createSessionStore,
+  postTurnSurfaceNotice,
   transcriptRowsToModelChatMessages,
   TieredTurnQueue,
   setTurnQueue,
@@ -2812,6 +2813,100 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
       finalBody!.endsWith(terminalLine!),
       `final body must end with the terminal bar line, got: ${finalBody}`,
     );
+  });
+
+  it("runSessionModelTurn messaging_surface: an in-turn banner keeps its live position across later round commits", async () => {
+    const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
+    createSessionStore(db).create({ id: sessionUrn, workspacePath: tmp });
+
+    const pushes: string[] = [];
+    const BANNER = "> 🧨 mid-turn banner";
+    let round = 0;
+    const runtime: DiscordMessagingRuntime = {
+      ...baseRuntime(sessionUrn, []),
+      streamingForSession: () => ({
+        start: async () => ({
+          setFullContent: async () => {},
+          pushUpdate: async (text: string) => {
+            pushes.push(text);
+          },
+        }),
+      }),
+    };
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: defaultConfig(tmp),
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord: runtime,
+      env: { SHOGGOTH_DISCORD_STREAM: "1" },
+      deps: {
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            round += 1;
+            if (round === 1) {
+              // Round 1: clean prose + an unknown tool call (answered with a
+              // synthetic tool error; never reaches the executor).
+              return {
+                content: "first",
+                toolCalls: [{ id: "c1", name: "missing_tool", argsJson: "{}" }],
+                usedModel: "m1",
+                usedProviderId: "p1",
+              };
+            }
+            if (round === 2) {
+              // Round 1's round-end already committed its segment — the turn
+              // surface is live and anchored at 1 of 3 (mid-count), exactly
+              // like a runaway steer firing between rounds. Fire it here,
+              // BEFORE round 2 streams its (padded) content.
+              postTurnSurfaceNotice(sessionUrn, BANNER);
+              // Round 2: content carries PADDING the display normalizes
+              // away (normalizeRoundProse strips it). Storing it raw made
+              // the segment unlocatable and pinned the banner to the tail of
+              // every subsequent frame.
+              return {
+                content: "\n\nsecond\n\n",
+                toolCalls: [{ id: "c2", name: "missing_tool", argsJson: "{}" }],
+                usedModel: "m1",
+                usedProviderId: "p1",
+              };
+            }
+            return {
+              content: "third",
+              toolCalls: [],
+              usedModel: "m1",
+              usedProviderId: "p1",
+            };
+          },
+        }),
+      },
+    });
+
+    await platform.runSessionModelTurn({
+      sessionId: sessionUrn,
+      userContent: "hi",
+      delivery: { kind: "messaging_surface", userId: "u-1" },
+    });
+    await platform.stop();
+
+    // Every frame carrying the banner must hold it AFTER round 1 and, once
+    // round 2 is on screen, BEFORE it — a live position that survives the
+    // later round commits instead of riding the tail downward (the observed
+    // production pin). (The coalescing pusher may only dispatch the final
+    // frame, so assertions are per-frame, not per-transition.)
+    const bannerFrames = pushes.filter((p) => p.includes(BANNER));
+    assert.ok(bannerFrames.length > 0, "the banner must reach the live surface");
+    for (const frame of bannerFrames) {
+      const bannerIdx = frame.indexOf(BANNER);
+      const firstIdx = frame.indexOf("first");
+      const secondIdx = frame.indexOf("second");
+      assert.ok(firstIdx !== -1 && firstIdx < bannerIdx, `banner before round 1 in: ${frame}`);
+      if (secondIdx !== -1) {
+        assert.ok(bannerIdx < secondIdx, `banner pinned to tail in: ${frame}`);
+      }
+    }
+    // The final frame shows all three rounds with the banner still in slot 1.
+    assert.strictEqual(pushes[pushes.length - 1], `first\n\n${BANNER}\n\nsecond\n\nthird`);
   });
 
   it("runSessionModelTurn messaging_surface at-once: terminal bar lands on the final sendBody", async () => {

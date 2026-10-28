@@ -112,6 +112,71 @@ describe("createTurnBannerCollector", () => {
         "**Rook:** Hello\n\n> note\n\nWorld",
       );
     });
+
+    it("keeps a banner in place when committed segments are multi-paragraph", () => {
+      // A round's content may contain blank lines (the model narrates
+      // "Raw spec:\n\n<paragraph>"), so a committed segment spans several
+      // display blocks. The banner anchored after such a segment must land
+      // after its LAST paragraph — never fall back to the tail.
+      let committed = 0;
+      const banners = createTurnBannerCollector({
+        captureAnchor: () => anchor(committed),
+      });
+      committed = 1;
+      banners.add("> trip");
+      committed = 2;
+      const segments = ["Raw spec:\n\nparagraph one", "recovery prose"];
+      const display = "Raw spec:\n\nparagraph one\n\nrecovery prose";
+      expect(banners.liveBody(display, { segments })).toBe(
+        "Raw spec:\n\nparagraph one\n\n> trip\n\nrecovery prose",
+      );
+    });
+
+    it("survives subsequent round commits after a multi-paragraph segment", () => {
+      // Regression: every live push re-renders from scratch, so a lookup
+      // failure would drag the banner to the tail as new rounds commit. With
+      // segment-aware location the banner stays at its fire-time slot while
+      // the turn keeps streaming.
+      let committed = 1;
+      const banners = createTurnBannerCollector({
+        captureAnchor: () => anchor(committed),
+      });
+      banners.add("> mid-turn");
+      const segments = ["Raw spec:\n\nparagraph one"];
+
+      const afterOne = banners.liveBody("Raw spec:\n\nparagraph one", { segments });
+      expect(afterOne).toBe("Raw spec:\n\nparagraph one\n\n> mid-turn");
+
+      // Two more rounds commit after the banner fired: same anchor, new
+      // display — the banner still trails only the first segment.
+      segments.push("second round");
+      const afterTwo = banners.liveBody("Raw spec:\n\nparagraph one\n\nsecond round", {
+        segments,
+      });
+      expect(afterTwo).toBe("Raw spec:\n\nparagraph one\n\n> mid-turn\n\nsecond round");
+      segments.push("third round");
+      const afterThree = banners.liveBody(
+        "Raw spec:\n\nparagraph one\n\nsecond round\n\nthird round",
+        { segments },
+      );
+      expect(afterThree).toBe(
+        "Raw spec:\n\nparagraph one\n\n> mid-turn\n\nsecond round\n\nthird round",
+      );
+    });
+
+    it("still appends at the tail when a multi-paragraph segment is genuinely unlocatable", () => {
+      const banners = createTurnBannerCollector({
+        captureAnchor: () => anchor(1),
+      });
+      banners.add("> note");
+      // Body was rewritten away from the segments (failover hop): the tail
+      // fallback still applies.
+      expect(
+        banners.liveBody("Something else entirely", {
+          segments: ["Raw spec:\n\nparagraph one"],
+        }),
+      ).toBe("Something else entirely\n\n> note");
+    });
   });
 
   describe("terminalBody", () => {
@@ -211,6 +276,44 @@ describe("createTurnBannerCollector", () => {
       expect(banners.terminalBody("First\n\nSecond", { segments: ["First", "Second"] })).toBe(
         "First\n\nSecond",
       );
+    });
+
+    it("splices after the last paragraph of a multi-paragraph segment", () => {
+      // Round-sized segments (content containing blank lines) span multiple
+      // body blocks; the notice anchored after such a segment must land
+      // after its final paragraph, not fall back to the tail.
+      const banners = createTurnBannerCollector({
+        captureAnchor: () => anchor(1),
+      });
+      banners.add("> note");
+      const body = banners.terminalBody("Raw spec:\n\nparagraph one\n\nnext round", {
+        segments: ["Raw spec:\n\nparagraph one", "next round"],
+      });
+      expect(body).toBe("Raw spec:\n\nparagraph one\n\n> note\n\nnext round");
+    });
+
+    it("interleaves a terminal notice in a body of all-multi-paragraph segments", () => {
+      const banners = createTurnBannerCollector({
+        captureAnchor: () => anchor(2),
+      });
+      banners.add("> note");
+      const segments = ["P1a\n\nP1b", "P2a\n\nP2b", "P3"];
+      const body = banners.terminalBody(segments.join("\n\n"), { segments });
+      expect(body).toBe("P1a\n\nP1b\n\nP2a\n\nP2b\n\n> note\n\nP3");
+    });
+
+    it("anchors a round-boundary notice at the final segment count as an explicit trailing block", () => {
+      // 3b semantics: a notice whose anchor equals the final segment count
+      // fired after the last committed segment (a cancel banner after the
+      // trip hop's round settled, with no further prose). It is a
+      // CHRONOLOGICAL trailing notice and lands after the final segment —
+      // distinct from the unresolvable-locate fallback below.
+      const banners = createTurnBannerCollector({
+        captureAnchor: () => anchor(2),
+      });
+      banners.add("> canceled");
+      const body = banners.terminalBody("One\n\nTwo", { segments: ["One", "Two"] });
+      expect(body).toBe("One\n\nTwo\n\n> canceled");
     });
   });
 

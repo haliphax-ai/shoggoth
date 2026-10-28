@@ -84,7 +84,7 @@ export {
   type SpawnSessionResult,
 } from "./sessions/session-manager";
 export { createSessionRouter, type SessionRouter } from "./sessions/session-router";
-export { createThinkingOutput } from "./messaging/thinking-output";
+export { createThinkingOutput, normalizeRoundProse } from "./messaging/thinking-output";
 export {
   runToolLoop,
   type ToolCall,

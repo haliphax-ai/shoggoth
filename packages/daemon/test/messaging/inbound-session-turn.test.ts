@@ -259,6 +259,116 @@ describe("runInboundSessionTurn chronological notice placement", () => {
 
     expect(sendErrorBody).toHaveBeenCalledWith("Error: boom\n\n> note");
   });
+
+  it("delivers a failed turn as the streamed snapshot with the failure notice trailing", async () => {
+    const setFullContent = vi.fn().mockResolvedValue(undefined);
+    const pushUpdate = vi.fn().mockResolvedValue(undefined);
+    const sendAssistantBody = vi.fn().mockResolvedValue(undefined);
+    const sendErrorBody = vi.fn().mockResolvedValue(undefined);
+    const notice = "> ↩️ ✅ Exec notification delivered in-turn: *echo hi* `n1`";
+
+    mockExecuteSessionAgentTurn.mockImplementationOnce(async (input: any) => {
+      // The turn streamed one settled round, then a banner fired, then the
+      // turn FAILED — the delivered body must keep the streamed snapshot
+      // (banner spliced in place) and append the failure notice as the LAST
+      // block. The old bug recomposed this body from a transcript fallback,
+      // replacing the streamed output outright.
+      input.stream?.onModelTextDelta?.({
+        delta: "hello",
+        accumulated: "hello",
+        round: 0,
+      });
+      input.stream?.onModelRoundEnd?.({ round: 0, content: "hello" });
+      postTurnSurfaceNotice("s1", notice);
+      return {
+        latestAssistantText: "_Turn failed: kaboom_",
+        assistantTurnProse: "hello",
+        failureNotice: "_Turn failed: kaboom_",
+        failoverMeta: undefined,
+        showAttachments: undefined,
+        outcome: "failed",
+      };
+    });
+
+    await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
+      buildTurn: () =>
+        Promise.resolve({
+          sessionId: "s1",
+          agentId: "main",
+          userContent: "hi",
+          messages: [],
+          tools: [],
+          systemPrompt: "",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          config: {} as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          stateDb: {} as any,
+        }),
+      streaming: {
+        minIntervalMs: 0,
+        start: vi.fn().mockResolvedValue({ setFullContent, pushUpdate }),
+      },
+      sliceDisplayText: (t) => t,
+      formatAssistantReply: (text) => `FORMATTED:${text}`,
+      formatErrorReply: String,
+      sendAssistantBody,
+      sendErrorBody,
+    });
+
+    // Streamed delivery: the snapshot stands, banner spliced in place,
+    // failure notice appended last — NOT the transcript-derived fallback.
+    expect(setFullContent).toHaveBeenLastCalledWith(`hello\n\n${notice}\n\n_Turn failed: kaboom_`);
+    expect(sendErrorBody).not.toHaveBeenCalled();
+    // The formatting path never ran: the failed body is the raw snapshot.
+    expect(setFullContent.mock.calls.some(([body]) => String(body).includes("FORMATTED:"))).toBe(
+      false,
+    );
+  });
+
+  it("delivers a failed non-streamed turn from the turn's prose with the failure notice trailing", async () => {
+    const sendAssistantBody = vi.fn().mockResolvedValue(undefined);
+    const sendErrorBody = vi.fn().mockResolvedValue(undefined);
+
+    mockExecuteSessionAgentTurn.mockImplementationOnce(async () => ({
+      latestAssistantText: "streamed so far\n\n_Turn failed: kaboom_",
+      assistantTurnProse: "streamed so far",
+      failureNotice: "_Turn failed: kaboom_",
+      failoverMeta: undefined,
+      showAttachments: undefined,
+      outcome: "failed",
+    }));
+
+    await runInboundSessionTurn({
+      executeSessionAgentTurn: mockExecuteSessionAgentTurn,
+      buildTurn: () =>
+        Promise.resolve({
+          sessionId: "s1",
+          agentId: "main",
+          userContent: "hi",
+          messages: [],
+          tools: [],
+          systemPrompt: "",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          config: {} as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          stateDb: {} as any,
+        }),
+      sliceDisplayText: (t) => t,
+      formatAssistantReply: (text) => `FORMATTED:${text}`,
+      formatErrorReply: String,
+      sendAssistantBody,
+      sendErrorBody,
+    });
+
+    // No snapshot exists (nothing streamed): the turn's transcript prose is
+    // the base, notice appended once at the end, formatting skipped.
+    expect(sendAssistantBody).toHaveBeenCalledWith(
+      "streamed so far\n\n_Turn failed: kaboom_",
+      undefined,
+    );
+    expect(sendErrorBody).not.toHaveBeenCalled();
+  });
 });
 
 describe("runInboundSessionTurn streaming delta delivery", () => {

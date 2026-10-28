@@ -95,38 +95,59 @@ export interface TurnBannerCollector {
 const splitBlocks = (body: string): string[] => body.split(/\n\n+/);
 
 /**
- * Locates the block index of each prose segment, in order. A block matches a
- * segment when it IS the segment (exact, preferred) or when it ends with the
- * segment (a decoration like the agent identity prefix glued onto the same
- * block). Returns undefined when any segment cannot be located — the body
- * was rewritten away from the composed prose (e.g. a mid-stream failover
- * hop), so anchor positions are unresolvable.
+ * Locates, for each prose segment in order, the block index of the segment's
+ * LAST block — the insertion point for a notice anchored "after this
+ * segment".
+ *
+ * Segments are round-sized: a round's content can contain blank lines (the
+ * model narrates multi-paragraph chunks like "Raw spec:\n\n<paragraph>"), so
+ * a segment may span several blocks after `splitBlocks`. Each PARAGRAPH of a
+ * segment is therefore located individually: a paragraph matches a block
+ * when it IS the block (exact, preferred) or when the block ends with it (a
+ * decoration like the agent identity prefix glued onto the same block), and
+ * the paragraphs are located forward in order so the segment's block run is
+ * contiguous in the block list. Returns undefined when any paragraph cannot
+ * be located — the body was rewritten away from the composed prose (e.g. a
+ * mid-stream failover hop), so anchor positions are unresolvable.
  */
 function locateSegmentBlocks(body: string, segments: readonly string[]): number[] | undefined {
   const blocks = splitBlocks(body);
   const result: number[] = [];
   let cursor = 0;
   for (const segment of segments) {
-    let found = -1;
-    for (let index = cursor; index < blocks.length; index += 1) {
-      const block = blocks[index]!.trim();
-      if (block === segment) {
-        found = index;
-        break;
-      }
-    }
-    if (found < 0) {
+    // Multi-paragraph segments are located paragraph by paragraph; a
+    // single-paragraph segment degenerates to exactly the block lookup
+    // (exact, then endsWith) this has always done.
+    const paragraphs = segment.split(/\n\n+/);
+    let lastFound = -1;
+    for (const paragraph of paragraphs) {
+      // A raw (un-normalized) segment can end with a blank line, yielding a
+      // trailing empty paragraph — it must not consume the next block.
+      if (!paragraph) continue;
+      let found = -1;
       for (let index = cursor; index < blocks.length; index += 1) {
         const block = blocks[index]!.trim();
-        if (block.endsWith(segment)) {
+        if (block === paragraph) {
           found = index;
           break;
         }
       }
+      if (found < 0) {
+        for (let index = cursor; index < blocks.length; index += 1) {
+          const block = blocks[index]!.trim();
+          if (block.endsWith(paragraph)) {
+            found = index;
+            break;
+          }
+        }
+      }
+      if (found < 0) return undefined;
+      lastFound = found;
+      cursor = found + 1;
     }
-    if (found < 0) return undefined;
-    result.push(found);
-    cursor = found + 1;
+    // The LAST block of the segment's run: a notice anchored after this
+    // segment must land after its final paragraph, never inside it.
+    result.push(lastFound);
   }
   return result;
 }
@@ -151,20 +172,33 @@ export function createTurnBannerCollector(
     if (notices.length === 0) return body;
     const noticeBlock = notices.map((entry) => entry.notice).join("\n\n");
     const proseSegments = segments.filter((segment) => segment.trim().length > 0);
+    const trailing = (target: string): string =>
+      target ? `${target}\n\n${noticeBlock}` : noticeBlock;
     if (proseSegments.length === 0) {
       // No prose segments to anchor against (tool-only turn, error body,
       // pre-prose live placeholder): one block at the end of the body.
-      return `${body}\n\n${noticeBlock}`;
+      return trailing(body);
     }
     const segmentBlockIndexes = locateSegmentBlocks(body, proseSegments);
     if (!segmentBlockIndexes) {
       // Unresolvable anchors: keep the legacy placement — one block at the
       // end of the body. Never drop a notice.
-      return `${body}\n\n${noticeBlock}`;
+      return trailing(body);
     }
     // Group notices by their clamped slot: slot s = after the s-th
     // committed prose segment (s=0 → before the first segment; s=K → at
     // the end of the body). Firing order is preserved within a slot.
+    //
+    // EXPLICIT semantics for the two tail-adjacent slots:
+    //  - s > K: the anchor exceeds the segment list — unresolvable, clamped
+    //    to K (same trailing placement as the fallbacks above).
+    //  - s == K: the notice fired at a round boundary that turned out to be
+    //    the LAST one (a cancel banner firing after the trip hop's round
+    //    settled, with no further prose committed). Chronologically this is
+    //    a TRAILING notice and is placed after the final segment by
+    //    definition — distinct from the unresolvable-locate fallback, which
+    //    only fires when the body cannot be reconciled with the segments
+    //    at all.
     const bySlot = new Map<number, string[]>();
     for (const entry of notices) {
       const slot = Math.max(0, Math.min(entry.anchor.committedProseSegments, proseSegments.length));

@@ -343,6 +343,25 @@ describe("runToolLoop runaway circuit breaker", () => {
           true,
     );
     assert.ok(!leaked, "prose cancel notice must not be appended to the transcript");
+
+    // The trip hop's assistant row is persisted BEFORE the prose budget is
+    // charged: its prose already streamed live, so the transcript-derived
+    // turn prose must be exactly as long as the streamed display. The final
+    // assistant row carries the trip hop's content and tool calls.
+    const assistantRows = page.messages.filter((m) => m.role === "assistant");
+    const tripRow = assistantRows[assistantRows.length - 1];
+    assert.ok(tripRow, "cancel must persist the trip hop's assistant row");
+    assert.equal(tripRow.content, bigProse);
+    assert.ok(tripRow.toolCalls?.length, "the trip hop's tool calls ride the same row");
+
+    // Every tool_call id of the canceled hop is answered with a synthetic
+    // tool row, so the next turn's history never carries a dangling
+    // assistant tool_calls entry.
+    for (const tc of tripRow.toolCalls) {
+      const answer = page.messages.find((m) => m.role === "tool" && m.toolCallId === tc.id);
+      assert.ok(answer, `canceled tool call ${tc.id} must receive a synthetic tool result`);
+      assert.match(answer.content ?? "", /runaway_breaker/);
+    }
   });
 
   it("never charges the terminal response against the prose budget", async () => {
