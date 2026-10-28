@@ -19,6 +19,7 @@ import { WIRE_VERSION } from "@shoggoth/authn";
 import {
   shoggothConfigFragmentSchema,
   shoggothConfigSchema,
+  shoggothMediaGenerationConfigSchema,
   DEFAULT_HITL_CONFIG,
   DEFAULT_POLICY_CONFIG,
   type ShoggothConfig,
@@ -673,6 +674,9 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
     assert.equal(result.success, true);
   });
 
+  // Referential checks (defaults refs must resolve against providers) run on
+  // the full config schema — config fragments are partial layers and cannot
+  // resolve refs that may be declared in a different layer.
   it("rejects a default that matches no configured model", () => {
     const fragment = {
       mediaGeneration: {
@@ -686,7 +690,7 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
         },
       },
     };
-    const result = shoggothConfigFragmentSchema.safeParse(fragment);
+    const result = shoggothMediaGenerationConfigSchema.safeParse(fragment.mediaGeneration);
     assert.equal(result.success, false);
   });
 
@@ -703,7 +707,7 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
         },
       },
     };
-    const result = shoggothConfigFragmentSchema.safeParse(fragment);
+    const result = shoggothMediaGenerationConfigSchema.safeParse(fragment.mediaGeneration);
     assert.equal(result.success, false);
   });
 
@@ -737,7 +741,7 @@ describe("mediaGeneration config schema - New Multi-Provider Shape", () => {
         },
       },
     };
-    const result = shoggothConfigFragmentSchema.safeParse(fragment);
+    const result = shoggothMediaGenerationConfigSchema.safeParse(fragment.mediaGeneration);
     assert.equal(result.success, false);
   });
 

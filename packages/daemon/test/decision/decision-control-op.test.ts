@@ -440,14 +440,17 @@ describe("decision config schema", () => {
         },
       },
     };
-    const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
-    assert.ok(!parsed.success);
+    // Referential checks (defaultModel must resolve against providers) run on
+    // the full config schema — config fragments are partial layers and cannot
+    // resolve refs that may be declared in a different layer.
+    const parsed = shoggothDecisionConfigSchema.safeParse(fragment.decision);
+    assert.ok(!parsed.success, JSON.stringify(parsed.error?.issues));
   });
 
   it("rejects a defaultModel when no providers are configured", () => {
     const fragment = { decision: { defaultModel: "typesafe-main/jev-latest", providers: {} } };
-    const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
-    assert.ok(!parsed.success);
+    const parsed = shoggothDecisionConfigSchema.safeParse(fragment.decision);
+    assert.ok(!parsed.success, JSON.stringify(parsed.error?.issues));
   });
 
   it("rejects a raw defaultModel without the provider/model-id format", () => {
@@ -463,8 +466,8 @@ describe("decision config schema", () => {
         },
       },
     };
-    const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
-    assert.ok(!parsed.success);
+    const parsed = shoggothDecisionConfigSchema.safeParse(fragment.decision);
+    assert.ok(!parsed.success, JSON.stringify(parsed.error?.issues));
   });
 
   it("rejects a defaultModel whose provider prefix does not match", () => {
@@ -480,8 +483,8 @@ describe("decision config schema", () => {
         },
       },
     };
-    const parsed = shoggothConfigFragmentSchema.safeParse(fragment);
-    assert.ok(!parsed.success);
+    const parsed = shoggothDecisionConfigSchema.safeParse(fragment.decision);
+    assert.ok(!parsed.success, JSON.stringify(parsed.error?.issues));
   });
 
   it("accepts decision without a defaultModel", () => {
