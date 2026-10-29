@@ -434,30 +434,28 @@ export async function executeSessionAgentTurn(
     const imageBlockCodec = resolveImageBlockCodec(models, modelProviderId);
 
     let ctxWindowTokens: number | undefined;
-    if (!input.minimalContext) {
-      if (modelRef) {
-        const slashIdx = modelRef.indexOf("/");
-        ctxWindowTokens = getModelContextWindowTokens(
-          modelRef.slice(0, slashIdx),
-          modelRef.slice(slashIdx + 1),
-        );
-      } else {
-        ctxWindowTokens = resolveModel(input.db, input.config, {
-          sessionId: input.sessionId,
-        })?.model?.contextWindowTokens;
-      }
-      if (!ctxWindowTokens) {
-        // Without a window there is no mid-turn compaction threshold, so the
-        // check stays off for the whole turn — make that visible instead of
-        // silently degrading.
-        log.warn(
-          "mid-turn compaction disabled for this turn: context window could not be resolved",
-          {
-            sessionId: input.sessionId,
-            modelRef: modelRef ?? null,
-          },
-        );
-      }
+    if (modelRef) {
+      const slashIdx = modelRef.indexOf("/");
+      ctxWindowTokens = getModelContextWindowTokens(
+        modelRef.slice(0, slashIdx),
+        modelRef.slice(slashIdx + 1),
+      );
+    } else {
+      ctxWindowTokens = resolveModel(input.db, input.config, {
+        sessionId: input.sessionId,
+      })?.model?.contextWindowTokens;
+    }
+    if (!ctxWindowTokens) {
+      // The context window could not be resolved, so there is no threshold to
+      // arm mid-turn compaction against. Surface this loudly instead of
+      // silently degrading: the compaction path itself handles overflow, and
+      // quietly leaving the check off for the whole turn is the failure mode
+      // this guards against. Context level must never decide whether the
+      // check is armed — a minimal-context session can still blow its window.
+      log.error("mid-turn compaction could not be armed: context window could not be resolved", {
+        sessionId: input.sessionId,
+        modelRef: modelRef ?? null,
+      });
     }
 
     return {

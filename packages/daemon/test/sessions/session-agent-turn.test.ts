@@ -479,9 +479,9 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
 
       assert.equal(result.latestAssistantText, "NOWIN_REPLY");
       const entry = stub.logs.find(
-        (l) => l.level === "warn" && l.msg.includes("mid-turn compaction disabled"),
+        (l) => l.level === "error" && l.msg.includes("mid-turn compaction could not be armed"),
       );
-      assert.ok(entry, "expected a warn log that mid-turn compaction is disabled");
+      assert.ok(entry, "expected an error log that mid-turn compaction could not be armed");
       assert.equal(entry!.fields?.sessionId, "sess-core");
     } finally {
       setRootLogger(createLogger({ component: "session-agent-turn.test" }));
@@ -550,8 +550,16 @@ describe("executeSessionAgentTurn (no Discord)", { concurrency: false }, () => {
       } as any);
 
       assert.equal(result.latestAssistantText, "MINIMAL_REPLY");
-      const entries = stub.logs.filter((l) => l.msg.includes("mid-turn compaction disabled"));
-      assert.equal(entries.length, 0, "minimalContext turns must stay silent about the disable");
+      // Mid-turn compaction must never be disabled based on context level, so an
+      // unresolvable window still surfaces the error on minimalContext turns.
+      const entries = stub.logs.filter(
+        (l) => l.level === "error" && l.msg.includes("mid-turn compaction could not be armed"),
+      );
+      assert.equal(
+        entries.length,
+        1,
+        "minimalContext turns must still surface the unresolvable-window error",
+      );
     } finally {
       setRootLogger(createLogger({ component: "session-agent-turn.test" }));
     }
