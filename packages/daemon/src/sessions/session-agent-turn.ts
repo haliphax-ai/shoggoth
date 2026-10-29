@@ -135,8 +135,12 @@ export interface ExecuteSessionAgentTurnInput {
     readonly onToolCall?: (ev: ToolCallEvent) => void;
     /** A HITL approval row was queued for a tool call (⏸️). */
     readonly onHitlQueued?: (call: { name: string; argsJson: string }) => void;
+    /** A compaction (threshold or deferred) began running for this turn. */
+    readonly onCompactionStart?: () => void;
     /** A mid-turn compaction completed. */
     readonly onCompaction?: () => void;
+    /** A compaction attempt failed; the turn continues with current context. */
+    readonly onCompactionFailed?: () => void;
     /** A model call reported provider usage: the call's input tokens are the
      *  best mid-turn gauge of current context-window fill. */
     readonly onContextUpdate?: (update: {
@@ -615,7 +619,9 @@ export async function executeSessionAgentTurn(
     onModelTextDelta: input.stream?.onModelTextDelta,
     onModelRoundEnd: input.stream?.onModelRoundEnd,
     onThinkingDelta: input.events?.onThinkingDelta,
+    onCompactionStart: input.events?.onCompactionStart,
     onCompaction: input.events?.onCompaction,
+    onCompactionFailed: input.events?.onCompactionFailed,
     onUsageDelta: (delta) => {
       // Provider-reported actuals: this call's total input+output is the best
       // available gauge of current context fill once the turn's final message
@@ -803,6 +809,9 @@ export async function executeSessionAgentTurn(
       transcript: input.transcript,
       contextSegmentId: ctxSeg,
       turnAbortSignal,
+      // Operator-triggered compaction parks here mid-turn and runs at a
+      // logical break; the model client owns the shared compaction body.
+      runDeferredCompaction: () => model.runCompaction(),
       subResourceRegistry: createDefaultSubResourceRegistry(),
       systemGates,
       hitl: {

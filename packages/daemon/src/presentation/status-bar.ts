@@ -53,6 +53,8 @@ export interface StatusBarSnapshot {
   /** Live background-exec notify handle count for the session. Absent when
    *  never seeded. */
   readonly notifies?: number;
+  /** True while a context compaction is running inside the turn (🗑️ overlay). */
+  readonly compacting?: boolean;
   /** True while cruise control (HITL auto-pilot) is active for the session. */
   readonly cruiseControl?: boolean;
   /** True while yolo mode is enabled for the session. */
@@ -85,6 +87,8 @@ export interface TurnStatusBar {
   toolFinished(): void; // records runtime for the last call
   updateContext(currentTokens: number, totalTokens?: number): void;
   setCompactions(count: number): void;
+  /** Marks the 🗑️ compaction overlay on/off while the turn keeps its phase. */
+  setCompacting(active: boolean): void;
   /** Live subagent count refresh (spawned/terminated mid-turn).
    *  Ignored at render time when a `subagentsCount` provider is set — the
    *  provider is the render-time source of truth. */
@@ -168,6 +172,7 @@ export function createTurnStatusBar(opts: {
   let phase: TurnStatusPhase = "starting";
   let sequence = 0;
   let compactions = 0;
+  let compacting = false;
   let context: { currentTokens: number; totalTokens?: number } | undefined;
   let subagents: { total: number; persistent: number } | undefined;
   let timers: number | undefined;
@@ -198,6 +203,7 @@ export function createTurnStatusBar(opts: {
       },
       ...(context ? { context } : {}),
       compactions,
+      ...(compacting ? { compacting: true } : {}),
       ...(subagentsNow ? { subagents: subagentsNow } : {}),
       ...(timersNow !== undefined ? { timers: timersNow } : {}),
       ...(notifiesNow !== undefined ? { notifies: notifiesNow } : {}),
@@ -382,6 +388,12 @@ export function createTurnStatusBar(opts: {
       scheduleRender();
     },
 
+    setCompacting(active) {
+      if (finished) return;
+      compacting = active;
+      scheduleRender();
+    },
+
     setSubagents(counts) {
       if (finished) return;
       subagents = counts;
@@ -403,6 +415,7 @@ export function createTurnStatusBar(opts: {
     async finish(outcome) {
       if (finished) return;
       finished = true;
+      compacting = false;
       clearPausedQueued();
       phase = outcome;
       if (timer) {
@@ -639,8 +652,12 @@ export interface TurnStatusBarTracker {
   /** An exec-notify handle was registered or resolved mid-turn: fresh live
    *  handle count for the section. */
   onNotifiesChanged?: (count: number) => void;
+  /** A compaction (threshold or deferred) began running inside the turn. */
+  onCompactionStart?: () => void;
   /** A mid-turn compaction completed. */
   onCompaction?: () => void;
+  /** A compaction attempt failed; the turn continues with current context. */
+  onCompactionFailed?: () => void;
   /** A model call reported provider usage: currentTokens is that call's
    *  input tokens (the best mid-turn gauge of context-window fill);
    *  totalTokens is the known/reported window, when available. */
@@ -762,7 +779,13 @@ export function createStatusBarTurnTracker(opts: {
     onSubagentsChanged: (counts) => engine.setSubagents(counts),
     onTimersChanged: (count) => engine.setTimers(count),
     onNotifiesChanged: (count) => engine.setNotifies(count),
-    onCompaction: () => engine.setCompactions(++compactions),
+    onCompactionStart: () => engine.setCompacting(true),
+    onCompaction: () => {
+      compactions += 1;
+      engine.setCompactions(compactions);
+      engine.setCompacting(false);
+    },
+    onCompactionFailed: () => engine.setCompacting(false),
     onContextUpdate: (update) => engine.updateContext(update.currentTokens, update.totalTokens),
   };
 }

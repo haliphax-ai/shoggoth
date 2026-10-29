@@ -16,6 +16,9 @@ const PHASE_EMOJI: Record<TurnStatusPhase, string> = {
   failed: "❌",
 };
 
+/** Phases that only exist while the turn is still in flight. */
+const LIVE_PHASES = new Set<TurnStatusPhase>(["starting", "thinking", "prose", "tool", "paused"]);
+
 /**
  * Render the turn status bar as a Discord blockquote line.
  *
@@ -29,7 +32,13 @@ export function renderDiscordStatusBar(
   const sections: string[] = [];
 
   if (cfg.statusEnabled) {
-    sections.push(PHASE_EMOJI[snap.phase]);
+    // 🗑️ replaces the live phase emoji while a compaction is running inside
+    // the turn; terminal phases keep their own emoji.
+    if (snap.compacting && LIVE_PHASES.has(snap.phase)) {
+      sections.push("🗑️");
+    } else {
+      sections.push(PHASE_EMOJI[snap.phase]);
+    }
   }
 
   if (cfg.sequenceEnabled) {

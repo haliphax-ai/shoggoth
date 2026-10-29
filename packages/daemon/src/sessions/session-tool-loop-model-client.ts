@@ -32,6 +32,14 @@ export interface SessionToolLoopModelClient extends ModelClient {
    * was truncated at the output-token limit.
    */
   getLastFinishReason(): string | undefined;
+  /**
+   * Runs one compaction pass against the CURRENT compaction config at a
+   * caller-chosen logical break in the tool loop (the tool loop parks itself
+   * there and freezes the turn queue before calling this). No-ops (compacted:
+   * false) when mid-turn compaction is not armed; rethrows compaction
+   * failures after firing {@link onCompactionFailed} so callers can report.
+   */
+  runCompaction(): Promise<{ compacted: boolean; messageCount: number }>;
 }
 
 export interface SessionToolLoopFailoverState {
@@ -116,8 +124,12 @@ export function createSessionToolLoopModelClient(input: {
   readonly onUsageDelta?: (delta: ModelUsage) => void;
   /** Reasoning/thinking content is streaming from the model (mapped from onReasoningDelta). */
   readonly onThinkingDelta?: (ev: ModelThinkingDeltaEvent) => void;
+  /** A compaction (threshold or deferred) began running for this loop. */
+  readonly onCompactionStart?: () => void;
   /** Fires when a mid-turn compaction completes with `compacted: true`. */
   readonly onCompaction?: () => void;
+  /** A compaction attempt failed; the loop continues with current messages. */
+  readonly onCompactionFailed?: () => void;
   /** Optional: enables mid-turn context compaction before each model call. */
   readonly compaction?: {
     readonly db: Database.Database;
@@ -152,6 +164,115 @@ export function createSessionToolLoopModelClient(input: {
   const resolveTools = (): readonly OpenAIToolFunctionDefinition[] =>
     typeof input.tools === "function" ? input.tools() : input.tools;
 
+  /**
+   * One compaction pass with the CURRENT compaction config: build the
+   * (compaction-model-overridden) failover client, summarize + replace the
+   * DB transcript, and swap the in-memory history for the reloaded context.
+   * No timeout, no events — callers own both. Throws on failure.
+   */
+  const executeCompaction = async (): Promise<{
+    compacted: boolean;
+    messageCount: number;
+  }> => {
+    const c = input.compaction;
+    if (!c) return { compacted: false, messageCount: 0 };
+    const policy = resolveCompactionPolicyFromModelsConfig(c.modelsConfig);
+    let compactionModelsConfig = c.modelsConfig;
+    if (c.compactionModel) {
+      const slash = c.compactionModel.indexOf("/");
+      if (slash > 0 && slash < c.compactionModel.length - 1) {
+        const providerId = c.compactionModel.slice(0, slash);
+        const modelName = c.compactionModel.slice(slash + 1);
+        const provider = c.modelsConfig?.providers
+          ? modelProvidersToEntries(c.modelsConfig.providers).find((p) => p.id === providerId)
+          : undefined;
+        if (provider) {
+          const { id, ...body } = provider;
+          compactionModelsConfig = {
+            providers: { [id]: body },
+            failoverChain: [id + "/" + modelName],
+          } as unknown as ShoggothModelsConfig;
+        }
+      }
+    }
+    const compactionClient = createFailoverClientFromModelsConfig(compactionModelsConfig, {
+      env: c.env,
+    });
+    const result = await compactSessionTranscript(c.db, c.sessionId, policy, compactionClient, {
+      modelsConfig: c.modelsConfig,
+    });
+    if (result.compacted) {
+      const reloaded = loadSessionTranscriptAsModelChat(c.db, c.sessionId, c.contextSegmentId);
+      const systemMsg = messages.find((m) => m.role === "system");
+      messages = systemMsg ? [systemMsg, ...reloaded] : [...reloaded];
+      log.debug("mid-turn compaction completed", {
+        sessionId: c.sessionId,
+      });
+      input.onCompaction?.();
+    }
+    return result;
+  };
+
+  /**
+   * Threshold-path compaction: runs one pass with the start/failed events and
+   * the configured abort timeout. On a timeout the pass keeps running in the
+   * background (its completion still reloads the history), so no failure event
+   * fires and the loop continues without waiting; on a real failure the pass
+   * is dead and {@link onCompactionFailed} fires.
+   */
+  const runCompactionGuarded = async (): Promise<void> => {
+    const c = input.compaction;
+    if (!c) return;
+    input.onCompactionStart?.();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("compaction timeout")), c.compactionAbortTimeoutMs);
+    });
+    try {
+      await Promise.race([executeCompaction(), timeoutPromise]);
+    } catch (e) {
+      if (String(e).includes("compaction timeout")) {
+        log.warn("mid-turn compaction timed out, proceeding with current messages", {
+          sessionId: c.sessionId,
+        });
+      } else {
+        input.onCompactionFailed?.();
+        log.warn("mid-turn compaction failed, proceeding with current messages", {
+          sessionId: c.sessionId,
+          err: String(e),
+        });
+      }
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  };
+
+  /**
+   * Deferred-path compaction (operator-triggered): runs one pass to
+   * completion — no timeout — because the caller (the tool loop's deferred
+   * break) holds the turn queue frozen until this settles; bailing early
+   * would unfreeze the queue against a mid-rewrite transcript. Start/failed
+   * events fire as usual; failures rethrow so the parked request can report.
+   */
+  const runCompactionToCompletion = async (): Promise<{
+    compacted: boolean;
+    messageCount: number;
+  }> => {
+    const c = input.compaction;
+    if (!c) return { compacted: false, messageCount: 0 };
+    input.onCompactionStart?.();
+    try {
+      return await executeCompaction();
+    } catch (e) {
+      input.onCompactionFailed?.();
+      log.warn("deferred compaction failed", {
+        sessionId: c.sessionId,
+        err: String(e),
+      });
+      throw e;
+    }
+  };
+
   return {
     getSessionToolLoopFailoverState() {
       return banner;
@@ -159,6 +280,10 @@ export function createSessionToolLoopModelClient(input: {
 
     getLastFinishReason() {
       return lastFinishReason;
+    },
+
+    async runCompaction() {
+      return runCompactionToCompletion();
     },
 
     getAccumulatedUsage() {
@@ -231,76 +356,11 @@ export function createSessionToolLoopModelClient(input: {
             effectiveWindowTokens,
             reserveTokens: c.reserveTokens,
           });
-          const compactionPromise = (async () => {
-            const policy = resolveCompactionPolicyFromModelsConfig(c.modelsConfig);
-            let compactionModelsConfig = c.modelsConfig;
-            if (c.compactionModel) {
-              const slash = c.compactionModel.indexOf("/");
-              if (slash > 0 && slash < c.compactionModel.length - 1) {
-                const providerId = c.compactionModel.slice(0, slash);
-                const modelName = c.compactionModel.slice(slash + 1);
-                const provider = c.modelsConfig?.providers
-                  ? modelProvidersToEntries(c.modelsConfig.providers).find(
-                      (p) => p.id === providerId,
-                    )
-                  : undefined;
-                if (provider) {
-                  const { id, ...body } = provider;
-                  compactionModelsConfig = {
-                    providers: { [id]: body },
-                    failoverChain: [id + "/" + modelName],
-                  } as unknown as ShoggothModelsConfig;
-                }
-              }
-            }
-            const compactionClient = createFailoverClientFromModelsConfig(compactionModelsConfig, {
-              env: c.env,
-            });
-            const { compacted } = await compactSessionTranscript(
-              c.db,
-              c.sessionId,
-              policy,
-              compactionClient,
-              { modelsConfig: c.modelsConfig },
-            );
-            if (compacted) {
-              const reloaded = loadSessionTranscriptAsModelChat(
-                c.db,
-                c.sessionId,
-                c.contextSegmentId,
-              );
-              const systemMsg = messages.find((m) => m.role === "system");
-              messages = systemMsg ? [systemMsg, ...reloaded] : [...reloaded];
-              log.debug("mid-turn compaction completed", {
-                sessionId: c.sessionId,
-              });
-              input.onCompaction?.();
-            }
-          })();
-
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          const timeoutPromise = new Promise<void>((_, reject) => {
-            timer = setTimeout(
-              () => reject(new Error("compaction timeout")),
-              c.compactionAbortTimeoutMs,
-            );
-          });
-
           try {
-            await Promise.race([compactionPromise, timeoutPromise]);
-          } catch (e) {
-            if (String(e).includes("compaction timeout")) {
-              log.warn("mid-turn compaction timed out, proceeding with current messages", {
-                sessionId: c.sessionId,
-              });
-            } else {
-              log.warn("mid-turn compaction failed, proceeding with current messages", {
-                sessionId: c.sessionId,
-                err: String(e),
-              });
-            }
-          } finally {
-            if (timer !== undefined) clearTimeout(timer);
+            await runCompactionGuarded();
+          } catch {
+            // The guarded run already logged and fired the failure event;
+            // the loop continues with the current messages either way.
           }
 
           if (c.turnAbortSignal?.aborted) {
