@@ -814,4 +814,144 @@ describe("TieredTurnQueue", () => {
       expect(q.getRunning("unknown")).toBeUndefined();
     });
   });
+
+  describe("turn queue block (in-turn long operations)", () => {
+    it("freezes the pump behind the running turn until the block is released", async () => {
+      let resolveFirst!: () => void;
+      const gate = new Promise<void>((r) => {
+        resolveFirst = r;
+      });
+      const order: string[] = [];
+
+      const p0 = q.enqueue("s1", "user", "blocker", async () => {
+        await gate;
+      });
+      const p1 = q.enqueue("s1", "user", "queued", async () => {
+        order.push("queued");
+      });
+
+      // A turn is running, so a block can be taken.
+      expect(q.beginTurnQueueBlock("s1")).toBe(true);
+
+      // While the in-flight turn is still running, the queued entry must not
+      // start — the freeze holds the pump behind it.
+      await new Promise<void>((r) => setTimeout(r, 0));
+      expect(order).toEqual([]);
+
+      // Releasing the freeze alone does not start the queued entry either:
+      // the running turn still holds the slot (pump is serialized per turn).
+      q.endTurnQueueBlock("s1");
+      await new Promise<void>((r) => setTimeout(r, 0));
+      expect(order).toEqual([]);
+
+      // Once the running turn ends, the queued entry runs.
+      resolveFirst();
+      await Promise.all([p0, p1]);
+      expect(order).toEqual(["queued"]);
+    });
+
+    it("lets entries accumulate (but not run) while the block is held", async () => {
+      let resolveFirst!: () => void;
+      const gate = new Promise<void>((r) => {
+        resolveFirst = r;
+      });
+      const order: string[] = [];
+
+      const p0 = q.enqueue("s1", "user", "blocker", async () => {
+        await gate;
+      });
+      q.beginTurnQueueBlock("s1");
+
+      const p1 = q.enqueue("s1", "user", "a", async () => {
+        order.push("a");
+      });
+      const p2 = q.enqueue("s1", "user", "b", async () => {
+        order.push("b");
+      });
+      expect(q.getDepth("s1")).toEqual({ system: 0, user: 2 });
+
+      q.endTurnQueueBlock("s1");
+      resolveFirst();
+      await Promise.all([p0, p1, p2]);
+      expect(order).toEqual(["a", "b"]);
+    });
+
+    it("keeps the freeze through forceReleaseRunning (operator recovery)", async () => {
+      let resolveFirst!: () => void;
+      const gate = new Promise<void>((r) => {
+        resolveFirst = r;
+      });
+      let ran = false;
+
+      const p0 = q.enqueue("s1", "user", "blocker", async () => {
+        await gate;
+      });
+      q.beginTurnQueueBlock("s1");
+      const p1 = q.enqueue("s1", "user", "after", async () => {
+        ran = true;
+      });
+
+      // Operator recovery force-releases the wedged turn, but an in-turn
+      // block is KEPT: the next pumped entry must not start while the
+      // background compaction still holds the transcript.
+      expect(q.forceReleaseRunning("s1")).toBe(true);
+      await expect(p0).rejects.toThrow(TurnDroppedError);
+      await new Promise<void>((r) => setTimeout(r, 0));
+      expect(ran).toBe(false);
+
+      // When the block owner releases, the queued entry starts.
+      q.endTurnQueueBlock("s1");
+      await p1;
+      expect(ran).toBe(true);
+
+      resolveFirst();
+    });
+
+    it("clears the freeze when the running turn ends without its owner releasing (crash safety)", async () => {
+      let resolveFirst!: () => void;
+      const gate = new Promise<void>((r) => {
+        resolveFirst = r;
+      });
+      let ran = false;
+
+      const p0 = q.enqueue("s1", "user", "blocker", async () => {
+        await gate;
+      });
+      q.beginTurnQueueBlock("s1");
+      const p1 = q.enqueue("s1", "user", "after", async () => {
+        ran = true;
+      });
+
+      // The blocker's turn ends while the block is still held (its execute()
+      // unwound past the block owner's finally): the queue must not wedge, so
+      // the freeze is cleared on turn end.
+      resolveFirst();
+      await p0;
+      await new Promise<void>((r) => setTimeout(r, 0));
+      await p1;
+      expect(ran).toBe(true);
+    });
+
+    it("returns false when no turn is running or a block already exists", async () => {
+      expect(q.beginTurnQueueBlock("s1")).toBe(false);
+
+      let resolveFirst!: () => void;
+      const gate = new Promise<void>((r) => {
+        resolveFirst = r;
+      });
+      const p0 = q.enqueue("s1", "user", "blocker", async () => {
+        await gate;
+      });
+      expect(q.beginTurnQueueBlock("s1")).toBe(true);
+      expect(q.beginTurnQueueBlock("s1")).toBe(false);
+      q.endTurnQueueBlock("s1");
+
+      resolveFirst();
+      await p0;
+    });
+
+    it("endTurnQueueBlock is a safe no-op when nothing is blocked", async () => {
+      expect(() => q.endTurnQueueBlock("s1")).not.toThrow();
+    });
+  });
 });

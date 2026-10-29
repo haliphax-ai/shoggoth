@@ -88,8 +88,12 @@ export interface RunInboundSessionTurnOptions {
           readonly onToolCall?: (ev: ToolCallEvent) => void;
           /** A HITL approval row was queued for a tool call (⏸️). */
           readonly onHitlQueued?: (call: { name: string; argsJson: string }) => void;
+          /** A compaction (threshold or deferred) began running for this turn. */
+          readonly onCompactionStart?: () => void;
           /** A mid-turn compaction completed. */
           readonly onCompaction?: () => void;
+          /** A compaction attempt failed; the turn continues with current context. */
+          readonly onCompactionFailed?: () => void;
           /** A model call reported usage: live context-window fill update. */
           readonly onContextUpdate?: (update: {
             readonly currentTokens: number;
@@ -159,7 +163,9 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
         onThinkingDelta?: (accumulated: string) => void;
         onToolCall?: (ev: ToolCallEvent) => void;
         onHitlQueued?: (call: { name: string; argsJson: string }) => void;
+        onCompactionStart?: () => void;
         onCompaction?: () => void;
+        onCompactionFailed?: () => void;
         onContextUpdate?: (update: { currentTokens: number; totalTokens?: number }) => void;
         onSubagentsChanged?: (counts: { total: number; persistent: number }) => void;
         onTimersChanged?: (count: number) => void;
@@ -332,7 +338,9 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
                 statusBar?.onToolCall?.(ev);
               },
               onHitlQueued: (call) => statusBar?.onHitlQueued?.(call),
+              onCompactionStart: () => statusBar?.onCompactionStart?.(),
               onCompaction: () => statusBar?.onCompaction?.(),
+              onCompactionFailed: () => statusBar?.onCompactionFailed?.(),
               onContextUpdate: (update) => statusBar?.onContextUpdate?.(update),
               onSubagentsChanged: (counts) => statusBar?.onSubagentsChanged?.(counts),
               onTimersChanged: (count) => statusBar?.onTimersChanged?.(count),

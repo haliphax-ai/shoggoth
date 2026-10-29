@@ -77,6 +77,8 @@ export class TieredTurnQueue {
   readonly maxDepth: number;
   // New field for the callback
   private onTurnEnd?: (sessionId: string) => void;
+  /** Sessions whose pump is frozen behind an in-turn long operation. */
+  private readonly blocked = new Set<string>();
 
   constructor(starvationThreshold = 2, maxDepth = 6) {
     this.starvationThreshold = starvationThreshold;
@@ -89,6 +91,32 @@ export class TieredTurnQueue {
    */
   setOnTurnEnd(cb: (sessionId: string) => void): void {
     this.onTurnEnd = cb;
+  }
+
+  /**
+   * Freezes the session's pump behind the in-flight turn: queued entries wait
+   * (and keep accumulating) while a long-running in-turn operation — e.g. a
+   * mid-loop context compaction — holds the session, and the next entry is
+   * pumped only after `endTurnQueueBlock`. Returns false when the queue is not
+   * initialized for the session or a block is already active (nested blocks
+   * are not supported; each block is ended exactly once by its owner).
+   */
+  beginTurnQueueBlock(sessionId: string): boolean {
+    const sq = this.sessions.get(sessionId);
+    if (!sq?.running || this.blocked.has(sessionId)) return false;
+    this.blocked.add(sessionId);
+    log.debug("turn_queue.blocked", { sessionId });
+    return true;
+  }
+
+  /**
+   * Releases a {@link beginTurnQueueBlock} freeze and pumps the next queued
+   * entry immediately. Safe to call when no block is active.
+   */
+  endTurnQueueBlock(sessionId: string): void {
+    if (!this.blocked.delete(sessionId)) return;
+    log.debug("turn_queue.unblocked", { sessionId });
+    this.pump(sessionId);
   }
 
   enqueue(
@@ -272,6 +300,11 @@ export class TieredTurnQueue {
     sq.running = false;
     sq.runningEntry = undefined;
     sq.runningSince = undefined;
+    // An in-turn block (e.g. a mid-loop compaction) is intentionally KEPT: the
+    // force-released turn's work continues in the background, and the next
+    // pumped entry must not start until the block owner releases (or the turn
+    // ends, which also clears the freeze). Operator recovery un-wedges the
+    // entry's promise, not an in-flight transcript rewrite.
     // Settle the wedged entry's promise so its caller is unblocked. A no-op
     // if the entry somehow already settled.
     entry?.reject(new TurnDroppedError(entry.id));
@@ -289,6 +322,10 @@ export class TieredTurnQueue {
   }
 
   private pump(sessionId: string): void {
+    if (this.blocked.has(sessionId)) {
+      log.debug("turn_queue.pump_blocked_in_turn_operation", { sessionId });
+      return;
+    }
     const sq = this.sessions.get(sessionId);
     if (!sq || sq.running) {
       if (sq?.running) {
@@ -340,6 +377,9 @@ export class TieredTurnQueue {
           label: next.label,
           id: next.id,
         });
+        // A session left blocked by a crashed turn would wedge forever, so a
+        // turn-end always clears the freeze alongside the running slot.
+        this.blocked.delete(sessionId);
         // *** IMPLEMENTATION 2: Call the hook upon turn completion ***
         this.onTurnEnd?.(sessionId);
         // ***********************************************************

@@ -363,6 +363,34 @@ describe("renderDiscordStatusBar", () => {
     expect(line).toContain("🗑️");
   });
 
+  it("shows 🗑️ instead of the live phase emoji while compacting", () => {
+    const line = renderDiscordStatusBar(
+      snap({ phase: "tool", compacting: true, compactions: 1 }),
+      defaultCfg,
+    );
+    expect(line).toContain("🗑️");
+    expect(line).not.toContain("⚡");
+  });
+
+  it("shows 🗑️ in the thinking phase while compacting", () => {
+    const line = renderDiscordStatusBar(snap({ phase: "thinking", compacting: true }), defaultCfg);
+    expect(line).toContain("🗑️");
+    expect(line).not.toContain("🧠");
+  });
+
+  it("keeps the terminal phase emoji when compacting is set on a finished turn", () => {
+    // A stale flag must never override a terminal render.
+    const line = renderDiscordStatusBar(snap({ phase: "finished", compacting: true }), defaultCfg);
+    expect(line).toContain("✅");
+    expect(line).not.toContain("⚡");
+  });
+
+  it("does not show the compacting overlay when no compaction is running", () => {
+    // Without the flag the bar renders the phase emoji as usual. (The
+    // compactions COUNT section is a separate 🗑️-prefixed section.)
+    expect(renderDiscordStatusBar(snap({ phase: "tool" }), defaultCfg)).toContain("⚡");
+  });
+
   it("joins sections with the fullwidth vertical bar character", () => {
     const line = renderDiscordStatusBar(
       snap({

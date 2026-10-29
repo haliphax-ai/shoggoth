@@ -863,7 +863,9 @@ export async function startDiscordPlatform(
                     surfaceTracker?.onToolCall?.(ev);
                   },
                   onHitlQueued: (call) => surfaceTracker?.onHitlQueued?.(call),
+                  onCompactionStart: () => surfaceTracker?.onCompactionStart?.(),
                   onCompaction: () => surfaceTracker?.onCompaction?.(),
+                  onCompactionFailed: () => surfaceTracker?.onCompactionFailed?.(),
                   onContextUpdate: (update) => surfaceTracker?.onContextUpdate?.(update),
                   // Count-change events: keep the 🕵️/⏰/↩️ sections live on
                   // this path (the inbound path forwards these too; the

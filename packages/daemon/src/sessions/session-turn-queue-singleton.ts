@@ -1,5 +1,7 @@
 import { TieredTurnQueue } from "./session-turn-queue";
 
+export type { TieredTurnQueue };
+
 /** @type {TieredTurnQueue | undefined} */
 let turnQueueRef: TieredTurnQueue | undefined;
 
@@ -21,4 +23,12 @@ export function getTurnQueue(): TieredTurnQueue {
  */
 export function setTurnQueue(queue: TieredTurnQueue): void {
   turnQueueRef = queue;
+}
+
+/**
+ * Like {@link getTurnQueue} but returns undefined instead of throwing when the
+ * queue has not been initialized (tests, minimal embeds).
+ */
+export function tryGetTurnQueue(): TieredTurnQueue | undefined {
+  return turnQueueRef;
 }

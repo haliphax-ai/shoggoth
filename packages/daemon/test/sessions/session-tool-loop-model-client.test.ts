@@ -1195,3 +1195,158 @@ describe("abort during mid-turn compaction", () => {
     await rejects;
   });
 });
+
+describe("deferred compaction (runCompaction)", () => {
+  let db: Database.Database;
+  let tmp: string;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    tmp = mkdtempSync(join(tmpdir(), "shoggoth-stlmc-defer-"));
+    db = new Database(join(tmp, "test.db"));
+    db.pragma("foreign_keys = ON");
+    migrate(db, defaultMigrationsDir());
+    createSessionStore(db).create({ id: "sess-1", workspacePath: tmp });
+    vi.mocked(compactSessionTranscript).mockReset();
+    vi.mocked(loadSessionTranscriptAsModelChat).mockReset();
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await closeTestDb(db, tmp);
+  });
+
+  function makeCompactionConfig() {
+    return {
+      db,
+      sessionId: "sess-1",
+      contextSegmentId: "default",
+      ctxWindowTokens: 100,
+      reserveTokens: 50,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      modelsConfig: undefined as any,
+      env: {},
+      systemPromptChars: 0,
+      toolSchemaChars: 0,
+      compactionAbortTimeoutMs: 60_000,
+    };
+  }
+
+  it("runs to completion and fires start/completed events, reloading history", async () => {
+    vi.mocked(compactSessionTranscript).mockResolvedValue({
+      compacted: true,
+      messageCount: 1,
+    });
+    vi.mocked(loadSessionTranscriptAsModelChat).mockReturnValue([
+      { role: "user", content: "compacted" },
+    ]);
+
+    const events: string[] = [];
+    let capturedMessages: unknown[] = [];
+    const toolClient = {
+      async completeWithTools(input: { messages: unknown[] }) {
+        capturedMessages = input.messages;
+        return {
+          content: "ok",
+          toolCalls: [],
+          usedProviderId: "p",
+          usedModel: "m",
+          degraded: false,
+        };
+      },
+    };
+    const model = createSessionToolLoopModelClient({
+      toolClient,
+      initialMessages: [
+        { role: "system", content: "sys" },
+        { role: "user", content: "hi" },
+      ],
+      tools: [],
+      compaction: makeCompactionConfig(),
+      onCompactionStart: () => events.push("start"),
+      onCompaction: () => events.push("completed"),
+      onCompactionFailed: () => events.push("failed"),
+    });
+
+    const result = await model.runCompaction();
+    assert.deepEqual(result, { compacted: true, messageCount: 1 });
+    assert.deepEqual(events, ["start", "completed"]);
+
+    // The in-memory history must be swapped for the reloaded transcript: the
+    // next model call sends system + reloaded messages, not the originals.
+    await model.complete();
+    const roles = capturedMessages.map((m) => (m as { role: string }).role);
+    assert.deepEqual(roles, ["system", "user"]);
+    assert.equal((capturedMessages[1] as { content: string }).content, "compacted");
+  });
+
+  it("resolves with compacted: false without events when compaction is not armed", async () => {
+    const events: string[] = [];
+    const model = createSessionToolLoopModelClient({
+      toolClient: stubToolClient(),
+      initialMessages: [{ role: "user", content: "hi" }],
+      tools: [],
+      onCompactionStart: () => events.push("start"),
+      onCompaction: () => events.push("completed"),
+      onCompactionFailed: () => events.push("failed"),
+    });
+
+    const result = await model.runCompaction();
+    assert.deepEqual(result, { compacted: false, messageCount: 0 });
+    assert.deepEqual(events, []);
+    assert.equal(vi.mocked(compactSessionTranscript).mock.calls.length, 0);
+  });
+
+  it("has NO timeout: waits for a slow summarizer instead of bailing", async () => {
+    vi.mocked(compactSessionTranscript).mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 500));
+      return { compacted: true, messageCount: 1 };
+    });
+    vi.mocked(loadSessionTranscriptAsModelChat).mockReturnValue([
+      { role: "user", content: "compacted" },
+    ]);
+
+    const events: string[] = [];
+    const model = createSessionToolLoopModelClient({
+      toolClient: stubToolClient(),
+      initialMessages: [
+        { role: "system", content: "sys" },
+        { role: "user", content: "hi" },
+      ],
+      tools: [],
+      compaction: makeCompactionConfig(),
+      onCompactionStart: () => events.push("start"),
+      onCompaction: () => events.push("completed"),
+      onCompactionFailed: () => events.push("failed"),
+    });
+
+    // The configured threshold timeout (compactionAbortTimeoutMs) is short;
+    // the deferred path must ignore it and wait for the compaction itself.
+    // Drive the fake clock far past both durations.
+    const result = model.runCompaction();
+    for (let i = 0; i < 60; i++) await vi.advanceTimersByTimeAsync(10);
+    assert.deepEqual(await result, { compacted: true, messageCount: 1 });
+    assert.deepEqual(events, ["start", "completed"]);
+  });
+
+  it("fires onCompactionFailed and rethrows when the summarizer fails", async () => {
+    vi.mocked(compactSessionTranscript).mockRejectedValue(new Error("provider down"));
+
+    const events: string[] = [];
+    const model = createSessionToolLoopModelClient({
+      toolClient: stubToolClient(),
+      initialMessages: [
+        { role: "system", content: "sys" },
+        { role: "user", content: "hi" },
+      ],
+      tools: [],
+      compaction: makeCompactionConfig(),
+      onCompactionStart: () => events.push("start"),
+      onCompaction: () => events.push("completed"),
+      onCompactionFailed: () => events.push("failed"),
+    });
+
+    await assert.rejects(() => model.runCompaction(), { message: "provider down" });
+    assert.deepEqual(events, ["start", "failed"]);
+  });
+});

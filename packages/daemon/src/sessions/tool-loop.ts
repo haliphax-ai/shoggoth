@@ -24,6 +24,8 @@ import { getLogger } from "../logging";
 import { postTurnSurfaceNotice } from "../presentation/active-turn-surface";
 import { validateToolArgs } from "./validate-tool-args";
 import { registerSteerChannel, drainSteers } from "./steer-channel";
+import { registerCompactionGate } from "./compaction-gate";
+import { tryGetTurnQueue } from "./session-turn-queue-singleton";
 import {
   RunawayBreaker,
   buildRunawayCancelNotice,
@@ -191,6 +193,15 @@ export interface RunToolLoopOptions {
    * HITL-queued, or validation-skipped dispatches). "start" then "end" per executed call.
    */
   readonly onToolCallEvent?: (ev: ToolCallEvent) => void;
+  /**
+   * Runs a deferred (operator-triggered) compaction at a logical break in the
+   * loop. When set, the loop registers the session's compaction gate, drains
+   * parked requests at the top of each round, after steering injection, and
+   * after the loop, and calls this runner inside each drained break while the
+   * turn queue is frozen behind the in-flight turn. Failures rethrown by the
+   * runner are logged and the loop continues.
+   */
+  readonly runDeferredCompaction?: () => Promise<{ compacted: boolean; messageCount: number }>;
 }
 
 /** Callback payload for incremental stats updates during the tool loop. */
@@ -1135,6 +1146,34 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
   });
 
   const steerHandle = registerSteerChannel(options.sessionId);
+  const compactionGate = options.runDeferredCompaction
+    ? registerCompactionGate(options.sessionId)
+    : undefined;
+
+  /**
+   * Drains parked compaction requests and runs each at this logical break.
+   * The turn queue is frozen behind the in-flight turn before the compaction
+   * starts and unfrozen once it settles, so queued turns can never start
+   * against a mid-rewrite transcript. A compaction failure rejects its parked
+   * request and the loop continues.
+   */
+  const drainDeferredCompaction = async (): Promise<void> => {
+    if (!compactionGate || !options.runDeferredCompaction) return;
+    for (;;) {
+      const entry = compactionGate.drain()[0];
+      if (!entry) return;
+      const queue = tryGetTurnQueue();
+      let blocked = false;
+      if (queue) blocked = queue.beginTurnQueueBlock(options.sessionId);
+      try {
+        entry.resolve(await options.runDeferredCompaction());
+      } catch (e) {
+        entry.reject(e instanceof Error ? e : new Error(String(e)));
+      } finally {
+        if (queue && blocked) queue.endTurnQueueBlock(options.sessionId);
+      }
+    }
+  };
 
   const emitStats = options.onStatsUpdate;
   const getTranscriptCount = (): number =>
@@ -1212,6 +1251,12 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
     let consecutiveInvalidToolCalls = 0;
     for (;;) {
       assertNotAborted(options.turnAbortSignal);
+
+      // ---- Deferred compaction break (top of round) ----
+      // A manual compaction parked while this loop was mid-turn runs here:
+      // the queue is frozen, no model call is in flight, and the in-memory
+      // history is consistent with the DB transcript.
+      await drainDeferredCompaction();
 
       // ---- Model call ----
       let turn: {
@@ -1585,13 +1630,22 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
           emitStats?.({ transcriptMessageCount: getTranscriptCount() });
         }
       }
+
+      // --- Deferred compaction break (same gap as steering) ---
+      await drainDeferredCompaction();
     }
+
+    // Post-loop compaction break: a request parked during the final round
+    // still runs here, while the turn (and its queue freeze) is still held.
+    await drainDeferredCompaction();
 
     options.toolRuns.markCompleted(options.runId);
     steerHandle.unregister();
+    compactionGate?.unregister();
     return result;
   } catch (e) {
     steerHandle.unregister();
+    compactionGate?.unregister();
     const row = options.db
       .prepare(`SELECT status FROM tool_runs WHERE id = ?`)
       .get(options.runId) as { status: string } | undefined;
