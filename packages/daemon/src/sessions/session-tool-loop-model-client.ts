@@ -19,6 +19,15 @@ import { getLogger } from "../logging";
 import { estimateTokensFromContent } from "./session-stats-store";
 import type { ModelClient } from "./tool-loop";
 
+/** Format a duration in ms as a human-readable string (e.g. "5m", "30s"). */
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1).replace(/\.0$/, "")}s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  return seconds > 0 ? `${minutes}m${seconds}s` : `${minutes}m`;
+}
+
 const log = getLogger("session-tool-loop-model-client");
 
 export interface SessionToolLoopModelClient extends ModelClient {
@@ -40,6 +49,20 @@ export interface SessionToolLoopModelClient extends ModelClient {
    * failures after firing {@link onCompactionFailed} so callers can report.
    */
   runCompaction(): Promise<{ compacted: boolean; messageCount: number }>;
+
+  /**
+   * Runs a threshold-path compaction pass with the configured abort timeout.
+   * On a timeout the pass keeps running in the background (its completion
+   * still reloads the history), so no failure event fires and the loop
+   * continues without waiting; on a real failure the pass is dead and
+   * {@link onCompactionFailed} fires.
+   */
+  runCompactionGuarded(): Promise<void>;
+  /**
+   * Fires onCompactionBanner with a compaction banner (start / timeout /
+   * failure notices) so the banner manager can deliver them mid-turn.
+   */
+  readonly onCompactionBanner?: (banner: string) => void;
 }
 
 export interface SessionToolLoopFailoverState {
@@ -130,6 +153,12 @@ export function createSessionToolLoopModelClient(input: {
   readonly onCompaction?: () => void;
   /** A compaction attempt failed; the loop continues with current messages. */
   readonly onCompactionFailed?: () => void;
+  /**
+   * A compaction banner to inject into the turn's active output. Fired for
+   * start / timeout / failure notices so the banner manager can deliver
+   * them mid-turn (or fall back to a standalone status message).
+   */
+  readonly onCompactionBanner?: (banner: string) => void;
   /** Optional: enables mid-turn context compaction before each model call. */
   readonly compaction?: {
     readonly db: Database.Database;
@@ -224,6 +253,7 @@ export function createSessionToolLoopModelClient(input: {
     const c = input.compaction;
     if (!c) return;
     input.onCompactionStart?.();
+    input.onCompactionBanner?.("> 🗑️ Mid-turn compaction triggered");
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error("compaction timeout")), c.compactionAbortTimeoutMs);
@@ -232,10 +262,18 @@ export function createSessionToolLoopModelClient(input: {
       await Promise.race([executeCompaction(), timeoutPromise]);
     } catch (e) {
       if (String(e).includes("compaction timeout")) {
+        input.onCompactionBanner?.(
+          "> 🗑️⌛ Mid-turn compaction **timed out** *" +
+            formatDuration(c.compactionAbortTimeoutMs) +
+            "*",
+        );
         log.warn("mid-turn compaction timed out, proceeding with current messages", {
           sessionId: c.sessionId,
         });
       } else {
+        input.onCompactionBanner?.(
+          "> 🗑️❌ Mid-turn compaction **failed**: " + (e instanceof Error ? e.message : String(e)),
+        );
         input.onCompactionFailed?.();
         log.warn("mid-turn compaction failed, proceeding with current messages", {
           sessionId: c.sessionId,
@@ -261,9 +299,14 @@ export function createSessionToolLoopModelClient(input: {
     const c = input.compaction;
     if (!c) return { compacted: false, messageCount: 0 };
     input.onCompactionStart?.();
+
+    input.onCompactionBanner?.("> 🗑️ Mid-turn compaction triggered");
     try {
       return await executeCompaction();
     } catch (e) {
+      input.onCompactionBanner?.(
+        "> 🗑️❌ Mid-turn compaction **failed**: " + (e instanceof Error ? e.message : String(e)),
+      );
       input.onCompactionFailed?.();
       log.warn("deferred compaction failed", {
         sessionId: c.sessionId,
@@ -284,6 +327,10 @@ export function createSessionToolLoopModelClient(input: {
 
     async runCompaction() {
       return runCompactionToCompletion();
+    },
+
+    async runCompactionGuarded() {
+      return runCompactionGuarded();
     },
 
     getAccumulatedUsage() {

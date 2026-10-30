@@ -141,6 +141,12 @@ export interface ExecuteSessionAgentTurnInput {
     readonly onCompaction?: () => void;
     /** A compaction attempt failed; the turn continues with current context. */
     readonly onCompactionFailed?: () => void;
+    /**
+     * A compaction banner to inject into the turn's active output. Fired for
+     * start / timeout / failure notices so the banner manager can deliver
+     * them mid-turn (or fall back to a standalone status message).
+     */
+    readonly onCompactionBanner?: (banner: string) => void;
     /** A model call reported provider usage: the call's input tokens are the
      *  best mid-turn gauge of current context-window fill. */
     readonly onContextUpdate?: (update: {
@@ -622,6 +628,7 @@ export async function executeSessionAgentTurn(
     onCompactionStart: input.events?.onCompactionStart,
     onCompaction: input.events?.onCompaction,
     onCompactionFailed: input.events?.onCompactionFailed,
+    onCompactionBanner: input.events?.onCompactionBanner,
     onUsageDelta: (delta) => {
       // Provider-reported actuals: this call's total input+output is the best
       // available gauge of current context fill once the turn's final message
@@ -662,7 +669,7 @@ export async function executeSessionAgentTurn(
         systemPromptChars: effectiveSystemPrompt.length,
         toolSchemaChars: JSON.stringify(currentToolsOpenAi).length,
         turnAbortSignal,
-        compactionAbortTimeoutMs: modelsForSession?.compaction?.compactionAbortTimeoutMs ?? 60_000,
+        compactionAbortTimeoutMs: modelsForSession?.compaction?.compactionAbortTimeoutMs ?? 300_000,
       };
     },
   });

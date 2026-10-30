@@ -9,6 +9,8 @@ import {
   type StatusBarSink,
   type TurnStatusBarTracker,
 } from "./status-bar.js";
+
+import { postTurnSurfaceNotice } from "./active-turn-surface.js";
 import type { ResolvedStatusBarConfig } from "@shoggoth/shared";
 import type { InboundSessionTurnInput } from "../messaging/inbound-session-turn.js";
 import {
@@ -343,6 +345,12 @@ export class PresentationTurnOrchestrator {
               onCompactionStart: () => tracker?.onCompactionStart?.(),
               onCompaction: () => tracker?.onCompaction?.(),
               onCompactionFailed: () => tracker?.onCompactionFailed?.(),
+              onCompactionBanner: (banner: string) => {
+                // Deliver the compaction banner into the turn's active output
+                // (the banner manager); silently skipped when no live turn
+                // surface is registered (OOB/internal turns).
+                void postTurnSurfaceNotice(sessionId, banner);
+              },
               onContextUpdate: (update) => tracker?.onContextUpdate?.(update),
               onSubagentsChanged: (counts) => tracker?.onSubagentsChanged?.(counts),
               onTimersChanged: (count) => tracker?.onTimersChanged?.(count),

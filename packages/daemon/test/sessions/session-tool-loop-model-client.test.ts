@@ -1349,4 +1349,69 @@ describe("deferred compaction (runCompaction)", () => {
     await assert.rejects(() => model.runCompaction(), { message: "provider down" });
     assert.deepEqual(events, ["start", "failed"]);
   });
+  it("fires onCompactionBanner with a triggered banner when compaction starts", async () => {
+    vi.mocked(compactSessionTranscript).mockResolvedValue({
+      compacted: true,
+      messageCount: 1,
+    });
+    vi.mocked(loadSessionTranscriptAsModelChat).mockReturnValue([
+      { role: "user", content: "compacted" },
+    ]);
+
+    const banners: string[] = [];
+    const model = createSessionToolLoopModelClient({
+      toolClient: stubToolClient(),
+      initialMessages: [
+        { role: "system", content: "sys" },
+        { role: "user", content: "hi" },
+      ],
+      tools: [],
+      compaction: makeCompactionConfig(),
+      onCompactionBanner: (b) => banners.push(b),
+    });
+
+    await model.runCompaction();
+    assert.equal(banners.length, 1);
+    assert.equal(banners[0], "> 🗑️ Mid-turn compaction triggered");
+  });
+
+  it("fires onCompactionBanner with a failed banner on compaction failure", async () => {
+    vi.mocked(compactSessionTranscript).mockRejectedValue(new Error("provider down"));
+
+    const banners: string[] = [];
+    const events: string[] = [];
+    const model = createSessionToolLoopModelClient({
+      toolClient: stubToolClient(),
+      initialMessages: [
+        { role: "system", content: "sys" },
+        { role: "user", content: "hi" },
+      ],
+      tools: [],
+      compaction: makeCompactionConfig(),
+      onCompactionBanner: (b) => banners.push(b),
+      onCompactionFailed: () => events.push("failed"),
+    });
+
+    await assert.rejects(() => model.runCompaction(), { message: "provider down" });
+
+    const failed = banners.find((b) => b.includes("failed"));
+    assert.ok(failed, "expected a failed banner");
+    assert.ok(failed!.includes("Mid-turn compaction **failed**"));
+    assert.ok(failed!.includes("provider down"));
+    assert.deepEqual(events, ["failed"]);
+  });
+
+  it("fires no banner when compaction is not armed", async () => {
+    const banners: string[] = [];
+    const model = createSessionToolLoopModelClient({
+      toolClient: stubToolClient(),
+      initialMessages: [{ role: "user", content: "hi" }],
+      tools: [],
+      onCompactionBanner: (b) => banners.push(b),
+    });
+
+    const result = await model.runCompaction();
+    assert.deepEqual(result, { compacted: false, messageCount: 0 });
+    assert.deepEqual(banners, []);
+  });
 });
