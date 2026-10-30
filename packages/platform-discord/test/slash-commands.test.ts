@@ -755,6 +755,7 @@ describe("createDiscordInteractionHandler", () => {
       { type: number; data: { content: string } },
     ];
     assert.strictEqual(body.type, 4, "delivery confirmation is a CHANNEL_MESSAGE (type 4)");
+    assert.strictEqual(body.data.flags, 64, "steer reply must be ephemeral (flags: 64)");
     assert.ok(body.data.content.includes("✅ Steering prompt submitted to session"));
     assert.ok(body.data.content.includes("agent:sub:discord:channel:ch-1"));
   });
@@ -895,6 +896,7 @@ describe("createDiscordInteractionHandler", () => {
       { type: number; data: { content: string } },
     ];
     assert.strictEqual(body.type, 4, "delivery status is a CHANNEL_MESSAGE (type 4)");
+    assert.strictEqual(body.data.flags, 64, "steer reply must be ephemeral (flags: 64)");
     assert.ok(body.data.content.includes("Steer failed"));
     assert.ok(body.data.content.includes("ERR_SESSION_INACTIVE"));
   });
@@ -954,6 +956,7 @@ describe("createDiscordInteractionHandler", () => {
       { type: number; data: { content: string } },
     ];
     assert.strictEqual(body.type, 4, "delivery confirmation is a CHANNEL_MESSAGE (type 4)");
+    assert.strictEqual(body.data.flags, 64, "steer reply must be ephemeral (flags: 64)");
     assert.ok(body.data.content.includes("✅ Steering prompt submitted to session"));
     assert.ok(body.data.content.includes("agent:sub:discord:channel:ch-1"));
 
@@ -1076,6 +1079,11 @@ describe("createDiscordInteractionHandler", () => {
     assert.strictEqual(waitFlag, false, "steer must ask the op to return on delivery");
     const callbacks = calls.filter((c) => c.method === "interactionCallback");
     assert.strictEqual(callbacks.length, 1, "must never retry the POST callback with the token");
+    assert.strictEqual(
+      callbacks[0]!.args[2]!.data!.flags,
+      64,
+      "steer reply must be ephemeral (flags: 64)",
+    );
     assert.ok(
       warns.includes("discord.interaction.steer_reply_undeliverable"),
       `expected distinct reply warn, got: ${JSON.stringify(warns)}`,

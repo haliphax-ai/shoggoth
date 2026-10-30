@@ -1,6 +1,10 @@
 import { describe, it, afterEach, vi } from "vitest";
 import assert from "node:assert";
-import { buildInTurnEventBanner, deliverInTurnEvent } from "../../src/messaging/in-turn-event";
+import {
+  buildInTurnEventBanner,
+  buildSteerBanner,
+  deliverInTurnEvent,
+} from "../../src/messaging/in-turn-event";
 import {
   registerSteerChannel,
   drainSteers,
@@ -41,6 +45,24 @@ describe("buildInTurnEventBanner", () => {
       maxDetailChars: 4,
     });
     assert.equal(b, "> ↩️ Exec notification: *abcd…*");
+  });
+});
+
+describe("buildSteerBanner", () => {
+  it("renders a 🫵 steered blockquote with the prompt verbatim", () => {
+    const b = buildSteerBanner("Focus on the failing tests first.");
+    assert.equal(b, "> 🫵 **Steered:** Focus on the failing tests first.");
+  });
+
+  it("passes the prompt through unmodified (no truncation)", () => {
+    const longPrompt = "x".repeat(200);
+    const b = buildSteerBanner(longPrompt);
+    assert.equal(b, `> 🫵 **Steered:** ${longPrompt}`);
+  });
+
+  it("preserves embedded newlines in the prompt", () => {
+    const b = buildSteerBanner("line one\nline two");
+    assert.equal(b, "> 🫵 **Steered:** line one\nline two");
   });
 });
 

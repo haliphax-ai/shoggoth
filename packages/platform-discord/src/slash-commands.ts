@@ -1296,7 +1296,7 @@ async function handleInteraction(
     try {
       await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
         type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content: steerContent },
+        data: { content: steerContent, flags: 64 },
       });
     } catch (err) {
       // The steer already ran; an undeliverable status must stay non-fatal
