@@ -156,7 +156,7 @@ export const shoggothModelsCompactionSchema = z
     summaryMaxOutputTokens: z.number().int().positive().optional(),
     /** Trigger inline compaction when estimated token usage exceeds (contextWindow − reserveTokens). Default 20 000. */
     contextWindowReserveTokens: z.number().int().positive().optional(),
-    /** Maximum time (ms) to wait for compaction to complete before honoring an abort. Default 60000 (60s). */
+    /** Maximum time (ms) to wait for compaction to complete before honoring an abort. Default 300000 (5m). */
     compactionAbortTimeoutMs: z.number().int().positive().optional(),
   })
   .strict();
