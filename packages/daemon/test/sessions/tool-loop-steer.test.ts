@@ -13,6 +13,10 @@ import { createToolRunStore } from "../../src/sessions/tool-run-store";
 import { createLogger, setRootLogger } from "../../src/logging";
 import { runToolLoop, type ModelClient } from "../../src/sessions/tool-loop";
 import { pushSteer, _resetAllChannels } from "../../src/sessions/steer-channel";
+import {
+  registerActiveTurnSurface,
+  _resetActiveTurnSurfaces,
+} from "../../src/presentation/active-turn-surface";
 
 function openMigratedDb(): { db: Database.Database; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "shoggoth-steer-"));
@@ -353,5 +357,60 @@ describe("runToolLoop steer injection", () => {
     );
     assert.ok(entry, "steer message content should appear in the daemon logs");
     assert.equal(entry!.fields?.sessionId, "sess");
+  });
+
+  it("posts a 🫵 Steered banner to the active turn surface when injecting a steer", async () => {
+    const notices: string[] = [];
+    const { unregister } = registerActiveTurnSurface("sess", {
+      captureAnchor: () => ({ committedProseSegments: 0, toolCalls: 0 }),
+      onNotice: (n) => {
+        notices.push(n);
+      },
+    });
+    try {
+      let step = 0;
+      const model: ModelClient = {
+        async complete() {
+          step += 1;
+          if (step === 1) {
+            return {
+              content: null,
+              toolCalls: [{ id: "c1", name: "read", argsJson: "{}" }],
+            };
+          }
+          return { content: "done", toolCalls: [] };
+        },
+        pushToolMessage() {},
+        pushSteerMessage() {},
+      };
+      const toolRuns = createToolRunStore(db);
+
+      const exec = vi.fn(async () => {
+        pushSteer("sess", "change direction");
+        return { resultJson: "{}" };
+      });
+
+      await runToolLoop({
+        db,
+        sessionId: "sess",
+        runId: "run-steer-banner",
+        principalId: "p",
+        policy: { check: () => ({ allow: true }) },
+        audit: { record: () => {} },
+        model,
+        tools: [{ name: "read" }],
+        executor: { execute: exec },
+        toolRuns,
+      });
+
+      assert.strictEqual(notices.length, 1, "exactly one steer banner per injected steer");
+      assert.ok(
+        notices[0]!.includes("> 🫵 **Steered:** change direction"),
+        `unexpected banner: ${notices[0]}`,
+      );
+    } finally {
+      unregister();
+      _resetActiveTurnSurfaces();
+    }
   });
 });

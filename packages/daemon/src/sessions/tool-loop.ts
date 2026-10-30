@@ -22,6 +22,8 @@ import { estimateTokens } from "./session-stats-store";
 import { toolRefreshNeeded } from "./session-tool-discovery";
 import { getLogger } from "../logging";
 import { postTurnSurfaceNotice } from "../presentation/active-turn-surface";
+import { buildSteerBanner } from "../messaging/in-turn-event";
+
 import { validateToolArgs } from "./validate-tool-args";
 import { registerSteerChannel, drainSteers } from "./steer-channel";
 import { registerCompactionGate } from "./compaction-gate";
@@ -1619,6 +1621,9 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
           message: s,
         });
         options.model.pushSteerMessage?.(s);
+        // Surface the steer as a banner in the active turn's output, anchored
+        // to the spot where it was injected.
+        postTurnSurfaceNotice(options.sessionId, buildSteerBanner(s));
         // Persist the steer in the transcript so it survives the turn and is
         // available to context assembly on subsequent turns.
         if (options.transcript) {

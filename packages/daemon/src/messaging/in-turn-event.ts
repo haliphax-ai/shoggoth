@@ -48,6 +48,17 @@ export function buildInTurnEventBanner(input: {
   return `> ${input.emoji} ${input.title}${detail}${id}`;
 }
 
+/**
+ * Build the operator-facing banner for an operator `/steer` injection: a
+ * `> 🫵 **Steered:** <prompt>` blockquote that anchors the directive to the
+ * spot where it was sent to the model. Mirrors the in-turn event banner
+ * aesthetic (emoji-lead blockquote) so steering directives read as part of
+ * the turn's own output rather than as a separate status message.
+ */
+export function buildSteerBanner(prompt: string): string {
+  return `> 🫵 **Steered:** ${prompt}`;
+}
+
 export type InTurnEventOutcome = "in_turn" | "fallback";
 
 /**
