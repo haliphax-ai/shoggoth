@@ -88,7 +88,7 @@ export function renderDiscordStatusBar(
     }
   }
 
-  if (cfg.compactionsEnabled) {
+  if (cfg.compactionsEnabled && snap.compactions > 0) {
     sections.push(`🗑️ \`${snap.compactions}\``);
   }
 
