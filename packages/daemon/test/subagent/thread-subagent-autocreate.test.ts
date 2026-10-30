@@ -10,6 +10,7 @@ import { createTranscriptStore } from "../../src/sessions/transcript-store";
 import { createSessionManager } from "../../src/sessions/session-manager";
 import { createSqliteAgentTokenStore } from "../../src/auth/sqlite-agent-tokens";
 import {
+  buildThreadSubagentCreatedBanner,
   handlePlatformThreadCreate,
   shouldSkipThreadSessionSentinel,
   type ThreadSubagentPlatformDeps,
@@ -184,6 +185,40 @@ describe("handlePlatformThreadCreate", { concurrency: false }, () => {
     assert.equal(statusBodies[0].sessionId, childId);
     assert.ok(statusBodies[0].body.includes(childId));
     assert.ok(statusBodies[0].body.includes("prov/test-model"));
+  });
+
+  it("banner shows the subagent's stamped model, not the parent/config default", async () => {
+    const {
+      sessionId: parentSessionId,
+      sessions,
+      sessionManager,
+    } = await createTopLevelSession(db, tmp);
+    const bindings = new Map<string, string>([["chan-1", parentSessionId]]);
+    const statusBodies: Array<{ sessionId: string; body: string }> = [];
+
+    const result = await handlePlatformThreadCreate({
+      db,
+      config: baseConfig(),
+      sessionManager,
+      sessions,
+      threadId: "thread-1",
+      parentChannelId: "chan-1",
+      platform: makePlatformDeps(bindings, statusBodies),
+    });
+
+    assert.equal(result.created, true);
+    const childId = result.sessionId!;
+    // A spawn op (or operator) switches the child's primary model after creation;
+    // the banner must reflect the session's model, not the config failover chain.
+    sessions.update(childId, { modelSelection: { model: "prov/test-model" } });
+    const body = buildThreadSubagentCreatedBanner({
+      db,
+      config: baseConfig(),
+      sessionId: childId,
+    });
+    assert.ok(body.includes("prov/test-model"));
+    assert.ok(body.includes(childId));
+    assert.ok(body.includes("Thread subagent session created."));
   });
 
   it("derives the subagent agent ID from the thread title, never the platform thread ID", async () => {
