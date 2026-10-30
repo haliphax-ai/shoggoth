@@ -7,7 +7,7 @@ import { createTranscriptStore } from "../sessions/transcript-store";
 import type { SessionManager } from "../sessions/session-manager";
 import { mergeSubagentSpawnModelSelection } from "@shoggoth/models";
 import { resolveConfiguredSubagentModel } from "../config/effective-runtime";
-import { resolveModel } from "../sessions/model-resolution";
+import { getSessionPrimaryModelRef, resolveModel } from "../sessions/model-resolution";
 import { rememberSubagentHandles } from "./subagent-disposables";
 import { armPersistentSubagentInactivityTimer } from "./persistent-subagent-timers";
 import { terminatePersistentSubagentSession } from "./subagent-kill";
@@ -70,9 +70,20 @@ export function buildThreadSubagentCreatedBanner(input: {
   readonly logger?: Logger;
 }): string {
   const l = input.logger ?? log;
+  // The subagent's model comes from its session row (stamped at spawn: the
+  // spawn model_options.model, the configured subagentModel, or the parent's
+  // inherited selection). resolveModel with no ref reads the *config*
+  // failover chain — the parent's model — so the session's primary model ref
+  // is resolved first and only the ref-less fallback consults the config chain.
   let resolvedModel: ReturnType<typeof resolveModel> = null;
   try {
-    resolvedModel = resolveModel(input.db, input.config, { sessionId: input.sessionId });
+    const sessionRef = getSessionPrimaryModelRef(
+      createSessionStore(input.db).getById(input.sessionId)?.modelSelection,
+    );
+    resolvedModel = resolveModel(input.db, input.config, {
+      sessionId: input.sessionId,
+      ...(sessionRef ? { ref: sessionRef } : {}),
+    });
   } catch (e) {
     l.warn("thread_subagent.model_resolution_failed", {
       sessionId: input.sessionId,
