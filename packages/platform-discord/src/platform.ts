@@ -182,6 +182,8 @@ export interface DiscordPlatformHandle {
     readonly systemContext?: SystemContext;
     readonly delivery: SessionModelTurnDelivery;
     readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
+    /** Operator-facing banner spliced into this turn's output before the model's prose. */
+    readonly turnBanner?: string;
     readonly statusBarSink?: { setStatusBar: (line: string | null) => Promise<void> };
   }) => Promise<SessionAgentTurnResult>;
   readonly oobTurnBanner: {
@@ -725,6 +727,7 @@ export async function startDiscordPlatform(
     readonly systemContext?: SystemContext;
     readonly delivery: SessionModelTurnDelivery;
     readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
+    readonly turnBanner?: string;
     readonly statusBarSink?: { setStatusBar: (line: string | null) => Promise<void> };
   }): Promise<SessionAgentTurnResult> {
     const sid = input.sessionId.trim();
@@ -799,6 +802,12 @@ export async function startDiscordPlatform(
           if (surfaceStreamPusher) pushDisplay(surfaceDisplay || "…");
         },
       });
+      // A caller-provided banner (e.g. the steer banner on a steer that
+      // started this turn) anchors at slot 0 — BEFORE the model's first prose
+      // segment — so the output attributes the turn to its prompt instead of
+      // showing an unattributed reply. Added before any turn output exists,
+      // so both the live display and the terminal body carry it first.
+      if (input.turnBanner) surfaceBanners.add(input.turnBanner);
       const pushDisplay = (display: string): void => {
         surfaceDisplay = display;
         if (!surfaceStreamPusher) return;
