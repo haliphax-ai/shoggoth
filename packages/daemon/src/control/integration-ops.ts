@@ -108,6 +108,7 @@ import {
 import { extractLatestTranscriptAssistantText } from "../sessions/transcript-to-chat";
 import { pushSystemContext } from "../sessions/system-context-buffer";
 import { pushSteer } from "../sessions/steer-channel";
+import { buildSteerBanner } from "../messaging/in-turn-event";
 import { getTurnQueue } from "../sessions/session-turn-queue-singleton";
 import {
   formatOobFailureNotice,
@@ -3233,10 +3234,15 @@ export async function handleIntegrationControlOp(
             })();
       const senderInfo =
         principal.kind === "agent" ? principal.sessionId : `operator:${principal.operatorId}`;
+      // The steer fell through to a new turn (no active tool loop to inject
+      // it mid-turn). Carry the steer banner on the turn so its output
+      // surface shows the directive before the model output instead of an
+      // unattributed reply (visual context is otherwise lost).
       const turnInput: Parameters<typeof ext.runSessionModelTurn>[0] = {
         sessionId,
         userContent: prompt,
         userMetadata: { session_steer: true },
+        turnBanner: buildSteerBanner(prompt),
         systemContext: {
           kind: "session.steer",
           summary: "Operator steering directive. Adjust your behavior accordingly.",

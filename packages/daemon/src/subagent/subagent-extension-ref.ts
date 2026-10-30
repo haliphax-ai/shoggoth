@@ -33,6 +33,12 @@ export type SubagentRuntimeExtension = {
     /** Optional override merged into the session's model invocation params (e.g. responseSchema for structured output). */
     readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
     /**
+     * Optional operator-facing banner spliced into this turn's output before
+     * the model's first prose segment (e.g. the steer banner when a steer
+     * starts a new turn — the surface must attribute the turn to its prompt).
+     */
+    readonly turnBanner?: string;
+    /**
      * Optional live status-bar sink for the turn. When present, the platform
      * creates a tracker wired to this sink and streams thinking/tool/prose
      * renders into it (used by the OOB banner surface so an out-of-band turn's

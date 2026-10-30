@@ -3054,6 +3054,72 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
     );
   });
 
+  it("turnBanner splices before the model's prose on the streamed surface", async () => {
+    const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
+    createSessionStore(db).create({ id: sessionUrn, workspacePath: tmp });
+    seedStats(sessionUrn, { turn_count: 1 });
+
+    const BANNER = "> 🫵 **Steered:** focus on the failing test";
+    const pushes: string[] = [];
+    const capture: { body: string }[] = [];
+    const runtime: DiscordMessagingRuntime = {
+      ...baseRuntime(sessionUrn, capture),
+      streamingForSession: () => ({
+        start: async () => ({
+          setFullContent: async () => {},
+          pushUpdate: async (text: string) => {
+            pushes.push(text);
+          },
+        }),
+      }),
+    };
+
+    const platform = await startDiscordPlatform({
+      db,
+      config: defaultConfig(tmp),
+      logger: createLogger({ component: "t", minLevel: "error" }),
+      discord: runtime,
+      env: { SHOGGOTH_DISCORD_STREAM: "1" },
+      deps: {
+        createToolCallingClient: () => ({
+          async completeWithTools() {
+            return {
+              content: "on it",
+              toolCalls: [],
+              usedModel: "m1",
+              usedProviderId: "p1",
+            };
+          },
+        }),
+      },
+    });
+
+    await platform.runSessionModelTurn({
+      sessionId: sessionUrn,
+      userContent: "focus on the failing test",
+      delivery: { kind: "messaging_surface", userId: "u-1" },
+      turnBanner: BANNER,
+    });
+    await platform.stop();
+
+    // Streaming: the banner leads the final frame, before the model's prose.
+    const bannerFrames = pushes.filter((p) => p.includes(BANNER));
+    assert.ok(bannerFrames.length > 0, "the banner must reach the live surface");
+    for (const frame of bannerFrames) {
+      const bannerIdx = frame.indexOf(BANNER);
+      const proseIdx = frame.indexOf("on it");
+      assert.ok(proseIdx === -1 || bannerIdx < proseIdx, `banner before prose in: ${frame}`);
+    }
+    // The terminal body re-splices from the same collector, so the delivered
+    // message must still carry the banner ahead of the prose.
+    const last = pushes[pushes.length - 1]!;
+    assert.ok(last.includes(BANNER), `final frame must carry the banner, got: ${last}`);
+    assert.ok(
+      last.indexOf(BANNER) < last.indexOf("on it"),
+      `banner must precede the model prose, got: ${last}`,
+    );
+  });
+
   it("context fill comes from the segment transcript estimate, not the cumulative input_tokens column", async () => {
     const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
     createSessionStore(db).create({ id: sessionUrn, workspacePath: tmp });

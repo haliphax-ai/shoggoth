@@ -76,6 +76,7 @@ type CapturedInput = {
   userContent: string;
   userMetadata?: Record<string, unknown>;
   systemContext?: SystemContext;
+  turnBanner?: string;
   delivery: { kind: string };
 };
 
@@ -422,6 +423,70 @@ describe("systemContext adoption: session_steer", () => {
           assert.ok(sc.summary.length > 0, "summary must be non-empty");
           assert.ok(sc.data, "data must be present");
           assert.ok(sc.data!.steered_by, "data.steered_by must be present");
+        },
+      );
+    } finally {
+      setSubagentRuntimeExtension(undefined);
+    }
+    db.close();
+  });
+
+  it("carries the steer banner on the turn input when a new turn starts", async () => {
+    if (process.platform !== "linux") return;
+
+    const dir = await mkdtemp(join(tmpdir(), "shoggoth-sc-st-b-"));
+    const sock = join(dir, "c.sock");
+    const dbPath = join(dir, "state.db");
+    const db = new Database(dbPath);
+    migrate(db, defaultMigrationsDir());
+    const sessions = createSessionStore(db);
+    const tokens = createSqliteAgentTokenStore(db);
+    const parentId = formatAgentSessionUrn(
+      "ag",
+      "discord",
+      "channel",
+      SHOGGOTH_DEFAULT_PRIMARY_SESSION_UUID,
+    );
+    const childId = formatAgentSessionUrn("ag", "discord", "channel", randomUUID());
+    sessions.create({ id: parentId, workspacePath: "/wp", status: "active" });
+    sessions.create({ id: childId, workspacePath: "/wc", status: "active" });
+    sessions.update(childId, {
+      parentSessionId: parentId,
+      subagentMode: "persistent",
+    });
+    tokens.register(parentId, "tok-steer");
+
+    const { ext, calls } = capturingSubagentRuntimeExtension();
+    setSubagentRuntimeExtension(ext);
+    try {
+      await withControlPlaneSession(
+        {
+          stateDb: db,
+          config: minimalConfig(sock),
+        },
+        async (send) => {
+          const line = await send({
+            v: WIRE_VERSION,
+            id: "sc-st-2",
+            op: "session_steer",
+            auth: { kind: "agent", session_id: parentId, token: "tok-steer" },
+            payload: { session_id: childId, prompt: "focus on the failing test" },
+          });
+          const res = parseResponseLine(line);
+          assert.equal(res.ok, true);
+          assert.equal(calls.length, 1);
+
+          const content = calls[0].userContent;
+          assert.equal(
+            content,
+            "focus on the failing test",
+            `userContent must be the bare prompt, got: ${JSON.stringify(content)}`,
+          );
+          assert.equal(
+            calls[0].turnBanner,
+            "> 🫵 **Steered:** focus on the failing test",
+            `turnBanner must carry the steer banner, got: ${JSON.stringify(calls[0].turnBanner)}`,
+          );
         },
       );
     } finally {
