@@ -235,6 +235,10 @@ describe("renderDiscordStatusBar", () => {
     expect(line).toContain("4");
   });
 
+  it("omits the compactions section when the count is zero", () => {
+    const line = renderDiscordStatusBar(snap({ compactions: 0 }), defaultCfg);
+    expect(line).not.toContain("🗑️");
+  });
   it("renders the subagent count with the persistent count in parentheses", () => {
     const line = renderDiscordStatusBar(
       snap({ subagents: { total: 2, persistent: 1 } }),
@@ -353,6 +357,7 @@ describe("renderDiscordStatusBar", () => {
         sequence: 217,
         context: { currentTokens: 12_000, totalTokens: 100_000 },
         toolCalls: { total: 1, last: { name: "builtin-read", running: false, runtimeMs: 5 } },
+        compactions: 1,
       }),
       cfg,
     );
