@@ -6,7 +6,11 @@ import {
   type CruiseControlDecision,
 } from "@shoggoth/shared";
 import type { ChatContentPart } from "@shoggoth/models";
-import { StructuredOutputValidationError, STRUCTURED_OUTPUT_TOOL_NAME } from "@shoggoth/models";
+import {
+  isTruncationFinishReason,
+  StructuredOutputValidationError,
+  STRUCTURED_OUTPUT_TOOL_NAME,
+} from "@shoggoth/models";
 import { classifyToolRisk } from "../hitl/risk-classify";
 import { requiresHumanApproval } from "../hitl/approval-gate";
 import { buildCruiseControlBanner, extractCruiseToolCommand } from "../hitl/cruise-control";
@@ -48,6 +52,34 @@ export class ToolCallTimeoutError extends Error {
   }
 }
 
+/**
+ * Raised when a tool call's arguments were cut off by the provider's
+ * output-token limit (`finish_reason: "length"` / `max_tokens`).
+ *
+ * This is a distinct failure from "the model emitted malformed JSON": the
+ * arguments are an incomplete prefix of a larger JSON object, so the model
+ * cannot repair them by retrying the same call. Healing them to `{}` and
+ * asking the model to try again poisons the NEXT provider request — the
+ * replayed assistant turn carries the truncated `function.arguments` and the
+ * upstream rejects the whole request with an opaque 400 — so the turn is
+ * failed fast with an actionable message instead.
+ */
+export class ToolCallTruncatedError extends Error {
+  constructor(
+    public readonly toolName: string,
+    /** The provider-reported stop reason that indicated truncation. */
+    public readonly finishReason: string | undefined,
+  ) {
+    super(
+      `Tool call "${toolName}" was truncated by the provider's output-token limit ` +
+        `(finish reason: ${finishReason ?? "unknown"}). The arguments are incomplete, ` +
+        `so the call cannot be retried as-is — split the work into smaller calls ` +
+        `(e.g. write the file in sections) and retry with smaller arguments.`,
+    );
+    this.name = "ToolCallTruncatedError";
+  }
+}
+
 export interface ToolCallEvent {
   readonly phase: "start" | "end";
   readonly name: string;
@@ -69,6 +101,13 @@ export interface ModelClient {
     content: string | null;
     toolCalls: readonly ToolCall[];
     reasoningContent?: string;
+    /**
+     * Provider-reported stop reason for this round (OpenAI `finish_reason`,
+     * Anthropic `stop_reason`, Gemini `finishReason`). `length` / `max_tokens`
+     * means the response was cut off at the output-token limit — a tool call's
+     * arguments may have been truncated mid-JSON.
+     */
+    finishReason?: string;
   }>;
   /** When set, tool results are fed back so the next `complete()` sees OpenAI-style tool messages. */
   pushToolMessage?(input: { toolCallId: string; content: string }): void;
@@ -232,6 +271,7 @@ export type ToolCallDispatchResultKind =
   | "skip_unknown_tool"
   | "skip_structured_output_near_miss"
   | "skip_bad_args"
+  | "skip_truncated_args"
   | "skip_validation_error"
   | "skip_policy_denied"
   | "skip_review_unavailable"
@@ -602,6 +642,7 @@ async function processSingleToolCall(
   names: Set<string>,
   schemas: Map<string, Record<string, unknown>>,
   badArgIds: Set<string>,
+  truncatedArgIds: Set<string>,
   turnAbortSignal: AbortSignal | undefined,
   runId: string,
   beforeExecute?: () => { kind: "ok" } | { kind: "prevented"; runawayVerdict: RunawayVerdict },
@@ -723,6 +764,37 @@ async function processSingleToolCall(
       });
     }
     return { kind: "skip_unknown_tool" };
+  }
+
+  if (truncatedArgIds.has(tc.id)) {
+    // The provider cut this response off at the output-token limit, so the
+    // arguments are an incomplete prefix of a larger JSON object. The model
+    // cannot repair them by retrying the same call, and replaying the broken
+    // call would poison the next provider request with an opaque 400 — so
+    // the turn is failed fast with an actionable message.
+    const errBody = JSON.stringify({
+      error: "output_truncated",
+      tool: tc.name,
+      message:
+        "Tool call arguments were truncated by the provider's output-token limit. " +
+        "The call cannot be retried as-is — split the work into smaller calls " +
+        "(e.g. write the file in sections) and retry with smaller arguments.",
+    });
+    options.audit.record({
+      phase: "args_truncated",
+      tool: tc.name,
+      toolCallId: tc.id,
+    });
+    options.model.pushToolMessage?.({ toolCallId: tc.id, content: errBody });
+    if (options.transcript) {
+      appendTx({
+        role: "tool",
+        content: errBody,
+        toolCallId: tc.id,
+        metadata: { tool: tc.name },
+      });
+    }
+    return { kind: "skip_truncated_args" };
   }
 
   if (badArgIds.has(tc.id)) {
@@ -1265,6 +1337,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
         content: string | null;
         toolCalls: readonly ToolCall[];
         reasoningContent?: string;
+        finishReason?: string;
       };
       try {
         turn = await Promise.race([
@@ -1355,7 +1428,29 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
       // ---- Per-tool-call dispatch ----
 
       // Sanitize malformed argsJson before transcript storage.
+      //
+      // Two distinct failures are separated here, because only one of them is
+      // recoverable by the model:
+      //
+      //  - Malformed args (the model emitted bad JSON but finished normally):
+      //    healable — the model sees the error and retries with the same
+      //    intent, so the call is answered with `invalid_arguments` and the
+      //    turn continues.
+      //
+      //  - Truncated args (the provider stopped at the output-token limit,
+      //    `finish_reason: "length"`): NOT recoverable — the arguments are a
+      //    cut-off prefix of a larger JSON object, so no retry of the same
+      //    call can ever succeed. Worse, replaying the broken call poisons
+      //    the NEXT provider request: the model client re-serializes the
+      //    assistant turn with the truncated `function.arguments`, and the
+      //    upstream rejects the whole request with an opaque 400 that kills
+      //    the turn with no useful detail. So this case fails the turn fast
+      //    with an explicit "output truncated — split the write" error
+      //    instead of healing the arguments to "{}" and asking the model to
+      //    try again.
       const badArgIds = new Set<string>();
+      const truncatedArgIds = new Set<string>();
+      const roundWasTruncated = isTruncationFinishReason(turn.finishReason);
       const sanitizedToolCalls = turn.toolCalls.map((tc) => {
         if (typeof tc.argsJson !== "string") {
           // Malformed tool call (provider omitted `arguments`): treat as bad
@@ -1374,12 +1469,26 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
           JSON.parse(fixedArgs);
           return fixedArgs !== tc.argsJson ? { ...tc, argsJson: fixedArgs } : tc;
         } catch {
-          log.warn("tool call args sanitized", {
-            toolName: tc.name,
-            toolCallId: tc.id,
-            sessionId: options.sessionId,
-          });
-          badArgIds.add(tc.id);
+          if (roundWasTruncated) {
+            // The provider cut this response off at the output-token limit,
+            // so the arguments are an incomplete prefix — the model cannot
+            // repair them by retrying the same call.
+            log.warn("tool call args truncated by output-token limit", {
+              toolName: tc.name,
+              toolCallId: tc.id,
+              sessionId: options.sessionId,
+              finishReason: turn.finishReason ?? null,
+              argsChars: tc.argsJson.length,
+            });
+            truncatedArgIds.add(tc.id);
+          } else {
+            log.warn("tool call args sanitized", {
+              toolName: tc.name,
+              toolCallId: tc.id,
+              sessionId: options.sessionId,
+            });
+            badArgIds.add(tc.id);
+          }
           return { ...tc, argsJson: "{}" };
         }
       });
@@ -1484,6 +1593,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
           names,
           schemas,
           badArgIds,
+          truncatedArgIds,
           options.turnAbortSignal,
           options.runId,
           runawayBreaker
@@ -1543,7 +1653,52 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
           break;
         }
 
-        if (dispatch.kind === "skip_structured_output_near_miss") {
+        if (dispatch.kind === "skip_truncated_args") {
+          // The provider truncated this call's arguments at the output-token
+          // limit. The call cannot succeed as written and the model cannot
+          // repair it by retrying, so the turn ends here rather than issuing
+          // another request that would carry the broken arguments back to
+          // the provider (an opaque 400 that killed the turn with no useful
+          // detail). The rest of the batch is answered so the transcript
+          // stays well-formed.
+          log.error("tool call arguments truncated by output-token limit; terminating turn", {
+            sessionId: options.sessionId,
+            toolName: tc.name,
+            toolCallId: tc.id,
+            finishReason: turn.finishReason ?? null,
+          });
+          options.audit.record({
+            phase: "args_truncated_turn_terminated",
+            sessionId: options.sessionId,
+            tool: tc.name,
+            toolCallId: tc.id,
+            finishReason: turn.finishReason ?? null,
+          });
+          for (let rest = callIdx + 1; rest < sanitizedToolCalls.length; rest++) {
+            const skippedTc = sanitizedToolCalls[rest]!;
+            const skipped = JSON.stringify({
+              error: "skipped",
+              message: "skipped — the batch was discarded after a truncated tool call",
+            });
+            options.model.pushToolMessage?.({ toolCallId: skippedTc.id, content: skipped });
+            if (options.transcript) {
+              appendTx({
+                role: "tool",
+                content: skipped,
+                toolCallId: skippedTc.id,
+                metadata: { tool: skippedTc.name },
+              });
+            }
+          }
+          if (options.transcript) {
+            emitStats?.({ transcriptMessageCount: getTranscriptCount() });
+          }
+          // Surface the truncation as the turn's failure: the operator (and
+          // the model, on the next turn) sees an explicit "output truncated —
+          // split the write" instead of a silent stop that looks like the
+          // agent simply gave up.
+          throw new ToolCallTruncatedError(tc.name, turn.finishReason);
+        } else if (dispatch.kind === "skip_structured_output_near_miss") {
           // Charge the structured-output retry budget (shared with the
           // schema-failure path) and terminate the turn once it's spent.
           structuredOutputAttempt++;
