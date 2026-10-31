@@ -217,6 +217,7 @@ export {
 } from "./effective-agent-for-session";
 export { redactToolArgsJson, redactJsonValue, redactDeep } from "./redact-json";
 export { sanitizeJsonEscapes } from "./sanitize-json-escapes";
+export { normalizeToolCallArgsJson } from "./tool-call-args";
 export { VERSION } from "./version";
 export {
   assertValidAgentId,

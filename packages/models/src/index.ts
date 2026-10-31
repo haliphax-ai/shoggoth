@@ -1,4 +1,5 @@
 export { isFailoverEligibleError } from "./classify";
+export { isTruncationFinishReason } from "./finish-reason";
 export { EmptyModelResponseError, ModelHttpError, ModelRequestAbortedError } from "./errors";
 export {
   createOpenAICompatibleProvider,
