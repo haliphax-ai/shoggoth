@@ -13,6 +13,7 @@ import { register as registerDiscover } from "../../src/sessions/builtin-handler
 import {
   getSessionToolState,
   setSessionToolState,
+  toolCatalogCache,
 } from "../../src/sessions/session-tool-discovery";
 import type { ShoggothConfig } from "@shoggoth/shared";
 
@@ -85,6 +86,7 @@ describe("builtin-discover reset action", () => {
   });
 
   afterEach(() => {
+    toolCatalogCache.delete("agent:test:discord:channel:123");
     db.close();
   });
 
@@ -126,6 +128,15 @@ describe("builtin-discover reset action", () => {
 
   it("should not affect alwaysOn tools after reset", async () => {
     const ctx = stubCtx(db, config);
+
+    // Seed the cached catalog so the list action can resolve rows.
+    toolCatalogCache.set(
+      ctx.sessionId,
+      new Map([
+        ["builtin-read", "stub builtin-read"],
+        ["builtin-write", "stub builtin-write"],
+      ]),
+    );
 
     // Reset with list
     const result = await registry.execute("discover", { reset: true, list: true }, ctx);

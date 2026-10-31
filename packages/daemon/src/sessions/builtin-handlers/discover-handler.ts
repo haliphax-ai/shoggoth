@@ -12,6 +12,7 @@ import {
   isToolEnabledByState,
   toolRefreshNeeded,
   toolCatalogCache,
+  warnUnmatchedEnableOnce,
 } from "../session-tool-discovery";
 import { isGlobPattern } from "../tool-id-glob";
 
@@ -81,6 +82,16 @@ async function discoverHandler(
     toolRefreshNeeded.set(ctx.sessionId, true);
   }
 
+  // Warn when an enabled tool ID is absent from the advertised catalog snapshot
+  // (unknown tool or stale config). Best-effort: skipped when no snapshot exists.
+  if (applied.enabled.length > 0) {
+    const advertised = toolCatalogCache.get(ctx.sessionId);
+    if (advertised) {
+      const unmatched = applied.enabled.filter((id) => !advertised.has(id));
+      warnUnmatchedEnableOnce(ctx.sessionId, unmatched);
+    }
+  }
+
   const result: Record<string, unknown> = { applied };
 
   // Build catalog if requested
@@ -109,23 +120,10 @@ async function discoverHandler(
         });
       }
     } else {
-      // Fallback: DB state only (no descriptions available)
-      for (const [toolId, enabled] of updatedState) {
-        if (isGlobPattern(toolId)) continue;
-        catalog.push({
-          id: toolId,
-          description: toolId,
-          enabled: resolved.alwaysOn.has(toolId) || enabled,
-          alwaysOn: resolved.alwaysOn.has(toolId),
-        });
-      }
-      // Add always-on tools not in DB (globs match concrete tools only, not catalog rows)
-      for (const id of resolved.alwaysOn) {
-        if (isGlobPattern(id)) continue;
-        if (!updatedState.has(id)) {
-          catalog.push({ id, description: id, enabled: true, alwaysOn: true });
-        }
-      }
+      // Fallback: no cached catalog descriptions are available. There is no
+      // way to verify which configured/state IDs are real tools here, so the
+      // catalog is left empty rather than emitting rows that could mask stale
+      // or unknown IDs (see #550).
     }
     result.catalog = catalog;
   }

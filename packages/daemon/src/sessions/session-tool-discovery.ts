@@ -4,7 +4,7 @@
 
 import type Database from "better-sqlite3";
 import { createAggregateMcpCatalogResult, type AggregatedTool } from "@shoggoth/mcp-integration";
-import { parseAgentSessionUrn, type ShoggothConfig } from "@shoggoth/shared";
+import { getLogger, parseAgentSessionUrn, type ShoggothConfig } from "@shoggoth/shared";
 import { isGlobPattern, toolIdGlobMatches } from "./tool-id-glob";
 import { openAiToolsFromCatalog, type SessionMcpToolContext } from "./session-mcp-tool-context";
 import { mcpToolsForToolLoop } from "../mcp/tool-loop-mcp";
@@ -23,6 +23,47 @@ export const toolRefreshNeeded = new Map<string, boolean>();
 
 /** Populated by the discovery finalizer; read by the discover handler for `list` results. */
 export const toolCatalogCache = new Map<string, ReadonlyMap<string, string>>();
+
+/**
+ * Exact `alwaysOn` entries reported as unmatched for a session (finalizer has
+ * seen a full catalog with the ID absent). Warns once per (session, ID) so a
+ * stale configured entry is diagnosable without log spam.
+ */
+const unmatchedAlwaysOnReported = new Map<string, Set<string>>();
+
+/**
+ * Exact tool IDs whose mid-loop `enable` was reported as absent from the
+ * advertised catalog for a session. Warns once per (session, ID).
+ */
+const unmatchedEnableReported = new Map<string, Set<string>>();
+
+/** Log an alwaysOn_unmatched warning once per (session, tool ID). */
+export function warnUnmatchedAlwaysOnOnce(sessionId: string, unmatched: string[]): void {
+  if (unmatched.length === 0) return;
+  const seen = unmatchedAlwaysOnReported.get(sessionId) ?? new Set<string>();
+  const fresh = unmatched.filter((id) => !seen.has(id));
+  if (fresh.length === 0) return;
+  for (const id of fresh) seen.add(id);
+  unmatchedAlwaysOnReported.set(sessionId, seen);
+  getLogger("tool-discovery").warn("tool_discovery.alwaysOn_unmatched", {
+    sessionId,
+    unmatched: fresh,
+  });
+}
+
+/** Log an enable_unmatched warning once per (session, tool ID). */
+export function warnUnmatchedEnableOnce(sessionId: string, ids: string[]): void {
+  if (ids.length === 0) return;
+  const seen = unmatchedEnableReported.get(sessionId) ?? new Set<string>();
+  const fresh = ids.filter((id) => !seen.has(id));
+  if (fresh.length === 0) return;
+  for (const id of fresh) seen.add(id);
+  unmatchedEnableReported.set(sessionId, seen);
+  getLogger("tool-discovery").warn("tool_discovery.enable_unmatched", {
+    sessionId,
+    ids: fresh,
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Session tool state helpers (read/write session_tool_state table)
@@ -231,6 +272,16 @@ export function createToolDiscoveryFinalizer(
       descMap.set(tool.namespacedName, tool.description ?? tool.originalName);
     }
     toolCatalogCache.set(sessionId, descMap);
+
+    // Warn when a configured exact alwaysOn entry matches no tool in the full
+    // catalog (e.g. after an MCP server rename). Globs are exempt: an
+    // empty-matching glob is not a misconfiguration signal by itself.
+    const unmatchedAlwaysOn: string[] = [];
+    for (const id of resolved.alwaysOn) {
+      if (isGlobPattern(id)) continue;
+      if (!descMap.has(id)) unmatchedAlwaysOn.push(id);
+    }
+    warnUnmatchedAlwaysOnOnce(sessionId, unmatchedAlwaysOn);
 
     const toolState = getSessionToolState(db, sessionId);
     const globPatterns = globPatternsOf(toolState);
