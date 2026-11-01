@@ -91,6 +91,32 @@ function extractSummaryBlock(content: string): string | null {
 }
 
 /**
+ * Trim leading `tool` messages from the tail whose `toolCallId` has no matching
+ * `toolCalls` in any retained assistant message. Without this, a raw slice can
+ * land in the middle of a tool-call exchange, orphaning tool results that the
+ * model API rejects.
+ */
+function trimOrphanedToolResults(tail: readonly ChatMessage[]): ChatMessage[] {
+  const claimedIds = new Set<string>();
+  for (const m of tail) {
+    if (m.role === "assistant" && m.toolCalls) {
+      for (const tc of m.toolCalls) {
+        claimedIds.add(tc.id);
+      }
+    }
+  }
+  let start = 0;
+  while (start < tail.length) {
+    const m = tail[start]!;
+    if (m.role !== "tool" || typeof m.toolCallId !== "string" || claimedIds.has(m.toolCallId)) {
+      break;
+    }
+    start++;
+  }
+  return tail.slice(start);
+}
+
+/**
  * Find the first assistant message in the transcript and extract its <summary> block if present.
  */
 function findPreviousSummary(messages: readonly ChatMessage[]): string | null {
@@ -117,8 +143,9 @@ export async function compactTranscriptIfNeeded(
     return { compacted: false, messages: [...messages] };
   }
 
-  const tail = rest.slice(-preserve);
-  const middle = rest.slice(0, -preserve);
+  const rawTail = rest.slice(-preserve);
+  const tail = trimOrphanedToolResults(rawTail);
+  const middle = rest.slice(0, rest.length - tail.length);
   if (middle.length === 0) {
     return { compacted: false, messages: [...messages] };
   }
