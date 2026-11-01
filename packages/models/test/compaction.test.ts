@@ -272,4 +272,73 @@ Build the feature
       "should list identifier types",
     );
   });
+
+  it("trims orphaned tool results from the tail boundary", async () => {
+    // Repro from issue #568: rest = [assistant(toolCalls=[A]), tool(A), assistant(text), user]
+    // with preserveRecentMessages: 3 the raw slice starts at tool(A) and orphans it.
+    const messages: ChatMessage[] = [
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "call-A", name: "foo", arguments: "{}" }],
+      },
+      { role: "tool", content: "result-A", toolCallId: "call-A" },
+      { role: "assistant", content: "thinking" },
+      { role: "user", content: "next" },
+    ];
+    const policy: CompactionPolicy = { preserveRecentMessages: 3 };
+    const client: FailoverModelClient = {
+      async complete() {
+        return {
+          content: "SUMMARY",
+          usedProviderId: "p",
+          usedModel: "m",
+          degraded: false,
+        };
+      },
+    };
+    const r = await compactTranscriptIfNeeded(messages, policy, client, {});
+    assert.equal(r.compacted, true);
+    // The orphaned tool(A) must be dropped — the tail must not start with a tool message
+    // whose toolCallId has no matching assistant toolCalls in the tail.
+    const tail = r.messages.slice(1); // skip the summary block
+    assert.ok(tail.length >= 1, "tail should have at least one message");
+    assert.notEqual(
+      tail[0]!.role,
+      "tool",
+      "first tail message must not be an orphaned tool result",
+    );
+    // The assistant(text) and user messages should be preserved
+    assert.ok(tail.some((m) => m.role === "assistant" && m.content === "thinking"));
+    assert.ok(tail.some((m) => m.role === "user" && m.content === "next"));
+  });
+
+  it("does not trim tool results that have a matching assistant in the tail", async () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "old" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "call-B", name: "bar", arguments: "{}" }],
+      },
+      { role: "tool", content: "result-B", toolCallId: "call-B" },
+      { role: "assistant", content: "reply" },
+    ];
+    const policy: CompactionPolicy = { preserveRecentMessages: 3 };
+    const client: FailoverModelClient = {
+      async complete() {
+        return {
+          content: "SUMMARY",
+          usedProviderId: "p",
+          usedModel: "m",
+          degraded: false,
+        };
+      },
+    };
+    const r = await compactTranscriptIfNeeded(messages, policy, client, {});
+    assert.equal(r.compacted, true);
+    const tail = r.messages.slice(1);
+    // tool(B) has a matching assistant in the tail, so it must be preserved
+    assert.ok(tail.some((m) => m.role === "tool" && m.toolCallId === "call-B"));
+  });
 });
