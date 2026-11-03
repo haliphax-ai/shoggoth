@@ -23,6 +23,19 @@
  *    path (silently skipped when no live surface exists).
  */
 
+import { createHash } from "node:crypto";
+
+/**
+ * Hash a tool-call signature for window storage. The full signature can be
+ * up to ~2000 chars (tool name + truncated args); hashing keeps each window
+ * entry fixed-size while preserving equality — two signatures that differ
+ * only past the truncation point still hash differently, so the duplicate
+ * detection is unchanged.
+ */
+function hashSignature(signature: string): string {
+  return createHash("sha256").update(signature).digest("hex");
+}
+
 /** Rolling window of recent tool calls inspected per trip. */
 export const RUNAWAY_WINDOW_SIZE = 15;
 
@@ -38,7 +51,14 @@ export const RUNAWAY_MAX_DUPLICATES = 2;
  * Argument characters folded into a call's signature. Calls that differ only
  * past this point (timestamps deep in a JSON blob, etc.) count as duplicates.
  */
-export const RUNAWAY_SIGNATURE_ARGS_CHARS = 200;
+/**
+ * Argument characters folded into a call's signature. Calls that differ only
+ * past this point (timestamps deep in a JSON blob, etc.) count as duplicates.
+ * The issue: 200 chars isn't capturing enough of the tool call to be useful,
+ * and is often canceling model turns for a valid series of tool calls that
+ * have a large, common JSON prefix. Extend the capture to 2000 characters.
+ */
+export const RUNAWAY_SIGNATURE_ARGS_CHARS = 2000;
 
 /**
  * Prose character budget for a single turn before the breaker trips: prose
@@ -109,11 +129,12 @@ export class RunawayBreaker {
    */
   record(toolName: string, argsJson: string): RunawayVerdict {
     const signature = `${toolName}|${argsJson.slice(0, this.signatureArgsChars)}`;
-    this.window.push(signature);
+    const hashed = hashSignature(signature);
+    this.window.push(hashed);
     while (this.window.length > this.windowSize) this.window.shift();
 
     let count = 0;
-    for (const s of this.window) if (s === signature) count++;
+    for (const h of this.window) if (h === hashed) count++;
 
     if (count <= this.maxDuplicates) return { verdict: "ok" };
 
