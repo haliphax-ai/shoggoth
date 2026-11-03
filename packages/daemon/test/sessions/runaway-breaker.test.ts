@@ -43,7 +43,7 @@ describe("RunawayBreaker", () => {
 
   it("treats identical-prefix long args as duplicates (truncated signature)", () => {
     const b = new RunawayBreaker();
-    const base = "x".repeat(250);
+    const base = "x".repeat(2500);
     expect(b.record("t", base).verdict).toBe("ok");
     expect(b.record("t", base).verdict).toBe("ok");
     // Differs only past the truncation point — still a duplicate.
