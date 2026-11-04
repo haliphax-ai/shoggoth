@@ -13,6 +13,7 @@ import {
 } from "@shoggoth/mcp-integration";
 import { getProcessManager } from "../process-manager-singleton";
 import { getLogger } from "../logging";
+import { truncateResultJson } from "../sessions/builtin-handlers/truncate-output";
 import type { ShoggothMcpConfig, ShoggothMcpServerEntry } from "@shoggoth/shared";
 import type { ExternalMcpInvoke } from "./tool-loop-mcp";
 import { resolveVaultEnv } from "./vault-env-resolve";
@@ -446,7 +447,9 @@ export async function connectShoggothMcpServers(
     try {
       const args = JSON.parse(argsJson) as Record<string, unknown>;
       const result = await mcpInvokeTool(session, originalName, args);
-      return { resultJson: JSON.stringify(result) };
+      return {
+        resultJson: truncateResultJson(JSON.stringify(dropMcpStructuredContent(result))),
+      };
     } catch (e) {
       return {
         resultJson: JSON.stringify({
@@ -471,4 +474,27 @@ export async function connectShoggothMcpServers(
   };
 
   return { pool, external, statuses };
+}
+
+/**
+ * The MCP protocol result for `tools/call` may carry the same payload twice:
+ * once as `content` text parts and once as `structuredContent`. The model
+ * sees the whole serialized object, so the duplicate doubles the token cost
+ * of every structured result. Prefer `structuredContent` when present (it is
+ * the machine-readable form) and drop the parallel `content` text; otherwise
+ * return the result unchanged.
+ */
+export function dropMcpStructuredContent(result: unknown): unknown {
+  if (
+    result !== null &&
+    typeof result === "object" &&
+    !Array.isArray(result) &&
+    "structuredContent" in result &&
+    (result as Record<string, unknown>).structuredContent != null
+  ) {
+    const { content: _dropped, ...rest } = result as Record<string, unknown>;
+    void _dropped;
+    return rest;
+  }
+  return result;
 }
