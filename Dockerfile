@@ -35,7 +35,7 @@ ARG AGENT_UID=900
 ENV SHOGGOTH_AGENT_UID=${AGENT_UID}
 RUN --mount=type=cache,mode=0755,target=/var/cache/apt \
   rm -f /etc/apt/apt.conf.d/docker-clean \
-  && apt-get update && apt-get install -y --no-install-recommends acl ca-certificates curl git ripgrep \
+  && apt-get update && apt-get install -y --no-install-recommends acl ca-certificates curl git ripgrep tini \
   && rm -rf /var/lib/apt/lists/* \
   && curl -fsSL https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-linux-amd64 -o /usr/local/bin/jq \
   && bash -c '[[ "$(sha256sum /usr/local/bin/jq)" == *"b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f"* ]] || exit 1' \
@@ -81,7 +81,7 @@ RUN chown root:shoggoth /usr/local/bin/shoggoth \
 
 ENV NODE_ENV=production
 USER root
-ENTRYPOINT ["/usr/local/bin/shoggoth-entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/shoggoth-entrypoint.sh"]
 HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
   CMD node --import tsx/esm packages/cli/src/cli.ts system health || exit 1
 CMD ["node", "--import", "tsx/esm", "packages/daemon/src/index.ts"]
