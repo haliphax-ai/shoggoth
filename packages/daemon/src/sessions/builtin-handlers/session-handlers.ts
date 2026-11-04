@@ -135,6 +135,11 @@ async function sessionQuery(
   const metadataOnly = args.metadataOnly === true;
   const includeMetadata = metadataOnly || args.includeMetadata === true;
 
+  // --- Per-message content cap (transcript contents can be huge) ---
+  const maxCharsRaw = Math.trunc(Number(args.max_chars));
+  const maxChars =
+    Number.isFinite(maxCharsRaw) && maxCharsRaw > 0 ? Math.min(maxCharsRaw, 50_000) : 2_000;
+
   // Build SQL query with optional role filter and substring search.
   const whereClauses: string[] = [];
   const params: Record<string, unknown> = {};
@@ -240,7 +245,7 @@ async function sessionQuery(
       role: r.role,
     };
     if (!metadataOnly) {
-      base.content = r.content;
+      base.content = truncateMessageContent(r.content, maxChars);
       if (r.tool_call_id) base.tool_call_id = r.tool_call_id;
       if (r.tool_calls_json) base.tool_calls = JSON.parse(r.tool_calls_json);
     }
@@ -254,6 +259,17 @@ async function sessionQuery(
     return base;
   });
   return { resultJson: JSON.stringify({ messages, count: messages.length }) };
+}
+
+/**
+ * Clip a transcript message's content for tool-result consumption. Long
+ * tool/file payloads dominate query results; the head is what identifies a
+ * message, so keep it and mark the clip explicitly.
+ */
+function truncateMessageContent(content: string | null, maxChars: number): string | null {
+  if (content == null) return null;
+  if (content.length <= maxChars) return content;
+  return content.slice(0, maxChars) + " [... truncated ...]";
 }
 
 // ---------------------------------------------------------------------------

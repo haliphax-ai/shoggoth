@@ -416,4 +416,44 @@ describe("session.query tool handler", { concurrency: false }, () => {
     assert.ok(toolResult.messages[0]._meta);
     assert.ok(typeof toolResult.messages[0]._meta.timestamp === "string");
   });
+  // -----------------------------------------------------------------------
+  // max_chars content clipping
+  // -----------------------------------------------------------------------
+
+  it("clips oversized message content to max_chars", async () => {
+    // Seed a message with a very large body.
+    const segBig = createSessionStore(db).getById(sessionId)!.contextSegmentId;
+    createTranscriptStore(db).append({
+      sessionId,
+      contextSegmentId: segBig,
+      role: "tool",
+      content: "Q".repeat(20_000),
+      toolCallId: "big-tool-result",
+    });
+
+    const { toolResult } = await runWithToolArgs({
+      order: "asc",
+      max_chars: 500,
+      role: ["tool"],
+    });
+    assert.ok(toolResult);
+    assert.ok(!toolResult.error, `unexpected error: ${toolResult?.error}`);
+    const big = toolResult.messages.find(
+      (m: { content: string }) => typeof m.content === "string" && m.content.startsWith("Q"),
+    );
+    assert.ok(big, "expected the large tool message in results");
+    assert.ok(
+      big.content.length <= 500 + " [... truncated ...]".length,
+      `expected clipped content, got length ${big.content.length}`,
+    );
+    assert.ok(big.content.endsWith("[... truncated ...]"));
+  });
+
+  it("leaves short content untouched when max_chars is set", async () => {
+    const { toolResult } = await runWithToolArgs({ order: "asc", max_chars: 100 });
+    assert.ok(toolResult);
+    assert.ok(!toolResult.error, `unexpected error: ${toolResult?.error}`);
+    const hello = toolResult.messages.find((m: { content: string }) => m.content === "hello");
+    assert.ok(hello, "expected the short message verbatim");
+  });
 });

@@ -493,6 +493,13 @@ export const sessionQueryArgs = {
       description:
         "When true, return only role and _meta (no content). Implies includeMetadata. Useful for session size analysis without consuming context. Default false.",
     },
+    max_chars: {
+      type: "integer",
+      description:
+        "Per-message content cap in characters. Content longer than this is clipped (head kept, truncation marker appended). Default 2000; maximum 50000.",
+      minimum: 1,
+      maximum: 50000,
+    },
     order: {
       type: "string",
       enum: ["asc", "desc"],

@@ -9,6 +9,7 @@ import type { AgentCredentials } from "@shoggoth/os-exec";
 import type { ProcessManager } from "@shoggoth/procman";
 import type { ChatContentPart, ImageBlockCodec } from "@shoggoth/models";
 import type { AgentIntegrationInvoker } from "../control/integration-invoke";
+import { truncateResultJson } from "./builtin-handlers/truncate-output";
 
 /**
  * Minimal interface for the message-tool context so we don't pull in heavy
@@ -80,9 +81,9 @@ export interface BuiltinToolContext {
   }) => void;
 
   /**
-   * Notified after a timer is queued or cancelled mid-turn with the
-   * recomputed unfired timer count for this session (queued and active
-   * timers as one cumulative sum; drives the live turn status bar).
+   * Notified after a timer is queued or cancelled mid-turn with the recomputed
+   * unfired timer count for this session (queued and active timers as one cumulative sum; drives
+   * the live turn status bar).
    */
   readonly onTimersChanged?: (count: number) => void;
 
@@ -132,7 +133,16 @@ export class BuiltinToolRegistry {
     if (!handler) {
       throw new Error(`No handler registered for builtin tool: ${name}`);
     }
-    return handler(args, ctx);
+    const result = await handler(args, ctx);
+    // Central tool-result cap: applied at the registry boundary so every
+    // dispatch path (session tool loop, workflow tasks, subagent runtime) is
+    // covered even when a handler has no internal truncation.
+    const resultJson =
+      result.contentParts !== undefined ? result.resultJson : truncateResultJson(result.resultJson);
+    return {
+      resultJson,
+      ...(result.contentParts !== undefined ? { contentParts: result.contentParts } : {}),
+    };
   }
 }
 
