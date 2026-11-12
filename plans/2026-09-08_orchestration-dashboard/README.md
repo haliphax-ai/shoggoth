@@ -63,7 +63,7 @@ The dashboard service plugin receives daemon dependencies via the `service.regis
 
 2. **Use existing stores** (`SessionStore`, `TimerScheduler`, `ToolRunStore`) for structured queries. The dashboard creates its own store instances from its read-only DB connection.
 
-2. **Use existing stores** (`SessionStore`, `SessionStats`, `TimerScheduler`, `ToolRunStore`) for structured queries. The dashboard creates its own store instances from its read-only DB connection. The `session_stats` table provides token usage (input/output tokens), turn count, compaction count, context window size, and context fill percentage — enabling per-session utilization cards.
+3. **Use existing stores** (`SessionStore`, `SessionStats`, `TimerScheduler`, `ToolRunStore`) for structured queries. The dashboard creates its own store instances from its read-only DB connection. The `session_stats` table provides token usage (input/output tokens), turn count, compaction count, context window size, and context fill percentage — enabling per-session utilization cards.
 
 ### Status Derivation
 

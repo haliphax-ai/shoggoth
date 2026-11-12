@@ -200,6 +200,7 @@ export interface SessionStatsData {
 ```
 
 ### API Response Types
+
 ### API Response Types
 
 ```typescript
@@ -232,7 +233,7 @@ export type ToolRunsResponse = ApiResponse<ToolRunData[]>;
 
 ### SSE Event Types
 
-```typescript
+````typescript
 /** Base SSE event */
 export interface DashboardEvent {
   /** Monotonically increasing sequence number */
@@ -302,7 +303,7 @@ export interface IDaemonEventEmitter {
   on<K extends keyof DaemonLifecycleEvents>(event: K, listener: (payload: DaemonLifecycleEvents[K]) => void): void;
   off<K extends keyof DaemonLifecycleEvents>(event: K, listener: (payload: DaemonLifecycleEvents[K]) => void): void;
 }
-```
+````
 
 ### DashboardData Service Interface
 
@@ -475,7 +476,8 @@ function deriveStatus(
   return "idle";
 }
 ```
-```
+
+````
 
 ## Model Info Extraction
 
@@ -514,7 +516,7 @@ function extractModelInfo(modelSelection: unknown): ModelInfo {
 
   return { display: JSON.stringify(modelSelection) };
 }
-```
+````
 
 ## Time Utilities
 

@@ -28,8 +28,8 @@ describe("SessionStore working_directory", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("defaults workingDirectory to undefined on new session", () => {
     const store = createSessionStore(db);

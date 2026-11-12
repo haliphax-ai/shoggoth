@@ -28,8 +28,8 @@ describe("PendingActionsStore", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("enqueue and getById round-trip", () => {
     const store = createPendingActionsStore(db);

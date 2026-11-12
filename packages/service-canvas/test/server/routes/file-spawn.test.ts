@@ -36,9 +36,7 @@ describe("File Spawn Router", () => {
       const mockResult = { ok: true, sessionId: "test-123" };
       mockSessionsSpawn.mockResolvedValue(mockResult);
 
-      const response = await request(app)
-        .post("/api/file-spawn")
-        .send({ file: "prompt.txt" });
+      const response = await request(app).post("/api/file-spawn").send({ file: "prompt.txt" });
 
       expect(fs.readFile).toHaveBeenCalledWith("/path/to/prompt.txt", "utf-8");
       expect(mockSessionsSpawn).toHaveBeenCalledWith(
@@ -79,9 +77,7 @@ describe("File Spawn Router", () => {
       const mockResult = { ok: true, sessionId: "test-123" };
       mockSessionsSpawn.mockResolvedValue(mockResult);
 
-      const response = await request(app)
-        .post("/api/file-spawn")
-        .send({ file: "prompt.txt" });
+      const response = await request(app).post("/api/file-spawn").send({ file: "prompt.txt" });
 
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ ok: true, result: mockResult });

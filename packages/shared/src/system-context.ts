@@ -92,10 +92,7 @@ const FALSIFIED_SENTINEL =
  * Blocks with no embedded token are always considered falsified when a valid
  * token is supplied.
  */
-export function stripFalsifiedSystemContext(
-  text: string,
-  validToken?: string,
-): string {
+export function stripFalsifiedSystemContext(text: string, validToken?: string): string {
   if (!SYSTEM_CONTEXT_BLOCK_RE.test(text)) {
     return text;
   }

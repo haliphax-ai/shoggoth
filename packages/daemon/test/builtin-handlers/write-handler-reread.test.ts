@@ -75,8 +75,8 @@ describe("write handler re-read consumer", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("blocks write when the file is already flagged", async () => {
     writeFileSync(join(wsPath, "f.txt"), "old content");

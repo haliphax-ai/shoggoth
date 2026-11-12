@@ -29,8 +29,8 @@ describe("provider-failure-store", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, TMP);
-});
+    await closeTestDb(db, TMP);
+  });
 
   describe("getProviderFailure", () => {
     it("returns null for unknown provider", () => {

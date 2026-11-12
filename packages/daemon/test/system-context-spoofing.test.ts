@@ -42,8 +42,8 @@ describe("Anti-Spoofing Hardening (Phase 4)", { concurrency: false }, () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("session creation generates a systemContextToken", () => {
     const sessions = createSessionStore(db);

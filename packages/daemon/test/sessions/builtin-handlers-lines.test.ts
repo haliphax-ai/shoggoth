@@ -52,7 +52,10 @@ describe("fs-handlers: lines flag", () => {
   it("splits content by newlines when lines: true", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     writeFileSync(join(ws, "test.txt"), "line1\nline2\nline3\n");
 
     const result = await reg.execute("read", { path: "test.txt", lines: true }, ctx);
@@ -70,7 +73,10 @@ describe("fs-handlers: lines flag", () => {
   it("handles CRLF line endings", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     writeFileSync(join(ws, "crlf.txt"), "line1\r\nline2\r\nline3\r\n");
 
     const result = await reg.execute("read", { path: "crlf.txt", lines: true }, ctx);
@@ -87,7 +93,10 @@ describe("fs-handlers: lines flag", () => {
   it("handles CR line endings", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     writeFileSync(join(ws, "cr.txt"), "line1\rline2\rline3\r");
 
     const result = await reg.execute("read", { path: "cr.txt", lines: true }, ctx);
@@ -100,7 +109,10 @@ describe("fs-handlers: lines flag", () => {
   it("truncates files over 1000 lines when lines: true", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     const lines = [];
     for (let i = 1; i <= 1500; i++) {
       lines.push(`Line ${i}`);
@@ -120,7 +132,10 @@ describe("fs-handlers: lines flag", () => {
   it("handles empty file with lines: true", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     writeFileSync(join(ws, "empty.txt"), "");
 
     const result = await reg.execute("read", { path: "empty.txt", lines: true }, ctx);
@@ -135,7 +150,10 @@ describe("fs-handlers: lines flag", () => {
   it("preserves lines with only newlines", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     writeFileSync(join(ws, "newlines.txt"), "\n\n\n");
 
     const result = await reg.execute("read", { path: "newlines.txt", lines: true }, ctx);
@@ -162,7 +180,10 @@ describe("fs-handlers: lineNumbers flag", () => {
   it("prefixes lines with 1-indexed numbers and returns array", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     writeFileSync(join(ws, "test.txt"), "first\nsecond\nthird\n");
 
     const result = await reg.execute("read", { path: "test.txt", lineNumbers: true }, ctx);
@@ -178,7 +199,10 @@ describe("fs-handlers: lineNumbers flag", () => {
   it("handles empty file", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     writeFileSync(join(ws, "empty.txt"), "");
 
     const result = await reg.execute("read", { path: "empty.txt", lineNumbers: true }, ctx);
@@ -192,7 +216,10 @@ describe("fs-handlers: lineNumbers flag", () => {
   it("handles file with only newlines", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     writeFileSync(join(ws, "newlines.txt"), "\n\n\n");
 
     const result = await reg.execute("read", { path: "newlines.txt", lineNumbers: true }, ctx);
@@ -217,7 +244,10 @@ describe("fs-handlers: fromLine/toLine range", () => {
   it("reads lines 2-4 from a 5-line file", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     writeFileSync(join(ws, "test.txt"), "line1\nline2\nline3\nline4\nline5\n");
 
     const result = await reg.execute("read", { path: "test.txt", fromLine: 2, toLine: 4 }, ctx);
@@ -234,7 +264,10 @@ describe("fs-handlers: fromLine/toLine range", () => {
   it("handles fromLine=1, toLine=1", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     writeFileSync(join(ws, "test.txt"), "first\nsecond\nthird\n");
 
     const result = await reg.execute("read", { path: "test.txt", fromLine: 1, toLine: 1 }, ctx);
@@ -259,7 +292,10 @@ describe("fs-handlers: offset/limit range", () => {
   it("reads 3 lines starting from offset 2", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     writeFileSync(join(ws, "test.txt"), "line1\nline2\nline3\nline4\nline5\n");
 
     const result = await reg.execute("read", { path: "test.txt", offset: 2, limit: 3 }, ctx);
@@ -276,7 +312,10 @@ describe("fs-handlers: offset/limit range", () => {
   it("handles offset=1, limit=1", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     writeFileSync(join(ws, "test.txt"), "first\nsecond\nthird\n");
 
     const result = await reg.execute("read", { path: "test.txt", offset: 1, limit: 1 }, ctx);
@@ -301,7 +340,10 @@ describe("fs-handlers: stat mode", () => {
   it("returns metadata for single file", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     writeFileSync(join(ws, "test.txt"), "hello world");
 
     const result = await reg.execute("read", { path: "test.txt", stat: true }, ctx);
@@ -318,7 +360,10 @@ describe("fs-handlers: stat mode", () => {
   it("includes line count for small files", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     writeFileSync(join(ws, "test.txt"), "line1\nline2\nline3\n");
 
     const result = await reg.execute("read", { path: "test.txt", stat: true }, ctx);
@@ -344,7 +389,10 @@ describe("fs-handlers: paths/globs", () => {
   it("reads multiple files from paths array", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     writeFileSync(join(ws, "file1.txt"), "content1");
     writeFileSync(join(ws, "file2.txt"), "content2");
     writeFileSync(join(ws, "file3.txt"), "content3");
@@ -361,12 +409,19 @@ describe("fs-handlers: paths/globs", () => {
   it("honors maxFiles limit with notice", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     writeFileSync(join(ws, "a.txt"), "a");
     writeFileSync(join(ws, "b.txt"), "b");
     writeFileSync(join(ws, "c.txt"), "c");
 
-    const result = await reg.execute("read", { paths: ["a.txt", "b.txt", "c.txt"], maxFiles: 1 }, ctx);
+    const result = await reg.execute(
+      "read",
+      { paths: ["a.txt", "b.txt", "c.txt"], maxFiles: 1 },
+      ctx,
+    );
     const parsed = JSON.parse(result.resultJson);
 
     assert.ok(Object.keys(parsed.files).length <= 1);
@@ -375,7 +430,10 @@ describe("fs-handlers: paths/globs", () => {
   it("handles glob patterns", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     writeFileSync(join(ws, "test.js"), "code1");
     writeFileSync(join(ws, "test2.js"), "code2");
     writeFileSync(join(ws, "readme.md"), "docs");
@@ -392,7 +450,10 @@ describe("fs-handlers: paths/globs", () => {
   it("handles non-existent file path gracefully", async () => {
     const reg = new BuiltinToolRegistry();
     registerFs(reg);
-    const ctx = stubCtx({ workspacePath: ws, creds: { uid: process.getuid!(), gid: process.getgid!() } });
+    const ctx = stubCtx({
+      workspacePath: ws,
+      creds: { uid: process.getuid!(), gid: process.getgid!() },
+    });
     writeFileSync(join(ws, "real.txt"), "exists");
 
     const result = await reg.execute("read", { paths: ["real.txt", "nope.txt"] }, ctx);

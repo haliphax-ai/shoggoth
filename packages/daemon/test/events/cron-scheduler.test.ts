@@ -29,8 +29,8 @@ describe("cron scheduler", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("runCronTick enqueues a durable event and advances next_run_at", () => {
     upsertCronJob(db, {

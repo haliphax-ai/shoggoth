@@ -1510,164 +1510,168 @@ describe("executeMessageToolAction", () => {
     assert.deepEqual(r, { ok: true, message_id: "m1", channel_id: "chan-a" });
   });
 
-
-// --- Banner tests ---
-it("post: adds provenance banner from sender_session_id", async () => {
-  const calls: string[] = [];
-  const transport = mockTransport({
-    async createMessage(ch, body) {
-      calls.push(`create:${ch}:${body.content}`);
-      return { id: "m1" };
-    },
-  });
-  const r = await executeMessageToolAction(
-    {
-      capabilities: caps,
-      transport,
-      sessionToChannel: () => "chan-a",
-      getSessionSenderIdForProvenance: (sid) => {
-        if (sid === "agent:x:discord:channel:00000000-0000-4000-8000-000000000001") {
-          return "sender:x:discord:channel:12345678-1234-4000-8000-123456789012";
-        }
-        return undefined;
+  // --- Banner tests ---
+  it("post: adds provenance banner from sender_session_id", async () => {
+    const calls: string[] = [];
+    const transport = mockTransport({
+      async createMessage(ch, body) {
+        calls.push(`create:${ch}:${body.content}`);
+        return { id: "m1" };
       },
-    },
-    "agent:x:discord:channel:00000000-0000-4000-8000-000000000001",
-    { action: "post", content: "hello" },
-  );
-  assert.deepEqual(r, { ok: true, message_id: "m1", channel_id: "chan-a" });
-  assert.equal(calls[0], "create:chan-a:> 📨 Message delivery: `sender:x:discord:channel:12345678-1234-4000-8000-123456789012`\n\nhello");
-});
-
-it("post: omits banner when sender_session_id not found", async () => {
-  const calls: string[] = [];
-  const transport = mockTransport({
-    async createMessage(ch, body) {
-      calls.push(`create:${ch}:${body.content}`);
-      return { id: "m1" };
-    },
-  });
-  const r = await executeMessageToolAction(
-    {
-      capabilities: caps,
-      transport,
-      sessionToChannel: () => "chan-a",
-       getSessionSenderIdForProvenance: (_sid) => {
-        // No sender for this session
-        return undefined;
+    });
+    const r = await executeMessageToolAction(
+      {
+        capabilities: caps,
+        transport,
+        sessionToChannel: () => "chan-a",
+        getSessionSenderIdForProvenance: (sid) => {
+          if (sid === "agent:x:discord:channel:00000000-0000-4000-8000-000000000001") {
+            return "sender:x:discord:channel:12345678-1234-4000-8000-123456789012";
+          }
+          return undefined;
+        },
       },
-    },
-    "agent:x:discord:channel:00000000-0000-4000-8000-000000000001",
-    { action: "post", content: "hello" },
-  );
-  assert.deepEqual(r, { ok: true, message_id: "m1", channel_id: "chan-a" });
-  // Content should not include the banner
-  assert.equal(calls[0], "create:chan-a:hello");
-});
-
-it("post: degrades gracefully when getSessionSenderIdForProvenance not provided", async () => {
-  const calls: string[] = [];
-  const transport = mockTransport({
-    async createMessage(ch, body) {
-      calls.push(`create:${ch}:${body.content}`);
-      return { id: "m1" };
-    },
+      "agent:x:discord:channel:00000000-0000-4000-8000-000000000001",
+      { action: "post", content: "hello" },
+    );
+    assert.deepEqual(r, { ok: true, message_id: "m1", channel_id: "chan-a" });
+    assert.equal(
+      calls[0],
+      "create:chan-a:> 📨 Message delivery: `sender:x:discord:channel:12345678-1234-4000-8000-123456789012`\n\nhello",
+    );
   });
-  const r = await executeMessageToolAction(
-    {
-      capabilities: caps,
-      transport,
-      sessionToChannel: () => "chan-a",
-      // getSessionSenderIdForProvenance not provided
-    },
-    "agent:x:discord:channel:00000000-0000-4000-8000-000000000001",
-    { action: "post", content: "hello" },
-  );
-  assert.deepEqual(r, { ok: true, message_id: "m1", channel_id: "chan-a" });
-  // Content should not include the banner
-  assert.equal(calls[0], "create:chan-a:hello");
-});
 
-it("choice: adds provenance banner to choice prompt", async () => {
-  const calls: string[] = [];
-  const transport = mockTransport({
-    async createMessage(ch, body) {
-      calls.push(`create:${ch}:${body.content}`);
-      return { id: "m1" };
-    },
-    async createMessageReaction() {}, // No-op for this test
-  });
-  const r = await executeMessageToolAction(
-    {
-      capabilities: caps,
-      transport,
-      sessionToChannel: () => "ch1",
-      getSessionSenderIdForProvenance: (sid) => {
-        if (sid === "sess") {
-          return "sender:sess:parent";
-        }
-        return undefined;
+  it("post: omits banner when sender_session_id not found", async () => {
+    const calls: string[] = [];
+    const transport = mockTransport({
+      async createMessage(ch, body) {
+        calls.push(`create:${ch}:${body.content}`);
+        return { id: "m1" };
       },
-    },
-    "sess",
-    {
-      action: "choice",
-      content: "Pick one:",
-      choices: [
-        { emoji: "👍", label: "Approve" },
-        { emoji: "👎", label: "Reject" },
-      ],
-    },
-  );
-  assert.deepEqual(r, {
-    ok: true,
-    message_id: "m1",
-    channel_id: "ch1",
-    choices: 2,
-    reactions_added: 2,
-    reactions_failed: 0,
-  });
-  // Check that the banner was prepended to the choice prompt
-  assert.ok(calls[0]!.startsWith("create:ch1:> 📨 Message delivery: `sender:sess:parent`\n\nPick one:"));
-});
-
-it("choice: omits banner when sender_session_id not found", async () => {
-  const calls: string[] = [];
-  const transport = mockTransport({
-    async createMessage(ch, body) {
-      calls.push(`create:${ch}:${body.content}`);
-      return { id: "m1" };
-    },
-    async createMessageReaction() {}, // No-op for this test
-  });
-  const r = await executeMessageToolAction(
-    {
-      capabilities: caps,
-      transport,
-      sessionToChannel: () => "ch1",
-       getSessionSenderIdForProvenance: (_sid) => {
-        // No sender for this session
-        return undefined;
+    });
+    const r = await executeMessageToolAction(
+      {
+        capabilities: caps,
+        transport,
+        sessionToChannel: () => "chan-a",
+        getSessionSenderIdForProvenance: (_sid) => {
+          // No sender for this session
+          return undefined;
+        },
       },
-    },
-    "sess",
-    {
-      action: "choice",
-      choices: [
-        { emoji: "👍", label: "Approve" },
-        { emoji: "👎", label: "Reject" },
-      ],
-    },
-  );
-  assert.deepEqual(r, {
-    ok: true,
-    message_id: "m1",
-    channel_id: "ch1",
-    choices: 2,
-    reactions_added: 2,
-    reactions_failed: 0,
+      "agent:x:discord:channel:00000000-0000-4000-8000-000000000001",
+      { action: "post", content: "hello" },
+    );
+    assert.deepEqual(r, { ok: true, message_id: "m1", channel_id: "chan-a" });
+    // Content should not include the banner
+    assert.equal(calls[0], "create:chan-a:hello");
   });
-  // The choice prompt should not include the banner
-  assert.ok(!calls[0]!.includes("> 📨 Message delivery:"));
-});
+
+  it("post: degrades gracefully when getSessionSenderIdForProvenance not provided", async () => {
+    const calls: string[] = [];
+    const transport = mockTransport({
+      async createMessage(ch, body) {
+        calls.push(`create:${ch}:${body.content}`);
+        return { id: "m1" };
+      },
+    });
+    const r = await executeMessageToolAction(
+      {
+        capabilities: caps,
+        transport,
+        sessionToChannel: () => "chan-a",
+        // getSessionSenderIdForProvenance not provided
+      },
+      "agent:x:discord:channel:00000000-0000-4000-8000-000000000001",
+      { action: "post", content: "hello" },
+    );
+    assert.deepEqual(r, { ok: true, message_id: "m1", channel_id: "chan-a" });
+    // Content should not include the banner
+    assert.equal(calls[0], "create:chan-a:hello");
+  });
+
+  it("choice: adds provenance banner to choice prompt", async () => {
+    const calls: string[] = [];
+    const transport = mockTransport({
+      async createMessage(ch, body) {
+        calls.push(`create:${ch}:${body.content}`);
+        return { id: "m1" };
+      },
+      async createMessageReaction() {}, // No-op for this test
+    });
+    const r = await executeMessageToolAction(
+      {
+        capabilities: caps,
+        transport,
+        sessionToChannel: () => "ch1",
+        getSessionSenderIdForProvenance: (sid) => {
+          if (sid === "sess") {
+            return "sender:sess:parent";
+          }
+          return undefined;
+        },
+      },
+      "sess",
+      {
+        action: "choice",
+        content: "Pick one:",
+        choices: [
+          { emoji: "👍", label: "Approve" },
+          { emoji: "👎", label: "Reject" },
+        ],
+      },
+    );
+    assert.deepEqual(r, {
+      ok: true,
+      message_id: "m1",
+      channel_id: "ch1",
+      choices: 2,
+      reactions_added: 2,
+      reactions_failed: 0,
+    });
+    // Check that the banner was prepended to the choice prompt
+    assert.ok(
+      calls[0]!.startsWith("create:ch1:> 📨 Message delivery: `sender:sess:parent`\n\nPick one:"),
+    );
+  });
+
+  it("choice: omits banner when sender_session_id not found", async () => {
+    const calls: string[] = [];
+    const transport = mockTransport({
+      async createMessage(ch, body) {
+        calls.push(`create:${ch}:${body.content}`);
+        return { id: "m1" };
+      },
+      async createMessageReaction() {}, // No-op for this test
+    });
+    const r = await executeMessageToolAction(
+      {
+        capabilities: caps,
+        transport,
+        sessionToChannel: () => "ch1",
+        getSessionSenderIdForProvenance: (_sid) => {
+          // No sender for this session
+          return undefined;
+        },
+      },
+      "sess",
+      {
+        action: "choice",
+        choices: [
+          { emoji: "👍", label: "Approve" },
+          { emoji: "👎", label: "Reject" },
+        ],
+      },
+    );
+    assert.deepEqual(r, {
+      ok: true,
+      message_id: "m1",
+      channel_id: "ch1",
+      choices: 2,
+      reactions_added: 2,
+      reactions_failed: 0,
+    });
+    // The choice prompt should not include the banner
+    assert.ok(!calls[0]!.includes("> 📨 Message delivery:"));
+  });
 });
