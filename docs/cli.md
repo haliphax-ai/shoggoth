@@ -415,6 +415,16 @@ shoggoth skills list
 
 Output: JSON array of `{ id, title, path, enabled }`.
 
+#### Search skills
+
+```
+shoggoth skills search [--query <text>] [--tag <tag>] [--category <category>] [--limit <n>] [--offset <n>]
+```
+
+Output: JSON array of `{ id, title, path, enabled, tags, category, description, score }`,
+ordered by relevance (with a `query`) then id. Omitting all flags returns the
+full list with `score` 0. Tags and category filters match case-insensitively.
+
 #### Resolve skill path
 
 ```
