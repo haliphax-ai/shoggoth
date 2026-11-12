@@ -2,10 +2,11 @@
   "name": "@shoggoth/cli",
   "version": "0.1.0",
   "bin": {
-    "shoggoth": "./run-cli.mjs"
+    "shoggoth": "./dist/cli.mjs"
   },
   "type": "module",
   "scripts": {
+    "build": "node ../../scripts/build-cli.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },

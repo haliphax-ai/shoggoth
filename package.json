@@ -9,6 +9,7 @@
   ],
   "type": "module",
   "scripts": {
+    "build:cli": "npm run build -w @shoggoth/cli",
     "clean": "rm -rf packages/*/dist dist",
     "cli": "node --import tsx/esm packages/cli/src/cli.ts",
     "daemon": "node --import tsx/esm packages/daemon/src/index.ts",
