@@ -1,5 +1,5 @@
 import { resolveSessionTargetFromCliArg } from "@shoggoth/daemon/lib";
-import { loadLayeredConfigAsync } from "@shoggoth/shared";
+import { loadLayeredConfigCachedAsync } from "./config-cache";
 
 /** Operator auth for control-socket requests issued by CLI subcommands. */
 export function controlAuth(): { kind: "operator_token"; token: string } {
@@ -15,7 +15,7 @@ export function controlAuth(): { kind: "operator_token"; token: string } {
 export async function socketPathFromEnv(configDir: string): Promise<string> {
   const fromEnv = process.env.SHOGGOTH_CONTROL_SOCKET?.trim();
   if (fromEnv) return fromEnv;
-  const config = await loadLayeredConfigAsync(configDir);
+  const config = await loadLayeredConfigCachedAsync(configDir);
   return config.socketPath;
 }
 
@@ -28,7 +28,7 @@ export async function resolveSessionTargetOrExit(
   configDir: string,
   raw: string,
 ): Promise<string | null> {
-  const config = await loadLayeredConfigAsync(configDir);
+  const config = await loadLayeredConfigCachedAsync(configDir);
   try {
     return resolveSessionTargetFromCliArg(raw, config);
   } catch (e) {
