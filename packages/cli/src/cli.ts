@@ -26,6 +26,7 @@ import { runDecisionCli } from "./run-decision";
 import { runRerankCli } from "./run-rerank";
 import { runServiceCli } from "./run-service";
 import { runVaultCli } from "./run-vault";
+import { runSubcommand } from "./cli-utils";
 
 const argv = process.argv.slice(2);
 
@@ -101,15 +102,21 @@ if (argv[0] === "config") {
   const rest = argv.slice(1);
   if (rest.length === 0 || rest[0] === "--help" || rest[0] === "-h") {
     printConfigHelp(VERSION);
-    process.exit(0);
+    process.exitCode = 0;
+    process.exit(process.exitCode);
   }
   if (rest[0] === "show") {
     const dynamic = rest.includes("--dynamic");
-    await runConfigShow({ dynamic });
-    process.exit(0);
+    // An op-level control failure sets exitCode inside runConfigShow but the
+    // command has always exited 0 in that case, so the failure flag from the
+    // wrapper (thrown errors only) overrides the exit code here.
+    const failed = await runSubcommand(() => runConfigShow({ dynamic }));
+    process.exitCode = failed ? 1 : 0;
+    process.exit(process.exitCode);
   }
   console.error("usage: shoggoth config show");
-  process.exit(1);
+  process.exitCode = 1;
+  process.exit(process.exitCode);
 }
 
 if (argv[0] === "skills") {
@@ -121,12 +128,14 @@ Usage:
   shoggoth skills search      Search/filter skills (JSON)
   shoggoth skills path <id>   Print absolute path to skill markdown
   shoggoth skills read <id>   Print skill path and contents (JSON)`);
-    process.exit(0);
+    process.exitCode = 0;
+    process.exit(process.exitCode);
   }
   const config = await loadLayeredConfigAsync(configDir);
   if (rest[0] === "list") {
     process.stdout.write(formatSkillsListJson(config));
-    process.exit(0);
+    process.exitCode = 0;
+    process.exit(process.exitCode);
   }
   if (rest[0] === "search") {
     const parsed = parseSkillsSearchArgs(rest.slice(1));
@@ -135,239 +144,161 @@ Usage:
       console.error(
         "usage: shoggoth skills search [--query <text>] [--tag <tag>] [--category <category>] [--limit <n>] [--offset <n>]",
       );
-      process.exit(1);
+      process.exitCode = 1;
+      process.exit(process.exitCode);
     }
-    try {
+    await runSubcommand(async () => {
       process.stdout.write(formatSkillsSearchJson(config, parsed.params));
-      process.exit(0);
-    } catch (e) {
-      console.error(e instanceof Error ? e.message : String(e));
-      process.exit(1);
-    }
+    });
+    process.exit(process.exitCode ?? 0);
   }
   if (rest[0] === "path") {
     const id = rest[1];
     if (!id) {
       console.error("usage: shoggoth skills path <id>");
-      process.exit(1);
+      process.exitCode = 1;
+      process.exit(process.exitCode);
     }
-    try {
+    await runSubcommand(async () => {
       process.stdout.write(formatSkillPathLine(config, id));
-      process.exit(0);
-    } catch (e) {
-      console.error(e instanceof Error ? e.message : String(e));
-      process.exit(1);
-    }
+    });
+    process.exit(process.exitCode ?? 0);
   }
   if (rest[0] === "read") {
     const id = rest[1];
     if (!id) {
       console.error("usage: shoggoth skills read <id>");
-      process.exit(1);
+      process.exitCode = 1;
+      process.exit(process.exitCode);
     }
-    try {
+    await runSubcommand(async () => {
       process.stdout.write(formatSkillReadJson(config, id));
-      process.exit(0);
-    } catch (e) {
-      console.error(e instanceof Error ? e.message : String(e));
-      process.exit(1);
-    }
+    });
+    process.exit(process.exitCode ?? 0);
   }
   console.error(
     "usage: shoggoth skills list | shoggoth skills search | shoggoth skills path <id> | shoggoth skills read <id>",
   );
-  process.exit(1);
+  process.exitCode = 1;
+  process.exit(process.exitCode);
 }
 
 if (argv[0] === "retention") {
   if (argv.length === 1 || argv[1] === "--help" || argv[1] === "-h") {
     console.log(`usage: shoggoth retention run`);
-    process.exit(0);
+    process.exitCode = 0;
+    process.exit(process.exitCode);
   }
   if (argv[1] === "run") {
-    await runRetentionCli({ configDir });
-    process.exit(0);
+    const failed = await runSubcommand(() => runRetentionCli({ configDir }));
+    process.exitCode = failed ? 1 : 0;
+    process.exit(process.exitCode);
   }
   console.error("usage: shoggoth retention run");
-  process.exit(1);
+  process.exitCode = 1;
+  process.exit(process.exitCode);
 }
 
 if (argv[0] === "events") {
   if (argv.length === 1 || argv[1] === "--help" || argv[1] === "-h") {
     console.log(`usage: shoggoth events dlq [limit]`);
-    process.exit(0);
+    process.exitCode = 0;
+    process.exit(process.exitCode);
   }
   if (argv[1] === "dlq") {
     const limitRaw = argv[2];
     const limit = limitRaw ? Number.parseInt(limitRaw, 10) : 100;
     if (!Number.isFinite(limit) || limit < 1) {
       console.error("usage: shoggoth events dlq [limit]");
-      process.exit(1);
+      process.exitCode = 1;
+      process.exit(process.exitCode);
     }
-    await runEventsDlqCli({ configDir, limit });
-    process.exit(0);
+    const failed = await runSubcommand(() => runEventsDlqCli({ configDir, limit }));
+    process.exitCode = failed ? 1 : 0;
+    process.exit(process.exitCode);
   }
   console.error("usage: shoggoth events dlq [limit]");
-  process.exit(1);
+  process.exitCode = 1;
+  process.exit(process.exitCode);
 }
 
 if (argv[0] === "hitl") {
-  try {
-    await runHitlCli(argv.slice(1));
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
-  }
+  await runSubcommand(() => runHitlCli(argv.slice(1)));
   process.exit(process.exitCode ?? 0);
 }
 
 if (argv[0] === "cruise") {
-  try {
-    await runCruiseCli(argv.slice(1));
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
-  }
+  await runSubcommand(() => runCruiseCli(argv.slice(1)));
   process.exit(process.exitCode ?? 0);
 }
 
 if (argv[0] === "mcp") {
-  try {
-    await runMcpCli(argv.slice(1));
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
-  }
+  await runSubcommand(() => runMcpCli(argv.slice(1)));
   process.exit(process.exitCode ?? 0);
 }
 
 if (argv[0] === "subagent") {
-  try {
-    await runSubagentCli(argv.slice(1));
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
-  }
+  await runSubcommand(() => runSubagentCli(argv.slice(1)));
   process.exit(process.exitCode ?? 0);
 }
 
 if (argv[0] === "session") {
-  try {
-    await runSessionCli(argv.slice(1));
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
-  }
+  await runSubcommand(() => runSessionCli(argv.slice(1)));
   process.exit(process.exitCode ?? 0);
 }
 
 if (argv[0] === "procman") {
-  try {
-    await runProcmanCli(argv.slice(1));
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
-  }
+  await runSubcommand(() => runProcmanCli(argv.slice(1)));
   process.exit(process.exitCode ?? 0);
 }
 
 if (argv[0] === "system") {
-  try {
-    await runSystemCli(argv.slice(1));
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
-  }
+  await runSubcommand(() => runSystemCli(argv.slice(1)));
   process.exit(process.exitCode ?? 0);
 }
 
 if (argv[0] === "queue") {
-  try {
-    await runQueueCli(argv.slice(1));
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
-  }
+  await runSubcommand(() => runQueueCli(argv.slice(1)));
   process.exit(process.exitCode ?? 0);
 }
 
 if (argv[0] === "prompt") {
-  try {
-    await runPromptCli(argv.slice(1));
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
-  }
+  await runSubcommand(() => runPromptCli(argv.slice(1)));
   process.exit(process.exitCode ?? 0);
 }
 
 if (argv[0] === "elevation") {
-  try {
-    await runElevationCli(argv.slice(1));
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
-  }
+  await runSubcommand(() => runElevationCli(argv.slice(1)));
   process.exit(process.exitCode ?? 0);
 }
 
 if (argv[0] === "yolo") {
-  try {
-    await runYoloCli(argv.slice(1));
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
-  }
+  await runSubcommand(() => runYoloCli(argv.slice(1)));
   process.exit(process.exitCode ?? 0);
 }
 
 if (argv[0] === "service") {
-  try {
-    await runServiceCli(argv.slice(1));
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
-  }
+  await runSubcommand(() => runServiceCli(argv.slice(1)));
   process.exit(process.exitCode ?? 0);
 }
 
 if (argv[0] === "vault") {
-  try {
-    await runVaultCli(argv.slice(1));
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
-  }
+  await runSubcommand(() => runVaultCli(argv.slice(1)));
   process.exit(process.exitCode ?? 0);
 }
 
 if (argv[0] === "media") {
-  try {
-    await runMediaCli(argv.slice(1));
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
-  }
+  await runSubcommand(() => runMediaCli(argv.slice(1)));
   process.exit(process.exitCode ?? 0);
 }
 
 if (argv[0] === "decision") {
-  try {
-    await runDecisionCli(argv.slice(1));
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
-  }
+  await runSubcommand(() => runDecisionCli(argv.slice(1)));
   process.exit(process.exitCode ?? 0);
 }
 
 if (argv[0] === "rerank") {
-  try {
-    await runRerankCli(argv.slice(1));
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
-  }
+  await runSubcommand(() => runRerankCli(argv.slice(1)));
   process.exit(process.exitCode ?? 0);
 }
 
