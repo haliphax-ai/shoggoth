@@ -1,10 +1,6 @@
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
-import {
-  loadLayeredConfigAsync,
-  LAYOUT,
-  resolveEffectiveModelsConfig,
-  VERSION,
-} from "@shoggoth/shared";
+import { LAYOUT, resolveEffectiveModelsConfig, VERSION } from "@shoggoth/shared";
+import { loadLayeredConfigCachedAsync } from "./config-cache";
 import { runSessionCompact } from "./run-session-compact";
 import { formatModelResult } from "./format-model-result";
 import { controlAuth, resolveSessionTargetOrExit, socketPathFromEnv } from "./cli-utils";
@@ -149,7 +145,7 @@ export async function runSessionCli(argv: string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    const config = await loadLayeredConfigAsync(configDir);
+    const config = await loadLayeredConfigCachedAsync(configDir);
     const sessionId = await resolveSessionTargetOrExit(configDir, rawTarget);
     if (!sessionId) return;
     const models = resolveEffectiveModelsConfig(config, sessionId) ?? config.models;
