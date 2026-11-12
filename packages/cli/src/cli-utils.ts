@@ -39,6 +39,23 @@ export async function resolveSessionTargetOrExit(
 }
 
 /**
+ * Run a CLI subcommand body, catching unexpected errors thrown by the
+ * runner. On error: prints the error message to stderr and sets the
+ * process exit code to 1. Returns true when an error was caught, false
+ * otherwise; the caller is responsible for the final process exit.
+ */
+export async function runSubcommand(run: () => Promise<void>): Promise<boolean> {
+  try {
+    await run();
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exitCode = 1;
+    return true;
+  }
+  return false;
+}
+
+/**
  * Print a column-aligned table to stdout: left-aligned cells padded to the
  * widest entry per column, joined with a two-space gap; header row first,
  * then a dash separator row, then the data rows.
