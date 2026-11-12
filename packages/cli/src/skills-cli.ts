@@ -57,3 +57,67 @@ export function formatSkillReadJson(config: ShoggothConfig, id: string): string 
   const content = readFileSync(p, "utf8");
   return `${JSON.stringify({ path: p, content }, null, 2)}\n`;
 }
+
+// ---------------------------------------------------------------------------
+// Arg parsing for `skills search`
+// ---------------------------------------------------------------------------
+
+type SearchParseOk = {
+  ok: true;
+  params: {
+    query?: string;
+    tags?: string[];
+    category?: string;
+    limit?: number;
+    offset?: number;
+  };
+};
+type SearchParseErr = { ok: false; error: string };
+
+export function parseSkillsSearchArgs(args: string[]): SearchParseOk | SearchParseErr {
+  let query: string | undefined;
+  const tags: string[] = [];
+  let category: string | undefined;
+  let limit: number | undefined;
+  let offset: number | undefined;
+
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (a === "--query") {
+      query = args[++i];
+    } else if (a === "--tag") {
+      const v = args[++i];
+      if (!v) return { ok: false, error: "--tag must not be empty" };
+      tags.push(v);
+    } else if (a === "--category") {
+      category = args[++i];
+    } else if (a === "--limit") {
+      const raw = args[++i];
+      limit = Number(raw);
+      if (!raw || !Number.isInteger(limit) || limit < 1) {
+        return { ok: false, error: `--limit must be a positive integer, got "${raw}"` };
+      }
+    } else if (a === "--offset") {
+      const raw = args[++i];
+      offset = Number(raw);
+      if (!raw || !Number.isInteger(offset) || offset < 0) {
+        return { ok: false, error: `--offset must be a non-negative integer, got "${raw}"` };
+      }
+    }
+    // Unknown flags are ignored, consistent with the other CLI arg parsers.
+  }
+
+  const params: {
+    query?: string;
+    tags?: string[];
+    category?: string;
+    limit?: number;
+    offset?: number;
+  } = {};
+  if (query != null) params.query = query;
+  if (tags.length > 0) params.tags = tags;
+  if (category != null) params.category = category;
+  if (limit != null) params.limit = limit;
+  if (offset != null) params.offset = offset;
+  return { ok: true, params };
+}

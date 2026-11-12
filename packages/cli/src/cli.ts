@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 import { loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
-import { formatSkillPathLine, formatSkillReadJson, formatSkillsListJson } from "./skills-cli";
+import {
+  formatSkillPathLine,
+  formatSkillReadJson,
+  formatSkillsListJson,
+  formatSkillsSearchJson,
+  parseSkillsSearchArgs,
+} from "./skills-cli";
 import { runRetentionCli } from "./run-retention";
 import { runEventsDlqCli } from "./run-events-dlq";
 import { runSessionCli } from "./run-session";
@@ -112,6 +118,7 @@ if (argv[0] === "skills") {
     console.log(`shoggoth ${VERSION}
 Usage:
   shoggoth skills list        List skills from configured scan roots (JSON)
+  shoggoth skills search      Search/filter skills (JSON)
   shoggoth skills path <id>   Print absolute path to skill markdown
   shoggoth skills read <id>   Print skill path and contents (JSON)`);
     process.exit(0);
@@ -120,6 +127,23 @@ Usage:
   if (rest[0] === "list") {
     process.stdout.write(formatSkillsListJson(config));
     process.exit(0);
+  }
+  if (rest[0] === "search") {
+    const parsed = parseSkillsSearchArgs(rest.slice(1));
+    if (!parsed.ok) {
+      console.error(parsed.error);
+      console.error(
+        "usage: shoggoth skills search [--query <text>] [--tag <tag>] [--category <category>] [--limit <n>] [--offset <n>]",
+      );
+      process.exit(1);
+    }
+    try {
+      process.stdout.write(formatSkillsSearchJson(config, parsed.params));
+      process.exit(0);
+    } catch (e) {
+      console.error(e instanceof Error ? e.message : String(e));
+      process.exit(1);
+    }
   }
   if (rest[0] === "path") {
     const id = rest[1];
@@ -150,7 +174,7 @@ Usage:
     }
   }
   console.error(
-    "usage: shoggoth skills list | shoggoth skills path <id> | shoggoth skills read <id>",
+    "usage: shoggoth skills list | shoggoth skills search | shoggoth skills path <id> | shoggoth skills read <id>",
   );
   process.exit(1);
 }

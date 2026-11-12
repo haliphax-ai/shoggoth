@@ -9,6 +9,7 @@ import {
   formatSkillReadJson,
   formatSkillsListJson,
   formatSkillsSearchJson,
+  parseSkillsSearchArgs,
 } from "../src/skills-cli";
 
 function cfg(configDirectory: string, skills: ShoggothConfig["skills"]): ShoggothConfig {
@@ -109,5 +110,83 @@ describe("skills-cli", () => {
     // No params returns all
     const all = JSON.parse(formatSkillsSearchJson(c)) as { id: string }[];
     assert.strictEqual(all.length, 2);
+  });
+
+  test("parseSkillsSearchArgs parses search flags", () => {
+    const ok = parseSkillsSearchArgs([
+      "--query",
+      "weather",
+      "--tag",
+      "api",
+      "--tag",
+      "forecast",
+      "--category",
+      "utilities",
+      "--limit",
+      "5",
+      "--offset",
+      "2",
+    ]);
+    assert.ok(ok.ok);
+    assert.deepStrictEqual(ok.params, {
+      query: "weather",
+      tags: ["api", "forecast"],
+      category: "utilities",
+      limit: 5,
+      offset: 2,
+    });
+
+    // No flags yields empty params (search returns the full list).
+    const empty = parseSkillsSearchArgs([]);
+    assert.ok(empty.ok);
+    if (empty.ok) assert.deepStrictEqual(empty.params, {});
+
+    // Unknown flags are ignored.
+    const unknown = parseSkillsSearchArgs(["--frobnicate", "x", "--query", "q"]);
+    assert.ok(unknown.ok);
+    if (unknown.ok) assert.deepStrictEqual(unknown.params, { query: "q" });
+  });
+
+  test("parseSkillsSearchArgs rejects invalid values", () => {
+    const missingTagValue = parseSkillsSearchArgs(["--tag"]);
+    assert.ok(!missingTagValue.ok);
+    if (!missingTagValue.ok) assert.ok(missingTagValue.error.includes("--tag"));
+
+    const badLimit = parseSkillsSearchArgs(["--limit", "0"]);
+    assert.ok(!badLimit.ok);
+    if (!badLimit.ok) assert.ok(badLimit.error.includes("--limit"));
+
+    const fracLimit = parseSkillsSearchArgs(["--limit", "1.5"]);
+    assert.ok(!fracLimit.ok);
+    if (!fracLimit.ok) assert.ok(fracLimit.error.includes("--limit"));
+
+    const nanLimit = parseSkillsSearchArgs(["--limit", "many"]);
+    assert.ok(!nanLimit.ok);
+    if (!nanLimit.ok) assert.ok(nanLimit.error.includes("--limit"));
+
+    const badOffset = parseSkillsSearchArgs(["--offset", "-1"]);
+    assert.ok(!badOffset.ok);
+    if (!badOffset.ok) assert.ok(badOffset.error.includes("--offset"));
+  });
+
+  test("formatSkillsSearchJson applies limit and offset", () => {
+    const d = mkdtempSync(join(tmpdir(), "sh-clisk-"));
+    const sd = join(d, "sk");
+    mkdirSync(sd);
+    writeFileSync(join(sd, "a.md"), "---\nid: alpha\n---\n");
+    writeFileSync(join(sd, "b.md"), "---\nid: beta\n---\n");
+    writeFileSync(join(sd, "g.md"), "---\nid: gamma\n---\n");
+    const c = cfg(d, { scanRoots: [sd], disabledIds: [] });
+
+    const page = JSON.parse(formatSkillsSearchJson(c, { limit: 2, offset: 1 })) as {
+      id: string;
+      score: number;
+    }[];
+    assert.strictEqual(page.length, 2);
+    assert.deepStrictEqual(
+      page.map((r) => r.id),
+      ["beta", "gamma"],
+    );
+    assert.ok(page.every((r) => r.score === 0));
   });
 });
