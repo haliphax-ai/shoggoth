@@ -1,6 +1,6 @@
 import { invokeControlRequest, resolveSessionTargetFromCliArg } from "@shoggoth/daemon/lib";
 import { loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
-import { controlAuth, socketPathFromEnv } from "./cli-utils";
+import { controlAuth, printSubcommandHelpHint, socketPathFromEnv } from "./cli-utils";
 import { readFileSync } from "node:fs";
 
 function printPromptHelp(): void {
@@ -137,6 +137,7 @@ export async function runPromptCli(argv: string[]): Promise<void> {
       console.error(
         "usage: shoggoth prompt <slug> --session <sessionUrn|agentId> [--json <blob>] [--json-file <path>] [--wait] [name=value...]",
       );
+      printSubcommandHelpHint("prompt");
       process.exitCode = 1;
     }
     return;

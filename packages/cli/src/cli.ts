@@ -26,7 +26,7 @@ import { runDecisionCli } from "./run-decision";
 import { runRerankCli } from "./run-rerank";
 import { runServiceCli } from "./run-service";
 import { runVaultCli } from "./run-vault";
-import { runSubcommand } from "./cli-utils";
+import { printUnknownCommand, runSubcommand } from "./cli-utils";
 
 const argv = process.argv.slice(2);
 
@@ -253,5 +253,5 @@ if (handler) {
   process.exit(process.exitCode ?? 0);
 }
 
-console.error(`Unknown command. Try shoggoth --help.`);
+printUnknownCommand(argv[0]);
 process.exit(1);

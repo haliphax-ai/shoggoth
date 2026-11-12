@@ -5,7 +5,7 @@ import {
   mediaGenerationModelEntriesFromRecord,
   VERSION,
 } from "@shoggoth/shared";
-import { controlAuth, socketPathFromEnv } from "./cli-utils";
+import { controlAuth, printSubcommandHelpHint, socketPathFromEnv } from "./cli-utils";
 
 function printMediaHelp(): void {
   console.log(`shoggoth ${VERSION}
@@ -251,5 +251,6 @@ export async function runMediaCli(argv: string[]): Promise<void> {
 
   // --- unknown ---
   printMediaHelp();
+  printSubcommandHelpHint("media");
   process.exitCode = 1;
 }

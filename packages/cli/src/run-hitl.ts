@@ -1,6 +1,11 @@
 import { LAYOUT, VERSION } from "@shoggoth/shared";
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
-import { controlAuth, resolveSessionTargetOrExit, socketPathFromEnv } from "./cli-utils";
+import {
+  controlAuth,
+  printSubcommandHelpHint,
+  resolveSessionTargetOrExit,
+  socketPathFromEnv,
+} from "./cli-utils";
 
 function printHitlHelp(): void {
   console.log(`shoggoth ${VERSION}
@@ -150,5 +155,6 @@ export async function runHitlCli(argv: string[]): Promise<void> {
   console.error(
     `usage: shoggoth hitl list [sessionId|agentId] | get <id> | approve <id> | deny <id> | clear <agent id|all> ...`,
   );
+  printSubcommandHelpHint("hitl");
   process.exitCode = 1;
 }

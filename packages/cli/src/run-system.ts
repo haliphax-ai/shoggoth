@@ -1,5 +1,5 @@
 import { LAYOUT, VERSION } from "@shoggoth/shared";
-import { controlAuth, socketPathFromEnv } from "./cli-utils";
+import { controlAuth, printSubcommandHelpHint, socketPathFromEnv } from "./cli-utils";
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
 
 function printSystemHelp(): void {
@@ -31,5 +31,6 @@ export async function runSystemCli(argv: string[]): Promise<void> {
   }
 
   console.error("usage: shoggoth system health");
+  printSubcommandHelpHint("system");
   process.exitCode = 1;
 }

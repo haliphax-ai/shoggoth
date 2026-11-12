@@ -1,5 +1,5 @@
 import { LAYOUT, VERSION } from "@shoggoth/shared";
-import { controlAuth, socketPathFromEnv } from "./cli-utils";
+import { controlAuth, printSubcommandHelpHint, socketPathFromEnv } from "./cli-utils";
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
 
 export function parseMcpCancelCliArgs(argv: string[]):
@@ -65,5 +65,6 @@ export async function runMcpCli(argv: string[]): Promise<void> {
   }
 
   console.error("usage: shoggoth mcp cancel <sessionId> <sourceId> <requestId>");
+  printSubcommandHelpHint("mcp");
   process.exitCode = 1;
 }

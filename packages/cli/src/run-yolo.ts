@@ -1,5 +1,5 @@
 import { LAYOUT, VERSION } from "@shoggoth/shared";
-import { controlAuth, socketPathFromEnv } from "./cli-utils";
+import { controlAuth, printSubcommandHelpHint, socketPathFromEnv } from "./cli-utils";
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
 
 function printYoloHelp(): void {
@@ -22,6 +22,7 @@ export async function runYoloCli(argv: string[]): Promise<void> {
   const action = argv[0];
   if (action !== "on" && action !== "off" && action !== "status") {
     printYoloHelp();
+    printSubcommandHelpHint("yolo");
     process.exitCode = 1;
     return;
   }

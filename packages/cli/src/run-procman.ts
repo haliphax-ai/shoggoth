@@ -1,5 +1,5 @@
 import { LAYOUT, VERSION } from "@shoggoth/shared";
-import { controlAuth, formatTable, socketPathFromEnv } from "./cli-utils";
+import { controlAuth, formatTable, printSubcommandHelpHint, socketPathFromEnv } from "./cli-utils";
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
 
 function printProcmanHelp(): void {
@@ -121,5 +121,6 @@ export async function runProcmanCli(argv: string[]): Promise<void> {
   }
 
   printProcmanHelp();
+  printSubcommandHelpHint("procman");
   process.exitCode = 1;
 }
