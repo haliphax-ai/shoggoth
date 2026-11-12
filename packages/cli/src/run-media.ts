@@ -118,6 +118,42 @@ export function parseMediaPollArgs(args: string[]):
 }
 
 // ---------------------------------------------------------------------------
+// Result display
+// ---------------------------------------------------------------------------
+
+/**
+ * Print the result payload of a media control op (generate or poll).
+ *
+ * `inProgressLabel` preserves the per-subcommand wording of the in-progress
+ * line ("In progress" for generate, "Status: in_progress" for poll) and
+ * `showPollHint` controls the generate-only follow-up hint. On an error
+ * result, sets the process exit code to 1, exactly as the inline branches did.
+ */
+function displayMediaResult(
+  res: unknown,
+  opts: { inProgressLabel: string; showPollHint?: boolean },
+): void {
+  const result = (res as Record<string, unknown>).result as Record<string, unknown> | undefined;
+  if (result) {
+    if (result.status === "complete") {
+      console.log(`Complete: ${result.path} (${result.mime_type})`);
+    } else if (result.status === "in_progress") {
+      console.log(`${opts.inProgressLabel} — operation: ${result.operation_id}`);
+      if (opts.showPollHint) {
+        console.log("Use: shoggoth media poll --provider <id> --operation " + result.operation_id);
+      }
+    } else if (result.status === "error") {
+      console.error(`Error: ${result.error}`);
+      process.exitCode = 1;
+    } else {
+      console.log(JSON.stringify(result, null, 2));
+    }
+  } else {
+    console.log(JSON.stringify(res, null, 2));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main entry
 // ---------------------------------------------------------------------------
 
@@ -178,22 +214,7 @@ export async function runMediaCli(argv: string[]): Promise<void> {
       return;
     }
 
-    const result = (res as Record<string, unknown>).result as Record<string, unknown> | undefined;
-    if (result) {
-      if (result.status === "complete") {
-        console.log(`Complete: ${result.path} (${result.mime_type})`);
-      } else if (result.status === "in_progress") {
-        console.log(`In progress — operation: ${result.operation_id}`);
-        console.log("Use: shoggoth media poll --provider <id> --operation " + result.operation_id);
-      } else if (result.status === "error") {
-        console.error(`Error: ${result.error}`);
-        process.exitCode = 1;
-      } else {
-        console.log(JSON.stringify(result, null, 2));
-      }
-    } else {
-      console.log(JSON.stringify(res, null, 2));
-    }
+    displayMediaResult(res, { inProgressLabel: "In progress", showPollHint: true });
     return;
   }
 
@@ -224,21 +245,7 @@ export async function runMediaCli(argv: string[]): Promise<void> {
       return;
     }
 
-    const result = (res as Record<string, unknown>).result as Record<string, unknown> | undefined;
-    if (result) {
-      if (result.status === "complete") {
-        console.log(`Complete: ${result.path} (${result.mime_type})`);
-      } else if (result.status === "in_progress") {
-        console.log(`Status: in_progress — operation: ${result.operation_id}`);
-      } else if (result.status === "error") {
-        console.error(`Error: ${result.error}`);
-        process.exitCode = 1;
-      } else {
-        console.log(JSON.stringify(result, null, 2));
-      }
-    } else {
-      console.log(JSON.stringify(res, null, 2));
-    }
+    displayMediaResult(res, { inProgressLabel: "Status: in_progress" });
     return;
   }
 
