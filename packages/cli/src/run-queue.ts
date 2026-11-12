@@ -1,5 +1,5 @@
 import { LAYOUT, VERSION } from "@shoggoth/shared";
-import { controlAuth, socketPathFromEnv } from "./cli-utils";
+import { controlAuth, formatTable, socketPathFromEnv } from "./cli-utils";
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
 
 function printQueueHelp(): void {
@@ -119,13 +119,7 @@ export async function runQueueCli(argv: string[]): Promise<void> {
       e.label,
       new Date(e.enqueuedAt).toISOString(),
     ]);
-    const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
-    const pad = (s: string, w: number) => s.padEnd(w);
-    console.log(header.map((h, i) => pad(h, widths[i])).join("  "));
-    console.log(widths.map((w) => "-".repeat(w)).join("  "));
-    for (const row of rows) {
-      console.log(row.map((c, i) => pad(c, widths[i])).join("  "));
-    }
+    formatTable(header, rows);
     return;
   }
 

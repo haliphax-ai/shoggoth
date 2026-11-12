@@ -37,3 +37,18 @@ export async function resolveSessionTargetOrExit(
     return null;
   }
 }
+
+/**
+ * Print a column-aligned table to stdout: left-aligned cells padded to the
+ * widest entry per column, joined with a two-space gap; header row first,
+ * then a dash separator row, then the data rows.
+ */
+export function formatTable(header: string[], rows: string[][]): void {
+  const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
+  const pad = (s: string, w: number) => s.padEnd(w);
+  console.log(header.map((h, i) => pad(h, widths[i])).join("  "));
+  console.log(widths.map((w) => "-".repeat(w)).join("  "));
+  for (const row of rows) {
+    console.log(row.map((c, i) => pad(c, widths[i])).join("  "));
+  }
+}
