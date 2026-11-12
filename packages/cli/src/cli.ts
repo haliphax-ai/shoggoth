@@ -222,83 +222,34 @@ if (argv[0] === "events") {
   process.exit(process.exitCode);
 }
 
-if (argv[0] === "hitl") {
-  await runSubcommand(() => runHitlCli(argv.slice(1)));
-  process.exit(process.exitCode ?? 0);
-}
+/**
+ * Uniform delegating subcommands: every entry takes the remaining argv and
+ * handles its own help/exit conventions, so dispatch is a single body.
+ * Commands with non-uniform handling (config, skills, retention, events) are
+ * routed explicitly above and deliberately not listed here.
+ */
+const commandHandlers: Record<string, (argv: string[]) => Promise<void>> = {
+  session: runSessionCli,
+  subagent: runSubagentCli,
+  hitl: runHitlCli,
+  cruise: runCruiseCli,
+  mcp: runMcpCli,
+  system: runSystemCli,
+  procman: runProcmanCli,
+  queue: runQueueCli,
+  prompt: runPromptCli,
+  elevation: runElevationCli,
+  yolo: runYoloCli,
+  media: runMediaCli,
+  decision: runDecisionCli,
+  rerank: runRerankCli,
+  service: runServiceCli,
+  vault: runVaultCli,
+};
 
-if (argv[0] === "cruise") {
-  await runSubcommand(() => runCruiseCli(argv.slice(1)));
-  process.exit(process.exitCode ?? 0);
-}
-
-if (argv[0] === "mcp") {
-  await runSubcommand(() => runMcpCli(argv.slice(1)));
-  process.exit(process.exitCode ?? 0);
-}
-
-if (argv[0] === "subagent") {
-  await runSubcommand(() => runSubagentCli(argv.slice(1)));
-  process.exit(process.exitCode ?? 0);
-}
-
-if (argv[0] === "session") {
-  await runSubcommand(() => runSessionCli(argv.slice(1)));
-  process.exit(process.exitCode ?? 0);
-}
-
-if (argv[0] === "procman") {
-  await runSubcommand(() => runProcmanCli(argv.slice(1)));
-  process.exit(process.exitCode ?? 0);
-}
-
-if (argv[0] === "system") {
-  await runSubcommand(() => runSystemCli(argv.slice(1)));
-  process.exit(process.exitCode ?? 0);
-}
-
-if (argv[0] === "queue") {
-  await runSubcommand(() => runQueueCli(argv.slice(1)));
-  process.exit(process.exitCode ?? 0);
-}
-
-if (argv[0] === "prompt") {
-  await runSubcommand(() => runPromptCli(argv.slice(1)));
-  process.exit(process.exitCode ?? 0);
-}
-
-if (argv[0] === "elevation") {
-  await runSubcommand(() => runElevationCli(argv.slice(1)));
-  process.exit(process.exitCode ?? 0);
-}
-
-if (argv[0] === "yolo") {
-  await runSubcommand(() => runYoloCli(argv.slice(1)));
-  process.exit(process.exitCode ?? 0);
-}
-
-if (argv[0] === "service") {
-  await runSubcommand(() => runServiceCli(argv.slice(1)));
-  process.exit(process.exitCode ?? 0);
-}
-
-if (argv[0] === "vault") {
-  await runSubcommand(() => runVaultCli(argv.slice(1)));
-  process.exit(process.exitCode ?? 0);
-}
-
-if (argv[0] === "media") {
-  await runSubcommand(() => runMediaCli(argv.slice(1)));
-  process.exit(process.exitCode ?? 0);
-}
-
-if (argv[0] === "decision") {
-  await runSubcommand(() => runDecisionCli(argv.slice(1)));
-  process.exit(process.exitCode ?? 0);
-}
-
-if (argv[0] === "rerank") {
-  await runSubcommand(() => runRerankCli(argv.slice(1)));
+const handler = commandHandlers[argv[0]];
+if (handler) {
+  await runSubcommand(() => handler(argv.slice(1)));
   process.exit(process.exitCode ?? 0);
 }
 
