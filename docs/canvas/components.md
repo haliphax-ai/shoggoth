@@ -42,9 +42,10 @@ Layered container. Children are stacked on top of each other. The **first child*
 { "Stack": { "children": ["overlay", "background"] } }
 ```
 
-| Prop       | Type       | Description                                                          |
-| ---------- | ---------- | -------------------------------------------------------------------- |
+| Prop       | Type       | Description                                                     |
+| ---------- | ---------- | --------------------------------------------------------------- |
 | `children` | `string[]` | Ordered list of child component IDs (first item renders on top) |
+
 ### Wrap
 
 Flex-wrap container. Children flow left-to-right and wrap onto new lines when they exceed the container width. Useful for groups of buttons, badges, or any set of items that should reflow responsively.

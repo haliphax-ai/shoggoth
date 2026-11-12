@@ -25,9 +25,7 @@ function stripQuotes(value: string): string {
  * - Values may be optionally quoted (single or double quotes stripped).
  * - No variable interpolation.
  */
-export function parseEnvFile(
-  content: string,
-): Array<{ key: string; value: string }> {
+export function parseEnvFile(content: string): Array<{ key: string; value: string }> {
   const result: Array<{ key: string; value: string }> = [];
 
   const lines = content.split(/\r?\n/);

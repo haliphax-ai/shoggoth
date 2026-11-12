@@ -43,8 +43,8 @@ describe("context level spawn wiring", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, workspacesRoot);
-});
+    await closeTestDb(db, workspacesRoot);
+  });
 
   it("spawn with explicit contextLevel override persists it on the session row", async () => {
     const sessions = createSessionStore(db);
@@ -232,8 +232,8 @@ describe("context level session store persistence", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("persists contextLevel on create and returns it on read", () => {
     const store = createSessionStore(db);

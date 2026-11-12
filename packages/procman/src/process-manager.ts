@@ -9,7 +9,10 @@ import { log } from "./log.js";
 
 export class ProcessManager extends EventEmitter {
   private readonly processes = new Map<string, ManagedProcess>();
-  private readonly stateChangeHandlers = new Map<string, (newState: string, _oldState: string) => void>();
+  private readonly stateChangeHandlers = new Map<
+    string,
+    (newState: string, _oldState: string) => void
+  >();
 
   /** Register and start a managed process. Returns the ManagedProcess handle. */
   async start(spec: ProcessSpec): Promise<ManagedProcess> {
@@ -213,7 +216,10 @@ export class ProcessManager extends EventEmitter {
         const deps = dependedOnBy.get(id)!;
         let hasRemainingDependent = false;
         for (const d of deps) {
-          if (remaining.has(d)) { hasRemainingDependent = true; break; }
+          if (remaining.has(d)) {
+            hasRemainingDependent = true;
+            break;
+          }
         }
         if (!hasRemainingDependent) {
           batch.push(id);

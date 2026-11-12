@@ -170,10 +170,7 @@ describe("validateToolArgs", () => {
       type: "object",
       properties: { path: { type: "string" } },
     };
-    const errors = validateToolArgs(
-      { path: "/foo", extra1: "a", extra2: "b" },
-      schema,
-    );
+    const errors = validateToolArgs({ path: "/foo", extra1: "a", extra2: "b" }, schema);
     expect(errors).toHaveLength(2);
     expect(errors.map((e) => e.field)).toContain("extra1");
     expect(errors.map((e) => e.field)).toContain("extra2");
@@ -209,10 +206,7 @@ describe("validateToolArgs", () => {
       },
       required: ["path"],
     };
-    const errors = validateToolArgs(
-      { limit: "not-a-number", mystery: true },
-      schema,
-    );
+    const errors = validateToolArgs({ limit: "not-a-number", mystery: true }, schema);
     expect(errors).toHaveLength(3);
     const fields = errors.map((e) => e.field);
     expect(fields).toContain("path");

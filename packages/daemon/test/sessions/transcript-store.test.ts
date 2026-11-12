@@ -30,8 +30,8 @@ describe("TranscriptStore", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("appends with monotonic seq", () => {
     const tr = createTranscriptStore(db);

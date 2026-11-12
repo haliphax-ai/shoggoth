@@ -31,8 +31,8 @@ describe("checkAgentsMdGate", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("returns null when no AGENTS.md files exist below workspace root", () => {
     mkdirSync(join(wsPath, "sub"), { recursive: true });

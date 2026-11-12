@@ -37,8 +37,8 @@ describe("SystemContext in session agent turns", { concurrency: false }, () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   function buildTurnInput(overrides: { userContent: string; systemContext?: SystemContext }) {
     const config = defaultConfig(tmp);

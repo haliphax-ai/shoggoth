@@ -30,8 +30,8 @@ describe("ToolRunStore", () => {
   });
 
   afterEach(async () => {
-  await closeTestDb(db, tmp);
-});
+    await closeTestDb(db, tmp);
+  });
 
   it("markAllRunningFailed sets failure_reason", () => {
     const tr = createToolRunStore(db);
