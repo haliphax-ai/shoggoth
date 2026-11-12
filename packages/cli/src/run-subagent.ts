@@ -115,14 +115,14 @@ const SPAWN_USAGE =
   ")";
 
 export async function runSubagentCli(argv: string[]): Promise<void> {
-  const configDir = process.env.SHOGGOTH_CONFIG_DIR ?? LAYOUT.configDir;
-  const socketPath = await socketPathFromEnv(configDir);
-  const auth = controlAuth();
-
   if (!argv.length || argv[0] === "--help" || argv[0] === "-h") {
     printSubagentHelp();
     return;
   }
+
+  const configDir = process.env.SHOGGOTH_CONFIG_DIR ?? LAYOUT.configDir;
+  const socketPath = await socketPathFromEnv(configDir);
+  const auth = controlAuth();
 
   const sub = argv[0];
   if (sub === "spawn") {
