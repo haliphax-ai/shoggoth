@@ -148,7 +148,6 @@ export async function runVaultCli(argv: string[]): Promise<void> {
     });
     console.log(JSON.stringify(res, null, 2));
     if (!res.ok) process.exitCode = 1;
-    if (!res.ok) process.exitCode = 1;
     return;
   }
 
