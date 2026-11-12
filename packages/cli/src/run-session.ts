@@ -64,6 +64,12 @@ export async function runSessionCli(argv: string[]): Promise<void> {
     return;
   }
   const sub = argv[0];
+
+  if (sub === "list" && (argv.length === 1 || argv[1] === "--help" || argv[1] === "-h")) {
+    printSessionHelp();
+    return;
+  }
+
   const socketPath = await socketPathFromEnv(configDir);
   const auth = controlAuth();
 
