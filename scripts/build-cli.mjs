@@ -16,13 +16,18 @@
  * better-sqlite3). Providing a real `require` avoids that.
  */
 import { build } from "esbuild";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const cjsInteropBanner =
   'import { createRequire as __createRequire } from "node:module";\nconst require = __createRequire(import.meta.url);';
 
 await build({
-  entryPoints: ["packages/cli/src/cli.ts"],
-  outfile: "packages/cli/dist/cli.mjs",
+  absWorkingDir: repoRoot,
+  entryPoints: [join(repoRoot, "packages/cli/src/cli.ts")],
+  outfile: join(repoRoot, "packages/cli/dist/cli.mjs"),
   bundle: true,
   platform: "node",
   format: "esm",
