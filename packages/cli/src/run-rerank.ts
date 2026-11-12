@@ -5,7 +5,7 @@ import {
   rerankModelEntriesFromRecord,
   VERSION,
 } from "@shoggoth/shared";
-import { controlAuth, socketPathFromEnv } from "./cli-utils";
+import { controlAuth, printSubcommandHelpHint, socketPathFromEnv } from "./cli-utils";
 
 function printRerankHelp(): void {
   console.log(`shoggoth ${VERSION}
@@ -181,5 +181,6 @@ export async function runRerankCli(argv: string[]): Promise<void> {
 
   // --- unknown ---
   printRerankHelp();
+  printSubcommandHelpHint("rerank");
   process.exitCode = 1;
 }

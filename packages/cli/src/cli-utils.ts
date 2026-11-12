@@ -39,6 +39,24 @@ export async function resolveSessionTargetOrExit(
 }
 
 /**
+ * Error message for an unrecognized top-level command: names the command and
+ * points at the top-level help, without pretending other commands don't exist.
+ */
+export function printUnknownCommand(command: string | undefined): void {
+  console.error(`unknown command: ${command ?? "(none)"} (try: shoggoth --help)`);
+  process.exitCode = 1;
+}
+
+/**
+ * Error hint for an unrecognized subcommand of a known top-level command:
+ * prints the command's own usage on stderr, then the pointer to its help.
+ * Call after the command's usage output, right before setting exitCode 1.
+ */
+export function printSubcommandHelpHint(command: string): void {
+  console.error(`(see: shoggoth ${command} --help)`);
+}
+
+/**
  * Run a CLI subcommand body, catching unexpected errors thrown by the
  * runner. On error: prints the error message to stderr and sets the
  * process exit code to 1. Returns true when an error was caught, false

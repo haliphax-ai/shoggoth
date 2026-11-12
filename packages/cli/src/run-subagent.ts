@@ -2,7 +2,12 @@ import {
   invokeControlRequest,
   SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES,
 } from "@shoggoth/daemon/lib";
-import { controlAuth, resolveSessionTargetOrExit, socketPathFromEnv } from "./cli-utils";
+import {
+  controlAuth,
+  printSubcommandHelpHint,
+  resolveSessionTargetOrExit,
+  socketPathFromEnv,
+} from "./cli-utils";
 import { LAYOUT, VERSION } from "@shoggoth/shared";
 
 /** Args after `spawn` — pulls `--model-options` / `--model-options=<json>` and `--delivery-mode`, returns positional remainder. */
@@ -221,5 +226,6 @@ export async function runSubagentCli(argv: string[]): Promise<void> {
   }
 
   console.error(SPAWN_USAGE);
+  printSubcommandHelpHint("subagent");
   process.exitCode = 1;
 }

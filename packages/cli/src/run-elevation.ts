@@ -1,5 +1,5 @@
 import { LAYOUT, VERSION } from "@shoggoth/shared";
-import { controlAuth, socketPathFromEnv } from "./cli-utils";
+import { controlAuth, printSubcommandHelpHint, socketPathFromEnv } from "./cli-utils";
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
 
 function parseDuration(raw: string): number {
@@ -124,5 +124,6 @@ export async function runElevationCli(argv: string[]): Promise<void> {
   }
 
   printElevationHelp();
+  printSubcommandHelpHint("elevation");
   process.exitCode = 1;
 }

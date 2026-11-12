@@ -60,6 +60,16 @@ describe("hitl list session target resolution", () => {
   });
 });
 
+describe("hitl unknown subcommand", () => {
+  it("prints usage and a pointer to hitl help", async () => {
+    await runHitlCli(["bogus"]);
+    assert.equal(mockInvoke.mock.calls.length, 0);
+    assert.ok(errored.some((l) => l.includes("usage: shoggoth hitl")));
+    assert.ok(errored.some((l) => l.includes("(see: shoggoth hitl --help)")));
+    assert.equal(process.exitCode, 1);
+  });
+});
+
 describe("hitl clear --session target resolution", () => {
   it("resolves a bare agent id --session to a session URN", async () => {
     mockInvoke.mockResolvedValue({

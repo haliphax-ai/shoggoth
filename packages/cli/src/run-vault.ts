@@ -1,5 +1,5 @@
 import { LAYOUT, VERSION } from "@shoggoth/shared";
-import { controlAuth, socketPathFromEnv } from "./cli-utils";
+import { controlAuth, printSubcommandHelpHint, socketPathFromEnv } from "./cli-utils";
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
 import { readFileSync } from "node:fs";
 import { resolve, isAbsolute } from "node:path";
@@ -152,5 +152,6 @@ export async function runVaultCli(argv: string[]): Promise<void> {
   }
 
   printVaultHelp();
+  printSubcommandHelpHint("vault");
   process.exitCode = 1;
 }

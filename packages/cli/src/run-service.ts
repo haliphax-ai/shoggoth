@@ -4,7 +4,7 @@
 
 import { LAYOUT, VERSION } from "@shoggoth/shared";
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
-import { controlAuth, socketPathFromEnv } from "./cli-utils";
+import { controlAuth, printSubcommandHelpHint, socketPathFromEnv } from "./cli-utils";
 
 interface ControlRequestParams {
   socketPath: string;
@@ -267,5 +267,6 @@ export async function runServiceCli(argv: string[]): Promise<void> {
   }
 
   printServiceHelp();
+  printSubcommandHelpHint("service");
   process.exitCode = 1;
 }

@@ -3,7 +3,12 @@ import { LAYOUT, resolveEffectiveModelsConfig, VERSION } from "@shoggoth/shared"
 import { loadLayeredConfigCachedAsync } from "./config-cache";
 import { runSessionCompact } from "./run-session-compact";
 import { formatModelResult } from "./format-model-result";
-import { controlAuth, resolveSessionTargetOrExit, socketPathFromEnv } from "./cli-utils";
+import {
+  controlAuth,
+  printSubcommandHelpHint,
+  resolveSessionTargetOrExit,
+  socketPathFromEnv,
+} from "./cli-utils";
 
 function printSessionHelp(): void {
   console.log(`shoggoth ${VERSION}
@@ -334,6 +339,7 @@ export async function runSessionCli(argv: string[]): Promise<void> {
   }
 
   printSessionHelp();
+  printSubcommandHelpHint("session");
   process.exitCode = 1;
 }
 

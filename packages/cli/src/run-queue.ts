@@ -1,5 +1,5 @@
 import { LAYOUT, VERSION } from "@shoggoth/shared";
-import { controlAuth, formatTable, socketPathFromEnv } from "./cli-utils";
+import { controlAuth, formatTable, printSubcommandHelpHint, socketPathFromEnv } from "./cli-utils";
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
 
 function printQueueHelp(): void {
@@ -37,6 +37,7 @@ export async function runQueueCli(argv: string[]): Promise<void> {
 
   if (!["list", "remove", "clear"].includes(action)) {
     printQueueHelp();
+    printSubcommandHelpHint("queue");
     process.exitCode = 1;
     return;
   }

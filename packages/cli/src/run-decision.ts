@@ -5,7 +5,7 @@ import {
   LAYOUT,
   VERSION,
 } from "@shoggoth/shared";
-import { controlAuth, socketPathFromEnv } from "./cli-utils";
+import { controlAuth, printSubcommandHelpHint, socketPathFromEnv } from "./cli-utils";
 
 function printDecisionHelp(): void {
   console.log(`shoggoth ${VERSION}
@@ -182,5 +182,6 @@ export async function runDecisionCli(argv: string[]): Promise<void> {
 
   // --- unknown ---
   printDecisionHelp();
+  printSubcommandHelpHint("decision");
   process.exitCode = 1;
 }
