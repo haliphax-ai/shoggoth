@@ -5,19 +5,7 @@ import {
   rerankModelEntriesFromRecord,
   VERSION,
 } from "@shoggoth/shared";
-
-function controlAuth(): { kind: "operator_token"; token: string } {
-  const token = process.env.SHOGGOTH_OPERATOR_TOKEN?.trim();
-  if (!token) throw new Error("SHOGGOTH_OPERATOR_TOKEN is required");
-  return { kind: "operator_token", token };
-}
-
-async function socketPathFromEnv(configPath: string): Promise<string> {
-  const fromEnv = process.env.SHOGGOTH_CONTROL_SOCKET?.trim();
-  if (fromEnv) return fromEnv;
-  const config = await loadLayeredConfigAsync(configPath);
-  return config.socketPath;
-}
+import { controlAuth, socketPathFromEnv } from "./cli-utils";
 
 function printRerankHelp(): void {
   console.log(`shoggoth ${VERSION}

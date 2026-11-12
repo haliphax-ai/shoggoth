@@ -1,4 +1,4 @@
-import { invokeControlRequest, resolveSessionTargetFromCliArg } from "@shoggoth/daemon/lib";
+import { invokeControlRequest } from "@shoggoth/daemon/lib";
 import {
   loadLayeredConfigAsync,
   LAYOUT,
@@ -7,30 +7,7 @@ import {
 } from "@shoggoth/shared";
 import { runSessionCompact } from "./run-session-compact";
 import { formatModelResult } from "./format-model-result";
-
-function controlAuth(): { kind: "operator_token"; token: string } {
-  const token = process.env.SHOGGOTH_OPERATOR_TOKEN?.trim();
-  if (!token) throw new Error("SHOGGOTH_OPERATOR_TOKEN is required");
-  return { kind: "operator_token", token };
-}
-
-async function socketPathFromEnv(configPath: string): Promise<string> {
-  const fromEnv = process.env.SHOGGOTH_CONTROL_SOCKET?.trim();
-  if (fromEnv) return fromEnv;
-  const config = await loadLayeredConfigAsync(configPath);
-  return config.socketPath;
-}
-
-async function resolveSessionTargetOrExit(configDir: string, raw: string): Promise<string | null> {
-  const config = await loadLayeredConfigAsync(configDir);
-  try {
-    return resolveSessionTargetFromCliArg(raw, config);
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exitCode = 1;
-    return null;
-  }
-}
+import { controlAuth, resolveSessionTargetOrExit, socketPathFromEnv } from "./cli-utils";
 
 function printSessionHelp(): void {
   console.log(`shoggoth ${VERSION}
@@ -173,14 +150,8 @@ export async function runSessionCli(argv: string[]): Promise<void> {
       return;
     }
     const config = await loadLayeredConfigAsync(configDir);
-    let sessionId: string;
-    try {
-      sessionId = resolveSessionTargetFromCliArg(rawTarget, config);
-    } catch (e) {
-      console.error(e instanceof Error ? e.message : String(e));
-      process.exitCode = 1;
-      return;
-    }
+    const sessionId = await resolveSessionTargetOrExit(configDir, rawTarget);
+    if (!sessionId) return;
     const models = resolveEffectiveModelsConfig(config, sessionId) ?? config.models;
     const out = await runSessionCompact({
       stateDbPath: config.stateDbPath,
@@ -202,15 +173,8 @@ export async function runSessionCli(argv: string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    const config = await loadLayeredConfigAsync(configDir);
-    let sessionId: string;
-    try {
-      sessionId = resolveSessionTargetFromCliArg(rawTarget, config);
-    } catch (e) {
-      console.error(e instanceof Error ? e.message : String(e));
-      process.exitCode = 1;
-      return;
-    }
+    const sessionId = await resolveSessionTargetOrExit(configDir, rawTarget);
+    if (!sessionId) return;
     await invokeSessionContextControl(configDir, action, sessionId);
     return;
   }

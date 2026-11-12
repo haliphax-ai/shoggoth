@@ -1,4 +1,5 @@
-import { loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
+import { LAYOUT, VERSION } from "@shoggoth/shared";
+import { controlAuth, socketPathFromEnv } from "./cli-utils";
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
 import { readFileSync } from "node:fs";
 import { resolve, isAbsolute } from "node:path";
@@ -8,19 +9,6 @@ function resolveCallerPath(filePath: string): string {
   if (isAbsolute(filePath)) return filePath;
   const callerCwd = process.env.SHOGGOTH_CALLER_CWD || process.cwd();
   return resolve(callerCwd, filePath);
-}
-
-function controlAuth(): { kind: "operator_token"; token: string } {
-  const token = process.env.SHOGGOTH_OPERATOR_TOKEN?.trim();
-  if (!token) throw new Error("SHOGGOTH_OPERATOR_TOKEN is required");
-  return { kind: "operator_token", token };
-}
-
-async function socketPathFromEnv(configPath: string): Promise<string> {
-  const fromEnv = process.env.SHOGGOTH_CONTROL_SOCKET?.trim();
-  if (fromEnv) return fromEnv;
-  const config = await loadLayeredConfigAsync(configPath);
-  return config.socketPath;
 }
 
 function printVaultHelp(): void {

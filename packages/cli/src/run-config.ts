@@ -1,5 +1,6 @@
 import { invokeControlRequest } from "@shoggoth/daemon/lib";
-import { loadLayeredConfigAsync, LAYOUT } from "@shoggoth/shared";
+import { LAYOUT } from "@shoggoth/shared";
+import { controlAuth, socketPathFromEnv } from "./cli-utils";
 
 export function printConfigHelp(version: string): void {
   console.log(`${version}
@@ -7,19 +8,6 @@ export function printConfigHelp(version: string): void {
 Usage:
   shoggoth config show [--dynamic]   Print effective layered config (JSON, redacted)
                                       --dynamic  Show only dynamic config fragments`);
-}
-
-function controlAuth(): { kind: "operator_token"; token: string } {
-  const token = process.env.SHOGGOTH_OPERATOR_TOKEN?.trim();
-  if (!token) throw new Error("SHOGGOTH_OPERATOR_TOKEN is required");
-  return { kind: "operator_token", token };
-}
-
-async function socketPathFromEnv(configPath: string): Promise<string> {
-  const fromEnv = process.env.SHOGGOTH_CONTROL_SOCKET?.trim();
-  if (fromEnv) return fromEnv;
-  const config = await loadLayeredConfigAsync(configPath);
-  return config.socketPath;
 }
 
 export async function runConfigShow(opts?: { dynamic?: boolean }): Promise<void> {
