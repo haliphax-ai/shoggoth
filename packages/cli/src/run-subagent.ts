@@ -1,33 +1,9 @@
 import {
   invokeControlRequest,
-  resolveSessionTargetFromCliArg,
   SUBAGENT_PERSISTENT_INACTIVITY_TIMEOUT_MINUTES,
 } from "@shoggoth/daemon/lib";
-import { loadLayeredConfigAsync, LAYOUT, VERSION } from "@shoggoth/shared";
-
-function controlAuth(): { kind: "operator_token"; token: string } {
-  const token = process.env.SHOGGOTH_OPERATOR_TOKEN?.trim();
-  if (!token) throw new Error("SHOGGOTH_OPERATOR_TOKEN is required");
-  return { kind: "operator_token", token };
-}
-
-async function socketPathFromEnv(configPath: string): Promise<string> {
-  const fromEnv = process.env.SHOGGOTH_CONTROL_SOCKET?.trim();
-  if (fromEnv) return fromEnv;
-  const config = await loadLayeredConfigAsync(configPath);
-  return config.socketPath;
-}
-
-async function resolveSessionTargetOrExit(configDir: string, raw: string): Promise<string | null> {
-  const config = await loadLayeredConfigAsync(configDir);
-  try {
-    return resolveSessionTargetFromCliArg(raw, config);
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exitCode = 1;
-    return null;
-  }
-}
+import { controlAuth, resolveSessionTargetOrExit, socketPathFromEnv } from "./cli-utils";
+import { LAYOUT, VERSION } from "@shoggoth/shared";
 
 /** Args after `spawn` — pulls `--model-options` / `--model-options=<json>` and `--delivery-mode`, returns positional remainder. */
 function parseSubagentSpawnArgv(args: string[]): {
