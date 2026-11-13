@@ -133,9 +133,10 @@ Usage:
   }
   const config = await loadLayeredConfigAsync(configDir);
   if (rest[0] === "list") {
-    process.stdout.write(formatSkillsListJson(config));
-    process.exitCode = 0;
-    process.exit(process.exitCode);
+    await runSubcommand(async () => {
+      process.stdout.write(await formatSkillsListJson(config));
+    });
+    process.exit(process.exitCode ?? 0);
   }
   if (rest[0] === "search") {
     const parsed = parseSkillsSearchArgs(rest.slice(1));
@@ -148,7 +149,7 @@ Usage:
       process.exit(process.exitCode);
     }
     await runSubcommand(async () => {
-      process.stdout.write(formatSkillsSearchJson(config, parsed.params));
+      process.stdout.write(await formatSkillsSearchJson(config, parsed.params));
     });
     process.exit(process.exitCode ?? 0);
   }
@@ -160,7 +161,7 @@ Usage:
       process.exit(process.exitCode);
     }
     await runSubcommand(async () => {
-      process.stdout.write(formatSkillPathLine(config, id));
+      process.stdout.write(await formatSkillPathLine(config, id));
     });
     process.exit(process.exitCode ?? 0);
   }
@@ -172,7 +173,7 @@ Usage:
       process.exit(process.exitCode);
     }
     await runSubcommand(async () => {
-      process.stdout.write(formatSkillReadJson(config, id));
+      process.stdout.write(await formatSkillReadJson(config, id));
     });
     process.exit(process.exitCode ?? 0);
   }

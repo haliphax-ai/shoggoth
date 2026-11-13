@@ -33,18 +33,18 @@ function minimalConfig(
 }
 
 describe("skills-config", () => {
-  test("listSkillsForConfig resolves absolute scan roots", () => {
+  test("listSkillsForConfig resolves absolute scan roots", async () => {
     const cfgDir = mkdtempSync(join(tmpdir(), "sh-skillcfg-"));
     const skillsDir = join(cfgDir, "my-skills");
     mkdirSync(skillsDir);
     writeFileSync(join(skillsDir, "one.md"), `---\nid: one\ntitle: One\n---\n`);
     const cfg = minimalConfig(cfgDir, { scanRoots: [skillsDir] });
-    const list = listSkillsForConfig(cfg);
+    const list = await listSkillsForConfig(cfg);
     assert.strictEqual(list.length, 1);
     assert.strictEqual(list[0]!.id, "one");
   });
 
-  test("listSkillsForConfig appends workspace skills folder", () => {
+  test("listSkillsForConfig appends workspace skills folder", async () => {
     const wsDir = mkdtempSync(join(tmpdir(), "sh-skillws-"));
     const wsSkills = join(wsDir, "skills");
     mkdirSync(wsSkills);
@@ -53,12 +53,12 @@ describe("skills-config", () => {
       `---\nid: ws-skill\ntitle: Workspace Skill\n---\n`,
     );
     const cfg = minimalConfig("/tmp", { scanRoots: [] });
-    const list = listSkillsForConfig(cfg, wsDir);
+    const list = await listSkillsForConfig(cfg, wsDir);
     assert.strictEqual(list.length, 1);
     assert.strictEqual(list[0]!.id, "ws-skill");
   });
 
-  test("workspace skill overrides system skill with same id", () => {
+  test("workspace skill overrides system skill with same id", async () => {
     const sysDir = mkdtempSync(join(tmpdir(), "sh-skillsys-"));
     writeFileSync(
       join(sysDir, "shared.md"),
@@ -72,22 +72,22 @@ describe("skills-config", () => {
       `---\nid: shared\ntitle: Workspace Version\n---\nWorkspace content`,
     );
     const cfg = minimalConfig("/tmp", { scanRoots: [sysDir] });
-    const list = listSkillsForConfig(cfg, wsDir);
+    const list = await listSkillsForConfig(cfg, wsDir);
     assert.strictEqual(list.length, 1);
     assert.strictEqual(list[0]!.title, "Workspace Version");
   });
 
-  test("skillAbsolutePathById finds file", () => {
+  test("skillAbsolutePathById finds file", async () => {
     const cfgDir = mkdtempSync(join(tmpdir(), "sh-skillcfg-"));
     const skillsDir = join(cfgDir, "s");
     mkdirSync(skillsDir);
     const p = join(skillsDir, "z.md");
     writeFileSync(p, `---\nid: zed\n---\n`);
     const cfg = minimalConfig(cfgDir, { scanRoots: [skillsDir] });
-    assert.strictEqual(skillAbsolutePathById(cfg, "zed"), p);
+    assert.strictEqual(await skillAbsolutePathById(cfg, "zed"), p);
   });
 
-  test("skillAbsolutePathById prefers workspace skill", () => {
+  test("skillAbsolutePathById prefers workspace skill", async () => {
     const sysDir = mkdtempSync(join(tmpdir(), "sh-skillsys-"));
     const sysFile = join(sysDir, "x.md");
     writeFileSync(sysFile, `---\nid: x\n---\n`);
@@ -97,16 +97,16 @@ describe("skills-config", () => {
     const wsFile = join(wsSkills, "x.md");
     writeFileSync(wsFile, `---\nid: x\n---\n`);
     const cfg = minimalConfig("/tmp", { scanRoots: [sysDir] });
-    assert.strictEqual(skillAbsolutePathById(cfg, "x", wsDir), wsFile);
+    assert.strictEqual(await skillAbsolutePathById(cfg, "x", wsDir), wsFile);
   });
 
-  test("skillAbsolutePathById still resolves disabled skills by path", () => {
+  test("skillAbsolutePathById still resolves disabled skills by path", async () => {
     const cfgDir = mkdtempSync(join(tmpdir(), "sh-skillcfg-"));
     const skillsDir = join(cfgDir, "s");
     mkdirSync(skillsDir);
     const p = join(skillsDir, "d.md");
     writeFileSync(p, `---\nid: d\n---\n`);
     const cfg = minimalConfig(cfgDir, { scanRoots: [skillsDir], disabledIds: ["d"] });
-    assert.strictEqual(skillAbsolutePathById(cfg, "d"), p);
+    assert.strictEqual(await skillAbsolutePathById(cfg, "d"), p);
   });
 });

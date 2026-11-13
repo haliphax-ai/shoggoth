@@ -6,7 +6,7 @@ import { describe, test } from "vitest";
 import { findSkillPathById, scanSkillDirectories } from "../src/scan-skills";
 
 describe("scanSkillDirectories", () => {
-  test("discovers markdown files and parses id and title from frontmatter", () => {
+  test("discovers markdown files and parses id and title from frontmatter", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
     writeFileSync(
       join(root, "alpha.md"),
@@ -17,7 +17,7 @@ title: Alpha Skill
 Body here
 `,
     );
-    const skills = scanSkillDirectories([root], new Set());
+    const skills = await scanSkillDirectories([root], new Set());
     assert.strictEqual(skills.length, 1);
     assert.strictEqual(skills[0]!.id, "alpha");
     assert.strictEqual(skills[0]!.title, "Alpha Skill");
@@ -25,7 +25,7 @@ Body here
     assert.strictEqual(skills[0]!.enabled, true);
   });
 
-  test("uses path-derived id when frontmatter omits id", () => {
+  test("uses path-derived id when frontmatter omits id", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
     const sub = join(root, "nest");
     mkdirSync(sub);
@@ -36,14 +36,14 @@ title: Beta
 ---
 `,
     );
-    const skills = scanSkillDirectories([root], new Set());
+    const skills = await scanSkillDirectories([root], new Set());
     assert.strictEqual(skills.length, 1);
     assert.ok(skills[0]!.id.includes("nest"));
     assert.ok(skills[0]!.id.includes("beta"));
     assert.strictEqual(skills[0]!.title, "Beta");
   });
 
-  test("config disabledIds disable skills regardless of frontmatter", () => {
+  test("config disabledIds disable skills regardless of frontmatter", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
     writeFileSync(
       join(root, "x.md"),
@@ -54,12 +54,12 @@ enabled: true
 ---
 `,
     );
-    const skills = scanSkillDirectories([root], new Set(["keep-me"]));
+    const skills = await scanSkillDirectories([root], new Set(["keep-me"]));
     assert.strictEqual(skills.length, 1);
     assert.strictEqual(skills[0]!.enabled, false);
   });
 
-  test("frontmatter enabled false marks skill disabled", () => {
+  test("frontmatter enabled false marks skill disabled", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
     writeFileSync(
       join(root, "off.md"),
@@ -70,11 +70,11 @@ enabled: false
 ---
 `,
     );
-    const skills = scanSkillDirectories([root], new Set());
+    const skills = await scanSkillDirectories([root], new Set());
     assert.strictEqual(skills[0]!.enabled, false);
   });
 
-  test("parses tags from frontmatter bracket syntax", () => {
+  test("parses tags from frontmatter bracket syntax", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
     writeFileSync(
       join(root, "tagged.md"),
@@ -85,12 +85,12 @@ tags: [api, Forecast, location]
 ---
 `,
     );
-    const skills = scanSkillDirectories([root], new Set());
+    const skills = await scanSkillDirectories([root], new Set());
     assert.strictEqual(skills.length, 1);
     assert.deepStrictEqual(skills[0]!.tags, ["api", "forecast", "location"]);
   });
 
-  test("parses category from frontmatter", () => {
+  test("parses category from frontmatter", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
     writeFileSync(
       join(root, "cat.md"),
@@ -101,11 +101,11 @@ category: Dev-Tools
 ---
 `,
     );
-    const skills = scanSkillDirectories([root], new Set());
+    const skills = await scanSkillDirectories([root], new Set());
     assert.strictEqual(skills[0]!.category, "dev-tools");
   });
 
-  test("parses description from frontmatter", () => {
+  test("parses description from frontmatter", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
     writeFileSync(
       join(root, "desc.md"),
@@ -116,11 +116,11 @@ description: A skill that does things
 ---
 `,
     );
-    const skills = scanSkillDirectories([root], new Set());
+    const skills = await scanSkillDirectories([root], new Set());
     assert.strictEqual(skills[0]!.description, "A skill that does things");
   });
 
-  test("defaults tags to empty array, category and description to null", () => {
+  test("defaults tags to empty array, category and description to null", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
     writeFileSync(
       join(root, "bare.md"),
@@ -130,13 +130,13 @@ title: Bare
 ---
 `,
     );
-    const skills = scanSkillDirectories([root], new Set());
+    const skills = await scanSkillDirectories([root], new Set());
     assert.deepStrictEqual(skills[0]!.tags, []);
     assert.strictEqual(skills[0]!.category, null);
     assert.strictEqual(skills[0]!.description, null);
   });
 
-  test("parses comma-separated tags without brackets", () => {
+  test("parses comma-separated tags without brackets", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
     writeFileSync(
       join(root, "nb.md"),
@@ -146,11 +146,11 @@ tags: alpha, beta, gamma
 ---
 `,
     );
-    const skills = scanSkillDirectories([root], new Set());
+    const skills = await scanSkillDirectories([root], new Set());
     assert.deepStrictEqual(skills[0]!.tags, ["alpha", "beta", "gamma"]);
   });
 
-  test("lowercases and validates tag format, dropping non-conforming tags", () => {
+  test("lowercases and validates tag format, dropping non-conforming tags", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
     writeFileSync(
       join(root, "valid.md"),
@@ -160,13 +160,13 @@ tags: [Hello, WORLD, foo-bar, a1, tag_underscore, "spa ce", foo@bar, ok-tag]
 ---
 `,
     );
-    const skills = scanSkillDirectories([root], new Set());
+    const skills = await scanSkillDirectories([root], new Set());
     // Conforming tags are lowercased and kept; tags containing anything
     // outside `[a-z0-9-]` (underscore, space, @) are dropped entirely.
     assert.deepStrictEqual(skills[0]!.tags, ["hello", "world", "foo-bar", "a1", "ok-tag"]);
   });
 
-  test("drops tags that are empty or only punctuation after normalization", () => {
+  test("drops tags that are empty or only punctuation after normalization", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
     writeFileSync(
       join(root, "degenerate.md"),
@@ -176,11 +176,11 @@ tags: [" --- ", " ", "", ok]
 ---
 `,
     );
-    const skills = scanSkillDirectories([root], new Set());
+    const skills = await scanSkillDirectories([root], new Set());
     assert.deepStrictEqual(skills[0]!.tags, ["ok"]);
   });
 
-  test("tags value with no conforming entries yields an empty list", () => {
+  test("tags value with no conforming entries yields an empty list", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
     writeFileSync(
       join(root, "junk.md"),
@@ -190,11 +190,11 @@ tags: hello world, foo@bar
 ---
 `,
     );
-    const skills = scanSkillDirectories([root], new Set());
+    const skills = await scanSkillDirectories([root], new Set());
     assert.deepStrictEqual(skills[0]!.tags, []);
   });
 
-  test("hyphenated and numeric tags are preserved", () => {
+  test("hyphenated and numeric tags are preserved", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
     writeFileSync(
       join(root, "keep.md"),
@@ -204,38 +204,38 @@ tags: [smart-home, v2, 2024, ---]
 ---
 `,
     );
-    const skills = scanSkillDirectories([root], new Set());
+    const skills = await scanSkillDirectories([root], new Set());
     assert.deepStrictEqual(skills[0]!.tags, ["smart-home", "v2", "2024", "---"]);
   });
 });
 
 describe("findSkillPathById", () => {
-  test("returns the path of the matching skill file", () => {
+  test("returns the path of the matching skill file", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-findpath-"));
     const p = join(root, "zed.md");
     writeFileSync(p, `---\nid: zed\n---\n`);
     writeFileSync(join(root, "other.md"), `---\nid: other\n---\n`);
-    assert.strictEqual(findSkillPathById([root], "zed"), p);
+    assert.strictEqual(await findSkillPathById([root], "zed"), p);
   });
 
-  test("returns undefined for an unknown id", () => {
+  test("returns undefined for an unknown id", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-findpath-"));
     writeFileSync(join(root, "a.md"), `---\nid: a\n---\n`);
-    assert.strictEqual(findSkillPathById([root], "missing"), undefined);
+    assert.strictEqual(await findSkillPathById([root], "missing"), undefined);
   });
 
-  test("matches the path-derived id when frontmatter omits id", () => {
+  test("matches the path-derived id when frontmatter omits id", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-findpath-"));
     const sub = join(root, "nest");
     mkdirSync(sub);
     const p = join(sub, "beta.md");
     writeFileSync(p, `---\ntitle: Beta\n---\n`);
-    const slugId = scanSkillDirectories([root], new Set())[0]!.id;
+    const slugId = (await scanSkillDirectories([root], new Set()))[0]!.id;
     assert.ok(slugId.includes("beta"));
-    assert.strictEqual(findSkillPathById([root], slugId), p);
+    assert.strictEqual(await findSkillPathById([root], slugId), p);
   });
 
-  test("prefers later roots over earlier roots for the same id", () => {
+  test("prefers later roots over earlier roots for the same id", async () => {
     const sysDir = mkdtempSync(join(tmpdir(), "sh-findpath-sys-"));
     writeFileSync(join(sysDir, "shared.md"), `---\nid: shared\n---\n`);
     const wsDir = mkdtempSync(join(tmpdir(), "sh-findpath-ws-"));
@@ -243,24 +243,24 @@ describe("findSkillPathById", () => {
     mkdirSync(wsSkills);
     writeFileSync(join(wsSkills, "shared.md"), `---\nid: shared\n---\n`);
     assert.strictEqual(
-      findSkillPathById([sysDir, wsSkills], "shared"),
+      await findSkillPathById([sysDir, wsSkills], "shared"),
       join(wsSkills, "shared.md"),
     );
   });
 
-  test("prefers a later file over an earlier file within one root", () => {
+  test("prefers a later file over an earlier file within one root", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-findpath-"));
     const first = join(root, "a.md");
     writeFileSync(first, `---\nid: dup\n---\n`);
     const second = join(root, "z.md");
     writeFileSync(second, `---\nid: dup\n---\n`);
-    assert.strictEqual(findSkillPathById([root], "dup"), second);
+    assert.strictEqual(await findSkillPathById([root], "dup"), second);
   });
 
-  test("ignores non-directory and missing roots", () => {
+  test("ignores non-directory and missing roots", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-findpath-"));
     const p = join(root, "ok.md");
     writeFileSync(p, `---\nid: ok\n---\n`);
-    assert.strictEqual(findSkillPathById(["/definitely/not/a/dir", root], "ok"), p);
+    assert.strictEqual(await findSkillPathById(["/definitely/not/a/dir", root], "ok"), p);
   });
 });

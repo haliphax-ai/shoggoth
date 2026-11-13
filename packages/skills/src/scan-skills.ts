@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { parseBoolField, parseMarkdownFrontmatter } from "./frontmatter";
 
@@ -16,17 +16,17 @@ export interface SkillRecord {
   readonly description: string | null;
 }
 
-function walkMarkdownFiles(dir: string, out: string[]): void {
+async function walkMarkdownFiles(dir: string, out: string[]): Promise<void> {
   let entries;
   try {
-    entries = readdirSync(dir, { withFileTypes: true });
+    entries = await readdir(dir, { withFileTypes: true });
   } catch {
     return;
   }
   for (const ent of entries) {
     const p = join(dir, ent.name);
     if (ent.isDirectory()) {
-      walkMarkdownFiles(p, out);
+      await walkMarkdownFiles(p, out);
     } else if (ent.isFile() && ent.name.endsWith(".md")) {
       out.push(p);
     }
@@ -67,27 +67,27 @@ function pathSlugId(root: string, filePath: string): string {
 /**
  * Recursively scans each root for `*.md` skills; parses YAML-like frontmatter.
  */
-export function scanSkillDirectories(
+export async function scanSkillDirectories(
   roots: readonly string[],
   disabledIds: ReadonlySet<string>,
-): SkillRecord[] {
+): Promise<SkillRecord[]> {
   const recordMap = new Map<string, SkillRecord>();
 
   for (const root of roots) {
     let st;
     try {
-      st = statSync(root, { throwIfNoEntry: false });
+      st = await stat(root);
     } catch {
       continue;
     }
     if (!st?.isDirectory()) continue;
 
     const files: string[] = [];
-    walkMarkdownFiles(root, files);
+    await walkMarkdownFiles(root, files);
     files.sort((a, b) => a.localeCompare(b, "en"));
 
     for (const absolutePath of files) {
-      const raw = readFileSync(absolutePath, "utf8");
+      const raw = await readFile(absolutePath, "utf8");
       const { fields } = parseMarkdownFrontmatter(raw);
       const idRaw = fields["id"]?.trim();
       const id = idRaw && idRaw.length > 0 ? idRaw : pathSlugId(root, absolutePath);
@@ -120,23 +120,26 @@ export function scanSkillDirectories(
  * behavior).  Skips non-matching files without building `SkillRecord`s, and
  * stops as soon as a match is found.
  */
-export function findSkillPathById(roots: readonly string[], id: string): string | undefined {
+export async function findSkillPathById(
+  roots: readonly string[],
+  id: string,
+): Promise<string | undefined> {
   for (let i = roots.length - 1; i >= 0; i--) {
     const root = roots[i]!;
     let st;
     try {
-      st = statSync(root, { throwIfNoEntry: false });
+      st = await stat(root);
     } catch {
       continue;
     }
     if (!st?.isDirectory()) continue;
 
     const files: string[] = [];
-    walkMarkdownFiles(root, files);
+    await walkMarkdownFiles(root, files);
     files.sort((a, b) => b.localeCompare(a, "en"));
 
     for (const absolutePath of files) {
-      const raw = readFileSync(absolutePath, "utf8");
+      const raw = await readFile(absolutePath, "utf8");
       const { fields } = parseMarkdownFrontmatter(raw);
       const idRaw = fields["id"]?.trim();
       const fileId = idRaw && idRaw.length > 0 ? idRaw : pathSlugId(root, absolutePath);

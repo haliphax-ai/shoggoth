@@ -7,8 +7,9 @@ import {
   type SkillSearchParams,
 } from "@shoggoth/skills";
 
-export function formatSkillsListJson(config: ShoggothConfig): string {
-  const rows = listSkillsForConfig(config).map((s) => ({
+export async function formatSkillsListJson(config: ShoggothConfig): Promise<string> {
+  const skills = await listSkillsForConfig(config);
+  const rows = skills.map((s) => ({
     id: s.id,
     title: s.title,
     description: s.description,
@@ -18,8 +19,8 @@ export function formatSkillsListJson(config: ShoggothConfig): string {
   return `${JSON.stringify(rows, null, 2)}\n`;
 }
 
-export function formatSkillPathLine(config: ShoggothConfig, id: string): string {
-  const p = skillAbsolutePathById(config, id);
+export async function formatSkillPathLine(config: ShoggothConfig, id: string): Promise<string> {
+  const p = await skillAbsolutePathById(config, id);
   if (!p) {
     throw new Error(`unknown skill id: ${id}`);
   }
@@ -30,11 +31,11 @@ export function formatSkillPathLine(config: ShoggothConfig, id: string): string 
  * Search/filter skills and return JSON results.  When no search params are
  * provided the full list is returned (backward-compatible).
  */
-export function formatSkillsSearchJson(
+export async function formatSkillsSearchJson(
   config: ShoggothConfig,
   params: SkillSearchParams = {},
-): string {
-  const all = listSkillsForConfig(config);
+): Promise<string> {
+  const all = await listSkillsForConfig(config);
   const results = searchSkills(all, params);
   const rows = results.map((r) => ({
     id: r.skill.id,
@@ -49,8 +50,8 @@ export function formatSkillsSearchJson(
   return `${JSON.stringify(rows, null, 2)}\n`;
 }
 
-export function formatSkillReadJson(config: ShoggothConfig, id: string): string {
-  const p = skillAbsolutePathById(config, id);
+export async function formatSkillReadJson(config: ShoggothConfig, id: string): Promise<string> {
+  const p = await skillAbsolutePathById(config, id);
   if (!p) {
     throw new Error(`unknown skill id: ${id}`);
   }
