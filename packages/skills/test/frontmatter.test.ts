@@ -1,6 +1,7 @@
 import assert from "node:assert";
 import { describe, test } from "vitest";
 import { parseBoolField, parseMarkdownFrontmatter } from "../src/frontmatter";
+import { performance } from "node:perf_hooks";
 
 describe("parseMarkdownFrontmatter", () => {
   test("parses simple key/value pairs and leaves the body", () => {
@@ -60,6 +61,19 @@ Body
 `;
     const { fields } = parseMarkdownFrontmatter(source);
     assert.deepStrictEqual(fields, { id: "alpha", also: "fine" });
+  });
+
+  test("tolerates pathological space runs without super-linear cost", () => {
+    const spaces = " ".repeat(100_000);
+    const pathological = `---\n9${spaces}\n9: value\n---\nBody\n`;
+    const t0 = performance.now();
+    const { fields, body } = parseMarkdownFrontmatter(pathological);
+    const elapsedMs = performance.now() - t0;
+    assert.strictEqual(fields["9"], "value");
+    assert.deepStrictEqual(Object.keys(fields), ["9"]);
+    assert.strictEqual(body, "Body\n");
+    // Guard against quadratic backtracking regressions (ReDoS).
+    assert.ok(elapsedMs < 100, `parse took ${elapsedMs}ms`);
   });
 
   test("preserves colons in values", () => {

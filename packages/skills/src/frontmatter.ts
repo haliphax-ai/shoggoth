@@ -23,9 +23,13 @@ export function parseMarkdownFrontmatter(source: string): ParsedFrontmatter {
       i++;
       break;
     }
-    const m = /^([^:]+)\s*:\s*(.*)$/.exec(line);
-    if (m) {
-      fields[m[1]!] = m[2]!.trim();
+    // Linear-time split instead of a regex: `[^:]+\s*:\s*(.*)` matches a
+    // non-colon prefix, optional spaces, the colon, and the value — but the
+    // repeated `\s*` makes the engine backtrack quadratically on long
+    // space runs (polynomial ReDoS on untrusted frontmatter lines).
+    const colon = line.indexOf(":");
+    if (colon > 0) {
+      fields[line.slice(0, colon)] = line.slice(colon + 1).trim();
     }
   }
   const body = lines.slice(i).join("\n").replace(/^\n+/, "");
