@@ -59,6 +59,20 @@ export function buildSteerBanner(prompt: string): string {
   return `> 🫵 **Steered:** ${prompt}`;
 }
 
+/**
+ * Build the turn-surface rendering for a drained steer-channel message.
+ *
+ * In-turn event deliveries (exec notifications, session-send replies, …) ride
+ * the same steer channel as operator prompts but already lead with their own
+ * blockquote banner; re-wrapping them under a 🫵 **Steered:** lead would stack
+ * two banners on one message. Such content surfaces verbatim; bare prompts
+ * still get the standard steer banner.
+ */
+export function buildInjectedSteerSurface(content: string): string {
+  if (content.startsWith("> ")) return content;
+  return buildSteerBanner(content);
+}
+
 export type InTurnEventOutcome = "in_turn" | "fallback";
 
 /**

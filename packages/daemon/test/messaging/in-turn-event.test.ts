@@ -3,6 +3,7 @@ import assert from "node:assert";
 import {
   buildInTurnEventBanner,
   buildSteerBanner,
+  buildInjectedSteerSurface,
   deliverInTurnEvent,
 } from "../../src/messaging/in-turn-event";
 import {
@@ -63,6 +64,42 @@ describe("buildSteerBanner", () => {
   it("preserves embedded newlines in the prompt", () => {
     const b = buildSteerBanner("line one\nline two");
     assert.equal(b, "> 🫵 **Steered:** line one\nline two");
+  });
+});
+
+describe("buildInjectedSteerSurface", () => {
+  it("wraps a bare prompt in the standard 🫵 steer banner", () => {
+    assert.equal(
+      buildInjectedSteerSurface("Focus on the failing tests first."),
+      "> 🫵 **Steered:** Focus on the failing tests first.",
+    );
+  });
+
+  it("passes banner-carrying content through verbatim (no 🫵 wrapper)", () => {
+    const inTurnBanner = buildInTurnEventBanner({
+      emoji: "↩️",
+      title: "Exec notification",
+      detail: "npm test",
+      id: "n-12",
+    });
+    assert.equal(buildInjectedSteerSurface(inTurnBanner), inTurnBanner);
+  });
+
+  it("does not wrap an OOB timer banner lead either", () => {
+    const oobBanner = "> ⏰ Processing timer: *ping me* `t-1` …";
+    assert.equal(buildInjectedSteerSurface(oobBanner), oobBanner);
+  });
+
+  it("still wraps content that only mentions a banner mid-string", () => {
+    const prompt = 'the exec notification said "> ↩️ Exec notification" but keep going';
+    assert.equal(buildInjectedSteerSurface(prompt), `> 🫵 **Steered:** ${prompt}`);
+  });
+
+  it("preserves embedded newlines in the prompt", () => {
+    assert.equal(
+      buildInjectedSteerSurface("line one\nline two"),
+      "> 🫵 **Steered:** line one\nline two",
+    );
   });
 });
 
