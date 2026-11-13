@@ -19,6 +19,7 @@ import type Database from "better-sqlite3";
 import type { ManagedProcess } from "@shoggoth/procman";
 import { isTerminal, type TruncationMode } from "@shoggoth/os-exec";
 import { getLogger } from "../logging";
+import { pendingDrains, releaseOneShotIfDrained } from "../subagent/one-shot-notify-drain";
 
 const log = getLogger("exec-notify-scheduler");
 
@@ -173,6 +174,10 @@ export class ExecNotifyScheduler {
   cancelBySession(sessionId: string): number {
     const db = this.db;
     if (!db) return 0;
+    // A cancel sweep for this session removes the handles a held one-shot is
+    // waiting on: release the hold (idempotent; no-op for other sessions) so
+    // an operator kill never leaves a zombie hold behind.
+    pendingDrains.delete(sessionId.trim());
     const rows = db
       .prepare("SELECT id FROM exec_notifies WHERE session_id = ? AND fired = 0")
       .all(sessionId) as Array<{ id: string }>;
@@ -291,6 +296,16 @@ export class ExecNotifyScheduler {
         .run(id);
       if (info.changes === 0) return; // already resolved (double state-change, cancel, …)
     }
+    const liveCount = db
+      ? (
+          db
+            .prepare("SELECT COUNT(*) AS cnt FROM exec_notifies WHERE session_id = ? AND fired = 0")
+            .get(completion.handle.sessionId) as { cnt: number }
+        ).cnt
+      : 0;
+    // One-shot notify drain: when a held one-shot session has no live handles
+    // left after this resolution, terminate it (no-op for every other session).
+    releaseOneShotIfDrained(completion.handle.sessionId, liveCount);
     try {
       await this.deliver(completion);
       log.debug("exec notify delivered", {

@@ -97,6 +97,7 @@ import {
 } from "../subagent/contract";
 import { sessionCreds } from "../sessions/session-agent-turn";
 import { terminatePersistentSubagentSession } from "../subagent/subagent-kill";
+import { settleOneShotAfterTurn } from "../subagent/one-shot-notify-drain";
 import {
   buildThreadSubagentCreatedBanner,
   findAdoptableThreadSubagentSession,
@@ -2167,12 +2168,18 @@ export async function handleIntegrationControlOp(
             })
             .finally(() => {
               clearTimeout(ttlTimer);
-              terminatePersistentSubagentSession(
+              // Keep the session alive when background execs it started are
+              // still pending: the notifications carry the exit codes the
+              // subagent must react to. The last handle completion (or the
+              // TTL-capped safety timer) settles the teardown.
+              settleOneShotAfterTurn({
                 sessionManager,
-                childId,
-                undefined,
-                ctx.hitlClear?.autoApproveGate,
-              );
+                sessions,
+                stateDb: ctx.stateDb,
+                sessionId: childId,
+                autoApproveGate: ctx.hitlClear?.autoApproveGate,
+                subLog,
+              });
             });
           ctx.recordIntegrationAudit({
             action: "subagent.spawn_one_shot",
@@ -2281,12 +2288,18 @@ export async function handleIntegrationControlOp(
         } finally {
           clearTimeout(ttlTimer);
           settleTurn = undefined;
-          terminatePersistentSubagentSession(
+          // Keep the session alive when background execs it started are still
+          // pending: the notifications carry the exit codes the subagent must
+          // react to. The last handle completion (or the TTL-capped safety
+          // timer) settles the teardown.
+          settleOneShotAfterTurn({
             sessionManager,
-            childId,
-            undefined,
-            ctx.hitlClear?.autoApproveGate,
-          );
+            sessions,
+            stateDb: ctx.stateDb,
+            sessionId: childId,
+            autoApproveGate: ctx.hitlClear?.autoApproveGate,
+            subLog,
+          });
         }
         // Contract mode: judge the turn's diffs against the contract and
         // return the verdict as an extra field on the spawn response.
