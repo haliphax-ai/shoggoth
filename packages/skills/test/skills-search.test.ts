@@ -70,19 +70,45 @@ const catalog: SkillRecord[] = [
 
 describe("searchSkills", () => {
   test("returns all skills when no params provided", () => {
-    const results = searchSkills(catalog, { limit: 100 });
+    const results = searchSkills(catalog);
     assert.strictEqual(results.length, catalog.length);
   });
 
-  test("default limit is 10", () => {
-    // With 7 items and default limit of 10, all should be returned.
-    const results = searchSkills(catalog);
-    assert.strictEqual(results.length, 7);
+  test("omitting limit returns every match (no default cap)", () => {
+    // A catalog larger than the old default limit of 10 must come back whole.
+    const big = [...catalog];
+    for (let i = big.length; i < 13; i++) {
+      big.push(skill({ id: `extra-${i}` }));
+    }
+    assert.strictEqual(big.length, 13);
+
+    // No params object at all.
+    assert.strictEqual(searchSkills(big).length, 13);
+    // Explicit undefined falls back to the same uncapped default.
+    assert.strictEqual(searchSkills(big, { limit: undefined }).length, 13);
+    // Explicit Infinity is equivalent to the default.
+    assert.strictEqual(searchSkills(big, { limit: Number.POSITIVE_INFINITY }).length, 13);
+
+    // Every skill in the catalog is present in the no-params result.
+    const ids = new Set(searchSkills(big).map((r) => r.skill.id));
+    for (const s of big) {
+      assert.ok(ids.has(s.id), `missing skill ${s.id}`);
+    }
   });
 
   test("limit restricts result count", () => {
     const results = searchSkills(catalog, { limit: 3 });
     assert.strictEqual(results.length, 3);
+  });
+
+  test("offset with no limit returns the full unpaginated tail", () => {
+    const all = searchSkills(catalog);
+    const results = searchSkills(catalog, { offset: 2 });
+    assert.strictEqual(results.length, all.length - 2);
+    assert.deepStrictEqual(
+      results.map((r) => r.skill.id),
+      all.slice(2).map((r) => r.skill.id),
+    );
   });
 
   test("offset paginates results", () => {
@@ -126,6 +152,14 @@ describe("searchSkills", () => {
   test("query with no matches returns empty", () => {
     const results = searchSkills(catalog, { query: "xyznonexistent" });
     assert.strictEqual(results.length, 0);
+  });
+
+  test("explicit limit still caps query results", () => {
+    const uncapped = searchSkills(catalog, { query: "edit", limit: 100 });
+    assert.ok(uncapped.length >= 2);
+    const capped = searchSkills(catalog, { query: "edit", limit: 1 });
+    assert.strictEqual(capped.length, 1);
+    assert.strictEqual(capped[0]!.score, uncapped[0]!.score);
   });
 
   test("tags filter with AND logic", () => {

@@ -142,7 +142,7 @@ interface SkillSearchParams {
   query?: string | null; // Free-text search
   tags?: readonly string[]; // AND-logic tag filter
   category?: string | null; // Exact category match
-  limit?: number; // Max results (default: 10)
+  limit?: number; // Max results (default: all — omit or pass Infinity for uncapped)
   offset?: number; // Pagination offset (default: 0)
 }
 ```
@@ -160,7 +160,8 @@ interface SkillSearchParams {
 | `tags` and `category` | 1×     |
 
 - Results are sorted by score descending, then by `id` ascending for stable ordering.
-- Pagination is applied via `offset` and `limit` after sorting.
+- Pagination is applied via `offset` and `limit` after sorting. When `limit` is
+  omitted, all results (starting at `offset`) are returned.
 
 ### Search Result
 

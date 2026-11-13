@@ -9,7 +9,8 @@ export interface SkillSearchParams {
   readonly tags?: readonly string[];
   /** Filter to skills in a specific category. */
   readonly category?: string | null;
-  /** Maximum number of results to return. @default 10 */
+  /** Maximum number of results to return. Omit (or pass `Infinity`) for all
+   *  results. @default Number.POSITIVE_INFINITY */
   readonly limit?: number;
   /** Pagination offset for large result sets. @default 0 */
   readonly offset?: number;
@@ -74,7 +75,13 @@ export function searchSkills(
   skills: readonly SkillRecord[],
   params: SkillSearchParams = {},
 ): SkillSearchResult[] {
-  const { query = null, tags = [], category = null, limit = 10, offset = 0 } = params;
+  const {
+    query = null,
+    tags = [],
+    category = null,
+    limit = Number.POSITIVE_INFINITY,
+    offset = 0,
+  } = params;
 
   const normalizedQuery = query?.trim().toLowerCase() ?? null;
   const normalizedTags = tags.map((t) => t.trim().toLowerCase()).filter((t) => t.length > 0);
