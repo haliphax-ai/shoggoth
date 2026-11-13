@@ -66,6 +66,11 @@ function pathSlugId(root: string, filePath: string): string {
 
 /**
  * Recursively scans each root for `*.md` skills; parses YAML-like frontmatter.
+ *
+ * A file whose frontmatter block is malformed under the skip policy (see
+ * `parseMarkdownFrontmatter`) is treated as if it did not exist: it produces
+ * no `SkillRecord`, so it cannot shadow other skills or be shadowed, and it
+ * never surfaces partial metadata from a typo'd frontmatter block.
  */
 export async function scanSkillDirectories(
   roots: readonly string[],
@@ -88,7 +93,12 @@ export async function scanSkillDirectories(
 
     for (const absolutePath of files) {
       const raw = await readFile(absolutePath, "utf8");
-      const { fields } = parseMarkdownFrontmatter(raw);
+      const { fields, malformed } = parseMarkdownFrontmatter(raw);
+      if (malformed) {
+        // Skip policy: a malformed frontmatter block means the file cannot
+        // be trusted as a skill — skip it entirely.
+        continue;
+      }
       const idRaw = fields["id"]?.trim();
       const id = idRaw && idRaw.length > 0 ? idRaw : pathSlugId(root, absolutePath);
       const title = (fields["title"] ?? fields["name"] ?? "").trim() || id;
@@ -118,7 +128,9 @@ export async function scanSkillDirectories(
  * Finds the absolute path of the skill with the given id, scanning roots in
  * reverse so later roots win (matching `scanSkillDirectories` last-wins
  * behavior).  Skips non-matching files without building `SkillRecord`s, and
- * stops as soon as a match is found.
+ * stops as soon as a match is found.  Files with malformed frontmatter are
+ * skipped exactly like in `scanSkillDirectories`: a path lookup must not
+ * resolve to a skill whose frontmatter does not parse.
  */
 export async function findSkillPathById(
   roots: readonly string[],
@@ -140,7 +152,11 @@ export async function findSkillPathById(
 
     for (const absolutePath of files) {
       const raw = await readFile(absolutePath, "utf8");
-      const { fields } = parseMarkdownFrontmatter(raw);
+      const { fields, malformed } = parseMarkdownFrontmatter(raw);
+      if (malformed) {
+        // Skip policy: malformed frontmatter is never resolvable by path.
+        continue;
+      }
       const idRaw = fields["id"]?.trim();
       const fileId = idRaw && idRaw.length > 0 ? idRaw : pathSlugId(root, absolutePath);
       if (fileId === id) return absolutePath;

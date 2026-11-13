@@ -12,16 +12,18 @@ title: Alpha Skill
 
 Body here
 `;
-    const { fields, body } = parseMarkdownFrontmatter(source);
+    const { fields, body, malformed } = parseMarkdownFrontmatter(source);
     assert.deepStrictEqual(fields, { id: "alpha", title: "Alpha Skill" });
     assert.strictEqual(body, "Body here\n");
+    assert.strictEqual(malformed, false);
   });
 
   test("treats the entire content as body when the frontmatter fence is missing", () => {
     const source = "just some body text";
-    const { fields, body } = parseMarkdownFrontmatter(source);
+    const { fields, body, malformed } = parseMarkdownFrontmatter(source);
     assert.deepStrictEqual(fields, {});
     assert.strictEqual(body, "just some body text");
+    assert.strictEqual(malformed, false);
   });
 
   test("parses keys containing spaces", () => {
@@ -51,16 +53,17 @@ Body
     assert.strictEqual(fields["日本語"], "nihongo");
   });
 
-  test("does not treat a line without a colon as a key", () => {
+  test("blank lines inside the fences are tolerated", () => {
     const source = `---
 id: alpha
-no colon here
-also: fine
+
+title: Alpha
 ---
 Body
 `;
-    const { fields } = parseMarkdownFrontmatter(source);
-    assert.deepStrictEqual(fields, { id: "alpha", also: "fine" });
+    const { fields, malformed } = parseMarkdownFrontmatter(source);
+    assert.deepStrictEqual(fields, { id: "alpha", title: "Alpha" });
+    assert.strictEqual(malformed, false);
   });
 
   test("tolerates pathological space runs without super-linear cost", () => {
@@ -111,6 +114,108 @@ Body
 `;
     const { fields } = parseMarkdownFrontmatter(source);
     assert.strictEqual(fields["id"], "second");
+  });
+
+  test("handles a closing fence with no trailing newline", () => {
+    const { fields, body, malformed } = parseMarkdownFrontmatter("---\nid: alpha\n---");
+    assert.deepStrictEqual(fields, { id: "alpha" });
+    assert.strictEqual(body, "");
+    assert.strictEqual(malformed, false);
+  });
+});
+
+describe("parseMarkdownFrontmatter malformed-line policy", () => {
+  test("a line without a colon marks the frontmatter malformed", () => {
+    const source = `---
+id: alpha
+no colon here
+---
+Body
+`;
+    const { fields, body, malformed } = parseMarkdownFrontmatter(source);
+    assert.strictEqual(malformed, true);
+    assert.strictEqual(fields["id"], "alpha");
+    assert.strictEqual(body, "Body\n");
+  });
+
+  test("an empty key (colon at index 0) marks the frontmatter malformed", () => {
+    const source = `---
+id: alpha
+: oops, no key
+---
+Body
+`;
+    const { malformed } = parseMarkdownFrontmatter(source);
+    assert.strictEqual(malformed, true);
+  });
+
+  test("a line with only a colon marks the frontmatter malformed", () => {
+    const source = `---
+id: alpha
+:
+---
+Body
+`;
+    const { malformed } = parseMarkdownFrontmatter(source);
+    assert.strictEqual(malformed, true);
+  });
+
+  test("an unclosed frontmatter fence marks the frontmatter malformed", () => {
+    const source = `---
+id: alpha
+title: Never closed`;
+    const { body, malformed } = parseMarkdownFrontmatter(source);
+    assert.strictEqual(malformed, true);
+    assert.strictEqual(body, "");
+  });
+
+  test("malformed does not swallow parseable fields but flags the block", () => {
+    const source = `---
+id: alpha
+tags: [a, b]
+title: Alpha
+colonless
+description: still parsed
+---
+Body
+`;
+    const { fields, malformed } = parseMarkdownFrontmatter(source);
+    assert.strictEqual(malformed, true);
+    assert.deepStrictEqual(fields, {
+      id: "alpha",
+      tags: "[a, b]",
+      title: "Alpha",
+      description: "still parsed",
+    });
+  });
+
+  test("malformed frontmatter is never repaired by later valid lines", () => {
+    const source = `---
+id: alpha
+: bad
+id: good
+---
+Body
+`;
+    const { malformed } = parseMarkdownFrontmatter(source);
+    assert.strictEqual(malformed, true);
+  });
+
+  test("a file with no frontmatter is never malformed", () => {
+    const { malformed, body } = parseMarkdownFrontmatter("plain markdown body\n\nmore text\n");
+    assert.strictEqual(malformed, false);
+    assert.strictEqual(body, "plain markdown body\n\nmore text\n");
+  });
+
+  test("whitespace-only variants of the fence still close the block", () => {
+    const source = `---
+id: alpha
+  ---
+Body
+`;
+    const { malformed, body } = parseMarkdownFrontmatter(source);
+    assert.strictEqual(malformed, false);
+    assert.strictEqual(body, "Body\n");
   });
 });
 
