@@ -3,7 +3,13 @@ interface ParsedFrontmatter {
   readonly body: string;
 }
 
-/** Minimal YAML-ish `key: value` lines between --- fences (v1). */
+/**
+ * Minimal YAML-ish `key: value` lines between --- fences (v1).
+ *
+ * Keys accept any characters up to the first `:` (so keys may contain
+ * spaces or other punctuation); quoted keys are not supported and a `:`
+ * inside a key is not possible since it delimits the value.
+ */
 export function parseMarkdownFrontmatter(source: string): ParsedFrontmatter {
   const lines = source.split(/\r?\n/);
   if (lines[0]?.trim() !== "---") {
@@ -17,7 +23,7 @@ export function parseMarkdownFrontmatter(source: string): ParsedFrontmatter {
       i++;
       break;
     }
-    const m = /^([A-Za-z0-9_.-]+)\s*:\s*(.*)$/.exec(line);
+    const m = /^([^:]+)\s*:\s*(.*)$/.exec(line);
     if (m) {
       fields[m[1]!] = m[2]!.trim();
     }
