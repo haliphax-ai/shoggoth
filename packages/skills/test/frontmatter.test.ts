@@ -122,6 +122,37 @@ Body
     assert.strictEqual(body, "");
     assert.strictEqual(malformed, false);
   });
+
+  test("accepts an empty frontmatter body between the fences", () => {
+    const { fields, body, malformed } = parseMarkdownFrontmatter("---\n---\nBody\n");
+    assert.deepStrictEqual(fields, {});
+    assert.strictEqual(body, "Body\n");
+    assert.strictEqual(malformed, false);
+  });
+
+  test("preserves a multi-line body after the closing fence", () => {
+    const source = `---
+id: alpha
+---
+
+First paragraph.
+
+Second paragraph.
+`;
+    const { fields, body, malformed } = parseMarkdownFrontmatter(source);
+    assert.deepStrictEqual(fields, { id: "alpha" });
+    assert.strictEqual(body, "First paragraph.\n\nSecond paragraph.\n");
+    assert.strictEqual(malformed, false);
+  });
+
+  test("normalizes CRLF line endings", () => {
+    const { fields, body, malformed } = parseMarkdownFrontmatter(
+      "---\r\nid: alpha\r\n---\r\n\r\nBody line\r\n",
+    );
+    assert.deepStrictEqual(fields, { id: "alpha" });
+    assert.strictEqual(body, "Body line\n");
+    assert.strictEqual(malformed, false);
+  });
 });
 
 describe("parseMarkdownFrontmatter malformed-line policy", () => {
@@ -227,10 +258,14 @@ describe("parseBoolField", () => {
 
   test("parses recognized boolean words", () => {
     assert.strictEqual(parseBoolField("true", false), true);
+    assert.strictEqual(parseBoolField("TRUE", false), true);
     assert.strictEqual(parseBoolField("YES", false), true);
+    assert.strictEqual(parseBoolField("yes", false), true);
     assert.strictEqual(parseBoolField("1", false), true);
     assert.strictEqual(parseBoolField("false", true), false);
+    assert.strictEqual(parseBoolField("FALSE", true), false);
     assert.strictEqual(parseBoolField("No", true), false);
+    assert.strictEqual(parseBoolField("no", true), false);
     assert.strictEqual(parseBoolField("0", true), false);
   });
 
