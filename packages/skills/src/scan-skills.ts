@@ -103,3 +103,35 @@ export function scanSkillDirectories(
 
   return [...recordMap.values()];
 }
+
+/**
+ * Finds the absolute path of the skill with the given id, scanning roots in
+ * reverse so later roots win (matching `scanSkillDirectories` last-wins
+ * behavior).  Skips non-matching files without building `SkillRecord`s, and
+ * stops as soon as a match is found.
+ */
+export function findSkillPathById(roots: readonly string[], id: string): string | undefined {
+  for (let i = roots.length - 1; i >= 0; i--) {
+    const root = roots[i]!;
+    let st;
+    try {
+      st = statSync(root, { throwIfNoEntry: false });
+    } catch {
+      continue;
+    }
+    if (!st?.isDirectory()) continue;
+
+    const files: string[] = [];
+    walkMarkdownFiles(root, files);
+    files.sort((a, b) => b.localeCompare(a, "en"));
+
+    for (const absolutePath of files) {
+      const raw = readFileSync(absolutePath, "utf8");
+      const { fields } = parseMarkdownFrontmatter(raw);
+      const idRaw = fields["id"]?.trim();
+      const fileId = idRaw && idRaw.length > 0 ? idRaw : pathSlugId(root, absolutePath);
+      if (fileId === id) return absolutePath;
+    }
+  }
+  return undefined;
+}

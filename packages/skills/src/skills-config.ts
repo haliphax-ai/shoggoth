@@ -1,7 +1,7 @@
 import type { ShoggothConfig } from "@shoggoth/shared";
 import { LAYOUT } from "@shoggoth/shared";
 import { isAbsolute, resolve } from "node:path";
-import { scanSkillDirectories } from "./scan-skills";
+import { findSkillPathById, scanSkillDirectories } from "./scan-skills";
 import type { SkillRecord } from "./scan-skills";
 
 /**
@@ -34,6 +34,5 @@ export function skillAbsolutePathById(
   if (workspacePath) {
     roots.push(resolve(workspacePath, "skills"));
   }
-  const all = scanSkillDirectories(roots, new Set());
-  return all.find((s) => s.id === id)?.absolutePath;
+  return findSkillPathById(roots, id);
 }
