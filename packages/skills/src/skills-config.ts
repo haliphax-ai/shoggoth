@@ -13,6 +13,22 @@ export function resolveSkillScanRoots(config: Pick<ShoggothConfig, "skills">): s
 }
 
 /**
+ * Fully resolve all scan roots: configured roots (relative to the data root)
+ * plus the agent workspace skills folder when a workspace path is provided.
+ * Workspace roots are appended last so they can override configured skills.
+ */
+function resolveAllSkillRoots(
+  config: Pick<ShoggothConfig, "skills">,
+  workspacePath?: string,
+): string[] {
+  const roots = resolveSkillScanRoots(config);
+  if (workspacePath) {
+    roots.push(resolve(workspacePath, "skills"));
+  }
+  return roots;
+}
+
+/**
  * List all skills from configured roots + the agent workspace skills folder.
  * Last skill loaded with the same id wins; workspace skills are scanned last.
  */
@@ -20,12 +36,8 @@ export async function listSkillsForConfig(
   config: ShoggothConfig,
   workspacePath?: string,
 ): Promise<SkillRecord[]> {
-  const roots = resolveSkillScanRoots(config);
-  if (workspacePath) {
-    roots.push(resolve(workspacePath, "skills"));
-  }
   const disabled = new Set(config.skills.disabledIds);
-  return scanSkillDirectories(roots, disabled);
+  return scanSkillDirectories(resolveAllSkillRoots(config, workspacePath), disabled);
 }
 
 export async function skillAbsolutePathById(
@@ -33,9 +45,5 @@ export async function skillAbsolutePathById(
   id: string,
   workspacePath?: string,
 ): Promise<string | undefined> {
-  const roots = resolveSkillScanRoots(config);
-  if (workspacePath) {
-    roots.push(resolve(workspacePath, "skills"));
-  }
-  return findSkillPathById(roots, id);
+  return findSkillPathById(resolveAllSkillRoots(config, workspacePath), id);
 }
