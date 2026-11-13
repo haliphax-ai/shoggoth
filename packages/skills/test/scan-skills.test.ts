@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "vitest";
-import { scanSkillDirectories } from "../src/scan-skills";
+import { findSkillPathById, scanSkillDirectories } from "../src/scan-skills";
 
 describe("scanSkillDirectories", () => {
   test("discovers markdown files and parses id and title from frontmatter", () => {
@@ -148,5 +148,61 @@ tags: alpha, beta, gamma
     );
     const skills = scanSkillDirectories([root], new Set());
     assert.deepStrictEqual(skills[0]!.tags, ["alpha", "beta", "gamma"]);
+  });
+});
+
+describe("findSkillPathById", () => {
+  test("returns the path of the matching skill file", () => {
+    const root = mkdtempSync(join(tmpdir(), "sh-findpath-"));
+    const p = join(root, "zed.md");
+    writeFileSync(p, `---\nid: zed\n---\n`);
+    writeFileSync(join(root, "other.md"), `---\nid: other\n---\n`);
+    assert.strictEqual(findSkillPathById([root], "zed"), p);
+  });
+
+  test("returns undefined for an unknown id", () => {
+    const root = mkdtempSync(join(tmpdir(), "sh-findpath-"));
+    writeFileSync(join(root, "a.md"), `---\nid: a\n---\n`);
+    assert.strictEqual(findSkillPathById([root], "missing"), undefined);
+  });
+
+  test("matches the path-derived id when frontmatter omits id", () => {
+    const root = mkdtempSync(join(tmpdir(), "sh-findpath-"));
+    const sub = join(root, "nest");
+    mkdirSync(sub);
+    const p = join(sub, "beta.md");
+    writeFileSync(p, `---\ntitle: Beta\n---\n`);
+    const slugId = scanSkillDirectories([root], new Set())[0]!.id;
+    assert.ok(slugId.includes("beta"));
+    assert.strictEqual(findSkillPathById([root], slugId), p);
+  });
+
+  test("prefers later roots over earlier roots for the same id", () => {
+    const sysDir = mkdtempSync(join(tmpdir(), "sh-findpath-sys-"));
+    writeFileSync(join(sysDir, "shared.md"), `---\nid: shared\n---\n`);
+    const wsDir = mkdtempSync(join(tmpdir(), "sh-findpath-ws-"));
+    const wsSkills = join(wsDir, "skills");
+    mkdirSync(wsSkills);
+    writeFileSync(join(wsSkills, "shared.md"), `---\nid: shared\n---\n`);
+    assert.strictEqual(
+      findSkillPathById([sysDir, wsSkills], "shared"),
+      join(wsSkills, "shared.md"),
+    );
+  });
+
+  test("prefers a later file over an earlier file within one root", () => {
+    const root = mkdtempSync(join(tmpdir(), "sh-findpath-"));
+    const first = join(root, "a.md");
+    writeFileSync(first, `---\nid: dup\n---\n`);
+    const second = join(root, "z.md");
+    writeFileSync(second, `---\nid: dup\n---\n`);
+    assert.strictEqual(findSkillPathById([root], "dup"), second);
+  });
+
+  test("ignores non-directory and missing roots", () => {
+    const root = mkdtempSync(join(tmpdir(), "sh-findpath-"));
+    const p = join(root, "ok.md");
+    writeFileSync(p, `---\nid: ok\n---\n`);
+    assert.strictEqual(findSkillPathById(["/definitely/not/a/dir", root], "ok"), p);
   });
 });
