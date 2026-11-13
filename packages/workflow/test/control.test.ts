@@ -565,14 +565,23 @@ describe("ControlPlane", () => {
   describe("retry", () => {
     const activeOrchestrators: Orchestrator[] = [];
 
+    beforeEach(() => {
+      // cp.retry() arms the orchestrator's polling timer (startPolling), which
+      // would otherwise fire background ticks during retry's real-fs awaits and
+      // race the retry assertions (pending → in_progress before we read it).
+      // Fake timers pin those ticks; afterEach restores real time first so the
+      // explicit orch.tick() calls below never dead-stop.
+      vi.useFakeTimers();
+    });
+
     afterEach(async () => {
+      vi.useRealTimers();
       // cp.retry() restarts the polling loop, so these orchestrators can have
       // background ticks in flight: stop the timers, then drain before the
       // file-level teardown removes the state directory.
       for (const orch of activeOrchestrators) orch.stopPolling();
       for (const orch of activeOrchestrators) await orch.waitForIdle();
       activeOrchestrators.length = 0;
-      vi.useRealTimers();
     });
 
     it("resets a failed task to pending and spawns it on next tick", async () => {
