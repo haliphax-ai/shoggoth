@@ -24,19 +24,20 @@ export interface SkillSearchResult {
   readonly score: number;
 }
 
-/**
- * Case-insensitive substring match score.  Returns the number of times
+/** Case-insensitive substring match score.  Returns the number of times
  * `needle` appears in `haystack`, or 0 if absent.
+ *
+ * Both arguments must already be lowercased by the caller: this helper runs
+ * once per skill field per search, so inputs are lowercased once per field
+ * (in {@link scoreSkill}) instead of on every match attempt here.
  */
 function substringScore(haystack: string, needle: string): number {
   if (!needle) return 0;
-  const h = haystack.toLowerCase();
-  const n = needle.toLowerCase();
   let count = 0;
   let idx = 0;
-  while ((idx = h.indexOf(n, idx)) !== -1) {
+  while ((idx = haystack.indexOf(needle, idx)) !== -1) {
     count++;
-    idx += n.length;
+    idx += needle.length;
   }
   return count;
 }
@@ -47,22 +48,29 @@ function substringScore(haystack: string, needle: string): number {
  */
 function scoreSkill(skill: SkillRecord, query: string): number {
   if (!query) return 0;
-  const q = query.toLowerCase();
+  // `query` arrives already lowercased (the caller normalizes it once);
+  // lowercase each skill field once so `substringScore` never re-lowercases
+  // per match attempt.
+  const id = skill.id.toLowerCase();
+  const title = skill.title.toLowerCase();
+  const description = skill.description?.toLowerCase() ?? null;
+  const category = skill.category?.toLowerCase() ?? null;
+  const tags = skill.tags.length > 0 ? skill.tags.map((tag) => tag.toLowerCase()) : [];
 
   // Weighted: id/title matches are most valuable, then description, then tags.
   let score = 0;
-  score += substringScore(skill.id, q) * 3;
-  score += substringScore(skill.title, q) * 3;
-  if (skill.description) {
-    score += substringScore(skill.description, q) * 2;
+  score += substringScore(id, query) * 3;
+  score += substringScore(title, query) * 3;
+  if (description) {
+    score += substringScore(description, query) * 2;
   }
-  if (skill.tags.length > 0) {
-    for (const tag of skill.tags) {
-      score += substringScore(tag, q) * 1;
+  if (tags.length > 0) {
+    for (const tag of tags) {
+      score += substringScore(tag, query) * 1;
     }
   }
-  if (skill.category) {
-    score += substringScore(skill.category, q) * 1;
+  if (category) {
+    score += substringScore(category, query) * 1;
   }
   return score;
 }
