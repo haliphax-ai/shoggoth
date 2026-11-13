@@ -188,15 +188,37 @@ export async function createSessionMcpRuntime(
   // Register elevation tool finalizer (conditionally injects builtin-elevate when grant is active).
   finalizers.push(createElevationToolFinalizer(opts.db));
   // Register skills enum finalizer (enriches builtin-skills id field with available skill IDs).
+  // The skill scan is async, so resolveContext refreshes a per-session ID
+
+  const skillsEnumIdsBySession = new Map<string, string[]>();
+
+  async function refreshSkillsEnumIds(sessionId: string): Promise<void> {
+    const parsed = parseAgentSessionUrn(sessionId);
+    const workspacesRoot = opts.config.workspacesRoot ?? LAYOUT.workspacesRoot;
+    const workspacePath = parsed ? resolve(workspacesRoot, parsed.agentId) : undefined;
+    try {
+      const skills = await listSkillsForConfig(opts.config, workspacePath);
+      skillsEnumIdsBySession.set(
+        sessionId,
+        skills.filter((s) => s.enabled).map((s) => s.id),
+      );
+    } catch {
+      skillsEnumIdsBySession.delete(sessionId);
+    }
+    // Cap the cache: Map preserves insertion order, so drop the oldest entry.
+    while (skillsEnumIdsBySession.size > 64) {
+      const oldest = skillsEnumIdsBySession.keys().next().value;
+      if (oldest === undefined) break;
+      skillsEnumIdsBySession.delete(oldest);
+    }
+  }
+
+  // Register skills enum finalizer (enriches builtin-skills id field with available skill IDs).
   finalizers.push((ctx, sessionId) => {
     const skillsTool = ctx.aggregated.tools.find((t) => t.namespacedName === "builtin-skills");
     if (!skillsTool) return ctx;
 
-    const parsed = parseAgentSessionUrn(sessionId);
-    const workspacesRoot = opts.config.workspacesRoot ?? LAYOUT.workspacesRoot;
-    const workspacePath = parsed ? resolve(workspacesRoot, parsed.agentId) : undefined;
-    const skills = listSkillsForConfig(opts.config, workspacePath);
-    const ids = skills.filter((s) => s.enabled).map((s) => s.id);
+    const ids = skillsEnumIdsBySession.get(sessionId) ?? [];
     if (ids.length === 0) return ctx;
 
     const inputSchema = JSON.parse(JSON.stringify(skillsTool.inputSchema));
@@ -583,6 +605,9 @@ export async function createSessionMcpRuntime(
   // ── resolveContext ───────────────────────────────────────────────
 
   async function resolveContext(sessionId: string): Promise<SessionMcpToolContext> {
+    // Fire-and-forget: awaiting the scan here would stall turns on real-fs I/O
+    // under fake timers in tests. Finalizers use the last-known ID list.
+    void refreshSkillsEnumIds(sessionId);
     if (mcpServers.length === 0) {
       return runContextFinalizers(builtinMcpCtx, sessionId);
     }

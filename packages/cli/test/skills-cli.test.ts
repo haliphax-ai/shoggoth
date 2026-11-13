@@ -33,29 +33,29 @@ function cfg(configDirectory: string, skills: ShoggothConfig["skills"]): Shoggot
 }
 
 describe("skills-cli", () => {
-  test("formatSkillsListJson includes discovered skills", () => {
+  test("formatSkillsListJson includes discovered skills", async () => {
     const d = mkdtempSync(join(tmpdir(), "sh-clisk-"));
     const sd = join(d, "sk");
     mkdirSync(sd);
     writeFileSync(join(sd, "a.md"), "---\nid: a\ntitle: A\n---\n");
     const c = cfg(d, { scanRoots: [sd], disabledIds: [] });
-    const out = JSON.parse(formatSkillsListJson(c)) as { id: string }[];
+    const out = JSON.parse(await formatSkillsListJson(c)) as { id: string }[];
     assert.strictEqual(out.length, 1);
     assert.strictEqual(out[0]!.id, "a");
   });
 
-  test("formatSkillPathLine prints absolute path", () => {
+  test("formatSkillPathLine prints absolute path", async () => {
     const d = mkdtempSync(join(tmpdir(), "sh-clisk-"));
     const sd = join(d, "sk");
     mkdirSync(sd);
     const fp = join(sd, "b.md");
     writeFileSync(fp, "---\nid: bee\n---\n");
     const c = cfg(d, { scanRoots: [sd], disabledIds: [] });
-    const line = formatSkillPathLine(c, "bee").trim();
+    const line = (await formatSkillPathLine(c, "bee")).trim();
     assert.strictEqual(line, fp);
   });
 
-  test("formatSkillReadJson returns path and content", () => {
+  test("formatSkillReadJson returns path and content", async () => {
     const d = mkdtempSync(join(tmpdir(), "sh-clisk-"));
     const sd = join(d, "sk");
     mkdirSync(sd);
@@ -63,7 +63,7 @@ describe("skills-cli", () => {
     const body = "---\nid: cee\ntitle: C\n---\nHello skill";
     writeFileSync(fp, body);
     const c = cfg(d, { scanRoots: [sd], disabledIds: [] });
-    const out = JSON.parse(formatSkillReadJson(c, "cee")) as {
+    const out = JSON.parse(await formatSkillReadJson(c, "cee")) as {
       path: string;
       content: string;
     };
@@ -71,7 +71,7 @@ describe("skills-cli", () => {
     assert.strictEqual(out.content, body);
   });
 
-  test("formatSkillsSearchJson returns matching skills with metadata", () => {
+  test("formatSkillsSearchJson returns matching skills with metadata", async () => {
     const d = mkdtempSync(join(tmpdir(), "sh-clisk-"));
     const sd = join(d, "sk");
     mkdirSync(sd);
@@ -86,7 +86,7 @@ describe("skills-cli", () => {
     const c = cfg(d, { scanRoots: [sd], disabledIds: [] });
 
     // Search by query
-    const byQuery = JSON.parse(formatSkillsSearchJson(c, { query: "weather" })) as {
+    const byQuery = JSON.parse(await formatSkillsSearchJson(c, { query: "weather" })) as {
       id: string;
       tags: string[];
       category: string | null;
@@ -101,18 +101,18 @@ describe("skills-cli", () => {
     assert.ok(byQuery[0]!.score > 0);
 
     // Search by category
-    const byCat = JSON.parse(formatSkillsSearchJson(c, { category: "dev-tools" })) as {
+    const byCat = JSON.parse(await formatSkillsSearchJson(c, { category: "dev-tools" })) as {
       id: string;
     }[];
     assert.strictEqual(byCat.length, 1);
     assert.strictEqual(byCat[0]!.id, "github");
 
     // No params returns all
-    const all = JSON.parse(formatSkillsSearchJson(c)) as { id: string }[];
+    const all = JSON.parse(await formatSkillsSearchJson(c)) as { id: string }[];
     assert.strictEqual(all.length, 2);
   });
 
-  test("parseSkillsSearchArgs parses search flags", () => {
+  test("parseSkillsSearchArgs parses search flags", async () => {
     const ok = parseSkillsSearchArgs([
       "--query",
       "weather",
@@ -147,7 +147,7 @@ describe("skills-cli", () => {
     if (unknown.ok) assert.deepStrictEqual(unknown.params, { query: "q" });
   });
 
-  test("parseSkillsSearchArgs rejects invalid values", () => {
+  test("parseSkillsSearchArgs rejects invalid values", async () => {
     const missingTagValue = parseSkillsSearchArgs(["--tag"]);
     assert.ok(!missingTagValue.ok);
     if (!missingTagValue.ok) assert.ok(missingTagValue.error.includes("--tag"));
@@ -169,7 +169,7 @@ describe("skills-cli", () => {
     if (!badOffset.ok) assert.ok(badOffset.error.includes("--offset"));
   });
 
-  test("formatSkillsSearchJson applies limit and offset", () => {
+  test("formatSkillsSearchJson applies limit and offset", async () => {
     const d = mkdtempSync(join(tmpdir(), "sh-clisk-"));
     const sd = join(d, "sk");
     mkdirSync(sd);
@@ -178,7 +178,7 @@ describe("skills-cli", () => {
     writeFileSync(join(sd, "g.md"), "---\nid: gamma\n---\n");
     const c = cfg(d, { scanRoots: [sd], disabledIds: [] });
 
-    const page = JSON.parse(formatSkillsSearchJson(c, { limit: 2, offset: 1 })) as {
+    const page = JSON.parse(await formatSkillsSearchJson(c, { limit: 2, offset: 1 })) as {
       id: string;
       score: number;
     }[];
