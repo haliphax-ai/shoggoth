@@ -194,6 +194,112 @@ tags: hello world, foo@bar
     assert.deepStrictEqual(skills[0]!.tags, []);
   });
 
+  test("skips skill files with malformed frontmatter entirely", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
+    writeFileSync(
+      join(root, "broken.md"),
+      `---
+id: broken
+title: Broken Skill
+this line has no colon
+---
+Body
+`,
+    );
+    writeFileSync(
+      join(root, "good.md"),
+      `---
+id: good
+title: Good Skill
+---
+Body
+`,
+    );
+    const skills = await scanSkillDirectories([root], new Set());
+    assert.deepStrictEqual(
+      skills.map((s) => s.id),
+      ["good"],
+    );
+  });
+
+  test("malformed file does not shadow a valid skill with the same id", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
+    writeFileSync(
+      join(root, "a.md"),
+      `---
+id: dup
+title: Broken Version
+no colon here
+---
+Body
+`,
+    );
+    writeFileSync(
+      join(root, "z.md"),
+      `---
+id: dup
+title: Valid Version
+---
+Body
+`,
+    );
+    const skills = await scanSkillDirectories([root], new Set());
+    assert.strictEqual(skills.length, 1);
+    assert.strictEqual(skills[0]!.id, "dup");
+    assert.strictEqual(skills[0]!.title, "Valid Version");
+  });
+
+  test("malformed file is not resurrected by a later valid root", async () => {
+    const sysDir = mkdtempSync(join(tmpdir(), "sh-skills-sys-"));
+    writeFileSync(
+      join(sysDir, "x.md"),
+      `---
+id: x
+title: Broken
+colonless line
+---
+`,
+    );
+    const wsDir = mkdtempSync(join(tmpdir(), "sh-skills-ws-"));
+    const wsSkills = join(wsDir, "skills");
+    mkdirSync(wsSkills);
+    writeFileSync(join(wsSkills, "x.md"), `---\nid: x\ntitle: Valid\n---\n`);
+    const skills = await scanSkillDirectories([sysDir, wsSkills], new Set());
+    assert.strictEqual(skills.length, 1);
+    assert.strictEqual(skills[0]!.title, "Valid");
+  });
+
+  test("empty-key line (leading colon) is fatal for the skill", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
+    writeFileSync(
+      join(root, "empty-key.md"),
+      `---
+id: empty-key
+: oops
+---
+Body
+`,
+    );
+    const skills = await scanSkillDirectories([root], new Set());
+    assert.strictEqual(skills.length, 0);
+  });
+
+  test("unclosed frontmatter fence is fatal for the skill", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
+    writeFileSync(join(root, "unclosed.md"), "---\nid: unclosed\ntitle: Never Closed");
+    const skills = await scanSkillDirectories([root], new Set());
+    assert.strictEqual(skills.length, 0);
+  });
+
+  test("skill with no frontmatter at all is still discovered", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
+    writeFileSync(join(root, "plain.md"), "Just markdown body, no frontmatter.\n");
+    const skills = await scanSkillDirectories([root], new Set());
+    assert.strictEqual(skills.length, 1);
+    assert.ok(skills[0]!.id.includes("plain"));
+    assert.strictEqual(skills[0]!.title, "plain");
+  });
+
   test("hyphenated and numeric tags are preserved", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
     writeFileSync(
@@ -222,6 +328,32 @@ describe("findSkillPathById", () => {
     const root = mkdtempSync(join(tmpdir(), "sh-findpath-"));
     writeFileSync(join(root, "a.md"), `---\nid: a\n---\n`);
     assert.strictEqual(await findSkillPathById([root], "missing"), undefined);
+  });
+
+  test("never resolves a skill with malformed frontmatter", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sh-findpath-"));
+    const broken = join(root, "broken.md");
+    writeFileSync(
+      broken,
+      `---
+id: broken
+colonless line
+---
+Body
+`,
+    );
+    assert.strictEqual(await findSkillPathById([root], "broken"), undefined);
+    // The path-derived id must not resolve either.
+    assert.strictEqual(await findSkillPathById([root], "broken.md"), undefined);
+    assert.strictEqual(await findSkillPathById([root], "any"), undefined);
+  });
+
+  test("malformed file does not block resolution of a valid later file with the same id", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sh-findpath-"));
+    writeFileSync(join(root, "a.md"), `---\nid: dup\ncolonless\n---\n`);
+    const second = join(root, "z.md");
+    writeFileSync(second, `---\nid: dup\n---\n`);
+    assert.strictEqual(await findSkillPathById([root], "dup"), second);
   });
 
   test("matches the path-derived id when frontmatter omits id", async () => {

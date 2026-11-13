@@ -87,7 +87,27 @@ presented to agents when they read the skill.
 - The parser is minimal and line-oriented — it is **not** a full YAML parser.
 - Each line inside the `---` fences is matched against the pattern `key: value` where the key is any text up to the first `:` (keys may contain spaces or other punctuation, but not a `:` itself).
 - Values are taken as raw strings; boolean coercion and tag array parsing happen in dedicated helpers.
-- If the file does not start with `---`, the entire content is treated as the body with no frontmatter fields.
+- If the file does not start with `---`, the entire content is treated as the body with no frontmatter fields (this is **not** malformed — see below).
+
+### Malformed Frontmatter (Skip Policy)
+
+A frontmatter block is **malformed** when any of the following is true:
+
+1. A non-blank line inside the `---` fences has no colon (e.g. a typo like `tags [a, b]` or accidental body text pasted into the block).
+2. A non-blank line inside the fences starts with `:` (empty key — the colon is at position 0).
+3. The opening `---` fence is never closed by a second `---` line.
+
+Blank lines inside the fences and the closing `---` fence itself are structural and always tolerated.
+
+**The skip policy is strict: a file with malformed frontmatter is treated as if it did not exist.**
+
+- `scanSkillDirectories()` produces no `SkillRecord` for it — it is not listed, not searchable, and cannot shadow or be shadowed by another skill sharing its (hypothetical) ID.
+- `findSkillPathById()` (and therefore `skillAbsolutePathById()` / the `builtin-skills` `path` action) never resolves to it.
+- The file's frontmatter is **not** partially applied: a typo must never silently produce a skill with missing title, tags, or other metadata.
+
+Note the asymmetry with tag parsing: individual malformed _tags_ are dropped while the rest of the skill loads (tags are advisory), but a malformed _frontmatter block_ invalidates the whole file. Fix the file's frontmatter to restore the skill.
+
+A file with no frontmatter at all (no leading `---`) is still a valid skill — it just uses a path-derived ID and default metadata.
 
 ### Auto-Generated Skill IDs
 
@@ -110,10 +130,11 @@ Skills are discovered by the `scanSkillDirectories()` function:
 3. Each root is recursively walked for `*.md` files.
 4. Files within each root are sorted lexicographically for deterministic ordering.
 5. Frontmatter is parsed from each file to extract metadata.
-6. A skill is marked `enabled: false` if **either**:
+6. Files whose frontmatter block is malformed are skipped entirely (see [Malformed Frontmatter (Skip Policy)](#malformed-frontmatter-skip-policy)) — they produce no record.
+7. A skill is marked `enabled: false` if **either**:
    - The frontmatter `enabled` field is `false`, **or**
    - The skill's ID appears in `config.skills.disabledIds`.
-7. Skills are stored in a Map keyed by ID — when duplicate IDs are encountered, the last one loaded replaces the earlier entry.
+8. Skills are stored in a Map keyed by ID — when duplicate IDs are encountered, the last one loaded replaces the earlier entry.
 
 The result is an array of `SkillRecord` objects:
 
