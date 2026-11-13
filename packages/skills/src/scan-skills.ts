@@ -1,6 +1,9 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
+import { getLogger } from "@shoggoth/shared";
 import { parseBoolField, parseMarkdownFrontmatter } from "./frontmatter";
+
+const log = getLogger("skills");
 
 export interface SkillRecord {
   readonly id: string;
@@ -71,6 +74,14 @@ function pathSlugId(root: string, filePath: string): string {
  * `parseMarkdownFrontmatter`) is treated as if it did not exist: it produces
  * no `SkillRecord`, so it cannot shadow other skills or be shadowed, and it
  * never surfaces partial metadata from a typo'd frontmatter block.
+ *
+ * Duplicate ids are deduplicated **last-wins**: when two skills across the
+ * roots share the same `id`, the one scanned later (later root in `roots`,
+ * then lexicographically later file within a root) silently replaces the
+ * earlier entry. There is no error and no partial merge — callers get one
+ * `SkillRecord` per id, so direct callers of this function (as opposed to
+ * `listSkillsForConfig`) must not assume every input file survived.
+ * A warning is logged whenever a collision is detected.
  */
 export async function scanSkillDirectories(
   roots: readonly string[],
@@ -109,6 +120,14 @@ export async function scanSkillDirectories(
       const category = categoryRaw && categoryRaw.length > 0 ? categoryRaw : null;
       const descRaw = fields["description"]?.trim();
       const description = descRaw && descRaw.length > 0 ? descRaw : null;
+      const previous = recordMap.get(id);
+      if (previous) {
+        log.warn("duplicate skill id; last scanned wins", {
+          skillId: id,
+          replacedPath: previous.absolutePath,
+          replacementPath: absolutePath,
+        });
+      }
       recordMap.set(id, {
         id,
         title,
