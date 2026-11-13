@@ -99,4 +99,14 @@ describe("skills-config", () => {
     const cfg = minimalConfig("/tmp", { scanRoots: [sysDir] });
     assert.strictEqual(skillAbsolutePathById(cfg, "x", wsDir), wsFile);
   });
+
+  test("skillAbsolutePathById still resolves disabled skills by path", () => {
+    const cfgDir = mkdtempSync(join(tmpdir(), "sh-skillcfg-"));
+    const skillsDir = join(cfgDir, "s");
+    mkdirSync(skillsDir);
+    const p = join(skillsDir, "d.md");
+    writeFileSync(p, `---\nid: d\n---\n`);
+    const cfg = minimalConfig(cfgDir, { scanRoots: [skillsDir], disabledIds: ["d"] });
+    assert.strictEqual(skillAbsolutePathById(cfg, "d"), p);
+  });
 });
