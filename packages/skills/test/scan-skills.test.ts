@@ -2,7 +2,7 @@ import assert from "node:assert";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, test } from "vitest";
+import { describe, test, vi } from "vitest";
 import { findSkillPathById, scanSkillDirectories } from "../src/scan-skills";
 
 describe("scanSkillDirectories", () => {
@@ -312,6 +312,65 @@ tags: [smart-home, v2, 2024, ---]
     );
     const skills = await scanSkillDirectories([root], new Set());
     assert.deepStrictEqual(skills[0]!.tags, ["smart-home", "v2", "2024", "---"]);
+  });
+
+  test("duplicate ids: last root wins and a warning is logged", async () => {
+    const sysDir = mkdtempSync(join(tmpdir(), "sh-skills-sys-"));
+    const wsDir = mkdtempSync(join(tmpdir(), "sh-skills-ws-"));
+    const wsSkills = join(wsDir, "skills");
+    mkdirSync(wsSkills);
+    writeFileSync(join(sysDir, "shared.md"), `---\nid: shared\ntitle: System Version\n---\n`);
+    writeFileSync(join(wsSkills, "shared.md"), `---\nid: shared\ntitle: Workspace Version\n---\n`);
+    const seen: string[] = [];
+    const writeSpy = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+      seen.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    try {
+      const skills = await scanSkillDirectories([sysDir, wsSkills], new Set());
+      assert.strictEqual(skills.length, 1);
+      assert.strictEqual(skills[0]!.id, "shared");
+      assert.strictEqual(skills[0]!.title, "Workspace Version");
+      assert.ok(skills[0]!.absolutePath.startsWith(wsSkills));
+      const warnings = seen.filter((line) => {
+        try {
+          return JSON.parse(line).msg === "duplicate skill id; last scanned wins";
+        } catch {
+          return false;
+        }
+      });
+      assert.strictEqual(warnings.length, 1);
+      const fields = JSON.parse(warnings[0]!);
+      assert.strictEqual(fields.skillId, "shared");
+      assert.strictEqual(fields.replacedPath, join(sysDir, "shared.md"));
+      assert.strictEqual(fields.replacementPath, join(wsSkills, "shared.md"));
+    } finally {
+      writeSpy.mockRestore();
+    }
+  });
+
+  test("no duplicate ids: no warning logged", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
+    writeFileSync(join(root, "one.md"), `---\nid: one\n---\n`);
+    writeFileSync(join(root, "two.md"), `---\nid: two\n---\n`);
+    const seen: string[] = [];
+    const writeSpy = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+      seen.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    try {
+      await scanSkillDirectories([root], new Set());
+      const warnings = seen.filter((line) => {
+        try {
+          return JSON.parse(line).msg === "duplicate skill id; last scanned wins";
+        } catch {
+          return false;
+        }
+      });
+      assert.strictEqual(warnings.length, 0);
+    } finally {
+      writeSpy.mockRestore();
+    }
   });
 });
 
