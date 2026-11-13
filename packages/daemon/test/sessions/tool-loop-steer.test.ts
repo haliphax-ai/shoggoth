@@ -413,4 +413,61 @@ describe("runToolLoop steer injection", () => {
       _resetActiveTurnSurfaces();
     }
   });
+
+  it("surfaces banner-carrying steered content verbatim on the active turn surface", async () => {
+    const notices: string[] = [];
+    const { unregister } = registerActiveTurnSurface("sess", {
+      captureAnchor: () => ({ committedProseSegments: 0, toolCalls: 0 }),
+      onNotice: (n) => {
+        notices.push(n);
+      },
+    });
+    try {
+      let step = 0;
+      const model: ModelClient = {
+        async complete() {
+          step += 1;
+          if (step === 1) {
+            return {
+              content: null,
+              toolCalls: [{ id: "c1", name: "read", argsJson: "{}" }],
+            };
+          }
+          return { content: "done", toolCalls: [] };
+        },
+        pushToolMessage() {},
+        pushSteerMessage() {},
+      };
+      const toolRuns = createToolRunStore(db);
+
+      const BANNER_CARRYING = "> ↩️ Exec notification: *npm test* `n-12`";
+      const exec = vi.fn(async () => {
+        pushSteer("sess", BANNER_CARRYING);
+        return { resultJson: "{}" };
+      });
+
+      await runToolLoop({
+        db,
+        sessionId: "sess",
+        runId: "run-steer-banner-carrying",
+        principalId: "p",
+        policy: { check: () => ({ allow: true }) },
+        audit: { record: () => {} },
+        model,
+        tools: [{ name: "read" }],
+        executor: { execute: exec },
+        toolRuns,
+      });
+
+      assert.strictEqual(notices.length, 1, "exactly one notice per injected steer");
+      assert.strictEqual(
+        notices[0],
+        BANNER_CARRYING,
+        "banner-carrying content must surface verbatim, without a 🫵 wrapper",
+      );
+    } finally {
+      unregister();
+      _resetActiveTurnSurfaces();
+    }
+  });
 });
