@@ -17,7 +17,8 @@ async function skills(
   const action = String(args.action ?? "").trim();
   const ws = ctx.workspacePath;
   if (action === "list") {
-    const rows = listSkillsForConfig(ctx.config, ws).map((s) => ({
+    const skills = await listSkillsForConfig(ctx.config, ws);
+    const rows = skills.map((s) => ({
       id: s.id,
       title: s.title,
       description: s.description,
@@ -35,7 +36,7 @@ async function skills(
     };
   }
   if (action === "path") {
-    const p = skillAbsolutePathById(ctx.config, id, ws);
+    const p = await skillAbsolutePathById(ctx.config, id, ws);
     if (!p)
       return {
         resultJson: JSON.stringify({ error: `unknown skill id: ${id}` }),
@@ -43,7 +44,7 @@ async function skills(
     return { resultJson: JSON.stringify({ path: p }) };
   }
   if (action === "read") {
-    const p = skillAbsolutePathById(ctx.config, id, ws);
+    const p = await skillAbsolutePathById(ctx.config, id, ws);
     if (!p)
       return {
         resultJson: JSON.stringify({ error: `unknown skill id: ${id}` }),
