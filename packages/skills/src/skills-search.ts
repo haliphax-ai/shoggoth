@@ -56,8 +56,10 @@ function scoreSkill(skill: SkillRecord, query: string): number {
   if (skill.description) {
     score += substringScore(skill.description, q) * 2;
   }
-  for (const tag of skill.tags) {
-    score += substringScore(tag, q) * 1;
+  if (skill.tags.length > 0) {
+    for (const tag of skill.tags) {
+      score += substringScore(tag, q) * 1;
+    }
   }
   if (skill.category) {
     score += substringScore(skill.category, q) * 1;
