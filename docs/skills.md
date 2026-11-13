@@ -85,7 +85,7 @@ presented to agents when they read the skill.
 ### Frontmatter Parsing Rules
 
 - The parser is minimal and line-oriented — it is **not** a full YAML parser.
-- Each line inside the `---` fences is matched against the pattern `key: value` where keys are alphanumeric (plus `_`, `.`, `-`).
+- Each line inside the `---` fences is matched against the pattern `key: value` where the key is any text up to the first `:` (keys may contain spaces or other punctuation, but not a `:` itself).
 - Values are taken as raw strings; boolean coercion and tag array parsing happen in dedicated helpers.
 - If the file does not start with `---`, the entire content is treated as the body with no frontmatter fields.
 

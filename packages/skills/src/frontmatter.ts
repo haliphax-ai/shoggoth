@@ -3,7 +3,13 @@ interface ParsedFrontmatter {
   readonly body: string;
 }
 
-/** Minimal YAML-ish `key: value` lines between --- fences (v1). */
+/**
+ * Minimal YAML-ish `key: value` lines between --- fences (v1).
+ *
+ * Keys accept any characters up to the first `:` (so keys may contain
+ * spaces or other punctuation); quoted keys are not supported and a `:`
+ * inside a key is not possible since it delimits the value.
+ */
 export function parseMarkdownFrontmatter(source: string): ParsedFrontmatter {
   const lines = source.split(/\r?\n/);
   if (lines[0]?.trim() !== "---") {
@@ -17,9 +23,13 @@ export function parseMarkdownFrontmatter(source: string): ParsedFrontmatter {
       i++;
       break;
     }
-    const m = /^([A-Za-z0-9_.-]+)\s*:\s*(.*)$/.exec(line);
-    if (m) {
-      fields[m[1]!] = m[2]!.trim();
+    // Linear-time split instead of a regex: `[^:]+\s*:\s*(.*)` matches a
+    // non-colon prefix, optional spaces, the colon, and the value — but the
+    // repeated `\s*` makes the engine backtrack quadratically on long
+    // space runs (polynomial ReDoS on untrusted frontmatter lines).
+    const colon = line.indexOf(":");
+    if (colon > 0) {
+      fields[line.slice(0, colon)] = line.slice(colon + 1).trim();
     }
   }
   const body = lines.slice(i).join("\n").replace(/^\n+/, "");
