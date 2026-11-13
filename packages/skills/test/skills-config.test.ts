@@ -100,6 +100,32 @@ describe("skills-config", () => {
     assert.strictEqual(await skillAbsolutePathById(cfg, "x", wsDir), wsFile);
   });
 
+  test("listSkillsForConfig drops skills with malformed frontmatter", async () => {
+    const cfgDir = mkdtempSync(join(tmpdir(), "sh-skillcfg-"));
+    const skillsDir = join(cfgDir, "s");
+    mkdirSync(skillsDir);
+    writeFileSync(
+      join(skillsDir, "bad.md"),
+      `---\nid: bad\ntitle: Bad\nthis line has no colon\n---\n`,
+    );
+    writeFileSync(join(skillsDir, "ok.md"), `---\nid: ok\ntitle: Ok\n---\n`);
+    const cfg = minimalConfig(cfgDir, { scanRoots: [skillsDir] });
+    const list = await listSkillsForConfig(cfg);
+    assert.deepStrictEqual(
+      list.map((s) => s.id),
+      ["ok"],
+    );
+  });
+
+  test("skillAbsolutePathById does not resolve malformed-frontmatter skills", async () => {
+    const cfgDir = mkdtempSync(join(tmpdir(), "sh-skillcfg-"));
+    const skillsDir = join(cfgDir, "s");
+    mkdirSync(skillsDir);
+    writeFileSync(join(skillsDir, "bad.md"), `---\nid: bad\ncolonless\n---\n`);
+    const cfg = minimalConfig(cfgDir, { scanRoots: [skillsDir] });
+    assert.strictEqual(await skillAbsolutePathById(cfg, "bad"), undefined);
+  });
+
   test("skillAbsolutePathById still resolves disabled skills by path", async () => {
     const cfgDir = mkdtempSync(join(tmpdir(), "sh-skillcfg-"));
     const skillsDir = join(cfgDir, "s");
