@@ -149,6 +149,64 @@ tags: alpha, beta, gamma
     const skills = scanSkillDirectories([root], new Set());
     assert.deepStrictEqual(skills[0]!.tags, ["alpha", "beta", "gamma"]);
   });
+
+  test("lowercases and validates tag format, dropping non-conforming tags", () => {
+    const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
+    writeFileSync(
+      join(root, "valid.md"),
+      `---
+id: tag-format
+tags: [Hello, WORLD, foo-bar, a1, tag_underscore, "spa ce", foo@bar, ok-tag]
+---
+`,
+    );
+    const skills = scanSkillDirectories([root], new Set());
+    // Conforming tags are lowercased and kept; tags containing anything
+    // outside `[a-z0-9-]` (underscore, space, @) are dropped entirely.
+    assert.deepStrictEqual(skills[0]!.tags, ["hello", "world", "foo-bar", "a1", "ok-tag"]);
+  });
+
+  test("drops tags that are empty or only punctuation after normalization", () => {
+    const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
+    writeFileSync(
+      join(root, "degenerate.md"),
+      `---
+id: degenerate-tags
+tags: [" --- ", " ", "", ok]
+---
+`,
+    );
+    const skills = scanSkillDirectories([root], new Set());
+    assert.deepStrictEqual(skills[0]!.tags, ["ok"]);
+  });
+
+  test("tags value with no conforming entries yields an empty list", () => {
+    const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
+    writeFileSync(
+      join(root, "junk.md"),
+      `---
+id: junk-tags
+tags: hello world, foo@bar
+---
+`,
+    );
+    const skills = scanSkillDirectories([root], new Set());
+    assert.deepStrictEqual(skills[0]!.tags, []);
+  });
+
+  test("hyphenated and numeric tags are preserved", () => {
+    const root = mkdtempSync(join(tmpdir(), "sh-skills-"));
+    writeFileSync(
+      join(root, "keep.md"),
+      `---
+id: conforming-tags
+tags: [smart-home, v2, 2024, ---]
+---
+`,
+    );
+    const skills = scanSkillDirectories([root], new Set());
+    assert.deepStrictEqual(skills[0]!.tags, ["smart-home", "v2", "2024", "---"]);
+  });
 });
 
 describe("findSkillPathById", () => {

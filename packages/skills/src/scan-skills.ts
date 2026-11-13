@@ -33,9 +33,19 @@ function walkMarkdownFiles(dir: string, out: string[]): void {
   }
 }
 
+/** Matches a conforming tag: lowercase letters, digits, hyphens. */
+const TAG_PATTERN = /^[a-z0-9-]+$/;
+
 /**
  * Parses a YAML-ish inline array string like `[foo, bar, baz]` into a
  * lowercase string array.  Returns `[]` for missing or malformed input.
+ *
+ * Tags are normalized (trimmed, lowercased) and then validated against
+ * `TAG_PATTERN`.  Non-conforming tags are **dropped** rather than kept or
+ * rejected: tags are advisory metadata parsed from untrusted frontmatter,
+ * so a malformed tag should never fail a skill scan, and keeping it would
+ * leak characters that search (exact-match tag filters, substring scoring)
+ * never matches.  A tag that trims to empty is also dropped.
  */
 function parseTags(raw: string | undefined): string[] {
   if (!raw) return [];
@@ -46,7 +56,7 @@ function parseTags(raw: string | undefined): string[] {
   return inner
     .split(",")
     .map((t) => t.trim().toLowerCase())
-    .filter((t) => t.length > 0);
+    .filter((t) => t.length > 0 && TAG_PATTERN.test(t));
 }
 
 function pathSlugId(root: string, filePath: string): string {
