@@ -1,6 +1,7 @@
 import assert from "node:assert";
 import { describe, it } from "vitest";
 import {
+  AgentTokenHashLengthError,
   MemoryAgentTokenStore,
   mintAgentCredentialRaw,
   timingSafeEqualRawToHash,
@@ -26,5 +27,10 @@ describe("agent token", () => {
   it("hash compare rejects wrong stored hash", () => {
     const raw = "test-raw";
     assert.strictEqual(timingSafeEqualRawToHash(raw, Buffer.alloc(32)), false);
+  });
+
+  it("hash compare throws on stored hash length mismatch", () => {
+    const raw = "test-raw";
+    assert.throws(() => timingSafeEqualRawToHash(raw, Buffer.alloc(16)), AgentTokenHashLengthError);
   });
 });

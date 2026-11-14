@@ -19,9 +19,26 @@ export function hashAgentToken(raw: string): Buffer {
   return createHash("sha256").update(raw, "utf8").digest();
 }
 
+export class AgentTokenHashLengthError extends Error {
+  override name = "AgentTokenHashLengthError";
+}
+
+/**
+ * Constant-time comparison of the computed SHA-256 digest against the stored hash.
+ * Returns false on a content mismatch. Throws AgentTokenHashLengthError when the
+ * stored hash has a different length: SHA-256 digests are always 32 bytes, so a
+ * length mismatch means the store returned corrupt data or a hash from another
+ * algorithm — a data-integrity bug, not a legitimate auth failure. (Node's
+ * timingSafeEqual also throws on length mismatch, so silent rejection was never
+ * actually reachable past this guard.)
+ */
 export function timingSafeEqualRawToHash(raw: string, storedHash: Buffer): boolean {
   const h = hashAgentToken(raw);
-  if (h.length !== storedHash.length) return false;
+  if (h.length !== storedHash.length) {
+    throw new AgentTokenHashLengthError(
+      `stored agent token hash length ${storedHash.length} != computed SHA-256 length ${h.length}`,
+    );
+  }
   return timingSafeEqual(h, storedHash);
 }
 
