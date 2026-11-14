@@ -110,6 +110,32 @@ export default plugin;
     await expect(loadPluginFromDirectory(root, system)).rejects.toThrow();
   });
 
+  test("throws when plugin entrypoint has no default export", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sh-plug-nodefault-"));
+
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify({
+        name: "nodefault-plugin",
+        version: "1.0.0",
+        shoggothPlugin: {
+          entrypoint: "./plugin.mjs",
+        },
+      }),
+    );
+
+    writeFileSync(
+      join(root, "plugin.mjs"),
+      `export const plugin = { name: "nodefault-plugin", hooks: {} };
+`,
+    );
+
+    const system = new ShoggothPluginSystem();
+    await expect(loadPluginFromDirectory(root, system)).rejects.toThrow(
+      'Plugin entrypoint "./plugin.mjs" does not export a default value',
+    );
+  });
+
   test("meta includes kind from shoggothPlugin bag", async () => {
     const root = mkdtempSync(join(tmpdir(), "sh-plug-kind-"));
 

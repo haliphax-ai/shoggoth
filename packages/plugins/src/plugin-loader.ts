@@ -38,6 +38,10 @@ export async function loadPluginFromDirectory(
   const mod = (await import(entrypointUrl)) as { default?: unknown };
   let plugin = mod.default;
 
+  if (plugin === undefined || plugin === null) {
+    throw new Error(`Plugin entrypoint "${meta.entrypoint}" does not export a default value`);
+  }
+
   // If the default export is a factory function, call it
   if (typeof plugin === "function") {
     plugin = await plugin();
