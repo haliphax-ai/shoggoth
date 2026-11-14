@@ -2,6 +2,9 @@ import { z } from "zod";
 
 const pluginKindSchema = z.enum(["messaging-platform", "observability", "general", "service"]);
 
+const pluginNameSchema = z.string().min(1);
+const pluginVersionSchema = z.string().min(1);
+
 /** Validates the `shoggothPlugin` property bag from package.json. */
 export const shoggothPluginBagSchema = z
   .object({
@@ -31,8 +34,8 @@ export function parseShoggothPluginBag(data: unknown): ShoggothPluginBag {
 export function resolvePluginMeta(packageJson: Record<string, unknown>): ShoggothPluginMeta {
   const bag = parseShoggothPluginBag(packageJson.shoggothPlugin);
   return {
-    name: z.string().min(1).parse(packageJson.name),
-    version: z.string().min(1).parse(packageJson.version),
+    name: pluginNameSchema.parse(packageJson.name),
+    version: pluginVersionSchema.parse(packageJson.version),
     kind: bag.kind,
     entrypoint: bag.entrypoint,
   };
