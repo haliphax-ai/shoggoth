@@ -71,15 +71,26 @@ export class ShoggothPluginSystem extends PluginSystem<ShoggothHooks> {
 /**
  * Recursively deep-freezes an object using Object.freeze.
  * Returns the same reference, now frozen at every level.
+ *
+ * A WeakSet of visited objects guards against circular references, so cyclic
+ * structures terminate instead of recursing forever.
  */
 export function freezeConfig<T>(obj: T): T {
-  Object.freeze(obj);
-  if (obj !== null && typeof obj === "object") {
-    for (const value of Object.values(obj as Record<string, unknown>)) {
-      if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
-        freezeConfig(value);
+  const visited = new WeakSet<object>();
+  const visit = (value: object): void => {
+    if (visited.has(value)) {
+      return;
+    }
+    visited.add(value);
+    Object.freeze(value);
+    for (const child of Object.values(value as Record<string, unknown>)) {
+      if (child !== null && typeof child === "object") {
+        visit(child);
       }
     }
+  };
+  if (obj !== null && typeof obj === "object") {
+    visit(obj);
   }
   return obj;
 }

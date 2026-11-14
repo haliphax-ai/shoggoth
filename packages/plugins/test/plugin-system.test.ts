@@ -188,6 +188,32 @@ describe("freezeConfig", () => {
       (frozen.nested.deep as any).c = 999;
     }, TypeError);
   });
+
+  test("terminates on a direct circular reference", () => {
+    const config: { a: number; self?: unknown } = { a: 1 };
+    config.self = config;
+
+    const frozen = freezeConfig(config);
+
+    assert.ok(Object.isFrozen(frozen), "top-level should be frozen");
+    assert.ok(Object.isFrozen(frozen.self), "circular self-reference should be frozen");
+  });
+
+  test("terminates on an indirect cycle between two objects", () => {
+    const a: Record<string, unknown> = { name: "a" };
+    const b: Record<string, unknown> = { name: "b" };
+    a.peer = b;
+    b.peer = a;
+
+    const frozenA = freezeConfig(a);
+
+    assert.ok(Object.isFrozen(frozenA), "first node should be frozen");
+    assert.ok(Object.isFrozen(frozenA.peer), "second node should be frozen");
+    assert.ok(
+      Object.isFrozen((frozenA.peer as Record<string, unknown>).peer),
+      "cycle back-edge should be frozen",
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
