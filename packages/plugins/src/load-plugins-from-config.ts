@@ -1,8 +1,10 @@
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, resolve } from "node:path";
-import type { ShoggothConfig } from "@shoggoth/shared";
+import { getLogger, type ShoggothConfig } from "@shoggoth/shared";
 import type { ShoggothPluginSystem } from "./plugin-system";
 import { loadPluginFromDirectory } from "./plugin-loader";
+
+const log = getLogger("plugins");
 
 export type PluginAuditOutcome = "success" | "failure";
 
@@ -66,6 +68,9 @@ export async function loadAllPluginsFromConfig(options: {
         outcome: "failure",
         detail,
       });
+      if (!options.audit) {
+        log.warn("plugin load failed", { plugin: label, detail });
+      }
     }
   }
   return loaded;
