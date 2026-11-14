@@ -25,8 +25,14 @@ export function resolveLocalPluginPath(pathStr: string, configDirectory: string)
 
 export function resolveNpmPluginRoot(packageName: string, resolveFromFile: string): string {
   const require = createRequire(resolveFromFile);
-  const pkgJsonPath = require.resolve(`${packageName}/package.json`);
-  return dirname(pkgJsonPath);
+  try {
+    const pkgJsonPath = require.resolve(`${packageName}/package.json`);
+    return dirname(pkgJsonPath);
+  } catch (e) {
+    throw new Error(
+      `Failed to resolve npm plugin "${packageName}": ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
 }
 
 /** Loads plugins from config; returns successfully loaded entries (for shutdown unload audit). */
