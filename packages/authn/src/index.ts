@@ -1,4 +1,5 @@
 export {
+  AgentTokenHashLengthError,
   mintAgentCredentialRaw,
   hashAgentToken,
   timingSafeEqualRawToHash,
