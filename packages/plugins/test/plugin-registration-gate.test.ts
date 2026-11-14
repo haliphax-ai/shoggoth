@@ -276,6 +276,46 @@ describe("plugin-registration-gate", () => {
       expect(() => proxy["exec.spawn"]).toThrow(/exec\.spawn/);
     });
 
+    test("approved plugin deps proxy passes built-in property access through", () => {
+      const deps: Record<string, () => string> = {
+        "net.fetch": () => "ok",
+      };
+
+      const proxy = createOpsEnforcementProxy(deps, {
+        pluginName: "canvas-plugin",
+        allowedOps: ["net.fetch"],
+      });
+
+      // Object.prototype built-ins bypass the ops check and hit the target
+      expect(proxy.toString).toBe(deps.toString);
+      expect(proxy.hasOwnProperty("net.fetch")).toBe(true);
+      expect(String(proxy)).toBe(String(deps));
+      expect(JSON.stringify(proxy)).toBe(JSON.stringify(deps));
+
+      // Well-known symbols also bypass (typeof prop === "symbol")
+      expect(Object.prototype.toString.call(proxy)).toBe(Object.prototype.toString.call(deps));
+      expect(typeof (proxy as unknown as Record<symbol, unknown>)[Symbol.toStringTag]).toBe(
+        "undefined",
+      );
+    });
+
+    test("approved plugin deps proxy still rejects undeclared non-built-in access", () => {
+      const deps: Record<string, () => string> = {
+        "net.fetch": () => "ok",
+        "exec.spawn": () => "should not be accessible",
+      };
+
+      const proxy = createOpsEnforcementProxy(deps, {
+        pluginName: "canvas-plugin",
+        allowedOps: ["net.fetch"],
+      });
+
+      // Non-built-in, undeclared ops still throw
+      expect(() => proxy["exec.spawn"]).toThrow(/exec\.spawn/);
+      expect(() => proxy["toString2"]).toThrow(/toString2/);
+      expect(() => proxy["constructor2"]).toThrow(/constructor2/);
+    });
+
     test("pending plugin does not get ops proxy (tools suspended anyway)", () => {
       const store = createMockStore();
       const { ctx: innerCtx } = createMockInnerCtx();
