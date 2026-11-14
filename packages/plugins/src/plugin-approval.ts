@@ -83,9 +83,42 @@ export function enforcePluginOps(
 }
 
 /**
+ * Built-in property names inherent to JavaScript that the ops enforcement
+ * proxy never treats as ops. These are Object.prototype members (methods and
+ * the legacy accessors) that innocuous language/runtime operations rely on,
+ * e.g. `deps.toString()`, `JSON.stringify(deps)`, or string coercion.
+ *
+ * Symbol keys (including well-known symbols like Symbol.toPrimitive) bypass
+ * the ops check separately via the `typeof prop` guard in the proxy's get trap.
+ */
+export const OPS_PROXY_BUILTIN_PROPS: ReadonlySet<string> = Object.freeze(
+  new Set<string>([
+    "constructor",
+    "hasOwnProperty",
+    "isPrototypeOf",
+    "propertyIsEnumerable",
+    "toLocaleString",
+    "toString",
+    "valueOf",
+    "__proto__",
+    "__defineGetter__",
+    "__defineSetter__",
+    "__lookupGetter__",
+    "__lookupSetter__",
+    // JSON.stringify protocol hook: JSON.stringify(deps) probes "toJSON"
+    // before serializing, so it must bypass the ops check like the symbol
+    // well-knowns do.
+    "toJSON",
+  ]),
+);
+
+/**
  * Creates a scope-checking proxy for plugin dependencies that rejects undeclared ops.
  * The proxy wraps a deps object and intercepts property access, checking each
- * access against the declared ops.
+ * access against the declared ops. JavaScript built-in properties (any symbol
+ * key and the Object.prototype built-in names) bypass the check and pass
+ * through to the target, so innocuous operations like `deps.toString()` or
+ * `JSON.stringify(deps)` do not throw.
  */
 export function createOpsEnforcementProxy<T extends object>(
   deps: T,
@@ -93,7 +126,7 @@ export function createOpsEnforcementProxy<T extends object>(
 ): T {
   return new Proxy(deps, {
     get(target, prop, receiver) {
-      if (typeof prop === "string") {
+      if (typeof prop === "string" && !OPS_PROXY_BUILTIN_PROPS.has(prop)) {
         const result = enforcePluginOps(declaration, prop);
         if (!result.allowed) {
           throw new Error(result.reason);
