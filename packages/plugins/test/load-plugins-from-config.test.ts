@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import { ShoggothPluginSystem } from "../src/plugin-system";
 import { loadAllPluginsFromConfig, resolveLocalPluginPath } from "../src/load-plugins-from-config";
+import { pluginTestStore, pluginTestStoreUrl } from "./plugin-test-store.mjs";
 
 describe("resolveLocalPluginPath", () => {
   test("returns absolute paths unchanged", () => {
@@ -39,11 +40,12 @@ describe("loadAllPluginsFromConfig", () => {
     );
     writeFileSync(
       join(good, "plugin.mjs"),
-      `export default function() {
+      `import { pluginTestStore } from ${JSON.stringify(pluginTestStoreUrl)};
+export default function() {
   return {
     name: "goodp",
     hooks: {
-      "daemon.shutdown": async (ctx) => { globalThis.__goodPlug = 7; },
+      "daemon.shutdown": async (ctx) => { pluginTestStore.set("goodPlug", 7); },
     },
   };
 };
@@ -77,7 +79,7 @@ describe("loadAllPluginsFromConfig", () => {
 
     // Fire hook through the plugin system to verify the good plugin was registered
     await system.lifecycle["daemon.shutdown"].emit({ reason: "test" });
-    expect((globalThis as { __goodPlug?: number }).__goodPlug).toBe(7);
-    delete (globalThis as { __goodPlug?: number }).__goodPlug;
+    expect(pluginTestStore.get("goodPlug")).toBe(7);
+    pluginTestStore.delete("goodPlug");
   });
 });
