@@ -176,6 +176,6 @@ export function buildManifestFromRegistration(
       description: t.description,
       parameters: t.parameters,
     })),
-    ops: ops as unknown as readonly string[],
+    ops,
   };
 }
