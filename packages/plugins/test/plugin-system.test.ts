@@ -1,7 +1,6 @@
 import assert from "node:assert";
 import { describe, test } from "vitest";
 
-// These imports target source files that DO NOT EXIST yet — tests must fail.
 import { ShoggothPluginSystem, freezeConfig } from "../src/plugin-system";
 import { defineMessagingPlatformPlugin } from "../src/messaging-platform-plugin";
 import type {
