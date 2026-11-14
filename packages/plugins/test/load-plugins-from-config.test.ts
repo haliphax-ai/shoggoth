@@ -5,7 +5,11 @@ import { describe, test, expect } from "vitest";
 import { fileURLToPath } from "node:url";
 import type { ShoggothConfig } from "@shoggoth/shared";
 import { ShoggothPluginSystem } from "../src/plugin-system";
-import { loadAllPluginsFromConfig, resolveLocalPluginPath } from "../src/load-plugins-from-config";
+import {
+  loadAllPluginsFromConfig,
+  resolveLocalPluginPath,
+  resolveNpmPluginRoot,
+} from "../src/load-plugins-from-config";
 import { pluginTestStore, pluginTestStoreUrl } from "./plugin-test-store.mjs";
 
 describe("resolveLocalPluginPath", () => {
@@ -17,6 +21,17 @@ describe("resolveLocalPluginPath", () => {
     const r = resolveLocalPluginPath("plugins/x", "/etc/shoggoth");
     expect(r).toContain("plugins");
     expect(r).toMatch(/plugins\/x$/);
+  });
+});
+
+describe("resolveNpmPluginRoot", () => {
+  test("throws descriptive error for missing package", () => {
+    expect(() =>
+      resolveNpmPluginRoot(
+        "@shoggoth/definitely-not-installed-plugin",
+        fileURLToPath(import.meta.url),
+      ),
+    ).toThrow(/^Failed to resolve npm plugin "@shoggoth\/definitely-not-installed-plugin": /);
   });
 });
 
