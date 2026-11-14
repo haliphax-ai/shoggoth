@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ShoggothPluginSystem } from "./plugin-system";
@@ -26,7 +27,7 @@ export async function loadPluginFromDirectory(
     throw new Error(`Plugin at "${rootDir}" has no package.json`);
   }
 
-  const raw = readFileSync(pkgPath, "utf8");
+  const raw = await readFile(pkgPath, "utf8");
   const packageJson = JSON.parse(raw) as Record<string, unknown>;
 
   if (!packageJson.shoggothPlugin) {
