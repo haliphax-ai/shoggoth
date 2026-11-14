@@ -32,6 +32,7 @@ describe("ShoggothPluginSystem", () => {
     "session.turn.after",
     "session.segment.change",
     "health.register",
+    "service.register",
   ] as const;
 
   test("can be instantiated and exposes all 15 hooks via lifecycle", () => {
