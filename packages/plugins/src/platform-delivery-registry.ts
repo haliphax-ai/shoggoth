@@ -81,7 +81,12 @@ export class PlatformDeliveryRegistry {
  * e.g. `agent:main:discord:channel:123456`
  */
 function extractPlatformSegment(sessionId: string): string | undefined {
+  if (!sessionId.trim()) throw new Error("sessionId must be a non-empty string");
   const parts = sessionId.split(":");
   // agent:main:discord:channel:123 → parts[2] = "discord"
-  return parts.length >= 3 ? parts[2] : undefined;
+  const platform = parts.length >= 3 ? parts[2] : undefined;
+  if (parts.length >= 3 && !platform?.trim()) {
+    throw new Error(`session URN platform segment must be non-empty: ${JSON.stringify(sessionId)}`);
+  }
+  return platform;
 }
