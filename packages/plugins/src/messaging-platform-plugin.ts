@@ -10,6 +10,7 @@ import type {
   PlatformStopCtx,
   HealthRegisterCtx,
 } from "./hook-types";
+import { definePluginWithRequiredHooks } from "./plugin-required-hooks";
 
 /**
  * The minimum set of hooks a messaging platform plugin must provide.
@@ -40,12 +41,9 @@ export const REQUIRED_MESSAGING_PLATFORM_HOOKS = [
 export function defineMessagingPlatformPlugin(
   plugin: MessagingPlatformPlugin,
 ): MessagingPlatformPlugin {
-  for (const hook of REQUIRED_MESSAGING_PLATFORM_HOOKS) {
-    if (typeof plugin.hooks[hook] !== "function") {
-      throw new Error(
-        `MessagingPlatformPlugin "${plugin.name}" is missing required hook "${hook}"`,
-      );
-    }
-  }
-  return plugin;
+  return definePluginWithRequiredHooks(
+    "MessagingPlatformPlugin",
+    plugin,
+    REQUIRED_MESSAGING_PLATFORM_HOOKS,
+  );
 }

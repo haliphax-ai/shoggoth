@@ -23,6 +23,7 @@ export {
   type ShoggothHooks,
   type ShoggothHookName,
 } from "./plugin-system";
+export { definePluginWithRequiredHooks } from "./plugin-required-hooks";
 export {
   defineMessagingPlatformPlugin,
   REQUIRED_MESSAGING_PLATFORM_HOOKS,

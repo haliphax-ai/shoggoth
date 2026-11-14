@@ -10,6 +10,7 @@ import type {
   DaemonShutdownCtx,
   HealthRegisterCtx,
 } from "./hook-types";
+import { definePluginWithRequiredHooks } from "./plugin-required-hooks";
 
 /**
  * The minimum set of hooks a service plugin must provide.
@@ -38,10 +39,5 @@ export const REQUIRED_SERVICE_PLUGIN_HOOKS = [
  * Throws if any required hook is missing.
  */
 export function defineServicePlugin(plugin: ServicePlugin): ServicePlugin {
-  for (const hook of REQUIRED_SERVICE_PLUGIN_HOOKS) {
-    if (typeof plugin.hooks[hook] !== "function") {
-      throw new Error(`ServicePlugin "${plugin.name}" is missing required hook "${hook}"`);
-    }
-  }
-  return plugin;
+  return definePluginWithRequiredHooks("ServicePlugin", plugin, REQUIRED_SERVICE_PLUGIN_HOOKS);
 }
