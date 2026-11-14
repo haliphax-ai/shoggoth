@@ -30,7 +30,7 @@ await system.lifecycle["daemon.startup"].emit({
 
 ## `ShoggothPluginSystem`
 
-Extends `PluginSystem` from `hooks-plugin` with Shoggoth's 14 typed hooks pre-configured.
+Extends `PluginSystem` from `hooks-plugin` with Shoggoth's 15 typed hooks pre-configured.
 
 ```ts
 const system = new ShoggothPluginSystem();
@@ -102,7 +102,7 @@ export default function createMyPlatformPlugin() {
 
 ## Hook Taxonomy
 
-All 14 hooks grouped by lifecycle phase:
+All 15 hooks grouped by lifecycle phase:
 
 ### Daemon Lifecycle
 
@@ -142,6 +142,12 @@ All 14 hooks grouped by lifecycle phase:
 | Hook              | Type       | Description                                    |
 | ----------------- | ---------- | ---------------------------------------------- |
 | `health.register` | `SyncHook` | Plugins register health probes during startup. |
+
+### Service
+
+| Hook               | Type        | Description                                                        |
+| ------------------ | ----------- | ------------------------------------------------------------------ |
+| `service.register` | `AsyncHook` | Service plugins register services and tools before `daemon.ready`. |
 
 ## Plugin Discovery
 
@@ -229,12 +235,17 @@ type ShoggothHooks, ShoggothHookName
 defineMessagingPlatformPlugin, REQUIRED_MESSAGING_PLATFORM_HOOKS
 type MessagingPlatformPlugin
 
+// Service plugin interface
+defineServicePlugin, REQUIRED_SERVICE_PLUGIN_HOOKS
+type ServicePlugin
+
 // Hook context types
 type DaemonConfigureCtx, DaemonStartupCtx, DaemonReadyCtx, DaemonShutdownCtx
 type PlatformRegisterCtx, PlatformDeps, PlatformStartCtx, PlatformStopCtx
 type MessageInboundCtx, MessageOutboundCtx, MessageReactionCtx
 type SessionTurnBeforeCtx, SessionTurnAfterCtx, SessionSegmentChangeCtx
 type HealthRegisterCtx, HealthProbe, HealthProbeResult
+type ServiceRegisterCtx
 
 // Plugin discovery & loading
 loadPluginFromDirectory, loadAllPluginsFromConfig
