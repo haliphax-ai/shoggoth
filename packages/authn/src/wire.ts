@@ -37,18 +37,25 @@ export class WireParseError extends Error {
   }
 }
 
-export function parseRequestLine(line: string): WireRequest {
+/**
+ * Shared preprocessing for JSONL wire lines: strip a trailing CR, guard against
+ * empty lines, and parse the JSON payload.
+ */
+function parseJsonLine(line: string): { obj: unknown; trimmed: string } {
   const trimmed = line.replace(/\r$/, "");
   if (!trimmed) throw new WireParseError("empty line");
-  let obj: unknown;
   try {
-    obj = JSON.parse(trimmed);
+    return { obj: JSON.parse(trimmed), trimmed };
   } catch (e) {
     throw new WireParseError(
       `invalid json: ${e instanceof Error ? e.message : String(e)}`,
       trimmed,
     );
   }
+}
+
+export function parseRequestLine(line: string): WireRequest {
+  const { obj } = parseJsonLine(line);
   if (!obj || typeof obj !== "object") throw new WireParseError("request must be a JSON object");
   const r = obj as Record<string, unknown>;
   if (r.v !== WIRE_VERSION) throw new WireParseError(`unsupported wire version: ${String(r.v)}`);
@@ -81,17 +88,7 @@ export function serializeResponse(res: WireResponse): string {
 }
 
 export function parseResponseLine(line: string): WireResponse {
-  const trimmed = line.replace(/\r$/, "");
-  if (!trimmed) throw new WireParseError("empty line");
-  let obj: unknown;
-  try {
-    obj = JSON.parse(trimmed);
-  } catch (e) {
-    throw new WireParseError(
-      `invalid json: ${e instanceof Error ? e.message : String(e)}`,
-      trimmed,
-    );
-  }
+  const { obj } = parseJsonLine(line);
   if (!obj || typeof obj !== "object") throw new WireParseError("response must be a JSON object");
   const r = obj as Record<string, unknown>;
   if (r.v !== WIRE_VERSION) throw new WireParseError(`unsupported wire version: ${String(r.v)}`);
