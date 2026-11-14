@@ -97,4 +97,104 @@ export default function() {
     expect(pluginTestStore.get("goodPlug")).toBe(7);
     pluginTestStore.delete("goodPlug");
   });
+
+  test("failed load with no audit callback emits stderr warning and still loads a second plugin", async () => {
+    // Bad plugin: invalid package.json
+    const bad = mkdtempSync(join(tmpdir(), "sh-bad-plug-"));
+    writeFileSync(join(bad, "package.json"), "{ not json");
+
+    // Good plugin: minimal valid manifest (no hooks required)
+    const good = mkdtempSync(join(tmpdir(), "sh-good2-plug-"));
+    writeFileSync(
+      join(good, "package.json"),
+      JSON.stringify({
+        name: "goodp2",
+        version: "1.0.0",
+        shoggothPlugin: {
+          entrypoint: "./plugin.mjs",
+        },
+      }),
+    );
+    writeFileSync(
+      join(good, "plugin.mjs"),
+      `export default function() {
+  return { name: "goodp2", hooks: {} };
+};
+`,
+    );
+
+    const cfgDir = mkdtempSync(join(tmpdir(), "sh-cfg-"));
+    const config = {
+      configDirectory: cfgDir,
+      plugins: [
+        { id: "a", path: bad },
+        { id: "b", path: good },
+      ],
+    } as Pick<ShoggothConfig, "plugins" | "configDirectory">;
+
+    const warnings: string[] = [];
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      warnings.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString());
+      return true;
+    }) as typeof process.stderr.write;
+
+    try {
+      const system = new ShoggothPluginSystem();
+      const loaded = await loadAllPluginsFromConfig({
+        config,
+        system,
+        resolveFromFile: fileURLToPath(import.meta.url),
+        // No audit callback: the warning is the only report of the failure.
+      });
+
+      expect(loaded).toEqual([{ resource: "b", manifestName: "goodp2" }]);
+    } finally {
+      process.stderr.write = origWrite;
+    }
+
+    const lines = warnings.map((w) => w.trim()).filter((w) => w.length > 0);
+    const rows = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+    const failed = rows.find((row) => row.level === "warn" && row.msg === "plugin load failed");
+    expect(failed).toBeDefined();
+    expect(failed!["plugin"]).toBe("a");
+    expect(typeof failed!["detail"]).toBe("string");
+  });
+
+  test("failed load with audit callback does not duplicate the warning on stderr", async () => {
+    // Bad plugin: invalid package.json
+    const bad = mkdtempSync(join(tmpdir(), "sh-bad3-plug-"));
+    writeFileSync(join(bad, "package.json"), "{ not json");
+
+    const cfgDir = mkdtempSync(join(tmpdir(), "sh-cfg-"));
+    const config = {
+      configDirectory: cfgDir,
+      plugins: [{ id: "a", path: bad }],
+    } as Pick<ShoggothConfig, "plugins" | "configDirectory">;
+
+    const audits: { outcome: string; resource: string }[] = [];
+    const warnings: string[] = [];
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      warnings.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString());
+      return true;
+    }) as typeof process.stderr.write;
+
+    try {
+      const system = new ShoggothPluginSystem();
+      const loaded = await loadAllPluginsFromConfig({
+        config,
+        system,
+        resolveFromFile: fileURLToPath(import.meta.url),
+        audit: (e) => audits.push({ outcome: e.outcome, resource: e.resource }),
+      });
+
+      expect(loaded).toEqual([]);
+      expect(audits).toEqual([{ outcome: "failure", resource: "a" }]);
+    } finally {
+      process.stderr.write = origWrite;
+    }
+
+    expect(warnings).toEqual([]);
+  });
 });
