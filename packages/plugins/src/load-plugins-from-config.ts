@@ -44,6 +44,8 @@ export async function loadAllPluginsFromConfig(options: {
   /** Existing file path passed to `createRequire` for npm resolution. */
   readonly resolveFromFile: string;
   readonly audit?: (e: PluginAuditEvent) => void;
+  /** When true, a failed plugin load throws instead of being skipped (default: skip and continue). */
+  readonly failOnError?: boolean;
 }): Promise<readonly LoadedPluginRef[]> {
   const loaded: LoadedPluginRef[] = [];
   for (const entry of options.config.plugins) {
@@ -70,6 +72,9 @@ export async function loadAllPluginsFromConfig(options: {
       });
       if (!options.audit) {
         log.warn("plugin load failed", { plugin: label, detail });
+      }
+      if (options.failOnError) {
+        throw new Error(`Failed to load plugin "${label}": ${detail}`);
       }
     }
   }

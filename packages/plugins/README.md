@@ -235,9 +235,16 @@ type ShoggothHooks, ShoggothHookName
 defineMessagingPlatformPlugin, REQUIRED_MESSAGING_PLATFORM_HOOKS
 type MessagingPlatformPlugin
 
+// Platform delivery
+PlatformDeliveryRegistry
+type PlatformDeliveryResolver, OperatorDelivery
+
 // Service plugin interface
 defineServicePlugin, REQUIRED_SERVICE_PLUGIN_HOOKS
 type ServicePlugin
+
+// Shared hook validation
+definePluginWithRequiredHooks
 
 // Hook context types
 type DaemonConfigureCtx, DaemonStartupCtx, DaemonReadyCtx, DaemonShutdownCtx
@@ -246,10 +253,24 @@ type MessageInboundCtx, MessageOutboundCtx, MessageReactionCtx
 type SessionTurnBeforeCtx, SessionTurnAfterCtx, SessionSegmentChangeCtx
 type HealthRegisterCtx, HealthProbe, HealthProbeResult
 type ServiceRegisterCtx
+type DirectServiceTool, DirectToolHandler, DirectToolContext
+type PluginServiceEntry, ServiceApprovalGate
 
 // Plugin discovery & loading
 loadPluginFromDirectory, loadAllPluginsFromConfig
+resolveLocalPluginPath, resolveNpmPluginRoot
 resolvePluginMeta, parseShoggothPluginBag, shoggothPluginBagSchema
 type ShoggothPluginMeta, ShoggothPluginBag
 type LoadedPluginMeta, LoadedPluginRef, PluginAuditEvent
+type PluginAuditOutcome
+
+// Plugin fingerprinting
+computePluginFingerprint
+type PluginManifestForFingerprint
+
+// Registration gate & approval
+createGatedServiceRegisterCtx, buildManifestFromRegistration
+resolvePluginApprovalStatus, enforcePluginOps, createOpsEnforcementProxy
+type PluginApprovalStore, GatedRegistrationResult, RegistrationGateLogger, CreateGatedContextOptions
+type PluginApprovalRecord, PluginApprovalStatus, PluginOpsDeclaration, OpsEnforcementResult
 ```
