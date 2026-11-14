@@ -6,6 +6,8 @@
 // platform without knowing platform-specific details.
 // -------------------------------------------------------------------------------
 
+import type { ShoggothConfig } from "@shoggoth/shared";
+
 /**
  * Delivery metadata returned by a platform plugin.
  * Opaque to the daemon — it just passes this through to the delivery layer.
@@ -25,8 +27,7 @@ export interface PlatformDeliveryResolver {
    */
   resolveOperatorDelivery(
     sessionId: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    config: any,
+    config: Readonly<ShoggothConfig>,
   ): OperatorDelivery | undefined;
 
   /**
@@ -35,8 +36,7 @@ export interface PlatformDeliveryResolver {
    */
   resolveSessionForInbound?(
     identifiers: Record<string, string>,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    config: any,
+    config: Readonly<ShoggothConfig>,
   ): string | undefined;
 }
 
@@ -57,8 +57,7 @@ export class PlatformDeliveryRegistry {
    */
   resolveOperatorDelivery(
     sessionId: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    config: any,
+    config: Readonly<ShoggothConfig>,
   ): OperatorDelivery | undefined {
     const segment = extractPlatformSegment(sessionId);
     if (!segment) return undefined;
@@ -69,8 +68,7 @@ export class PlatformDeliveryRegistry {
   resolveSessionForInbound(
     platformSegment: string,
     identifiers: Record<string, string>,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    config: any,
+    config: Readonly<ShoggothConfig>,
   ): string | undefined {
     const resolver = this.resolvers.get(platformSegment);
     return resolver?.resolveSessionForInbound?.(identifiers, config);
