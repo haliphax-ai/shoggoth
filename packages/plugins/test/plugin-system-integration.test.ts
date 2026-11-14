@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, test, expect } from "vitest";
 import { ShoggothPluginSystem } from "../src/plugin-system";
 import { loadPluginFromDirectory } from "../src/plugin-loader";
+import { pluginTestStore, pluginTestStoreUrl } from "./plugin-test-store.mjs";
 
 describe("loadPluginFromDirectory", () => {
   test("loads a plugin from package.json with shoggothPlugin bag and fires hook", async () => {
@@ -25,12 +26,13 @@ describe("loadPluginFromDirectory", () => {
     // Write entrypoint that exports a factory returning a plugin object with hooks
     writeFileSync(
       join(root, "plugin.mjs"),
-      `export default function createPlugin() {
+      `import { pluginTestStore } from ${JSON.stringify(pluginTestStoreUrl)};
+export default function createPlugin() {
   return {
     name: "test-plugin",
     hooks: {
       "daemon.shutdown": async (ctx) => {
-        globalThis.__testPluginShutdownReason = ctx.reason;
+        pluginTestStore.set("shutdownReason", ctx.reason);
       },
     },
   };
@@ -48,10 +50,8 @@ describe("loadPluginFromDirectory", () => {
 
     // Fire the hook through the plugin system and verify it ran
     await system.lifecycle["daemon.shutdown"].emit({ reason: "test-shutdown" });
-    expect((globalThis as { __testPluginShutdownReason?: string }).__testPluginShutdownReason).toBe(
-      "test-shutdown",
-    );
-    delete (globalThis as { __testPluginShutdownReason?: string }).__testPluginShutdownReason;
+    expect(pluginTestStore.get("shutdownReason")).toBe("test-shutdown");
+    pluginTestStore.delete("shutdownReason");
   });
 
   test("loads a plugin that directly exports a plugin object (not a factory)", async () => {
@@ -70,11 +70,12 @@ describe("loadPluginFromDirectory", () => {
 
     writeFileSync(
       join(root, "plugin.mjs"),
-      `const plugin = {
+      `import { pluginTestStore } from ${JSON.stringify(pluginTestStoreUrl)};
+const plugin = {
   name: "direct-plugin",
   hooks: {
     "daemon.shutdown": async (ctx) => {
-      globalThis.__directPluginFired = true;
+      pluginTestStore.set("directPluginFired", true);
     },
   },
 };
@@ -90,8 +91,8 @@ export default plugin;
     expect(meta.kind).toBe("general"); // default kind
 
     await system.lifecycle["daemon.shutdown"].emit({ reason: "bye" });
-    expect((globalThis as { __directPluginFired?: boolean }).__directPluginFired).toBe(true);
-    delete (globalThis as { __directPluginFired?: boolean }).__directPluginFired;
+    expect(pluginTestStore.get("directPluginFired")).toBe(true);
+    pluginTestStore.delete("directPluginFired");
   });
 
   test("throws when package.json is missing shoggothPlugin bag", async () => {
