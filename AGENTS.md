@@ -32,6 +32,10 @@ Platforms should plug into system internals using hook points so that the implem
 
 Discord is currently the only available platform, but it should not be treated as such--future platform development and layers of abstraction should always be considered when making changes to the messaging system. Platform capabilities and transport should be registered and routed through the presentation layer.
 
+## Qlty
+
+This project uses the qlty.sh scanner for detecting code smells and other issues. Use a locally-installed `qlty` binary to check for issues outside of CI.
+
 ## Tech Stack
 
 - typescript: code
