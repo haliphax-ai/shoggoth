@@ -11,18 +11,20 @@
 //
 // Instead, when a one-shot finishes its turn with live notify handles, the
 // session is HELD: it stays `active` and the pending completion notifications
-// keep their delivery path (in-turn steer or the OOB turn). The last handle to
-// resolve — or the operator killing the session — drains the hold and
-// terminates the session. A safety timer derived from the session's persisted
-// wall-clock TTL caps the wait so the hold can never outlive the spawn's
-// budget (the one-shot "never forever" guarantee still applies).
+// keep their delivery path (in-turn steer or the OOB turn). The last handle
+// to resolve releases the hold — but only after that notification is
+// delivered and its wake-up turn settles, so a release can never destroy the
+// notification it was held for (issue #620). An operator kill drains the hold
+// immediately; the persisted wall-clock TTL safety timer caps the wait.
 
 import type Database from "better-sqlite3";
 import type { HitlAutoApproveGate } from "../hitl/hitl-auto-approve";
 import type { Logger } from "../logging";
+import { getLogger } from "../logging";
 import { getExecNotifyScheduler } from "../exec/exec-notify-scheduler";
 import type { SessionManager } from "../sessions/session-manager";
 import type { SessionStore } from "../sessions/session-store";
+import { tryGetTurnQueue } from "../sessions/session-turn-queue-singleton";
 import { terminatePersistentSubagentSession } from "./subagent-kill";
 
 /** Fallback cap for the hold when the session row carries no valid expiry. */
@@ -30,6 +32,148 @@ const DEFAULT_ONE_SHOT_NOTIFY_DRAIN_TIMEOUT_MS = 60 * 60_000;
 
 /** Terminate callbacks for held one-shot sessions, keyed by session id. */
 export const pendingDrains = new Map<string, () => void>();
+
+/** Wake-up chains in flight; a drained release never lands while set. */
+const deliveryInFlight = new Set<string>();
+
+/**
+ * Deferred releases keyed by session; the value is the terminate callback
+ * captured at drain time so a re-armed hold can supersede it by identity.
+ */
+const pendingReleases = new Map<string, () => void>();
+
+/** Unsubscribe handles for armed turn-end listeners, keyed by session id. */
+const armedWakeUpListeners = new Map<string, () => void>();
+
+/** Idle when the queue is absent (tests, minimal embeds). */
+function turnQueueBusy(sid: string): boolean {
+  const queue = tryGetTurnQueue();
+  if (!queue) return false;
+  if (queue.isRunning(sid)) return true;
+  const depth = queue.getDepth(sid);
+  return depth.system + depth.user > 0;
+}
+
+function disarmWakeUpListener(sid: string): void {
+  const unsubscribe = armedWakeUpListeners.get(sid);
+  if (!unsubscribe) return;
+  armedWakeUpListeners.delete(sid);
+  unsubscribe();
+}
+
+/**
+ * Land a drained release once the wake-up chain has settled. A re-armed hold
+ * supersedes the captured callback; a busy queue defers to the next turn end.
+ * The live handle count is re-read here: the count that drained the hold went
+ * stale the moment a wake-up turn could have registered new handles.
+ */
+function tryReleaseOneShot(sid: string, terminate: () => void): void {
+  if (pendingDrains.get(sid) !== terminate) {
+    // A newer hold replaced this one; it owns the teardown.
+    pendingReleases.delete(sid);
+    disarmWakeUpListener(sid);
+    return;
+  }
+  if (deliveryInFlight.has(sid) || turnQueueBusy(sid)) {
+    armWakeUpListener(sid, terminate);
+    return;
+  }
+  const liveHandles = getExecNotifyScheduler()?.liveHandleCount(sid) ?? 0;
+  if (liveHandles > 0) {
+    // The wake-up turn registered new handles; wait for those to drain.
+    return;
+  }
+  pendingReleases.delete(sid);
+  pendingDrains.delete(sid);
+  disarmWakeUpListener(sid);
+  terminate();
+}
+
+/** Arm the turn-end listener that lands the deferred release. */
+function armWakeUpListener(sid: string, terminate: () => void): void {
+  pendingReleases.set(sid, terminate);
+  if (armedWakeUpListeners.has(sid)) return;
+  const queue = tryGetTurnQueue();
+  if (!queue) return; // no queue (tests): the safety timer caps the hold
+  const onTurnEnd = (endedSid: string): void => {
+    if (endedSid !== sid) return;
+    // Turn-end fires with the running slot still held: check on a microtask.
+    void Promise.resolve().then(() => {
+      const captured = pendingReleases.get(sid);
+      if (!captured) {
+        disarmWakeUpListener(sid);
+        return;
+      }
+      tryReleaseOneShot(sid, captured);
+    });
+  };
+  const { unsubscribe } = queue.addTurnEndListener(onTurnEnd);
+  armedWakeUpListeners.set(sid, unsubscribe);
+}
+
+/**
+ * Release the hold when the session has no live handles left. A positive
+ * `liveCount` (e.g. the delivery turn backgrounded new execs) keeps the hold.
+ * The release defers — never skips — while a wake-up is in flight or busy;
+ * the hold entry stays armed so its safety timer still bounds the wait.
+ */
+export function releaseOneShotIfDrained(sessionId: string, liveCount: number): void {
+  const sid = sessionId.trim();
+  const terminate = pendingDrains.get(sid);
+  if (!terminate) return;
+  if (liveCount > 0) return;
+  const pending = pendingReleases.get(sid);
+  if (pending) {
+    tryReleaseOneShot(sid, pending);
+    return;
+  }
+  if (deliveryInFlight.has(sid) || turnQueueBusy(sid)) {
+    getLogger("one-shot-notify-drain").debug(
+      "one-shot release deferred: delivery wake-up in flight",
+      { sessionId: sid },
+    );
+    armWakeUpListener(sid, terminate);
+    return;
+  }
+  // Delete before terminating so the kill's own cancelBySession → listener
+  // round-trip is a no-op.
+  pendingDrains.delete(sid);
+  terminate();
+}
+
+/**
+ * Begin a wake-up window: drained releases defer until settleOneShotDelivery.
+ * Must precede the delivery's write to the session (steer push or turn
+ * enqueue) so a release cannot interleave.
+ */
+export function beginOneShotDelivery(sessionId: string): void {
+  deliveryInFlight.add(sessionId.trim());
+}
+
+/** Settle the wake-up window; a deferred release lands when the queue idles. */
+export function settleOneShotDelivery(sessionId: string): void {
+  const sid = sessionId.trim();
+  deliveryInFlight.delete(sid);
+  const pending = pendingReleases.get(sid);
+  if (pending) tryReleaseOneShot(sid, pending);
+}
+
+/**
+ * Wrap an OOB fallback delivery: the steer drop callback fires between turns
+ * (queue momentarily idle), so the marker must cover the fallback turn too.
+ */
+export async function oneShotWakeFallback<T>(
+  sessionId: string,
+  inner: () => Promise<T>,
+): Promise<T> {
+  const sid = sessionId.trim();
+  beginOneShotDelivery(sid);
+  try {
+    return await inner();
+  } finally {
+    settleOneShotDelivery(sid);
+  }
+}
 
 /**
  * Hold a one-shot session until its pending exec-notify handles drain.
@@ -44,8 +188,9 @@ function holdOneShotForNotifyDrain(input: {
   if (pendingDrains.has(sid)) return;
   const safety = setTimeout(
     () => {
-      // Safety expiry: the persisted wall-clock TTL (or the fallback cap)
-      // elapsed without the handles draining — terminate as a normal TTL end.
+      // TTL elapsed without the handles draining — terminate as a normal end.
+      pendingReleases.delete(sid);
+      disarmWakeUpListener(sid);
       pendingDrains.delete(sid);
       input.terminate();
     },
@@ -55,22 +200,6 @@ function holdOneShotForNotifyDrain(input: {
     clearTimeout(safety);
     input.terminate();
   });
-}
-
-/**
- * Called after an exec-notify handle resolves or is cancelled: when the
- * session has no live handles left and is held, terminate it. A positive
- * `liveCount` (e.g. the delivery turn backgrounded new execs) keeps the hold.
- */
-export function releaseOneShotIfDrained(sessionId: string, liveCount: number): void {
-  const sid = sessionId.trim();
-  const terminate = pendingDrains.get(sid);
-  if (!terminate) return;
-  if (liveCount > 0) return;
-  // Delete before terminating so the kill's own cancelBySession → listener
-  // round-trip is a no-op.
-  pendingDrains.delete(sid);
-  terminate();
 }
 
 /**
@@ -111,7 +240,11 @@ export function settleOneShotAfterTurn(input: {
   });
 }
 
-/** Clear every hold (shutdown/tests). */
+/** Clear every hold, pending release, and delivery marker (shutdown/tests). */
 export function clearAllOneShotNotifyDrains(): void {
+  for (const unsubscribe of armedWakeUpListeners.values()) unsubscribe();
+  armedWakeUpListeners.clear();
+  pendingReleases.clear();
+  deliveryInFlight.clear();
   pendingDrains.clear();
 }
