@@ -17,6 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@shoggoth/shared": "*",
     "age-encryption": "0.3.0"
   }
 }
