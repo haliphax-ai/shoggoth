@@ -99,4 +99,43 @@ describe("createIdentityHandler", () => {
     handler(req);
     expect(onReceive).toHaveBeenCalledWith(IDENTITY);
   });
+
+  it("rejects a second provisioning attempt once an identity has been received", () => {
+    const provision = makeProvisionSpy();
+    const handler: IdentityHandler = createIdentityHandler({
+      provisionSecret: PROVISION_SECRET,
+      onReceive: provision.onReceive,
+    });
+
+    const req = makeRequest({ "x-provision-secret": PROVISION_SECRET }, { identity: IDENTITY });
+    handler(req);
+
+    const second = makeRequest(
+      { "x-provision-secret": PROVISION_SECRET },
+      { identity: "AGE-SECRET-KEY-1SECOND" },
+    );
+
+    expect(() => handler(second)).toThrow(/already provisioned/);
+    expect(provision.record.identity).toBe(IDENTITY);
+  });
+
+  it("replaces the stored identity when allowReprovision is true", () => {
+    const provision = makeProvisionSpy();
+    const handler: IdentityHandler = createIdentityHandler({
+      provisionSecret: PROVISION_SECRET,
+      allowReprovision: true,
+      onReceive: provision.onReceive,
+    });
+
+    const first = makeRequest({ "x-provision-secret": PROVISION_SECRET }, { identity: IDENTITY });
+    handler(first);
+
+    const second = makeRequest(
+      { "x-provision-secret": PROVISION_SECRET },
+      { identity: "AGE-SECRET-KEY-1SECOND" },
+    );
+
+    expect(handler(second)).toEqual({ ok: true });
+    expect(provision.record.identity).toBe("AGE-SECRET-KEY-1SECOND");
+  });
 });
