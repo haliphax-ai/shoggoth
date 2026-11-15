@@ -1,9 +1,18 @@
 export interface IdentityHandlerOptions {
   provisionSecret?: string;
+  /**
+   * Allow re-provisioning after an identity has already been received.
+   * Defaults to false: a second accepted provisioning attempt is rejected
+   * instead of silently overwriting the stored identity. Rotation requests
+   * that authenticate with a Bearer token should bypass this handler.
+   */
+  allowReprovision?: boolean;
   onReceive: (identity: string) => void;
 }
 
 export function createIdentityHandler(options: IdentityHandlerOptions) {
+  let provisioned = false;
+
   return (req: {
     headers: Record<string, string | undefined>;
     body: { identity: string };
@@ -20,6 +29,11 @@ export function createIdentityHandler(options: IdentityHandlerOptions) {
       throw new Error("Missing identity in request body");
     }
 
+    if (provisioned && !options.allowReprovision) {
+      throw new Error("Identity already provisioned");
+    }
+
+    provisioned = true;
     options.onReceive(identity);
     return { ok: true };
   };

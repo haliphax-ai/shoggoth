@@ -58,11 +58,14 @@ describe("demo service auth integration", () => {
   let serverProcess: ReturnType<typeof import("node:child_process").spawn> | undefined;
   let identity: string;
   let recipient: string;
+  /** Recipient matching the identity currently stored by the service. */
+  let storedRecipient: string;
 
   beforeAll(async () => {
     // Generate an age identity/recipient pair for token minting
     identity = await age.generateIdentity();
     recipient = await age.identityToRecipient(identity);
+    storedRecipient = recipient;
 
     // Pick a random available port
     const net = await import("node:net");
@@ -138,12 +141,6 @@ describe("demo service auth integration", () => {
     });
 
     it("accepts rotation token when identity is already stored", async () => {
-      // First, provision the identity
-      await makeRequest(port, "POST", "/_shoggoth/identity", {
-        headers: { "x-provision-secret": PROVISION_SECRET },
-        body: { identity },
-      });
-
       // Generate a new identity for rotation
       const newIdentity = await age.generateIdentity();
 
@@ -160,6 +157,7 @@ describe("demo service auth integration", () => {
       });
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ ok: true });
+      storedRecipient = await age.identityToRecipient(newIdentity);
     });
   });
 
@@ -177,16 +175,10 @@ describe("demo service auth integration", () => {
     });
 
     it("succeeds with valid minted token", async () => {
-      // Ensure identity is provisioned
-      await makeRequest(port, "POST", "/_shoggoth/identity", {
-        headers: { "x-provision-secret": PROVISION_SECRET },
-        body: { identity },
-      });
-
       const now = Math.floor(Date.now() / 1000);
       const token = await mintToken(
         { sub: "agent-1", scope: "service", iat: now, exp: now + 300 },
-        recipient,
+        storedRecipient,
       );
 
       const res = await makeRequest(port, "GET", "/api/get_message", {
@@ -199,16 +191,10 @@ describe("demo service auth integration", () => {
 
   describe("POST /api/set_message", () => {
     it("succeeds with valid minted token", async () => {
-      // Ensure identity is provisioned
-      await makeRequest(port, "POST", "/_shoggoth/identity", {
-        headers: { "x-provision-secret": PROVISION_SECRET },
-        body: { identity },
-      });
-
       const now = Math.floor(Date.now() / 1000);
       const token = await mintToken(
         { sub: "agent-1", scope: "service", iat: now, exp: now + 300 },
-        recipient,
+        storedRecipient,
       );
 
       const res = await makeRequest(port, "POST", "/api/set_message", {

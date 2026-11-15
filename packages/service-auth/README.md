@@ -95,6 +95,8 @@ Returns an Express-style `(req, res, next)` middleware. Extracts the Bearer toke
 
 Returns a handler function that validates the provision secret (if configured) and calls `onReceive` with the identity string from the request body.
 
+The first accepted request marks the identity as provisioned. Subsequent provisioning requests are rejected with an "Identity already provisioned" error instead of silently overwriting the stored identity, so a leaked provision secret cannot replace a working identity. Set `allowReprovision: true` to opt back into overwrite-on-provision. Replace a service's identity through the authenticated rotation flow (Bearer rotation token) instead of re-provisioning.
+
 ## Types
 
 ```ts
@@ -112,6 +114,7 @@ interface AuthMiddlewareOptions {
 
 interface IdentityHandlerOptions {
   provisionSecret?: string;
+  allowReprovision?: boolean;
   onReceive: (identity: string) => void;
 }
 ```
