@@ -77,6 +77,46 @@ describe("deliverSubagentResult", () => {
       expect(mockRunSessionModelTurn).not.toHaveBeenCalled();
       handle.unregister();
     });
+
+    it("re-delivers via the OOB queue turn when the inline steer entry is dropped undrained", async () => {
+      const handle = registerSteerChannel("parent-drop");
+      const subLog = { info: vi.fn(), warn: vi.fn() } as never;
+      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      mockRunSessionModelTurn.mockClear();
+
+      // Steer channel is registered, so the completion notice is queued in-turn.
+      await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
+        childSessionId: "child-drop",
+        respondTo: "parent-drop",
+        internalDelivery: true,
+        mode: "one_shot",
+        deliveryMode: "inline",
+        assistantText: "dropped result",
+        subLog,
+      });
+      expect(mockRunSessionModelTurn).not.toHaveBeenCalled();
+
+      // Parent turn ends before draining the channel: the drop callback must
+      // re-deliver the result via the OOB queue turn instead of losing it.
+      handle.unregister();
+      await vi.waitFor(() => expect(mockRunSessionModelTurn).toHaveBeenCalledTimes(1));
+
+      const arg = mockRunSessionModelTurn.mock.calls[0][0];
+      expect(arg.sessionId).toBe("parent-drop");
+      expect(arg.userContent).toContain("[Subagent completed]");
+      expect(arg.userContent).toContain("dropped result");
+      // The OOB path carries the structured-output guidance.
+      expect(arg.userContent).toContain("respond with structured output");
+      expect(arg.userMetadata).toMatchObject({
+        subagent_result: true,
+        child_session_id: "child-drop",
+        mode: "one_shot",
+      });
+      expect(subLog.info).toHaveBeenCalledWith(
+        "subagent result re-delivered OOB after inline steer drop",
+        expect.objectContaining({ childSessionId: "child-drop", respondTo: "parent-drop" }),
+      );
+    });
   });
 
   describe("delivery_mode='inline' without active loop (fallback to queue)", () => {
