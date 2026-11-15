@@ -34,6 +34,17 @@ function makeRequest(headers: Record<string, string>, body: { identity: string }
   return { headers, body };
 }
 
+/**
+ * Build a request whose identity value is deliberately not the string that
+ * the handler's request type promises, simulating untrusted wire input.
+ */
+function makeRequestWithRawIdentity(
+  headers: Record<string, string>,
+  identity: unknown,
+): IdentityRequest {
+  return { headers, body: { identity } } as unknown as IdentityRequest;
+}
+
 describe("createIdentityHandler", () => {
   const PROVISION_SECRET = "test-secret-abc123";
 
@@ -137,5 +148,40 @@ describe("createIdentityHandler", () => {
 
     expect(handler(second)).toEqual({ ok: true });
     expect(provision.record.identity).toBe("AGE-SECRET-KEY-1SECOND");
+  });
+
+  it.each([
+    ["number", 12345],
+    ["boolean", true],
+    ["object", { key: "AGE-SECRET-KEY-1OBJECT" }],
+    ["array", ["AGE-SECRET-KEY-1ARRAY"]],
+    ["null", null],
+    ["empty string", ""],
+  ])("rejects an identity that is not a non-empty string (%s)", (_label, identity) => {
+    const provision = makeProvisionSpy();
+    const handler: IdentityHandler = createIdentityHandler({
+      provisionSecret: PROVISION_SECRET,
+      onReceive: provision.onReceive,
+    });
+
+    const req = makeRequestWithRawIdentity({ "x-provision-secret": PROVISION_SECRET }, identity);
+
+    expect(() => handler(req)).toThrow(/Missing identity in request body/);
+    expect(provision.record.identity).toBe("");
+  });
+
+  it("rejects a non-string identity before the overwrite guard consumes the attempt", () => {
+    const provision = makeProvisionSpy();
+    const handler: IdentityHandler = createIdentityHandler({
+      provisionSecret: PROVISION_SECRET,
+      onReceive: provision.onReceive,
+    });
+
+    const req = makeRequestWithRawIdentity({ "x-provision-secret": PROVISION_SECRET }, 12345);
+    expect(() => handler(req)).toThrow(/Missing identity in request body/);
+
+    const valid = makeRequest({ "x-provision-secret": PROVISION_SECRET }, { identity: IDENTITY });
+    expect(handler(valid)).toEqual({ ok: true });
+    expect(provision.record.identity).toBe(IDENTITY);
   });
 });
