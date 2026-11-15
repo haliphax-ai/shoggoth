@@ -3,8 +3,6 @@
  * The policy engine uses these with action/resource for authorization.
  */
 
-export type AuthSource = "cli_operator_token" | "agent" | "system";
-
 export type OperatorPrincipal = {
   kind: "operator";
   operatorId: string;
@@ -26,3 +24,9 @@ export type SystemPrincipal = {
 };
 
 export type AuthenticatedPrincipal = OperatorPrincipal | AgentPrincipal | SystemPrincipal;
+
+/**
+ * Convenience union of every source literal above — derived from the principal
+ * types so it can never drift out of sync with them.
+ */
+export type AuthSource = AuthenticatedPrincipal["source"];
