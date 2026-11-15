@@ -31,5 +31,9 @@ export function resolveAuthenticatedPrincipal(
     if (!ctx.agentTokenStore.validate(auth.token, auth.session_id)) return null;
     return agentPrincipalFromToken(auth.session_id);
   }
+  // Unreachable for every member of the WireAuth union — this fallback exists
+  // for type safety only (e.g. a malformed runtime payload that slipped past
+  // parseRequestLine's kind check). Returning null means "unauthenticated"
+  // to callers; no error is raised by design.
   return null;
 }
