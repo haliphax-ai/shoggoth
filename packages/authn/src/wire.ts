@@ -60,6 +60,13 @@ export function parseRequestLine(line: string): WireRequest {
   const r = obj as Record<string, unknown>;
   if (r.v !== WIRE_VERSION) throw new WireParseError(`unsupported wire version: ${String(r.v)}`);
   if (typeof r.id !== "string" || !r.id) throw new WireParseError("missing request id");
+  // `op` is deliberately left format-free: it is an opaque dispatch label, not
+  // a path or identifier. Every dispatch site matches it against fixed,
+  // literal op names (daemon control-plane `dispatchOp`, policy
+  // `isDefinedControlOp`, `handleIntegrationControlOp`) and rejects anything
+  // unrecognized with ERR_UNKNOWN_OP before a handler runs. Do not add
+  // consumers that index, resolve, or interpolate `op` — keep dispatch
+  // exact-match only.
   if (typeof r.op !== "string" || !r.op) throw new WireParseError("missing op");
   // Auth is optional — ops like "health" are exempt
   if (r.auth && typeof r.auth === "object") {

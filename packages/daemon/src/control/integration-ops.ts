@@ -1041,7 +1041,11 @@ async function runCompactionBehindQueue(
 }
 
 /**
- * Control-plane handlers for ACPX workspace bindings and managed acpx processes.
+ * Integration control-op router. `req.op` arrives as an arbitrary string from
+ * the wire (parseRequestLine does not constrain its format); safety relies on
+ * this switch matching only literal case labels and returning `undefined` for
+ * anything else (callers then reject with ERR_UNKNOWN_OP). Never index,
+ * resolve, or interpolate `op` into paths, imports, or command names.
  */
 export async function handleIntegrationControlOp(
   req: WireRequest,
