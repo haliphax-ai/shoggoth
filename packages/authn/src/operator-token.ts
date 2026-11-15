@@ -4,7 +4,7 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 
-export function hashOperatorTokenOpaque(token: string): Buffer {
+export function hashOperatorTokenOpaque(token: string): Uint8Array {
   return createHash("sha256").update(token, "utf8").digest();
 }
 

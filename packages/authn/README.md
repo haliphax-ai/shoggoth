@@ -27,7 +27,7 @@ The **`@shoggoth/daemon`** control plane consumes this package (JSONL wire and a
 - At session spawn: mint random opaque token; persist **hash only** (e.g. SHA-256) with `session_id`, `created_at`, `revoked_at`.
 - Inject raw token into agent env (e.g. `SHOGGOTH_AGENT_TOKEN`) or IPC; never operator secret.
 - **validate:** hash presented token, lookup row, require session status active — **store interface** `AgentTokenStore` (SQLite-backed in production; in-memory for early tests).
-- **Implemented:** `mintAgentCredential`, `hashAgentToken`, `timingSafeEqualToken` + in-memory `MemoryAgentTokenStore` for tests.
+- **Implemented:** `mintAgentCredentialRaw`, `hashAgentToken`, `timingSafeEqualRawToHash` + in-memory `MemoryAgentTokenStore` for tests.
 
 ## JSONL wire format
 
