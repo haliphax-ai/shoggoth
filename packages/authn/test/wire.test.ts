@@ -136,4 +136,59 @@ describe("JSONL wire", () => {
     assert.throws(() => parseResponseLine(""), WireParseError);
     assert.throws(() => parseResponseLine("\r"), WireParseError);
   });
+
+  it("omits lineNumber when the caller does not supply one", () => {
+    const line = JSON.stringify({ v: 99, id: "x", op: "ping" });
+    try {
+      parseRequestLine(line);
+      assert.fail("expected throw");
+    } catch (e) {
+      assert.ok(e instanceof WireParseError);
+      assert.strictEqual(e.lineNumber, undefined);
+      assert.strictEqual(e.lineText, undefined);
+    }
+  });
+
+  it("attaches the supplied lineNumber to request parse errors", () => {
+    const line = JSON.stringify({ v: 99, id: "x", op: "ping" });
+    try {
+      parseRequestLine(line, 7);
+      assert.fail("expected throw");
+    } catch (e) {
+      assert.ok(e instanceof WireParseError);
+      assert.strictEqual(e.lineNumber, 7);
+    }
+  });
+
+  it("attaches lineNumber and lineText to invalid-json request errors", () => {
+    try {
+      parseRequestLine("{not json}", 3);
+      assert.fail("expected throw");
+    } catch (e) {
+      assert.ok(e instanceof WireParseError);
+      assert.strictEqual(e.lineNumber, 3);
+      assert.strictEqual(e.lineText, "{not json}");
+    }
+  });
+
+  it("attaches the supplied lineNumber to response parse errors", () => {
+    const line = JSON.stringify({ v: WIRE_VERSION, id: "x" });
+    try {
+      parseResponseLine(line, 12);
+      assert.fail("expected throw");
+    } catch (e) {
+      assert.ok(e instanceof WireParseError);
+      assert.strictEqual(e.lineNumber, 12);
+    }
+  });
+
+  it("attaches lineNumber to empty-line errors", () => {
+    try {
+      parseRequestLine("", 42);
+      assert.fail("expected throw");
+    } catch (e) {
+      assert.ok(e instanceof WireParseError);
+      assert.strictEqual(e.lineNumber, 42);
+    }
+  });
 });

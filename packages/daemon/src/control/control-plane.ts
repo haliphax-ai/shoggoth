@@ -136,6 +136,7 @@ async function dispatchOp(
 
 async function handleOneLine(
   line: string,
+  lineNumber: number,
   _socket: Socket,
   deps: {
     operatorTokenSecret: string | undefined;
@@ -162,7 +163,7 @@ async function handleOneLine(
 ): Promise<WireResponse> {
   let req: WireRequest;
   try {
-    req = parseRequestLine(line);
+    req = parseRequestLine(line, lineNumber);
   } catch (e) {
     if (e instanceof WireParseError) {
       return {
@@ -414,6 +415,7 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
 
   const server: Server = createServer((socket) => {
     let buf = "";
+    let nextLineNumber = 0;
     let chain = Promise.resolve();
     const flushLines = () => {
       let nl: number;
@@ -421,9 +423,11 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
         const line = buf.slice(0, nl);
         buf = buf.slice(nl + 1);
         const captured = line;
+        const capturedLineNumber = nextLineNumber;
+        nextLineNumber += 1;
         chain = chain
           .then(() =>
-            handleOneLine(captured, socket, {
+            handleOneLine(captured, capturedLineNumber, socket, {
               operatorTokenSecret,
               agentStore,
               getHealth,
@@ -437,7 +441,10 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
             socket.write(serializeResponse(res));
           })
           .catch((err: unknown) => {
-            logger.error("control plane request failed", { err: String(err) });
+            logger.error("control plane request failed", {
+              err: String(err),
+              lineNumber: err instanceof WireParseError ? err.lineNumber : undefined,
+            });
             try {
               socket.destroy();
             } catch {

@@ -31,35 +31,50 @@ export type WireResponse = {
 export class WireParseError extends Error {
   override name = "WireParseError";
   readonly lineText?: string;
-  constructor(message: string, lineText?: string) {
+  /**
+   * 0-based index of the line in the stream, when the caller knows it. Not set
+   * by the parse functions themselves (they see only a single line) — stream
+   * consumers attach their own position here for debugging.
+   */
+  readonly lineNumber?: number;
+  constructor(message: string, lineText?: string, lineNumber?: number) {
     super(message);
     this.lineText = lineText;
+    this.lineNumber = lineNumber;
   }
+}
+
+/**
+ * Internal throw helper: builds a WireParseError, attaching the optional line
+ * number so every error from a stream-aware parse carries its position.
+ */
+function err(message: string, lineNumber?: number, lineText?: string): WireParseError {
+  return new WireParseError(message, lineText, lineNumber);
 }
 
 /**
  * Shared preprocessing for JSONL wire lines: strip a trailing CR, guard against
  * empty lines, and parse the JSON payload.
  */
-function parseJsonLine(line: string): { obj: unknown; trimmed: string } {
+function parseJsonLine(
+  line: string,
+  lineNumber: number | undefined,
+): { obj: unknown; trimmed: string } {
   const trimmed = line.replace(/\r$/, "");
-  if (!trimmed) throw new WireParseError("empty line");
+  if (!trimmed) throw err("empty line", lineNumber);
   try {
     return { obj: JSON.parse(trimmed), trimmed };
   } catch (e) {
-    throw new WireParseError(
-      `invalid json: ${e instanceof Error ? e.message : String(e)}`,
-      trimmed,
-    );
+    throw err(`invalid json: ${e instanceof Error ? e.message : String(e)}`, lineNumber, trimmed);
   }
 }
 
-export function parseRequestLine(line: string): WireRequest {
-  const { obj } = parseJsonLine(line);
-  if (!obj || typeof obj !== "object") throw new WireParseError("request must be a JSON object");
+export function parseRequestLine(line: string, lineNumber?: number): WireRequest {
+  const { obj } = parseJsonLine(line, lineNumber);
+  if (!obj || typeof obj !== "object") throw err("request must be a JSON object", lineNumber);
   const r = obj as Record<string, unknown>;
-  if (r.v !== WIRE_VERSION) throw new WireParseError(`unsupported wire version: ${String(r.v)}`);
-  if (typeof r.id !== "string" || !r.id) throw new WireParseError("missing request id");
+  if (r.v !== WIRE_VERSION) throw err(`unsupported wire version: ${String(r.v)}`, lineNumber);
+  if (typeof r.id !== "string" || !r.id) throw err("missing request id", lineNumber);
   // `op` is deliberately left format-free: it is an opaque dispatch label, not
   // a path or identifier. Every dispatch site matches it against fixed,
   // literal op names (daemon control-plane `dispatchOp`, policy
@@ -67,23 +82,23 @@ export function parseRequestLine(line: string): WireRequest {
   // unrecognized with ERR_UNKNOWN_OP before a handler runs. Do not add
   // consumers that index, resolve, or interpolate `op` — keep dispatch
   // exact-match only.
-  if (typeof r.op !== "string" || !r.op) throw new WireParseError("missing op");
+  if (typeof r.op !== "string" || !r.op) throw err("missing op", lineNumber);
   // Auth is optional — ops like "health" are exempt
   if (r.auth && typeof r.auth === "object") {
     const auth = r.auth as Record<string, unknown>;
     const kind = auth.kind;
     if (kind !== "operator_token" && kind !== "agent") {
-      throw new WireParseError(`unknown auth.kind: ${String(kind)}`);
+      throw err(`unknown auth.kind: ${String(kind)}`, lineNumber);
     }
     if (kind === "operator_token") {
       if (typeof auth.token !== "string" || !auth.token)
-        throw new WireParseError("operator_token requires auth.token");
+        throw err("operator_token requires auth.token", lineNumber);
     }
     if (kind === "agent") {
       if (typeof auth.session_id !== "string" || !auth.session_id)
-        throw new WireParseError("agent auth requires auth.session_id");
+        throw err("agent auth requires auth.session_id", lineNumber);
       if (typeof auth.token !== "string" || !auth.token)
-        throw new WireParseError("agent auth requires auth.token");
+        throw err("agent auth requires auth.token", lineNumber);
     }
   }
 
@@ -94,16 +109,16 @@ export function serializeResponse(res: WireResponse): string {
   return `${JSON.stringify(res)}\n`;
 }
 
-export function parseResponseLine(line: string): WireResponse {
-  const { obj } = parseJsonLine(line);
-  if (!obj || typeof obj !== "object") throw new WireParseError("response must be a JSON object");
+export function parseResponseLine(line: string, lineNumber?: number): WireResponse {
+  const { obj } = parseJsonLine(line, lineNumber);
+  if (!obj || typeof obj !== "object") throw err("response must be a JSON object", lineNumber);
   const r = obj as Record<string, unknown>;
-  if (r.v !== WIRE_VERSION) throw new WireParseError(`unsupported wire version: ${String(r.v)}`);
-  if (typeof r.id !== "string" || !r.id) throw new WireParseError("missing response id");
-  if (typeof r.ok !== "boolean") throw new WireParseError("missing ok boolean");
+  if (r.v !== WIRE_VERSION) throw err(`unsupported wire version: ${String(r.v)}`, lineNumber);
+  if (typeof r.id !== "string" || !r.id) throw err("missing response id", lineNumber);
+  if (typeof r.ok !== "boolean") throw err("missing ok boolean", lineNumber);
   if (r.ok === true && r.error !== undefined)
-    throw new WireParseError("ok:true must not include error");
+    throw err("ok:true must not include error", lineNumber);
   if (r.ok === false && (r.error === undefined || typeof r.error !== "object"))
-    throw new WireParseError("ok:false requires error object");
+    throw err("ok:false requires error object", lineNumber);
   return r as unknown as WireResponse;
 }
