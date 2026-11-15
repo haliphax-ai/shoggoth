@@ -37,6 +37,18 @@ The **`@shoggoth/daemon`** control plane consumes this package (JSONL wire and a
 - **Auth kinds:** `operator_token`, `agent`.
 - **Versioning:** `v === 1` for this contract. Additive fields allowed (ignore unknown). Breaking changes bump `v` and require daemon + CLI capability negotiation later if needed.
 
+### `op` semantics (audit note)
+
+`op` is validated for presence and type only (`typeof op === "string"`, non-empty) — its format is deliberately unconstrained, so any string (`../../etc/passwd`, values with spaces, etc.) parses successfully. This is safe by construction: `op` is an opaque dispatch label, never treated as a path, identifier, or command name. Every dispatch site matches it against fixed, literal op names and rejects unrecognized values with `ERR_UNKNOWN_OP` before any handler runs:
+
+- `@shoggoth/daemon` control plane (`control-plane.ts`): health short-circuit (`=== "health"`), then (after authentication) `isDefinedControlOp()` — a closed, literal allowlist (`DEFINED_CONTROL_OPS` in `policy/engine.ts`) — rejects unknown ops with `ERR_UNKNOWN_OP` (audited as `unknown_op`), then policy authorization uses `op` only as a policy `resource` string, then `dispatchOp()` matches exact literals (`ping`, `version`, `health`; agents get `agent_ping`).
+- Integration router (`integration-ops.ts`): `switch (req.op)` with literal case labels only; the `default` branch returns `undefined`, which the caller turns into `ERR_UNKNOWN_OP`.
+- In-process invoker (`integration-invoke.ts`): callers pass compile-time op constants; the policy check still gates the call.
+
+Do not add consumers that interpolate `op` into file paths, dynamic `import()`/`require()`, subprocess command names, or registry keys. If a future dispatch site needs a non-literal mapping (e.g. a plugin registry keyed by op), it must validate against its own closed enumeration first.
+
+Audit conclusion (2026-11-15): arbitrary `op` strings cannot reach dangerous code paths — path construction, registry/command lookup, and dynamic imports are all driven by _payload_ fields, never by `op` itself. No format regex is required at the parse layer; handlers already fail safe on unknown ops.
+
 ## Integrations with other subsystems
 
 - **Authorization / audit:** consumes `AuthenticatedPrincipal` and audit `source`.
