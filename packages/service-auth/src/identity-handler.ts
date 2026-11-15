@@ -25,8 +25,8 @@ export function createIdentityHandler(options: IdentityHandlerOptions) {
     }
 
     const { identity } = req.body;
-    if (!identity) {
-      throw new Error("Missing identity in request body");
+    if (typeof identity !== "string" || identity.length === 0) {
+      throw new Error("Missing identity in request body: expected a non-empty string");
     }
 
     if (provisioned && !options.allowReprovision) {
