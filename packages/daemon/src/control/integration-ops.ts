@@ -809,10 +809,8 @@ export async function deliverOobStructuredResponse(opts: {
 }
 
 /**
- * Deliver a subagent's completed result to the respond_to session.
- * Used by background one-shot and non-thread-bound persistent subagents.
+ * Options for delivering a finished subagent result to its parent session.
  */
-/** Options for delivering a finished subagent result to its parent session. */
 type SubagentResultOpts = {
   childSessionId: string;
   /** Subagent shorthand agent ID, used to label event messages and logs. */
@@ -950,27 +948,7 @@ async function runSubagentResultOobTurn(input: {
 
 export async function deliverSubagentResult(
   ext: NonNullable<typeof subagentRuntimeExtensionRef.current>,
-  opts: {
-    childSessionId: string;
-    /** Subagent shorthand agent ID, used to label event messages and logs. */
-    childAgentId?: string;
-    respondTo: string;
-    internalDelivery: boolean;
-    mode: "one_shot" | "persistent";
-    deliveryMode: "inline" | "queue" | "drop";
-    maxChars?: number;
-    assistantText: string;
-    subLog: ReturnType<typeof getLogger>;
-    /** Optional override merged into the parent turn's model invocation params (e.g. responseSchema for structured output). */
-    modelInvocationOverride?: Partial<ModelInvocationParams>;
-    /**
-     * Spawning session to fall back to when `respondTo` cannot receive the turn
-     * (missing or terminated at delivery time). Omit to drop on failure (logged).
-     */
-    fallbackRespondTo?: string;
-    /** Set internally on fallback delivery: the original `respond_to` that was unavailable. */
-    unavailableRespondTo?: string;
-  },
+  opts: SubagentResultOpts,
 ): Promise<void> {
   const {
     childSessionId,
