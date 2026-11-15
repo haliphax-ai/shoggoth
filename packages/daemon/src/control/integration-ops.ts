@@ -812,6 +812,153 @@ export async function deliverOobStructuredResponse(opts: {
  * Deliver a subagent's completed result to the respond_to session.
  * Used by background one-shot and non-thread-bound persistent subagents.
  */
+/** Options for delivering a finished subagent result to its parent session. */
+type SubagentResultOpts = {
+  childSessionId: string;
+  /** Subagent shorthand agent ID, used to label event messages and logs. */
+  childAgentId?: string;
+  respondTo: string;
+  internalDelivery: boolean;
+  mode: "one_shot" | "persistent";
+  deliveryMode: "inline" | "queue" | "drop";
+  maxChars?: number;
+  assistantText: string;
+  subLog: ReturnType<typeof getLogger>;
+  /** Optional override merged into the parent turn's model invocation params (e.g. responseSchema for structured output). */
+  modelInvocationOverride?: Partial<ModelInvocationParams>;
+  /**
+   * Spawning session to fall back to when `respondTo` cannot receive the turn
+   * (missing or terminated at delivery time). Omit to drop on failure (logged).
+   */
+  fallbackRespondTo?: string;
+  /** Set internally on fallback delivery: the original `respond_to` that was unavailable. */
+  unavailableRespondTo?: string;
+};
+
+/**
+ * Dispatch the subagent result as an out-of-band queue turn. This is both the
+ * normal path for queue-mode delivery and the guaranteed-delivery fallback for
+ * inline mode (steer entry dropped undrained / no active steer channel) and for
+ * re-routed deliveries.
+ */
+async function runSubagentResultOobTurn(input: {
+  readonly ext: NonNullable<typeof subagentRuntimeExtensionRef.current>;
+  readonly childSessionId: string;
+  readonly respondTo: string;
+  readonly internalDelivery: boolean;
+  readonly mode: "one_shot" | "persistent";
+  /** Parent-facing content: completed tag + result text + OOB guidance. */
+  readonly asyncContent: string;
+  readonly systemContext: SystemContext;
+  readonly subLog: ReturnType<typeof getLogger>;
+  readonly maxChars: number;
+  readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
+  readonly fallbackRespondTo?: string;
+  readonly unavailableRespondTo?: string;
+  /** Original opts, reused for the dead-target re-route. */
+  readonly originalOpts: SubagentResultOpts;
+}): Promise<void> {
+  const {
+    ext,
+    childSessionId,
+    respondTo,
+    internalDelivery,
+    mode,
+    asyncContent,
+    systemContext,
+    subLog,
+    maxChars,
+    modelInvocationOverride,
+    fallbackRespondTo,
+    unavailableRespondTo,
+    originalOpts,
+  } = input;
+
+  // Only the turn dispatch is guarded for fallback: a throw here means the target
+  // session could not run a turn (missing/terminated), so the result has not been
+  // delivered anywhere yet and can safely be re-routed.
+  let turnResult: Awaited<ReturnType<typeof ext.runSessionModelTurn>>;
+  try {
+    turnResult = await ext.runSessionModelTurn({
+      sessionId: respondTo,
+      userContent: asyncContent,
+      userMetadata: {
+        subagent_result: true,
+        child_session_id: childSessionId,
+        mode,
+      },
+      systemContext,
+      delivery: { kind: "internal" },
+      modelInvocationOverride: {
+        // OOB structured output is the default for the parent delivery turn; a
+        // caller-supplied override is shallow-merged on top so partial overrides
+        // (e.g. temperature) keep the OOB response schema intact.
+        responseSchema: { schema: OOB_SCHEMA_WITH_SENDER },
+        structuredOutputMode: "best-effort",
+        ...modelInvocationOverride,
+      },
+    });
+  } catch (err) {
+    subLog.warn("failed to deliver subagent result to respond_to session", {
+      childSessionId,
+      respondTo,
+      mode,
+      error: String(err),
+    });
+    if (fallbackRespondTo && fallbackRespondTo !== respondTo && !unavailableRespondTo) {
+      subLog.info("re-routing subagent result to spawning session", {
+        childSessionId,
+        respondTo,
+        fallbackRespondTo,
+        mode,
+      });
+      await deliverSubagentResult(ext, {
+        ...originalOpts,
+        respondTo: fallbackRespondTo,
+        fallbackRespondTo: undefined,
+        unavailableRespondTo: respondTo,
+      });
+      return;
+    }
+    subLog.warn("subagent result dropped: no live delivery target", {
+      childSessionId,
+      respondTo,
+      fallbackRespondTo,
+      mode,
+    });
+    return;
+  }
+
+  try {
+    if (turnResult?.aborted || turnResult?.latestAssistantText) {
+      await deliverOobStructuredResponse({
+        structuredResponse: turnResult.latestAssistantText,
+        aborted: turnResult.aborted,
+        respondTo,
+        childSessionId,
+        ext,
+        subLog,
+        maxChars,
+        hasSender: true,
+        systemContext,
+      });
+    }
+    subLog.info("subagent result delivered to respond_to session", {
+      childSessionId,
+      respondTo,
+      mode,
+      internal: internalDelivery,
+    });
+  } catch (err) {
+    subLog.warn("failed to finalize subagent result delivery", {
+      childSessionId,
+      respondTo,
+      mode,
+      error: String(err),
+    });
+  }
+}
+
 export async function deliverSubagentResult(
   ext: NonNullable<typeof subagentRuntimeExtensionRef.current>,
   opts: {
@@ -892,98 +1039,22 @@ export async function deliverSubagentResult(
     },
   };
 
-  /**
-   * Dispatch the subagent result as an out-of-band queue turn. This is both the
-   * normal path for queue-mode delivery and the guaranteed-delivery fallback for
-   * inline mode (steer entry dropped undrained / no active steer channel) and
-   * for re-routed deliveries. Declared before the inline block because
-   * `deliverInTurnEvent` may invoke the fallback synchronously (no active
-   * channel).
-   */
-  const runOobDelivery = async (): Promise<void> => {
-    // Only the turn dispatch is guarded for fallback: a throw here means the target
-    // session could not run a turn (missing/terminated), so the result has not been
-    // delivered anywhere yet and can safely be re-routed.
-    let turnResult: Awaited<ReturnType<typeof ext.runSessionModelTurn>>;
-    try {
-      turnResult = await ext.runSessionModelTurn({
-        sessionId: respondTo,
-        userContent: asyncContent,
-        userMetadata: {
-          subagent_result: true,
-          child_session_id: childSessionId,
-          mode,
-        },
-        systemContext: oobSystemContext,
-        delivery: { kind: "internal" },
-        modelInvocationOverride: {
-          // OOB structured output is the default for the parent delivery turn; a
-          // caller-supplied override is shallow-merged on top so partial overrides
-          // (e.g. temperature) keep the OOB response schema intact.
-          responseSchema: { schema: OOB_SCHEMA_WITH_SENDER },
-          structuredOutputMode: "best-effort",
-          ...modelInvocationOverride,
-        },
-      });
-    } catch (err) {
-      subLog.warn("failed to deliver subagent result to respond_to session", {
-        childSessionId,
-        respondTo,
-        mode,
-        error: String(err),
-      });
-      if (fallbackRespondTo && fallbackRespondTo !== respondTo && !unavailableRespondTo) {
-        subLog.info("re-routing subagent result to spawning session", {
-          childSessionId,
-          respondTo,
-          fallbackRespondTo,
-          mode,
-        });
-        return deliverSubagentResult(ext, {
-          ...opts,
-          respondTo: fallbackRespondTo,
-          fallbackRespondTo: undefined,
-          unavailableRespondTo: respondTo,
-        });
-      }
-      subLog.warn("subagent result dropped: no live delivery target", {
-        childSessionId,
-        respondTo,
-        fallbackRespondTo,
-        mode,
-      });
-      return;
-    }
-
-    try {
-      if (turnResult?.aborted || turnResult?.latestAssistantText) {
-        await deliverOobStructuredResponse({
-          structuredResponse: turnResult.latestAssistantText,
-          aborted: turnResult.aborted,
-          respondTo,
-          childSessionId,
-          ext,
-          subLog,
-          maxChars,
-          hasSender: true,
-          systemContext: oobSystemContext,
-        });
-      }
-      subLog.info("subagent result delivered to respond_to session", {
-        childSessionId,
-        respondTo,
-        mode,
-        internal: internalDelivery,
-      });
-    } catch (err) {
-      subLog.warn("failed to finalize subagent result delivery", {
-        childSessionId,
-        respondTo,
-        mode,
-        error: String(err),
-      });
-    }
-  };
+  const runOobDelivery = async (): Promise<void> =>
+    runSubagentResultOobTurn({
+      ext,
+      childSessionId,
+      respondTo,
+      internalDelivery,
+      mode,
+      asyncContent,
+      systemContext: oobSystemContext,
+      subLog,
+      maxChars,
+      modelInvocationOverride,
+      fallbackRespondTo,
+      unavailableRespondTo,
+      originalOpts: opts,
+    });
 
   // inline mode: attempt steer injection first. Delivery is guaranteed: if the
   // turn ends (or is replaced) before the entry is drained, the drop callback
@@ -1005,25 +1076,21 @@ export async function deliverSubagentResult(
     // Either the entry was injected into the active turn ("in_turn") or the
     // fallback already delivered it via the OOB queue turn ("fallback" covers
     // both no-active-turn and the dropped-undrained case) — never both.
-    if (delivered === "in_turn") {
-      subLog.info("subagent result injected inline via steer channel", {
+    subLog.info(
+      delivered === "in_turn"
+        ? "subagent result injected inline via steer channel"
+        : "subagent result delivered OOB (no active steer channel)",
+      {
         childSessionId,
         respondTo,
         mode,
         internal: internalDelivery,
-      });
-    } else {
-      subLog.info("subagent result delivered OOB (no active steer channel)", {
-        childSessionId,
-        respondTo,
-        mode,
-        internal: internalDelivery,
-      });
-    }
+      },
+    );
     return;
   }
 
-  return runOobDelivery();
+  await runOobDelivery();
 }
 
 function requireAcpxRuntime(ctx: IntegrationOpsContext): {
