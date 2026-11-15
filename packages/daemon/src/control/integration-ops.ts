@@ -842,37 +842,26 @@ type SubagentResultOpts = {
  * re-routed deliveries.
  */
 async function runSubagentResultOobTurn(input: {
+  readonly opts: SubagentResultOpts;
   readonly ext: NonNullable<typeof subagentRuntimeExtensionRef.current>;
-  readonly childSessionId: string;
-  readonly respondTo: string;
-  readonly internalDelivery: boolean;
-  readonly mode: "one_shot" | "persistent";
   /** Parent-facing content: completed tag + result text + OOB guidance. */
   readonly asyncContent: string;
   readonly systemContext: SystemContext;
-  readonly subLog: ReturnType<typeof getLogger>;
+  /** Resolved `maxChars` (the default is applied by callers); kept explicit so the truncation width is visible at the call site. */
   readonly maxChars: number;
-  readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
-  readonly fallbackRespondTo?: string;
-  readonly unavailableRespondTo?: string;
-  /** Original opts, reused for the dead-target re-route. */
-  readonly originalOpts: SubagentResultOpts;
 }): Promise<void> {
+  const { opts } = input;
   const {
-    ext,
     childSessionId,
     respondTo,
     internalDelivery,
     mode,
-    asyncContent,
-    systemContext,
     subLog,
-    maxChars,
     modelInvocationOverride,
     fallbackRespondTo,
     unavailableRespondTo,
-    originalOpts,
-  } = input;
+  } = opts;
+  const { ext, asyncContent, systemContext, maxChars } = input;
 
   // Only the turn dispatch is guarded for fallback: a throw here means the target
   // session could not run a turn (missing/terminated), so the result has not been
@@ -913,7 +902,7 @@ async function runSubagentResultOobTurn(input: {
         mode,
       });
       await deliverSubagentResult(ext, {
-        ...originalOpts,
+        ...opts,
         respondTo: fallbackRespondTo,
         fallbackRespondTo: undefined,
         unavailableRespondTo: respondTo,
@@ -992,8 +981,6 @@ export async function deliverSubagentResult(
     assistantText,
     subLog,
     maxChars = 8000,
-    modelInvocationOverride,
-    fallbackRespondTo,
     unavailableRespondTo,
     childAgentId,
   } = opts;
@@ -1041,19 +1028,11 @@ export async function deliverSubagentResult(
 
   const runOobDelivery = async (): Promise<void> =>
     runSubagentResultOobTurn({
+      opts,
       ext,
-      childSessionId,
-      respondTo,
-      internalDelivery,
-      mode,
       asyncContent,
       systemContext: oobSystemContext,
-      subLog,
       maxChars,
-      modelInvocationOverride,
-      fallbackRespondTo,
-      unavailableRespondTo,
-      originalOpts: opts,
     });
 
   // inline mode: attempt steer injection first. Delivery is guaranteed: if the
