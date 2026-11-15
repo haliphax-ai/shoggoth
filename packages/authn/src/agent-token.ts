@@ -15,7 +15,7 @@ export function mintAgentCredentialRaw(): string {
   return randomBytes(RAW_BYTES).toString("base64url");
 }
 
-export function hashAgentToken(raw: string): Buffer {
+export function hashAgentToken(raw: string): Uint8Array {
   return createHash("sha256").update(raw, "utf8").digest();
 }
 
@@ -25,6 +25,8 @@ export class AgentTokenHashLengthError extends Error {
 
 /**
  * Constant-time comparison of the computed SHA-256 digest against the stored hash.
+ * Hashes are typed as Uint8Array for runtime portability; Buffer is a Uint8Array
+ * subclass, so callers may still pass Buffers.
  * Returns false on a content mismatch. Throws AgentTokenHashLengthError when the
  * stored hash has a different length: SHA-256 digests are always 32 bytes, so a
  * length mismatch means the store returned corrupt data or a hash from another
@@ -32,7 +34,7 @@ export class AgentTokenHashLengthError extends Error {
  * timingSafeEqual also throws on length mismatch, so silent rejection was never
  * actually reachable past this guard.)
  */
-export function timingSafeEqualRawToHash(raw: string, storedHash: Buffer): boolean {
+export function timingSafeEqualRawToHash(raw: string, storedHash: Uint8Array): boolean {
   const h = hashAgentToken(raw);
   if (h.length !== storedHash.length) {
     throw new AgentTokenHashLengthError(
@@ -44,7 +46,7 @@ export function timingSafeEqualRawToHash(raw: string, storedHash: Buffer): boole
 
 export type AgentTokenRecord = {
   sessionId: string;
-  tokenHash: Buffer;
+  tokenHash: Uint8Array;
   revoked: boolean;
 };
 
