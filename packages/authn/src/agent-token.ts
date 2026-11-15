@@ -15,6 +15,13 @@ export function mintAgentCredentialRaw(): string {
   return randomBytes(RAW_BYTES).toString("base64url");
 }
 
+/**
+ * Hash the raw agent credential (SHA-256); the digest is the only persisted form.
+ *
+ * Intentionally not a shared `hashToken` utility with operator-token: the two
+ * domains stay decoupled, and the "duplication" is a single SHA-256 expression.
+ * Change both together if the hashing scheme ever changes.
+ */
 export function hashAgentToken(raw: string): Uint8Array {
   return createHash("sha256").update(raw, "utf8").digest();
 }
