@@ -9,6 +9,7 @@ workflows:
         - 'docker/build-push-action@v7.4.0'
         - 'docker/setup-buildx-action@v4.4.1'
         - 'haliphax-ai/shoggoth@main'
+        - 'qltysh/qlty-action@v2.7.0'
 dependencies:
     'actions/checkout@v7':
         ref: 'v7'
@@ -48,3 +49,8 @@ dependencies:
         uses:
             - 'actions/checkout@v7'
             - 'actions/setup-node@v6'
+    'qltysh/qlty-action@v2.7.0':
+        ref: 'v2.7.0'
+        commit: 'sha1-0ff2178667bf8eb28ed0013a7ef54857a24d4056'
+        owner_id: 184769278
+        repo_id: 873940193
