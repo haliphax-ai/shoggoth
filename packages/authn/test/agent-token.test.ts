@@ -17,6 +17,17 @@ describe("agent token", () => {
     assert.strictEqual(store.validate(raw, "sess-2"), false);
   });
 
+  it("mintAndRegister stores hash only and returns the raw token", () => {
+    const store = new MemoryAgentTokenStore();
+    const raw = store.mintAndRegister("sess-mint");
+    assert.strictEqual(store.validate(raw, "sess-mint"), true);
+    assert.strictEqual(store.validate(raw, "sess-other"), false);
+    const raw2 = store.mintAndRegister("sess-mint");
+    assert.notStrictEqual(raw2, raw);
+    assert.strictEqual(store.validate(raw, "sess-mint"), false);
+    assert.strictEqual(store.validate(raw2, "sess-mint"), true);
+  });
+
   it("fails after revoke", () => {
     const store = new MemoryAgentTokenStore();
     const raw = mintAgentCredentialRaw();

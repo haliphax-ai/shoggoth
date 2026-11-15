@@ -35,6 +35,20 @@ describe("createSqliteAgentTokenStore", () => {
     assert.strictEqual(tokens.validate(raw, "s2"), false);
   });
 
+  it("mintAndRegister returns raw token and replaces prior token", () => {
+    const db = openMigratedDb();
+    const sessions = createSessionStore(db);
+    const tokens = createSqliteAgentTokenStore(db);
+    sessions.create({ id: "s4", workspacePath: "/w", status: "active" });
+    const raw = tokens.mintAndRegister("s4");
+    assert.strictEqual(tokens.validate(raw, "s4"), true);
+    assert.strictEqual(tokens.validate(raw, "other"), false);
+    const raw2 = tokens.mintAndRegister("s4");
+    assert.notStrictEqual(raw2, raw);
+    assert.strictEqual(tokens.validate(raw, "s4"), false);
+    assert.strictEqual(tokens.validate(raw2, "s4"), true);
+  });
+
   it("replaces prior token for same session on re-register", () => {
     const db = openMigratedDb();
     const sessions = createSessionStore(db);
