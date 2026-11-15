@@ -59,6 +59,8 @@ export type AgentTokenRecord = {
 
 export interface AgentTokenStore {
   register(sessionId: string, rawToken: string): void;
+  /** Mint a fresh credential, persist only its hash, and return the raw token. */
+  mintAndRegister(sessionId: string): string;
   revoke(sessionId: string): void;
   validate(rawToken: string, sessionId: string): boolean;
 }
@@ -72,6 +74,12 @@ export class MemoryAgentTokenStore implements AgentTokenStore {
       tokenHash: hashAgentToken(rawToken),
       revoked: false,
     });
+  }
+
+  mintAndRegister(sessionId: string): string {
+    const raw = mintAgentCredentialRaw();
+    this.register(sessionId, raw);
+    return raw;
   }
 
   revoke(sessionId: string): void {

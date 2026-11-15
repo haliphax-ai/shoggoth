@@ -1,4 +1,4 @@
-import { hashAgentToken, type AgentTokenStore } from "@shoggoth/authn";
+import { hashAgentToken, mintAgentCredentialRaw, type AgentTokenStore } from "@shoggoth/authn";
 import type Database from "better-sqlite3";
 
 /**
@@ -29,6 +29,12 @@ export function createSqliteAgentTokenStore(db: Database.Database): AgentTokenSt
         insert.run({ session_id: sessionId, token_hash });
       });
       run();
+    },
+
+    mintAndRegister(sessionId: string): string {
+      const raw = mintAgentCredentialRaw();
+      this.register(sessionId, raw);
+      return raw;
     },
 
     revoke(sessionId: string): void {
