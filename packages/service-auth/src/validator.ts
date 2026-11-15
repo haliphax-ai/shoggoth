@@ -1,4 +1,7 @@
 import * as age from "age-encryption";
+import { getLogger } from "@shoggoth/shared";
+
+const log = getLogger("service-auth");
 
 export interface ServiceTokenPayload {
   sub: string;
@@ -28,7 +31,11 @@ export class TokenValidator {
       }
 
       return payload;
-    } catch {
+    } catch (err) {
+      // Invalid/malformed tokens are an expected path here, so a debug record
+      // is enough — callers treat a null result as "reject the request".
+      const msg = err instanceof Error ? err.message : String(err);
+      log.debug("token_validate_failed", { error: msg });
       return null;
     }
   }
