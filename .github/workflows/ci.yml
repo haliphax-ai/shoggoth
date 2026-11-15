@@ -80,7 +80,7 @@ jobs:
         run: npx vitest --merge-reports --coverage
       - name: Upload coverage to Qlty
         if: ${{ !cancelled() && needs.unit.result == 'success' && !github.event.pull_request.head.repo.fork }}
-        uses: qltysh/qlty-action/coverage@v2
+        uses: qltysh/qlty-action/coverage@v2.7.0
         with:
           oidc: true
           files: coverage/lcov.info
