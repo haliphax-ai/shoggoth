@@ -4,6 +4,13 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 
+/**
+ * Hash the raw operator token (SHA-256).
+ *
+ * Intentionally not a shared `hashToken` utility with agent-token: the two
+ * domains stay decoupled, and the "duplication" is a single SHA-256 expression.
+ * Change both together if the hashing scheme ever changes.
+ */
 export function hashOperatorTokenOpaque(token: string): Uint8Array {
   return createHash("sha256").update(token, "utf8").digest();
 }
