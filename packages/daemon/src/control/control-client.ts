@@ -34,7 +34,7 @@ export async function invokeControlRequest(
       const i = buf.indexOf("\n");
       if (i >= 0) {
         try {
-          resolve(parseResponseLine(buf.slice(0, i)));
+          resolve(parseResponseLine(buf.slice(0, i), 0));
         } catch (e) {
           reject(e);
         }
