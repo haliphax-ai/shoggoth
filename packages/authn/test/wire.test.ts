@@ -76,4 +76,64 @@ describe("JSONL wire", () => {
       WireParseError,
     );
   });
+  it("rejects response with wrong version", () => {
+    assert.throws(
+      () =>
+        parseResponseLine(
+          JSON.stringify({
+            v: 99,
+            id: "x",
+            ok: true,
+          }),
+        ),
+      WireParseError,
+    );
+  });
+
+  it("rejects response missing ok boolean", () => {
+    assert.throws(
+      () =>
+        parseResponseLine(
+          JSON.stringify({
+            v: WIRE_VERSION,
+            id: "x",
+          }),
+        ),
+      WireParseError,
+    );
+  });
+
+  it("rejects ok:true response with error body", () => {
+    assert.throws(
+      () =>
+        parseResponseLine(
+          JSON.stringify({
+            v: WIRE_VERSION,
+            id: "x",
+            ok: true,
+            error: { code: "ERR_X", message: "boom" },
+          }),
+        ),
+      WireParseError,
+    );
+  });
+
+  it("rejects ok:false response without error body", () => {
+    assert.throws(
+      () =>
+        parseResponseLine(
+          JSON.stringify({
+            v: WIRE_VERSION,
+            id: "x",
+            ok: false,
+          }),
+        ),
+      WireParseError,
+    );
+  });
+
+  it("rejects empty response line", () => {
+    assert.throws(() => parseResponseLine(""), WireParseError);
+    assert.throws(() => parseResponseLine("\r"), WireParseError);
+  });
 });
