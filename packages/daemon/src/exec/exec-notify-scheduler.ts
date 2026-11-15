@@ -19,7 +19,12 @@ import type Database from "better-sqlite3";
 import type { ManagedProcess } from "@shoggoth/procman";
 import { isTerminal, type TruncationMode } from "@shoggoth/os-exec";
 import { getLogger } from "../logging";
-import { pendingDrains, releaseOneShotIfDrained } from "../subagent/one-shot-notify-drain";
+import {
+  beginOneShotDelivery,
+  pendingDrains,
+  releaseOneShotIfDrained,
+  settleOneShotDelivery,
+} from "../subagent/one-shot-notify-drain";
 
 const log = getLogger("exec-notify-scheduler");
 
@@ -223,6 +228,13 @@ export class ExecNotifyScheduler {
     return row.cnt;
   }
 
+  /** Live handle count via the scheduler's stored db (0 when unset). */
+  liveHandleCount(sessionId: string): number {
+    const db = this.db;
+    if (!db) return 0;
+    return this.countForSession(db, sessionId);
+  }
+
   /**
    * Restore state on startup. The process manager is in-memory, so any handle
    * whose process is gone resolves as lost (delivering a notification with an
@@ -296,16 +308,10 @@ export class ExecNotifyScheduler {
         .run(id);
       if (info.changes === 0) return; // already resolved (double state-change, cancel, …)
     }
-    const liveCount = db
-      ? (
-          db
-            .prepare("SELECT COUNT(*) AS cnt FROM exec_notifies WHERE session_id = ? AND fired = 0")
-            .get(completion.handle.sessionId) as { cnt: number }
-        ).cnt
-      : 0;
-    // One-shot notify drain: when a held one-shot session has no live handles
-    // left after this resolution, terminate it (no-op for every other session).
-    releaseOneShotIfDrained(completion.handle.sessionId, liveCount);
+    // Release after delivery, never before: a held one-shot must outlive the
+    // notification it was held for (issue #620). The count is re-read at
+    // release time — the wake-up turn may have registered new handles.
+    beginOneShotDelivery(completion.handle.sessionId);
     try {
       await this.deliver(completion);
       log.debug("exec notify delivered", {
@@ -320,6 +326,12 @@ export class ExecNotifyScheduler {
         sessionId: completion.handle.sessionId,
         err: String(e),
       });
+    } finally {
+      settleOneShotDelivery(completion.handle.sessionId);
+      releaseOneShotIfDrained(
+        completion.handle.sessionId,
+        this.liveHandleCount(completion.handle.sessionId),
+      );
     }
   }
 }
