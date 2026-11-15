@@ -77,6 +77,8 @@ export class TieredTurnQueue {
   readonly maxDepth: number;
   // New field for the callback
   private onTurnEnd?: (sessionId: string) => void;
+  /** Additional per-event turn-end listeners. */
+  private readonly turnEndListeners = new Set<(sessionId: string) => void>();
   /** Sessions whose pump is frozen behind an in-turn long operation. */
   private readonly blocked = new Set<string>();
 
@@ -91,6 +93,32 @@ export class TieredTurnQueue {
    */
   setOnTurnEnd(cb: (sessionId: string) => void): void {
     this.onTurnEnd = cb;
+  }
+
+  /** Subscribe an additional turn-end listener (fired after the shared one). */
+  addTurnEndListener(cb: (sessionId: string) => void): { unsubscribe: () => void } {
+    this.turnEndListeners.add(cb);
+    return {
+      unsubscribe: () => {
+        this.turnEndListeners.delete(cb);
+      },
+    };
+  }
+
+  private fireTurnEnd(sessionId: string): void {
+    this.onTurnEnd?.(sessionId);
+    // Snapshot: listeners may unsubscribe mid-loop.
+    for (const listener of Array.from(this.turnEndListeners)) {
+      try {
+        listener(sessionId);
+      } catch (err) {
+        log.warn("turn_queue.turn_end_listener_failed", {
+          sessionId,
+          err: String(err),
+        });
+        this.turnEndListeners.delete(listener);
+      }
+    }
   }
 
   /**
@@ -381,7 +409,7 @@ export class TieredTurnQueue {
         // turn-end always clears the freeze alongside the running slot.
         this.blocked.delete(sessionId);
         // *** IMPLEMENTATION 2: Call the hook upon turn completion ***
-        this.onTurnEnd?.(sessionId);
+        this.fireTurnEnd(sessionId);
         // ***********************************************************
         current.running = false;
         current.runningEntry = undefined;

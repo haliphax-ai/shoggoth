@@ -18,6 +18,7 @@ import { truncateToolOutput } from "../sessions/builtin-handlers/truncate-output
 import type { SystemContext } from "@shoggoth/shared";
 import { getLogger } from "../logging";
 import type { SessionSendNotifyCompletion } from "../sessions/session-send-notify-scheduler";
+import { oneShotWakeFallback } from "../subagent/one-shot-notify-drain";
 
 /**
  * The notification payload, shaped like the result a blocking (non-yielded)
@@ -67,10 +68,12 @@ export async function deliverSessionSendNotifyMessage(
     detail: handle.targetSessionId,
     id: handle.id,
   });
+  // Wrapped fallback: the steer-drop → OOB-turn gap must not release the hold.
   const outcome = await deliverInTurnEvent({
     sessionId: handle.sessionId,
     content: `${banner}\n\n${body}`,
-    fallback: () => deliverSessionSendOobTurn(completion),
+    fallback: () =>
+      oneShotWakeFallback(handle.sessionId, () => deliverSessionSendOobTurn(completion)),
   });
   // Surface trace for in-turn delivery (best-effort): folded into the
   // active turn's own output when one is live, posted as a standalone
