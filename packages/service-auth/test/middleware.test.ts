@@ -210,6 +210,25 @@ describe("createAuthMiddleware", () => {
     expect(req.serviceAuth).toBeUndefined();
   });
 
+  it("responds 401 when the token iat is in the future beyond skew tolerance", async () => {
+    const identity = await age.generateIdentity();
+    const recipient = await age.identityToRecipient(identity);
+    const now = Math.floor(Date.now() / 1000);
+    const token = await mintToken(
+      { sub: "agent-1", scope: "service", iat: now + 600, exp: now + 900 },
+      recipient,
+    );
+    const middleware = createAuthMiddleware({ getIdentity: () => identity });
+    const req = makeRequest({ authorization: `Bearer ${token}` });
+    const { res, record } = makeResponse();
+
+    await middleware(req, res, next);
+
+    expectUnauthorized(record, "Invalid or expired token");
+    expect(next).not.toHaveBeenCalled();
+    expect(req.serviceAuth).toBeUndefined();
+  });
+
   it("prefers the lowercase authorization header when both casings are present", async () => {
     const { identity, token, payload } = await mintValidToken();
     const middleware = createAuthMiddleware({ getIdentity: () => identity });

@@ -13,6 +13,9 @@ export interface ServiceTokenPayload {
 
 // The decrypter is stateless per identity once configured, so one instance per
 // identity string is reused across validations instead of reallocating per call.
+/** Allowed clock drift, in seconds, between token issuance and validation. */
+const CLOCK_SKEW_TOLERANCE_SECONDS = 60;
+
 const decrypters = new Map<string, age.Decrypter>();
 
 function getDecrypter(identityString: string): age.Decrypter {
@@ -39,6 +42,12 @@ export class TokenValidator {
 
       const now = Math.floor(Date.now() / 1000);
       if (payload.exp <= now) {
+        return null;
+      }
+
+      // Tokens issued in the future are rejected; small clock drift between
+      // the minter and this validator is tolerated.
+      if (payload.iat > now + CLOCK_SKEW_TOLERANCE_SECONDS) {
         return null;
       }
 

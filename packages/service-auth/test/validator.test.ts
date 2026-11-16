@@ -98,6 +98,43 @@ describe("TokenValidator", () => {
     expect(result).toBeNull();
   });
 
+  it("accepts a token whose iat is a few seconds in the future within skew tolerance", async () => {
+    const identity = await age.generateIdentity();
+    const recipient = await age.identityToRecipient(identity);
+
+    const now = Math.floor(Date.now() / 1000);
+    const payload: ServiceTokenPayload = {
+      sub: "agent-1",
+      scope: "service",
+      iat: now + 15, // inside the clock-skew tolerance
+      exp: now + 300,
+    };
+
+    const token = await mintToken(payload, recipient);
+    const result = await TokenValidator.validate(token, identity);
+
+    expect(result).not.toBeNull();
+    expect(result!.iat).toBe(now + 15);
+  });
+
+  it("returns null for a token whose iat is in the future beyond skew tolerance", async () => {
+    const identity = await age.generateIdentity();
+    const recipient = await age.identityToRecipient(identity);
+
+    const now = Math.floor(Date.now() / 1000);
+    const payload: ServiceTokenPayload = {
+      sub: "agent-1",
+      scope: "service",
+      iat: now + 600, // far in the future, exp still in the future
+      exp: now + 900,
+    };
+
+    const token = await mintToken(payload, recipient);
+    const result = await TokenValidator.validate(token, identity);
+
+    expect(result).toBeNull();
+  });
+
   it("returns null for malformed input", async () => {
     const identity = await age.generateIdentity();
 
