@@ -314,6 +314,42 @@ describe("deliverOobStructuredResponse", () => {
     handle.unregister();
   });
 
+  it("re-delivers to_sender via an OOB turn when the steer entry is dropped undrained", async () => {
+    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+
+    const runTurn = vi.fn().mockResolvedValue({});
+    const senderText = "Sender recovery message";
+    const handle = registerSteerChannel("parent-oob");
+
+    await deliverOobStructuredResponse({
+      ...opts(),
+      ext: { postToOperator: mockPostToOperator, runSessionModelTurn: runTurn } as never,
+      structuredResponse: JSON.stringify({
+        to_operator: null,
+        to_sender: senderText,
+      }),
+      hasSender: true,
+    });
+
+    // Queued in-turn initially; no fallback yet.
+    expect(runTurn).not.toHaveBeenCalled();
+
+    // Parent turn ends before draining: the drop callback must re-deliver the
+    // reply to the sender via the OOB turn instead of silently losing it.
+    handle.unregister();
+    await vi.waitFor(() => expect(runTurn).toHaveBeenCalledTimes(1));
+    expect(runTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "parent-oob",
+        userContent: expect.stringContaining(senderText),
+        userMetadata: expect.objectContaining({
+          subagent_result: true,
+          child_session_id: "child-oob",
+        }),
+      }),
+    );
+  });
+
   it("falls back to runSessionModelTurn when no active steer channel for to_sender", async () => {
     const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
 

@@ -1,11 +1,31 @@
 import { describe, it, afterEach, vi } from "vitest";
 import assert from "node:assert";
+import { createLogger, setRootLogger } from "../../src/logging";
 import {
   registerSteerChannel,
   pushSteer,
   drainSteers,
   _resetAllChannels,
 } from "../../src/sessions/steer-channel";
+
+function stubLogger() {
+  const logs: Array<{
+    level: string;
+    msg: string;
+    fields?: Record<string, unknown>;
+  }> = [];
+  const log = (level: string) => (msg: string, fields?: Record<string, unknown>) => {
+    logs.push({ level, msg, fields });
+  };
+  const logger = {
+    debug: log("debug"),
+    info: log("info"),
+    warn: log("warn"),
+    error: log("error"),
+    child: () => logger,
+  };
+  return { logger, logs };
+}
 
 describe("steer-channel", () => {
   afterEach(() => {
@@ -114,5 +134,40 @@ describe("steer-channel", () => {
     unregister();
     assert.equal(bad.mock.calls.length, 1);
     assert.equal(good.mock.calls.length, 1);
+  });
+
+  it("logs a warn with sessionId and truncated content when a message is dropped undrained", () => {
+    const stub = stubLogger();
+    setRootLogger(stub.logger);
+    try {
+      const { unregister } = registerSteerChannel("sess-drop-log");
+      pushSteer("sess-drop-log", "x".repeat(200));
+      unregister();
+      const entry = stub.logs.find((l) => l.msg.includes("dropped undrained"));
+      assert.ok(entry, "expected a dropped-undrained warn entry");
+      assert.equal(entry.level, "warn");
+      assert.equal(entry.fields?.sessionId, "sess-drop-log");
+      // Content is truncated to ~80 chars.
+      const content = String(entry.fields?.content ?? "");
+      assert.ok(content.length <= 81, `content should be truncated, got ${content.length}`);
+      assert.equal(content, "x".repeat(80));
+    } finally {
+      setRootLogger(createLogger({ component: "steer-channel.test" }));
+    }
+  });
+
+  it("does not log a drop when a message was drained before unregister", () => {
+    const stub = stubLogger();
+    setRootLogger(stub.logger);
+    try {
+      const { unregister } = registerSteerChannel("sess-drained");
+      pushSteer("sess-drained", "consumed");
+      drainSteers("sess-drained");
+      unregister();
+      const drops = stub.logs.filter((l) => l.msg.includes("dropped undrained"));
+      assert.equal(drops.length, 0);
+    } finally {
+      setRootLogger(createLogger({ component: "steer-channel.test" }));
+    }
   });
 });

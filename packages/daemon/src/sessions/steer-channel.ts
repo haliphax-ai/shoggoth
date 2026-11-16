@@ -8,6 +8,7 @@
  * before the message was drained — so the sender can fall back to another
  * delivery path (e.g. an OOB turn) instead of silently losing the message.
  */
+import { getLogger } from "../logging";
 
 interface SteerEntry {
   readonly message: string;
@@ -16,9 +17,20 @@ interface SteerEntry {
 
 const channels = new Map<string, SteerEntry[]>();
 
-/** Invoke drop callbacks without letting one failure orphan the rest. */
-function dropEntries(entries: SteerEntry[]): void {
+const log = getLogger("steer-channel");
+
+/**
+ * Invokes drop callbacks and emits a warn so a never-drained steer entry is
+ * visible in logs. The `onDropped` callback (when registered) remains the
+ * guaranteed-delivery mechanism; this log only makes the drop itself
+ * observable.
+ */
+function dropEntries(sessionId: string, entries: SteerEntry[]): void {
   for (const entry of entries) {
+    log.warn("steer entry dropped undrained", {
+      sessionId,
+      content: entry.message.slice(0, 80),
+    });
     try {
       entry.onDropped?.();
     } catch {
@@ -34,7 +46,7 @@ export function registerSteerChannel(sessionId: string): {
 } {
   const queue: SteerEntry[] = [];
   const prev = channels.get(sessionId);
-  if (prev) dropEntries(prev.splice(0)); // replaced turn: undrained messages are dropped
+  if (prev) dropEntries(sessionId, prev.splice(0)); // replaced turn: undrained messages are dropped
   channels.set(sessionId, queue);
   let dropped = false;
   return {
@@ -42,7 +54,7 @@ export function registerSteerChannel(sessionId: string): {
       if (channels.get(sessionId) === queue) channels.delete(sessionId);
       if (dropped) return;
       dropped = true;
-      dropEntries(queue.splice(0));
+      dropEntries(sessionId, queue.splice(0));
     },
   };
 }
