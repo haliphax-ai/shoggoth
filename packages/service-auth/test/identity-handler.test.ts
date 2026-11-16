@@ -184,4 +184,28 @@ describe("createIdentityHandler", () => {
     expect(handler(valid)).toEqual({ ok: true });
     expect(provision.record.identity).toBe(IDENTITY);
   });
+
+  it("propagates an onReceive failure without consuming the attempt", () => {
+    let stored = "";
+    let calls = 0;
+    const onReceive = (identity: string) => {
+      calls += 1;
+      if (calls === 1) {
+        throw new Error("boom");
+      }
+      stored = identity;
+    };
+    const handler: IdentityHandler = createIdentityHandler({
+      provisionSecret: PROVISION_SECRET,
+      onReceive,
+    });
+
+    const req = makeRequest({ "x-provision-secret": PROVISION_SECRET }, { identity: IDENTITY });
+    expect(() => handler(req)).toThrow(/boom/);
+    expect(stored).toBe("");
+
+    const retry = makeRequest({ "x-provision-secret": PROVISION_SECRET }, { identity: IDENTITY });
+    expect(handler(retry)).toEqual({ ok: true });
+    expect(stored).toBe(IDENTITY);
+  });
 });

@@ -34,7 +34,14 @@ export function createIdentityHandler(options: IdentityHandlerOptions) {
     }
 
     provisioned = true;
-    options.onReceive(identity);
+    try {
+      options.onReceive(identity);
+    } catch (err) {
+      // A failed delivery must not consume the attempt; rethrow so the
+      // HTTP wrapper reports it like any other provisioning failure.
+      provisioned = false;
+      throw err;
+    }
     return { ok: true };
   };
 }
