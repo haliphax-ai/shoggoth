@@ -7,7 +7,19 @@ import type Database from "better-sqlite3";
 import type { ShoggothConfig, ShoggothContractEntry, SystemContext } from "@shoggoth/shared";
 import { getLogger } from "../logging";
 import { resolveConfiguredSubagentModel } from "../config/effective-runtime";
+
 const ioLog = getLogger("integration-ops");
+
+/**
+ * Session store bound from daemon startup (see `bindIntegrationOpsSessionStore`)
+ * for delivery guards that run outside an integration-ops request context.
+ */
+let boundSessionStore: SessionStore | undefined;
+
+/** Bind the session store used by out-of-context delivery guards (index.ts). */
+export function bindIntegrationOpsSessionStore(sessions: SessionStore): void {
+  boundSessionStore = sessions;
+}
 import { getProcessManager } from "../process-manager-singleton";
 import {
   agentMayInvokeSubagentSpawnByAllowlist,
@@ -97,7 +109,7 @@ import {
 } from "../subagent/contract";
 import { sessionCreds } from "../sessions/session-agent-turn";
 import { terminatePersistentSubagentSession } from "../subagent/subagent-kill";
-import { settleOneShotAfterTurn } from "../subagent/one-shot-notify-drain";
+import { settleOneShotAfterTurn, oneShotWakeFallback } from "../subagent/one-shot-notify-drain";
 import {
   buildThreadSubagentCreatedBanner,
   findAdoptableThreadSubagentSession,
@@ -300,7 +312,13 @@ function terminateOneShotAfterTtl(
   autoApproveGate?: HitlAutoApproveGate,
 ): void {
   try {
-    terminatePersistentSubagentSession(sessionManager, childId, "ttl_expired", autoApproveGate);
+    terminatePersistentSubagentSession(
+      sessionManager,
+      childId,
+      "ttl_expired",
+      autoApproveGate,
+      "one_shot_ttl",
+    );
   } catch (e) {
     ioLog.warn("subagent.one_shot.ttl_terminate_failed", { childId, error: String(e) });
   }
@@ -784,25 +802,31 @@ export async function deliverOobStructuredResponse(opts: {
       await deliverInTurnEvent({
         sessionId: respondTo,
         content: truncated,
-        fallback: async () => {
-          try {
-            await ext.runSessionModelTurn({
-              sessionId: respondTo,
-              userContent: truncated,
-              userMetadata: {
-                subagent_result: true,
-                child_session_id: childSessionId,
-              },
-              delivery: { kind: "internal" },
-            });
-          } catch (err) {
-            subLog.warn("failed to deliver oob to_sender", {
-              respondTo,
-              childSessionId,
-              error: String(err),
-            });
-          }
-        },
+        // Wrapped fallback: the wake marker covers the OOB turn so a held
+        // one-shot parent cannot release mid-delivery, and a terminated
+        // parent is never dispatched (the stale to_sender is logged, not
+        // laundered onto a dead row).
+        fallback: () =>
+          oneShotWakeFallback(respondTo, async () => {
+            if (!(await assertDeliveryTargetNotTerminated(respondTo, subLog))) return;
+            try {
+              await ext.runSessionModelTurn({
+                sessionId: respondTo,
+                userContent: truncated,
+                userMetadata: {
+                  subagent_result: true,
+                  child_session_id: childSessionId,
+                },
+                delivery: { kind: "internal" },
+              });
+            } catch (err) {
+              subLog.warn("failed to deliver oob to_sender", {
+                respondTo,
+                childSessionId,
+                error: String(err),
+              });
+            }
+          }),
       });
     }
   }
@@ -832,6 +856,31 @@ type SubagentResultOpts = {
   /** Set internally on fallback delivery: the original `respond_to` that was unavailable. */
   unavailableRespondTo?: string;
 };
+
+/**
+ * Terminated-target guard for OOB delivery paths: resolves the target row via
+ * the store bound at startup (falling back to the caller-supplied one) and
+ * returns false — logging, never throwing — when the session is missing or
+ * terminated. Delivery paths call this before dispatching a turn so a stale
+ * payload is logged and dropped instead of being laundered onto another
+ * session's transcript through a dead-row error path.
+ */
+async function assertDeliveryTargetNotTerminated(
+  sessionId: string,
+  log: ReturnType<typeof getLogger>,
+): Promise<boolean> {
+  const row = boundSessionStore?.getById(sessionId.trim());
+  if (row?.status === "terminated") {
+    log.warn("oob delivery target terminated; dispatch skipped", {
+      sessionId,
+    });
+    return false;
+  }
+  // No store bound (tests/embeds) or row missing: the platform's own
+  // runSessionModelTurn guard rejects terminated rows by throwing, so the
+  // delivery stays fail-open here.
+  return true;
+}
 
 /**
  * Dispatch the subagent result as an out-of-band queue turn. This is both the
@@ -864,26 +913,35 @@ async function runSubagentResultOobTurn(input: {
   // Only the turn dispatch is guarded for fallback: a throw here means the target
   // session could not run a turn (missing/terminated), so the result has not been
   // delivered anywhere yet and can safely be re-routed.
+  // The dispatch is wrapped in the one-shot wake marker: a held one-shot parent
+  // must not release while this parent-delivery turn is in flight. A terminated
+  // target is never dispatched — the guard skips the turn so the delivery falls
+  // through to the re-route/drop handling below instead of throwing on a dead row.
   let turnResult: Awaited<ReturnType<typeof ext.runSessionModelTurn>>;
   try {
-    turnResult = await ext.runSessionModelTurn({
-      sessionId: respondTo,
-      userContent: asyncContent,
-      userMetadata: {
-        subagent_result: true,
-        child_session_id: childSessionId,
-        mode,
-      },
-      systemContext,
-      delivery: { kind: "internal" },
-      modelInvocationOverride: {
-        // OOB structured output is the default for the parent delivery turn; a
-        // caller-supplied override is shallow-merged on top so partial overrides
-        // (e.g. temperature) keep the OOB response schema intact.
-        responseSchema: { schema: OOB_SCHEMA_WITH_SENDER },
-        structuredOutputMode: "best-effort",
-        ...modelInvocationOverride,
-      },
+    turnResult = await oneShotWakeFallback(respondTo, async () => {
+      if (!(await assertDeliveryTargetNotTerminated(respondTo, subLog))) {
+        return undefined as never;
+      }
+      return ext.runSessionModelTurn({
+        sessionId: respondTo,
+        userContent: asyncContent,
+        userMetadata: {
+          subagent_result: true,
+          child_session_id: childSessionId,
+          mode,
+        },
+        systemContext,
+        delivery: { kind: "internal" },
+        modelInvocationOverride: {
+          // OOB structured output is the default for the parent delivery turn; a
+          // caller-supplied override is shallow-merged on top so partial overrides
+          // (e.g. temperature) keep the OOB response schema intact.
+          responseSchema: { schema: OOB_SCHEMA_WITH_SENDER },
+          structuredOutputMode: "best-effort",
+          ...modelInvocationOverride,
+        },
+      });
     });
   } catch (err) {
     subLog.warn("failed to deliver subagent result to respond_to session", {
@@ -1346,6 +1404,7 @@ export async function handleIntegrationControlOp(
               cid,
               "killed",
               ctx.hitlClear?.autoApproveGate,
+              "subagent_wait_timeout",
             );
           }
         },
@@ -1389,6 +1448,7 @@ export async function handleIntegrationControlOp(
               cid,
               "killed",
               ctx.hitlClear?.autoApproveGate,
+              "context_segment_reset",
             );
           }
         },
@@ -2166,6 +2226,9 @@ export async function handleIntegrationControlOp(
           // spawning session, and any still-pending completion handlers are
           // ignored so a killed child can never surface a spurious result.
           let oneShotTtlFired = false;
+          // Outcome of the settling turn, captured for the end-of-turn
+          // teardown (a failed/aborted turn never answers its steers).
+          let settledOutcome: "completed" | "aborted" | "failed" | "canceled" = "completed";
           const ttlTimer = setTimeout(() => {
             oneShotTtlFired = true;
             subLog.warn("subagent one_shot (background) wall-clock TTL expired", {
@@ -2208,9 +2271,11 @@ export async function handleIntegrationControlOp(
             })
             .then(async (turn) => {
               if (oneShotTtlFired) return;
+              settledOutcome = turn.outcome;
               subLog.info("subagent one_shot (background) model turn completed", {
                 childId,
                 replyLen: turn.latestAssistantText?.length ?? 0,
+                turnOutcome: turn.outcome,
               });
               if (contract) {
                 const contractStatus = await judgeContract();
@@ -2234,6 +2299,7 @@ export async function handleIntegrationControlOp(
             })
             .catch((err) => {
               if (oneShotTtlFired) return;
+              settledOutcome = "failed";
               subLog.warn("subagent one_shot (background) model turn failed", {
                 childId,
                 error: String(err),
@@ -2244,7 +2310,10 @@ export async function handleIntegrationControlOp(
               // Keep the session alive when background execs it started are
               // still pending: the notifications carry the exit codes the
               // subagent must react to. The last handle completion (or the
-              // TTL-capped safety timer) settles the teardown.
+              // TTL-capped safety timer) settles the teardown. `turnOutcome`
+              // lets the settle decide whether the steers this turn received
+              // were answered (a turn that aborted or failed never answered
+              // them — they are re-delivered before the teardown fires).
               settleOneShotAfterTurn({
                 sessionManager,
                 sessions,
@@ -2252,6 +2321,7 @@ export async function handleIntegrationControlOp(
                 sessionId: childId,
                 autoApproveGate: ctx.hitlClear?.autoApproveGate,
                 subLog,
+                turnOutcome: settledOutcome,
               });
             });
           ctx.recordIntegrationAudit({
@@ -2279,6 +2349,9 @@ export async function handleIntegrationControlOp(
         // race is settled with the structured failure, so the spawn op can never
         // hang past its TTL. The child's turn result is discarded after expiry.
         let oneShotTtlFired = false;
+        // Outcome of the settling turn, captured for the end-of-turn teardown
+        // (a failed/aborted turn never answers its steers).
+        let settledOutcome: "completed" | "aborted" | "failed" | "canceled" = "completed";
         let settleTurn: (() => void) | undefined;
         const ttlTimer = setTimeout(() => {
           oneShotTtlFired = true;
@@ -2299,7 +2372,11 @@ export async function handleIntegrationControlOp(
           });
           settleTurn?.();
         }, oneShotTtlMs);
-        let turn: { latestAssistantText: string; failoverMeta?: unknown };
+        let turn: {
+          latestAssistantText: string;
+          failoverMeta?: unknown;
+          outcome: "completed" | "aborted" | "failed" | "canceled";
+        };
         try {
           const turnPromise = ext.runSessionModelTurn({
             sessionId: childId,
@@ -2334,6 +2411,7 @@ export async function handleIntegrationControlOp(
               );
           });
           turn = await Promise.race([turnPromise, settlePromise]);
+          settledOutcome = turn.outcome;
           if (oneShotTtlFired) {
             throw new IntegrationOpError(
               ONE_SHOT_TTL_EXPIRED_CODE,
@@ -2372,6 +2450,7 @@ export async function handleIntegrationControlOp(
             sessionId: childId,
             autoApproveGate: ctx.hitlClear?.autoApproveGate,
             subLog,
+            turnOutcome: settledOutcome,
           });
         }
         // Contract mode: judge the turn's diffs against the contract and
@@ -2533,6 +2612,7 @@ export async function handleIntegrationControlOp(
                 sid,
                 "ttl_expired",
                 ctx.hitlClear?.autoApproveGate,
+                "adopted_spawn_inactivity",
               );
             },
           },
@@ -2563,6 +2643,7 @@ export async function handleIntegrationControlOp(
                 sid,
                 "ttl_expired",
                 ctx.hitlClear?.autoApproveGate,
+                "persistent_spawn_inactivity",
               );
             },
           },
@@ -3284,7 +3365,20 @@ export async function handleIntegrationControlOp(
         );
       }
       // --- Split path: inject directly into active tool loop if one exists ---
+      // A channel can exist without a live turn for a few ticks (turn
+      // teardown vs. session termination race). A steer pushed into such a
+      // channel is dropped by the next channel teardown and — via the wait
+      // path's fallback — can resurface as a stray turn on another session
+      // (the stale-steer bounce). If the row is gone, fail fast here instead
+      // of pushing into a channel owned by no live loop.
       if (pushSteer(sessionId, prompt)) {
+        const steeredRow = sessions.getById(sessionId);
+        if (!steeredRow || steeredRow.status === "terminated") {
+          ioLog.warn("session_steer refused: target terminated (channel race)", {
+            sessionId,
+          });
+          throw new IntegrationOpError("ERR_SESSION_INACTIVE", "session is missing or terminated");
+        }
         ctx.recordIntegrationAudit({
           action: "session.steer",
           resource: sessionId,
@@ -3340,18 +3434,23 @@ export async function handleIntegrationControlOp(
         // wait:false — deliver the directive and return immediately; the
         // detached turn's outcome reaches the operator via the delivery
         // surface and failures land in the daemon log.
-        void ext.runSessionModelTurn(turnInput).catch((err) => {
-          ioLog.warn("subagent conversation: steer detached turn failed", {
-            sessionId,
-            err: String(err),
+        if (await assertDeliveryTargetNotTerminated(sessionId, ioLog)) {
+          void ext.runSessionModelTurn(turnInput).catch((err) => {
+            ioLog.warn("subagent conversation: steer detached turn failed", {
+              sessionId,
+              err: String(err),
+            });
           });
-        });
+        }
         ctx.recordIntegrationAudit({
           action: "session.steer",
           resource: sessionId,
           outcome: "delivered",
         });
         return { delivered: true, session_id: sessionId };
+      }
+      if (!(await assertDeliveryTargetNotTerminated(sessionId, ioLog))) {
+        throw new IntegrationOpError("ERR_SESSION_INACTIVE", "session is missing or terminated");
       }
       const turn = await ext.runSessionModelTurn(turnInput);
       ctx.recordIntegrationAudit({
@@ -3598,6 +3697,7 @@ export async function handleIntegrationControlOp(
         sessionId,
         shouldAnnounceKilled ? "killed" : undefined,
         ctx.hitlClear?.autoApproveGate,
+        "session_kill_op",
       );
       // Killing a session must not leave a wedged running entry or a queued
       // backlog behind: clear any queued turns and force-release the running

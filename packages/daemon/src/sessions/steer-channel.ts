@@ -7,6 +7,13 @@
  * model — the turn ended (unregister) or a new turn replaced the channel
  * before the message was drained — so the sender can fall back to another
  * delivery path (e.g. an OOB turn) instead of silently losing the message.
+ *
+ * Drained messages additionally get an "answered" handshake: injection
+ * consumes the entry, but the consumption only counts as delivered when the
+ * receiving turn settles normally (the tool loop marks it answered on
+ * completion). If the turn aborts or fails first, the message stays tracked
+ * as injected-but-unanswered so a teardown can re-deliver it instead of
+ * dropping a directive the model never responded to.
  */
 import { getLogger } from "../logging";
 
@@ -16,6 +23,14 @@ interface SteerEntry {
 }
 
 const channels = new Map<string, SteerEntry[]>();
+
+/**
+ * Steer messages drained into a turn but not yet answered by it, keyed by
+ * session. Session-level on purpose: the channel dies with the turn that
+ * received the injection, while the "was the directive answered?" question
+ * outlives it.
+ */
+const unansweredBySession = new Map<string, string[]>();
 
 const log = getLogger("steer-channel");
 
@@ -74,14 +89,46 @@ export function pushSteer(
   return true;
 }
 
-/** Drains all pending steer messages for a session. */
+/**
+ * Drains all pending steer messages for a session, marking them
+ * injected-but-unanswered: the receiving turn must settle normally for the
+ * injection to count as delivered (the tool loop settles on completion).
+ */
 export function drainSteers(sessionId: string): string[] {
   const q = channels.get(sessionId);
   if (!q || q.length === 0) return [];
-  return q.splice(0).map((e) => e.message);
+  const drained = q.splice(0).map((e) => e.message);
+  const pending = unansweredBySession.get(sessionId) ?? [];
+  pending.push(...drained);
+  unansweredBySession.set(sessionId, pending);
+  return drained;
+}
+
+/**
+ * Mark every injected-but-unanswered steer for the session as answered
+ * (the receiving turn settled normally and a model response followed).
+ */
+export function settleSteersAnswered(sessionId: string): void {
+  unansweredBySession.delete(sessionId.trim());
+}
+
+/** Take the outstanding unanswered steer messages (clearing the tracking). */
+export function takeUnansweredSteers(sessionId: string): string[] {
+  return unansweredBySession.get(sessionId.trim())?.splice(0) ?? [];
+}
+
+/**
+ * Steer messages not yet answered by the model: queued (never injected) plus
+ * injected-but-unanswered. One-shot teardown treats a non-zero depth as "a
+ * directive may still lose its answer" and re-delivers before terminating.
+ */
+export function steerDepth(sessionId: string): number {
+  const sid = sessionId.trim();
+  return (channels.get(sid)?.length ?? 0) + (unansweredBySession.get(sid)?.length ?? 0);
 }
 
 /** Visible for testing — clears all channels. */
 export function _resetAllChannels(): void {
   channels.clear();
+  unansweredBySession.clear();
 }

@@ -29,7 +29,7 @@ import { postTurnSurfaceNotice } from "../presentation/active-turn-surface";
 import { buildInjectedSteerSurface } from "../messaging/in-turn-event";
 
 import { validateToolArgs } from "./validate-tool-args";
-import { registerSteerChannel, drainSteers } from "./steer-channel";
+import { registerSteerChannel, drainSteers, settleSteersAnswered } from "./steer-channel";
 import { registerCompactionGate } from "./compaction-gate";
 import { tryGetTurnQueue } from "./session-turn-queue-singleton";
 import {
@@ -1801,6 +1801,11 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
     // still runs here, while the turn (and its queue freeze) is still held.
     await drainDeferredCompaction();
 
+    // The turn is completing normally: every steering message drained into
+    // it is now answered (the model will have responded to them). The
+    // injected-but-unanswered tracking clears; an aborted/failed turn leaves
+    // it intact for the teardown's re-delivery.
+    settleSteersAnswered(options.sessionId);
     options.toolRuns.markCompleted(options.runId);
     steerHandle.unregister();
     compactionGate?.unregister();
