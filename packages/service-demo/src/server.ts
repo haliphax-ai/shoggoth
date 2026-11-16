@@ -17,6 +17,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createIdentityHandler, TokenValidator } from "@shoggoth/service-auth";
 import { getLogger } from "@shoggoth/shared";
+import { DEMO_TOOLS, DEFAULT_MESSAGE, escapeHtml } from "./shared.js";
 
 const log = getLogger("demo-service");
 
@@ -29,7 +30,7 @@ const PROVISION_SECRET =
   process.env.DEMO_PROVISION_SECRET || process.env.SHOGGOTH_PROVISION_SECRET || "";
 
 /** In-memory message displayed by the demo service. */
-let message = "Hello from the Shoggoth demo service!";
+let message = DEFAULT_MESSAGE;
 
 /** Stored identity for token validation. */
 let storedIdentity: string | null = null;
@@ -62,47 +63,14 @@ const identityHandler = createIdentityHandler({
 const manifest = {
   name: "demo",
   version: "1.0.0",
-  tools: [
-    {
-      name: "demo.set_message",
-      description:
-        "Set the message displayed by the demo web service. Visit the service URL to see the current message.",
-      parameters: {
-        type: "object",
-        properties: {
-          message: {
-            type: "string",
-            description: "The new message to display",
-          },
-        },
-        required: ["message"],
-      },
-      method: "POST",
-      path: "/api/set_message",
-      dispatch: "body",
-    },
-    {
-      name: "demo.get_message",
-      description: "Get the current message displayed by the demo web service.",
-      parameters: {
-        type: "object",
-        properties: {},
-      },
-      method: "GET",
-      path: "/api/get_message",
-      dispatch: "body",
-    },
-  ],
+  tools: DEMO_TOOLS.map((tool) => ({
+    ...tool,
+    method: tool.name === "demo.set_message" ? ("POST" as const) : ("GET" as const),
+    path: tool.name === "demo.set_message" ? "/api/set_message" : "/api/get_message",
+    dispatch: "body" as const,
+  })),
   ops: [],
 };
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
