@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, assert } from "vitest";
+import { describe, it, expect, afterEach, assert, vi } from "vitest";
 import * as age from "age-encryption";
 import { createLogger, setRootLogger, type Logger, type LogFields } from "@shoggoth/shared";
 import { TokenValidator } from "../src/validator.js";
@@ -135,11 +135,34 @@ describe("TokenValidator", () => {
     expect(result).toBeNull();
   });
 
-  it("returns null for malformed input", async () => {
+  it("returns null for an empty token", async () => {
     const identity = await age.generateIdentity();
 
-    const result = await TokenValidator.validate("not-a-valid-token!!!", identity);
+    const result = await TokenValidator.validate("", identity);
     expect(result).toBeNull();
+  });
+
+  it("returns null for a token too short to contain an age ciphertext header", async () => {
+    const result = await TokenValidator.validate("Zm9v", "AGE-SECRET-KEY-1DUMMY");
+    expect(result).toBeNull();
+  });
+
+  it("rejects short tokens without attempting decryption", async () => {
+    const identity = await age.generateIdentity();
+    logs = recordingLogger();
+
+    const decryptSpy = vi.spyOn(age.Decrypter.prototype, "decrypt");
+    try {
+      const result = await TokenValidator.validate("Zm9v", identity);
+      expect(result).toBeNull();
+      expect(decryptSpy).not.toHaveBeenCalled();
+      const record = logs.find((l) => l.msg === "token_validate_failed");
+      assert.ok(record, "should emit a debug record for the rejected token");
+      assert.equal(record.level, "debug");
+      assert.ok(typeof record.fields?.error === "string");
+    } finally {
+      decryptSpy.mockRestore();
+    }
   });
 
   it("logs a debug record when decryption throws", async () => {
