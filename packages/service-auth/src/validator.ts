@@ -11,11 +11,16 @@ export interface ServiceTokenPayload {
   session?: string;
 }
 
-// The decrypter is stateless per identity once configured, so one instance per
-// identity string is reused across validations instead of reallocating per call.
 /** Allowed clock drift, in seconds, between token issuance and validation. */
 const CLOCK_SKEW_TOLERANCE_SECONDS = 60;
 
+// A base64url token is the encoding of an age ciphertext file, whose header
+// alone spans several dozen bytes. Tokens shorter than this minimum cannot
+// carry a valid ciphertext, so they are rejected before any decryption work.
+const MIN_TOKEN_LENGTH = 32;
+
+// The decrypter is stateless per identity once configured, so one instance per
+// identity string is reused across validations instead of reallocating per call.
 const decrypters = new Map<string, age.Decrypter>();
 
 function getDecrypter(identityString: string): age.Decrypter {
@@ -34,6 +39,11 @@ export class TokenValidator {
     identityString: string,
   ): Promise<ServiceTokenPayload | null> {
     try {
+      // Shorter than any age ciphertext can be; reject it without decrypting.
+      if (token.length < MIN_TOKEN_LENGTH) {
+        throw new Error("token shorter than the minimum length");
+      }
+
       const ciphertext = Buffer.from(token, "base64url");
 
       const plaintext = await getDecrypter(identityString).decrypt(ciphertext, "text");
