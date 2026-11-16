@@ -46,7 +46,13 @@ export function reconcilePersistentSubagents(input: {
 
     // The persisted inactivity expiry already elapsed while the daemon was down.
     if (validExpiry !== undefined && validExpiry <= now) {
-      terminatePersistentSubagentSession(sessionManager, s.id, "ttl_expired");
+      terminatePersistentSubagentSession(
+        sessionManager,
+        s.id,
+        "ttl_expired",
+        undefined,
+        "startup_reconcile_ttl",
+      );
       expiredKilled++;
       log.info("subagent.reconcile.expired_killed", { sessionId: s.id });
       continue;
@@ -63,7 +69,14 @@ export function reconcilePersistentSubagents(input: {
     const { expiresAtMs: expiresAt, dispose: clearTtl } = armPersistentSubagentInactivityTimer(
       {
         sessions,
-        onTimeout: (sid) => terminatePersistentSubagentSession(sessionManager, sid, "ttl_expired"),
+        onTimeout: (sid) =>
+          terminatePersistentSubagentSession(
+            sessionManager,
+            sid,
+            "ttl_expired",
+            undefined,
+            "startup_reconcile_inactivity",
+          ),
       },
       s.id,
       validExpiry !== undefined ? { expiresAtMs: validExpiry } : {},

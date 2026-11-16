@@ -86,6 +86,8 @@ import { createToolRunStore } from "./sessions/tool-run-store";
 import { registerPlatform as registerMessagingPlatform } from "@shoggoth/messaging";
 import { registerPlatform, stopAllPlatforms } from "./platforms/platform-registry";
 import { reconcilePersistentSubagents } from "./subagent/reconcile-persistent-subagents";
+import { bindOneShotSessionStore } from "./subagent/one-shot-notify-drain";
+import { bindIntegrationOpsSessionStore } from "./control/integration-ops";
 import { touchPersistentSubagentInactivityTimer } from "./subagent/persistent-subagent-timers";
 import { handlePlatformThreadCreate } from "./subagent/thread-subagent-autocreate";
 import { messageToolContextRef } from "./messaging/message-tool-context-ref";
@@ -920,6 +922,12 @@ void (async () => {
     agentId: resolveShoggothAgentId(config),
     agentsConfig: config.agents,
   });
+  // Give the one-shot teardown (and the steer re-delivery it schedules) access
+  // to the session store so a terminated target is never re-checked into a
+  // turn. Other guards (session_steer op, OOB delivery) resolve the store via
+  // their own op context.
+  bindOneShotSessionStore(sessions);
+  bindIntegrationOpsSessionStore(sessions);
 
   // --- Control Plane ---
   try {

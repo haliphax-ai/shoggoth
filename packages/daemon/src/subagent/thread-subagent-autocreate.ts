@@ -284,7 +284,13 @@ export async function handlePlatformThreadCreate(
     {
       sessions,
       onTimeout: (sid) =>
-        terminatePersistentSubagentSession(input.sessionManager, sid, "ttl_expired"),
+        terminatePersistentSubagentSession(
+          input.sessionManager,
+          sid,
+          "ttl_expired",
+          undefined,
+          "thread_autocreate_inactivity",
+        ),
     },
     childId,
   );
