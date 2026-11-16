@@ -11,6 +11,20 @@ export interface ServiceTokenPayload {
   session?: string;
 }
 
+// The decrypter is stateless per identity once configured, so one instance per
+// identity string is reused across validations instead of reallocating per call.
+const decrypters = new Map<string, age.Decrypter>();
+
+function getDecrypter(identityString: string): age.Decrypter {
+  let decrypter = decrypters.get(identityString);
+  if (!decrypter) {
+    decrypter = new age.Decrypter();
+    decrypter.addIdentity(identityString);
+    decrypters.set(identityString, decrypter);
+  }
+  return decrypter;
+}
+
 export class TokenValidator {
   static async validate(
     token: string,
@@ -19,9 +33,7 @@ export class TokenValidator {
     try {
       const ciphertext = Buffer.from(token, "base64url");
 
-      const decrypter = new age.Decrypter();
-      decrypter.addIdentity(identityString);
-      const plaintext = await decrypter.decrypt(ciphertext, "text");
+      const plaintext = await getDecrypter(identityString).decrypt(ciphertext, "text");
 
       const payload: ServiceTokenPayload = JSON.parse(plaintext);
 
