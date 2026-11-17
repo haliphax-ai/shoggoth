@@ -39,7 +39,6 @@ interface ExtendedServiceRegisterCtx extends Omit<ServiceRegisterCtx, "config"> 
  */
 export default function createCanvasPlugin(): Plugin<ShoggothHooks> {
   let canvasServer: CanvasServer | undefined;
-  let gateway: Gateway | undefined;
 
   return {
     name: "service-canvas",
@@ -80,7 +79,6 @@ export default function createCanvasPlugin(): Plugin<ShoggothHooks> {
         };
 
         // Create and start the canvas server
-        // Create and start the canvas server
         canvasServer = createCanvasServer(config, {
           sessionsSpawn: ctx.spawnSession,
         });
@@ -100,7 +98,7 @@ export default function createCanvasPlugin(): Plugin<ShoggothHooks> {
         });
 
         // Register all canvas tools
-        ctx.registerTools(getCanvasTools(gateway));
+        ctx.registerTools(getCanvasTools(canvasServer!.gateway));
       },
 
       "health.register"(ctx) {
@@ -116,7 +114,6 @@ export default function createCanvasPlugin(): Plugin<ShoggothHooks> {
         if (canvasServer) {
           await canvasServer.close();
           canvasServer = undefined;
-          gateway = undefined;
         }
       },
     },
@@ -168,7 +165,9 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
           target: args.target,
           surface: args.surface,
         });
-        return { resultJson: JSON.stringify(result ?? { ok: true }) };
+        return {
+          resultJson: JSON.stringify(result ?? { ok: false, error: "Canvas gateway unavailable" }),
+        };
       },
     },
     {
@@ -180,7 +179,9 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
       },
       async handler() {
         const result = await gatewayRef?.dispatch("canvas.hide", {});
-        return { resultJson: JSON.stringify(result ?? { ok: true }) };
+        return {
+          resultJson: JSON.stringify(result ?? { ok: false, error: "Canvas gateway unavailable" }),
+        };
       },
     },
     {
@@ -206,7 +207,9 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
           session,
           path: args.path,
         });
-        return { resultJson: JSON.stringify(result ?? { ok: true }) };
+        return {
+          resultJson: JSON.stringify(result ?? { ok: false, error: "Canvas gateway unavailable" }),
+        };
       },
     },
     {
@@ -226,7 +229,9 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
         const result = await gatewayRef?.dispatch("canvas.navigateExternal", {
           url: args.url,
         });
-        return { resultJson: JSON.stringify(result ?? { ok: true }) };
+        return {
+          resultJson: JSON.stringify(result ?? { ok: false, error: "Canvas gateway unavailable" }),
+        };
       },
     },
     {
@@ -251,7 +256,9 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
           js: args.js,
           id: args.id,
         });
-        return { resultJson: JSON.stringify(result ?? { ok: true }) };
+        return {
+          resultJson: JSON.stringify(result ?? { ok: false, error: "Canvas gateway unavailable" }),
+        };
       },
     },
     {
@@ -272,7 +279,9 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
         const result = await gatewayRef?.dispatch("canvas.snapshot", {
           id: session,
         });
-        return { resultJson: JSON.stringify(result ?? { ok: true }) };
+        return {
+          resultJson: JSON.stringify(result ?? { ok: false, error: "Canvas gateway unavailable" }),
+        };
       },
     },
     {
@@ -300,7 +309,9 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
           session,
           payload,
         });
-        return { resultJson: JSON.stringify(result ?? { ok: true }) };
+        return {
+          resultJson: JSON.stringify(result ?? { ok: false, error: "Canvas gateway unavailable" }),
+        };
       },
     },
     {
@@ -319,7 +330,9 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
       async handler(args, ctx) {
         const session = normalizeSession((args.session as string) || ctx.sessionUrn);
         const result = await gatewayRef?.dispatch("a2ui.reset", { session });
-        return { resultJson: JSON.stringify(result ?? { ok: true }) };
+        return {
+          resultJson: JSON.stringify(result ?? { ok: false, error: "Canvas gateway unavailable" }),
+        };
       },
     },
   ];
