@@ -74,7 +74,4 @@ You can also pass the port as a CLI argument: `npx tsx src/server.ts 4000`
 }
 ```
 
-```
-
 The daemon will start the process, poll `/manifest` for tool declarations, health-check it, and register the tools once healthy.
-```
