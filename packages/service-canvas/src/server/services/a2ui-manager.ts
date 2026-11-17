@@ -1,7 +1,12 @@
-import { getLogger } from "@shoggoth/shared";
+import { getLogger, deepMerge } from "@shoggoth/shared";
 import type { A2UIStore } from "./a2ui-store";
 
 const log = getLogger("service-canvas:a2ui-manager");
+
+/** Plain-object guard matching the semantics of the shared deepMerge helper. */
+function isPlainRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
 
 export interface A2UISurface {
   surfaceId: string;
@@ -17,6 +22,78 @@ export interface A2UISurface {
 /** Composite key for session-scoped surfaces */
 function key(session: string, surfaceId: string): string {
   return `${session}\0${surfaceId}`;
+}
+
+/**
+ * Property names that must never be taken from untrusted model payloads.
+ * Writing these onto a plain object corrupts lookup/serialization behavior
+ * (prototype pollution and method-shadowing), so sanitized merge output
+ * silently drops them.
+ */
+const UNSAFE_KEYS = new Set([
+  "__proto__",
+  "constructor",
+  "hasOwnProperty",
+  "isPrototypeOf",
+  "propertyIsEnumerable",
+  "toLocaleString",
+  "toString",
+  "valueOf",
+]);
+
+/**
+ * Strip unsafe keys from a model value (recursively for plain objects).
+ * Returns the value unchanged when nothing needs to be removed.
+ */
+function withoutUnsafeKeys(value: unknown): unknown {
+  if (!isPlainRecord(value)) return value;
+  let sanitized: Record<string, unknown> | null = null;
+  for (const [k, v] of Object.entries(value)) {
+    if (UNSAFE_KEYS.has(k)) {
+      sanitized ??= { ...value };
+      delete sanitized[k];
+      continue;
+    }
+    const cleaned = withoutUnsafeKeys(v);
+    if (cleaned !== v && sanitized === null) sanitized = { ...value };
+    if (sanitized !== null) sanitized[k] = cleaned;
+  }
+  return sanitized ?? value;
+}
+
+/**
+ * Merge a data model update into the existing model.
+ *
+ * Plain objects merge recursively; arrays, primitives, and other values
+ * replace the previous value outright. `$sources` is merged by source name,
+ * with each named source replacing its previous definition wholesale —
+ * matching the client store's treatment of pushed sources (a push with
+ * fewer rows than before must not leave stale rows behind).
+ */
+export function mergeDataModel(
+  base: Record<string, unknown>,
+  update: Record<string, unknown>,
+  surfaceId?: string,
+): Record<string, unknown> {
+  const merged = deepMerge(base, withoutUnsafeKeys(update) as Record<string, unknown>);
+  const sources = merged.$sources;
+  if (isPlainRecord(sources) && isPlainRecord(update.$sources)) {
+    for (const [name, src] of Object.entries(update.$sources)) {
+      if (UNSAFE_KEYS.has(name)) {
+        log.debug("dropping unsafe source name from data model update", {
+          surfaceId,
+          source: name,
+        });
+        delete sources[name];
+        continue;
+      }
+      // Per-source wholesale replace mirrors the client store: deep-merged
+      // rows would resurrect entries the producer removed, so each named
+      // source is taken from the update as-is.
+      sources[name] = withoutUnsafeKeys(src);
+    }
+  }
+  return merged;
 }
 
 export class A2UIManager {
@@ -110,7 +187,7 @@ export class A2UIManager {
           }
         }
       }
-      Object.assign(surface.dataModel, data);
+      surface.dataModel = mergeDataModel(surface.dataModel, data, surfaceId);
       this.store?.save(session, surface);
     }
   }
