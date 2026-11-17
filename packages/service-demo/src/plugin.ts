@@ -1,7 +1,7 @@
 import type { Plugin } from "hooks-plugin";
 import type { ShoggothHooks } from "@shoggoth/plugins";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { DEMO_TOOLS, DEFAULT_MESSAGE, escapeHtml } from "./shared.js";
+import { DEMO_TOOLS, DEFAULT_MESSAGE, demoManifest, escapeHtml } from "./shared.js";
 
 const DEFAULT_PORT = 3200;
 
@@ -31,10 +31,21 @@ function json(res: ServerResponse, status: number, data: unknown): void {
   res.end(body);
 }
 
-/** Serve the demo page on GET /; 405 for other methods, 404 elsewhere. */
+/** Serve the demo page on GET /, the service manifest on GET /manifest; 405/404 elsewhere. */
 function handleRequest(req: IncomingMessage, res: ServerResponse): void {
   const method = req.method?.toUpperCase() ?? "GET";
   const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+
+  if (pathname === "/manifest") {
+    if (method !== "GET") {
+      res.setHeader("Allow", "GET");
+      json(res, 405, { error: "method not allowed" });
+      return;
+    }
+
+    json(res, 200, demoManifest);
+    return;
+  }
 
   if (pathname !== "/") {
     json(res, 404, { error: "not found" });

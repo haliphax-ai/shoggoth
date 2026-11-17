@@ -17,7 +17,7 @@ Add the plugin to your configuration file:
 }
 ```
 
-The daemon loads the plugin at startup and registers the service + tools automatically.
+The daemon loads the plugin at startup and registers the service + tools automatically. The plugin-mode HTTP server also serves `GET /manifest` with the same service manifest as the standalone server, so Shoggoth discovery behaves identically in both modes.
 
 ## Managed Service Mode
 

@@ -53,3 +53,16 @@ export const DEMO_TOOLS: readonly DemoToolDefinition[] = [
     },
   },
 ];
+
+/** Service manifest returned at GET /manifest by both the plugin and the standalone server. */
+export const demoManifest = {
+  name: "demo",
+  version: "1.0.0",
+  tools: DEMO_TOOLS.map((tool) => ({
+    ...tool,
+    method: tool.name === "demo.set_message" ? ("POST" as const) : ("GET" as const),
+    path: tool.name === "demo.set_message" ? "/api/set_message" : "/api/get_message",
+    dispatch: "body" as const,
+  })),
+  ops: [],
+};
