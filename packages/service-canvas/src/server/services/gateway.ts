@@ -168,7 +168,7 @@ export class Gateway {
       const timeout = setTimeout(() => {
         this.pendingSnapshots.delete(sessionId);
         resolve(""); // Return empty string on timeout
-      }, 30000);
+      }, 15000);
 
       this.pendingSnapshots.set(sessionId, { resolve, reject: _reject, timeout });
     });

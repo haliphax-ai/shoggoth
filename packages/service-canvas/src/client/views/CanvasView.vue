@@ -157,7 +157,7 @@ export default defineComponent({
               const timeoutId = setTimeout(() => {
                 window.removeEventListener("message", handler);
                 reject(new Error("Iframe snapshot timed out"));
-              }, 10000);
+              }, 15000);
 
               function handler(e: MessageEvent) {
                 if (!e.data || e.data.type !== "canvas-snapshot-result") return;
