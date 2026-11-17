@@ -63,7 +63,6 @@ export function createCanvasServer(
     fullConfig.agentWorkspaces["__default"] ?? process.cwd(),
     "canvas",
   );
-  fs.mkdirSync(canvasRoot, { recursive: true });
 
   // Build agent workspace map from config
   const agentWorkspaceMap = new Map<string, string>();
