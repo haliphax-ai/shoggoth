@@ -34,7 +34,9 @@ export class JSONLWatcher {
 
     for (const [session, canvasDir] of sessionPathMap) {
       const jsonlDir = path.join(canvasDir, "jsonl");
-      fs.mkdirSync(jsonlDir, { recursive: true });
+      if (fs.existsSync(canvasDir)) {
+        fs.mkdirSync(jsonlDir, { recursive: true });
+      }
       try {
         const watcher = fs.watch(jsonlDir, (eventType, filename) => {
           if (!filename || !filename.endsWith(".jsonl")) return;

@@ -187,6 +187,8 @@ When running behind a reverse proxy with a base path (e.g., `basePath: "/canvas"
 
 The root path (`/`) redirects to `/main/` by default.
 
+Sessions map to the `canvas/` directory of each agent listed in `agentWorkspaces`; a session only exists once its directory is present on disk — the server does not create it. In deployments without a `main` agent, `/main/` returns 404.
+
 ## Session Files
 
 Place HTML/CSS/JS files in the agent's `canvas/` workspace directory. The server serves them at `/<session>/<path>`. File changes trigger live reload in the browser.
