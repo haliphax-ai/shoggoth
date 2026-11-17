@@ -19,7 +19,7 @@
     "reinstall": "rm -rf node_modules **/node_modules && npm ci",
     "test": "vitest run --reporter=minimal --coverage",
     "test:ci-agent-isolation": "SHOGGOTH_CI_STRICT_AGENT_TESTS=1 vitest run packages/os-exec --reporter=minimal",
-    "typecheck": "lerna run typecheck --parallel --stream"
+    "typecheck": "lerna run typecheck --concurrency $(nproc) --stream"
   },
   "dependencies": {
     "tsx": "^4.19.3"
