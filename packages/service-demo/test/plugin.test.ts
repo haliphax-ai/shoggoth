@@ -69,4 +69,32 @@ describe("plugin mode HTTP server", () => {
     expect(res.status).toBe(404);
     expect(JSON.parse(res.body)).toEqual({ error: "not found" });
   });
+
+  it("serves the service manifest on GET /manifest", async () => {
+    const res = await makeRequest(port, "GET", "/manifest");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("application/json");
+    const manifest = JSON.parse(res.body);
+    expect(manifest.name).toBe("demo");
+    expect(manifest.version).toBe("1.0.0");
+    expect(manifest.tools).toHaveLength(2);
+    for (const tool of manifest.tools) {
+      expect(typeof tool.name).toBe("string");
+      expect(typeof tool.method).toBe("string");
+      expect(typeof tool.path).toBe("string");
+      expect(tool.dispatch).toBe("body");
+    }
+    const setMessage = manifest.tools.find((t: { name: string }) => t.name === "demo.set_message");
+    const getMessage = manifest.tools.find((t: { name: string }) => t.name === "demo.get_message");
+    expect(setMessage).toMatchObject({ method: "POST", path: "/api/set_message" });
+    expect(getMessage).toMatchObject({ method: "GET", path: "/api/get_message" });
+    expect(manifest.ops).toEqual([]);
+  });
+
+  it("returns 405 for non-GET requests to /manifest", async () => {
+    const res = await makeRequest(port, "POST", "/manifest");
+    expect(res.status).toBe(405);
+    expect(res.headers.allow).toBe("GET");
+    expect(JSON.parse(res.body)).toEqual({ error: "method not allowed" });
+  });
 });

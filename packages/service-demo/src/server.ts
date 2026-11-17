@@ -18,7 +18,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { createIdentityHandler, TokenValidator } from "@shoggoth/service-auth";
 import { getLogger } from "@shoggoth/shared";
-import { DEMO_TOOLS, DEFAULT_MESSAGE, escapeHtml } from "./shared.js";
+import { DEFAULT_MESSAGE, demoManifest, escapeHtml } from "./shared.js";
 
 const log = getLogger("demo-service");
 
@@ -71,17 +71,7 @@ const identityHandler = createIdentityHandler({
 });
 
 /** Service manifest returned at GET /manifest. */
-const manifest = {
-  name: "demo",
-  version: "1.0.0",
-  tools: DEMO_TOOLS.map((tool) => ({
-    ...tool,
-    method: tool.name === "demo.set_message" ? ("POST" as const) : ("GET" as const),
-    path: tool.name === "demo.set_message" ? "/api/set_message" : "/api/get_message",
-    dispatch: "body" as const,
-  })),
-  ops: [],
-};
+const manifest = demoManifest;
 
 /** Maximum accepted request body size (1 MiB); larger requests are rejected with 413. */
 const MAX_BODY_BYTES = 1024 * 1024;
