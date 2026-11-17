@@ -191,6 +191,68 @@ function bodyField(parsed: unknown, key: string): unknown {
   return (parsed as Record<string, unknown>)[key];
 }
 
+/**
+ * Attempt to rotate the stored identity using a Bearer token.
+ *
+ * A rotation request carries a `Bearer` token that must validate against the
+ * currently stored identity. When the credentials do not qualify (no Bearer
+ * token, nothing stored yet, or an invalid token), the request is reported as
+ * unhandled so the caller can fall through to provision-secret handling.
+ *
+ * Returns true when the request was fully handled (a response was written).
+ */
+async function tryRotateIdentity(ctx: RequestContext, parsed: unknown): Promise<boolean> {
+  const authHeader = ctx.authorization;
+  if (!authHeader?.startsWith("Bearer ") || !storedIdentity) {
+    return false;
+  }
+
+  const payload = await TokenValidator.validate(authHeader.slice(7), storedIdentity);
+  if (!payload) {
+    // Invalid token — fall through to provision secret check
+    return false;
+  }
+
+  // Valid token — allow rotation. Same truthiness gate as before: any
+  // missing/empty/non-string identity is rejected here.
+  const identity = bodyField(parsed, "identity");
+  if (typeof identity !== "string" || identity.length === 0) {
+    json(ctx.res, 400, { error: "Missing identity in request body" });
+    return true;
+  }
+
+  storedIdentity = identity;
+  log.info(`Identity rotated (${identity.slice(0, 20)}...)`);
+  try {
+    await writeIdentityFile(identity);
+  } catch (err) {
+    log.warn(`Failed to write rotated identity to ${KEY_PATH}`, { err: String(err) });
+  }
+  json(ctx.res, 200, { ok: true });
+  return true;
+}
+
+/**
+ * Provision an identity using the shared provision secret. This is the
+ * bootstrap path for requests that were not rotated via Bearer token; any
+ * identity-handler rejection surfaces as 403.
+ */
+function provisionViaSecret(ctx: RequestContext, parsed: unknown): void {
+  try {
+    const result = identityHandler({
+      headers: {
+        "x-provision-secret": ctx.req.headers["x-provision-secret"] as string | undefined,
+        authorization: ctx.authorization,
+      },
+      body: parsed as { identity: string },
+    });
+    json(ctx.res, 200, result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Forbidden";
+    json(ctx.res, 403, { error: msg });
+  }
+}
+
 /** Route handler; returns normally after the response has been written. */
 type RouteHandler = (ctx: RequestContext) => Promise<void>;
 
@@ -244,51 +306,10 @@ const routes: Route[] = [
     // POST /_shoggoth/identity — identity provisioning
     match: exact("POST", "/_shoggoth/identity"),
     handle: async (ctx) => {
-      const { req, res } = ctx;
-      const body = await readBodyAsJson(req, res);
+      const body = await readBodyAsJson(ctx.req, ctx.res);
       if (!body.ok) return;
-      const parsed = body.value;
-
-      // Check if this is a rotation request (Bearer token with existing identity)
-      const identity = bodyField(parsed, "identity");
-      const authHeader = ctx.authorization;
-      if (authHeader?.startsWith("Bearer ") && storedIdentity) {
-        const token = authHeader.slice(7);
-        const payload = await TokenValidator.validate(token, storedIdentity);
-        if (payload) {
-          // Valid token — allow rotation. Same truthiness gate as before:
-          // any missing/empty/non-string identity is rejected here.
-          if (typeof identity !== "string" || identity.length === 0) {
-            json(res, 400, { error: "Missing identity in request body" });
-            return;
-          }
-          storedIdentity = identity;
-          log.info(`Identity rotated (${identity.slice(0, 20)}...)`);
-          try {
-            await writeIdentityFile(identity);
-          } catch (err) {
-            log.warn(`Failed to write rotated identity to ${KEY_PATH}`, { err: String(err) });
-          }
-          json(res, 200, { ok: true });
-          return;
-        }
-        // Invalid token — fall through to provision secret check
-      }
-
-      // Use the identity handler for provision-secret-based provisioning
-      try {
-        const result = identityHandler({
-          headers: {
-            "x-provision-secret": req.headers["x-provision-secret"] as string | undefined,
-            authorization: ctx.authorization,
-          },
-          body: parsed as { identity: string },
-        });
-        json(res, 200, result);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Forbidden";
-        json(res, 403, { error: msg });
-      }
+      if (await tryRotateIdentity(ctx, body.value)) return;
+      provisionViaSecret(ctx, body.value);
     },
   },
   {
