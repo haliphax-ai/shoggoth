@@ -1,6 +1,6 @@
 import type { Plugin } from "hooks-plugin";
 import type { ShoggothHooks } from "@shoggoth/plugins";
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { DEMO_TOOLS, DEFAULT_MESSAGE, escapeHtml } from "./shared.js";
 
 const DEFAULT_PORT = 3200;
@@ -11,19 +11,49 @@ let message = DEFAULT_MESSAGE;
 /** HTTP server instance. */
 let server: Server | undefined;
 
-function startServer(port: number): Promise<Server> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer((_req, res) => {
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(`<!DOCTYPE html>
+function pageHtml(): string {
+  return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><title>Demo Service</title></head>
 <body>
 <h1>Demo Service</h1>
 <p>${escapeHtml(message)}</p>
 </body>
-</html>`);
-    });
+</html>`;
+}
+
+function json(res: ServerResponse, status: number, data: unknown): void {
+  const body = JSON.stringify(data);
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": Buffer.byteLength(body),
+  });
+  res.end(body);
+}
+
+/** Serve the demo page on GET /; 405 for other methods, 404 elsewhere. */
+function handleRequest(req: IncomingMessage, res: ServerResponse): void {
+  const method = req.method?.toUpperCase() ?? "GET";
+  const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+
+  if (pathname !== "/") {
+    json(res, 404, { error: "not found" });
+    return;
+  }
+
+  if (method !== "GET") {
+    res.setHeader("Allow", "GET");
+    json(res, 405, { error: "method not allowed" });
+    return;
+  }
+
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(pageHtml());
+}
+
+export function startServer(port: number): Promise<Server> {
+  return new Promise((resolve, reject) => {
+    const srv = createServer((req, res) => handleRequest(req, res));
     srv.listen(port, "127.0.0.1", () => resolve(srv));
     srv.on("error", reject);
   });
