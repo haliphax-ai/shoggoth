@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as age from "age-encryption";
+import { request } from "node:http";
 import type { ServiceTokenPayload } from "@shoggoth/service-auth";
 
 const PROVISION_SECRET = "test-provision-secret-xyz";
@@ -21,35 +22,33 @@ function makeRequest(
   options?: { headers?: Record<string, string>; body?: unknown },
 ): Promise<{ status: number; body: unknown }> {
   return new Promise((resolve, reject) => {
-    import("node:http").then(({ request }) => {
-      const url = new URL(path, `http://127.0.0.1:${port}`);
-      const headers: Record<string, string> = {
-        ...options?.headers,
-      };
-      if (options?.body !== undefined) {
-        headers["content-type"] = "application/json";
-      }
-      const req = request(url, { method, headers }, (res) => {
-        const chunks: Buffer[] = [];
-        res.on("data", (chunk: Buffer) => chunks.push(chunk));
-        res.on("end", () => {
-          const raw = Buffer.concat(chunks).toString("utf-8");
-          let body: unknown;
-          try {
-            body = JSON.parse(raw);
-          } catch {
-            body = raw;
-          }
-          resolve({ status: res.statusCode ?? 0, body });
-        });
-        res.on("error", reject);
+    const url = new URL(path, `http://127.0.0.1:${port}`);
+    const headers: Record<string, string> = {
+      ...options?.headers,
+    };
+    if (options?.body !== undefined) {
+      headers["content-type"] = "application/json";
+    }
+    const req = request(url, { method, headers }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () => {
+        const raw = Buffer.concat(chunks).toString("utf-8");
+        let body: unknown;
+        try {
+          body = JSON.parse(raw);
+        } catch {
+          body = raw;
+        }
+        resolve({ status: res.statusCode ?? 0, body });
       });
-      req.on("error", reject);
-      if (options?.body !== undefined) {
-        req.write(JSON.stringify(options.body));
-      }
-      req.end();
+      res.on("error", reject);
     });
+    req.on("error", reject);
+    if (options?.body !== undefined) {
+      req.write(JSON.stringify(options.body));
+    }
+    req.end();
   });
 }
 
