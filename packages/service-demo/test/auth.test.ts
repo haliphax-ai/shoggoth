@@ -216,4 +216,36 @@ describe("demo service auth integration", () => {
       expect((res.body as { ok: boolean; message: string }).message).toBe("Updated via auth test");
     });
   });
+
+  describe("request body size limit", () => {
+    /** Oversized payload: 1 MiB limit + extra margin to clear it on any chunking. */
+    const OVER_LIMIT_BODY_BYTES = 1024 * 1024 + 1024;
+
+    it("rejects oversized request bodies with 413 and the server stays healthy", async () => {
+      const res = await makeRequest(port, "POST", "/_shoggoth/identity", {
+        headers: { "x-provision-secret": PROVISION_SECRET },
+        body: { identity: "x".repeat(OVER_LIMIT_BODY_BYTES) },
+      });
+      expect(res.status).toBe(413);
+      expect(res.body).toEqual({ error: "request body too large" });
+
+      const health = await makeRequest(port, "GET", "/health");
+      expect(health.status).toBe(200);
+    });
+
+    it("accepts normal-size request bodies", async () => {
+      const now = Math.floor(Date.now() / 1000);
+      const token = await mintToken(
+        { sub: "agent-1", scope: "service", iat: now, exp: now + 300 },
+        storedRecipient,
+      );
+
+      const res = await makeRequest(port, "POST", "/api/set_message", {
+        headers: { authorization: `Bearer ${token}` },
+        body: { message: "within the body size limit" },
+      });
+      expect(res.status).toBe(200);
+      expect((res.body as { ok: boolean }).ok).toBe(true);
+    });
+  });
 });

@@ -72,10 +72,33 @@ const manifest = {
   ops: [],
 };
 
+/** Maximum accepted request body size (1 MiB); larger requests are rejected with 413. */
+const MAX_BODY_BYTES = 1024 * 1024;
+
+/** Error thrown by readBody when the request body exceeds MAX_BODY_BYTES. */
+class PayloadTooLargeError extends Error {
+  constructor() {
+    super("request body too large");
+    this.name = "PayloadTooLargeError";
+  }
+}
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk) => chunks.push(chunk));
+    let size = 0;
+    let tooLarge = false;
+    req.on("data", (chunk: Buffer) => {
+      if (tooLarge) return; // keep draining so the 413 response can be delivered
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        tooLarge = true;
+        chunks.length = 0; // drop the partial buffer
+        reject(new PayloadTooLargeError());
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
     req.on("error", reject);
   });
@@ -124,7 +147,14 @@ async function handler(req: IncomingMessage, res: ServerResponse): Promise<void>
 
   // POST /_shoggoth/identity — identity provisioning
   if (url.pathname === "/_shoggoth/identity" && method === "POST") {
-    const body = await readBody(req);
+    const body = await readBody(req).catch((err: unknown) => {
+      if (err instanceof PayloadTooLargeError) {
+        json(res, 413, { error: "request body too large" });
+        return null;
+      }
+      throw err;
+    });
+    if (body === null) return;
     let parsed: { identity?: string };
     try {
       parsed = JSON.parse(body);
@@ -202,7 +232,14 @@ async function handler(req: IncomingMessage, res: ServerResponse): Promise<void>
 
   // POST /api/set_message — set the message
   if (url.pathname === "/api/set_message" && method === "POST") {
-    const body = await readBody(req);
+    const body = await readBody(req).catch((err: unknown) => {
+      if (err instanceof PayloadTooLargeError) {
+        json(res, 413, { error: "request body too large" });
+        return null;
+      }
+      throw err;
+    });
+    if (body === null) return;
     try {
       const parsed = JSON.parse(body);
       if (typeof parsed.message !== "string") {
@@ -231,7 +268,11 @@ const server = createServer((req, res) => {
   handler(req, res).catch((err) => {
     log.error("Request error", { err: String(err) });
     if (!res.headersSent) {
-      json(res, 500, { error: "internal server error" });
+      if (err instanceof PayloadTooLargeError) {
+        json(res, 413, { error: "request body too large" });
+      } else {
+        json(res, 500, { error: "internal server error" });
+      }
     }
   });
 });
