@@ -14,7 +14,8 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { createIdentityHandler, TokenValidator } from "@shoggoth/service-auth";
 import { getLogger } from "@shoggoth/shared";
 import { DEMO_TOOLS, DEFAULT_MESSAGE, escapeHtml } from "./shared.js";
@@ -44,18 +45,28 @@ try {
   // Ignore read errors on startup
 }
 
+/**
+ * Persist the current identity to disk without blocking the event loop.
+ *
+ * The service-auth `onReceive` callback is invoked synchronously and its
+ * return value is never awaited, so provisioning treats this as
+ * fire-and-forget and logs a warning when the write fails. Other call
+ * sites can await the returned promise.
+ */
+async function writeIdentityFile(identity: string): Promise<void> {
+  await writeFile(KEY_PATH, identity, "utf-8");
+  log.info(`Identity written to ${KEY_PATH}`);
+}
+
 /** Identity handler using service-auth. */
 const identityHandler = createIdentityHandler({
   provisionSecret: PROVISION_SECRET || undefined,
   onReceive(identity: string) {
     storedIdentity = identity;
     log.info(`Identity received and stored (${identity.slice(0, 20)}...)`);
-    try {
-      writeFileSync(KEY_PATH, identity, "utf-8");
-      log.info(`Identity written to ${KEY_PATH}`);
-    } catch (err) {
+    writeIdentityFile(identity).catch((err: unknown) => {
       log.warn(`Failed to write identity to ${KEY_PATH}`, { err: String(err) });
-    }
+    });
   },
 });
 
@@ -182,8 +193,7 @@ async function handler(req: IncomingMessage, res: ServerResponse): Promise<void>
         storedIdentity = parsed.identity;
         log.info(`Identity rotated (${parsed.identity.slice(0, 20)}...)`);
         try {
-          writeFileSync(KEY_PATH, parsed.identity, "utf-8");
-          log.info(`Rotated identity written to ${KEY_PATH}`);
+          await writeIdentityFile(parsed.identity);
         } catch (err) {
           log.warn(`Failed to write rotated identity to ${KEY_PATH}`, { err: String(err) });
         }
