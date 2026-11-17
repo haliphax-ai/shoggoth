@@ -53,6 +53,36 @@ function loadStoredIdentity(): string | null {
 let storedIdentity: string | null = loadStoredIdentity();
 
 /**
+ * Tail of an in-module promise-chain mutex guarding `storedIdentity`.
+ *
+ * Node executes JS on a single thread, but async handlers still interleave
+ * at every `await`. The rotation path reads `storedIdentity`, awaits
+ * `TokenValidator.validate` against it, and only then writes the new
+ * identity — so two concurrent rotations (or a rotation racing a
+ * provision) could otherwise interleave read-validate-write and store an
+ * identity nobody validated. Chaining each critical section onto the
+ * previous one's tail serializes identity handling; routes, status codes,
+ * response bodies, and log wording are unchanged.
+ */
+let identityLockTail: Promise<void> = Promise.resolve();
+
+/**
+ * Run `fn` once all previously queued identity critical sections have
+ * finished. `fn` may be sync or async; its result and rejections pass
+ * through to the caller unchanged. The lock tail is always restored to a
+ * resolved promise, so a failing section never breaks the chain for later
+ * callers.
+ */
+function withIdentityLock<T>(fn: () => T | Promise<T>): Promise<T> {
+  const run = identityLockTail.then(fn);
+  identityLockTail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/**
  * Persist the current identity to disk without blocking the event loop.
  *
  * The service-auth `onReceive` callback is invoked synchronously and its
@@ -135,9 +165,15 @@ interface RequestContext {
 /**
  * Guard for routes that declare `auth`: validates the Bearer token against
  * the stored identity. Returns true (and may have written a 401 response)
- * when the request must not proceed.
+ * when the request must not proceed. Runs under the identity lock so a
+ * token can never be validated against an identity mid-rotation.
  */
 async function requireBearerToken(ctx: RequestContext): Promise<boolean> {
+  return withIdentityLock(() => validateBearerToken(ctx));
+}
+
+/** Body of the auth guard, run under the identity lock. */
+async function validateBearerToken(ctx: RequestContext): Promise<boolean> {
   const header = ctx.authorization;
   if (!header?.startsWith("Bearer ")) {
     json(ctx.res, 401, { error: "missing or invalid authorization header" });
@@ -317,8 +353,13 @@ async function handleManifest({ res }: RequestContext): Promise<void> {
 }
 
 async function handleIdentity(ctx: RequestContext): Promise<void> {
-  if (await tryRotateIdentity(ctx, ctx.body)) return;
-  provisionViaSecret(ctx, ctx.body);
+  // Both writers of `storedIdentity` (rotation and provisioning) are
+  // reachable only through this handler, so locking here serializes every
+  // read-validate-write on the identity.
+  await withIdentityLock(async () => {
+    if (await tryRotateIdentity(ctx, ctx.body)) return;
+    provisionViaSecret(ctx, ctx.body);
+  });
 }
 
 async function handleSetMessage(ctx: RequestContext): Promise<void> {
