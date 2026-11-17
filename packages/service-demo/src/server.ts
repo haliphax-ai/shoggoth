@@ -14,9 +14,13 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { createIdentityHandler, TokenValidator } from "@shoggoth/service-auth";
+import {
+  createIdentityHandler,
+  TokenValidator,
+  type ServiceTokenPayload,
+} from "@shoggoth/service-auth";
 import { getLogger } from "@shoggoth/shared";
 import { DEFAULT_MESSAGE, demoManifest, escapeHtml } from "./shared.js";
 
@@ -33,17 +37,20 @@ const PROVISION_SECRET =
 /** In-memory message displayed by the demo service. */
 let message = DEFAULT_MESSAGE;
 
-/** Stored identity for token validation. */
-let storedIdentity: string | null = null;
-
-// Load identity from file on startup if it exists
-try {
-  if (existsSync(KEY_PATH)) {
-    storedIdentity = readFileSync(KEY_PATH, "utf-8").trim();
+/**
+ * Load the persisted identity from disk, or null when the file is missing
+ * or unreadable.
+ */
+function loadStoredIdentity(): string | null {
+  try {
+    return readFileSync(KEY_PATH, "utf-8").trim();
+  } catch {
+    return null;
   }
-} catch {
-  // Ignore read errors on startup
 }
+
+/** Stored identity for token validation. */
+let storedIdentity: string | null = loadStoredIdentity();
 
 /**
  * Persist the current identity to disk without blocking the event loop.
@@ -88,12 +95,9 @@ function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
-    let tooLarge = false;
     req.on("data", (chunk: Buffer) => {
-      if (tooLarge) return; // keep draining so the 413 response can be delivered
       size += chunk.length;
       if (size > MAX_BODY_BYTES) {
-        tooLarge = true;
         chunks.length = 0; // drop the partial buffer
         reject(new PayloadTooLargeError());
         return;
@@ -124,16 +128,18 @@ interface RequestContext {
   method: string;
   /** Raw Authorization header value, if present. */
   authorization: string | undefined;
+  /** Parsed JSON body; set by the dispatcher when the route opts into body parsing. */
+  body?: unknown;
 }
 
 /**
- * Guard for /api/* handlers: validates the Bearer token against the stored
- * identity. Returns true (and may have written a 401 response) when the
- * handler must not proceed.
+ * Guard for routes that declare `auth`: validates the Bearer token against
+ * the stored identity. Returns true (and may have written a 401 response)
+ * when the request must not proceed.
  */
 async function requireBearerToken(ctx: RequestContext): Promise<boolean> {
   const header = ctx.authorization;
-  if (!header || !header.startsWith("Bearer ")) {
+  if (!header?.startsWith("Bearer ")) {
     json(ctx.res, 401, { error: "missing or invalid authorization header" });
     return false;
   }
@@ -162,14 +168,16 @@ type BodyResult = { ok: true; value: unknown } | { ok: false };
  * `null` parses successfully and is reported via `value`.
  */
 async function readBodyAsJson(req: IncomingMessage, res: ServerResponse): Promise<BodyResult> {
-  const raw = await readBody(req).catch((err: unknown) => {
+  let raw: string;
+  try {
+    raw = await readBody(req);
+  } catch (err: unknown) {
     if (err instanceof PayloadTooLargeError) {
       json(res, 413, { error: "request body too large" });
-      return null;
+      return { ok: false };
     }
     throw err;
-  });
-  if (raw === null) return { ok: false };
+  }
 
   try {
     return { ok: true, value: JSON.parse(raw) as unknown };
@@ -185,36 +193,44 @@ async function readBodyAsJson(req: IncomingMessage, res: ServerResponse): Promis
  * `undefined` for them instead of throwing.
  */
 function bodyField(parsed: unknown, key: string): unknown {
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+  if (!(parsed instanceof Object) || Array.isArray(parsed)) {
     return undefined;
   }
   return (parsed as Record<string, unknown>)[key];
 }
 
 /**
- * Attempt to rotate the stored identity using a Bearer token.
- *
- * A rotation request carries a `Bearer` token that must validate against the
- * currently stored identity. When the credentials do not qualify (no Bearer
- * token, nothing stored yet, or an invalid token), the request is reported as
- * unhandled so the caller can fall through to provision-secret handling.
- *
- * Returns true when the request was fully handled (a response was written).
+ * Validate the Bearer token of a rotation request against the currently
+ * stored identity. Returns null when the request does not carry usable
+ * rotation credentials (no Bearer token, nothing stored yet, or an invalid
+ * token); the caller then falls through to provision-secret handling.
  */
-async function tryRotateIdentity(ctx: RequestContext, parsed: unknown): Promise<boolean> {
+async function rotationPayload(ctx: RequestContext): Promise<ServiceTokenPayload | null> {
   const authHeader = ctx.authorization;
   if (!authHeader?.startsWith("Bearer ") || !storedIdentity) {
-    return false;
+    return null;
   }
+  return TokenValidator.validate(authHeader.slice(7), storedIdentity);
+}
 
-  const payload = await TokenValidator.validate(authHeader.slice(7), storedIdentity);
+/**
+ * Attempt to rotate the stored identity using a Bearer token.
+ *
+ * A valid Bearer token authorizes the rotation: a missing or non-string
+ * identity in the body is rejected with 400, otherwise the new identity is
+ * stored and persisted. Returns true when the request was fully handled (a
+ * response was written), false when the request carried no usable rotation
+ * credentials and the response is left unwritten for provision-secret
+ * handling.
+ */
+async function tryRotateIdentity(ctx: RequestContext, parsed: unknown): Promise<boolean> {
+  const payload = await rotationPayload(ctx);
   if (!payload) {
-    // Invalid token — fall through to provision secret check
     return false;
   }
 
-  // Valid token — allow rotation. Same truthiness gate as before: any
-  // missing/empty/non-string identity is rejected here.
+  // Same truthiness gate as before: any missing/empty/non-string identity is
+  // rejected here.
   const identity = bodyField(parsed, "identity");
   if (typeof identity !== "string" || identity.length === 0) {
     json(ctx.res, 400, { error: "Missing identity in request body" });
@@ -223,13 +239,18 @@ async function tryRotateIdentity(ctx: RequestContext, parsed: unknown): Promise<
 
   storedIdentity = identity;
   log.info(`Identity rotated (${identity.slice(0, 20)}...)`);
+  await writeRotatedIdentity(identity);
+  json(ctx.res, 200, { ok: true });
+  return true;
+}
+
+/** Persist a rotated identity, logging (but not failing) when the write fails. */
+async function writeRotatedIdentity(identity: string): Promise<void> {
   try {
     await writeIdentityFile(identity);
   } catch (err) {
     log.warn(`Failed to write rotated identity to ${KEY_PATH}`, { err: String(err) });
   }
-  json(ctx.res, 200, { ok: true });
-  return true;
 }
 
 /**
@@ -259,23 +280,22 @@ type RouteHandler = (ctx: RequestContext) => Promise<void>;
 /** Route matcher; true when this route should handle the request. */
 type RouteMatcher = (pathname: string, method: string) => boolean;
 
-/** A single route: a matcher plus its handler. */
+/** A single route: a matcher, its handler, and optional dispatcher gates. */
 interface Route {
   match: RouteMatcher;
   handle: RouteHandler;
+  /** Require a valid Bearer token before the handler runs. */
+  auth?: boolean;
+  /** Read and JSON-parse the request body into ctx.body before the handler runs. */
+  parseBody?: boolean;
 }
 
 function exact(method: string, pathname: string): RouteMatcher {
   return (p, m) => p === pathname && m === method;
 }
 
-/** Routes are evaluated top to bottom; the first matcher wins. */
-const routes: Route[] = [
-  {
-    // GET / — HTML page
-    match: exact("GET", "/"),
-    handle: async ({ res }) => {
-      const html = `<!DOCTYPE html>
+async function handleHome({ res }: RequestContext): Promise<void> {
+  const html = `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><title>Demo Service</title></head>
 <body>
@@ -283,104 +303,123 @@ const routes: Route[] = [
 <p>${escapeHtml(message)}</p>
 </body>
 </html>`;
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(html);
-    },
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(html);
+}
+
+async function handleHealth({ res }: RequestContext): Promise<void> {
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("ok");
+}
+
+async function handleManifest({ res }: RequestContext): Promise<void> {
+  json(res, 200, manifest);
+}
+
+async function handleIdentity(ctx: RequestContext): Promise<void> {
+  if (await tryRotateIdentity(ctx, ctx.body)) return;
+  provisionViaSecret(ctx, ctx.body);
+}
+
+async function handleSetMessage(ctx: RequestContext): Promise<void> {
+  const requested = bodyField(ctx.body, "message");
+  if (typeof requested !== "string") {
+    json(ctx.res, 400, { error: "message must be a string" });
+    return;
+  }
+  message = requested;
+  json(ctx.res, 200, { ok: true, message });
+}
+
+async function handleGetMessage({ res }: RequestContext): Promise<void> {
+  json(res, 200, { message });
+}
+
+async function handleApiNotFound({ res }: RequestContext): Promise<void> {
+  json(res, 404, { error: "not found" });
+}
+
+/** Routes are evaluated top to bottom; the first matcher wins. */
+const routes: Route[] = [
+  {
+    // GET / — HTML page
+    match: exact("GET", "/"),
+    handle: handleHome,
   },
   {
     // GET /health — lightweight health check
     match: exact("GET", "/health"),
-    handle: async ({ res }) => {
-      res.writeHead(200, { "Content-Type": "text/plain" });
-      res.end("ok");
-    },
+    handle: handleHealth,
   },
   {
     // GET /manifest — service manifest
     match: exact("GET", "/manifest"),
-    handle: async ({ res }) => {
-      json(res, 200, manifest);
-    },
+    handle: handleManifest,
   },
   {
     // POST /_shoggoth/identity — identity provisioning
     match: exact("POST", "/_shoggoth/identity"),
-    handle: async (ctx) => {
-      const body = await readBodyAsJson(ctx.req, ctx.res);
-      if (!body.ok) return;
-      if (await tryRotateIdentity(ctx, body.value)) return;
-      provisionViaSecret(ctx, body.value);
-    },
+    parseBody: true,
+    handle: handleIdentity,
   },
   {
     // POST /api/set_message — set the message (Bearer token required)
     match: exact("POST", "/api/set_message"),
-    handle: async (ctx) => {
-      if (!(await requireBearerToken(ctx))) return;
-      const body = await readBodyAsJson(ctx.req, ctx.res);
-      if (!body.ok) return;
-      const requested = bodyField(body.value, "message");
-      if (typeof requested !== "string") {
-        json(ctx.res, 400, { error: "message must be a string" });
-        return;
-      }
-      message = requested;
-      json(ctx.res, 200, { ok: true, message });
-    },
+    auth: true,
+    parseBody: true,
+    handle: handleSetMessage,
   },
   {
     // GET /api/get_message — get the message (Bearer token required)
     match: exact("GET", "/api/get_message"),
-    handle: async (ctx) => {
-      if (!(await requireBearerToken(ctx))) return;
-      json(ctx.res, 200, { message });
-    },
+    auth: true,
+    handle: handleGetMessage,
   },
   {
     // Any other /api/* path: reject with the Bearer auth errors before 404
     match: (pathname) => pathname.startsWith("/api/"),
-    handle: async (ctx) => {
-      if (!(await requireBearerToken(ctx))) return;
-      json(ctx.res, 404, { error: "not found" });
-    },
+    auth: true,
+    handle: handleApiNotFound,
   },
 ];
 
 async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", `http://${HOST}:${PORT}`);
   const pathname = url.pathname;
-  const method = req.method?.toUpperCase() ?? "GET";
-  const authorizationHeader = req.headers["authorization"];
+  const method = (req.method ?? "GET").toUpperCase();
   const ctx: RequestContext = {
     req,
     res,
     pathname,
     method,
-    authorization: authorizationHeader,
+    authorization: req.headers["authorization"],
   };
 
-  for (const route of routes) {
-    if (route.match(pathname, method)) {
-      await route.handle(ctx);
-      return;
-    }
+  const route = routes.find((candidate) => candidate.match(pathname, method));
+  if (!route) {
+    // 404
+    json(res, 404, { error: "not found" });
+    return;
   }
+  if (route.auth && !(await requireBearerToken(ctx))) return;
+  if (route.parseBody) {
+    const parsed = await readBodyAsJson(req, res);
+    if (!parsed.ok) return;
+    ctx.body = parsed.value;
+  }
+  await route.handle(ctx);
+}
 
-  // 404
-  json(res, 404, { error: "not found" });
+/** Log a failed request and answer 500 unless a response was already sent. */
+function respondToServerError(res: ServerResponse, err: unknown): void {
+  log.error("Request error", { err: String(err) });
+  if (!res.headersSent) {
+    json(res, 500, { error: "internal server error" });
+  }
 }
 
 const server = createServer((req, res) => {
-  handler(req, res).catch((err) => {
-    log.error("Request error", { err: String(err) });
-    if (!res.headersSent) {
-      if (err instanceof PayloadTooLargeError) {
-        json(res, 413, { error: "request body too large" });
-      } else {
-        json(res, 500, { error: "internal server error" });
-      }
-    }
-  });
+  handler(req, res).catch((err: unknown) => respondToServerError(res, err));
 });
 
 server.listen(PORT, HOST, () => {
