@@ -77,7 +77,6 @@ export function createCanvasServer(
   const fileResolver = new FileResolver(agentWorkspaceMap, canvasRoot);
   const sessionManager = new SessionManager();
   const a2uiStore = new A2UIStore(fullConfig.a2uiDbPath);
-  // a2uiStore is closed in the returned close() after the HTTP server drains.
   const a2uiManager = new A2UIManager(a2uiStore);
   const catalogRegistry = new CatalogRegistry();
 
