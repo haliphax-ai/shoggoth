@@ -74,10 +74,6 @@ export default function createDemoServicePlugin(): Plugin<ShoggothHooks> {
   return {
     name: "service-demo",
     hooks: {
-      "daemon.configure"(ctx) {
-        return ctx;
-      },
-
       async "service.register"(ctx) {
         server = await startServer(DEFAULT_PORT);
 
