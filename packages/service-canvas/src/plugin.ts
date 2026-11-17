@@ -39,7 +39,6 @@ interface ExtendedServiceRegisterCtx extends Omit<ServiceRegisterCtx, "config"> 
  */
 export default function createCanvasPlugin(): Plugin<ShoggothHooks> {
   let canvasServer: CanvasServer | undefined;
-  let gateway: Gateway | undefined;
 
   return {
     name: "service-canvas",
@@ -100,7 +99,7 @@ export default function createCanvasPlugin(): Plugin<ShoggothHooks> {
         });
 
         // Register all canvas tools
-        ctx.registerTools(getCanvasTools(gateway));
+        ctx.registerTools(getCanvasTools(canvasServer!.gateway));
       },
 
       "health.register"(ctx) {
@@ -116,7 +115,6 @@ export default function createCanvasPlugin(): Plugin<ShoggothHooks> {
         if (canvasServer) {
           await canvasServer.close();
           canvasServer = undefined;
-          gateway = undefined;
         }
       },
     },
