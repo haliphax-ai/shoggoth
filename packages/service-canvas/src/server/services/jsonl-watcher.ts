@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 import { getLogger } from "@shoggoth/shared";
 import type { Gateway } from "./gateway";
@@ -10,6 +11,8 @@ const log = getLogger("service-canvas:jsonl-watcher");
 
 export interface JSONLWatcherOptions {
   debounceMs?: number;
+  /** Disable directory watchers (used by tests). */
+  watch?: boolean;
 }
 
 /**
@@ -19,7 +22,10 @@ export interface JSONLWatcherOptions {
 export class JSONLWatcher {
   private watchers = new Map<string, fs.FSWatcher>();
   private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private pending = new Map<string, Promise<void>>();
+  private closed = false;
   private debounceMs: number;
+  private watch: boolean;
   private resolveSchema?: SchemaResolver;
 
   constructor(
@@ -31,6 +37,9 @@ export class JSONLWatcher {
   ) {
     this.resolveSchema = resolveSchema;
     this.debounceMs = options.debounceMs ?? 300;
+    this.watch = options.watch ?? true;
+
+    if (!this.watch) return;
 
     for (const [session, canvasDir] of sessionPathMap) {
       const jsonlDir = path.join(canvasDir, "jsonl");
@@ -65,14 +74,7 @@ export class JSONLWatcher {
     );
   }
 
-  processFile(session: string, filePath: string) {
-    let content: string;
-    try {
-      content = fs.readFileSync(filePath, "utf8");
-    } catch {
-      return; // file may have been deleted
-    }
-
+  private async processLines(session: string, filePath: string, content: string) {
     const lines = content.split("\n").filter((l) => l.trim());
     for (const line of lines) {
       let parsed: Record<string, unknown>;
@@ -86,14 +88,67 @@ export class JSONLWatcher {
         continue;
       }
 
-      processA2UICommand(session, parsed, this.a2uiManager, this.gateway, this.resolveSchema);
+      try {
+        processA2UICommand(session, parsed, this.a2uiManager, this.gateway, this.resolveSchema);
+      } catch (err: any) {
+        log.warn("failed to process jsonl command", {
+          file: path.basename(filePath),
+          command: typeof parsed === "object" && parsed ? Object.keys(parsed)[0] : undefined,
+          err: err?.message ?? String(err),
+        });
+      }
     }
   }
 
-  close() {
+  processFile(session: string, filePath: string): Promise<void> {
+    const key = `${session}\0${filePath}`;
+    const previous = this.pending.get(key);
+    const run = (previous ?? Promise.resolve()).then(() => this.processOne(session, filePath));
+    const settled = run.catch(() => {});
+    this.pending.set(key, settled);
+    void settled.then(() => {
+      if (this.pending.get(key) === settled) this.pending.delete(key);
+    });
+    return run;
+  }
+
+  private async processOne(session: string, filePath: string): Promise<void> {
+    let content: string;
+    try {
+      content = await fsp.readFile(filePath, "utf8");
+    } catch (err: any) {
+      if (err?.code !== "ENOENT") {
+        log.warn("failed to read jsonl file", {
+          file: path.basename(filePath),
+          err: err?.message ?? String(err),
+        });
+      }
+      return;
+    }
+
+    if (this.closed) return;
+    await this.processLines(session, filePath, content);
+  }
+
+  close(): void {
+    this.closed = true;
     for (const timer of this.debounceTimers.values()) clearTimeout(timer);
     this.debounceTimers.clear();
     for (const watcher of this.watchers.values()) watcher.close();
     this.watchers.clear();
+  }
+
+  /**
+   * Close watchers and timers, then wait for all in-flight processing to
+   * finish before arming the closed gate.
+   */
+  async closeAndWait(): Promise<void> {
+    for (const timer of this.debounceTimers.values()) clearTimeout(timer);
+    this.debounceTimers.clear();
+    for (const watcher of this.watchers.values()) watcher.close();
+    this.watchers.clear();
+    const pending = [...this.pending.values()];
+    if (pending.length) await Promise.all(pending);
+    this.closed = true;
   }
 }
