@@ -42,8 +42,25 @@ export function createFileSpawnRouter(opts: FileSpawnOptions): Router {
         ? path.resolve(decodedFile)
         : path.resolve(root, decodedFile);
 
-      // Verify resolved path is within the root
-      if (!resolved.startsWith(root + path.sep) && resolved !== root) {
+      // Resolve symlinks so the containment check sees the real target
+      let real: string;
+      try {
+        real = await fs.realpath(resolved);
+      } catch {
+        res.status(404).json({ error: "file not found" });
+        return;
+      }
+
+      let realRoot: string;
+      try {
+        realRoot = await fs.realpath(root);
+      } catch {
+        res.status(404).json({ error: "file not found" });
+        return;
+      }
+
+      // Verify the real path is within the root
+      if (!real.startsWith(realRoot + path.sep) && real !== realRoot) {
         res.status(400).json({ error: "path traversal detected" });
         return;
       }
@@ -51,7 +68,7 @@ export function createFileSpawnRouter(opts: FileSpawnOptions): Router {
       // Read file content
       let fileContent: string;
       try {
-        fileContent = await fs.readFile(resolved, "utf-8");
+        fileContent = await fs.readFile(real, "utf-8");
       } catch {
         res.status(404).json({ error: "file not found" });
         return;

@@ -7,10 +7,12 @@ import express from "express";
 import request from "supertest";
 import { createFileSpawnRouter } from "../../../src/server/routes/file-spawn";
 import * as fs from "fs/promises";
+import type { PathLike } from "node:fs";
 
 // Mock fs/promises
 vi.mock("fs/promises", () => ({
   readFile: vi.fn(),
+  realpath: vi.fn((p: PathLike) => Promise.resolve(String(p))),
 }));
 
 describe("File Spawn Router", () => {
@@ -20,6 +22,7 @@ describe("File Spawn Router", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(fs.realpath).mockImplementation(async (p: PathLike) => String(p));
     app = express();
     app.use(express.json());
     app.use(
@@ -69,6 +72,47 @@ describe("File Spawn Router", () => {
 
       expect(response.status).toBe(400);
       expect(response.body.error).toContain("path traversal");
+    });
+
+    it("should block symlink escape via realpath resolution", async () => {
+      const outsidePath = "/etc/passwd";
+      vi.mocked(fs.realpath).mockImplementation(async (p: PathLike) => {
+        return String(p) === "/path/to/link" ? outsidePath : String(p);
+      });
+
+      const response = await request(app).post("/api/file-spawn").send({ file: "link" });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain("path traversal");
+      expect(fs.readFile).not.toHaveBeenCalled();
+      expect(mockSessionsSpawn).not.toHaveBeenCalled();
+    });
+
+    it("should allow symlink pointing inside the root", async () => {
+      vi.mocked(fs.realpath).mockImplementation(async (p: PathLike) => {
+        return String(p) === "/path/to/link" ? "/path/to/target.txt" : String(p);
+      });
+      vi.mocked(fs.readFile).mockResolvedValue("Prompt content");
+      mockSessionsSpawn.mockResolvedValue({ ok: true });
+
+      const response = await request(app).post("/api/file-spawn").send({ file: "link" });
+
+      expect(response.status).toBe(200);
+      expect(fs.readFile).toHaveBeenCalledWith("/path/to/target.txt", "utf-8");
+    });
+
+    it("should return 404 when the root itself is missing", async () => {
+      vi.mocked(fs.realpath).mockImplementation(async (p: PathLike) => {
+        if (String(p) === "/path/to") throw new Error("ENOENT");
+        return String(p);
+      });
+
+      const response = await request(app).post("/api/file-spawn").send({ file: "prompt.txt" });
+
+      expect(response.status).toBe(404);
+      expect(response.body.error).toContain("file not found");
+      expect(fs.readFile).not.toHaveBeenCalled();
+      expect(mockSessionsSpawn).not.toHaveBeenCalled();
     });
 
     it("should return { ok: true, result } on success", async () => {
