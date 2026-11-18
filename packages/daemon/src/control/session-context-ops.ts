@@ -95,20 +95,31 @@ async function runCompactionBehindQueue(
   return captured;
 }
 
+interface SessionContextSegmentOpSpec {
+  /** Op name for principal-guard error strings (e.g. "session_context_new"). */
+  readonly opName: string;
+  /** Audit action recorded on success (e.g. "session.context_segment_new"). */
+  readonly auditAction: string;
+  /** Kill reason passed through to the subagent kill closure. */
+  readonly killReason: string;
+  /** Segment mutation to apply (`applySessionContextSegmentNew` / `...Reset`). */
+  readonly apply: typeof applySessionContextSegmentNew;
+}
+
 /**
- * Handle session.context_new control operation.
- * Starts a new context segment for the target session.
+ * Shared body of session_context_new / session_context_reset: operator guard,
+ * state/manager guard, target resolution, segment mutation with subagent kill
+ * wiring, and a success audit record. Per-op behavior (segment mint vs wipe,
+ * kill reason, audit action) is carried by the spec.
  */
-export async function handleSessionContextNew(
+async function handleSessionContextSegmentOp(
+  op: SessionContextSegmentOpSpec,
   req: WireRequest,
   principal: AuthenticatedPrincipal,
   ctx: IntegrationOpsContext,
 ): Promise<unknown> {
   if (principal.kind !== "operator") {
-    throw new IntegrationOpError(
-      "ERR_FORBIDDEN",
-      "session_context_new requires operator principal",
-    );
+    throw new IntegrationOpError("ERR_FORBIDDEN", `${op.opName} requires operator principal`);
   }
   if (!ctx.stateDb || !ctx.sessions || !ctx.sessionManager) {
     throw new IntegrationOpError(
@@ -121,7 +132,7 @@ export async function handleSessionContextNew(
   const sessionManager = ctx.sessionManager;
   const pl = payloadObject(req);
   const sessionId = requireSessionId(pl, ctx.config, ctx.sessions);
-  const out = applySessionContextSegmentNew({
+  const out = op.apply({
     db: ctx.stateDb,
     sessions: ctx.sessions,
     sessionId,
@@ -133,18 +144,40 @@ export async function handleSessionContextNew(
           cid,
           "killed",
           ctx.hitlClear?.autoApproveGate,
-          "subagent_wait_timeout",
+          op.killReason,
         );
       }
     },
   });
   ctx.recordIntegrationAudit({
-    action: "session.context_segment_new",
+    action: op.auditAction,
     resource: sessionId,
     outcome: "ok",
     argsRedactedJson: JSON.stringify(out),
   });
   return out;
+}
+
+/**
+ * Handle session.context_new control operation.
+ * Starts a new context segment for the target session.
+ */
+export async function handleSessionContextNew(
+  req: WireRequest,
+  principal: AuthenticatedPrincipal,
+  ctx: IntegrationOpsContext,
+): Promise<unknown> {
+  return handleSessionContextSegmentOp(
+    {
+      opName: "session_context_new",
+      auditAction: "session.context_segment_new",
+      killReason: "subagent_wait_timeout",
+      apply: applySessionContextSegmentNew,
+    },
+    req,
+    principal,
+    ctx,
+  );
 }
 
 /**
@@ -156,47 +189,17 @@ export async function handleSessionContextReset(
   principal: AuthenticatedPrincipal,
   ctx: IntegrationOpsContext,
 ): Promise<unknown> {
-  if (principal.kind !== "operator") {
-    throw new IntegrationOpError(
-      "ERR_FORBIDDEN",
-      "session_context_reset requires operator principal",
-    );
-  }
-  if (!ctx.stateDb || !ctx.sessions || !ctx.sessionManager) {
-    throw new IntegrationOpError(
-      "ERR_STATE_DB_REQUIRED",
-      "session context ops require state database and session manager",
-    );
-  }
-  // A session manager is always created alongside the state DB (see control-plane), so one is
-  // guaranteed here — captured for the kill closure without a non-null assertion.
-  const sessionManager = ctx.sessionManager;
-  const pl = payloadObject(req);
-  const sessionId = requireSessionId(pl, ctx.config, ctx.sessions);
-  const out = applySessionContextSegmentReset({
-    db: ctx.stateDb,
-    sessions: ctx.sessions,
-    sessionId,
-    pending: ctx.hitlPending,
-    killSubagents: (childIds) => {
-      for (const cid of childIds) {
-        terminatePersistentSubagentSession(
-          sessionManager,
-          cid,
-          "killed",
-          ctx.hitlClear?.autoApproveGate,
-          "context_segment_reset",
-        );
-      }
+  return handleSessionContextSegmentOp(
+    {
+      opName: "session_context_reset",
+      auditAction: "session.context_segment_reset",
+      killReason: "context_segment_reset",
+      apply: applySessionContextSegmentReset,
     },
-  });
-  ctx.recordIntegrationAudit({
-    action: "session.context_segment_reset",
-    resource: sessionId,
-    outcome: "ok",
-    argsRedactedJson: JSON.stringify(out),
-  });
-  return out;
+    req,
+    principal,
+    ctx,
+  );
 }
 
 /**

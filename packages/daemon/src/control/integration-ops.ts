@@ -1,5 +1,5 @@
 import { WIRE_VERSION } from "@shoggoth/authn";
-import type { AuthenticatedPrincipal } from "@shoggoth/authn";
+import type { AuthenticatedPrincipal, OperatorPrincipal } from "@shoggoth/authn";
 import type { WireRequest } from "@shoggoth/authn";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -521,6 +521,86 @@ function requireSubagentRuntime(ctx: IntegrationOpsContext): {
     );
   }
   return { sessions: ctx.sessions, sessionManager: ctx.sessionManager };
+}
+
+/**
+ * Operator guard + payload resolution shared by `hitl_pending_approve` and
+ * `hitl_pending_deny`: principal check (op-specific error string), pending
+ * store availability, and `payload.id` extraction. The per-op decision
+ * (approve vs deny) stays in the switch case.
+ */
+function requirePendingOperatorTarget(
+  opName: string,
+  req: WireRequest,
+  principal: AuthenticatedPrincipal,
+  ctx: IntegrationOpsContext,
+): { store: PendingActionsStore; id: string; operator: OperatorPrincipal } {
+  if (principal.kind !== "operator") {
+    throw new IntegrationOpError("ERR_FORBIDDEN", `${opName} requires operator principal`);
+  }
+  if (!ctx.hitlPending) {
+    throw new IntegrationOpError("ERR_HITL_UNAVAILABLE", "HITL pending store not configured");
+  }
+  const pl = payloadObject(req);
+  const id = requireString(pl, "id");
+  return { store: ctx.hitlPending, id, operator: principal };
+}
+
+/** Completed entry for one `subagent_wait` target. */
+interface SubagentWaitResolved {
+  sessionId: string;
+  status: string;
+  exitReason: string;
+  result?: string;
+  truncated?: boolean;
+}
+
+/**
+ * Resolve one `subagent_wait` target: a terminated (or missing) session yields
+ * its completion entry — with the latest transcript result attached when
+ * results are requested — and a still-running session yields `null`. Shared by
+ * the pre-check sweep and the poll loop in `subagent_wait`.
+ */
+function resolveWaitedSessionResult(
+  ctx: IntegrationOpsContext,
+  sessions: NonNullable<IntegrationOpsContext["sessions"]>,
+  sid: string,
+  options: { readonly includeResults: boolean; readonly maxCharsEach: number },
+): SubagentWaitResolved | null {
+  const row = sessions.getById(sid);
+  if (!row) {
+    const resolved: SubagentWaitResolved = {
+      sessionId: sid,
+      status: "done",
+      exitReason: "not_found",
+    };
+    if (options.includeResults) {
+      Object.assign(resolved, { result: "", truncated: false });
+    }
+    return resolved;
+  }
+  if (row.status !== "terminated") {
+    return null; // still running
+  }
+  const resolved: SubagentWaitResolved = {
+    sessionId: sid,
+    status: "done",
+    exitReason: "natural",
+  };
+  if (options.includeResults) {
+    if (ctx.stateDb) {
+      const text =
+        extractLatestTranscriptAssistantText(ctx.stateDb, sid, row.contextSegmentId) ?? "";
+      const truncated = text.length > options.maxCharsEach;
+      Object.assign(resolved, {
+        result: truncated ? text.slice(0, options.maxCharsEach) : text,
+        truncated,
+      });
+    } else {
+      Object.assign(resolved, { result: "", truncated: false });
+    }
+  }
+  return resolved;
 }
 
 /**
@@ -1188,18 +1268,13 @@ export async function handleIntegrationControlOp(
     }
 
     case "hitl_pending_approve": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "hitl_pending_approve requires operator principal",
-        );
-      }
-      if (!ctx.hitlPending) {
-        throw new IntegrationOpError("ERR_HITL_UNAVAILABLE", "HITL pending store not configured");
-      }
-      const pl = payloadObject(req);
-      const id = requireString(pl, "id");
-      const ok = ctx.hitlPending.approve(id, principal.operatorId);
+      const { store, id, operator } = requirePendingOperatorTarget(
+        "hitl_pending_approve",
+        req,
+        principal,
+        ctx,
+      );
+      const ok = store.approve(id, operator.operatorId);
       ctx.recordIntegrationAudit({
         action: "hitl.pending_approve",
         resource: id,
@@ -1209,18 +1284,13 @@ export async function handleIntegrationControlOp(
     }
 
     case "hitl_pending_deny": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "hitl_pending_deny requires operator principal",
-        );
-      }
-      if (!ctx.hitlPending) {
-        throw new IntegrationOpError("ERR_HITL_UNAVAILABLE", "HITL pending store not configured");
-      }
-      const pl = payloadObject(req);
-      const id = requireString(pl, "id");
-      const ok = ctx.hitlPending.deny(id, principal.operatorId);
+      const { store, id, operator } = requirePendingOperatorTarget(
+        "hitl_pending_deny",
+        req,
+        principal,
+        ctx,
+      );
+      const ok = store.deny(id, operator.operatorId);
       ctx.recordIntegrationAudit({
         action: "hitl.pending_deny",
         resource: id,
@@ -2428,47 +2498,16 @@ export async function handleIntegrationControlOp(
       const POLL_INTERVAL_MS = optionalFinitePositiveInt(pl, "_poll_interval_ms") ?? 500;
       const deadline = Date.now() + timeoutMs;
 
-      /** Check whether a session counts as "completed" (terminated, or not found). */
-      const resolveSessionStatus = (
-        sid: string,
-      ): { sessionId: string; status: string; exitReason: string } | null => {
-        const row = sessions.getById(sid);
-        if (!row) {
-          return { sessionId: sid, status: "done", exitReason: "not_found" };
-        }
-        if (row.status === "terminated") {
-          return { sessionId: sid, status: "done", exitReason: "natural" };
-        }
-        return null; // still running
-      };
-
-      const completed: {
-        sessionId: string;
-        status: string;
-        exitReason: string;
-        result?: string;
-        truncated?: boolean;
-      }[] = [];
+      const completed: SubagentWaitResolved[] = [];
       const remaining = new Set(sessionIds);
 
       // Check for already-completed sessions first.
       for (const sid of sessionIds) {
-        const resolved = resolveSessionStatus(sid);
+        const resolved = resolveWaitedSessionResult(ctx, sessions, sid, {
+          includeResults,
+          maxCharsEach,
+        });
         if (resolved) {
-          if (includeResults) {
-            const row = sessions.getById(sid);
-            if (row && ctx.stateDb) {
-              const text =
-                extractLatestTranscriptAssistantText(ctx.stateDb, sid, row.contextSegmentId) ?? "";
-              const truncated = text.length > maxCharsEach;
-              Object.assign(resolved, {
-                result: truncated ? text.slice(0, maxCharsEach) : text,
-                truncated,
-              });
-            } else {
-              Object.assign(resolved, { result: "", truncated: false });
-            }
-          }
           completed.push(resolved);
           remaining.delete(sid);
         }
@@ -2490,23 +2529,11 @@ export async function handleIntegrationControlOp(
       while (Date.now() < deadline) {
         await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
         for (const sid of remaining) {
-          const resolved = resolveSessionStatus(sid);
+          const resolved = resolveWaitedSessionResult(ctx, sessions, sid, {
+            includeResults,
+            maxCharsEach,
+          });
           if (resolved) {
-            if (includeResults) {
-              const row = sessions.getById(sid);
-              if (row && ctx.stateDb) {
-                const text =
-                  extractLatestTranscriptAssistantText(ctx.stateDb, sid, row.contextSegmentId) ??
-                  "";
-                const truncated = text.length > maxCharsEach;
-                Object.assign(resolved, {
-                  result: truncated ? text.slice(0, maxCharsEach) : text,
-                  truncated,
-                });
-              } else {
-                Object.assign(resolved, { result: "", truncated: false });
-              }
-            }
             completed.push(resolved);
             remaining.delete(sid);
           }
