@@ -223,4 +223,41 @@ describe("JSONLWatcher.processFile", () => {
     });
     expect(() => watcher.close()).not.toThrow();
   });
+
+  it("emits and processes appends through chokidar watchers when enabled", async () => {
+    const watcher = new JSONLWatcher(new Map([["s1", tmpDir]]), gateway, a2uiManager, {
+      watch: true,
+      debounceMs: 30,
+    });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const jsonlDir = path.join(tmpDir, "jsonl");
+      fs.mkdirSync(jsonlDir, { recursive: true });
+
+      // Create + append a command line; chokidar (add/change) triggers debounce
+      // then a full-file process that applies the buffered line.
+      fs.writeFileSync(
+        path.join(jsonlDir, "canvas.jsonl"),
+        JSON.stringify({
+          createSurface: { surfaceId: "surf" },
+        }) + "\n",
+      );
+      fs.appendFileSync(
+        path.join(jsonlDir, "canvas.jsonl"),
+        JSON.stringify({ updateDataModel: { surfaceId: "surf", data: { n: 1 } } }) + "\n",
+      );
+
+      const deadline = Date.now() + 2000;
+      while (broadcastOrder.length < 2 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+
+      expect(broadcastOrder.map((b) => b.type)).toEqual([
+        "a2ui.createSurface",
+        "a2ui.updateDataModel",
+      ]);
+    } finally {
+      await watcher.closeAndWait();
+    }
+  });
 });

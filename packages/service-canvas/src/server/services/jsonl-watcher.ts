@@ -1,3 +1,4 @@
+import { watch, type FSWatcher } from "chokidar";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -20,7 +21,7 @@ export interface JSONLWatcherOptions {
  * and auto-pushes A2UI surface data to the canvas.
  */
 export class JSONLWatcher {
-  private watchers = new Map<string, fs.FSWatcher>();
+  private watchers = new Map<string, FSWatcher>();
   private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private pending = new Map<string, Promise<void>>();
   private closed = false;
@@ -47,11 +48,22 @@ export class JSONLWatcher {
         fs.mkdirSync(jsonlDir, { recursive: true });
       }
       try {
-        const watcher = fs.watch(jsonlDir, (eventType, filename) => {
-          if (!filename || !filename.endsWith(".jsonl")) return;
-          if (eventType !== "change" && eventType !== "rename") return;
-          const filePath = path.join(jsonlDir, filename);
+        const watcher = watch(jsonlDir, {
+          ignoreInitial: true,
+          awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 },
+        });
+        const handleEvent = (filePath: string) => {
+          if (!filePath.endsWith(".jsonl")) return;
           this.scheduleProcess(session, filePath);
+        };
+        watcher.on("add", handleEvent);
+        watcher.on("change", handleEvent);
+        watcher.on("unlink", handleEvent);
+        watcher.on("error", (err: unknown) => {
+          log.warn("jsonl watcher error", {
+            dir: jsonlDir,
+            err: err instanceof Error ? err.message : String(err),
+          });
         });
         this.watchers.set(session, watcher);
         log.debug("watching jsonl directory", { dir: jsonlDir, session });
@@ -134,7 +146,17 @@ export class JSONLWatcher {
     this.closed = true;
     for (const timer of this.debounceTimers.values()) clearTimeout(timer);
     this.debounceTimers.clear();
-    for (const watcher of this.watchers.values()) watcher.close();
+    this.closeWatchers();
+  }
+
+  private closeWatchers(): void {
+    for (const watcher of this.watchers.values()) {
+      watcher.close().catch((err: unknown) => {
+        log.warn("failed to close jsonl watcher", {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
     this.watchers.clear();
   }
 
@@ -145,7 +167,15 @@ export class JSONLWatcher {
   async closeAndWait(): Promise<void> {
     for (const timer of this.debounceTimers.values()) clearTimeout(timer);
     this.debounceTimers.clear();
-    for (const watcher of this.watchers.values()) watcher.close();
+    for (const watcher of this.watchers.values()) {
+      try {
+        await watcher.close();
+      } catch (err: unknown) {
+        log.warn("failed to close jsonl watcher", {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     this.watchers.clear();
     const pending = [...this.pending.values()];
     if (pending.length) await Promise.all(pending);
