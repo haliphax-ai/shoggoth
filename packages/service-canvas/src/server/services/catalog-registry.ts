@@ -14,7 +14,7 @@ export interface CatalogEntry {
 export class CatalogRegistry {
   private packages = new Map<string, CatalogEntry>();
 
-  async discover(projectRoot: string): Promise<void> {
+  discover(projectRoot: string): void {
     this.packages.clear();
     const nodeModules = path.join(projectRoot, "node_modules");
     if (!fs.existsSync(nodeModules)) return;
