@@ -4,28 +4,23 @@
   </div>
 </template>
 
-<script lang="ts">
-import { defineComponent, computed } from "vue";
+<script setup lang="ts">
+import { computed } from "vue";
 import { useStore } from "vuex";
 import A2UINode from "./A2UINode.vue";
 
-export default defineComponent({
-  name: "A2UIRenderer",
-  components: { A2UINode },
-  props: {
-    surfaceId: { type: String, required: true },
-  },
-  setup(props) {
-    const store = useStore();
-    const surface = computed(() => store.state.a2ui?.surfaces?.[props.surfaceId]);
-    const root = computed(() => surface.value?.root ?? null);
+defineOptions({ name: "A2UIRenderer" });
 
-    const activeTheme = computed(() => {
-      return surface.value?.theme || "dark";
-    });
+const props = defineProps<{
+  surfaceId: string;
+}>();
 
-    return { root, activeTheme };
-  },
+const store = useStore();
+const surface = computed(() => store.state.a2ui?.surfaces?.[props.surfaceId]);
+const root = computed(() => surface.value?.root ?? null);
+
+const activeTheme = computed(() => {
+  return surface.value?.theme || "dark";
 });
 </script>
 
