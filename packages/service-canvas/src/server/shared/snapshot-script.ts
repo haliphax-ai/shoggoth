@@ -31,39 +31,3 @@ domtoimage.toPng(document.body)
 })()`;
 
 export const SNAPSHOT_SCRIPT = `<script>${domToImageMin}</script><script>${SNAPSHOT_HANDLER}</script>`;
-
-/**
- * Inject the snapshot script into a data:text/html URL.
- * Returns the original URL unchanged if it's not a data:text/html URL.
- */
-export function injectSnapshotIntoDataUrl(url: string): string {
-  if (!url.startsWith("data:text/html")) return url;
-
-  const commaIdx = url.indexOf(",");
-  if (commaIdx < 0) return url;
-
-  const meta = url.slice(0, commaIdx);
-  const isBase64 = meta.toLowerCase().includes(";base64");
-  const encoded = url.slice(commaIdx + 1);
-
-  let html: string;
-  if (isBase64) {
-    html = Buffer.from(encoded, "base64").toString("utf-8");
-  } else {
-    html = decodeURIComponent(encoded);
-  }
-
-  if (html.includes("</body>")) {
-    html = html.replace("</body>", SNAPSHOT_SCRIPT + "</body>");
-  } else if (html.includes("</html>")) {
-    html = html.replace("</html>", SNAPSHOT_SCRIPT + "</html>");
-  } else {
-    html += SNAPSHOT_SCRIPT;
-  }
-
-  if (isBase64) {
-    return meta + "," + Buffer.from(html, "utf-8").toString("base64");
-  } else {
-    return meta + "," + encodeURIComponent(html);
-  }
-}
