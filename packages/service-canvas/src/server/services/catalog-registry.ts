@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ComponentSchema } from "./a2ui-component-schemas";
+import type { ComponentSchema, PropType } from "./a2ui-component-schemas";
 
 export interface CatalogEntry {
   packageName: string;
@@ -145,15 +145,6 @@ export class CatalogRegistry {
     return map;
   }
 }
-
-type PropType =
-  | "string"
-  | "number"
-  | "boolean"
-  | "array"
-  | "object"
-  | "string|object"
-  | "number|string";
 
 /**
  * Convert a JSON Schema `properties` block into the internal ComponentSchema
