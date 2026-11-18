@@ -8,6 +8,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { getLogger } from "@shoggoth/shared";
+import type { WebSocket } from "ws";
 
 import { FileResolver } from "./services/file-resolver";
 import { Gateway } from "./services/gateway";
@@ -155,7 +156,7 @@ export function createCanvasServer(
   registerA2UICommands(gateway, a2uiManager, resolveSchema);
 
   // Replay cached A2UI state to newly connected SPA clients
-  gateway.onSpaConnect?.((ws: unknown) => {
+  gateway.onSpaConnect?.((ws: WebSocket) => {
     const session = gateway.getSpaSession?.(ws) ?? "main";
     for (const surface of a2uiManager.surfacesForSession(session)) {
       const components = Array.from(surface.components.entries()).map(([id, component]) => ({
