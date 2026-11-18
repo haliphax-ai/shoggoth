@@ -1,4 +1,4 @@
-import { SHOGGOTH_AGENT_TOKEN_ENV, WIRE_VERSION } from "@shoggoth/authn";
+import { WIRE_VERSION } from "@shoggoth/authn";
 import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import type { WireRequest } from "@shoggoth/authn";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -40,23 +40,13 @@ import {
   shoggothConfigFragmentSchema,
   shoggothConfigSchema,
 } from "@shoggoth/shared";
-import {
-  SHOGGOTH_ACPX_WORKSPACE_ROOT_ENV,
-  SHOGGOTH_CONTROL_SOCKET_ENV,
-  SHOGGOTH_SESSION_ID_ENV,
-} from "@shoggoth/mcp-integration";
 import type { AppendAuditRowInput } from "../audit/append-audit";
 import type { AcpxProcessSupervisor } from "../acpx/acpx-process-supervisor";
-import { AcpxSupervisorError } from "../acpx/acpx-process-supervisor";
 import type { AcpxBindingStore } from "../acpx/sqlite-acpx-bindings";
 import { SessionManagerError, type SessionManager } from "../sessions/session-manager";
 import type { SessionRow, SessionStore, SessionSortBy } from "../sessions/session-store";
 import { computeSessionDepthFromStore } from "../sessions/session-store";
 import { resolveSessionTargetFromCliArg } from "./resolve-session-cli-target";
-import {
-  applySessionContextSegmentNew,
-  applySessionContextSegmentReset,
-} from "../sessions/session-context-segment";
 import type { HitlConfigRef } from "../config-hot-reload";
 import {
   rewriteAgentToolAutoApproveMapAndReload,
@@ -72,17 +62,11 @@ import {
 } from "../hitl/hitl-session-tool-auto-store";
 import { mergeSubagentSpawnModelSelection } from "@shoggoth/models";
 import type { ModelInvocationParams } from "@shoggoth/models";
-import { compactSessionTranscript } from "../transcript-compact";
-import { CompactionGateClosedError, pushCompactionRequest } from "../sessions/compaction-gate";
-import { runSessionCompaction } from "../sessions/run-session-compaction";
-import { tryGetTurnQueue } from "../sessions/session-turn-queue-singleton";
-import { TurnDroppedError } from "../sessions/session-turn-queue";
 import {
   getSessionStats,
   getContextFill,
   buildFormattedStats,
 } from "../sessions/session-stats-store";
-import { dispatchMcpHttpCancelRequest } from "../mcp/mcp-http-cancel-registry";
 import {
   armPersistentSubagentInactivityTimer,
   clearPersistentSubagentInactivityTimer,
@@ -153,6 +137,21 @@ import {
   handleServiceRotateKey,
 } from "./service-ops";
 import { listPromptFiles, PromptOpError, renderPrompt, resolvePromptFile } from "./prompt-ops";
+import {
+  handleAcpxBindGet,
+  handleAcpxBindSet,
+  handleAcpxBindDelete,
+  handleAcpxBindList,
+  handleAcpxAgentStart,
+  handleAcpxAgentStop,
+  handleAcpxAgentList,
+} from "./acpx-ops";
+import {
+  handleSessionContextNew,
+  handleSessionContextReset,
+  handleSessionCompact,
+} from "./session-context-ops";
+import { handleMcpHttpCancelRequest } from "./mcp-ops";
 
 export class IntegrationOpError extends Error {
   constructor(
@@ -1108,65 +1107,6 @@ export async function deliverSubagentResult(
   await runOobDelivery();
 }
 
-function requireAcpxRuntime(ctx: IntegrationOpsContext): {
-  acpxStore: AcpxBindingStore;
-  sessions: SessionStore;
-  sessionManager: SessionManager;
-  acpxSupervisor: AcpxProcessSupervisor;
-} {
-  if (!ctx.acpxStore) {
-    throw new IntegrationOpError("ERR_STATE_DB_REQUIRED", "acpx bindings require state database");
-  }
-  if (!ctx.sessions || !ctx.sessionManager || !ctx.acpxSupervisor) {
-    throw new IntegrationOpError(
-      "ERR_ACPX_RUNTIME_UNAVAILABLE",
-      "acpx agent lifecycle requires session store and process supervisor",
-    );
-  }
-  return {
-    acpxStore: ctx.acpxStore,
-    sessions: ctx.sessions,
-    sessionManager: ctx.sessionManager,
-    acpxSupervisor: ctx.acpxSupervisor,
-  };
-}
-
-/**
- * Runs a session compaction serialized through the turn queue (a system turn
- * holding the running slot), so it cannot interleave with inbound turns. The
- * captured compaction result is returned even though the queue's promise
- * resolves void; a dropped entry (queue full) surfaces as ERR_SESSION_BUSY.
- * Falls back to running inline when the queue is unavailable (tests).
- */
-async function runCompactionBehindQueue(
-  ctx: IntegrationOpsContext,
-  sessionId: string,
-): Promise<Awaited<ReturnType<typeof compactSessionTranscript>>> {
-  let captured: Awaited<ReturnType<typeof compactSessionTranscript>> = {
-    compacted: false,
-    messageCount: 0,
-  };
-  const queue = tryGetTurnQueue();
-  if (!queue) {
-    return runSessionCompaction({ db: ctx.stateDb!, sessionId, config: ctx.config });
-  }
-  await queue
-    .enqueue(sessionId, "system", "compaction", async () => {
-      captured = await runSessionCompaction({
-        db: ctx.stateDb!,
-        sessionId,
-        config: ctx.config,
-      });
-    })
-    .catch((e: unknown) => {
-      if (e instanceof TurnDroppedError) {
-        throw new IntegrationOpError("ERR_SESSION_BUSY", "session queue is full");
-      }
-      throw e;
-    });
-  return captured;
-}
-
 /**
  * Integration control-op router. `req.op` arrives as an arbitrary string from
  * the wire (parseRequestLine does not constrain its format); safety relies on
@@ -1186,328 +1126,27 @@ export async function handleIntegrationControlOp(
     });
   }
   switch (req.op) {
-    case "acpx_bind_get": {
-      if (!ctx.acpxStore) {
-        throw new IntegrationOpError(
-          "ERR_STATE_DB_REQUIRED",
-          "acpx bindings require state database",
-        );
-      }
-      const pl = payloadObject(req);
-      const root = requireString(pl, "acp_workspace_root");
-      const hit = ctx.acpxStore.get(root);
-      if (principal.kind === "agent") {
-        if (!hit || hit.shoggothSessionId !== principal.sessionId) {
-          return { binding: null };
-        }
-      }
-      return { binding: hit ?? null };
-    }
+    case "acpx_bind_get":
+      return handleAcpxBindGet(req, principal, ctx);
+    case "acpx_bind_set":
+      return handleAcpxBindSet(req, principal, ctx);
+    case "acpx_bind_delete":
+      return handleAcpxBindDelete(req, principal, ctx);
+    case "acpx_bind_list":
+      return handleAcpxBindList(req, principal, ctx);
+    case "acpx_agent_start":
+      return handleAcpxAgentStart(req, principal, ctx);
+    case "acpx_agent_stop":
+      return handleAcpxAgentStop(req, principal, ctx);
+    case "acpx_agent_list":
+      return handleAcpxAgentList(req, principal, ctx);
 
-    case "acpx_bind_set": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "acpx_bind_set requires operator principal");
-      }
-      if (!ctx.acpxStore) {
-        throw new IntegrationOpError(
-          "ERR_STATE_DB_REQUIRED",
-          "acpx bindings require state database",
-        );
-      }
-      const pl = payloadObject(req);
-      const acpWorkspaceRoot = requireString(pl, "acp_workspace_root");
-      const shoggothSessionId = requireString(pl, "shoggoth_session_id");
-      const agentPrincipalId = requireString(pl, "agent_principal_id");
-      ctx.acpxStore.upsert({
-        acpWorkspaceRoot,
-        shoggothSessionId,
-        agentPrincipalId,
-      });
-      return { ok: true };
-    }
-
-    case "acpx_bind_delete": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "acpx_bind_delete requires operator principal",
-        );
-      }
-      if (!ctx.acpxStore) {
-        throw new IntegrationOpError(
-          "ERR_STATE_DB_REQUIRED",
-          "acpx bindings require state database",
-        );
-      }
-      const pl = payloadObject(req);
-      const root = requireString(pl, "acp_workspace_root");
-      return { deleted: ctx.acpxStore.delete(root) };
-    }
-
-    case "acpx_bind_list": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "acpx_bind_list requires operator principal");
-      }
-      if (!ctx.acpxStore) {
-        throw new IntegrationOpError(
-          "ERR_STATE_DB_REQUIRED",
-          "acpx bindings require state database",
-        );
-      }
-      return { bindings: ctx.acpxStore.list() };
-    }
-
-    case "acpx_agent_start": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "acpx_agent_start requires operator principal",
-        );
-      }
-      const rt = requireAcpxRuntime(ctx);
-      const pl = payloadObject(req);
-      const root = requireString(pl, "acp_workspace_root");
-      const binding = rt.acpxStore.get(root);
-      if (!binding) {
-        throw new IntegrationOpError(
-          "ERR_ACPX_BINDING_NOT_FOUND",
-          `no binding for workspace root ${root}`,
-        );
-      }
-      const session = rt.sessions.getById(binding.shoggothSessionId);
-      if (!session || session.status === "terminated") {
-        throw new IntegrationOpError(
-          "ERR_SESSION_INACTIVE",
-          "bound Shoggoth session is missing or terminated",
-        );
-      }
-      const args = optionalStringArray(pl, "acpx_args") ?? ctx.config.acpx?.defaultArgs;
-      if (!args || args.length === 0) {
-        throw new IntegrationOpError(
-          "ERR_INVALID_PAYLOAD",
-          "payload.acpx_args or config.acpx.defaultArgs is required",
-        );
-      }
-      const binary = ctx.config.acpx?.binary ?? "acpx";
-      let creds;
-      try {
-        creds = rt.sessionManager.rotateAgentToken(binding.shoggothSessionId);
-      } catch (e) {
-        if (e instanceof SessionManagerError) {
-          throw new IntegrationOpError(e.code, e.message);
-        }
-        throw e;
-      }
-      const env: Record<string, string> = {
-        [SHOGGOTH_CONTROL_SOCKET_ENV]: ctx.config.socketPath,
-        [SHOGGOTH_SESSION_ID_ENV]: binding.shoggothSessionId,
-        [SHOGGOTH_ACPX_WORKSPACE_ROOT_ENV]: root,
-        [SHOGGOTH_AGENT_TOKEN_ENV]: creds.agentToken,
-      };
-      let pid: number;
-      try {
-        ({ pid } = rt.acpxSupervisor.start({
-          acpWorkspaceRoot: root,
-          shoggothSessionId: binding.shoggothSessionId,
-          command: binary,
-          args,
-          cwd: root,
-          env,
-        }));
-      } catch (e) {
-        if (e instanceof AcpxSupervisorError) {
-          throw new IntegrationOpError(e.code, e.message);
-        }
-        throw e;
-      }
-      ctx.recordIntegrationAudit({
-        action: "acpx.agent_start",
-        resource: root,
-        outcome: "ok",
-        argsRedactedJson: JSON.stringify({
-          pid,
-          shoggoth_session_id: binding.shoggothSessionId,
-          binary,
-        }),
-      });
-      return {
-        ok: true,
-        pid,
-        shoggoth_session_id: binding.shoggothSessionId,
-        acp_workspace_root: root,
-      };
-    }
-
-    case "acpx_agent_stop": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "acpx_agent_stop requires operator principal",
-        );
-      }
-      const rt = requireAcpxRuntime(ctx);
-      const pl = payloadObject(req);
-      const root = requireString(pl, "acp_workspace_root");
-      const { stopped, pid } = rt.acpxSupervisor.stop(root);
-      ctx.recordIntegrationAudit({
-        action: "acpx.agent_stop",
-        resource: root,
-        outcome: stopped ? "ok" : "not_running",
-        argsRedactedJson: pid !== undefined ? JSON.stringify({ pid }) : undefined,
-      });
-      return { stopped, pid };
-    }
-
-    case "acpx_agent_list": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "acpx_agent_list requires operator principal",
-        );
-      }
-      const rt = requireAcpxRuntime(ctx);
-      const processes = rt.acpxSupervisor.list().map((t) => ({
-        pid: t.pid,
-        shoggoth_session_id: t.shoggothSessionId,
-        started_at_ms: t.startedAtMs,
-      }));
-      return { processes };
-    }
-
-    case "session_context_new": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "session_context_new requires operator principal",
-        );
-      }
-      if (!ctx.stateDb || !ctx.sessions || !ctx.sessionManager) {
-        throw new IntegrationOpError(
-          "ERR_STATE_DB_REQUIRED",
-          "session context ops require state database and session manager",
-        );
-      }
-      // A session manager is always created alongside the state DB (see control-plane), so one is
-      // guaranteed here — captured for the kill closure without a non-null assertion.
-      const sessionManager = ctx.sessionManager;
-      const pl = payloadObject(req);
-      const sessionId = requireSessionId(pl, ctx.config, ctx.sessions);
-      const out = applySessionContextSegmentNew({
-        db: ctx.stateDb,
-        sessions: ctx.sessions,
-        sessionId,
-        pending: ctx.hitlPending,
-        killSubagents: (childIds) => {
-          for (const cid of childIds) {
-            terminatePersistentSubagentSession(
-              sessionManager,
-              cid,
-              "killed",
-              ctx.hitlClear?.autoApproveGate,
-              "subagent_wait_timeout",
-            );
-          }
-        },
-      });
-      ctx.recordIntegrationAudit({
-        action: "session.context_segment_new",
-        resource: sessionId,
-        outcome: "ok",
-        argsRedactedJson: JSON.stringify(out),
-      });
-      return out;
-    }
-
-    case "session_context_reset": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "session_context_reset requires operator principal",
-        );
-      }
-      if (!ctx.stateDb || !ctx.sessions || !ctx.sessionManager) {
-        throw new IntegrationOpError(
-          "ERR_STATE_DB_REQUIRED",
-          "session context ops require state database and session manager",
-        );
-      }
-      // A session manager is always created alongside the state DB (see control-plane), so one is
-      // guaranteed here — captured for the kill closure without a non-null assertion.
-      const sessionManager = ctx.sessionManager;
-      const pl = payloadObject(req);
-      const sessionId = requireSessionId(pl, ctx.config, ctx.sessions);
-      const out = applySessionContextSegmentReset({
-        db: ctx.stateDb,
-        sessions: ctx.sessions,
-        sessionId,
-        pending: ctx.hitlPending,
-        killSubagents: (childIds) => {
-          for (const cid of childIds) {
-            terminatePersistentSubagentSession(
-              sessionManager,
-              cid,
-              "killed",
-              ctx.hitlClear?.autoApproveGate,
-              "context_segment_reset",
-            );
-          }
-        },
-      });
-      ctx.recordIntegrationAudit({
-        action: "session.context_segment_reset",
-        resource: sessionId,
-        outcome: "ok",
-        argsRedactedJson: JSON.stringify(out),
-      });
-      return out;
-    }
-
-    case "session_compact": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "session_compact requires operator principal",
-        );
-      }
-      if (!ctx.stateDb) {
-        throw new IntegrationOpError(
-          "ERR_STATE_DB_REQUIRED",
-          "session_compact requires state database",
-        );
-      }
-      const pl = payloadObject(req);
-      const sessionId = requireSessionId(pl, ctx.config, ctx.sessions);
-
-      // An active turn owns the transcript: park the compaction on its gate so
-      // it runs at the loop's next logical break (the loop freezes the turn
-      // queue for the duration). If the turn ends before the loop drains the
-      // parked request, the gate rejects it and the compaction falls through
-      // to the queued path below. No active turn: run it as a queued system
-      // turn so the session's queue serializes it against the next inbound
-      // turn, then falls back to inline when the queue is unavailable (tests).
-      let result: Awaited<ReturnType<typeof compactSessionTranscript>>;
-      let deferred = false;
-      const parked = pushCompactionRequest(sessionId);
-      if (parked) {
-        deferred = true;
-        result = await parked.catch((e: unknown) => {
-          if (e instanceof CompactionGateClosedError) {
-            deferred = false;
-            return runCompactionBehindQueue(ctx, sessionId);
-          }
-          throw e;
-        });
-      } else {
-        result = await runCompactionBehindQueue(ctx, sessionId);
-      }
-      ctx.recordIntegrationAudit({
-        action: "session.compact",
-        resource: sessionId,
-        outcome: "ok",
-        argsRedactedJson: JSON.stringify({ ...result, deferred }),
-      });
-      return result;
-    }
+    case "session_context_new":
+      return handleSessionContextNew(req, principal, ctx);
+    case "session_context_reset":
+      return handleSessionContextReset(req, principal, ctx);
+    case "session_compact":
+      return handleSessionCompact(req, principal, ctx);
 
     case "hitl_pending_list": {
       if (principal.kind !== "operator") {
@@ -1762,28 +1401,8 @@ export async function handleIntegrationControlOp(
       return { active: true, policy, warnings };
     }
 
-    case "mcp_http_cancel_request": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "mcp_http_cancel_request requires operator principal",
-        );
-      }
-      const pl = payloadObject(req);
-      const sessionId = requireString(pl, "session_id");
-      const sourceId = requireString(pl, "source_id");
-      const requestIdRaw = pl.request_id;
-      if (typeof requestIdRaw !== "number" || !Number.isFinite(requestIdRaw)) {
-        throw new IntegrationOpError(
-          "ERR_INVALID_PAYLOAD",
-          "payload.request_id must be a finite number",
-        );
-      }
-      const requestId = Math.trunc(requestIdRaw);
-      const cancel = ctx.cancelMcpHttpRequest ?? dispatchMcpHttpCancelRequest;
-      const cancelled = cancel({ sessionId, sourceId, requestId });
-      return { cancelled };
-    }
+    case "mcp_http_cancel_request":
+      return handleMcpHttpCancelRequest(req, principal, ctx);
 
     case "subagent_spawn": {
       if (principal.kind !== "operator" && principal.kind !== "agent") {
