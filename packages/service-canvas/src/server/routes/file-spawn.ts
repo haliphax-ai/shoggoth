@@ -12,6 +12,29 @@ export interface FileSpawnOptions {
   agentWorkspaceMap?: Map<string, string>;
 }
 
+type FileSpawnResolution =
+  | { ok: true; real: string }
+  | { ok: false; status: 400 | 404; error: string };
+
+async function resolveRealPathWithinRoot(
+  resolved: string,
+  root: string,
+): Promise<FileSpawnResolution> {
+  try {
+    const real = await fs.realpath(resolved);
+    const realRoot = await fs.realpath(root);
+
+    // Verify the real path is within the root
+    if (!real.startsWith(realRoot + path.sep) && real !== realRoot) {
+      return { ok: false, status: 400, error: "path traversal detected" };
+    }
+
+    return { ok: true, real };
+  } catch {
+    return { ok: false, status: 404, error: "file not found" };
+  }
+}
+
 export function createFileSpawnRouter(opts: FileSpawnOptions): Router {
   const router = Router();
 
@@ -43,32 +66,16 @@ export function createFileSpawnRouter(opts: FileSpawnOptions): Router {
         : path.resolve(root, decodedFile);
 
       // Resolve symlinks so the containment check sees the real target
-      let real: string;
-      try {
-        real = await fs.realpath(resolved);
-      } catch {
-        res.status(404).json({ error: "file not found" });
-        return;
-      }
-
-      let realRoot: string;
-      try {
-        realRoot = await fs.realpath(root);
-      } catch {
-        res.status(404).json({ error: "file not found" });
-        return;
-      }
-
-      // Verify the real path is within the root
-      if (!real.startsWith(realRoot + path.sep) && real !== realRoot) {
-        res.status(400).json({ error: "path traversal detected" });
+      const resolution = await resolveRealPathWithinRoot(resolved, root);
+      if (!resolution.ok) {
+        res.status(resolution.status).json({ error: resolution.error });
         return;
       }
 
       // Read file content
       let fileContent: string;
       try {
-        fileContent = await fs.readFile(real, "utf-8");
+        fileContent = await fs.readFile(resolution.real, "utf-8");
       } catch {
         res.status(404).json({ error: "file not found" });
         return;
