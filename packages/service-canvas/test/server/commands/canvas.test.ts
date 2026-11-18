@@ -5,14 +5,13 @@
 import { describe, it, expect } from "vitest";
 import { registerCanvasCommands } from "../../../src/server/commands/canvas";
 import { Gateway } from "../../../src/server/services/gateway";
-import { SessionManager } from "../../../src/server/services/session-manager";
 
 describe("canvas command handlers", () => {
   function setup() {
     const gateway = new Gateway();
-    const sessionManager = new SessionManager();
-    registerCanvasCommands(gateway, sessionManager);
-    return { gateway, sessionManager };
+
+    registerCanvasCommands(gateway);
+    return { gateway };
   }
 
   describe("canvas.show", () => {
@@ -23,11 +22,10 @@ describe("canvas command handlers", () => {
     });
 
     it("rejects an invalid session instead of defaulting to the active one", async () => {
-      const { gateway, sessionManager } = setup();
-      sessionManager.setActive("main");
+      const { gateway } = setup();
       const result = await gateway.dispatch("canvas.show", { session: "a/b" });
       expect(result).toEqual({ error: "Invalid session" });
-      expect(sessionManager.getActive()).toBe("main");
+      expect(gateway.getActiveSession()).toBe("main");
     });
 
     it("rejects oversized session identifiers", async () => {

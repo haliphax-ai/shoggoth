@@ -78,8 +78,7 @@ packages/
 │   │       ├── index.ts         # Express server, startup, shutdown
 │   │       ├── config.ts        # CanvasConfig interface and defaults
 │   │       ├── services/
-│   │       │   ├── gateway.ts           # WebSocket server (/gateway for agents, /ws for SPA)
-│   │       │   ├── session-manager.ts
+│   │       │   ├── gateway.ts           # WebSocket server (/gateway for agents, /ws for SPA); tracks active session
 │   │       │   ├── file-resolver.ts     # Path resolution with traversal guard
 │   │       │   ├── file-watcher.ts      # chokidar live reload
 │   │       │   ├── jsonl-watcher.ts     # JSONL file watcher for A2UI auto-push

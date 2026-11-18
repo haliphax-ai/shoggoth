@@ -1,5 +1,4 @@
 import type { Gateway } from "../services/gateway";
-import type { SessionManager } from "../services/session-manager";
 
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === "string" && v.length > 0;
@@ -33,14 +32,14 @@ function sanitizePath(v: unknown): string | null {
   return normalized;
 }
 
-export function registerCanvasCommands(gateway: Gateway, sessionManager: SessionManager) {
+export function registerCanvasCommands(gateway: Gateway) {
   gateway.on("canvas.show", (msg, reply) => {
     if (!isValidSession(msg.session)) {
       reply({ error: "Invalid session" });
       return;
     }
     const session = msg.session;
-    sessionManager.setActive(session);
+    gateway.setActiveSession(session);
     gateway.broadcastSpaSession(session, { type: "canvas.show", session });
 
     // `target` and `surface` arrive from the canvas-present tool, but the SPA
@@ -66,7 +65,7 @@ export function registerCanvasCommands(gateway: Gateway, sessionManager: Session
       return;
     }
     const session = msg.session;
-    sessionManager.setActive(session);
+    gateway.setActiveSession(session);
     gateway.broadcastSpaSession(session, { type: "canvas.navigate", session, path });
     reply({ ok: true, session, path });
   });
