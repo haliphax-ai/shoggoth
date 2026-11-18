@@ -9,18 +9,14 @@
   </div>
 </template>
 
-<script lang="ts">
-import { defineComponent, computed } from "vue";
+<script setup lang="ts">
+import { computed } from "vue";
 import { useRoute } from "vue-router";
 
-export default defineComponent({
-  name: "ScaffoldView",
-  setup() {
-    const route = useRoute();
-    const session = computed(() => (route.query.session as string) || "main");
-    return { session };
-  },
-});
+defineOptions({ name: "ScaffoldView" });
+
+const route = useRoute();
+const session = computed(() => (route.query.session as string) || "main");
 </script>
 
 <style scoped>
