@@ -4,6 +4,8 @@
 
 import type { Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
+import type { A2UIManager } from "./a2ui-manager";
+import type { SchemaResolver } from "./a2ui-component-schemas";
 
 export interface SpaSession {
   id: string;
@@ -26,8 +28,8 @@ export class Gateway {
   private pendingSnapshots: Map<string, PendingSnapshot> = new Map();
   private handlers: Map<string, CommandHandler> = new Map();
   private spaConnectListeners: Array<(ws: WebSocket) => void> = [];
-  private a2uiManager: unknown = null;
-  private schemaResolver: unknown = null;
+  private a2uiManager: A2UIManager | null = null;
+  private schemaResolver: SchemaResolver | null = null;
 
   /** Fallback session used when a message does not specify one. */
   private activeSession: string = "main";
@@ -106,22 +108,22 @@ export class Gateway {
     });
   }
 
-  setA2UIManager(manager: unknown): void {
+  setA2UIManager(manager: A2UIManager): void {
     this.a2uiManager = manager;
   }
 
-  setSchemaResolver(resolver: unknown): void {
+  setSchemaResolver(resolver: SchemaResolver): void {
     this.schemaResolver = resolver;
   }
 
-  onSpaConnect(listener: (ws: unknown) => void): void {
-    this.spaConnectListeners.push(listener as (ws: WebSocket) => void);
+  onSpaConnect(listener: (ws: WebSocket) => void): void {
+    this.spaConnectListeners.push(listener);
   }
 
-  getSpaSession(ws: unknown): string {
+  getSpaSession(ws: WebSocket): string {
     // Find which session this WebSocket belongs to
     for (const [sessionId, clients] of this.clients) {
-      if (clients.has(ws as WebSocket)) {
+      if (clients.has(ws)) {
         return sessionId;
       }
     }
@@ -138,10 +140,9 @@ export class Gateway {
     return this.activeSession;
   }
 
-  sendToSpa(ws: unknown, message: unknown): void {
-    const socket = ws as WebSocket;
-    if (socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify(message));
+  sendToSpa(ws: WebSocket, message: unknown): void {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(message));
     }
   }
 
