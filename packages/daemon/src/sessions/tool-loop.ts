@@ -1036,10 +1036,14 @@ async function processSingleToolCall(
   });
   let out: { resultJson: string; contentParts?: ChatContentPart[] };
   const timeoutMs = options.toolCallTimeoutMs;
+  let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
   try {
     if (timeoutMs != null && timeoutMs > 0) {
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new ToolCallTimeoutError(compoundResource, timeoutMs)), timeoutMs);
+        timeoutTimer = setTimeout(
+          () => reject(new ToolCallTimeoutError(compoundResource, timeoutMs)),
+          timeoutMs,
+        );
       });
       out = await Promise.race([execPromise, timeoutPromise, abortPromise(turnAbortSignal)]);
     } else {
@@ -1105,6 +1109,10 @@ async function processSingleToolCall(
       });
     }
     return { kind: "skip_hitl_denied" }; // reuse skip kind – caller continues
+  } finally {
+    // The timer races the executor; once the race settles (either arm), the
+    // timer must not keep the event loop hot for the full timeout window.
+    if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
   }
 
   log.debug("tool call completed", {

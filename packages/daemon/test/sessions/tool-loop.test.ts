@@ -429,6 +429,46 @@ describe("runToolLoop", () => {
     assert.equal(row.status, "completed");
   });
 
+  it("clears the tool-call timeout timer once the race settles", async () => {
+    vi.useFakeTimers();
+    let step = 0;
+    const model: ModelClient = {
+      async complete() {
+        step += 1;
+        if (step === 1) {
+          return {
+            content: null,
+            toolCalls: [{ id: "tt1", name: "quick", argsJson: "{}" }],
+          };
+        }
+        return { content: "ok", toolCalls: [] };
+      },
+    };
+    const exec = vi.fn(async () => ({ resultJson: '{"ok":true}' }));
+    const toolRuns = createToolRunStore(db);
+    await runToolLoop({
+      db,
+      sessionId: "sess",
+      runId: "run-timeout-cleared",
+      principalId: "p",
+      policy: { check: () => ({ allow: true }) },
+      audit: { record: () => {} },
+      model,
+      tools: [{ name: "quick" }],
+      executor: { execute: exec },
+      toolRuns,
+      toolCallTimeoutMs: 50,
+    });
+    assert.equal(exec.mock.calls.length, 1);
+    // The executor won the race, so the 50ms timeout timer must have been
+    // cleared — a leaked timer would still be pending on the fake clock.
+    assert.equal(vi.getTimerCount(), 0);
+    const row = db
+      .prepare(`SELECT status FROM tool_runs WHERE id = 'run-timeout-cleared'`)
+      .get() as { status: string };
+    assert.equal(row.status, "completed");
+  });
+
   it("does not timeout when toolCallTimeoutMs is not set", async () => {
     const exec = vi.fn(async () => ({ resultJson: '{"ok":true}' }));
     let step = 0;
