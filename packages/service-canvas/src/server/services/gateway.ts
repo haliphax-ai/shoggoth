@@ -29,6 +29,9 @@ export class Gateway {
   private a2uiManager: unknown = null;
   private schemaResolver: unknown = null;
 
+  /** Fallback session used when a message does not specify one. */
+  private activeSession: string = "main";
+
   constructor(options?: { server?: Server }) {
     if (options?.server) {
       this.attachToServer(options.server);
@@ -123,6 +126,16 @@ export class Gateway {
       }
     }
     return "main";
+  }
+
+  /** Update the active (fallback) session. */
+  setActiveSession(session: string): void {
+    this.activeSession = session;
+  }
+
+  /** The active (fallback) session, used when a message specifies none. */
+  getActiveSession(): string {
+    return this.activeSession;
   }
 
   sendToSpa(ws: unknown, message: unknown): void {

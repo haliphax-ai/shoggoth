@@ -10,6 +10,17 @@ describe("Gateway", () => {
     expect(() => new Gateway()).not.toThrow();
   });
 
+  it("defaults the active session to main", () => {
+    const gateway = new Gateway();
+    expect(gateway.getActiveSession()).toBe("main");
+  });
+
+  it("updates the active session", () => {
+    const gateway = new Gateway();
+    gateway.setActiveSession("other");
+    expect(gateway.getActiveSession()).toBe("other");
+  });
+
   it("should have broadcastSpaSession method", () => {
     const gateway = new Gateway();
     expect(typeof gateway.broadcastSpaSession).toBe("function");

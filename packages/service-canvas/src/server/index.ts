@@ -10,7 +10,6 @@ import { fileURLToPath } from "node:url";
 import { getLogger } from "@shoggoth/shared";
 
 import { FileResolver } from "./services/file-resolver";
-import { SessionManager } from "./services/session-manager";
 import { Gateway } from "./services/gateway";
 import { A2UIStore } from "./services/a2ui-store";
 import { A2UIManager } from "./services/a2ui-manager";
@@ -36,7 +35,6 @@ export interface CanvasServer {
   app: Express;
   server: HttpServer;
   gateway: Gateway;
-  sessionManager: SessionManager;
   a2uiManager: A2UIManager;
   catalogRegistry: CatalogRegistry;
   fileResolver: FileResolver;
@@ -75,7 +73,6 @@ export function createCanvasServer(
 
   // Instantiate services
   const fileResolver = new FileResolver(agentWorkspaceMap, canvasRoot);
-  const sessionManager = new SessionManager();
   const a2uiStore = new A2UIStore(fullConfig.a2uiDbPath);
   const a2uiManager = new A2UIManager(a2uiStore);
   const catalogRegistry = new CatalogRegistry();
@@ -154,7 +151,7 @@ export function createCanvasServer(
   gateway.setSchemaResolver?.(resolveSchema);
 
   // Register commands on the gateway
-  registerCanvasCommands(gateway, sessionManager);
+  registerCanvasCommands(gateway);
   registerA2UICommands(gateway, a2uiManager, resolveSchema);
 
   // Replay cached A2UI state to newly connected SPA clients
@@ -216,7 +213,6 @@ export function createCanvasServer(
     app,
     server,
     gateway,
-    sessionManager,
     a2uiManager,
     catalogRegistry,
     fileResolver,
