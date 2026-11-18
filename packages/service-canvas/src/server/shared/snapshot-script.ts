@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { injectScriptIntoDataUrl } from "./inject-script";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
@@ -32,11 +31,3 @@ domtoimage.toPng(document.body)
 })()`;
 
 export const SNAPSHOT_SCRIPT = `<script>${domToImageMin}</script><script>${SNAPSHOT_HANDLER}</script>`;
-
-/**
- * Inject the snapshot script into a data:text/html URL.
- * Returns the original URL unchanged if it's not a data:text/html URL.
- */
-export function injectSnapshotIntoDataUrl(url: string): string {
-  return injectScriptIntoDataUrl(url, SNAPSHOT_SCRIPT);
-}
