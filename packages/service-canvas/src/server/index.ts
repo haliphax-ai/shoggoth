@@ -78,11 +78,14 @@ export function createCanvasServer(
   const a2uiManager = new A2UIManager(a2uiStore);
   const catalogRegistry = new CatalogRegistry();
 
-  // Discover catalogs
+  // Discover catalogs synchronously so catalog-dependent routes and schema
+  // resolution never observe a partially populated registry.
   const catalogRoot = opts?.catalogRoot ?? process.cwd();
-  catalogRegistry.discover(catalogRoot).catch((err) => {
+  try {
+    catalogRegistry.discover(catalogRoot);
+  } catch (err) {
     log.error("catalog discovery failed", { err: String(err) });
-  });
+  }
 
   const resolveSchema = catalogRegistry.getComponentSchema?.bind(catalogRegistry);
 
