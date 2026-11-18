@@ -25,7 +25,7 @@ type CommandHandler = (
 export class Gateway {
   private clients: Map<string, Set<WebSocket>> = new Map();
   private wss: WebSocketServer | null = null;
-  private pendingSnapshots: Map<string, PendingSnapshot> = new Map();
+  private pendingSnapshots: Map<string, PendingSnapshot[]> = new Map();
   private handlers: Map<string, CommandHandler> = new Map();
   private spaConnectListeners: Array<(ws: WebSocket) => void> = [];
   private a2uiManager: A2UIManager | null = null;
@@ -75,11 +75,14 @@ export class Gateway {
 
           // Handle snapshot responses
           if (message.type === "snapshot" && message.sessionId) {
-            const pending = this.pendingSnapshots.get(message.sessionId);
-            if (pending) {
+            const queue = this.pendingSnapshots.get(message.sessionId);
+            if (queue && queue.length > 0) {
+              const pending = queue.shift()!;
               clearTimeout(pending.timeout);
-              this.pendingSnapshots.delete(message.sessionId);
               pending.resolve(message.data || "");
+              if (queue.length === 0) {
+                this.pendingSnapshots.delete(message.sessionId);
+              }
             }
           }
         } catch {
@@ -176,16 +179,49 @@ export class Gateway {
   requestSnapshot(session: string | SpaSession): Promise<string> {
     const sessionId = typeof session === "string" ? session : session.id;
 
+    const clients = this.clients.get(sessionId);
+
+    // No SPA client is connected for this session, so no snapshot can ever
+    // arrive; return immediately instead of waiting out the timeout.
+    if (!clients || clients.size === 0) {
+      return Promise.resolve("");
+    }
+
     this.broadcastSpaSession(sessionId, { type: "requestSnapshot" });
 
     return new Promise((resolve, _reject) => {
       const timeout = setTimeout(() => {
-        this.pendingSnapshots.delete(sessionId);
+        this.removePendingSnapshot(sessionId, waiter);
         resolve(""); // Return empty string on timeout
       }, 15000);
 
-      this.pendingSnapshots.set(sessionId, { resolve, reject: _reject, timeout });
+      const waiter: PendingSnapshot = { resolve, reject: _reject, timeout };
+      const queue = this.pendingSnapshots.get(sessionId);
+
+      if (queue) {
+        queue.push(waiter);
+      } else {
+        this.pendingSnapshots.set(sessionId, [waiter]);
+      }
     });
+  }
+
+  private removePendingSnapshot(sessionId: string, waiter: PendingSnapshot): void {
+    const queue = this.pendingSnapshots.get(sessionId);
+
+    if (!queue) {
+      return;
+    }
+
+    const index = queue.indexOf(waiter);
+
+    if (index !== -1) {
+      queue.splice(index, 1);
+    }
+
+    if (queue.length === 0) {
+      this.pendingSnapshots.delete(sessionId);
+    }
   }
 
   close(): void {
@@ -201,8 +237,10 @@ export class Gateway {
       this.wss = null;
     }
 
-    for (const pending of this.pendingSnapshots.values()) {
-      clearTimeout(pending.timeout);
+    for (const queue of this.pendingSnapshots.values()) {
+      for (const pending of queue) {
+        clearTimeout(pending.timeout);
+      }
     }
     this.pendingSnapshots.clear();
   }
