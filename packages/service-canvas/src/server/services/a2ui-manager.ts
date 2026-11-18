@@ -213,6 +213,16 @@ export class A2UIManager {
     return this.surfaces.get(key(session, surfaceId));
   }
 
+  /**
+   * Close the backing store (if any) and drop its reference. The manager
+   * owns the store's lifecycle for the server, so shutdown releases the
+   * database through this method.
+   */
+  close() {
+    this.store?.close();
+    this.store = null;
+  }
+
   /** Serialize for sending to SPA */
   serialize(session: string, surfaceId: string): Record<string, unknown> | null {
     const s = this.surfaces.get(key(session, surfaceId));
