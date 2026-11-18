@@ -304,6 +304,8 @@ interface ToolLoopContext {
   }) => void;
   readonly emitStats: RunToolLoopOptions["onStatsUpdate"];
   readonly getTranscriptCount: () => number;
+  /** Resyncs the in-memory transcript row counter from the DB after an out-of-band segment rewrite (compaction). */
+  readonly resyncTranscriptCount: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -1220,6 +1222,7 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
       toolCalls: row.toolCalls,
       metadata: row.metadata,
     });
+    transcriptCount += 1;
   };
 
   options.toolRuns.insertRunning({
@@ -1248,7 +1251,12 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
       let blocked = false;
       if (queue) blocked = queue.beginTurnQueueBlock(options.sessionId);
       try {
-        entry.resolve(await options.runDeferredCompaction());
+        const outcome = await options.runDeferredCompaction();
+        // A compaction rewrites this segment's transcript rows out-of-band
+        // (replaceSessionTranscript), so the incrementally maintained count is
+        // stale until re-read.
+        if (outcome.compacted) resyncTranscriptCount();
+        entry.resolve(outcome);
       } catch (e) {
         entry.reject(e instanceof Error ? e : new Error(String(e)));
       } finally {
@@ -1258,17 +1266,41 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
   };
 
   const emitStats = options.onStatsUpdate;
-  const getTranscriptCount = (): number =>
-    (
+  // In-memory count of the current segment's transcript rows, kept in sync by
+  // appendTx below. Sourced once from the DB — the loop may enter mid-segment —
+  // then maintained incrementally instead of issuing a COUNT(*) scan after
+  // every append.
+  let transcriptCount = options.transcript
+    ? (
+        options.db
+          .prepare(
+            `SELECT COUNT(*) AS cnt FROM transcript_messages WHERE session_id = @sessionId AND context_segment_id = @ctxSeg`,
+          )
+          .get({ sessionId: options.sessionId, ctxSeg }) as { cnt: number }
+      ).cnt
+    : 0;
+  const getTranscriptCount = (): number => transcriptCount;
+  // Compaction rewrites the current segment's rows outside appendTx; pull the
+  // fresh count from the DB so the in-memory counter matches the rewritten
+  // segment for the rest of the run.
+  const resyncTranscriptCount = (): void => {
+    transcriptCount = (
       options.db
         .prepare(
           `SELECT COUNT(*) AS cnt FROM transcript_messages WHERE session_id = @sessionId AND context_segment_id = @ctxSeg`,
         )
         .get({ sessionId: options.sessionId, ctxSeg }) as { cnt: number }
     ).cnt;
+  };
 
   // Shared context passed to helper functions
-  const ctx: ToolLoopContext = { options, appendTx, emitStats, getTranscriptCount };
+  const ctx: ToolLoopContext = {
+    options,
+    appendTx,
+    emitStats,
+    getTranscriptCount,
+    resyncTranscriptCount,
+  };
 
   try {
     let structuredOutputAttempt = 0;
