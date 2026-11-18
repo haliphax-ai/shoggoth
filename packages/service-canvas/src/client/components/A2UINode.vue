@@ -14,23 +14,13 @@ import type { Component } from "vue";
 import { useStore } from "vuex";
 import { catalogComponents } from "virtual:shoggoth-catalogs";
 
-/** Built-in component map — all components now resolve through the catalog system */
-const builtinMap: Record<string, Component> = {};
-
 /**
- * Resolve a component by name using two-tier lookup:
- * 1. Built-in map (always wins)
- * 2. Catalog components from virtual:shoggoth-catalogs
+ * Resolve a component by name using catalog components from virtual:shoggoth-catalogs.
  *
  * Exported for testability.
  */
 export function resolveA2UIComponent(name: string | null): Component | null {
   if (!name) return null;
-
-  // Built-in always wins
-  if (builtinMap[name]) return builtinMap[name];
-
-  // Catalog fallback
   // TODO: catalogId filtering — restrict catalog components by surface catalogId
   const catalogEntry = catalogComponents[name];
   if (catalogEntry) return catalogEntry.component;
