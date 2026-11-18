@@ -46,8 +46,8 @@
   </Teleport>
 </template>
 
-<script lang="ts">
-import { defineComponent, ref, computed, onMounted } from "vue";
+<script setup lang="ts">
+import { ref, computed, onMounted } from "vue";
 import {
   truncateMessage,
   executeDeepLink,
@@ -55,83 +55,68 @@ import {
   type DeepLinkRequest,
 } from "../services/deep-link";
 
-export default defineComponent({
-  name: "DeepLinkConfirm",
-  setup() {
-    const visible = ref(false);
-    const pending = ref<DeepLinkRequest | null>(null);
-    const resolvePromise = ref<((confirmed: boolean) => void) | null>(null);
+defineOptions({ name: "DeepLinkConfirm" });
 
-    const showAdvanced = ref(false);
-    const agents = ref<string[]>([]);
-    const agentId = ref("");
-    const model = ref("");
-    const thinking = ref("");
-    const sessionKey = ref("");
+const visible = ref(false);
+const pending = ref<DeepLinkRequest | null>(null);
+const resolvePromise = ref<((confirmed: boolean) => void) | null>(null);
 
-    const truncatedMessage = computed(() =>
-      pending.value ? truncateMessage(pending.value.message, 300) : "",
-    );
+const showAdvanced = ref(false);
+const agents = ref<string[]>([]);
+const agentId = ref("");
+const model = ref("");
+const thinking = ref("");
+const sessionKey = ref("");
 
-    onMounted(async () => {
-      const config = await fetchCanvasConfig();
-      agents.value = config.agents ?? [];
-    });
+const truncatedMessage = computed(() =>
+  pending.value ? truncateMessage(pending.value.message, 300) : "",
+);
 
-    function show(req: DeepLinkRequest): Promise<boolean> {
-      pending.value = req;
-      // Pre-populate from URL params
-      agentId.value = req.agentId ?? "";
-      model.value = req.model ?? "";
-      thinking.value = req.thinking ?? "";
-      sessionKey.value = req.sessionKey ?? "";
-      showAdvanced.value = false;
-      visible.value = true;
-      return new Promise((resolve) => {
-        resolvePromise.value = resolve;
-      });
-    }
-
-    function onCancel() {
-      visible.value = false;
-      resolvePromise.value?.(false);
-      pending.value = null;
-      resolvePromise.value = null;
-    }
-
-    async function onConfirm() {
-      visible.value = false;
-      if (pending.value) {
-        const req = { ...pending.value };
-        if (agentId.value) req.agentId = agentId.value;
-        if (model.value) req.model = model.value;
-        if (thinking.value) req.thinking = thinking.value;
-        if (sessionKey.value) req.sessionKey = sessionKey.value;
-        const result = await executeDeepLink(req);
-        if (!result.ok) {
-          console.error("[deep-link] Failed:", result.error);
-        }
-      }
-      resolvePromise.value?.(true);
-      pending.value = null;
-      resolvePromise.value = null;
-    }
-
-    return {
-      visible,
-      truncatedMessage,
-      showAdvanced,
-      agents,
-      agentId,
-      model,
-      thinking,
-      sessionKey,
-      show,
-      onCancel,
-      onConfirm,
-    };
-  },
+onMounted(async () => {
+  const config = await fetchCanvasConfig();
+  agents.value = config.agents ?? [];
 });
+
+function show(req: DeepLinkRequest): Promise<boolean> {
+  pending.value = req;
+  // Pre-populate from URL params
+  agentId.value = req.agentId ?? "";
+  model.value = req.model ?? "";
+  thinking.value = req.thinking ?? "";
+  sessionKey.value = req.sessionKey ?? "";
+  showAdvanced.value = false;
+  visible.value = true;
+  return new Promise((resolve) => {
+    resolvePromise.value = resolve;
+  });
+}
+
+function onCancel() {
+  visible.value = false;
+  resolvePromise.value?.(false);
+  pending.value = null;
+  resolvePromise.value = null;
+}
+
+async function onConfirm() {
+  visible.value = false;
+  if (pending.value) {
+    const req = { ...pending.value };
+    if (agentId.value) req.agentId = agentId.value;
+    if (model.value) req.model = model.value;
+    if (thinking.value) req.thinking = thinking.value;
+    if (sessionKey.value) req.sessionKey = sessionKey.value;
+    const result = await executeDeepLink(req);
+    if (!result.ok) {
+      console.error("[deep-link] Failed:", result.error);
+    }
+  }
+  resolvePromise.value?.(true);
+  pending.value = null;
+  resolvePromise.value = null;
+}
+
+defineExpose({ show });
 </script>
 
 <style scoped>
