@@ -26,6 +26,29 @@ describe("createCanvasPlugin", () => {
     return fn(...args);
   }
 
+  /**
+   * Register the plugin with an ephemeral server and return the plugin plus a
+   * cleanup handle. The registered tools are read from registerToolsMock.
+   */
+  async function registerTestPlugin(registerToolsMock: ReturnType<typeof vi.fn>) {
+    const registerServiceMock = vi.fn();
+    const ctx = {
+      registerService: registerServiceMock,
+      registerTools: registerToolsMock,
+      config: {
+        services: {
+          canvas: { port: 0, a2uiDbPath: ":memory:" },
+        },
+      },
+    };
+    const plugin = createCanvasPlugin();
+    await callHook(plugin, "service.register", ctx);
+    return {
+      plugin,
+      cleanup: () => callHook(plugin, "daemon.shutdown"),
+    };
+  }
+
   it("returns a plugin object with name 'service-canvas'", () => {
     const plugin = createCanvasPlugin();
     expect(plugin.name).toBe("service-canvas");
@@ -229,34 +252,28 @@ describe("createCanvasPlugin", () => {
 
       const result = await presentTool.handler(
         {},
-        { agentId: "test-agent", sessionUrn: "test:session" },
+        {
+          agentId: "test-agent",
+          sessionUrn: "agent:test-agent:discord:channel:1480957862858719232",
+        },
       );
       expect(JSON.parse(result.resultJson).ok).toBe(true);
     });
 
     it("canvas.hide handler returns { resultJson } with { ok: true }", async () => {
-      const registerServiceMock = vi.fn();
       const registerToolsMock = vi.fn();
-      const ctx = {
-        registerService: registerServiceMock,
-        registerTools: registerToolsMock,
-        config: {
-          services: {
-            canvas: { port: 0, a2uiDbPath: ":memory:" },
-          },
-        },
-      };
-
-      const plugin = createCanvasPlugin();
-      await callHook(plugin, "service.register", ctx);
-      cleanups.push(() => callHook(plugin, "daemon.shutdown"));
+      const { cleanup } = await registerTestPlugin(registerToolsMock);
+      cleanups.push(cleanup);
 
       const tools = registerToolsMock.mock.calls[0][0];
       const hideTool = tools.find((t: { name: string }) => t.name === "canvas-hide");
 
       const result = await hideTool.handler(
         {},
-        { agentId: "test-agent", sessionUrn: "test:session" },
+        {
+          agentId: "test-agent",
+          sessionUrn: "agent:test-agent:discord:channel:1480957862858719232",
+        },
       );
       expect(result).toEqual({
         resultJson: JSON.stringify({ ok: true }),
@@ -264,32 +281,96 @@ describe("createCanvasPlugin", () => {
     });
 
     it("canvas-a2ui-reset handler returns { resultJson } with { ok: true }", async () => {
-      const registerServiceMock = vi.fn();
       const registerToolsMock = vi.fn();
-      const ctx = {
-        registerService: registerServiceMock,
-        registerTools: registerToolsMock,
-        config: {
-          services: {
-            canvas: { port: 0, a2uiDbPath: ":memory:" },
-          },
-        },
-      };
-
-      const plugin = createCanvasPlugin();
-      await callHook(plugin, "service.register", ctx);
-      cleanups.push(() => callHook(plugin, "daemon.shutdown"));
+      const { cleanup } = await registerTestPlugin(registerToolsMock);
+      cleanups.push(cleanup);
 
       const tools = registerToolsMock.mock.calls[0][0];
       const resetTool = tools.find((t: { name: string }) => t.name === "canvas-a2ui-reset");
 
       const result = await resetTool.handler(
         {},
-        { agentId: "test-agent", sessionUrn: "test:session" },
+        {
+          agentId: "test-agent",
+          sessionUrn: "agent:test-agent:discord:channel:1480957862858719232",
+        },
       );
       expect(result).toEqual({
         resultJson: JSON.stringify({ ok: true }),
       });
+    });
+
+    it("canvas-present handler reduces a valid session URN to its agent ID", async () => {
+      const registerToolsMock = vi.fn();
+      const { cleanup } = await registerTestPlugin(registerToolsMock);
+      cleanups.push(cleanup);
+
+      const tools = registerToolsMock.mock.calls[0][0];
+      const presentTool = tools.find((t: { name: string }) => t.name === "canvas-present");
+
+      const urn = "agent:main:discord:channel:1480957862858719232";
+      const result = await presentTool.handler(
+        { session: urn },
+        { agentId: "main", sessionUrn: urn },
+      );
+      // The gateway command receives the agent ID, not the full URN
+      expect(JSON.parse(result.resultJson)).toMatchObject({ ok: true, session: "main" });
+    });
+
+    it("canvas-present handler rejects a malformed session URN with a tool error", async () => {
+      const registerToolsMock = vi.fn();
+      const { cleanup } = await registerTestPlugin(registerToolsMock);
+      cleanups.push(cleanup);
+
+      const tools = registerToolsMock.mock.calls[0][0];
+      const presentTool = tools.find((t: { name: string }) => t.name === "canvas-present");
+
+      const malformed = "agent:main:discord:channel";
+      const result = await presentTool.handler(
+        { session: malformed },
+        { agentId: "main", sessionUrn: "agent:main:discord:channel:1480957862858719232" },
+      );
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.ok).toBe(false);
+      // Actionable: names the offending value and the expected URN shape
+      expect(parsed.error).toContain(malformed);
+      expect(parsed.error).toContain("agent:<agentId>:<platform>:<resourceType>:<leaf>");
+    });
+
+    it("canvas-snapshot handler rejects a malformed session URN", async () => {
+      const registerToolsMock = vi.fn();
+      const { cleanup } = await registerTestPlugin(registerToolsMock);
+      cleanups.push(cleanup);
+
+      const tools = registerToolsMock.mock.calls[0][0];
+      const snapshotTool = tools.find((t: { name: string }) => t.name === "canvas-snapshot");
+
+      const result = await snapshotTool.handler(
+        { session: "agent:main:discord::1480957862858719232" },
+        { agentId: "main", sessionUrn: "agent:main:discord:channel:1480957862858719232" },
+      );
+      const parsed = JSON.parse(result.resultJson);
+      expect(parsed.ok).toBe(false);
+      expect(parsed.error).toContain("session");
+    });
+
+    it("session tools fall back to ctx.sessionUrn and reduce it to the agent ID", async () => {
+      const registerToolsMock = vi.fn();
+      const { cleanup } = await registerTestPlugin(registerToolsMock);
+      cleanups.push(cleanup);
+
+      const tools = registerToolsMock.mock.calls[0][0];
+      const sessionUrn = "agent:alpha:discord:dm:1480957862858719232";
+      for (const toolName of ["canvas-present", "canvas-navigate", "canvas-a2ui-reset"]) {
+        const tool = tools.find((t: { name: string }) => t.name === toolName);
+        const args = toolName === "canvas-navigate" ? { path: "x/" } : {};
+        const result = await tool.handler(args, { agentId: "alpha", sessionUrn });
+        const parsed = JSON.parse(result.resultJson);
+        // a2ui.reset replies without echoing the session; the others do
+        const expected =
+          toolName === "canvas-a2ui-reset" ? { ok: true } : { ok: true, session: "alpha" };
+        expect(parsed).toMatchObject(expected);
+      }
     });
   });
 });
