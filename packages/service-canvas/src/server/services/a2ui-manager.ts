@@ -96,6 +96,22 @@ export function mergeDataModel(
   return merged;
 }
 
+/**
+ * Normalize any array-shaped rows in a $sources entry into object rows.
+ * Mutates `source` in place; a no-op when rows are already objects or the
+ * shape is unexpected.
+ */
+function normalizeSourceRows(source: unknown): void {
+  const src = source as { rows?: unknown; fields?: unknown } | null | undefined;
+  if (!Array.isArray(src?.rows) || !Array.isArray(src?.fields)) return;
+  const rows = src.rows as unknown[];
+  if (!rows.some((r) => Array.isArray(r))) return;
+  const fields = src.fields as string[];
+  src.rows = rows.map((r) =>
+    Array.isArray(r) ? Object.fromEntries(fields.map((f: string, i: number) => [f, r[i]])) : r,
+  );
+}
+
 export class A2UIManager {
   private surfaces = new Map<string, A2UISurface>();
   private store: A2UIStore | null;
@@ -169,22 +185,9 @@ export class A2UIManager {
   updateDataModel(session: string, surfaceId: string, data: Record<string, unknown>) {
     const surface = this.surfaces.get(key(session, surfaceId));
     if (surface) {
-      // Normalize array rows to object rows in $sources
       if (data.$sources && typeof data.$sources === "object") {
-        const sources = data.$sources as Record<string, any>;
-        for (const [name, src] of Object.entries(sources)) {
-          if (src?.rows && Array.isArray(src.rows) && Array.isArray(src.fields)) {
-            const fields: string[] = src.fields;
-            const hasArrayRows = src.rows.some((r: any) => Array.isArray(r));
-            if (hasArrayRows) {
-              log.debug("normalizing array rows", { source: name, surfaceId });
-              src.rows = src.rows.map((r: any) =>
-                Array.isArray(r)
-                  ? Object.fromEntries(fields.map((f: string, i: number) => [f, r[i]]))
-                  : r,
-              );
-            }
-          }
+        for (const src of Object.values(data.$sources as Record<string, unknown>)) {
+          normalizeSourceRows(src);
         }
       }
       surface.dataModel = mergeDataModel(surface.dataModel, data, surfaceId);
@@ -211,6 +214,16 @@ export class A2UIManager {
 
   getSurface(session: string, surfaceId: string): A2UISurface | undefined {
     return this.surfaces.get(key(session, surfaceId));
+  }
+
+  /**
+   * Close the backing store (if any) and drop its reference. The manager
+   * owns the store's lifecycle for the server, so shutdown releases the
+   * database through this method.
+   */
+  close() {
+    this.store?.close();
+    this.store = null;
   }
 
   /** Serialize for sending to SPA */

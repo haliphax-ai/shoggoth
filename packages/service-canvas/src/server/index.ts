@@ -227,9 +227,9 @@ export function createCanvasServer(
       await new Promise<void>((resolve) => {
         server.close(() => resolve());
       });
-      // Close the A2UI store only after the HTTP server has fully drained, so
-      // no in-flight request handler can still be writing to the database.
-      a2uiStore.close();
+      // The manager owns the store reference; closing it through the manager
+      // releases the database after the HTTP server has fully drained, so no
+      // in-flight request handler can still be writing to it.
     },
   };
 }

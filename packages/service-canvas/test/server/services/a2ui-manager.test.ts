@@ -4,6 +4,10 @@
 
 import { describe, it, expect } from "vitest";
 import { A2UIManager, mergeDataModel } from "../../../src/server/services/a2ui-manager";
+import { A2UIStore } from "../../../src/server/services/a2ui-store";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 describe("mergeDataModel", () => {
   it("shallow keys merge deeply into the existing model", () => {
@@ -154,5 +158,65 @@ describe("A2UIManager.updateDataModel", () => {
     expect(dm).toEqual({
       $sources: { users: { fields: ["id", "name"], rows: [{ id: 1, name: "a" }] } },
     });
+  });
+});
+
+describe("A2UIManager.close", () => {
+  it("closes the backing store through the manager", () => {
+    const dbDir = mkdtempSync(path.join(tmpdir(), "a2ui-manager-close-"));
+    const store = new A2UIStore(path.join(dbDir, "a2ui-manager-close.db"));
+    const manager = new A2UIManager(store);
+
+    manager.close();
+
+    expect((store as unknown as { db: { open: boolean } }).db.open).toBe(false);
+    rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  it("drops the store reference so persisted writes stop after close", async () => {
+    const dbDir = mkdtempSync(path.join(tmpdir(), "a2ui-manager-close-"));
+    const dbPath = path.join(dbDir, "a2ui-manager-close.db");
+    const manager = new A2UIManager(new A2UIStore(dbPath));
+    manager.upsertSurface("main", "surf1", [{ id: "c1", component: "Text", text: "hello" }]);
+
+    manager.close();
+    // Writes after close must be in-memory only, not crash on a closed DB.
+    manager.upsertSurface("main", "surf1", [{ id: "c2", component: "Text", text: "after close" }]);
+    expect(manager.getSurface("main", "surf1")?.components.get("c2")).toEqual({
+      component: "Text",
+      text: "after close",
+    });
+
+    const { default: Database } = await import("better-sqlite3");
+    const reopened = new Database(dbPath, { readonly: true });
+    const row = reopened
+      .prepare("SELECT components FROM a2ui_surfaces WHERE session = ? AND surfaceId = ?")
+      .get("main", "surf1") as { components: string } | undefined;
+    reopened.close();
+
+    expect(row).toBeDefined();
+    const components = JSON.parse(row!.components) as Record<string, unknown>;
+    expect(Object.keys(components)).toEqual(["c1"]);
+
+    rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  it("is safe to call when the manager has no store", () => {
+    const manager = new A2UIManager();
+
+    expect(() => manager.close()).not.toThrow();
+  });
+
+  it("is safe to call twice", () => {
+    const dbDir = mkdtempSync(path.join(tmpdir(), "a2ui-manager-close-"));
+    const store = new A2UIStore(path.join(dbDir, "a2ui-manager-close.db"));
+    const manager = new A2UIManager(store);
+
+    manager.close();
+
+    expect(() => manager.close()).not.toThrow();
+    expect((store as unknown as { db: { open: boolean } }).db.open).toBe(false);
+
+    rmSync(dbDir, { recursive: true, force: true });
   });
 });
