@@ -121,13 +121,31 @@ export default function createCanvasPlugin(): Plugin<ShoggothHooks> {
 }
 
 /**
- * Normalize a session identifier for the canvas system.
- * Full session URNs (agent:main:discord:channel:123) are reduced to the agent ID ("main").
- * Plain strings are returned as-is.
+ * A session identifier resolved for a canvas gateway command, or a rejection
+ * describing why the provided value cannot be used.
  */
-function normalizeSession(session: string): string {
+type ResolvedToolSession = { ok: true; session: string } | { ok: false; error: string };
+
+/** Shape of a valid session URN, shown verbatim in rejection messages. */
+const SESSION_URN_SHAPE = "agent:<agentId>:<platform>:<resourceType>:<leaf>";
+
+/**
+ * Resolve the `session` argument of a canvas tool to the agent-scoped session
+ * key the gateway dispatch uses. Full session URNs
+ * (`agent:<agentId>:<platform>:<resourceType>:<leaf>`) are reduced to their
+ * agent ID; anything else is rejected instead of silently passed through, so a
+ * malformed identifier fails loudly at the tool boundary rather than dispatching
+ * against a session key no SPA is subscribed to.
+ */
+function resolveToolSession(session: string): ResolvedToolSession {
   const parsed = parseAgentSessionUrn(session);
-  return parsed ? parsed.agentId : session;
+  if (!parsed) {
+    return {
+      ok: false,
+      error: `invalid session: ${JSON.stringify(session)} — must be a session URN of the form ${SESSION_URN_SHAPE}`,
+    };
+  }
+  return { ok: true, session: parsed.agentId };
 }
 
 /**
@@ -159,9 +177,12 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
         required: ["session"],
       },
       async handler(args, ctx) {
-        const session = normalizeSession((args.session as string) || ctx.sessionUrn);
+        const resolved = resolveToolSession((args.session as string) || ctx.sessionUrn);
+        if (!resolved.ok) {
+          return { resultJson: JSON.stringify(resolved) };
+        }
         const result = await gatewayRef?.dispatch("canvas.show", {
-          session,
+          session: resolved.session,
           target: args.target,
           surface: args.surface,
         });
@@ -202,9 +223,12 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
         required: ["session"],
       },
       async handler(args, ctx) {
-        const session = normalizeSession((args.session as string) || ctx.sessionUrn);
+        const resolved = resolveToolSession((args.session as string) || ctx.sessionUrn);
+        if (!resolved.ok) {
+          return { resultJson: JSON.stringify(resolved) };
+        }
         const result = await gatewayRef?.dispatch("canvas.navigate", {
-          session,
+          session: resolved.session,
           path: args.path,
         });
         return {
@@ -275,9 +299,12 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
         required: ["session"],
       },
       async handler(args, ctx) {
-        const session = normalizeSession((args.session as string) || ctx.sessionUrn);
+        const resolved = resolveToolSession((args.session as string) || ctx.sessionUrn);
+        if (!resolved.ok) {
+          return { resultJson: JSON.stringify(resolved) };
+        }
         const result = await gatewayRef?.dispatch("canvas.snapshot", {
-          id: session,
+          id: resolved.session,
         });
         return {
           resultJson: JSON.stringify(result ?? { ok: false, error: "Canvas gateway unavailable" }),
@@ -302,11 +329,14 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
         required: ["session", "payload"],
       },
       async handler(args, ctx) {
-        const session = normalizeSession((args.session as string) || ctx.sessionUrn);
+        const resolved = resolveToolSession((args.session as string) || ctx.sessionUrn);
+        if (!resolved.ok) {
+          return { resultJson: JSON.stringify(resolved) };
+        }
         const payload =
           typeof args.payload === "string" ? args.payload : JSON.stringify(args.payload);
         const result = await gatewayRef?.dispatch("a2ui.push", {
-          session,
+          session: resolved.session,
           payload,
         });
         return {
@@ -328,8 +358,11 @@ function getCanvasTools(gatewayRef: Gateway | undefined): DirectServiceTool[] {
         required: ["session"],
       },
       async handler(args, ctx) {
-        const session = normalizeSession((args.session as string) || ctx.sessionUrn);
-        const result = await gatewayRef?.dispatch("a2ui.reset", { session });
+        const resolved = resolveToolSession((args.session as string) || ctx.sessionUrn);
+        if (!resolved.ok) {
+          return { resultJson: JSON.stringify(resolved) };
+        }
+        const result = await gatewayRef?.dispatch("a2ui.reset", { session: resolved.session });
         return {
           resultJson: JSON.stringify(result ?? { ok: false, error: "Canvas gateway unavailable" }),
         };
