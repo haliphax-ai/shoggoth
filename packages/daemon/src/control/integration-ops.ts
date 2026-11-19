@@ -1,8 +1,6 @@
 import { WIRE_VERSION } from "@shoggoth/authn";
-import type { AuthenticatedPrincipal, OperatorPrincipal } from "@shoggoth/authn";
+import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import type { WireRequest } from "@shoggoth/authn";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import type Database from "better-sqlite3";
 import type { ShoggothConfig, ShoggothContractEntry, SystemContext } from "@shoggoth/shared";
 import { getLogger } from "../logging";
@@ -20,25 +18,19 @@ let boundSessionStore: SessionStore | undefined;
 export function bindIntegrationOpsSessionStore(sessions: SessionStore): void {
   boundSessionStore = sessions;
 }
-import { getProcessManager } from "../process-manager-singleton";
 import {
   agentMayInvokeSubagentSpawnByAllowlist,
   assertValidAgentId,
   assertValidSubagentAgentId,
   clampTtlMs,
   crossAgentSessionSendAllowed,
-  deepMerge,
   resolveMaxTtlMs,
   resolveMaxOneShotTtlMs,
   effectiveMaxSpawnDepth,
-  loadLayeredConfigAsync,
   maySpawnSubagentAtDepth,
   parseAgentSessionUrn,
-  redactDeep,
   resolveEffectiveModelsConfig,
   modelProvidersToEntries,
-  shoggothConfigFragmentSchema,
-  shoggothConfigSchema,
 } from "@shoggoth/shared";
 import type { AppendAuditRowInput } from "../audit/append-audit";
 import type { AcpxProcessSupervisor } from "../acpx/acpx-process-supervisor";
@@ -48,18 +40,9 @@ import type { SessionRow, SessionStore, SessionSortBy } from "../sessions/sessio
 import { computeSessionDepthFromStore } from "../sessions/session-store";
 import { resolveSessionTargetFromCliArg } from "./resolve-session-cli-target";
 import type { HitlConfigRef } from "../config-hot-reload";
-import {
-  rewriteAgentToolAutoApproveMapAndReload,
-  readAgentToolAutoApproveMap,
-} from "../hitl/hitl-agent-tool-auto-persist";
 import type { HitlAutoApproveGate } from "../hitl/hitl-auto-approve";
 import type { PendingActionsStore } from "../hitl/pending-actions-store";
-import { cruiseControlActivationWarnings, type CruiseControlStore } from "../hitl/cruise-control";
-import type { CruiseControlPolicy } from "@shoggoth/shared";
-import {
-  clearAllSessionToolAutoApprove,
-  clearSessionToolAutoApproveForSessionIds,
-} from "../hitl/hitl-session-tool-auto-store";
+import type { CruiseControlStore } from "../hitl/cruise-control";
 import { mergeSubagentSpawnModelSelection } from "@shoggoth/models";
 import type { ModelInvocationParams } from "@shoggoth/models";
 import {
@@ -117,9 +100,6 @@ import {
   OOB_WITH_SENDER_GUIDANCE,
 } from "../messaging/oob-response-schemas";
 // import type { SubagentRuntimeExtension } from "../subagent/subagent-extension-ref";
-import { MediaGenerationService } from "../media/media-generation-service";
-import { DecisionService } from "../decision/decision-service";
-import { RerankService } from "../rerank/rerank-service";
 import {
   handleVaultSet,
   handleVaultGet,
@@ -136,7 +116,6 @@ import {
   handleServiceRevoke,
   handleServiceRotateKey,
 } from "./service-ops";
-import { listPromptFiles, PromptOpError, renderPrompt, resolvePromptFile } from "./prompt-ops";
 import {
   handleAcpxBindGet,
   handleAcpxBindSet,
@@ -152,6 +131,21 @@ import {
   handleSessionCompact,
 } from "./session-context-ops";
 import { handleMcpHttpCancelRequest } from "./mcp-ops";
+import {
+  handleHitlPendingList,
+  handleHitlPendingGet,
+  handleHitlPendingApprove,
+  handleHitlPendingDeny,
+  handleHitlClear,
+  handleHitlCruiseControl,
+} from "./hitl-ops";
+import { handlePrompt, handlePromptList } from "./prompt-ops-handler";
+import { handleConfigShow, handleConfigRequest } from "./config-ops";
+import { handleProcmanList, handleProcmanRestart, handleProcmanStop } from "./procman-ops";
+import { handleElevationGrant, handleElevationRevoke, handleElevationList } from "./elevation-ops";
+import { handleYoloMode } from "./yolo-ops";
+import { handleMediaGenerate, handleMediaGeneratePoll } from "./media-ops";
+import { handleDecisionEvaluate, handleRerankDocuments } from "./decision-ops";
 
 export class IntegrationOpError extends Error {
   constructor(
@@ -395,18 +389,6 @@ async function deliverOneShotTtlExpiredFailure(opts: {
   }
 }
 
-function optionalNonEmptySessionId(pl: Record<string, unknown>): string | undefined {
-  const v = pl.session_id;
-  if (v === undefined) return undefined;
-  if (typeof v !== "string" || !v.trim()) {
-    throw new IntegrationOpError(
-      "ERR_INVALID_PAYLOAD",
-      "payload.session_id must be a non-empty string when provided",
-    );
-  }
-  return v.trim();
-}
-
 /**
  * Resolve `payload.session_id` to a full agent session URN. Accepts either a valid session URN
  * or a bare agent id (substituted with that agent's bootstrap primary session URN).
@@ -417,17 +399,6 @@ function requireSessionId(
   sessions: SessionStore | undefined,
 ): string {
   return resolveTargetSessionIdOrThrow(requireString(pl, "session_id"), cfg, sessions);
-}
-
-/** Like {@link requireSessionId}, but returns undefined when `payload.session_id` is absent. */
-function optionalSessionId(
-  pl: Record<string, unknown>,
-  cfg: ShoggothConfig,
-  sessions: SessionStore | undefined,
-): string | undefined {
-  const raw = optionalNonEmptySessionId(pl);
-  if (raw === undefined) return undefined;
-  return resolveTargetSessionIdOrThrow(raw, cfg, sessions);
 }
 
 function resolveTargetSessionIdOrThrow(
@@ -521,29 +492,6 @@ function requireSubagentRuntime(ctx: IntegrationOpsContext): {
     );
   }
   return { sessions: ctx.sessions, sessionManager: ctx.sessionManager };
-}
-
-/**
- * Operator guard + payload resolution shared by `hitl_pending_approve` and
- * `hitl_pending_deny`: principal check (op-specific error string), pending
- * store availability, and `payload.id` extraction. The per-op decision
- * (approve vs deny) stays in the switch case.
- */
-function requirePendingOperatorTarget(
-  opName: string,
-  req: WireRequest,
-  principal: AuthenticatedPrincipal,
-  ctx: IntegrationOpsContext,
-): { store: PendingActionsStore; id: string; operator: OperatorPrincipal } {
-  if (principal.kind !== "operator") {
-    throw new IntegrationOpError("ERR_FORBIDDEN", `${opName} requires operator principal`);
-  }
-  if (!ctx.hitlPending) {
-    throw new IntegrationOpError("ERR_HITL_UNAVAILABLE", "HITL pending store not configured");
-  }
-  const pl = payloadObject(req);
-  const id = requireString(pl, "id");
-  return { store: ctx.hitlPending, id, operator: principal };
 }
 
 /** Completed entry for one `subagent_wait` target. */
@@ -1228,248 +1176,18 @@ export async function handleIntegrationControlOp(
     case "session_compact":
       return handleSessionCompact(req, principal, ctx);
 
-    case "hitl_pending_list": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "hitl_pending_list requires operator principal",
-        );
-      }
-      if (!ctx.hitlPending) {
-        throw new IntegrationOpError("ERR_HITL_UNAVAILABLE", "HITL pending store not configured");
-      }
-      const pl = payloadObject(req);
-      const sessionId = optionalSessionId(pl, ctx.config, ctx.sessions);
-      if (sessionId) {
-        return { pending: ctx.hitlPending.listPendingForSession(sessionId) };
-      }
-      const limitRaw = pl.limit;
-      const limit =
-        typeof limitRaw === "number" && Number.isFinite(limitRaw)
-          ? Math.floor(limitRaw)
-          : undefined;
-      return { pending: ctx.hitlPending.listAllPending(limit) };
-    }
-
-    case "hitl_pending_get": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "hitl_pending_get requires operator principal",
-        );
-      }
-      if (!ctx.hitlPending) {
-        throw new IntegrationOpError("ERR_HITL_UNAVAILABLE", "HITL pending store not configured");
-      }
-      const pl = payloadObject(req);
-      const id = requireString(pl, "id");
-      const row = ctx.hitlPending.getById(id);
-      return { row: row ?? null };
-    }
-
-    case "hitl_pending_approve": {
-      const { store, id, operator } = requirePendingOperatorTarget(
-        "hitl_pending_approve",
-        req,
-        principal,
-        ctx,
-      );
-      const ok = store.approve(id, operator.operatorId);
-      ctx.recordIntegrationAudit({
-        action: "hitl.pending_approve",
-        resource: id,
-        outcome: ok ? "ok" : "not_pending",
-      });
-      return { ok };
-    }
-
-    case "hitl_pending_deny": {
-      const { store, id, operator } = requirePendingOperatorTarget(
-        "hitl_pending_deny",
-        req,
-        principal,
-        ctx,
-      );
-      const ok = store.deny(id, operator.operatorId);
-      ctx.recordIntegrationAudit({
-        action: "hitl.pending_deny",
-        resource: id,
-        outcome: ok ? "ok" : "not_pending",
-      });
-      return { ok };
-    }
-
-    case "hitl_clear": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "hitl_clear requires operator principal");
-      }
-      if (!ctx.hitlPending) {
-        throw new IntegrationOpError("ERR_HITL_UNAVAILABLE", "HITL pending store not configured");
-      }
-      if (!ctx.stateDb || !ctx.sessions) {
-        throw new IntegrationOpError(
-          "ERR_STATE_DB_REQUIRED",
-          "hitl_clear requires SQLite session store",
-        );
-      }
-      const pl = payloadObject(req);
-      const agentIdRaw = requireString(pl, "agent_id").trim();
-      if (agentIdRaw !== "all") {
-        assertValidAgentId(agentIdRaw);
-      }
-      const sessionIdOpt = optionalSessionId(pl, ctx.config, ctx.sessions);
-      const noAuto = pl.no_auto === true;
-      /** Session-scoped clear never touches auto-approve (SQLite / z-JSON / memory). */
-      const skipAutoClear = Boolean(sessionIdOpt) || noAuto;
-
-      let sessionIds: string[];
-      if (sessionIdOpt) {
-        const parsed = parseAgentSessionUrn(sessionIdOpt);
-        if (!parsed) {
-          throw new IntegrationOpError(
-            "ERR_INVALID_PAYLOAD",
-            "payload.session_id must be a valid agent session URN",
-          );
-        }
-        if (agentIdRaw !== "all" && parsed.agentId !== agentIdRaw) {
-          throw new IntegrationOpError(
-            "ERR_INVALID_PAYLOAD",
-            "payload.session_id agent does not match payload.agent_id",
-          );
-        }
-        const row = ctx.sessions.getById(sessionIdOpt);
-        if (!row) {
-          throw new IntegrationOpError("ERR_SESSION_INACTIVE", "session is missing or terminated");
-        }
-        sessionIds = [sessionIdOpt];
-      } else if (agentIdRaw === "all") {
-        sessionIds = ctx.sessions.list().map((r) => r.id);
-      } else {
-        sessionIds = ctx.sessions.list({ agentId: agentIdRaw }).map((r) => r.id);
-      }
-
-      const deletedPending = ctx.hitlPending.deletePendingForSessionIds(sessionIds);
-
-      let clearedSessionAutoApprove = 0;
-      let clearedAgentAutoApproveAgents = 0;
-      if (!skipAutoClear) {
-        const hc = ctx.hitlClear;
-        if (!hc) {
-          throw new IntegrationOpError(
-            "ERR_HITL_UNAVAILABLE",
-            "HITL auto-approve clear not configured (requires persisting HITL gate)",
-          );
-        }
-        if (agentIdRaw === "all") {
-          clearedSessionAutoApprove = clearAllSessionToolAutoApprove(ctx.stateDb);
-        } else {
-          clearedSessionAutoApprove = clearSessionToolAutoApproveForSessionIds(
-            ctx.stateDb,
-            sessionIds,
-          );
-        }
-        const merged = readAgentToolAutoApproveMap(
-          await loadLayeredConfigAsync(hc.configDirectory),
-        );
-        const nextMap: Record<string, string[]> =
-          agentIdRaw === "all"
-            ? Object.fromEntries(Object.keys(merged).map((k) => [k, [] as string[]]))
-            : { ...merged, [agentIdRaw]: [] };
-        if (hc.dynamicConfigDirectory) {
-          await rewriteAgentToolAutoApproveMapAndReload({
-            configDirectory: hc.configDirectory,
-            dynamicConfigDirectory: hc.dynamicConfigDirectory,
-            configRef: hc.configRef,
-            hitlRef: hc.hitlRef,
-            nextAgentToolAutoApprove: nextMap,
-          });
-        }
-        clearedAgentAutoApproveAgents = agentIdRaw === "all" ? Object.keys(merged).length : 1;
-        if (agentIdRaw === "all") {
-          hc.autoApproveGate.clearAutoApproveMemory?.({ agents: "all" });
-        } else {
-          hc.autoApproveGate.clearAutoApproveMemory?.({ agents: [agentIdRaw] });
-        }
-      }
-
-      ctx.recordIntegrationAudit({
-        action: "hitl.clear",
-        resource: sessionIdOpt ?? agentIdRaw,
-        outcome: "ok",
-        argsRedactedJson: JSON.stringify({
-          agent_id: agentIdRaw,
-          session_id: sessionIdOpt,
-          no_auto: noAuto,
-        }),
-      });
-
-      return {
-        deleted_pending: deletedPending,
-        session_ids: sessionIds,
-        cleared_session_auto_approve: clearedSessionAutoApprove,
-        cleared_agent_auto_approve_agents: clearedAgentAutoApproveAgents,
-      };
-    }
-
-    case "hitl_cruise_control": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "hitl_cruise_control requires operator principal",
-        );
-      }
-      if (!ctx.cruiseControl) {
-        throw new IntegrationOpError("ERR_CRUISE_UNAVAILABLE", "cruise control not configured");
-      }
-      const pl = payloadObject(req);
-      const sessionId = requireSessionId(pl, ctx.config, ctx.sessions);
-
-      if (pl.deactivate === true) {
-        const cleared = ctx.cruiseControl.clear(sessionId);
-        ctx.recordIntegrationAudit({
-          action: "hitl.cruise_deactivate",
-          resource: sessionId,
-          outcome: cleared ? "ok" : "not_active",
-        });
-        return { active: false, cleared };
-      }
-
-      const yes = typeof pl.yes === "string" ? pl.yes.trim() : "";
-      const no = typeof pl.no === "string" ? pl.no.trim() : "";
-      if (!yes || !no) {
-        // No guidance provided — status query.
-        const policy = ctx.cruiseControl.get(sessionId);
-        return {
-          active: policy !== undefined,
-          policy: policy ?? null,
-          warnings: policy ? cruiseControlActivationWarnings(ctx.config, policy) : [],
-        };
-      }
-
-      const escalate =
-        typeof pl.escalate === "string" && pl.escalate.trim() ? pl.escalate.trim() : undefined;
-      const model = typeof pl.model === "string" && pl.model.trim() ? pl.model.trim() : undefined;
-      const policy: CruiseControlPolicy = {
-        yes,
-        no,
-        ...(escalate ? { escalate } : {}),
-        ...(model ? { model } : {}),
-      };
-      const warnings = cruiseControlActivationWarnings(ctx.config, policy);
-      ctx.cruiseControl.set(sessionId, policy);
-      ctx.recordIntegrationAudit({
-        action: "hitl.cruise_activate",
-        resource: sessionId,
-        outcome: "ok",
-        argsRedactedJson: JSON.stringify({
-          yes,
-          no,
-          escalate: escalate ?? null,
-          model: model ?? null,
-        }),
-      });
-      return { active: true, policy, warnings };
-    }
+    case "hitl_pending_list":
+      return handleHitlPendingList(req, principal, ctx);
+    case "hitl_pending_get":
+      return handleHitlPendingGet(req, principal, ctx);
+    case "hitl_pending_approve":
+      return handleHitlPendingApprove(req, principal, ctx);
+    case "hitl_pending_deny":
+      return handleHitlPendingDeny(req, principal, ctx);
+    case "hitl_clear":
+      return handleHitlClear(req, principal, ctx);
+    case "hitl_cruise_control":
+      return handleHitlCruiseControl(req, principal, ctx);
 
     case "mcp_http_cancel_request":
       return handleMcpHttpCancelRequest(req, principal, ctx);
@@ -3110,159 +2828,10 @@ export async function handleIntegrationControlOp(
       };
     }
 
-    case "prompt": {
-      ioLog.debug("canned prompt", { op: req.op, principalKind: principal.kind });
-      if (principal.kind !== "operator" && principal.kind !== "agent") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "prompt requires operator or agent principal",
-        );
-      }
-      const ext = subagentRuntimeExtensionRef.current;
-      if (!ext) {
-        throw new IntegrationOpError(
-          "ERR_SUBAGENT_RUNTIME_UNAVAILABLE",
-          "prompt requires messaging runtime",
-        );
-      }
-      const { sessions } = requireSubagentRuntime(ctx);
-      const pl = payloadObject(req);
-      const slug = requireString(pl, "slug");
-      const sessionId = resolveSessionSendTargetSessionId(pl, ctx.config, ctx.sessions);
-      assertAgentMayTargetSessionForSendOrList(principal, sessionId, ctx.config);
-      const paramsRaw = optionalRecordObject(pl, "params") ?? {};
-      const params: Record<string, string> = {};
-      for (const [k, v] of Object.entries(paramsRaw)) {
-        if (typeof v !== "string") {
-          throw new IntegrationOpError(
-            "ERR_INVALID_PAYLOAD",
-            `payload.params.${k} must be a string`,
-          );
-        }
-        params[k] = v;
-      }
-      const row = sessions.getById(sessionId);
-      if (!row || row.status === "terminated") {
-        throw new IntegrationOpError("ERR_SESSION_INACTIVE", "session is missing or terminated");
-      }
-      if (row.subagentMode === "one_shot") {
-        throw new IntegrationOpError(
-          "ERR_SUBAGENT_ONE_SHOT",
-          "one_shot subagents cannot receive prompt",
-        );
-      }
-      let message: string;
-      try {
-        const promptPath = resolvePromptFile(
-          row.workspacePath,
-          ctx.config.prompts?.globalDir,
-          slug,
-        );
-        if (!promptPath) {
-          throw new PromptOpError("ERR_PROMPT_NOT_FOUND", `prompt not found: ${slug}`);
-        }
-        message = renderPrompt(readFileSync(promptPath, "utf8"), params);
-      } catch (e) {
-        if (e instanceof PromptOpError) {
-          throw new IntegrationOpError(e.code, e.message);
-        }
-        throw e;
-      }
-      const silent = pl.silent === true;
-      const platformUserIdRaw = pl.platform_user_id;
-      const platformUserId =
-        typeof platformUserIdRaw === "string" && platformUserIdRaw.trim()
-          ? platformUserIdRaw.trim()
-          : undefined;
-      const replyToMessageId =
-        typeof pl.reply_to_message_id === "string" && pl.reply_to_message_id.trim()
-          ? pl.reply_to_message_id.trim()
-          : undefined;
-      const delivery = silent
-        ? ({ kind: "internal" } as const)
-        : (() => {
-            if (!platformUserId && !row.subagentPlatformThreadId?.trim()) {
-              throw new IntegrationOpError(
-                "ERR_MISSING_PLATFORM_USER_ID",
-                "platform_user_id is required for messaging_surface delivery",
-              );
-            }
-            return {
-              kind: "messaging_surface",
-              userId: platformUserId ?? "system",
-              replyToMessageId,
-            } as const;
-          })();
-      const senderSessionId =
-        principal.kind === "agent" ? principal.sessionId : `operator:${principal.operatorId}`;
-      const turnInput: Parameters<typeof ext.runSessionModelTurn>[0] = {
-        sessionId,
-        userContent: message,
-        userMetadata: { prompt: slug },
-        systemContext: {
-          kind: "session.message",
-          summary: `Canned prompt "${slug}" from session ${senderSessionId}.`,
-          data: { sender_session_id: senderSessionId, prompt_slug: slug },
-        },
-        delivery,
-      };
-      if (optionalBooleanFlag(pl, "wait") === false) {
-        // wait:false — the prompt is delivered; return without waiting for
-        // the turn. Callers report an immediate "submitted" status and the
-        // turn's outcome reaches the operator via the delivery surface.
-        void ext.runSessionModelTurn(turnInput).catch((err) => {
-          ioLog.warn("canned prompt detached turn failed", {
-            sessionId,
-            slug,
-            err: String(err),
-          });
-        });
-        ctx.recordIntegrationAudit({
-          action: "prompt.run",
-          resource: sessionId,
-          outcome: "delivered",
-          argsRedactedJson: JSON.stringify({ slug, wait: false }),
-        });
-        return { delivered: true, session_id: sessionId, slug };
-      }
-      const turn = await ext.runSessionModelTurn(turnInput);
-      ctx.recordIntegrationAudit({
-        action: "prompt.run",
-        resource: sessionId,
-        outcome: "ok",
-        argsRedactedJson: JSON.stringify({ slug }),
-      });
-      return {
-        reply: turn.latestAssistantText,
-        failover: turn.failoverMeta ?? null,
-      };
-    }
-
-    case "prompt_list": {
-      if (principal.kind !== "operator" && principal.kind !== "agent") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "prompt_list requires operator or agent principal",
-        );
-      }
-      const pl = payloadObject(req);
-      let workspaceDir: string | undefined;
-      const hasTarget =
-        (typeof pl.session_id === "string" && pl.session_id.trim()) ||
-        (typeof pl.agent_id === "string" && pl.agent_id.trim());
-      if (hasTarget) {
-        const { sessions } = requireSubagentRuntime(ctx);
-        const sessionId = resolveSessionSendTargetSessionId(pl, ctx.config, ctx.sessions);
-        assertAgentMayTargetSessionForSendOrList(principal, sessionId, ctx.config);
-        const row = sessions.getById(sessionId);
-        workspaceDir = row?.workspacePath;
-      } else if (principal.kind === "agent") {
-        const { sessions } = requireSubagentRuntime(ctx);
-        const row = sessions.getById(principal.sessionId);
-        workspaceDir = row?.workspacePath;
-      }
-      return { prompts: listPromptFiles(workspaceDir, ctx.config.prompts?.globalDir) };
-    }
+    case "prompt":
+      return handlePrompt(req, principal, ctx);
+    case "prompt_list":
+      return handlePromptList(req, principal, ctx);
 
     case "session_abort": {
       if (principal.kind !== "operator" && principal.kind !== "agent") {
@@ -3490,148 +3059,16 @@ export async function handleIntegrationControlOp(
       };
     }
 
-    case "config_show": {
-      if (principal.kind !== "operator" && principal.kind !== "agent") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "config_show requires operator or agent principal",
-        );
-      }
-      const csPayload = payloadObject(req);
-      const dynamicOnly = csPayload.dynamic === true;
-      if (dynamicOnly) {
-        const dynDir = ctx.config.dynamicConfigDirectory;
-        if (!dynDir || !existsSync(dynDir)) {
-          return { ok: true, fragments: {} };
-        }
-        const fragments: Record<string, unknown> = {};
-        for (const name of readdirSync(dynDir).sort()) {
-          if (!name.endsWith(".json")) continue;
-          try {
-            fragments[name.slice(0, -5)] = JSON.parse(readFileSync(join(dynDir, name), "utf8"));
-          } catch {
-            continue;
-          }
-        }
-        const jsonPaths = ctx.config.policy.auditRedaction.jsonPaths;
-        return { ok: true, fragments: redactDeep(fragments, jsonPaths) };
-      }
-      const jsonPaths = ctx.config.policy.auditRedaction.jsonPaths;
-      return { ok: true, config: redactDeep(ctx.config, jsonPaths) };
-    }
-
-    case "procman_list": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "procman_list requires operator principal");
-      }
-      const pm = getProcessManager();
-      if (!pm) return { processes: [] };
-      const processes = pm.list().map((mp) => ({
-        id: mp.spec.id,
-        label: mp.spec.label ?? null,
-        state: mp.state,
-        pid: mp.pid ?? null,
-        uptimeMs: mp.uptimeMs,
-        restartCount: mp.restartCount,
-        lastExitCode: mp.lastExitCode,
-        owner: mp.spec.owner,
-      }));
-      return { processes };
-    }
-
-    case "procman_restart": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "procman_restart requires operator principal",
-        );
-      }
-      const pl = payloadObject(req);
-      const id = requireString(pl, "id");
-      const pm = getProcessManager();
-      if (!pm)
-        throw new IntegrationOpError("ERR_PROCMAN_UNAVAILABLE", "process manager not initialized");
-      const mp = pm.get(id);
-      if (!mp) {
-        throw new IntegrationOpError("ERR_PROCESS_NOT_FOUND", `no managed process with id "${id}"`);
-      }
-      await mp.restart();
-      return { ok: true, id, state: mp.state };
-    }
-
-    case "procman_stop": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "procman_stop requires operator principal");
-      }
-      const pl = payloadObject(req);
-      const id = requireString(pl, "id");
-      const pm = getProcessManager();
-      if (!pm)
-        throw new IntegrationOpError("ERR_PROCMAN_UNAVAILABLE", "process manager not initialized");
-      const mp = pm.get(id);
-      if (!mp) {
-        throw new IntegrationOpError("ERR_PROCESS_NOT_FOUND", `no managed process with id "${id}"`);
-      }
-      await pm.stop(id);
-      return { ok: true, id };
-    }
-
-    case "config_request": {
-      if (principal.kind !== "agent") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "config_request requires agent principal");
-      }
-      if (!ctx.config.dynamicConfigDirectory) {
-        throw new IntegrationOpError(
-          "ERR_CONFIG_REQUEST_UNAVAILABLE",
-          "dynamicConfigDirectory not configured",
-        );
-      }
-      const pl = payloadObject(req);
-      const crKey = typeof pl.key === "string" ? pl.key.trim() : "";
-      if (!crKey || !/^[a-zA-Z0-9_-]+$/.test(crKey)) {
-        throw new IntegrationOpError(
-          "ERR_INVALID_PAYLOAD",
-          "payload.key is required and must contain only alphanumeric characters, hyphens, and underscores",
-        );
-      }
-      const crMode = pl.mode === "overwrite" ? "overwrite" : "merge";
-      const fragmentRaw = pl.fragment;
-      if (fragmentRaw === undefined || fragmentRaw === null) {
-        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "payload.fragment is required");
-      }
-      // Wrap the fragment value under the key for schema validation and storage.
-      const wrappedRaw = { [crKey]: fragmentRaw };
-      const wrappedParse = shoggothConfigFragmentSchema.safeParse(wrappedRaw);
-      if (!wrappedParse.success) {
-        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", wrappedParse.error.message);
-      }
-      let wrapped = wrappedParse.data;
-      const dynDir = ctx.config.dynamicConfigDirectory;
-      mkdirSync(dynDir, { recursive: true });
-      const filePath = join(dynDir, `${crKey}.json`);
-      if (crMode === "merge" && existsSync(filePath)) {
-        try {
-          const existing = JSON.parse(readFileSync(filePath, "utf8"));
-          wrapped = deepMerge(existing, wrapped);
-        } catch {
-          /* overwrite if existing file is unreadable */
-        }
-      }
-      const currentConfig = await loadLayeredConfigAsync(ctx.config.configDirectory);
-      const merged = deepMerge(currentConfig, wrapped);
-      const fullParse = shoggothConfigSchema.safeParse(merged);
-      if (!fullParse.success) {
-        return {
-          ok: false,
-          error: "validation_failed",
-          details: fullParse.error,
-        };
-      }
-      writeFileSync(filePath, JSON.stringify(wrapped, null, 2), {
-        encoding: "utf8",
-      });
-      return { ok: true, path: filePath, key: crKey, mode: crMode };
-    }
+    case "config_show":
+      return handleConfigShow(req, principal, ctx);
+    case "procman_list":
+      return handleProcmanList(req, principal, ctx);
+    case "procman_restart":
+      return handleProcmanRestart(req, principal, ctx);
+    case "procman_stop":
+      return handleProcmanStop(req, principal, ctx);
+    case "config_request":
+      return handleConfigRequest(req, principal, ctx);
 
     case "session_queue_manage": {
       if (principal.kind !== "operator") {
@@ -3734,125 +3171,14 @@ export async function handleIntegrationControlOp(
       );
     }
 
-    case "elevation_grant": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "elevation_grant is operator-only");
-      }
-      const elevGrantPl = payloadObject(req);
-      const elevGrantSessionIdRaw =
-        typeof elevGrantPl.session_id === "string" ? elevGrantPl.session_id : undefined;
-      if (!elevGrantSessionIdRaw) {
-        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "payload.session_id is required");
-      }
-      const elevGrantSessionId = resolveTargetSessionIdOrThrow(
-        elevGrantSessionIdRaw,
-        ctx.config,
-        ctx.sessions,
-      );
-      if (!ctx.stateDb) {
-        throw new IntegrationOpError("ERR_STATE_DB_REQUIRED", "elevation requires state DB");
-      }
-      const elevDurationMs =
-        typeof elevGrantPl.duration_ms === "number" ? elevGrantPl.duration_ms : undefined;
-      const { createElevationStore: createElevStoreGrant } =
-        await import("../elevation/elevation-store");
-      const elevStoreGrant = createElevStoreGrant(ctx.stateDb);
-      const elevGrant = elevStoreGrant.grant(elevGrantSessionId, elevDurationMs);
-      return { ok: true, ...elevGrant };
-    }
-
-    case "elevation_revoke": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "elevation_revoke is operator-only");
-      }
-      const elevRevokePl = payloadObject(req);
-      if (!ctx.stateDb) {
-        throw new IntegrationOpError("ERR_STATE_DB_REQUIRED", "elevation requires state DB");
-      }
-      const { createElevationStore: createElevStoreRevoke } =
-        await import("../elevation/elevation-store");
-      const elevStoreRevoke = createElevStoreRevoke(ctx.stateDb);
-      if (typeof elevRevokePl.grant_id === "string") {
-        const revokeOk = elevStoreRevoke.revoke(elevRevokePl.grant_id);
-        return { ok: revokeOk, revoked: revokeOk };
-      }
-      const elevRevokeSessionIdRaw =
-        typeof elevRevokePl.session_id === "string" ? elevRevokePl.session_id : undefined;
-      if (!elevRevokeSessionIdRaw) {
-        throw new IntegrationOpError(
-          "ERR_INVALID_PAYLOAD",
-          "payload.grant_id or payload.session_id is required",
-        );
-      }
-      const elevRevokeSessionId = resolveTargetSessionIdOrThrow(
-        elevRevokeSessionIdRaw,
-        ctx.config,
-        ctx.sessions,
-      );
-      const revokeCount = elevStoreRevoke.revokeAllForSession(elevRevokeSessionId);
-      return { ok: true, revokedCount: revokeCount };
-    }
-
-    case "elevation_list": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "elevation_list is operator-only");
-      }
-      const elevListPl = payloadObject(req);
-      if (!ctx.stateDb) {
-        throw new IntegrationOpError("ERR_STATE_DB_REQUIRED", "elevation requires state DB");
-      }
-      const elevListSessionIdRaw =
-        typeof elevListPl.session_id === "string" ? elevListPl.session_id : undefined;
-      const { createElevationStore: createElevStoreList } =
-        await import("../elevation/elevation-store");
-      const elevStoreList = createElevStoreList(ctx.stateDb);
-      if (elevListSessionIdRaw) {
-        const elevListSessionId = resolveTargetSessionIdOrThrow(
-          elevListSessionIdRaw,
-          ctx.config,
-          ctx.sessions,
-        );
-        const grants = elevStoreList.list(elevListSessionId);
-        return { ok: true, grants, count: grants.length };
-      }
-      const grants = elevStoreList.list();
-      return { ok: true, grants, count: grants.length };
-    }
-
-    case "yolo_mode": {
-      if (principal.kind !== "operator") {
-        throw new IntegrationOpError("ERR_FORBIDDEN", "yolo_mode is operator-only");
-      }
-      const yoloPl = payloadObject(req);
-      const yoloSessionIdRaw =
-        typeof yoloPl.session_id === "string" ? yoloPl.session_id : undefined;
-      if (!yoloSessionIdRaw) {
-        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "payload.session_id is required");
-      }
-      const yoloSessionId = resolveTargetSessionIdOrThrow(
-        yoloSessionIdRaw,
-        ctx.config,
-        ctx.sessions,
-      );
-      if (!ctx.stateDb) {
-        throw new IntegrationOpError("ERR_STATE_DB_REQUIRED", "yolo mode requires state DB");
-      }
-      const yoloAction =
-        typeof yoloPl.action === "string" && yoloPl.action.length > 0 ? yoloPl.action : "on";
-      if (yoloAction !== "on" && yoloAction !== "off" && yoloAction !== "status") {
-        throw new IntegrationOpError(
-          "ERR_INVALID_PAYLOAD",
-          "payload.action must be on, off, or status",
-        );
-      }
-      const { createYoloModeStore: createYoloStore } = await import("../hitl/yolo-mode-store");
-      const yoloStore = createYoloStore(ctx.stateDb);
-      if (yoloAction === "status") {
-        return { ok: true, sessionId: yoloSessionId, enabled: yoloStore.isEnabled(yoloSessionId) };
-      }
-      yoloStore.setEnabled(yoloSessionId, yoloAction === "on");
-      return { ok: true, sessionId: yoloSessionId, enabled: yoloAction === "on" };
-    }
+    case "elevation_grant":
+      return handleElevationGrant(req, principal, ctx);
+    case "elevation_revoke":
+      return handleElevationRevoke(req, principal, ctx);
+    case "elevation_list":
+      return handleElevationList(req, principal, ctx);
+    case "yolo_mode":
+      return handleYoloMode(req, principal, ctx);
 
     case "vault.set":
       return handleVaultSet(req, principal, ctx);
@@ -3880,216 +3206,15 @@ export async function handleIntegrationControlOp(
     case "service.rotate-key":
       return handleServiceRotateKey(req, principal, ctx);
 
-    case "media_generate": {
-      if (principal.kind !== "agent" && principal.kind !== "operator") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "media_generate requires agent or operator principal",
-        );
-      }
-      const pl = payloadObject(req);
-      // model is optional — falls back to the configured media-type default
-      const modelRaw = pl.model;
-      if (
-        modelRaw !== undefined &&
-        modelRaw !== null &&
-        (typeof modelRaw !== "string" || !modelRaw)
-      ) {
-        throw new IntegrationOpError(
-          "ERR_INVALID_PAYLOAD",
-          "media_generate model must be a non-empty string",
-        );
-      }
-      const model = typeof modelRaw === "string" && modelRaw ? modelRaw : undefined;
-      if (model && (model.indexOf("/") <= 0 || model.indexOf("/") === model.length - 1)) {
-        throw new IntegrationOpError(
-          "ERR_INVALID_PAYLOAD",
-          "media_generate model must be in provider-id/model-id format",
-        );
-      }
-      const prompt = pl.prompt;
-      if (typeof prompt !== "string" || prompt === undefined) {
-        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "media_generate requires prompt");
-      }
-      const params = pl.params;
-      if (!params || typeof params !== "object") {
-        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "media_generate requires params");
-      }
-      if (!(params as any).kind) {
-        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "media_generate params requires kind");
-      }
-      const mediaGenConfig = (ctx.config as any).mediaGeneration;
-      if (!mediaGenConfig) {
-        return { status: "error", error: `No mediaGeneration config found` };
-      }
-      const svc = (ctx.createMediaGenerationService ?? MediaGenerationService.fromConfig)(
-        mediaGenConfig,
-      );
-      return svc.generate({
-        model,
-        prompt,
-        params: params as any,
-        output_path:
-          typeof pl.output_path === "string" ? pl.output_path : `/tmp/media/${Date.now()}.bin`,
-        timeout_ms: typeof pl.timeout_ms === "number" ? pl.timeout_ms : undefined,
-      });
-    }
-    case "media_generate_poll": {
-      const pl = payloadObject(req);
-      const providerId = pl.provider_id;
-      const operationId = pl.operation_id;
-      if (typeof providerId !== "string" || !providerId) {
-        throw new IntegrationOpError(
-          "ERR_INVALID_PAYLOAD",
-          "media_generate_poll requires provider_id",
-        );
-      }
-      if (typeof operationId !== "string" || !operationId) {
-        throw new IntegrationOpError(
-          "ERR_INVALID_PAYLOAD",
-          "media_generate_poll requires operation_id",
-        );
-      }
-      const mediaGenConfig2 = (ctx.config as any).mediaGeneration;
-      if (!mediaGenConfig2) {
-        return { status: "error", error: `Provider not found: ${providerId}` };
-      }
-      const svc2 = (ctx.createMediaGenerationService ?? MediaGenerationService.fromConfig)(
-        mediaGenConfig2,
-      );
-      return svc2.poll({
-        provider_id: providerId,
-        operation_id: operationId,
-        output_path: typeof pl.output_path === "string" ? pl.output_path : undefined,
-      });
-    }
+    case "media_generate":
+      return handleMediaGenerate(req, principal, ctx);
+    case "media_generate_poll":
+      return handleMediaGeneratePoll(req, principal, ctx);
 
-    case "decision_evaluate": {
-      // Feature gating: with no decision provider that has models, the op is
-      // indistinguishable from a nonexistent one (undefined → ERR_UNKNOWN_OP).
-      const decisionConfig = (ctx.config as any).decision;
-      const decisionEnabled = (
-        Object.values(decisionConfig?.providers ?? {}) as Array<{
-          models?: Record<string, unknown>;
-        }>
-      ).some((p) => Object.keys(p.models ?? {}).length > 0);
-      if (!decisionEnabled) {
-        return undefined;
-      }
-      if (principal.kind !== "agent" && principal.kind !== "operator") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "decision_evaluate requires agent or operator principal",
-        );
-      }
-      const pl = payloadObject(req);
-      // model is optional — falls back to the configured decision defaultModel
-      const modelRaw = pl.model;
-      if (
-        modelRaw !== undefined &&
-        modelRaw !== null &&
-        (typeof modelRaw !== "string" || !modelRaw)
-      ) {
-        throw new IntegrationOpError(
-          "ERR_INVALID_PAYLOAD",
-          "decision_evaluate model must be a non-empty string",
-        );
-      }
-      const model = typeof modelRaw === "string" && modelRaw ? modelRaw : undefined;
-      if (pl.state === undefined || pl.state === null) {
-        throw new IntegrationOpError("ERR_INVALID_PAYLOAD", "decision_evaluate requires state");
-      }
-      const questions = pl.questions;
-      if (
-        !questions ||
-        typeof questions !== "object" ||
-        Array.isArray(questions) ||
-        Object.keys(questions as object).length === 0
-      ) {
-        throw new IntegrationOpError(
-          "ERR_INVALID_PAYLOAD",
-          "decision_evaluate requires a non-empty questions object",
-        );
-      }
-      const svc = DecisionService.fromConfig(decisionConfig);
-      return svc.evaluate({
-        model: model,
-        state: pl.state,
-        questions: questions as Record<string, unknown>,
-        timeout_ms: typeof pl.timeout_ms === "number" ? pl.timeout_ms : undefined,
-      });
-    }
-
-    case "rerank_documents": {
-      // Feature gating: with no rerank provider that has models, the op is
-      // indistinguishable from a nonexistent one (undefined → ERR_UNKNOWN_OP).
-      const rerankConfig = ctx.config.rerank;
-      const rerankEnabled = Object.values(rerankConfig?.providers ?? {}).some(
-        (p) => Object.keys(p.models ?? {}).length > 0,
-      );
-      if (!rerankEnabled) {
-        return undefined;
-      }
-      if (principal.kind !== "agent" && principal.kind !== "operator") {
-        throw new IntegrationOpError(
-          "ERR_FORBIDDEN",
-          "rerank_documents requires agent or operator principal",
-        );
-      }
-      const pl = payloadObject(req);
-      // model is optional — falls back to the configured rerank defaultModel
-      const modelRaw = pl.model;
-      if (
-        modelRaw !== undefined &&
-        modelRaw !== null &&
-        (typeof modelRaw !== "string" || !modelRaw)
-      ) {
-        throw new IntegrationOpError(
-          "ERR_INVALID_PAYLOAD",
-          "rerank_documents model must be a non-empty string",
-        );
-      }
-      const model = typeof modelRaw === "string" && modelRaw ? modelRaw : undefined;
-      const queryRaw = pl.query;
-      if (typeof queryRaw !== "string" || !queryRaw.trim()) {
-        throw new IntegrationOpError(
-          "ERR_INVALID_PAYLOAD",
-          "rerank_documents requires a non-empty query string",
-        );
-      }
-      const docsRaw = pl.documents;
-      if (!Array.isArray(docsRaw) || docsRaw.length === 0) {
-        throw new IntegrationOpError(
-          "ERR_INVALID_PAYLOAD",
-          "rerank_documents requires a non-empty documents array",
-        );
-      }
-      if (!docsRaw.every((d) => typeof d === "string" && d.length > 0)) {
-        throw new IntegrationOpError(
-          "ERR_INVALID_PAYLOAD",
-          "rerank_documents documents must be non-empty strings",
-        );
-      }
-      const topNRaw = pl.top_n;
-      if (
-        topNRaw !== undefined &&
-        topNRaw !== null &&
-        (typeof topNRaw !== "number" || !Number.isFinite(topNRaw) || topNRaw < 1)
-      ) {
-        throw new IntegrationOpError(
-          "ERR_INVALID_PAYLOAD",
-          "rerank_documents top_n must be a positive number",
-        );
-      }
-      const svc = (ctx.createRerankService ?? RerankService.fromConfig)(rerankConfig!);
-      return svc.rerank({
-        model: model,
-        query: queryRaw,
-        documents: docsRaw as string[],
-        top_n: typeof topNRaw === "number" ? topNRaw : undefined,
-        timeout_ms: typeof pl.timeout_ms === "number" ? pl.timeout_ms : undefined,
-      });
-    }
+    case "decision_evaluate":
+      return handleDecisionEvaluate(req, principal, ctx);
+    case "rerank_documents":
+      return handleRerankDocuments(req, principal, ctx);
 
     default:
       return undefined;
