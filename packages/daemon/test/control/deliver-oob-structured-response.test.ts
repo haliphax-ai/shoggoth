@@ -58,7 +58,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("delivers both to_operator and to_sender when both fields are present", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const postToOperator = mockPostToOperator;
     const operatorText = "Message for the operator";
@@ -88,7 +88,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("delivers only to_sender when to_operator is null", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const senderText = "Only sender gets this";
     const handle = registerSteerChannel("parent-oob");
@@ -110,7 +110,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("delivers only to_operator when to_sender is null", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const operatorText = "Only operator gets this";
 
@@ -131,7 +131,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("does not deliver anything when both fields are null", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     await deliverOobStructuredResponse({
       ...opts(),
@@ -144,7 +144,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("sends a nudge turn when JSON is invalid, and surfaces error when nudge produces no response", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const warn = vi.fn();
     const error = vi.fn();
@@ -182,7 +182,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("recovers when nudge turn produces valid structured output (hasSender=true)", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const nudgeResponse = JSON.stringify({
       to_operator: "recovered!",
@@ -214,7 +214,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("recovers when nudge turn produces valid structured output (hasSender=false, timer case)", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const nudgeResponse = JSON.stringify({ to_operator: "timer result" });
     const runTurn = vi.fn().mockResolvedValue({ latestAssistantText: nudgeResponse });
@@ -236,7 +236,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("surfaces error to operator when nudge also produces invalid JSON", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const error = vi.fn();
     const runTurn = vi.fn().mockResolvedValue({ latestAssistantText: "still not json" });
@@ -261,7 +261,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("surfaces error to operator when nudge turn itself throws", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const error = vi.fn();
     const runTurn = vi.fn().mockRejectedValue(new Error("model unavailable"));
@@ -286,7 +286,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("truncates long messages to maxChars", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const longText = "x".repeat(10000);
     const handle = registerSteerChannel("parent-oob");
@@ -315,7 +315,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("re-delivers to_sender via an OOB turn when the steer entry is dropped undrained", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const runTurn = vi.fn().mockResolvedValue({});
     const senderText = "Sender recovery message";
@@ -351,7 +351,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("falls back to runSessionModelTurn when no active steer channel for to_sender", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const runTurn = vi.fn().mockResolvedValue({});
     const senderText = "Sender fallback message";
@@ -379,7 +379,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("does NOT deliver to_sender when hasSender is false even if present", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const runTurn = vi.fn().mockResolvedValue({});
 
@@ -405,7 +405,7 @@ describe("deliverOobStructuredResponse", () => {
     // returns a structured response, then verify postToOperator receives the
     // to_operator field. deliverOobStructuredResponse is a same-module call,
     // so vi.mock cannot intercept it — we test the effect.
-    const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+    const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
     const structured = JSON.stringify({
       to_operator: "operator sees this",
@@ -452,7 +452,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("replays the OOB system context on the nudge turn so it is a continuation", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const runTurn = vi.fn().mockResolvedValue({
       latestAssistantText: JSON.stringify({ to_operator: "ok", to_sender: null }),
@@ -480,7 +480,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("omits systemContext on the nudge turn when the original turn had none", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const runTurn = vi.fn().mockResolvedValue({
       latestAssistantText: JSON.stringify({ to_operator: "ok", to_sender: null }),
@@ -500,7 +500,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("nudge text frames the retry as a continuation that still has the structured output tool", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const runTurn = vi.fn().mockResolvedValue({
       latestAssistantText: JSON.stringify({ to_operator: "ok", to_sender: null }),
@@ -520,7 +520,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("surfaces the model's raw output after the warning when the nudge is also invalid", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const runTurn = vi
       .fn()
@@ -543,7 +543,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("surfaces the original OOB output after the warning when the nudge turn throws", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const runTurn = vi.fn().mockRejectedValue(new Error("model unavailable"));
 
@@ -561,7 +561,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("surfaces the original OOB output after the warning when the nudge produces no response", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const runTurn = vi.fn().mockResolvedValue(undefined);
 
@@ -579,7 +579,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("forwards banner statusBar to finish on the success path", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const finish = vi.fn();
     const handle = { sessionId: "parent-oob", setStatusBar: vi.fn() };
@@ -607,7 +607,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("omits statusBar on the success path when the banner had no tracker", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const finish = vi.fn();
     const handle = { sessionId: "parent-oob", setStatusBar: vi.fn() };
@@ -632,7 +632,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("forwards banner statusBar to finish on the abort path", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const finish = vi.fn();
     const handle = { sessionId: "parent-oob", setStatusBar: vi.fn() };
@@ -661,7 +661,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("forwards banner statusBar to finish on the failure (nudge) path", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const finish = vi.fn();
     const handle = { sessionId: "parent-oob", setStatusBar: vi.fn() };
@@ -689,7 +689,7 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("clips a very long raw output to maxChars in the failure notice", async () => {
-    const { deliverOobStructuredResponse } = await import("../../src/control/integration-ops");
+    const { deliverOobStructuredResponse } = await import("../../src/control/ops-shared");
 
     const runTurn = vi.fn().mockResolvedValue({ latestAssistantText: "y".repeat(10_000) });
 

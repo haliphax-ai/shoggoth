@@ -15,10 +15,7 @@ import { createPolicyEngine } from "../../src/policy/engine";
 import { executeSessionAgentTurn } from "../../src/sessions/session-agent-turn";
 import { buildBuiltinOnlySessionMcpToolContext } from "../../src/sessions/session-mcp-tool-context";
 import { requestSessionTurnAbort, TurnAbortedError } from "../../src/sessions/session-turn-abort";
-import {
-  deliverOobStructuredResponse,
-  deliverSubagentResult,
-} from "../../src/control/integration-ops";
+import { deliverOobStructuredResponse, deliverSubagentResult } from "../../src/control/ops-shared";
 import type { SubagentRuntimeExtension } from "../../src/subagent/subagent-extension-ref";
 import { setSubagentRuntimeExtension } from "../../src/subagent/subagent-extension-ref";
 import { deliverTimerMessage } from "../../src/timers/timer-delivery";

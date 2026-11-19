@@ -42,7 +42,7 @@ describe("deliverSubagentResult", () => {
 
   describe("delivery_mode='drop'", () => {
     it("should not call pushSteer or runSessionModelTurn when delivery_mode is drop", async () => {
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
       await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
         childSessionId: "child-1",
@@ -62,7 +62,7 @@ describe("deliverSubagentResult", () => {
     it("should call pushSteer and NOT call runSessionModelTurn when active loop exists", async () => {
       const handle = registerSteerChannel("parent-2");
 
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
       await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
         childSessionId: "child-2",
@@ -81,7 +81,7 @@ describe("deliverSubagentResult", () => {
     it("re-delivers via the OOB queue turn when the inline steer entry is dropped undrained", async () => {
       const handle = registerSteerChannel("parent-drop");
       const subLog = { info: vi.fn(), warn: vi.fn() } as never;
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
       mockRunSessionModelTurn.mockClear();
 
       // Steer channel is registered, so the completion notice is queued in-turn.
@@ -121,7 +121,7 @@ describe("deliverSubagentResult", () => {
 
   describe("delivery_mode='inline' without active loop (fallback to queue)", () => {
     it("should call runSessionModelTurn when no active loop exists, with OOB structured override", async () => {
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
       await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
         childSessionId: "child-3",
@@ -164,7 +164,7 @@ describe("deliverSubagentResult", () => {
     it("should always call runSessionModelTurn regardless of active loop", async () => {
       const handle = registerSteerChannel("parent-4");
 
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
       await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
         childSessionId: "child-4",
@@ -181,7 +181,7 @@ describe("deliverSubagentResult", () => {
     });
 
     it("should call runSessionModelTurn when no active loop exists", async () => {
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
       await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
         childSessionId: "child-5",
@@ -200,7 +200,7 @@ describe("deliverSubagentResult", () => {
   describe("max-chars truncation", () => {
     it("should truncate text to 8000 chars by default", async () => {
       const longText = "a".repeat(10000);
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
       await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
         childSessionId: "child-6",
@@ -226,7 +226,7 @@ describe("deliverSubagentResult", () => {
 
     it("should truncate text to custom maxChars when provided", async () => {
       const longText = "b".repeat(500);
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
       await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
         childSessionId: "child-7",
@@ -248,7 +248,7 @@ describe("deliverSubagentResult", () => {
 
     it("should not truncate text shorter than maxChars", async () => {
       const shortText = "short result";
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
       await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
         childSessionId: "child-8",
@@ -273,7 +273,7 @@ describe("deliverSubagentResult", () => {
 
     it("inline+active-loop: appends base reminder, NOT the OOB guidance string", async () => {
       const handle = registerSteerChannel("parent-remind-steer");
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
       await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
         childSessionId: "child-remind-1",
@@ -297,7 +297,7 @@ describe("deliverSubagentResult", () => {
     });
 
     it("async/queue: appends guidance string instead of old reminders", async () => {
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
       await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
         childSessionId: "child-remind-2",
@@ -320,7 +320,7 @@ describe("deliverSubagentResult", () => {
 
     it("async/inline fallback: appends guidance string", async () => {
       mockRunSessionModelTurn.mockClear();
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
       await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
         childSessionId: "child-remind-3",
@@ -341,7 +341,7 @@ describe("deliverSubagentResult", () => {
     });
 
     it("reminders contain no platform-specific names", async () => {
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
       mockRunSessionModelTurn.mockClear();
 
       await deliverSubagentResult({ runSessionModelTurn: mockRunSessionModelTurn } as never, {
@@ -369,7 +369,7 @@ describe("deliverSubagentResult", () => {
         })
         .mockResolvedValue({});
       const postToOperator = vi.fn();
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
       await deliverSubagentResult(
         { runSessionModelTurn: mockRunSessionModelTurn, postToOperator } as never,
@@ -410,7 +410,7 @@ describe("deliverSubagentResult", () => {
         .mockResolvedValueOnce({ latestAssistantText: "original prose answer" })
         .mockResolvedValue({ latestAssistantText: "still prose" });
       const postToOperator = vi.fn();
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
       await deliverSubagentResult(
         { runSessionModelTurn: mockRunSessionModelTurn, postToOperator } as never,
