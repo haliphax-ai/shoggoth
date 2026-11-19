@@ -10,6 +10,9 @@ import { deepMerge, loadLayeredConfigAsync, redactDeep } from "@shoggoth/shared"
 import { shoggothConfigFragmentSchema, shoggothConfigSchema } from "@shoggoth/shared";
 import type { IntegrationOpsContext } from "./integration-ops";
 import { IntegrationOpError } from "./integration-ops";
+import { getLogger } from "../logging";
+
+const ioLog = getLogger("config-ops");
 
 function payloadObject(req: WireRequest): Record<string, unknown> {
   const p = req.payload;
@@ -45,7 +48,11 @@ export async function handleConfigShow(
       if (!name.endsWith(".json")) continue;
       try {
         fragments[name.slice(0, -5)] = JSON.parse(readFileSync(join(dynDir, name), "utf8"));
-      } catch {
+      } catch (e) {
+        ioLog.warn("config_fragment_parse_failed", {
+          file: join(dynDir, name),
+          error: String(e),
+        });
         continue;
       }
     }
@@ -100,8 +107,8 @@ export async function handleConfigRequest(
     try {
       const existing = JSON.parse(readFileSync(filePath, "utf8"));
       wrapped = deepMerge(existing, wrapped);
-    } catch {
-      /* overwrite if existing file is unreadable */
+    } catch (e) {
+      ioLog.warn("config_fragment_parse_failed", { file: filePath, error: String(e) });
     }
   }
   const currentConfig = await loadLayeredConfigAsync(ctx.config.configDirectory);

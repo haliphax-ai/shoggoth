@@ -14,6 +14,7 @@ import {
   handleIntegrationControlOp,
   type IntegrationOpsContext,
 } from "../../src/control/integration-ops";
+import { createLogger, setRootLogger, type Logger, type LogFields } from "../../src/logging";
 
 function minimalConfig(tmp: string, dynamicConfigDirectory?: string): ShoggothConfig {
   const configDir = join(tmp, "config.d");
@@ -49,6 +50,25 @@ function makeWireRequest(op: string, payload: Record<string, unknown>): WireRequ
     auth: { kind: "operator", token: "t" },
     payload,
   };
+}
+
+type LogCapture = {
+  logger: Logger;
+  records: Array<{ level: string; msg: string; fields: LogFields }>;
+};
+
+function recordingLogger(): LogCapture {
+  const records: Array<{ level: string; msg: string; fields: LogFields }> = [];
+  const logger: Logger = {
+    debug: (_msg, _fields) => {},
+    info: (_msg, _fields) => {},
+    warn: (msg, fields) => {
+      records.push({ level: "warn", msg, fields: fields ?? {} });
+    },
+    error: (_msg, _fields) => {},
+    child: () => logger,
+  };
+  return { logger, records };
 }
 
 const agentPrincipal: AuthenticatedPrincipal = {
@@ -330,5 +350,81 @@ describe("config_request control op", { concurrency: false }, () => {
     };
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.error, "validation_failed");
+  });
+
+  it("warns on unreadable dynamic fragments instead of silently skipping them in config_show", async () => {
+    const dynDir = join(tmp, "dynamic");
+    mkdirSync(dynDir, { recursive: true });
+    writeFileSync(join(dynDir, "broken.json"), "{ not json");
+    writeFileSync(join(dynDir, "logLevel.json"), JSON.stringify({ logLevel: "debug" }));
+    const config = minimalConfig(tmp, dynDir);
+    const ctx: IntegrationOpsContext = {
+      config,
+      stateDb: db,
+      acpxStore: undefined,
+      sessions: undefined,
+      sessionManager: undefined,
+      acpxSupervisor: undefined,
+      recordIntegrationAudit: () => {},
+    };
+    const req = makeWireRequest("config_show", { dynamic: true });
+    const capture = recordingLogger();
+    setRootLogger(capture.logger);
+    try {
+      const result = (await handleIntegrationControlOp(req, operatorPrincipal, ctx)) as {
+        ok: boolean;
+        fragments: Record<string, unknown>;
+      };
+      assert.strictEqual(result.ok, true);
+      assert.deepStrictEqual(result.fragments, { logLevel: { logLevel: "debug" } });
+      const warnings = capture.records.filter(
+        (r) => r.level === "warn" && r.msg === "config_fragment_parse_failed",
+      );
+      assert.strictEqual(warnings.length, 1);
+      assert.strictEqual(warnings[0].fields.file, join(dynDir, "broken.json"));
+    } finally {
+      setRootLogger(createLogger({ component: "config-request.test" }));
+    }
+  });
+
+  it("warns on unreadable existing fragment and overwrites it in config_request merge mode", async () => {
+    const dynDir = join(tmp, "dynamic");
+    mkdirSync(dynDir, { recursive: true });
+    writeFileSync(join(dynDir, "logLevel.json"), "{ not json");
+    const config = minimalConfig(tmp, dynDir);
+    const ctx: IntegrationOpsContext = {
+      config,
+      stateDb: db,
+      acpxStore: undefined,
+      sessions: undefined,
+      sessionManager: undefined,
+      acpxSupervisor: undefined,
+      recordIntegrationAudit: () => {},
+    };
+    const req = makeWireRequest("config_request", {
+      key: "logLevel",
+      fragment: "debug",
+    });
+    const capture = recordingLogger();
+    setRootLogger(capture.logger);
+    try {
+      const result = (await handleIntegrationControlOp(req, agentPrincipal, ctx)) as {
+        ok: boolean;
+        path: string;
+        mode: string;
+      };
+      assert.strictEqual(result.ok, true);
+      assert.strictEqual(result.mode, "merge");
+      const warnings = capture.records.filter(
+        (r) => r.level === "warn" && r.msg === "config_fragment_parse_failed",
+      );
+      assert.strictEqual(warnings.length, 1);
+      assert.strictEqual(warnings[0].fields.file, join(dynDir, "logLevel.json"));
+      // Corrupt existing fragment is still overwritten (best-effort behavior kept).
+      const written = JSON.parse(readFileSync(result.path, "utf8"));
+      assert.deepStrictEqual(written, { logLevel: "debug" });
+    } finally {
+      setRootLogger(createLogger({ component: "config-request.test" }));
+    }
   });
 });
