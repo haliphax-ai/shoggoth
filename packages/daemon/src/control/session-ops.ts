@@ -180,16 +180,13 @@ export async function handleSessionList(
           "agent may only list sessions for own agent id",
         );
       }
-      const rows = ctx.sessions.list({
+      return listSessionsWithDefaults(ctx.sessions, callerAgentId, {
         status,
-        agentId: callerAgentId,
         sortBy,
         sortOrder,
         activeSince,
         limit,
       });
-      const filtered = status ? rows : rows.filter((r) => r.status !== "terminated");
-      return { sessions: filtered.map(mapSessionListRow) };
     }
 
     if (agentFilter) {
@@ -200,17 +197,37 @@ export async function handleSessionList(
         throw new IntegrationOpError("ERR_INVALID_PAYLOAD", `payload.agent: ${msg}`);
       }
     }
-    const rows = ctx.sessions.list({
+    return listSessionsWithDefaults(ctx.sessions, agentFilter, {
       status,
-      agentId: agentFilter,
       sortBy,
       sortOrder,
       activeSince,
       limit,
     });
-    const filtered = status ? rows : rows.filter((r) => r.status !== "terminated");
-    return { sessions: filtered.map(mapSessionListRow) };
   }
+}
+
+/**
+ * Run one shared `session_list` query: resolve the effective agent filter, list
+ * sessions, and map rows — hiding terminated sessions unless an explicit
+ * status filter is present. Both the agent-principal and operator branches of
+ * `handleSessionList` funnel through this tail so filter construction and row
+ * mapping cannot silently diverge between them.
+ */
+function listSessionsWithDefaults(
+  sessions: NonNullable<IntegrationOpsContext["sessions"]>,
+  agentId: string | undefined,
+  filter: {
+    readonly status?: string;
+    readonly sortBy?: SessionSortBy;
+    readonly sortOrder?: "asc" | "desc";
+    readonly activeSince?: string;
+    readonly limit?: number;
+  },
+): { sessions: ReturnType<typeof mapSessionListRow>[] } {
+  const rows = sessions.list({ ...filter, agentId });
+  const filtered = filter.status ? rows : rows.filter((r) => r.status !== "terminated");
+  return { sessions: filtered.map(mapSessionListRow) };
 }
 
 /**
