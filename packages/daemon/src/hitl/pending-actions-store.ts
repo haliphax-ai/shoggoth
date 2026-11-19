@@ -139,6 +139,51 @@ export function createPendingActionsStore(
     LIMIT @limit
   `);
 
+  const approveStmt = db.prepare(`
+    UPDATE hitl_pending_actions SET
+      status = 'approved',
+      resolved_at = datetime('now'),
+      resolver_principal = @resolver_principal
+    WHERE id = @id AND status = 'pending'
+  `);
+
+  const denyStmt = db.prepare(`
+    UPDATE hitl_pending_actions SET
+      status = 'denied',
+      denial_reason = 'operator',
+      resolved_at = datetime('now'),
+      resolver_principal = @resolver_principal
+    WHERE id = @id AND status = 'pending'
+  `);
+
+  const selectDueStmt = db.prepare(`
+    SELECT id FROM hitl_pending_actions
+    WHERE status = 'pending'
+      AND datetime(expires_at) < datetime(@now_iso)
+  `);
+
+  const expireDueStmt = db.prepare(`
+    UPDATE hitl_pending_actions SET
+      status = 'denied',
+      denial_reason = 'timeout',
+      resolved_at = datetime('now')
+    WHERE id = @id AND status = 'pending'
+      AND datetime(expires_at) < datetime(@now_iso)
+  `);
+
+  const deletePendingStmt = db.prepare(`
+    DELETE FROM hitl_pending_actions
+    WHERE status = 'pending' AND session_id = @session_id
+  `);
+
+  const deletePendingBySessionIds = db.transaction((sessionIds: readonly string[]) => {
+    let n = 0;
+    for (const sessionId of sessionIds) {
+      n += deletePendingStmt.run({ session_id: sessionId.trim() }).changes;
+    }
+    return n;
+  });
+
   return {
     enqueue(input) {
       insert.run({
@@ -174,14 +219,7 @@ export function createPendingActionsStore(
     },
 
     approve(id, resolverPrincipal) {
-      const q = db.prepare(`
-        UPDATE hitl_pending_actions SET
-          status = 'approved',
-          resolved_at = datetime('now'),
-          resolver_principal = @resolver_principal
-        WHERE id = @id AND status = 'pending'
-      `);
-      const info = q.run({ id, resolver_principal: resolverPrincipal });
+      const info = approveStmt.run({ id, resolver_principal: resolverPrincipal });
       if (info.changes > 0) {
         hooks?.onResolved?.({ id, status: "approved" });
       }
@@ -189,15 +227,7 @@ export function createPendingActionsStore(
     },
 
     deny(id, resolverPrincipal) {
-      const q = db.prepare(`
-        UPDATE hitl_pending_actions SET
-          status = 'denied',
-          denial_reason = 'operator',
-          resolved_at = datetime('now'),
-          resolver_principal = @resolver_principal
-        WHERE id = @id AND status = 'pending'
-      `);
-      const info = q.run({ id, resolver_principal: resolverPrincipal });
+      const info = denyStmt.run({ id, resolver_principal: resolverPrincipal });
       if (info.changes > 0) {
         hooks?.onResolved?.({ id, status: "denied", denialReason: "operator" });
       }
@@ -205,26 +235,12 @@ export function createPendingActionsStore(
     },
 
     expireDue(nowIso) {
-      const selectDue = db.prepare(`
-        SELECT id FROM hitl_pending_actions
-        WHERE status = 'pending'
-          AND datetime(expires_at) < datetime(@now_iso)
-      `);
-      const dueRows = selectDue.all({ now_iso: nowIso }) as { id: string }[];
+      const dueRows = selectDueStmt.all({ now_iso: nowIso }) as { id: string }[];
       if (dueRows.length === 0) return 0;
-
-      const upd = db.prepare(`
-        UPDATE hitl_pending_actions SET
-          status = 'denied',
-          denial_reason = 'timeout',
-          resolved_at = datetime('now')
-        WHERE id = @id AND status = 'pending'
-          AND datetime(expires_at) < datetime(@now_iso)
-      `);
 
       let n = 0;
       for (const { id } of dueRows) {
-        const info = upd.run({ id, now_iso: nowIso });
+        const info = expireDueStmt.run({ id, now_iso: nowIso });
         if (info.changes > 0) {
           n++;
           hooks?.onResolved?.({
@@ -239,12 +255,7 @@ export function createPendingActionsStore(
 
     deletePendingForSessionIds(sessionIds) {
       if (sessionIds.length === 0) return 0;
-      const placeholders = sessionIds.map(() => "?").join(", ");
-      const q = db.prepare(
-        `DELETE FROM hitl_pending_actions WHERE status = 'pending' AND session_id IN (${placeholders})`,
-      );
-      const info = q.run(...sessionIds.map((s) => s.trim()));
-      return Number(info.changes);
+      return Number(deletePendingBySessionIds(sessionIds));
     },
   };
 }
