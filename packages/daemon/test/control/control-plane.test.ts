@@ -1201,6 +1201,70 @@ describe("control plane (unix socket + JSONL)", () => {
         assert.ok(ids.has(sidA));
         assert.ok(ids.has(sidB));
         assert.ok(!ids.has(sidOther));
+
+        // Sorting must flow through the shared agent-filter path (agentId
+        // resolved from the token's session URN, sortBy applied after).
+        const lineSort = await send({
+          v: WIRE_VERSION,
+          id: "sla2",
+          op: "session_list",
+          auth: { kind: "agent", session_id: sidA, token: raw },
+          payload: { sort_by: "created", sort_order: "asc" },
+        });
+        const resSort = parseResponseLine(lineSort);
+        assert.equal(resSort.ok, true);
+        const sortedIds = (resSort.result as { sessions: { id: string }[] }).sessions.map(
+          (r) => r.id,
+        );
+        assert.ok(sortedIds.length >= 2);
+        assert.ok(sortedIds.includes(sidA));
+        assert.ok(sortedIds.includes(sidB));
+        assert.ok(!sortedIds.includes(sidOther));
+        assert.deepEqual(sortedIds.slice(0, 2), [sidA, sidB]);
+        assert.ok(
+          sortedIds.indexOf(sidA) <= sortedIds.indexOf(sidB),
+          "ascending created sort must order sidA before sidB",
+        );
+
+        // Limit flows through the same shared path (no terminated rows exist
+        // here, so the default terminated-exclusion does not interfere).
+        const lineLimit = await send({
+          v: WIRE_VERSION,
+          id: "sla3",
+          op: "session_list",
+          auth: { kind: "agent", session_id: sidA, token: raw },
+          payload: { limit: 1 },
+        });
+        const resLimit = parseResponseLine(lineLimit);
+        assert.equal(resLimit.ok, true);
+        const limitedIds = (resLimit.result as { sessions: { id: string }[] }).sessions;
+        assert.equal(limitedIds.length, 1);
+
+        // Agent may list own agent id explicitly; other agent ids are denied.
+        const lineOwn = await send({
+          v: WIRE_VERSION,
+          id: "sla4",
+          op: "session_list",
+          auth: { kind: "agent", session_id: sidA, token: raw },
+          payload: { agent: "scoped" },
+        });
+        const resOwn = parseResponseLine(lineOwn);
+        assert.equal(resOwn.ok, true);
+        const ownIds = (resOwn.result as { sessions: { id: string }[] }).sessions;
+        assert.ok(ownIds.some((r) => r.id === sidA));
+        assert.ok(ownIds.some((r) => r.id === sidB));
+
+        const lineForeign = await send({
+          v: WIRE_VERSION,
+          id: "sla5",
+          op: "session_list",
+          auth: { kind: "agent", session_id: sidA, token: raw },
+          payload: { agent: "other" },
+        });
+        const resForeign = parseResponseLine(lineForeign);
+        assert.equal(resForeign.ok, false);
+        assert.equal(resForeign.error?.code, "ERR_FORBIDDEN");
+        assert.match(String(resForeign.error?.message), /own agent id/);
       },
     );
 
