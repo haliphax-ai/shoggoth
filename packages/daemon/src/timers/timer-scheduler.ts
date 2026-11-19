@@ -19,6 +19,18 @@ interface TimerRecord {
 
 type TimerDeliveryFn = (entry: TimerEntry) => Promise<void>;
 
+/**
+ * Delivery/cancel semantics (at-most-once):
+ *
+ * - A timer is marked `fired = 1` in the DB *before* its delivery begins, so a
+ *   crash mid-delivery drops the message rather than duplicating it.
+ * - A timer whose delivery is currently in flight can NOT be cancelled:
+ *   {@link cancel} and {@link cancelByAnchorSession} skip it (reporting it as
+ *   not cancelled) and the pending delivery still completes. A cancel arriving
+ *   during delivery therefore never contradicts a delivery that lands.
+ * - Timers still in the pending buffer (scheduled but not yet flushed) and
+ *   timers waiting in the heap remain freely cancellable.
+ */
 export class TimerScheduler {
   private readonly heap = new TimerHeap();
   private timeout: ReturnType<typeof setTimeout> | undefined;
@@ -26,6 +38,8 @@ export class TimerScheduler {
   private readonly deliver: TimerDeliveryFn;
   /** Pending timers per session — buffered until flushSession() is called after a turn ends. */
   private readonly pendingTimers = new Map<string, TimerRecord[]>();
+  /** Timers whose delivery is currently awaiting — cancel() ignores these. */
+  private readonly inFlight = new Set<string>();
 
   constructor(deliver: TimerDeliveryFn) {
     this.deliver = deliver;
@@ -83,9 +97,16 @@ export class TimerScheduler {
     this.reschedule();
   }
 
-  /** Cancel a timer by ID. Marks fired=1 in DB and removes from heap or pending buffer. */
+  /**
+   * Cancel a timer by ID. Marks fired=1 in DB and removes from heap or pending
+   * buffer. Returns false for unknown, already-fired, or in-flight-delivery
+   * timers (see class doc for in-flight semantics). All DB work uses the passed
+   * handle — the scheduler-wide handle is owned by schedule/restore only.
+   */
   cancel(db: Database.Database, id: string): boolean {
-    this.db = db;
+    if (this.inFlight.has(id)) {
+      return false;
+    }
     const removed = this.heap.removeById(id);
     if (!removed) {
       // Check pending buffer
@@ -112,7 +133,11 @@ export class TimerScheduler {
     return true;
   }
 
-  /** Cancel all unfired timers anchored to a session. Idempotent — safe when no timers are anchored. Returns count canceled. */
+  /**
+   * Cancel all unfired timers anchored to a session. Idempotent — safe when no
+   * timers are anchored. Returns count canceled; timers whose delivery is in
+   * flight are skipped and left to complete (see class doc).
+   */
   cancelByAnchorSession(sessionId: string): number {
     const db = this.db;
     if (!db) return 0;
@@ -213,7 +238,12 @@ export class TimerScheduler {
   private async fireTimer(db: Database.Database, entry: TimerEntry): Promise<void> {
     try {
       db.prepare("UPDATE timers SET fired = 1 WHERE id = ?").run(entry.id);
-      await this.deliver(entry);
+      this.inFlight.add(entry.id);
+      try {
+        await this.deliver(entry);
+      } finally {
+        this.inFlight.delete(entry.id);
+      }
       log.debug("timer fired", {
         id: entry.id,
         sessionId: entry.sessionId,
