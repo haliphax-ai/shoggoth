@@ -6,6 +6,9 @@ import type {
 } from "@shoggoth/shared";
 import { resolveAgentIdFromSessionId } from "@shoggoth/shared";
 import { isGlobPattern, toolIdGlobMatches } from "../sessions/tool-id-glob";
+import { INTEGRATION_CONTROL_OPS, type IntegrationControlOp } from "../control/op-registry";
+
+export { INTEGRATION_CONTROL_OPS } from "../control/op-registry";
 
 export type PolicyAction = "control.invoke" | "tool.invoke";
 
@@ -20,70 +23,35 @@ export type PolicyDecision = { allow: true } | { allow: false; reason: string };
 
 const EMPTY_RULES: ShoggothToolRules = { allow: [], deny: [], review: [] };
 
-/** Ops the wire layer recognizes; unknown names stay `ERR_UNKNOWN_OP` before policy. */
-export const DEFINED_CONTROL_OPS = [
+/**
+ * Ops recognized at the wire layer. Registry ops are derived from the
+ * integration-op handler registry so the two cannot drift; `ping`, `version`,
+ * `health`, and `agent_ping` are handled directly in the control-plane
+ * dispatcher and are listed here explicitly.
+ *
+ * Unknown names are rejected with `ERR_UNKNOWN_OP` before policy evaluation,
+ * so an op missing here is unreachable over the wire even if policy allows it.
+ */
+export const DEFINED_CONTROL_OPS: readonly string[] = [
   "ping",
   "version",
   "health",
   "agent_ping",
-  "acpx_bind_get",
-  "acpx_bind_set",
-  "acpx_bind_delete",
-  "acpx_bind_list",
-  "acpx_agent_start",
-  "acpx_agent_stop",
-  "acpx_agent_list",
-  "hitl_pending_list",
-  "hitl_pending_get",
-  "hitl_pending_approve",
-  "hitl_pending_deny",
-  "hitl_clear",
-  "hitl_cruise_control",
-  "mcp_http_cancel_request",
-  "session_compact",
-  "session_context_new",
-  "session_context_reset",
-  "session_context_status",
-  "session_stats",
-  "subagent_spawn",
-  "session_inspect",
-  "session_list",
-  "session_send",
-  "session_steer",
-  "prompt",
-  "prompt_list",
-  "session_abort",
-  "session_kill",
-  "session_model",
-  "session_queue_manage",
-  "elevation_grant",
-  "elevation_revoke",
-  "elevation_list",
-  "yolo_mode",
-  "media_generate",
-  "media_generate_poll",
-  "decision_evaluate",
-  "rerank_documents",
-  "config_show",
-  "config_request",
-  "procman_list",
-  "procman_restart",
-  "procman_stop",
-  "vault.set",
-  "vault.get",
-  "vault.delete",
-  "vault.list",
-  "vault.import",
-  "vault.rotate-key",
-  "service.list",
-  "service.requests",
-  "service.request",
-  "service.approve",
-  "service.revoke",
-  "service.rotate-key",
-] as const;
-type DefinedControlOp = (typeof DEFINED_CONTROL_OPS)[number];
+  ...INTEGRATION_CONTROL_OPS,
+];
 
+/**
+ * A control op that the wire layer can dispatch. The op may still be rejected
+ * at dispatch (principal restrictions, feature gates), but policy for a
+ * defined op is live configuration rather than dead surface.
+ */
+type DefinedControlOp = "ping" | "version" | "health" | "agent_ping" | IntegrationControlOp;
+
+/**
+ * Exact-string gate against the defined-op set. Used before policy evaluation
+ * so unknown ops are rejected with `ERR_UNKNOWN_OP` (audited as `unknown_op`)
+ * before any policy lookup.
+ */
 export function isDefinedControlOp(op: string): op is DefinedControlOp {
   return (DEFINED_CONTROL_OPS as readonly string[]).includes(op);
 }

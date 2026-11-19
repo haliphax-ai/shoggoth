@@ -2495,6 +2495,49 @@ describe("control plane (unix socket + JSONL)", () => {
     });
   });
 
+  it("session_stats is no longer a defined op (drift regression)", async () => {
+    const line = await jsonlRoundTrip({
+      v: WIRE_VERSION,
+      id: "drift-stats",
+      op: "session_stats",
+      auth: { kind: "operator_token", token: TEST_OPERATOR_TOKEN },
+    });
+    const res = parseResponseLine(line);
+    // There is no handler for this op anywhere in the dispatcher, so it must
+    // be rejected at the wire gate rather than consuming policy evaluation.
+    assert.equal(res.ok, false);
+    assert.equal(res.error?.code, "ERR_UNKNOWN_OP");
+  });
+
+  it("subagent_wait and subagent_result are defined ops (policy is live surface)", async () => {
+    const db = new Database(":memory:");
+    migrate(db, defaultMigrationsDir());
+    try {
+      await withControlPlaneSession({ stateDb: db }, async (send) => {
+        for (const [op, payload] of [
+          ["subagent_wait", { session_ids: [] }],
+          ["subagent_result", {}],
+        ] as const) {
+          const line = await send({
+            v: WIRE_VERSION,
+            id: `drift-${op}`,
+            op,
+            auth: { kind: "operator_token", token: TEST_OPERATOR_TOKEN },
+            payload,
+          });
+          const res = parseResponseLine(line);
+          // Defined (past the wire gate, policy evaluated) but payload-invalid:
+          // before these ops were registered in the defined-op set, the wire
+          // layer rejected them with ERR_UNKNOWN_OP before policy ever ran.
+          assert.equal(res.ok, false);
+          assert.equal(res.error?.code, "ERR_INVALID_PAYLOAD");
+        }
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("session_send with wait:false returns on delivery while the turn keeps running detached", async () => {
     if (process.platform !== "linux") return;
 
