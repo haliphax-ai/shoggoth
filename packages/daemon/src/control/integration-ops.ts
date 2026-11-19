@@ -677,13 +677,104 @@ export async function deliverSubagentResult(
 }
 
 /**
+ * A control-op handler as exported by the per-domain op modules.
+ */
+type OpHandler = (
+  req: WireRequest,
+  principal: AuthenticatedPrincipal,
+  ctx: IntegrationOpsContext,
+) => Promise<unknown>;
+
+/**
+ * Static op → handler registry. `req.op` arrives as an arbitrary string from
+ * the wire (parseRequestLine does not constrain its format); safety relies on
+ * exact-string map lookups against literal keys and on `get()` returning
+ * `undefined` for anything else (callers then reject with ERR_UNKNOWN_OP).
+ * Never index, resolve, or interpolate `op` into paths, imports, or command
+ * names — including computed keys on this map.
+ */
+const OP_HANDLERS: ReadonlyMap<string, OpHandler> = new Map<string, OpHandler>([
+  // acpx.ts
+  ["acpx_bind_get", handleAcpxBindGet],
+  ["acpx_bind_set", handleAcpxBindSet],
+  ["acpx_bind_delete", handleAcpxBindDelete],
+  ["acpx_bind_list", handleAcpxBindList],
+  ["acpx_agent_start", handleAcpxAgentStart],
+  ["acpx_agent_stop", handleAcpxAgentStop],
+  ["acpx_agent_list", handleAcpxAgentList],
+  // session-context-ops.ts
+  ["session_context_new", handleSessionContextNew],
+  ["session_context_reset", handleSessionContextReset],
+  ["session_compact", handleSessionCompact],
+  // hitl-ops.ts
+  ["hitl_pending_list", handleHitlPendingList],
+  ["hitl_pending_get", handleHitlPendingGet],
+  ["hitl_pending_approve", handleHitlPendingApprove],
+  ["hitl_pending_deny", handleHitlPendingDeny],
+  ["hitl_clear", handleHitlClear],
+  ["hitl_cruise_control", handleHitlCruiseControl],
+  // mcp-ops.ts
+  ["mcp_http_cancel_request", handleMcpHttpCancelRequest],
+  // subagent-ops.ts
+  ["subagent_spawn", handleSubagentSpawn],
+  ["subagent_wait", handleSubagentWait],
+  ["subagent_result", handleSubagentResult],
+  // session-ops.ts
+  ["session_list", handleSessionList],
+  ["session_context_status", handleSessionContextStatus],
+  ["session_inspect", handleSessionInspect],
+  ["session_send", handleSessionSend],
+  ["session_steer", handleSessionSteer],
+  ["session_abort", handleSessionAbort],
+  ["session_kill", handleSessionKill],
+  ["session_model", handleSessionModel],
+  ["session_queue_manage", handleSessionQueueManage],
+  // prompt-ops-handler.ts
+  ["prompt", handlePrompt],
+  ["prompt_list", handlePromptList],
+  // config-ops.ts
+  ["config_show", handleConfigShow],
+  ["config_request", handleConfigRequest],
+  // procman-ops.ts
+  ["procman_list", handleProcmanList],
+  ["procman_restart", handleProcmanRestart],
+  ["procman_stop", handleProcmanStop],
+  // elevation-ops.ts
+  ["elevation_grant", handleElevationGrant],
+  ["elevation_revoke", handleElevationRevoke],
+  ["elevation_list", handleElevationList],
+  // yolo-ops.ts
+  ["yolo_mode", handleYoloMode],
+  // vault-ops.ts
+  ["vault.set", handleVaultSet],
+  ["vault.get", handleVaultGet],
+  ["vault.delete", handleVaultDelete],
+  ["vault.list", handleVaultList],
+  ["vault.import", handleVaultImport],
+  ["vault.rotate-key", handleVaultRotateKey],
+  // service-ops.ts
+  ["service.list", handleServiceList],
+  ["service.requests", handleServiceRequests],
+  ["service.request", handleServiceRequest],
+  ["service.approve", handleServiceApprove],
+  ["service.revoke", handleServiceRevoke],
+  ["service.rotate-key", handleServiceRotateKey],
+  // media-ops.ts
+  ["media_generate", handleMediaGenerate],
+  ["media_generate_poll", handleMediaGeneratePoll],
+  // decision-ops.ts
+  ["decision_evaluate", handleDecisionEvaluate],
+  ["rerank_documents", handleRerankDocuments],
+]);
+
+/**
  * Integration control-op router. `req.op` arrives as an arbitrary string from
  * the wire (parseRequestLine does not constrain its format); safety relies on
- * this switch matching only literal case labels and returning `undefined` for
+ * exact-string map lookups against literal keys, returning `undefined` for
  * anything else (callers then reject with ERR_UNKNOWN_OP). Never index,
  * resolve, or interpolate `op` into paths, imports, or command names.
  */
-export async function handleIntegrationControlOp(
+export function handleIntegrationControlOp(
   req: WireRequest,
   principal: AuthenticatedPrincipal,
   ctx: IntegrationOpsContext,
@@ -694,132 +785,12 @@ export async function handleIntegrationControlOp(
       operatorId: principal.operatorId,
     });
   }
-  switch (req.op) {
-    case "acpx_bind_get":
-      return handleAcpxBindGet(req, principal, ctx);
-    case "acpx_bind_set":
-      return handleAcpxBindSet(req, principal, ctx);
-    case "acpx_bind_delete":
-      return handleAcpxBindDelete(req, principal, ctx);
-    case "acpx_bind_list":
-      return handleAcpxBindList(req, principal, ctx);
-    case "acpx_agent_start":
-      return handleAcpxAgentStart(req, principal, ctx);
-    case "acpx_agent_stop":
-      return handleAcpxAgentStop(req, principal, ctx);
-    case "acpx_agent_list":
-      return handleAcpxAgentList(req, principal, ctx);
-
-    case "session_context_new":
-      return handleSessionContextNew(req, principal, ctx);
-    case "session_context_reset":
-      return handleSessionContextReset(req, principal, ctx);
-    case "session_compact":
-      return handleSessionCompact(req, principal, ctx);
-
-    case "hitl_pending_list":
-      return handleHitlPendingList(req, principal, ctx);
-    case "hitl_pending_get":
-      return handleHitlPendingGet(req, principal, ctx);
-    case "hitl_pending_approve":
-      return handleHitlPendingApprove(req, principal, ctx);
-    case "hitl_pending_deny":
-      return handleHitlPendingDeny(req, principal, ctx);
-    case "hitl_clear":
-      return handleHitlClear(req, principal, ctx);
-    case "hitl_cruise_control":
-      return handleHitlCruiseControl(req, principal, ctx);
-
-    case "mcp_http_cancel_request":
-      return handleMcpHttpCancelRequest(req, principal, ctx);
-
-    case "subagent_spawn":
-      return handleSubagentSpawn(req, principal, ctx);
-
-    case "subagent_wait":
-      return handleSubagentWait(req, principal, ctx);
-    case "subagent_result":
-      return handleSubagentResult(req, principal, ctx);
-    case "session_list":
-      return handleSessionList(req, principal, ctx);
-    case "session_context_status":
-      return handleSessionContextStatus(req, principal, ctx);
-    case "session_inspect":
-      return handleSessionInspect(req, principal, ctx);
-    case "session_send":
-      return handleSessionSend(req, principal, ctx);
-    case "session_steer":
-      return handleSessionSteer(req, principal, ctx);
-    case "prompt":
-      return handlePrompt(req, principal, ctx);
-    case "prompt_list":
-      return handlePromptList(req, principal, ctx);
-
-    case "session_abort":
-      return handleSessionAbort(req, principal, ctx);
-    case "session_kill":
-      return handleSessionKill(req, principal, ctx);
-    case "session_model":
-      return handleSessionModel(req, principal, ctx);
-    case "config_show":
-      return handleConfigShow(req, principal, ctx);
-    case "procman_list":
-      return handleProcmanList(req, principal, ctx);
-    case "procman_restart":
-      return handleProcmanRestart(req, principal, ctx);
-    case "procman_stop":
-      return handleProcmanStop(req, principal, ctx);
-    case "config_request":
-      return handleConfigRequest(req, principal, ctx);
-
-    case "session_queue_manage":
-      return handleSessionQueueManage(req, principal, ctx);
-    case "elevation_grant":
-      return handleElevationGrant(req, principal, ctx);
-    case "elevation_revoke":
-      return handleElevationRevoke(req, principal, ctx);
-    case "elevation_list":
-      return handleElevationList(req, principal, ctx);
-    case "yolo_mode":
-      return handleYoloMode(req, principal, ctx);
-
-    case "vault.set":
-      return handleVaultSet(req, principal, ctx);
-    case "vault.get":
-      return handleVaultGet(req, principal, ctx);
-    case "vault.delete":
-      return handleVaultDelete(req, principal, ctx);
-    case "vault.list":
-      return handleVaultList(req, principal, ctx);
-    case "vault.import":
-      return handleVaultImport(req, principal, ctx);
-    case "vault.rotate-key":
-      return handleVaultRotateKey(req, principal, ctx);
-
-    case "service.list":
-      return handleServiceList(req, principal, ctx);
-    case "service.requests":
-      return handleServiceRequests(req, principal, ctx);
-    case "service.request":
-      return handleServiceRequest(req, principal, ctx);
-    case "service.approve":
-      return handleServiceApprove(req, principal, ctx);
-    case "service.revoke":
-      return handleServiceRevoke(req, principal, ctx);
-    case "service.rotate-key":
-      return handleServiceRotateKey(req, principal, ctx);
-
-    case "media_generate":
-      return handleMediaGenerate(req, principal, ctx);
-    case "media_generate_poll":
-      return handleMediaGeneratePoll(req, principal, ctx);
-
-    case "decision_evaluate":
-      return handleDecisionEvaluate(req, principal, ctx);
-    case "rerank_documents":
-      return handleRerankDocuments(req, principal, ctx);
-
-    default:
-      return undefined;
+  const handler = OP_HANDLERS.get(req.op);
+  if (handler === undefined) {
+    // Preserve the switch's exact fall-through semantics: an unrecognized op
+    // resolves to `undefined`, and the wire layer turns that into
+    // ERR_UNKNOWN_OP (never index or interpolate req.op).
+    return Promise.resolve(undefined);
   }
+  return handler(req, principal, ctx);
 }
