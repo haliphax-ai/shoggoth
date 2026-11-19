@@ -4,8 +4,10 @@ import { describe, it } from "vitest";
 import { DEFAULT_POLICY_CONFIG } from "@shoggoth/shared";
 import {
   createPolicyEngine,
+  DEFINED_CONTROL_OPS,
   emptyPolicyConfig,
   evaluateRules,
+  INTEGRATION_CONTROL_OPS,
   isDefinedControlOp,
 } from "../../src/policy/engine";
 import { redactToolArgsJson } from "../../src/policy/redact-json";
@@ -196,7 +198,31 @@ describe("policy engine", () => {
     assert.equal(isDefinedControlOp("session_abort"), true);
     assert.equal(isDefinedControlOp("session_list"), true);
     assert.equal(isDefinedControlOp("session_send"), true);
+    // Derived from the handler registry: every registry op is defined, the
+    // registry's dispatcher-side ops are all covered, and hand-listed ops
+    // that never had a handler are gone.
+    assert.equal(isDefinedControlOp("session_inspect"), true);
+    assert.equal(isDefinedControlOp("subagent_wait"), true);
+    assert.equal(isDefinedControlOp("subagent_result"), true);
+    assert.equal(isDefinedControlOp("vault.list"), true);
+    assert.equal(isDefinedControlOp("session_stats"), false);
     assert.equal(isDefinedControlOp("nope"), false);
+  });
+
+  it("DEFINED_CONTROL_OPS covers exactly the dispatcher + registry op sets", () => {
+    for (const op of INTEGRATION_CONTROL_OPS) {
+      assert.ok(isDefinedControlOp(op), `registry op ${op} must be defined for the wire gate`);
+    }
+    for (const op of ["ping", "version", "health", "agent_ping"]) {
+      assert.ok(isDefinedControlOp(op), `${op} must stay defined (dispatcher side)`);
+    }
+    for (const op of DEFINED_CONTROL_OPS) {
+      assert.ok(
+        INTEGRATION_CONTROL_OPS.includes(op) ||
+          ["ping", "version", "health", "agent_ping"].includes(op),
+        `defined op ${op} must be either a registry op or dispatcher-handled`,
+      );
+    }
   });
 });
 

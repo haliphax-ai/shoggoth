@@ -19,6 +19,7 @@ import Database from "better-sqlite3";
 import { WIRE_VERSION, type WireRequest } from "@shoggoth/authn";
 import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import { DEFAULT_POLICY_CONFIG } from "@shoggoth/shared";
+import { isDefinedControlOp } from "../../src/policy/engine";
 import { migrate, defaultMigrationsDir } from "../../src/db/migrate";
 import { createSessionStore } from "../../src/sessions/session-store";
 import { createTranscriptStore } from "../../src/sessions/transcript-store";
@@ -435,5 +436,24 @@ describe("subagent_wait and subagent_result control ops", { concurrency: false }
       () => handleIntegrationControlOp(req, operatorPrincipal, ctx),
       (err: Error) => err.message.includes("non-empty string"),
     );
+  });
+
+  it("subagent_wait is a defined op (wire gate accepts it before policy)", async () => {
+    assert.equal(isDefinedControlOp("subagent_wait"), true);
+    assert.equal(isDefinedControlOp("subagent_result"), true);
+  });
+
+  it("subagent_wait over the wire reaches the handler instead of the unknown-op gate", async () => {
+    const req = makeWireRequest("subagent_wait", {
+      session_ids: ["agent:test:discord:channel:ghost-1"],
+      timeout_ms: 1000,
+    });
+    const result = (await handleIntegrationControlOp(req, operatorPrincipal, ctx)) as {
+      completed: { sessionId: string; exitReason: string }[];
+      timedOut: boolean;
+    };
+    assert.equal(result.completed.length, 1);
+    assert.equal(result.completed[0]!.exitReason, "not_found");
+    assert.equal(result.timedOut, false);
   });
 });

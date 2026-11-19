@@ -15,11 +15,13 @@ export {
   isDefinedControlOp,
   evaluateRules,
   DEFINED_CONTROL_OPS,
+  INTEGRATION_CONTROL_OPS,
   type PolicyEngine,
   type PolicyAction,
   type PolicyCheckInput,
   type PolicyDecision,
 } from "./policy/engine";
+export { OP_HANDLERS, type OpHandler } from "./control/op-registry";
 export {
   auditSourceForPrincipal,
   principalAuditFields,
