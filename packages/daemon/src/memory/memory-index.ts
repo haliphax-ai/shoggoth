@@ -160,6 +160,11 @@ function fileMatchesFilters(
   return true;
 }
 
+/** Escape a string for use as a literal in a SQL LIKE pattern (see ESCAPE clause). */
+function escapeLikePattern(value: string): string {
+  return value.replace(/([\\%_])/g, "\\$1");
+}
+
 /**
  * Scan absolute directory roots for `*.md`, upsert into `memory_documents` / FTS.
  *
@@ -195,12 +200,17 @@ export function ingestMemoryRoots(
   const deleteDoc = db.prepare("DELETE FROM memory_documents WHERE id = @id");
 
   const run = db.transaction((roots: string[]) => {
+    // Resolve each root's realpath once — reused by the walk below and by the
+    // stale-removal scan.
+    const realRootByRoot = new Map<string, string>();
+    for (const root of roots) {
+      realRootByRoot.set(root, realpathSync(root));
+    }
+
     // Track which absolute paths we visited so we can detect removals.
     const visitedPaths = new Set<string>();
 
-    for (const root of roots) {
-      const realRoot = realpathSync(root);
-
+    for (const realRoot of realRootByRoot.values()) {
       for (const filePath of walkMarkdownFiles(realRoot)) {
         const abs = realpathSync(filePath);
         const rel = relative(realRoot, abs);
@@ -242,43 +252,45 @@ export function ingestMemoryRoots(
       }
     }
 
-    // Detect removed files: query existing index entries under these roots
-    // and remove any that no longer exist on disk.
+    // Detect removed files: query index entries under each scanned root and
+    // remove any that no longer exist on disk. Stored source_path values are
+    // realpath'd paths, so a prefix match against the realpath'd root in SQL
+    // is sound and avoids loading the entire table.
     // For scoped ingests, only check files that match the scope filters.
-    const allDocs = db.prepare("SELECT id, source_path FROM memory_documents").all() as {
-      id: number;
-      source_path: string;
-    }[];
+    const selectUnderRoot = db.prepare(
+      "SELECT id, source_path FROM memory_documents WHERE source_path LIKE @prefix ESCAPE '\\'",
+    );
 
-    for (const doc of allDocs) {
-      // Only consider documents under one of the scanned roots.
-      let underRoot = false;
-      let docRelPath = "";
-      let _docRealRoot = "";
-      for (const root of roots) {
-        const realRoot = realpathSync(root);
-        const normalizedRoot = realRoot.endsWith("/") ? realRoot : `${realRoot}/`;
-        if (doc.source_path === realRoot || doc.source_path.startsWith(normalizedRoot)) {
-          underRoot = true;
-          docRelPath = relative(realRoot, doc.source_path);
-          _docRealRoot = realRoot;
-          break;
+    for (const realRoot of realRootByRoot.values()) {
+      const staleDocs = selectUnderRoot.all({
+        prefix: `${escapeLikePattern(realRoot)}/%`,
+      }) as {
+        id: number;
+        source_path: string;
+      }[];
+
+      for (const doc of staleDocs) {
+        // For scoped ingests, only remove files that match the scope.
+        if (
+          isScoped &&
+          !fileMatchesFilters(
+            relative(realRoot, doc.source_path),
+            doc.source_path,
+            includePats,
+            excludePats,
+          )
+        ) {
+          continue;
         }
-      }
-      if (!underRoot) continue;
 
-      // For scoped ingests, only remove files that match the scope.
-      if (isScoped && !fileMatchesFilters(docRelPath, doc.source_path, includePats, excludePats)) {
-        continue;
-      }
+        // If the file was visited during the walk, it still exists — skip.
+        if (visitedPaths.has(doc.source_path)) continue;
 
-      // If the file was visited during the walk, it still exists — skip.
-      if (visitedPaths.has(doc.source_path)) continue;
-
-      // File is gone from disk (or no longer matches). Remove from index.
-      if (!existsSync(doc.source_path)) {
-        deleteDoc.run({ id: doc.id });
-        files.push({ path: doc.source_path, status: "removed" });
+        // File is gone from disk (or no longer matches). Remove from index.
+        if (!existsSync(doc.source_path)) {
+          deleteDoc.run({ id: doc.id });
+          files.push({ path: doc.source_path, status: "removed" });
+        }
       }
     }
   });
