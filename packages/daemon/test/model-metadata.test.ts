@@ -10,9 +10,6 @@ import {
   initModelMetadataFromConfig,
   setModelMetadataFromProvider,
   getModelContextWindowTokens,
-  registerAnthropicDefaultsForProviders,
-  registerOpenAIDefaultsForProviders,
-  getOpenAIKnownContextWindow,
 } from "../src/model-metadata";
 
 describe("model-metadata", () => {
@@ -160,7 +157,7 @@ describe("model-metadata", () => {
       const store = createModelMetadataStore();
       store.set("anthropic:claude-3", {
         contextWindowTokens: 200_000,
-        source: "default",
+        source: "config",
       });
 
       expect(getModelContextWindowTokens("anthropic", "claude-3", store)).toBe(200_000);
@@ -170,116 +167,14 @@ describe("model-metadata", () => {
       const store = createModelMetadataStore();
       expect(getModelContextWindowTokens("nonexistent", "model", store)).toBeUndefined();
     });
-  });
 
-  // ── registerAnthropicDefaultsForProviders ───────────────────────────
-
-  describe("registerAnthropicDefaultsForProviders", () => {
-    it("registers 200k defaults for anthropic-messages providers", () => {
+    it("returns undefined for unconfigured models even when other models of the same provider are known", () => {
+      // No hard-coded defaults: a provider reporting one model's window must
+      // not imply windows for its other models.
       const store = createModelMetadataStore();
-      registerAnthropicDefaultsForProviders([{ id: "anth1", kind: "anthropic-messages" }], store);
+      setModelMetadataFromProvider("prov1", "known-model", 200_000, store);
 
-      expect(getModelContextWindowTokens("anth1", "claude-sonnet-4-20250514", store)).toBe(200_000);
-      expect(getModelContextWindowTokens("anth1", "claude-3-haiku-20240307", store)).toBe(200_000);
-    });
-
-    it("does not register defaults for non-anthropic providers", () => {
-      const store = createModelMetadataStore();
-      registerAnthropicDefaultsForProviders([{ id: "openai1", kind: "openai-compatible" }], store);
-
-      expect(store.size).toBe(0);
-    });
-
-    it("does not overwrite existing config or provider entries", () => {
-      const store = createModelMetadataStore();
-      store.set("anth1:claude-sonnet-4-20250514", {
-        contextWindowTokens: 100_000,
-        source: "config",
-      });
-
-      registerAnthropicDefaultsForProviders([{ id: "anth1", kind: "anthropic-messages" }], store);
-
-      expect(getModelContextWindowTokens("anth1", "claude-sonnet-4-20250514", store)).toBe(100_000);
-    });
-  });
-
-  // ── registerOpenAIDefaultsForProviders ──────────────────────────────
-
-  describe("registerOpenAIDefaultsForProviders", () => {
-    it("registers known context windows for openai-compatible providers in the failover chain", () => {
-      const store = createModelMetadataStore();
-      registerOpenAIDefaultsForProviders(
-        [{ id: "oai1", kind: "openai-compatible" }],
-        ["oai1/gpt-4o", "oai1/gpt-4"],
-        store,
-      );
-
-      expect(getModelContextWindowTokens("oai1", "gpt-4o", store)).toBe(128_000);
-      expect(getModelContextWindowTokens("oai1", "gpt-4", store)).toBe(8_192);
-    });
-
-    it("does not register defaults for models not in the failover chain", () => {
-      const store = createModelMetadataStore();
-      registerOpenAIDefaultsForProviders(
-        [{ id: "oai1", kind: "openai-compatible" }],
-        ["oai1/gpt-4o"],
-        store,
-      );
-
-      expect(getModelContextWindowTokens("oai1", "gpt-4", store)).toBeUndefined();
-    });
-
-    it("does not register defaults for non-openai providers", () => {
-      const store = createModelMetadataStore();
-      registerOpenAIDefaultsForProviders(
-        [{ id: "anth1", kind: "anthropic-messages" }],
-        ["anth1/gpt-4o"],
-        store,
-      );
-
-      expect(store.size).toBe(0);
-    });
-
-    it("does not overwrite existing config or provider entries", () => {
-      const store = createModelMetadataStore();
-      store.set("oai1:gpt-4o", {
-        contextWindowTokens: 99_999,
-        source: "provider",
-      });
-
-      registerOpenAIDefaultsForProviders(
-        [{ id: "oai1", kind: "openai-compatible" }],
-        ["oai1/gpt-4o"],
-        store,
-      );
-
-      expect(getModelContextWindowTokens("oai1", "gpt-4o", store)).toBe(99_999);
-    });
-
-    it("skips unknown models in the failover chain gracefully", () => {
-      const store = createModelMetadataStore();
-      registerOpenAIDefaultsForProviders(
-        [{ id: "oai1", kind: "openai-compatible" }],
-        ["oai1/unknown-model-xyz"],
-        store,
-      );
-
-      expect(store.size).toBe(0);
-    });
-  });
-
-  // ── getOpenAIKnownContextWindow ─────────────────────────────────────
-
-  describe("getOpenAIKnownContextWindow", () => {
-    it("returns known context window for recognized models", () => {
-      expect(getOpenAIKnownContextWindow("gpt-4o")).toBe(128_000);
-      expect(getOpenAIKnownContextWindow("gpt-4.1")).toBe(1_047_576);
-      expect(getOpenAIKnownContextWindow("o3")).toBe(200_000);
-      expect(getOpenAIKnownContextWindow("gpt-4")).toBe(8_192);
-    });
-
-    it("returns undefined for unrecognized models", () => {
-      expect(getOpenAIKnownContextWindow("nonexistent-model")).toBeUndefined();
+      expect(getModelContextWindowTokens("prov1", "unreported-model", store)).toBeUndefined();
     });
   });
 

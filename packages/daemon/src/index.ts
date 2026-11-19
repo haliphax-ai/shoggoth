@@ -41,11 +41,7 @@ import {
   fetchGeminiMetadataForProviders,
   fetchOpenAIMetadataForProviders,
 } from "./health";
-import {
-  initModelMetadataFromConfig,
-  registerAnthropicDefaultsForProviders,
-  registerOpenAIDefaultsForProviders,
-} from "./model-metadata";
+import { initModelMetadataFromConfig } from "./model-metadata";
 import { startConfigHotReload } from "./config-hot-reload";
 import {
   isConfigHotReloadEnabled,
@@ -239,18 +235,12 @@ function modelProviderEntries(
   return models?.providers ? modelProvidersToEntries(models.providers) : undefined;
 }
 
-// Initialize model metadata store from config and register known defaults.
+// Initialize the model metadata store from config. There are no hard-coded
+// model defaults: provider-reported values (fetched after the model health
+// check) layer on top of configured windows, and models with neither have no
+// entry in the store.
 if (config.models?.failoverChain) {
   initModelMetadataFromConfig(config.models.failoverChain, modelProviderEntries(config.models));
-}
-if (config.models?.providers) {
-  registerAnthropicDefaultsForProviders(modelProviderEntries(config.models)!);
-}
-if (config.models?.providers && config.models?.failoverChain) {
-  registerOpenAIDefaultsForProviders(
-    modelProviderEntries(config.models)!,
-    config.models.failoverChain,
-  );
 }
 
 const policyRef = { engine: createPolicyEngine(config.policy, config.agents) };

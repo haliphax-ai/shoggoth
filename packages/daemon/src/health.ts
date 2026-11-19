@@ -1,6 +1,6 @@
 import { access, constants } from "node:fs/promises";
 import { dirname } from "node:path";
-import { setModelMetadataFromProvider, getOpenAIKnownContextWindow } from "./model-metadata";
+import { setModelMetadataFromProvider } from "./model-metadata";
 
 export type HealthStatus = "pass" | "fail" | "warn" | "skipped";
 
@@ -319,7 +319,7 @@ export async function fetchGeminiMetadataForProviders(
 /**
  * Fetch model metadata from an OpenAI-compatible `/v1/models/{model}` endpoint.
  * Some providers (Ollama, vLLM, LiteLLM) return context window info; the official
- * OpenAI API does not. Falls back to a static lookup table of known OpenAI models.
+ * OpenAI API does not.
  */
 async function fetchOpenAIModelMetadata(
   baseUrl: string,
@@ -354,14 +354,9 @@ async function fetchOpenAIModelMetadata(
       }
     }
   } catch {
-    // API call failed — fall through to static lookup.
+    // API call failed — no provider-reported window available.
+    return undefined;
   }
-
-  // Fall back to known OpenAI model context windows.
-  const known = getOpenAIKnownContextWindow(model);
-  if (known != null) return { contextWindow: known };
-
-  return undefined;
 }
 
 /**
