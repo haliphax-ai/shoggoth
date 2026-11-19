@@ -9,6 +9,7 @@
 
 import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import type { WireRequest } from "@shoggoth/authn";
+import type { ShoggothModelsConfig } from "@shoggoth/shared";
 import {
   assertValidAgentId,
   modelProvidersToEntries,
@@ -23,6 +24,7 @@ import {
   buildFormattedStats,
 } from "../sessions/session-stats-store";
 import { requestSessionTurnAbort } from "../sessions/session-turn-abort";
+import type { SessionRow } from "../sessions/session-store";
 import { validateModelRefExists, getSessionPrimaryModelRef } from "../sessions/model-resolution";
 import { getModelContextWindowTokens } from "../model-metadata";
 import { postTurnSurfaceNotice } from "../presentation/active-turn-surface";
@@ -49,6 +51,73 @@ import type { IntegrationOpsContext } from "./integration-ops";
 import { IntegrationOpError } from "./integration-ops";
 
 const ioLog = getLogger("integration-ops");
+
+/** Split a `providerId/model` ref at its first slash. */
+function splitModelRef(ref: string): { providerId: string; modelName: string } {
+  const p = ref.indexOf("/");
+  const providerId = ref.slice(0, p);
+  const modelName = ref.slice(p + 1);
+  return { providerId, modelName };
+}
+
+/**
+ * Surface the model-switch cap-reduction warning: folded into the live
+ * turn's output when a turn surface exists, standalone status post
+ * otherwise (verbatim fallback behavior).
+ */
+function notifyModelSwitchCapReduced(
+  sessionId: string,
+  requestedRef: string,
+  newWindow: number,
+  oldWindow: number,
+): void {
+  const notice = `> ⚠️ Context window cap reduced by model switch: ${oldWindow.toLocaleString("en-US")} → ${newWindow.toLocaleString("en-US")} tokens (\`${requestedRef}\`)`;
+  const ext = subagentRuntimeExtensionRef.current;
+  if (postTurnSurfaceNotice(sessionId, notice) || !ext) return;
+  void ext.sendStatusMessage?.(sessionId, notice).catch((e: unknown) => {
+    ioLog.warn("session_model reduced-window notice failed", {
+      sessionId,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  });
+}
+
+/** Session model info shape returned by `session_list` and `session_context_status`. */
+interface SessionModelInfo {
+  providerId: string | null;
+  model: string | null;
+}
+
+/**
+ * Resolve a session row's effective model info for control-plane output:
+ * explicit `modelSelection` first, then the effective failover chain's head.
+ * Non-object selections (null / invocation-only tweak) return the fallback
+ * from the models config instead.
+ */
+function sessionModelInfo(row: SessionRow, modelsConfig: ShoggothModelsConfig | undefined) {
+  let providerId: string | null = null;
+  let modelName: string | null = null;
+  const modelSel = row.modelSelection as Record<string, unknown> | undefined;
+  if (modelSel && typeof modelSel === "object") {
+    providerId = (modelSel.providerId as string) ?? null;
+    modelName = (modelSel.model as string) ?? null;
+  }
+  if (!providerId || !modelName) {
+    const chain = modelsConfig?.failoverChain;
+    if (chain && chain.length > 0) {
+      const first = chain[0];
+      const [parsedProviderId, ...modelParts] = first.split("/");
+      if (!providerId) providerId = parsedProviderId ?? null;
+      if (!modelName) modelName = modelParts.join("/") || null;
+    }
+  }
+  return { providerId, model: modelName };
+}
+
+/** True when `value` is a finite number `>= min` (1-based wire-index guard). */
+function isNumberAtLeast(value: unknown, min: number): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= min;
+}
 
 /**
  * Handle session_list control operation.
@@ -202,30 +271,10 @@ export async function handleSessionContextStatus(
         getContextFill(ctx.stateDb, sessionId, row.contextSegmentId.trim()),
       );
     }
-    let modelData: {
-      providerId: string | null;
-      model: string | null;
-    } | null = null;
+    let modelData: SessionModelInfo | null = null;
     if (row) {
       try {
-        const modelSel = row.modelSelection as Record<string, unknown> | undefined;
-        let providerId: string | null = null;
-        let modelName: string | null = null;
-        if (modelSel && typeof modelSel === "object") {
-          providerId = (modelSel.providerId as string) ?? null;
-          modelName = (modelSel.model as string) ?? null;
-        }
-        if (!providerId || !modelName) {
-          const modelsConfig = resolveEffectiveModelsConfig(ctx.config, sessionId);
-          const chain = modelsConfig?.failoverChain;
-          if (chain && chain.length > 0) {
-            const first = chain[0];
-            const [parsedProviderId, ...modelParts] = first.split("/");
-            if (!providerId) providerId = parsedProviderId ?? null;
-            if (!modelName) modelName = modelParts.join("/") || null;
-          }
-        }
-        modelData = { providerId, model: modelName };
+        modelData = sessionModelInfo(row, resolveEffectiveModelsConfig(ctx.config, sessionId));
       } catch {
         modelData = null;
       }
@@ -765,9 +814,7 @@ export async function handleSessionModel(
         // Context window for a "providerId/model" ref: metadata store
         // first (provider-reported/default), effective config as fallback.
         const lookupWindow = (ref: string): number | undefined => {
-          const p = ref.indexOf("/");
-          const providerId = ref.slice(0, p);
-          const modelName = ref.slice(p + 1);
+          const { providerId, modelName } = splitModelRef(ref);
           return (
             getModelContextWindowTokens(providerId, modelName) ??
             modelProvidersToEntries(effective?.providers).find((pr) => pr.id === providerId)
@@ -791,18 +838,7 @@ export async function handleSessionModel(
         // context window cap — tell the user through the banner system.
         const oldWindow = previousRef ? lookupWindow(previousRef) : undefined;
         if (newWindow != null && oldWindow != null && newWindow < oldWindow) {
-          const notice = `> ⚠️ Context window cap reduced by model switch: ${oldWindow.toLocaleString("en-US")} → ${newWindow.toLocaleString("en-US")} tokens (\`${requestedRef}\`)`;
-          // Folded into the live turn's output when one is running;
-          // standalone status post only when no turn surface exists.
-          if (!postTurnSurfaceNotice(sessionId, notice)) {
-            const ext = subagentRuntimeExtensionRef.current;
-            void ext?.sendStatusMessage?.(sessionId, notice).catch((e) => {
-              ioLog.warn("session_model reduced-window notice failed", {
-                sessionId,
-                error: e instanceof Error ? e.message : String(e),
-              });
-            });
-          }
+          notifyModelSwitchCapReduced(sessionId, requestedRef, newWindow, oldWindow);
         }
       }
 
@@ -895,7 +931,7 @@ export async function handleSessionQueueManage(
       const by = pl.by;
       if (by === "index") {
         const idx = pl.index;
-        if (typeof idx !== "number" || !Number.isFinite(idx) || idx < 1) {
+        if (!isNumberAtLeast(idx, 1)) {
           throw new IntegrationOpError(
             "ERR_INVALID_PAYLOAD",
             "payload.index must be a number >= 1 (1-based, matching list output)",
@@ -907,14 +943,7 @@ export async function handleSessionQueueManage(
       if (by === "range") {
         const start = pl.start;
         const end = pl.end;
-        if (
-          typeof start !== "number" ||
-          typeof end !== "number" ||
-          !Number.isFinite(start) ||
-          !Number.isFinite(end) ||
-          start < 1 ||
-          end < 1
-        ) {
+        if (!isNumberAtLeast(start, 1) || !isNumberAtLeast(end, 1)) {
           throw new IntegrationOpError(
             "ERR_INVALID_PAYLOAD",
             "payload.start and payload.end must be numbers >= 1 (1-based, matching list output)",
@@ -925,7 +954,7 @@ export async function handleSessionQueueManage(
       }
       if (by === "count") {
         const count = pl.count;
-        if (typeof count !== "number" || !Number.isFinite(count) || count < 1) {
+        if (!isNumberAtLeast(count, 1)) {
           throw new IntegrationOpError(
             "ERR_INVALID_PAYLOAD",
             "payload.count must be a positive number",
