@@ -36,6 +36,7 @@ import { getSubagentHandles, rememberSubagentHandles } from "../subagent/subagen
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
 import { sessionCreds } from "../sessions/session-agent-turn";
 import { terminatePersistentSubagentSession } from "../subagent/subagent-kill";
+import { markOneShotResultDelivered } from "../subagent/one-shot-final-result";
 import { settleOneShotAfterTurn } from "../subagent/one-shot-notify-drain";
 import {
   buildThreadSubagentCreatedBanner,
@@ -529,6 +530,11 @@ export async function handleSubagentSpawn(
         subagentMode: "one_shot",
         subagentPlatformThreadId: null,
         subagentExpiresAtMs: oneShotExpiresAtMs,
+        // Persisted so the teardown's final-result delivery resolves the same
+        // target the spawn path used (a one-shot may steer its reply at a
+        // respond_to that is not the spawning session).
+        subagentDeliveryMode: deliveryMode,
+        subagentRespondTo: respondTo,
       });
       const subLog = getLogger("subagent");
       subLog.info("subagent one_shot model turn starting", {
@@ -683,7 +689,7 @@ export async function handleSubagentSpawn(
                 ...(contractStatus.reason ? { reason: contractStatus.reason } : {}),
               });
             }
-            return deliverSubagentResult(ext, {
+            await deliverSubagentResult(ext, {
               deliveryMode,
               childSessionId: childId,
               childAgentId,
@@ -693,6 +699,7 @@ export async function handleSubagentSpawn(
               assistantText: turn.latestAssistantText,
               subLog,
               fallbackRespondTo: parentSessionId,
+              onDelivered: () => markOneShotResultDelivered(childId, turn.latestAssistantText),
             });
           })
           .catch((err) => {
@@ -872,6 +879,9 @@ export async function handleSubagentSpawn(
         }),
       });
       if (deliveryMode === "inline") {
+        // Inline: the reply IS the op response — mark it as delivered so the
+        // teardown's final-result delivery compares against this text.
+        markOneShotResultDelivered(childId, turn.latestAssistantText);
         return {
           session_id: childId,
           mode: "one_shot",
@@ -893,6 +903,7 @@ export async function handleSubagentSpawn(
         assistantText: turn.latestAssistantText,
         subLog,
         fallbackRespondTo: parentSessionId,
+        onDelivered: () => markOneShotResultDelivered(childId, turn.latestAssistantText),
       });
       return {
         session_id: childId,

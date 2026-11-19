@@ -22,11 +22,11 @@ import { createSqliteAgentTokenStore } from "../../src/auth/sqlite-agent-tokens"
 import { ExecNotifyScheduler, setExecNotifyScheduler } from "../../src/exec/exec-notify-scheduler";
 import type { ExecNotifyCompletion } from "../../src/exec/exec-notify-scheduler";
 import {
-  beginOneShotDelivery,
   clearAllOneShotNotifyDrains,
   pendingDrains,
   settleOneShotAfterTurn,
 } from "../../src/subagent/one-shot-notify-drain";
+import { beginOneShotDelivery } from "../../src/subagent/one-shot-wake-window";
 import { setTurnQueue, tryGetTurnQueue } from "../../src/sessions/session-turn-queue-singleton";
 import { TieredTurnQueue } from "../../src/sessions/session-turn-queue";
 

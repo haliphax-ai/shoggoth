@@ -13,7 +13,7 @@ import { truncateToolOutput } from "../sessions/builtin-handlers/truncate-output
 import type { SystemContext } from "@shoggoth/shared";
 import { getLogger } from "../logging";
 import type { ExecNotifyCompletion } from "./exec-notify-scheduler";
-import { oneShotWakeFallback } from "../subagent/one-shot-notify-drain";
+import { oneShotWakeFallback } from "../subagent/one-shot-wake-window";
 
 function truncateForNotify(
   raw: string,
