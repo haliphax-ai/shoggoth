@@ -51,14 +51,18 @@ RUN userdel node 2>/dev/null; groupdel node 2>/dev/null; \
   && usermod -aG agent shoggoth
 
 WORKDIR /app
-COPY --chmod=a=rX --from=build /app/node_modules ./node_modules
-COPY --chmod=a=rX --from=build /app/packages ./packages
-COPY --chmod=a=rX --from=build /app/package.json ./
-COPY --chmod=a=rX --from=build /app/.git-hash ./.git-hash
-COPY --chmod=a=rX scripts ./scripts
-COPY --chmod=a=rX templates/agent-workspace /app/templates/agent-workspace
-COPY --chmod=a=rX migrations /app/migrations
-COPY --chmod=a=rX docs /app/docs
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/packages ./packages
+COPY --from=build /app/package.json ./
+COPY --from=build /app/.git-hash ./.git-hash
+COPY scripts ./scripts
+COPY templates/agent-workspace /app/templates/agent-workspace
+COPY migrations /app/migrations
+COPY docs /app/docs
+
+# Ensure all app files are world-readable (build context from agent workspaces may have restrictive ACL-derived permissions)
+RUN chmod -R a+rX /app
+
 COPY docker/entrypoint.sh /usr/local/bin/shoggoth-entrypoint.sh
 COPY docker/shoggoth-wrapper.sh /usr/local/bin/shoggoth
 COPY docker/config-merge.sh /usr/local/bin/shoggoth-config-merge
