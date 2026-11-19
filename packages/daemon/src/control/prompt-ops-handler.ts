@@ -8,13 +8,10 @@ import type { WireRequest } from "@shoggoth/authn";
 import type { IntegrationOpsContext } from "./integration-ops";
 import { IntegrationOpError } from "./integration-ops";
 import { listPromptFiles, PromptOpError, renderPrompt, resolvePromptFile } from "./prompt-ops";
-import { resolveSessionTargetFromCliArg } from "./resolve-session-cli-target";
 import {
-  crossAgentSessionSendAllowed,
-  parseAgentSessionUrn,
-  type ShoggothConfig,
-} from "@shoggoth/shared";
-import type { SessionStore } from "../sessions/session-store";
+  assertAgentMayTargetSessionForSendOrList,
+  resolveSessionSendTargetSessionId,
+} from "./ops-shared";
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
 import { getLogger } from "../logging";
 
@@ -55,69 +52,6 @@ function optionalBooleanFlag(obj: Record<string, unknown>, key: string): boolean
     throw new IntegrationOpError("ERR_INVALID_PAYLOAD", `payload.${key} must be a boolean`);
   }
   return v;
-}
-
-function resolveSessionSendTargetSessionId(
-  pl: Record<string, unknown>,
-  cfg: ShoggothConfig,
-  sessions: SessionStore | undefined,
-): string {
-  const sidRaw = pl.session_id;
-  const aidRaw = pl.agent_id;
-  const hasSid = typeof sidRaw === "string" && sidRaw.trim();
-  const hasAid = typeof aidRaw === "string" && aidRaw.trim();
-  if (hasSid && hasAid) {
-    throw new IntegrationOpError(
-      "ERR_INVALID_PAYLOAD",
-      "payload must not set both session_id and agent_id",
-    );
-  }
-  if (hasSid) return resolveTargetSessionIdOrThrow((sidRaw as string).trim(), cfg, sessions);
-  if (hasAid) {
-    return resolveSessionTargetFromCliArg((aidRaw as string).trim(), cfg, sessions);
-  }
-  throw new IntegrationOpError(
-    "ERR_INVALID_PAYLOAD",
-    "payload.session_id or payload.agent_id is required",
-  );
-}
-
-function resolveTargetSessionIdOrThrow(
-  raw: string,
-  cfg: ShoggothConfig,
-  sessions: SessionStore | undefined,
-): string {
-  try {
-    return resolveSessionTargetFromCliArg(raw, cfg, sessions);
-  } catch (e) {
-    throw new IntegrationOpError("ERR_INVALID_PAYLOAD", e instanceof Error ? e.message : String(e));
-  }
-}
-
-/**
- * Agents may target only sessions of their own agent id for `prompt` /
- * `prompt_list` (same rule as `session_send` / `session_list`).
- */
-function assertAgentMayTargetSessionForSendOrList(
-  principal: AuthenticatedPrincipal,
-  targetSessionId: string,
-  config: ShoggothConfig,
-): void {
-  if (principal.kind !== "agent") return;
-  const callerAgentId = parseAgentSessionUrn(principal.sessionId)?.agentId;
-  const targetAgentId = parseAgentSessionUrn(targetSessionId)?.agentId;
-  if (!callerAgentId || !targetAgentId) {
-    throw new IntegrationOpError(
-      "ERR_FORBIDDEN",
-      "agent session_send requires valid agent session URNs for caller and target",
-    );
-  }
-  if (!crossAgentSessionSendAllowed(config, callerAgentId, targetAgentId)) {
-    throw new IntegrationOpError(
-      "ERR_FORBIDDEN",
-      "cross-agent session_send denied (configure agentToAgent.allow and/or agents.list.<id>.agentToAgent.allow)",
-    );
-  }
 }
 
 function requireSubagentRuntime(ctx: IntegrationOpsContext): {

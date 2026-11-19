@@ -16,7 +16,7 @@ export type SubagentMode = "one_shot" | "persistent";
 
 /**
  * Controls how subagent turn results are delivered to the parent session.
- * See control op `subagent_spawn` and deliverSubagentResult in integration-ops.ts.
+ * See control op `subagent_spawn` and deliverSubagentResult in ops-shared.ts.
  */
 export type SubagentDeliveryMode = "inline" | "queue" | "drop";
 

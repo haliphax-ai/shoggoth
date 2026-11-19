@@ -109,7 +109,7 @@ describe("persistent subagent all-turn delivery", () => {
       const handle = registerSteerChannel(respondTo);
 
       // Import the delivery function to test the conditions directly
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
       const mockSubLog = {
         info: vi.fn(),
         warn: vi.fn(),
@@ -152,7 +152,7 @@ describe("persistent subagent all-turn delivery", () => {
         tmp,
       );
 
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
       const mockSubLog = {
         info: vi.fn(),
         warn: vi.fn(),
@@ -257,7 +257,7 @@ describe("persistent subagent all-turn delivery", () => {
         tmp,
       );
 
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
       const mockSubLog = {
         info: vi.fn(),
         warn: vi.fn(),
@@ -301,7 +301,7 @@ describe("persistent subagent all-turn delivery", () => {
       // Register steer channel for inline mode
       const handle = registerSteerChannel(respondTo);
 
-      const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+      const { deliverSubagentResult } = await import("../../src/control/ops-shared");
       const mockSubLog = {
         info: vi.fn(),
         warn: vi.fn(),

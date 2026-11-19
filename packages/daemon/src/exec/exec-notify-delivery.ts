@@ -7,7 +7,7 @@ import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref"
 import { buildExecNotifyTurnBanner } from "../messaging/oob-turn-banner";
 import { buildInTurnEventBanner, deliverInTurnEvent } from "../messaging/in-turn-event";
 import { postTurnSurfaceNotice } from "../presentation/active-turn-surface";
-import { deliverOobStructuredResponse } from "../control/integration-ops";
+import { deliverOobStructuredResponse } from "../control/ops-shared";
 import { OOB_NO_SENDER_GUIDANCE, OOB_SCHEMA_NO_SENDER } from "../messaging/oob-response-schemas";
 import { truncateToolOutput } from "../sessions/builtin-handlers/truncate-output";
 import type { SystemContext } from "@shoggoth/shared";

@@ -1,6 +1,6 @@
 import type { SessionToolLoopFailoverState } from "../sessions/session-tool-loop-model-client";
 import { createSessionStore } from "../sessions/session-store";
-import { deliverSubagentResult } from "../control/integration-ops";
+import { deliverSubagentResult } from "../control/ops-shared";
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
 import { shouldSkipThreadSessionSentinel } from "../subagent/thread-subagent-autocreate";
 import {

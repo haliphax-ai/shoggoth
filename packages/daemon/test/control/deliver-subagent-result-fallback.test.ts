@@ -23,7 +23,7 @@ describe("deliverSubagentResult fallback", () => {
       .mockRejectedValueOnce(new Error("session not available: dead-target"))
       .mockResolvedValueOnce({});
     const subLog = { info: vi.fn(), warn: vi.fn() } as never;
-    const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+    const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
     await deliverSubagentResult({ runSessionModelTurn } as never, {
       childSessionId: "child-f1",
@@ -48,7 +48,7 @@ describe("deliverSubagentResult fallback", () => {
   it("drops with a logged warning when both respond_to and the fallback are unavailable", async () => {
     const runSessionModelTurn = vi.fn().mockRejectedValue(new Error("session not available"));
     const subLog = { info: vi.fn(), warn: vi.fn() } as never;
-    const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+    const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
     await deliverSubagentResult({ runSessionModelTurn } as never, {
       childSessionId: "child-f2",
@@ -72,7 +72,7 @@ describe("deliverSubagentResult fallback", () => {
   it("does not fall back when no fallbackRespondTo is supplied", async () => {
     const runSessionModelTurn = vi.fn().mockRejectedValue(new Error("session not available"));
     const subLog = { info: vi.fn(), warn: vi.fn() } as never;
-    const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+    const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
     await deliverSubagentResult({ runSessionModelTurn } as never, {
       childSessionId: "child-f3",
@@ -90,7 +90,7 @@ describe("deliverSubagentResult fallback", () => {
   it("uses the plain header when delivery to respond_to succeeds", async () => {
     const runSessionModelTurn = vi.fn().mockResolvedValue({});
     const subLog = { info: vi.fn(), warn: vi.fn() } as never;
-    const { deliverSubagentResult } = await import("../../src/control/integration-ops");
+    const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
     await deliverSubagentResult({ runSessionModelTurn } as never, {
       childSessionId: "child-f4",

@@ -1,7 +1,7 @@
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
 import type { TimerEntry } from "./timer-heap";
 import { buildTimerTurnBanner } from "../messaging/oob-turn-banner";
-import { deliverOobStructuredResponse } from "../control/integration-ops";
+import { deliverOobStructuredResponse } from "../control/ops-shared";
 import { OOB_NO_SENDER_GUIDANCE, OOB_SCHEMA_NO_SENDER } from "../messaging/oob-response-schemas";
 import type { SystemContext } from "@shoggoth/shared";
 import { getLogger } from "../logging";
