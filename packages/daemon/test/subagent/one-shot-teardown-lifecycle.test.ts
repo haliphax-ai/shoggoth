@@ -29,10 +29,10 @@ import { createSqliteAgentTokenStore } from "../../src/auth/sqlite-agent-tokens"
 import { setExecNotifyScheduler } from "../../src/exec/exec-notify-scheduler";
 import {
   clearAllOneShotNotifyDrains,
-  markOneShotResultDelivered,
   pendingDrains,
   settleOneShotAfterTurn,
 } from "../../src/subagent/one-shot-notify-drain";
+import { markOneShotResultDelivered } from "../../src/subagent/one-shot-final-result";
 import { setSubagentRuntimeExtension } from "../../src/subagent/subagent-extension-ref";
 import {
   drainSteers,

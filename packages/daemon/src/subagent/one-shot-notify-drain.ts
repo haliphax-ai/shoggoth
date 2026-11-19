@@ -37,13 +37,14 @@ import { tryGetTurnQueue } from "../sessions/session-turn-queue-singleton";
 import { steerDepth, takeUnansweredSteers } from "../sessions/steer-channel";
 import { terminatePersistentSubagentSession } from "./subagent-kill";
 import {
-  beginOneShotDelivery as beginOneShotDeliveryWindow,
   clearAllOneShotDeliveryWindows,
   isOneShotDeliveryInFlight,
   settleOneShotDelivery as settleOneShotDeliveryWindow,
 } from "./one-shot-wake-window";
-import { deliverOneShotFollowupResult } from "./one-shot-result-delivery";
-import { extractLatestTranscriptAssistantText } from "../sessions/transcript-to-chat";
+import {
+  clearAllOneShotFinalResultMarks,
+  terminateOneShotWithFinalResult,
+} from "./one-shot-final-result";
 
 /** Fallback cap for the hold when the session row carries no valid expiry. */
 const DEFAULT_ONE_SHOT_NOTIFY_DRAIN_TIMEOUT_MS = 60 * 60_000;
@@ -324,7 +325,7 @@ export function settleOneShotAfterTurn(input: {
 }): void {
   const sid = input.sessionId.trim();
   storeRef = input.sessions;
-  const terminate = (): void => terminateOneShotWithFinalResult(input, sid);
+  const terminate = buildOneShotTerminate(input);
   const scheduler = getExecNotifyScheduler();
   const liveNotifies =
     scheduler && input.stateDb ? scheduler.countForSession(input.stateDb, sid) : 0;
@@ -398,30 +399,12 @@ export function settleOneShotAfterTurn(input: {
 }
 
 /**
- * Record the latest transcript text the spawn path already delivered to the
- * parent (the first settled turn's result). A later teardown delivers the
- * subagent's transcript only when its latest text differs — steering a
- * one-shot produces a newer reply, and that is the delta the parent must see
- * instead of silence. Cleared with the other module state in
- * {@link clearAllOneShotNotifyDrains}.
- */
-const lastDeliveredResultText = new Map<string, string>();
-
-/**
- * Mark the delivered result for a one-shot session (spawn path, after
- * `deliverSubagentResult` resolved for the first settled turn). The teardown
- * compares against this when deciding whether the parent has already seen the
- * transcript's final text.
- */
-export function markOneShotResultDelivered(sessionId: string, assistantText: string): void {
-  lastDeliveredResultText.set(sessionId.trim(), assistantText);
-}
-
-/**
  * The teardown that fires at the end of the LAST settle: deliver the one-shot's
  * final transcript text as a structured OOB follow-up turn to its parent when
  * that text was not already delivered (the normal case for a steered follow-up
- * turn), then terminate the session.
+ * turn), then terminate the session. The decision and delivery live in
+ * {@link terminateOneShotWithFinalResult}; this wrapper binds the settle's
+ * session context and the plain teardown every path shares.
  *
  * Every teardown path — the direct one here, the deferred release in
  * {@link tryReleaseOneShot}, and the safety timer inside
@@ -429,18 +412,15 @@ export function markOneShotResultDelivered(sessionId: string, assistantText: str
  * always hears one of "result" or (via the terminate notice) "ended" for the
  * post-steer lifetime of the child.
  */
-function terminateOneShotWithFinalResult(
-  input: {
-    readonly sessionManager: SessionManager;
-    readonly sessions: SessionStore;
-    readonly stateDb?: Database.Database;
-    readonly sessionId: string;
-    readonly autoApproveGate?: HitlAutoApproveGate;
-    readonly subLog: Logger;
-  },
-  sid: string,
-): void {
-  // The plain teardown every no-follow-up path shares.
+function buildOneShotTerminate(input: {
+  readonly sessionManager: SessionManager;
+  readonly sessions: SessionStore;
+  readonly stateDb?: Database.Database;
+  readonly sessionId: string;
+  readonly autoApproveGate?: HitlAutoApproveGate;
+  readonly subLog: Logger;
+}): () => void {
+  const sid = input.sessionId.trim();
   const teardown = (): void =>
     terminatePersistentSubagentSession(
       input.sessionManager,
@@ -449,82 +429,19 @@ function terminateOneShotWithFinalResult(
       input.autoApproveGate,
       "one_shot_teardown",
     );
-  const row = storeRef?.getById(sid);
-  const followup = pendingFollowupFor(input.stateDb, sid, row);
-  // Missing row (legacy callers/tests) or already dead (TTL expiry / operator
-  // kill owns the parent notification): tear down exactly as before.
-  if (!followup) {
-    lastDeliveredResultText.delete(sid);
-    teardown();
-    return;
-  }
-  void deliverFollowupThenTerminate(input, sid, followup, teardown);
-}
-
-/** A follow-up worth delivering: the undelivered final text and its target. */
-interface OneShotFollowup {
-  readonly text: string;
-  readonly respondTo: string;
-}
-
-/**
- * Resolve the follow-up delivery a terminating one-shot owes its parent, if
- * any: the row must be live, have an unread transcript, and that text must
- * differ from what the spawn path already delivered (exact-equality dedupe —
- * both sides read the transcript, so only a turn that settled after the first
- * delivery can differ).
- */
-function pendingFollowupFor(
-  stateDb: Database.Database | undefined,
-  sid: string,
-  row:
-    | {
-        readonly status: string;
-        readonly contextSegmentId: string;
-        readonly subagentRespondTo: string | undefined;
-        readonly parentSessionId: string | undefined;
-      }
-    | undefined,
-): OneShotFollowup | undefined {
-  if (!row || row.status === "terminated" || !stateDb) return undefined;
-  const text = extractLatestTranscriptAssistantText(stateDb, sid, row.contextSegmentId);
-  if (!text || text === lastDeliveredResultText.get(sid)) return undefined;
-  return {
-    text,
-    respondTo: row.subagentRespondTo ?? row.parentSessionId ?? "",
+  return () => {
+    const row = input.sessions.getById(sid);
+    terminateOneShotWithFinalResult({
+      sessionId: sid,
+      stateDb: input.stateDb,
+      row,
+      subLog: input.subLog,
+      teardown,
+      // Land any release a concurrent settle deferred behind the delivery,
+      // then terminate. A racing settle's own terminate is idempotent.
+      onSettled: () => settleOneShotDeliveryAndRelease(sid),
+    });
   };
-}
-
-/** Deliver the follow-up (never throws), then run the teardown. */
-async function deliverFollowupThenTerminate(
-  input: {
-    readonly subLog: Logger;
-  },
-  sid: string,
-  followup: OneShotFollowup,
-  teardown: () => void,
-): Promise<void> {
-  beginOneShotDeliveryWindow(sid);
-  try {
-    const deliveredText = await deliverOneShotFollowupResult({
-      sessionId: sid,
-      parentSessionId: followup.respondTo,
-      text: followup.text,
-    });
-    // Record what this follow-up delivered so a concurrent settle that lands
-    // mid-delivery cannot re-deliver the same text.
-    lastDeliveredResultText.set(sid, deliveredText);
-  } catch (e) {
-    input.subLog.warn("one-shot final result delivery failed", {
-      sessionId: sid,
-      err: String(e),
-    });
-  } finally {
-    // Land any release a concurrent settle deferred behind this delivery,
-    // then terminate. A racing settle's own terminate is idempotent.
-    settleOneShotDeliveryAndRelease(sid);
-    teardown();
-  }
 }
 
 /** Clear every hold, pending release, and delivery marker (shutdown/tests). */
@@ -535,7 +452,7 @@ export function clearAllOneShotNotifyDrains(): void {
   redeliveryInFlight.clear();
   redeliveryFailed.clear();
   pendingDrains.clear();
-  lastDeliveredResultText.clear();
+  clearAllOneShotFinalResultMarks();
   clearAllOneShotDeliveryWindows();
   storeRef = undefined;
 }

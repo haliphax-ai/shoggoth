@@ -36,10 +36,8 @@ import { getSubagentHandles, rememberSubagentHandles } from "../subagent/subagen
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
 import { sessionCreds } from "../sessions/session-agent-turn";
 import { terminatePersistentSubagentSession } from "../subagent/subagent-kill";
-import {
-  markOneShotResultDelivered,
-  settleOneShotAfterTurn,
-} from "../subagent/one-shot-notify-drain";
+import { markOneShotResultDelivered } from "../subagent/one-shot-final-result";
+import { settleOneShotAfterTurn } from "../subagent/one-shot-notify-drain";
 import {
   buildThreadSubagentCreatedBanner,
   findAdoptableThreadSubagentSession,
@@ -701,11 +699,8 @@ export async function handleSubagentSpawn(
               assistantText: turn.latestAssistantText,
               subLog,
               fallbackRespondTo: parentSessionId,
+              onDelivered: () => markOneShotResultDelivered(childId, turn.latestAssistantText),
             });
-            // The first turn's result reached the parent: the teardown's
-            // final-result delivery must not re-send this text after a later
-            // steered turn settles.
-            markOneShotResultDelivered(childId, turn.latestAssistantText);
           })
           .catch((err) => {
             if (oneShotTtlFired) return;
@@ -908,8 +903,8 @@ export async function handleSubagentSpawn(
         assistantText: turn.latestAssistantText,
         subLog,
         fallbackRespondTo: parentSessionId,
+        onDelivered: () => markOneShotResultDelivered(childId, turn.latestAssistantText),
       });
-      markOneShotResultDelivered(childId, turn.latestAssistantText);
       return {
         session_id: childId,
         mode: "one_shot",

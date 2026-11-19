@@ -412,6 +412,14 @@ export type SubagentResultOpts = {
   fallbackRespondTo?: string;
   /** Set internally on fallback delivery: the original `respond_to` that was unavailable. */
   unavailableRespondTo?: string;
+  /**
+   * Invoked once the result has been delivered through one of the delivery
+   * paths (inline steer, OOB turn, or re-route). Lets a caller record what
+   * was delivered without restructuring its control flow (e.g. the one-shot
+   * spawn path marks the text so the teardown's final-result delivery can
+   * dedupe against it).
+   */
+  onDelivered?: () => void;
 };
 
 /**
@@ -659,10 +667,12 @@ export async function deliverSubagentResult(
         internal: internalDelivery,
       },
     );
+    opts.onDelivered?.();
     return;
   }
 
   await runOobDelivery();
+  opts.onDelivered?.();
 }
 
 /**
