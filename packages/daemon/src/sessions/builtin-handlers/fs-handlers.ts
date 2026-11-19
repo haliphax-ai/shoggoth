@@ -95,6 +95,35 @@ function reReadGateFor(ctx: BuiltinToolContext, absPath: string): unknown | null
   }
 }
 
+/**
+ * Format a file body for a read result. With `lines`/`lineNumbers`, the
+ * body is split into lines (LF, CRLF, CR), optionally numbered 1-indexed,
+ * and capped at 1000 lines with a notice (the line cap applies when `lines`
+ * is set). The final joined output always goes through truncateToolOutput
+ * so a small number of enormous lines cannot produce an unbounded result;
+ * when the byte cap kicks in, the head/tail string form replaces the array.
+ * Without those flags the body is truncated by character count only.
+ */
+function formatBodyLines(body: string, lines: boolean, lineNumbers: boolean): string | string[] {
+  if (!lines && !lineNumbers) return truncateToolOutput(body);
+
+  const rawLines = body.split(/\r\n|\n|\r/);
+  const numbered = (ls: string[]) => ls.map((line, index) => `${index + 1}: ${line}`);
+
+  let content: string[] = lineNumbers ? numbered(rawLines) : rawLines;
+  if (lines && rawLines.length > 1000) {
+    const cappedLines = rawLines.slice(0, 1000);
+    content = [
+      ...(lineNumbers ? numbered(cappedLines) : cappedLines),
+      `[... truncated — file has ${rawLines.length} lines, showing first 1000 ...]`,
+    ];
+  }
+
+  const joined = content.join("\n");
+  const cappedOutput = truncateToolOutput(joined);
+  return cappedOutput === joined ? content : cappedOutput;
+}
+
 async function readHandler(
   args: Record<string, unknown>,
   ctx: BuiltinToolContext,
@@ -182,26 +211,7 @@ async function readHandler(
     }
 
     const body = result.content;
-    let content: string | string[];
-    if (lines || lineNumbers) {
-      const rawLines = body.split(/\r\n|\n|\r/);
-      if (lineNumbers) {
-        content = rawLines.map((line, index) => `${index + 1}: ${line}`);
-      } else {
-        content = rawLines;
-      }
-      if (lines && rawLines.length > 1000) {
-        const truncatedContent = rawLines.slice(0, 1000);
-        if (lineNumbers) {
-          content = truncatedContent.map((line, index) => `${index + 1}: ${line}`);
-        } else {
-          content = truncatedContent;
-        }
-        content.push(`[... truncated — file has ${rawLines.length} lines, showing first 1000 ...]`);
-      }
-    } else {
-      content = truncateToolOutput(body);
-    }
+    const content = formatBodyLines(body, lines, lineNumbers);
 
     clearReReadFlag(ctx, resolvedPath);
     return { resultJson: JSON.stringify({ path, content }) };
@@ -209,26 +219,7 @@ async function readHandler(
 
   const body = await toolRead(ctx.workspacePath, resolvedPath, ctx.creds);
 
-  let content: string | string[];
-  if (lines || lineNumbers) {
-    const rawLines = body.split(/\r\n|\n|\r/);
-    if (lineNumbers) {
-      content = rawLines.map((line, index) => `${index + 1}: ${line}`);
-    } else {
-      content = rawLines;
-    }
-    if (lines && rawLines.length > 1000) {
-      const truncatedContent = rawLines.slice(0, 1000);
-      if (lineNumbers) {
-        content = truncatedContent.map((line, index) => `${index + 1}: ${line}`);
-      } else {
-        content = truncatedContent;
-      }
-      content.push(`[... truncated — file has ${rawLines.length} lines, showing first 1000 ...]`);
-    }
-  } else {
-    content = truncateToolOutput(body);
-  }
+  const content = formatBodyLines(body, lines, lineNumbers);
 
   clearReReadFlag(ctx, resolvedPath);
   return { resultJson: JSON.stringify({ path, content }) };
