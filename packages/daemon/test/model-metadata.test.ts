@@ -4,7 +4,7 @@
  * Every test creates an isolated store via createModelMetadataStore()
  * so tests never share mutable state.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
   createModelMetadataStore,
   initModelMetadataFromConfig,
@@ -14,6 +14,26 @@ import {
   registerOpenAIDefaultsForProviders,
   getOpenAIKnownContextWindow,
 } from "../src/model-metadata";
+import { createLogger, setRootLogger } from "../src/logging";
+
+function stubLogger() {
+  const logs: Array<{
+    level: string;
+    msg: string;
+    fields?: Record<string, unknown>;
+  }> = [];
+  const log = (level: string) => (msg: string, fields?: Record<string, unknown>) => {
+    logs.push({ level, msg, fields });
+  };
+  const logger = {
+    debug: log("debug"),
+    info: log("info"),
+    warn: log("warn"),
+    error: log("error"),
+    child: () => logger,
+  };
+  return { logger, logs };
+}
 
 describe("model-metadata", () => {
   // ── createModelMetadataStore ────────────────────────────────────────
@@ -150,6 +170,73 @@ describe("model-metadata", () => {
       const warning = setModelMetadataFromProvider("openai", "gpt-4o", 128_000, store);
 
       expect(warning).toBeUndefined();
+    });
+  });
+
+  // ── setModelMetadataFromProvider: default-override debug log ────────
+
+  describe("setModelMetadataFromProvider: default-override debug log", () => {
+    afterEach(() => {
+      setRootLogger(createLogger({ component: "model-metadata.test" }));
+    });
+
+    it("logs debug when a provider value overrides a different hard-coded default", () => {
+      const store = createModelMetadataStore();
+      store.set("anthropic:claude-x", {
+        contextWindowTokens: 200_000,
+        source: "default",
+      });
+      const { logger, logs } = stubLogger();
+      setRootLogger(logger);
+
+      setModelMetadataFromProvider("anthropic", "claude-x", 180_000, store);
+
+      const entry = logs.find(
+        (l) =>
+          l.level === "debug" && l.msg === "provider context window overrides hard-coded default",
+      );
+      expect(entry).toBeDefined();
+      expect(entry?.fields).toMatchObject({
+        key: "anthropic:claude-x",
+        defaultValue: 200_000,
+        providerValue: 180_000,
+      });
+      // The provider value wins over the default.
+      expect(getModelContextWindowTokens("anthropic", "claude-x", store)).toBe(180_000);
+      expect(store.get("anthropic:claude-x")?.source).toBe("provider");
+    });
+
+    it("does not log when the provider value matches the default", () => {
+      const store = createModelMetadataStore();
+      store.set("anthropic:claude-x", {
+        contextWindowTokens: 200_000,
+        source: "default",
+      });
+      const { logger, logs } = stubLogger();
+      setRootLogger(logger);
+
+      setModelMetadataFromProvider("anthropic", "claude-x", 200_000, store);
+
+      expect(
+        logs.some((l) => l.msg === "provider context window overrides hard-coded default"),
+      ).toBe(false);
+    });
+
+    it("does not log when overriding a config-sourced entry (warning path instead)", () => {
+      const store = createModelMetadataStore();
+      store.set("openai:gpt-4o", {
+        contextWindowTokens: 128_000,
+        source: "config",
+      });
+      const { logger, logs } = stubLogger();
+      setRootLogger(logger);
+
+      const warning = setModelMetadataFromProvider("openai", "gpt-4o", 200_000, store);
+
+      expect(warning).toContain("mismatch");
+      expect(
+        logs.some((l) => l.msg === "provider context window overrides hard-coded default"),
+      ).toBe(false);
     });
   });
 

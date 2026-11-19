@@ -1,5 +1,9 @@
 import { modelEntriesFromRecord, type ShoggothModelEntryBody } from "@shoggoth/shared";
 
+import { getLogger } from "./logging";
+
+const log = getLogger("model-metadata");
+
 export interface ModelMetadataEntry {
   /** Context window size in tokens. */
   contextWindowTokens: number;
@@ -94,6 +98,20 @@ export function setModelMetadataFromProvider(
     warning = `Context window mismatch for ${key}: config says ${existing.contextWindowTokens}, provider reports ${contextWindowTokens}. Using provider value.`;
   }
 
+  if (
+    existing &&
+    existing.source === "default" &&
+    existing.contextWindowTokens !== contextWindowTokens
+  ) {
+    // Dated snapshot lists drift from reality; make the override observable
+    // at debug level so silent mis-sizing of context windows shows up.
+    log.debug("provider context window overrides hard-coded default", {
+      key,
+      defaultValue: existing.contextWindowTokens,
+      providerValue: contextWindowTokens,
+    });
+  }
+
   store.set(key, { contextWindowTokens, source: "provider" });
   return warning;
 }
@@ -136,6 +154,11 @@ export function registerAnthropicDefaultsForProviders(
 ): void {
   const anthropicIds = providers.filter((p) => p.kind === "anthropic-messages").map((p) => p.id);
 
+  // Dated snapshot list, kept as-is: Anthropic models and their 200k input
+  // token context windows, verified against the Anthropic models documentation
+  // (https://docs.anthropic.com/en/docs/about-claude/models) on 2026-11-19.
+  // Provider-reported values override these at runtime; the override is logged
+  // in setModelMetadataFromProvider so drift is observable.
   const models200k = [
     "claude-sonnet-4-20250514",
     "claude-opus-4-20250514",
