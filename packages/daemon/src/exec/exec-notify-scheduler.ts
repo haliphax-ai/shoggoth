@@ -19,12 +19,8 @@ import type Database from "better-sqlite3";
 import type { ManagedProcess } from "@shoggoth/procman";
 import { isTerminal, type TruncationMode } from "@shoggoth/os-exec";
 import { getLogger } from "../logging";
-import {
-  beginOneShotDelivery,
-  pendingDrains,
-  releaseOneShotIfDrained,
-  settleOneShotDelivery,
-} from "../subagent/one-shot-notify-drain";
+import { beginOneShotDelivery, settleOneShotDelivery } from "../subagent/one-shot-wake-window";
+import { pendingDrains, releaseOneShotIfDrained } from "../subagent/one-shot-notify-drain";
 
 const log = getLogger("exec-notify-scheduler");
 

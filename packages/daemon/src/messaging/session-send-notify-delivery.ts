@@ -18,7 +18,7 @@ import { truncateToolOutput } from "../sessions/builtin-handlers/truncate-output
 import type { SystemContext } from "@shoggoth/shared";
 import { getLogger } from "../logging";
 import type { SessionSendNotifyCompletion } from "../sessions/session-send-notify-scheduler";
-import { oneShotWakeFallback } from "../subagent/one-shot-notify-drain";
+import { oneShotWakeFallback } from "../subagent/one-shot-wake-window";
 
 /**
  * The notification payload, shaped like the result a blocking (non-yielded)

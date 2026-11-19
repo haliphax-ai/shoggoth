@@ -23,7 +23,7 @@ import {
 import type { OobTurnOutcome } from "../messaging/oob-turn-banner";
 import { pushSteer } from "../sessions/steer-channel";
 import { deliverInTurnEvent } from "../messaging/in-turn-event";
-import { oneShotWakeFallback } from "../subagent/one-shot-notify-drain";
+import { oneShotWakeFallback } from "../subagent/one-shot-wake-window";
 import {
   formatOobFailureNotice,
   OOB_NO_SENDER_GUIDANCE,
