@@ -124,9 +124,7 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
       let subagentAgentId = input.subagentAgentId;
       if (input.parentSessionId && !subagentAgentId) {
         const reserved = new Set(input.reservedAgentIds ?? Object.keys(agentsConfig?.list ?? {}));
-        for (const row of options.sessions.list()) {
-          if (row.status !== "terminated" && row.subagentAgentId) reserved.add(row.subagentAgentId);
-        }
+        for (const id of options.sessions.activeSubagentAgentIds()) reserved.add(id);
         subagentAgentId = deriveThreadSubagentAgentId(input.parentSessionId, (candidate) =>
           reserved.has(candidate),
         );

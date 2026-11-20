@@ -296,8 +296,7 @@ function resolveSpawnAgentId(
   const parentId = resolveAgentIdFromSessionId(ctx.sessionId);
   const reserved = new Set(Object.keys(ctx.config.agents?.list ?? {}));
   if (parentId) reserved.add(parentId);
-  for (const row of sessions.list())
-    if (row.status !== "terminated" && row.subagentAgentId) reserved.add(row.subagentAgentId);
+  for (const id of sessions.activeSubagentAgentIds()) reserved.add(id);
   return deriveThreadSubagentAgentId(parentId || "subagent", (id) => reserved.has(id));
 }
 

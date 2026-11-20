@@ -54,6 +54,11 @@ export interface SessionRow {
   readonly workingDirectory: string | undefined;
 }
 
+/** Distinct `agent_id` values (subagent IDs) of all non-terminated sessions,
+ * resolved entirely in SQL. Empty `agent_id`/NULL rows contribute nothing.
+ * Cheap enough for per-spawn use: one indexed scan, no row mapping. */
+export type ActiveSubagentIds = readonly string[];
+
 export interface CreateSessionInput {
   readonly id: string;
   readonly workspacePath: string;
@@ -200,6 +205,9 @@ export interface SessionStore {
    *  subtrees) pruned; `persistent` counts the included sessions spawned with
    *  mode "persistent". Resolved entirely in SQL (recursive CTE). */
   countSubagentTree(rootSessionId: string): { total: number; persistent: number };
+  /** Distinct subagent agent ids (`agent_id` column) held by any non-terminated
+   *  session. Resolved in SQL (single DISTINCT scan, no row mapping). */
+  activeSubagentAgentIds(): ActiveSubagentIds;
 }
 
 /**
@@ -323,6 +331,12 @@ function countSubagentTreeRows(
     | { total: number; persistent: number | null }
     | undefined;
   return { total: r?.total ?? 0, persistent: r?.persistent ?? 0 };
+}
+
+/** Reads the `activeSubagentAgentIds` statement: rows of `{agent_id}` from the
+ *  DISTINCT scan, with NULL agent_ids normalized to "". */
+function readActiveSubagentIds(stmt: Database.Statement): ActiveSubagentIds {
+  return (stmt.all() as Array<{ agent_id: string | null }>).map((r) => r.agent_id ?? "");
 }
 
 const UPDATE_SESSION_SQL = `
@@ -533,6 +547,20 @@ function buildSessionStore(db: Database.Database): SessionStore {
 
   const del = db.prepare(`DELETE FROM sessions WHERE id = @id`);
 
+  /** Distinct subagent agent ids (`agent_id` column) held by non-terminated
+   *  sessions — the store-level replacement for full-table `list()` walks that
+   *  only needed the subagent ids (subagent_spawn reservation, thread-subagent
+   *  autocreate, session-manager derivation). Top-level rows always have a
+   *  NULL or empty `agent_id`, so both are excluded here; this rides the
+   *  `idx_sessions_agent_id` index instead of materializing every row. */
+  const activeSubagentIds = db.prepare(`
+    SELECT DISTINCT agent_id
+    FROM sessions
+    WHERE status != 'terminated'
+      AND agent_id IS NOT NULL
+      AND agent_id != ''
+  `);
+
   /** Active descendant subagent counts: non-terminated, thread-branch-free,
    *  full-tree — the SQL twin of the status bar's former app-side walk.
    *  Recursion only descends into rows kept in the previous level, so a
@@ -568,5 +596,6 @@ function buildSessionStore(db: Database.Database): SessionStore {
     delete: (id) => deleteSessionRow(del, id),
     countSubagentTree: (rootSessionId) => countSubagentTreeRows(countSubagents, rootSessionId),
     list: (filter) => listSessionRows(db, filter),
+    activeSubagentAgentIds: () => readActiveSubagentIds(activeSubagentIds),
   };
 }

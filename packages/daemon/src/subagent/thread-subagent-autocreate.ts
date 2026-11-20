@@ -199,10 +199,7 @@ export async function handlePlatformThreadCreate(
 
   // Derive a title-based ID, reserving configured agents and all active subagents.
   const reservedAgentIds = new Set(Object.keys(input.config.agents?.list ?? {}));
-  for (const row of sessions.list()) {
-    if (row.status !== "terminated" && row.subagentAgentId)
-      reservedAgentIds.add(row.subagentAgentId);
-  }
+  for (const id of sessions.activeSubagentAgentIds()) reservedAgentIds.add(id);
   // A title-less thread must not use its numeric platform ID as the agent ID: that is not a
   // human-readable slug. Fall back to a readable base instead.
   const subagentAgentId = deriveThreadSubagentAgentId(input.threadTitle?.trim() || "thread", (id) =>
