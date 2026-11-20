@@ -59,6 +59,8 @@ export class FsHelperClient {
   private exitHandler: (() => void) | undefined;
   private buffer = "";
   private disposed = false;
+  /** Last helper-exit error, so a request racing the exit fails with the real cause. */
+  private lastExitError: string | undefined;
 
   constructor(opts: FsHelperSpawnOptions) {
     this.sessionId = opts.sessionId;
@@ -81,7 +83,9 @@ export class FsHelperClient {
     await this.ensure();
     const managed = this.managed;
     if (!managed || managed.state !== "running") {
-      throw new Error(`fs helper not running (state=${managed?.state ?? "none"})`);
+      throw new Error(
+        this.lastExitError ?? `fs helper not running (state=${managed?.state ?? "none"})`,
+      );
     }
 
     const id = randomUUID();
@@ -165,6 +169,7 @@ export class FsHelperClient {
       }
       this.spawnedOnce = true;
       this.managed = managed;
+      this.lastExitError = undefined;
       this.attachListeners(managed);
     })();
 
@@ -189,7 +194,8 @@ export class FsHelperClient {
     const onExit = () => {
       if (this.managed === managed) {
         this.managed = undefined;
-        this.failAllPending(new Error("fs helper exited; retry the operation"));
+        this.lastExitError = "fs helper exited; retry the operation";
+        this.failAllPending(new Error(this.lastExitError));
       }
       managed.removeListener("stdout", onStdout);
       managed.removeListener("exit", onExit);
@@ -224,23 +230,33 @@ export class FsHelperClient {
       const line = this.buffer.slice(0, nl).replace(/\r$/, "").trim();
       this.buffer = this.buffer.slice(nl + 1);
       if (!line) continue;
-      let msg: unknown;
-      try {
-        msg = JSON.parse(line);
-      } catch {
-        log.warn("fs_helper.malformed_frame", { sessionId: this.sessionId });
-        continue;
-      }
-      if (typeof msg !== "object" || msg === null) continue;
-      const rec = msg as Record<string, unknown>;
-      const id = rec.id;
-      if (typeof id !== "string") continue;
-      const entry = this.pending.get(id);
-      if (!entry) continue;
-      this.pending.delete(id);
-      clearTimeout(entry.timer);
-      entry.resolve(rec);
+      const rec = this.parseResponseFrame(line);
+      if (!rec) continue;
+      this.settlePending(rec.id, rec);
     }
+  }
+
+  /** Parse one NDJSON frame; null when it is empty, malformed, or lacks an id. */
+  private parseResponseFrame(line: string): ({ id: string } & Record<string, unknown>) | null {
+    let msg: unknown;
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      log.warn("fs_helper.malformed_frame", { sessionId: this.sessionId });
+      return null;
+    }
+    if (typeof msg !== "object" || msg === null) return null;
+    const rec = msg as { id: string } & Record<string, unknown>;
+    return typeof rec.id === "string" ? rec : null;
+  }
+
+  /** Resolve (or drop) the pending request matching a response frame's id. */
+  private settlePending(id: string, rec: Record<string, unknown>): void {
+    const entry = this.pending.get(id);
+    if (!entry) return;
+    this.pending.delete(id);
+    clearTimeout(entry.timer);
+    entry.resolve(rec);
   }
 
   private failAllPending(err: Error): void {

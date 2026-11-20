@@ -171,6 +171,7 @@ describe("fs helper entry process", () => {
 
   it("delete counts nested entries with recursive", async () => {
     const helper = new HelperHandle();
+    mkdirSync(join(workspace, "tree"));
     mkdirSync(join(workspace, "tree", "sub"));
     writeFileSync(join(workspace, "tree", "one.txt"), "1");
     writeFileSync(join(workspace, "tree", "sub", "two.txt"), "2");

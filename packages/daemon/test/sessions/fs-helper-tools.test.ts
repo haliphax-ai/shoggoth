@@ -104,9 +104,10 @@ describe("fs mutation tools via the persistent helper", () => {
     writeFileSync(join(workspace, "tree", "a.txt"), "1");
     writeFileSync(join(workspace, "tree", "sub", "b.txt"), "2");
 
-    const blocked = await registry.execute("fs", { action: "delete", path: "tree" }, ctx);
-    const blockedJson = JSON.parse(blocked.resultJson);
-    assert.match(String(blockedJson.error ?? ""), /recursive/);
+    await assert.rejects(
+      () => registry.execute("fs", { action: "delete", path: "tree" }, ctx),
+      /recursive/,
+    );
     assert.ok(existsSync(join(workspace, "tree", "a.txt")));
 
     const result = await registry.execute(
@@ -167,11 +168,14 @@ describe("fs mutation tools via the persistent helper", () => {
   });
 
   it("rejects invalid chmod modes before reaching the helper", async () => {
-    writeFileSync(join(workspace, "v.txt"), "x");
+    const target = join(workspace, "v.txt");
+    writeFileSync(target, "x");
+    // Pin the mode so the assertion is independent of the environment umask.
+    chmodSync(target, 0o644);
     await assert.rejects(() =>
       registry.execute("fs", { action: "chmod", path: "v.txt", mode: "999" }, ctx),
     );
-    assert.strictEqual(lstatSync(join(workspace, "v.txt")).mode & 0o777, 0o644);
+    assert.strictEqual(lstatSync(target).mode & 0o777, 0o644);
   });
 
   it("requires dest for move and copy", async () => {

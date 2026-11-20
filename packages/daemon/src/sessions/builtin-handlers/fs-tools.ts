@@ -93,36 +93,39 @@ function isValidMode(mode: string): boolean {
 // Action implementations
 // ---------------------------------------------------------------------------
 
-async function doMove(ctx: BuiltinToolContext, args: FsArgs): Promise<BuiltinToolResult> {
-  if (!args.dest) throw new Error("`dest` is required for move");
-  const src = resolveDst(ctx, args.path);
+/**
+ * Shared body for the two-argument actions (move, copy): validate `dest`,
+ * resolve both paths (the source resolver differs per action — move already
+ * requires an existing source so it uses the write resolver's parent check),
+ * run the helper op, and report the from/to pair.
+ */
+async function runSrcDstAction(
+  ctx: BuiltinToolContext,
+  args: FsArgs,
+  action: "move" | "copy",
+  resolveSrcPath: (ctx: BuiltinToolContext, userPath: string) => string,
+): Promise<BuiltinToolResult> {
+  if (!args.dest) throw new Error(`\`dest\` is required for ${action}`);
+  const src = resolveSrcPath(ctx, args.path);
   const dst = resolveDst(ctx, args.dest);
 
-  await runHelper(ctx, "move", { src, dst });
+  await runHelper(ctx, action, { src, dst });
   return {
     resultJson: JSON.stringify({
       ok: true,
-      action: "move",
+      action,
       from: relPath(ctx, src),
       to: relPath(ctx, dst),
     }),
   };
 }
 
-async function doCopy(ctx: BuiltinToolContext, args: FsArgs): Promise<BuiltinToolResult> {
-  if (!args.dest) throw new Error("`dest` is required for copy");
-  const src = resolveSrc(ctx, args.path);
-  const dst = resolveDst(ctx, args.dest);
+async function doMove(ctx: BuiltinToolContext, args: FsArgs): Promise<BuiltinToolResult> {
+  return runSrcDstAction(ctx, args, "move", resolveDst);
+}
 
-  await runHelper(ctx, "copy", { src, dst });
-  return {
-    resultJson: JSON.stringify({
-      ok: true,
-      action: "copy",
-      from: relPath(ctx, src),
-      to: relPath(ctx, dst),
-    }),
-  };
+async function doCopy(ctx: BuiltinToolContext, args: FsArgs): Promise<BuiltinToolResult> {
+  return runSrcDstAction(ctx, args, "copy", resolveSrc);
 }
 
 async function doDelete(ctx: BuiltinToolContext, args: FsArgs): Promise<BuiltinToolResult> {

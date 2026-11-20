@@ -1,14 +1,6 @@
-// ---------------------------------------------------------------------------
 // fs helper entry — persistent per-session helper process for fs mutations.
-//
-// Spawned by the daemon via procman (one per session, first fs op), running
-// as the agent UID/GID so kernel DAC applies to every operation. Receives
-// newline-delimited JSON commands on stdin and answers each with one
-// newline-delimited JSON result on stdout (same framing as the MCP stdio
-// transport). The daemon resolves and sandbox-checks every path before the
-// command reaches this process; the helper performs the actual fs mutation
-// so file ownership and permission checks happen under the agent identity.
-// ---------------------------------------------------------------------------
+// Spawned by the daemon via procman (one per session, first fs op), running as
+// the agent UID/GID so kernel DAC applies. NDJSON requests/responses on stdio.
 
 import readline from "node:readline";
 import fs from "node:fs";
@@ -134,10 +126,12 @@ rl.on("line", (line) => {
   try {
     command = JSON.parse(trimmed);
   } catch {
+    // Unparseable frame: no id is recoverable, answer with a bare error result.
     process.stdout.write(`${JSON.stringify({ ok: false, error: "invalid JSON frame" })}\n`);
     return;
   }
-  const result = execute(command);
+  // Echo the command id so the client can match responses to requests.
+  const result = { ...execute(command), id: command?.id };
   process.stdout.write(`${JSON.stringify(result)}\n`);
 });
 
