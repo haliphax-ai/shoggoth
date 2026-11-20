@@ -20,16 +20,8 @@ interface TimerRecord {
 type TimerDeliveryFn = (entry: TimerEntry) => Promise<void>;
 
 /**
- * Delivery/cancel semantics (at-most-once):
- *
- * - A timer is marked `fired = 1` in the DB *before* its delivery begins, so a
- *   crash mid-delivery drops the message rather than duplicating it.
- * - A timer whose delivery is currently in flight can NOT be cancelled:
- *   {@link cancel} and {@link cancelByAnchorSession} skip it (reporting it as
- *   not cancelled) and the pending delivery still completes. A cancel arriving
- *   during delivery therefore never contradicts a delivery that lands.
- * - Timers still in the pending buffer (scheduled but not yet flushed) and
- *   timers waiting in the heap remain freely cancellable.
+ * Delivery/cancel semantics are at-most-once; the full invariant list:
+ * docs/daemon.md → Timers (Delivery and Cancel Semantics).
  */
 export class TimerScheduler {
   private readonly heap = new TimerHeap();

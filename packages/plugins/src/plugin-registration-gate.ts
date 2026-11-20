@@ -64,18 +64,14 @@ export interface CreateGatedContextOptions {
 // ---------------------------------------------------------------------------
 
 /**
- * Creates a gated ServiceRegisterCtx that intercepts registerService/registerTools
- * and applies fingerprint-based approval gating:
- *
- * - Computes the plugin fingerprint from its manifest
- * - Resolves approval status against the store
- * - If 'pending' or 'pending-reapproval': registers the service but suspends tools
- *   (does not call inner registerTools)
- * - If 'approved' and fingerprint matches: registers service and tools normally
- * - When deps are provided and plugin has declared ops, wraps deps with
- *   createOpsEnforcementProxy() so undeclared ops throw at access time
- *
- * Returns both the gated context (to pass to the hook) and a result accessor.
+ * Creates a gated {@link ServiceRegisterCtx} that intercepts
+ * registerService/registerTools and applies fingerprint-based approval
+ * gating. The service entry always registers (visible in the registry);
+ * pending/pending-reapproval plugins register the service but their tools
+ * are suspended; approved plugins register tools normally. When deps are
+ * provided and the plugin has declared ops, deps are wrapped with
+ * `createOpsEnforcementProxy()` so undeclared ops throw at access time.
+ * Returns the gated context (to pass to the hook) plus a result accessor.
  */
 export function createGatedServiceRegisterCtx(options: CreateGatedContextOptions): {
   ctx: ServiceRegisterCtx;

@@ -2,15 +2,10 @@ import type Database from "better-sqlite3";
 import { rmSync } from "node:fs";
 
 /**
- * Safely close a test database and remove its temp directory.
- *
- * SQLite WAL mode creates `-wal` and `-shm` sidecar files that may not be
- * fully flushed when `db.close()` returns. A concurrent `rmSync` can then
- * hit `ENOTEMPTY` if a sidecar file appears mid-traversal.
- *
- * Checkpointing with TRUNCATE before close eliminates most races, but some
- * tests still hit ENOTEMPTY on rare occasions. This function retries when
- * that happens (bounded immediate retries, no timer waits).
+ * Close a test database and remove its temp directory. WAL sidecar files
+ * may still be flushing when db.close() returns, so rmSync can hit
+ * ENOTEMPTY mid-traversal; wal_checkpoint(TRUNCATE) narrows the race and a
+ * bounded event-loop retry covers the rest.
  */
 export async function closeTestDb(db: Database.Database, tmpDir: string): Promise<void> {
   try {

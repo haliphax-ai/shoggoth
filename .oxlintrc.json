@@ -6,7 +6,7 @@
     "correctness": "error"
   },
   "rules": {
-	"custom-lint/jsdoc-refer-docs": "error",
+    "custom-lint/jsdoc-refer-docs": "error",
     "custom-lint/no-comment-essays": "error",
     "no-unused-vars": "error"
   },

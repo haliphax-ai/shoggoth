@@ -101,10 +101,22 @@ Migrations live in `shoggoth/migrations/` as numbered SQL files (e.g. `0001_init
 
 Context segments (`sessions.context_segment_id`) scope transcript messages for model context. Two operations exist:
 
-- **New** (`applySessionContextSegmentNew`) — mints a new segment UUID, denies pending HITL actions, clears per-session tool auto-approve, kills all child subagents, resets session stats. Old transcript rows are abandoned (not deleted — retention handles cleanup).
-- **Reset** (`applySessionContextSegmentReset`) — mints a new segment UUID and denies pending HITL, but retains auto-approvals and does not touch subagents.
+- **New** (`applySessionContextSegmentNew`) — mints a new segment UUID, so the previous segment's transcript rows are abandoned (excluded from model context by the new segment id) and left for the retention workflow to clean up.
+- **Reset** (`applySessionContextSegmentReset`) — does NOT mint a new segment id: it deletes the transcript rows of the current segment in place (not abandoned) and the session continues with the segment id it already had.
 
-Both push a "Fresh session" system context message.
+Both deny pending HITL actions, clear the re-read-required list (stale line numbers no longer apply to a fresh transcript), reset the session's tool state to the agent's defaults (session tool discovery overlays from the previous transcript do not carry over), regenerate the system-context token, reset segment stats, and kill the session's still-running **one-shot** subagents (via the optional `killSubagents` callback). **Persistent** subagents (`subagentMode === "persistent"`) are never killed by either operation — they outlive the parent's context lifecycle and are torn down only by TTL/inactivity or an explicit subagent kill. Both push a "Fresh session" system context message.
+
+**New** additionally clears **per-session** tool auto-approve (`hitl_session_tool_auto_approve`, e.g. ✅ "this tool for session"). **Reset** retains per-session auto-approvals.
+
+### Steer Channel
+
+`sessions/steer-channel.ts` implements per-session injection of operator guidance into an active tool loop (same singleton-map pattern as `system-context-buffer.ts`). The tool loop drains the queue between tool-call batches and injects the messages into the model context.
+
+Delivery and answeredness are handshake-based:
+
+- **Drop handshake** — a steer entry may carry an `onDropped` callback; it fires (best-effort, never breaks teardown) when the message is never drained: the turn ended without injecting, or the channel was replaced by a newer turn (a replaced turn's undrained queue is dropped). A warn log accompanies every drop so it is observable; the callback remains the guaranteed-delivery mechanism.
+- **Answered handshake** — drained messages move to a per-session injected-but-unanswered set; the receiving turn must settle normally (a model response follows) for `settleSteersAnswered` to clear them. `steerDepth` counts queued (never injected) plus unanswered entries; one-shot teardown treats a non-zero depth as "a directive may still lose its answer" and re-delivers before terminating (`startSteerRedelivery`).
+- The unanswered set is keyed by session on purpose: the channel dies with the turn that received the injection, while the "was the directive answered?" question outlives it.
 
 ---
 
@@ -157,6 +169,55 @@ The loop respects a `turnAbortSignal` for cancellation and marks tool runs as fa
 
 Argument validation is universal: unknown arguments (not declared in the tool's schema) and missing required arguments are rejected with an `invalid_arguments` error instead of being silently dropped. The tool loop validates at Stage 2, and the MCP routing executor (`createMcpRoutingToolExecutor`) validates again before dispatching — covering the paths that bypass the loop (workflow tool tasks and the subagent runtime executor). Schemas that declare no `properties` (open schemas) or set `additionalProperties: true` pass args through unchanged.
 
+The MCP routing executor retries an external tool call exactly once when it fails with a closed-session signature (`Error: MCP session is closed` / `MCP session closed`, wrapped by the pool as `{ error: "mcp_tools_call_failed", ... }`). This happens when a pooled MCP session was closed out from under an in-flight turn — typically the 30-minute per-instance idle eviction closing the pool while the turn captured its external invoke at turn start. The retry re-resolves the session's MCP context (lazily reconnecting an idle-evicted pool) and re-dispatches; a second closed-session failure is returned as-is (no retry loop).
+
+### Per-Call Dispatch
+
+`processSingleToolCall()` validates, gates, and executes a single tool call, returning a dispatch result so the caller knows whether to `continue` (skip) or proceed. Errors and denials are pushed back to the model via `pushToolMessage` and appended to the transcript inside the function. Its stages:
+
+1. Name / thinking-leak / unknown-tool validation
+2. Args validation
+3. Policy check
+4. System gates + HITL approval gate
+   4.5. `beforeExecute` hook — fired at the proceed-decision point, BEFORE execution, so the runaway breaker can record the call and trip (steer/cancel) while preventing a tripping call from ever running
+5. Execution with timeout
+6. Result feedback to model + transcript
+
+`beforeExecute` returns `{ kind: "prevented", runawayVerdict }` when the runaway breaker trips on this call: the call is answered with a synthetic tool result (written by the hook), never reaches the executor, and the caller discards the rest of the batch. Otherwise it returns `{ kind: "ok" }` and execution proceeds normally.
+
+### Circuit Breakers
+
+The model loop is `for (;;)` and only exits on abort, a terminal no-tool-call response, or the structured-output retry budget. Three backstops terminate a stuck turn cleanly (same `break` style as the retry-exhausted path):
+
+- **Consecutive invalid tool calls** (`MAX_CONSECUTIVE_INVALID_TOOL_CALLS`) — unknown tool name, unparseable arguments, or schema-invalid arguments on a known tool are all calls the model could retry forever without the loop ever advancing; this many in a row without a valid call in between ends the turn. Near-miss structured-output calls are excluded: they have their own bounded retry budget.
+- **Structured-output near-miss** — models under stress sometimes emit a garbled variant (e.g. `__structured_output__parameter`) containing the exact synthetic tool name as a substring. Provider adapters match the synthetic tool with an exact-name check, so these near-misses fall through to the generic unknown-tool path, which has no counter and would spin unbounded; routing them into the structured-output retry budget (`STRUCTURED_OUTPUT_MAX_RETRIES`) bounds the spin. Detection is deliberately simple exact-name-substring containment, excluding the exact name itself (which the adapter intercepts).
+- **Runaway breaker** — see below.
+
+#### Runaway Breaker
+
+The runaway breaker (`runaway-breaker.ts`) detects deterministic runaway model behavior that burns the token budget until the TTL expires. Two heuristics share one two-stage state:
+
+- **Duplicate tool calls** — the model keeps issuing the same call (same tool name, same truncated arguments). A rolling window of the most recent tool-call signatures (`RUNAWAY_WINDOW_SIZE`) trips when any one signature's count within the window exceeds the configured maximum (`RUNAWAY_MAX_DUPLICATES`). Signatures are `toolName|args` with args truncated at `RUNAWAY_SIGNATURE_ARGS_CHARS` (2000) characters — calls that differ only past that point (e.g. timestamps deep in a JSON blob) count as duplicates — then hashed so each window entry is fixed-size while preserving equality. The original 200-character capture was too small and canceled valid series of tool calls with a large common JSON prefix; 2000 chars is the compromise.
+- **Excessive prose** — the model generates long prose without the tool activity needed to make progress (a runaway monologue). Accumulated assistant prose is charged against a per-turn character budget (`RUNAWAY_PROSE_CHAR_LIMIT`); tool-only rounds charge nothing.
+
+Both heuristics use a shared two-stage response mirroring a physical circuit breaker: the first trip returns `steer` — the model receives an injected steering message telling it to change approach, and the window/budget reset so it gets a fresh chance to recover; the second trip returns `cancel` — the turn is terminated cleanly (same `break`-style as the other in-loop circuit breakers) and an operator notice is posted once through the active turn surface's in-turn banner path (silently skipped when no live surface exists). The window and prose budget reset on either trip, so the model is judged on fresh behavior afterwards.
+
+When a trip prevents a call mid-batch, the remaining tool calls in that batch are answered with a synthetic `runaway_breaker_skipped` result so the next hop (steer) or next turn (cancel) never sees an unanswered tool-call id.
+
+### Steer Channel
+
+The steer channel (`steer-channel.ts`) injects operator guidance into active tool loops, using the same singleton-map pattern as the system-context buffer. Pushed messages may carry an `onDropped` callback: guaranteed in-turn delivery needs to know when a queued message will never reach the model — the turn ended (unregister) or a new turn replaced the channel before the message was drained — so the sender can fall back to another delivery path (e.g. an OOB turn) instead of silently losing the message.
+
+Drained messages additionally get an "answered" handshake: injection consumes the entry, but the consumption only counts as delivered when the receiving turn settles normally (the tool loop marks it answered on completion). If the turn aborts or fails first, the message stays tracked as injected-but-unanswered so a teardown can re-deliver it instead of dropping a directive the model never responded to. Failed turns keep the entries (one-shot redelivery handshake); an operator abort withdraws the directive and settles them.
+
+### Truncated Tool-Call Args
+
+A tool call whose arguments were cut off by the provider's output-token limit (`finish_reason: "length"` / `max_tokens`) raises `ToolCallTruncatedError`. This is a distinct failure from "the model emitted malformed JSON": the arguments are an incomplete prefix of a larger JSON object, so the model cannot repair them by retrying the same call. Healing them to `{}` and asking the model to try again poisons the NEXT provider request — the replayed assistant turn carries the truncated `function.arguments` and the upstream rejects the whole request with an opaque 400 — so the turn is failed fast with an actionable message instead. The rest of the batch is answered with synthetic skip results so the transcript stays well-formed, and the truncation is surfaced as the turn's failure: the operator (and the model, on the next turn) sees an explicit error instead of a silent stop that looks like the agent gave up.
+
+### Compaction Gate
+
+Manual compaction requests are deferred into an active tool loop through a per-session gate (`compaction-gate.ts`, the steer-channel pattern: singleton map, one queue per session). Compaction rewrites the session transcript while the model client holds the same messages in memory, so it must only run when the loop is parked at a logical break (top of round, after steering injection, after the loop) and the turn queue is frozen behind the in-flight turn. A compaction request parked in the gate is drained by the loop at the next break; a request that arrives with no active loop gets `undefined` back and the caller falls back to running the compaction as a queued turn instead. When the turn settles, the gate is unregistered and leftover parked requests are rejected with `CompactionGateClosedError` so their callers fall back too.
+
 ### Tool Discovery
 
 When `toolDiscovery.enabled` is true, the daemon maintains a collapsible tool catalog:
@@ -197,6 +258,8 @@ The `gates` config section extends the same two gates to any tool whose namespac
 
 Registered builtins include: exec, fetch, fs operations, ls, cd, read/write, search-replace, kv, memory, message, ask, session management, show, skills, timer, web-search, workflow, config, discover, elevate, and process manager operations.
 
+The `fetch` handler resolves its undici dispatcher per request: without a configured CA bundle a plain default Agent is built once and reused; with one, an Agent trusting the PEM certificate bundle at the configured path is built and cached per resolved path for the process lifetime. When the path changes, the previous agent is left open so in-flight requests using it can finish; its idle sockets close after undici's keep-alive timeout. Malformed bundles fail fast at dispatcher construction with a clear error (same content validation as startup) instead of a cryptic TLS failure mid-request.
+
 ---
 
 ## Transcript & Compaction
@@ -212,7 +275,14 @@ Transcripts are stored in `transcript_messages` scoped by `(session_id, context_
 
 Compaction uses a separate model call to summarize older messages, preserving recent ones.
 
----
+### Transcript Assistant-Prose Extraction
+
+Turn delivery paths need the assistant prose produced during a single turn, and the transcript layout makes two shapes of extraction necessary:
+
+- `extractLatestTranscriptAssistantText` keeps only the LAST tool-call-free assistant segment after a given seq — by design, for paths that just want the turn's concluding text.
+- `extractTurnTranscriptAssistantProse` concatenates EVERY assistant text segment written after `afterSeq` — i.e. the prose emitted during a single turn — in transcript order, joined by a blank line. Prose that rides along a tool-call round is included (the tool loop writes content and tool calls in one row, so the pre-tools segment would otherwise be lost); pure tool-call rows carry no content and are skipped naturally. It returns undefined when the turn produced no assistant prose (tool-only turns). This preserves every pre-tools and post-tools segment so prose → tools → prose turns can be delivered whole on non-streaming paths.
+
+## Segments are normalized for newline padding and blank segments so composed prose joins with one blank-line separator, matching the display pipeline's round normalization.
 
 ## Control Plane
 
@@ -249,6 +319,10 @@ Rules support wildcards (`*`), compound resources (`exec:*`, `exec:curl`), and p
 | MCP      | `mcp_http_cancel_request`                                                                                                                                                                                                                 |
 
 All operations are audited to the `audit_log` table.
+
+### Op Dispatch Safety
+
+The op registry (`packages/daemon/src/control/op-registry.ts`) is a static map of literal op names to handlers. `req.op` arrives as an arbitrary string from the wire (`parseRequestLine` does not constrain its format); safety relies on exact-string map lookups against literal keys and on `get()` returning `undefined` for anything else — callers then reject with `ERR_UNKNOWN_OP`. Never index, resolve, or interpolate `op` into paths, imports, or command names, including computed keys on this map. The module must also stay a leaf: the policy engine imports it for the derived defined-op set, so it must not pull runtime state or config into its import graph.
 
 ---
 
@@ -393,6 +467,15 @@ While yolo mode is enabled, a 😎 section appears in the turn status bar immedi
 
 When a timer fires, it delivers a user-turn message to the target session via `runSessionModelTurn`. Timers are persisted in the `timers` table and survive daemon restarts.
 
+### Delivery and Cancel Semantics
+
+Delivery is at-most-once (implemented in `timers/timer-scheduler.ts` and `timers/timer-delivery.ts`):
+
+- A timer is marked `fired = 1` in the DB **before** its delivery begins, so a crash mid-delivery drops the message rather than duplicating it.
+- A timer whose delivery is currently in flight can **not** be cancelled: `cancel` and `cancelByAnchorSession` skip it (reporting it as not cancelled) and the pending delivery still completes — a cancel arriving during delivery never contradicts a delivery that lands.
+- Timers still in the pending buffer (scheduled but not yet flushed by the turn-end hook) and timers waiting in the heap remain freely cancellable.
+- Delivery targets the timer's owning session; when the owner is terminated but its `session_anchor` is alive, the delivery retargets to the anchor — otherwise the platform's turn guard would reject the dead owner and the anchored session would silently lose the wake-up (e.g. a one-shot subagent scheduling a parent-anchored check-in loses it at its own teardown). No store bound (tests/embeds) fails open; a missing or terminated anchor leaves the target on the owner.
+
 ---
 
 ## Events & Cron
@@ -423,6 +506,19 @@ When a timer fires, it delivers a user-turn message to the target session via `r
 
 - Requeue stale `processing` events (from a previous crash).
 - Mark orphaned `running` tool runs as failed with reason `restart_reconciliation`.
+
+---
+
+## Turn Output Presentation
+
+In-turn banners and notices (session-send yield notices, exec / session-send delivery traces, steering directives, judge-decision banners) must land inside the active turn's output rather than as separate channel messages.
+
+- **Steer-channel injection** (`sessions/steer-channel.ts`): messages pushed onto a session's steer channel are drained between tool-call batches and injected into the running turn. A `> 🫵 **Steered:** <prompt>` blockquote anchors an operator `/steer` directive in the turn output; steer-channel content that already leads with its own blockquote banner (in-turn events) surfaces verbatim instead of being re-wrapped.
+- **In-turn events** (`messaging/in-turn-event.ts`): async completions that arrive mid-turn — background exec notifications, async agent-to-agent replies, inline tool results with truncated args — are delivered into the _current_ turn through the steer channel instead of spawning an out-of-band turn. Banners follow the emoji-lead blockquote pattern shared with OOB turn banners (`> emoji Title: *detail* `id``). Delivery is guaranteed: when no turn is active, or the turn ends before the queued event is drained, the caller's fallback path (typically the OOB turn) delivers instead; exactly one of the two paths ever runs.
+- **OOB turn banners** (`messaging/oob-turn-banner.ts`): when a message-surface-bound session handles an out-of-band turn (timer, incoming inter-session message, workflow status notification), the operator gets a blockquoted "processing" banner at turn start, the status bar streamed live into that message while the turn runs, and a terminal banner (plus any `to_operator` content) at completion. Formatting (block quote, italics, monospace ids) is part of the display aesthetic; builders are platform-neutral and unit-tested, and a platform that cannot edit messages falls back to posting the terminal banner as a new message.
+- **Queued-message indicator** (`presentation/queued-message-indicator.ts`): when an operator message lands in the turn queue behind an in-flight turn, the platform marks it so the operator knows it was received — a ⏳ reaction on the queued message when reactions are supported, else a ⏳ reply, else a standalone post. The reaction is removed once the queued message is processed or dropped; reply/post fallbacks carry nothing to clear.
+- **Active turn surface** (`presentation/active-turn-surface.ts`): the turn runner registers a per-turn banner collector for its session while the turn is live. Notices are captured with an anchor (committed prose segments, tool calls). Live render re-renders the in-flight display from scratch on every push, splicing notices in at their anchors (slot _s_ = after the _s_-th committed prose segment); terminal render applies the same splice to the composed body at delivery, so the live stream and the delivered message place each notice between the prose segments it fired between. Each body renders at most once — the first render of a body is final and later calls return it untouched — so termination can never produce an intermediate ("bottom-smashed") layout. Prose segments may span several markdown blocks (multi-paragraph rounds), so anchors are located paragraph by paragraph; unresolvable anchors fall back to one trailing block at the end of the body — notices are never dropped.
+- **Termination shaping** (`presentation/stream-coordinator.ts`): the final delivery body passes through one-shot shaping steps (banner splice, thinking composition, …) against a single in-memory copy — only the very final result is ever yielded, so the platform surface never renders an intermediate layout. The pass is fail-open: any step that throws (or any interruption) rejects without yielding anything, and the caller keeps the already-streamed output as the delivered record.
 
 ---
 
@@ -476,6 +572,21 @@ Task types: `agent` (subagent session), `tool` (direct tool call), `gate` (condi
 
 ---
 
+## Model Resolution
+
+`resolveModel(db, config, opts)` maps a model ref (`providerId/model`) to its full provider + model definition, honoring per-session model overrides and failover. Effective models config comes from the session's override slice when a `sessionId` is given, else the global `models` config. The algorithm:
+
+1. Determine the target ref: explicit ref > first entry of the effective failover chain.
+2. Look up the provider by providerId from the ref.
+3. Check `provider_failures`: if failed and not stale → skip to failover; if stale → clear the failure record and try.
+4. If the provider is down, find its position in the failover chain and walk from the next entry until a non-failed provider is found.
+5. If the chain is exhausted, return null and log a warning.
+6. Resolve the model definition from the provider's keyed `models` record by name.
+
+A failed provider is marked for a cooldown duration (`getMarkFailedDuration`, provider-specific or global retry budget) before it becomes eligible again. The failover chain may contain `FailoverChainEntry` (string or `{ ref }`) or `ShoggothModelFailoverHop` (`{ providerId, model }`) entries from agent overrides; entries are normalized to refs.
+
+---
+
 ## Configuration
 
 ### Layered Config
@@ -492,6 +603,7 @@ Config is loaded from the config directory as layered JSON files. The `configRef
 - Debounced at 400ms.
 
 Disable with `SHOGGOTH_CONFIG_HOT_RELOAD=0` or `runtime.configHotReload: false`.
+Restart-required keys are enumerated by `CONFIG_RESTART_REQUIRED_KEYS` (`packages/daemon/src/config-policy.ts`); hot reload live-applies the `policy` and `hitl` slices only when the merged config stays equal on every one of those keys. Changes to a restart-required key are logged and ignored until restart, and other subtrees (`models`, `mcp`, `skills`, `plugins`, `memory`, `retention`, `logLevel`, …) are not applied live either — adjust those and restart the daemon.
 
 ### Dynamic Config
 
@@ -527,6 +639,12 @@ After a successful model health check, the daemon fetches model metadata (contex
 5. After drains, calls `markInterruptedRunsFailed()` to fail in-flight tool runs.
 6. Closes the state database.
 7. Resolves the `finished` promise, triggering `process.exit(0)`.
+
+### Drain Groups
+
+Drains registered with a `group` number (`DrainGroup` option) are scheduled by dependency level: drains sharing a group run in parallel via `Promise.allSettled`, and groups execute in ascending numeric order — a group-2 drain starts only after every group-1 drain completes (or fails). The shared `drainTimeoutMs` deadline spans all groups: a drain whose turn arrives after the deadline is skipped, and any drain deadline hit stops scheduling further groups.
+
+Drains registered **without** a group each get a unique implicit group and therefore execute sequentially in registration order (backward compatible).
 
 ### Drain Registration Order
 
@@ -589,12 +707,45 @@ Subagent sessions are child sessions spawned from a parent:
 - `reconcilePersistentSubagents()` runs at startup to restore or expire persistent subagents.
 - Nesting depth is governed by `maxSpawnDepth` (default 1, per-agent override via `agents.list.<id>.maxSpawnDepth`): a top-level session is depth 0 and may spawn while its depth is below the limit; with the default, subagents cannot spawn nested subagents. This is the sole spawn-permission and nesting gate for agent principals, enforced at both the builtin `subagent` tool and the `subagent_spawn` control op (authoritative) by walking `parent_session_id` lineage; the `subagentSpawnAllow` allowlist (which agent ids a sender may spawn _as_) is a separate gate. Thread-bound persistent subagents (platform-thread-attached, user-visible) are governed by `maxSpawnDepth` like all other sessions — pure `parent_session_id` lineage depth, no platform-thread exemptions (they were previously exempt from the nesting ban). This is distinct from the workflow engine's `maxDepth`.
 
+### Persistent subagent inactivity timers
+
+All persistent subagents (thread-bound or threadless, any spawn path) share one arm/reset implementation (`packages/daemon/src/subagent/persistent-subagent-timers.ts`):
+
+- `armPersistentSubagentInactivityTimer` clears any prior timer, persists the computed expiry (`subagentExpiresAtMs`), and schedules termination (`ttl_expired`) at the expiry.
+- `touchPersistentSubagentInactivityTimer` re-arms a full window after each delivered assistant response.
+- The startup reconcile re-arms the remaining window from the persisted expiry after a restart (via the `expiresAtMs` option).
+- Kill paths tear the timer down via the `clearTtl` handle each arming site registers on the session's subagent runtime handles (`disposeSubagentRuntime`).
+- One-shot subagents and regular sessions have no armed inactivity timer (touch is a no-op for them).
+
+### Thread subagents (platform threads)
+
+Threads created on a bound platform channel can get an automatic persistent subagent session (`handlePlatformThreadCreate` — platform-agnostic decision core; platforms stay thin: parse the gateway event, resolve channel→session, post the status banner):
+
+- Enabled unless `agents.threadSubagents` is explicitly `false`.
+- No-op when the parent channel is unbound, its session is not top-level, or the parent is terminated.
+- Idempotent: a thread with an existing session binding (durable row or runtime map) never gets a second session — re-fired gateway events and reconcile-restored threads are no-ops.
+- **Control-plane spawn claims** (`thread-subagent-claims.ts`): a platform `THREAD_CREATE` event carries no signal distinguishing a thread the operator's `subagent_spawn` op just created (via REST) from a user-created one — the autocreate routine would race the spawn op and, on losing the binding, leave a banner-only zombie session. The spawn flow therefore claims the thread _before_ it exists: an **explicit thread id** claim (`spawn_persistent` with a concrete `platform_thread_id`), or a **pending creation** claim keyed by the parent channel, refcounted and registered before the REST create call (the `thread_id: "0"` sentinel's id is unknown until the call returns, but the event may be dispatched first). Claims are synchronous, exclusive, and released on every spawn exit path (success, thrown error, bind conflict); tests reset the registry with `clearThreadSpawnClaims`. The autocreate path skips claimed threads with reason `control_plane_claimed`.
+- When a spawn's thread binding is refused (a concurrent flow won the race), the freshly autocreated thread subagent is adopted by the spawn op (`findAdoptableThreadSubagentSession` — live, persistent, thread-bound, zero transcript messages, same parent; the spawn op's own child is excluded) so its prompt becomes the first model turn instead of failing the spawn and leaving a banner-only zombie.
+- Sessions ignore a lone "." inbound message while the thread has no transcript history yet (`shouldSkipThreadSessionSentinel`), letting the operator set the thread up (e.g. switch the model) before the real prompt.
+- The agent id is derived from the thread title (a title-less thread falls back to a readable slug, never the numeric platform id), reserved against configured agents and all live subagent ids. The banner (URN + resolved model, shared with the manual `subagent_spawn` path) is posted to the thread immediately, before any turn.
+
+### One-shot notify drain and final result
+
+End-of-turn teardown for a one-shot is deferred while work may still matter (`settleOneShotAfterTurn` / `one-shot-notify-drain.ts`):
+
+- Terminate immediately when nothing is pending (no live exec-notify handles, no in-flight OOB delivery, idle turn queue).
+- Otherwise hold the session until pending exec-notify handles drain, capped by the persisted wall-clock expiry (fallback 60 min when the row carries no valid expiry); a safety timer terminates as a normal end when the TTL elapses.
+- Releases are identity-checked: a re-armed hold supersedes a captured terminate callback, and the live handle count is re-read at release time (a wake-up turn may have registered new handles).
+- A turn that ended non-normally (`aborted`/`failed`/`canceled`) never answers the steers it received: unanswered steers are re-delivered as one structured OOB turn on the still-active session (`startSteerRedelivery`, one attempt — a failed attempt tears down instead of retrying; the target row is re-checked first so a terminated session never receives the turn), and a normal settle then resumes the teardown.
+- The final teardown (every path — direct, deferred release, and safety timer — routes through one terminate closure) delivers the child's latest transcript text to its parent as a structured OOB follow-up turn when it differs from what the spawn path already delivered (`markOneShotResultDelivered` dedupes by exact text; this is the steered follow-up case — steering produces a newer reply), then terminates. The parent therefore always hears one of "result" or (via the terminate notice) "ended" for the post-steer lifetime of the child.
+
 ### Contract mode (one-shot subagent spawns)
 
 `subagent_spawn` (and the builtin `subagent` tool's `spawn_one_shot` action) accepts an optional `contract` array — entries of `{ path, action, summary }` (`action`: `create` | `update` | `delete`) — plus an optional `judge` decision model (`provider-id/model-name`). The mode is inactive when `contract` is unset or empty.
 
 - **Call-time gate**: each target's repository is discovered from the target's own directory (upward) and from the spawning session's working directory (downward), so contracts may point at a repository nested below the workspace as well as at one containing it; all targets must land in the same repository (the contract is diffed as one unit against one baseline) — otherwise the spawn fails (`ERR_CONTRACT_NOT_IN_REPO`) before any child session exists, notifying the agent. `judge` requires a non-empty `contract` and must name a configured decision provider/model (`ERR_INVALID_JUDGE`). Persistent spawns reject `contract`.
 - **Baseline**: the spawn-time `HEAD` is captured as the diff baseline.
+- **Git invocation**: contract git commands run as the configured agent uid/gid (`resolveAgentCreds`), not the daemon's — the checks read and diff the agent-owned working tree. `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`/`GIT_COMMON_DIR` are stripped from the environment so the working directory alone decides the repository, and `safe.directory=*` is relaxed for these invocations only (the daemon/agent uid split otherwise trips git's "dubious ownership" guard even when DAC permissions allow reading). When the uid switch is not permitted (no `CAP_SETUID`, e.g. CI runners), the command is retried as the current user instead of failing every check. Downward repo discovery is bounded (`MAX_REPO_PROBES`, 512 probes) and probes only real directories (symlinked trees like `node_modules` are skipped); when no target resolves, the validation error names the base directory and the unwalked target.
 - **Post-turn verification** (`packages/daemon/src/subagent/contract.ts`): a target not acted upon with its contractual type breaks the contract (no decision call for it; `create` on a pre-existing path and `update` on an untouched path break; `delete` requires the path to be gone), as does any repository file **outside** the listed targets that changed against the baseline (the contract is exhaustive — tracked, deleted, and untracked changes are all listed from git itself, and an unenumerable change set fails closed). Otherwise each per-file `git diff` against the baseline is judged by the decision model in batches (`agents.contract.batchSize`, default 5); deleted files are never sent to the judge — a per-file `noul` answer below `agents.contract.yesMinimum` (default `0.85`) breaks it. Decision failures fail closed.
 - **Response**: the spawn response carries an extra `contract` field: `broken` (boolean) with `reason` naming what broke it, plus `yesMinimum`, `entries`, `judged[]` with per-file `yes`, `violated[]`, `unlisted[]`, `deletedSkipped[]`, `baseline`. `reason` is absent while the contract holds. Background one-shots return `{ active: true, pending: true }` and judge asynchronously after the turn.
 - **Prompt**: when a contract is active its entries (absolute paths, with the exhaustiveness rule) are appended to the child's task prompt as a `## Contract` section — spawn prompts carry the task only, never a restatement.

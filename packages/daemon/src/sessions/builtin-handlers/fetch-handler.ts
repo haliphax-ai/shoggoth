@@ -26,12 +26,11 @@ let cachedCaBundlePath: string | undefined;
 let cachedCaAgent: Agent | undefined;
 
 /**
- * Resolve the undici dispatcher for a request. Without a configured CA
- * bundle a plain default Agent is built once and reused; with one, an Agent
- * trusting the PEM certificate bundle at the configured path is built and
- * cached per resolved path for the process lifetime (when the path changes,
- * the previous agent is left open so in-flight requests using it can finish;
- * its idle sockets close after undici's keep-alive timeout).
+ * Resolve the undici dispatcher for a request. Without a configured CA bundle a
+ * plain default Agent is built once and reused; with one, an Agent trusting the
+ * PEM bundle at that path is built and cached per resolved path for the process
+ * lifetime (see docs/daemon.md → "Builtin Tool Registry" for agent caching and
+ * swap behavior).
  *
  * Throws if the bundle file is missing, unreadable, or not a valid PEM
  * certificate bundle.

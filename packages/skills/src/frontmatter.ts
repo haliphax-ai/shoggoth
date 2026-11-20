@@ -12,26 +12,9 @@ interface ParsedFrontmatter {
 /**
  * Minimal YAML-ish `key: value` lines between --- fences (v1).
  *
- * Keys accept any characters up to the first `:` (so keys may contain
- * spaces or other punctuation); quoted keys are not supported and a `:`
- * inside a key is not possible since it delimits the value.
- *
- * ## Malformed-line policy (skip, don't guess)
- *
- * Lines inside the fences that are blank or exactly a `---` fence are
- * structural and always tolerated. Any other line inside the fences that
- * does not parse as `key: value` — a line with no colon, or a line whose
- * colon is at index 0 (empty key) — makes the whole frontmatter block
- * malformed: `malformed` is set to true, and the invalid line is not
- * recorded as a field.
- *
- * Callers loading skills must treat a malformed frontmatter block as a
- * skip signal: the skill file is treated as if it did not exist, rather
- * than loaded with partially-parsed fields (see `scanSkillDirectories`
- * and `findSkillPathById`). A typo in frontmatter should never silently
- * produce a skill with missing metadata. Files that start with a `---`
- * fence but never close it are also malformed — the unclosed fence is
- * treated as a typo, not as a body.
+ * Any non-parseable line makes the whole block malformed, and callers treat
+ * malformed blocks as a skip signal (the file is treated as absent). Full
+ * policy: docs/skills.md — "Malformed Frontmatter (Skip Policy)".
  */
 export function parseMarkdownFrontmatter(source: string): ParsedFrontmatter {
   const lines = source.split(/\r?\n/);

@@ -1,19 +1,7 @@
 /**
  * Builds the operator CLI entry (`packages/cli/src/cli.ts`) to a single
  * self-contained `.mjs` bundle at `packages/cli/dist/cli.mjs`.
- *
- * Workspace packages export raw TypeScript sources (their `exports` point at
- * `./src/*.ts`), so a bare-node build cannot resolve cross-package imports
- * without a TypeScript loader. Bundling inlines those workspace sources into
- * the output, which lets the published bin run under plain `node` with no
- * `tsx` loader and no spawn wrapper.
- *
- * Dependencies installed from the registry are `external` and resolved from
- * `node_modules` at runtime, exactly as today.
- *
- * `--banner:js` shims CommonJS interop: esbuild's ESM output throws on
- * `require()` calls reached through CJS dependency graphs (e.g.
- * better-sqlite3). Providing a real `require` avoids that.
+ * Bundling rationale and the CJS-interop banner: docs/cli.md — "Building the CLI".
  */
 import { build } from "esbuild";
 import { dirname, join } from "node:path";

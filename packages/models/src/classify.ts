@@ -3,14 +3,9 @@ import { RETRYABLE_STATUSES } from "./resilience";
 
 /**
  * Status codes that trigger failover to the next provider/model in the chain.
- *
- * This set is a **strict superset** of the resilience-layer `RETRYABLE_STATUSES`
- * (which controls same-provider retries). Failover adds `429` because rate limits
- * are per-provider — a different provider is unlikely to share the same quota.
- *
- * We do NOT treat every 5xx as failover-eligible. Status codes like 501 (Not
- * Implemented) or 507 (Insufficient Storage) indicate a capability or
- * infrastructure problem that is unlikely to resolve by switching providers.
+ * A strict superset of the resilience-layer `RETRYABLE_STATUSES`; failover
+ * additionally treats 429 as eligible (see docs/models.md, "Failover-Eligible
+ * Errors").
  */
 const FAILOVER_STATUSES = new Set([...RETRYABLE_STATUSES, 429]);
 

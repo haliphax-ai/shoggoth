@@ -116,9 +116,7 @@ export function safeJsonParse(text: string, errorMessage: string): unknown {
 
 /**
  * Assert that a response has OK status, throwing `ModelHttpError` on failure.
- * Reads the response body text on error to include in the exception.
- *
- * Use this **before** reading the response body for content. On success the
+ * Use this **before** reading the response body for content: on success the
  * body stream is untouched; on error the body is consumed by the helper.
  *
  * @param res - The response to check.

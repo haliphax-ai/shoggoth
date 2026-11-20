@@ -1,28 +1,12 @@
 /**
- * Centralized, rate-limit-aware Discord REST client.
- *
- * Single point of contact for Discord REST traffic. Instead of firing every
- * request blind and eating 429s, the client meters proactively from Discord's
- * advertised headers (`X-RateLimit-Bucket`, `X-RateLimit-Remaining`,
- * `X-RateLimit-Reset-After`), schedules per bucket with priority lanes
- * (user-facing sends > workflow status > background probes), coalesces
- * same-message edits (latest-wins, one in-flight, stale = dropped), and folds
- * the entire 429/503 backoff into one mechanism with a whole-client pause for
- * `global: true` rate limits.
- *
- * Errors are typed (`RateLimitedError`, `NotFoundError`,
- * `MissingPermissionsError`, `ServerError`, `QueueTimeoutError`,
- * `NetworkError`, `BadRequestError`, `ThreadArchivedError`) so callers can
- * distinguish transient from permanent
- * failures instead of matching on error strings. All errors extend
- * `DiscordRestError` and keep the legacy `Discord REST <op> <status>: <body>`
- * message shape for log compatibility.
- *
- * Every failure is ALSO emitted as a structured log record through an optional
- * injected logger (`discord.rest.request_failed` / `discord.rest.backoff`)
- * with typed fields (`operation`, `kind`, `status`, `route_key`, ...) so
- * operators can query failures with jq (`builtin-logs`) instead of parsing raw
- * exception text. The logger is optional: without it, behavior is unchanged.
+ * Centralized, rate-limit-aware Discord REST client — the single point of
+ * contact for Discord REST traffic in the daemon. Requests are metered from
+ * Discord's advertised rate-limit headers, scheduled per bucket with priority
+ * lanes, same-message edits are coalesced (latest-wins), and the 429/503
+ * backoff is folded into one mechanism (whole-client pause for `global`).
+ * Errors are typed (all extending `DiscordRestError`); failures are also
+ * logged as structured records. Docs: docs/platform-discord.md
+ * ("Rate Limit Handling").
  */
 
 /** Priority lanes: user-facing sends > workflow status > background probes. */

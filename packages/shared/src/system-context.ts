@@ -83,14 +83,10 @@ const FALSIFIED_SENTINEL =
 /**
  * Checks untrusted inbound text for falsified system context blocks.
  *
- * When no valid token is provided, any block matching the divider pattern causes
- * the entire message to be discarded and replaced with a safety notice.
- *
- * When a valid token is provided, only blocks whose token does NOT match the
- * valid token are stripped (replaced with a sentinel in-place). Blocks that
- * carry the valid token are preserved, and surrounding text is kept intact.
- * Blocks with no embedded token are always considered falsified when a valid
- * token is supplied.
+ * With no valid token: any matching block discards the entire message
+ * (replaced with a safety notice). With a valid token: blocks carrying it are
+ * preserved, mismatched or token-less blocks are replaced in-place with a
+ * sentinel. Details: docs/shared.md — "System Context Envelopes".
  */
 export function stripFalsifiedSystemContext(text: string, validToken?: string): string {
   if (!SYSTEM_CONTEXT_BLOCK_RE.test(text)) {

@@ -36,6 +36,8 @@ Discord config is resolved from `platforms.discord` in the Shoggoth config (or t
 | `hitlNotifyChannelId`  | `string?`  | Post HITL notices to this channel. Env `SHOGGOTH_HITL_NOTIFY_CHANNEL_ID`.                                                                                                     |
 | `hitlNotifyWebhookUrl` | `string?`  | POST HITL events as JSON to this webhook. Env `SHOGGOTH_HITL_NOTIFY_WEBHOOK_URL`.                                                                                             |
 
+Bot token resolution (`resolveDiscordBotToken`) — env wins, in order: (1) `process.env[tokenEnv]` when `discord.tokenEnv` names an env var (the `*Env` convention used elsewhere in the configuration); (2) `process.env.DISCORD_BOT_TOKEN` (the long-standing default, so deployments that never set `tokenEnv` behave unchanged); (3) the layered `discord.token` inline value. Unlike model/memory providers (inline value first, `apiKey ?? apiKeyEnv`), Discord has always resolved the environment first — flipping that order would silently change which token wins for existing deployments.
+
 ### Additional Env-Driven Settings
 
 | Env Variable                               | Effect                                                 |
@@ -146,6 +148,9 @@ All REST traffic flows through one process-wide client (`rest-client.ts`):
   failures are jq-queryable via `builtin-logs` instead of raw exception
   text. `DiscordRestError.toJSON()` serializes those fields whenever an
   error is logged as an object.
+- **Typed error classes & message shape** — every error keeps the legacy `Discord REST <op> <status>: <body>` message shape for log compatibility. HTTP 400s surface as `BadRequestError` and are permanent by nature (callers must not retry the identical request); known 400 cases subclass it (e.g. `ThreadArchivedError`, Discord code 50083 "Thread is archived", where every further edit/create fails the same way until a human unarchives the thread) so bespoke recovery has a clean hook, while unclassified 400s default to log + give up.
+- **Queue deadlines** — a coalescable edit is rejected as stale after 10s in queue (`coalesceDeadlineMs`); any queued request is rejected after 90s (`maxQueueWaitMs`). Retries re-enter at the front of their priority lane. The injected logger is optional: without it the client only throws.
+- **Priority lane mapping** — `createDiscordRestTransport()` defaults sends/edits/threads/reactions/interaction callbacks to the `user` lane and reads (message history, search, reactions), typing, and command registration to `background`. The `status` lane exists for workflow-status edits but no default operation uses it; streaming and status edits share the `user` lane, with same-message contention handled by edit coalescing rather than lane ordering.
 
 ---
 
@@ -185,9 +190,16 @@ Inbound attachments are parsed from the Gateway payload with `id`, `url`, `filen
 
 Discord enforces a 2000-character limit. `splitDiscordMessage()` splits long messages:
 
-- Split priority: newline → space → hard cut.
-- Tracks fenced code blocks (triple backticks with language tag): closes at chunk boundary, reopens in next chunk.
-- Tracks paired inline formatting markers (`**`, `*`, `__`, `~~`, `||`): closes open markers at chunk end, reopens at next chunk start.
+- Split priority: newline → space → hard cut. A split point reserves room for the closing suffix (fence + inline markers); if the suffix would not fit, the split point is recomputed against the reduced budget.
+- Tracks fenced code blocks (triple backticks with optional language tag): a chunk ending inside a fence is closed with ``` and the next chunk reopens the same fence line (including the language tag).
+- Tracks paired inline formatting markers (`**`, `*`, `__`, `~~`, `||`): open markers are closed at chunk end and reopened at the next chunk start via the shared helpers in `formatting-state.ts`.
+
+**Formatting-state rules** (`formatting-state.ts`, shared by the splitter and the streaming synthetic-close guard):
+
+- Markers toggle only where Discord actually formats them: a marker OPENS when preceded by a word boundary (or line start) and followed by non-whitespace, and CLOSES when preceded by non-whitespace and followed by a word boundary (or line end). Intra-word and word-end markers (`5 * 3`, `snake_case_name`, a trailing `*`) are literal text in Discord, so they never count as toggles — appending a companion for them would corrupt later text that legitimately uses the marker.
+- Spoilers (`||`) are the exception: Discord formats them with no word boundary at all (`foo||bar||baz`), so the marker only requires content on its inside (non-whitespace after an opener, before a closer).
+- Chunks are scanned as a viewer sees them: the reopen prefix built from the previous chunk's state is prepended before scanning, so markers at the very start of a chunk get their true surrounding context (a hard split can land right before a closing marker).
+- `appendSyntheticClose()` closes constructs left open at the end of a text (e.g. before the turn status bar): open inline markers get their closing marker appended, an unclosed fence gets a closing ``` (the fence swallows everything after it until closed), and markers inside a fence are ignored as literal text. Markers are only tracked where Discord would actually format them, so prose markers never trigger a synthetic close; when a later chunk completes the pair, the synthetic close disappears on its own.
 
 ---
 
@@ -212,6 +224,8 @@ When `SHOGGOTH_DISCORD_STREAM=1`:
 4. Minimum edit interval controlled by `SHOGGOTH_DISCORD_STREAM_MIN_MS` (default 400ms).
 
 The streaming placeholder is posted before the typing indicator starts, because Discord cancels typing when a bot posts a message.
+
+Each stream handle is guarded by a permanent-failure circuit breaker: a 404 (message/thread deleted), a 403 (permissions revoked), or any 400 (the request would be rejected identically forever — archived thread, malformed payload) means the target cannot be edited. The first permanent rejection poisons the handle (one warn log), and all later `pushUpdate` / `setFullContent` / `setStatusBar` calls resolve as no-ops with zero REST traffic. `close()` is the deterministic-teardown twin: it marks the handle dead without an error log (deliberate shutdown on turn abort or pipeline disposal), is idempotent, and an operation already dispatched to the transport settles on its own.
 
 ---
 
@@ -245,6 +259,7 @@ Guild-scoped slash commands are registered on startup via `PUT /applications/{id
 | `/model`   | Get or set the session model selection. Options: `session_id`, `agent_id`, `model_selection`.                                                                                   |
 | `/queue`   | Manage the turn queue. Options: `action` (list/remove/clear/release), `priority`, `index`, `range`, `count`. Indexes are 1-based.                                               |
 | `/cruise`  | Activate or deactivate [cruise control](daemon.md#cruise-control) (HITL auto-pilot). Options: `yes`, `no`, `escalate`, `model`, `session_id`.                                   |
+| `/prompt`  | Run a canned prompt against a session. Options: `slug` (omit for a dropdown of available prompts), `session_id`.                                                                |
 
 When `session_id` is omitted, the handler resolves the session from the channel where the command was invoked. `session_id` accepts a session URN or a bare agent id (resolved to that agent's bootstrap primary session).
 
@@ -254,9 +269,22 @@ When `session_id` is omitted, the handler resolves the session from the channel 
 - **All required guidance provided** (`yes` and `no`) → activates (or changes) cruise control directly, no modal; activation warnings (e.g. missing model) are surfaced in the reply.
 - **Otherwise** (no options while inactive, or partial guidance) → a modal with three text inputs (`yes`/`no` required, `escalate` optional) prefilled with whatever was provided; an optional model rides in the modal `custom_id` (the session is re-derived from the channel at submit).
 
+### `/prompt` Flow
+
+`/prompt` runs a canned prompt against a session through a staged flow so the slug-dropdown message ("message A") always transitions forward instead of being left behind:
+
+1. **Slug omitted** → an ephemeral dropdown of available prompts (stage 1).
+2. **Dropdown selection, no placeholders** → the prompt runs immediately; message A is rewritten in place with the delivery confirmation.
+3. **Dropdown selection or `/prompt <slug>` with placeholders** → a type-9 parameter modal (one text input per placeholder, `custom_id` `prompt_modal|<slug>`); on submit the prompt runs and message A is rewritten with the recap (stage 3). More than 5 placeholders → guard error (Discord modals support at most 5), delivered as an in-place update on the dropdown path or an ephemeral slash response on the command path.
+4. **Delivery reporting** — `direct-response`: the prompt op returns as soon as the prompt is delivered, so the initial slash response IS the confirmation (no deferred placeholder, no post-turn edit). `inline-update`: ACK first with UPDATE_MESSAGE (7) to satisfy the ~3s interaction window and rewrite message A in place (falling back to a deferred response if type 7 is rejected). Discord text inputs are modal-only, so message A stays visible as the dropdown while the modal is open. The turn keeps running detached either way and announces itself via the typing indicator and the session's delivery surface; only a failure rewrites the status afterwards (`⚠️ Prompt failed: …`).
+
+Custom-ID constraints: a session URN is never embedded in a `custom_id` (Discord's 100-char limit breaks for long thread-bound subagent URNs with a 400 `BASE_TYPE_BAD_LENGTH`); the session is re-derived from the interaction's channel at each stage. An activation modal may carry only a short optional model reference (cruise control). Select-menu pre-selection never fires the onchange event, so a slug with placeholders routes straight to the parameter modal instead of a pre-selected dropdown (a dead end).
+
 ### Durable Command IDs
 
 Nothing tears the command list down at shutdown. Discord preserves the snowflake IDs of same-named commands across a bulk overwrite, so startup registration is a convergent sync: command definitions update in place, stale entries are pruned, and IDs stay stable across restarts. This is what lets multiple instances share one application without fighting over the command list, and why a restart no longer invalidates the command set.
+
+The application ID equals the bot user ID for bot applications, and registration performs no transport calls when the guild set is empty (guild commands cannot exist without a guild).
 
 ### Legacy Global Cleanup
 

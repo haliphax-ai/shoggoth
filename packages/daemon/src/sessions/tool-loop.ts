@@ -56,13 +56,10 @@ export class ToolCallTimeoutError extends Error {
  * Raised when a tool call's arguments were cut off by the provider's
  * output-token limit (`finish_reason: "length"` / `max_tokens`).
  *
- * This is a distinct failure from "the model emitted malformed JSON": the
- * arguments are an incomplete prefix of a larger JSON object, so the model
- * cannot repair them by retrying the same call. Healing them to `{}` and
- * asking the model to try again poisons the NEXT provider request — the
- * replayed assistant turn carries the truncated `function.arguments` and the
- * upstream rejects the whole request with an opaque 400 — so the turn is
- * failed fast with an actionable message instead.
+ * Distinct from malformed JSON: the arguments are an incomplete JSON prefix the
+ * model cannot repair by retrying, and healing them would poison the next
+ * provider request with an opaque 400 — so the turn fails fast instead. See
+ * docs/daemon.md → "Tool Loop: Truncated Tool-Call Args".
  */
 export class ToolCallTruncatedError extends Error {
   constructor(
@@ -321,32 +318,23 @@ const buildSchemaMap = (
 const STRUCTURED_OUTPUT_MAX_RETRIES = 2;
 
 /**
- * Backstop for consecutive invalid tool calls within a single turn.
- *
- * The model loop is `for (;;)` and only exits on abort, a terminal no-tool-call
- * response, or the structured-output retry budget. A model that repeatedly emits
- * invalid tool calls (and never recovers) would spin forever, so we cap
- * consecutive invalid dispatches. "Invalid" here means an unknown tool name, a
- * known tool called with unparseable arguments, or a known tool called with
- * schema-invalid arguments — all three are calls the model could retry forever
- * without the loop ever advancing. When this many occur in a row without a valid
- * tool call or terminal response in between, the turn is terminated cleanly
- * (same `break` style as the retry-exhausted path). Near-miss structured-output
- * calls are excluded: they have their own bounded retry budget above.
+ * Backstop for consecutive invalid tool calls (unknown tool name, unparseable
+ * args, or schema-invalid args on a known tool) within a single turn: the
+ * `for (;;)` loop would otherwise spin forever, so this many in a row without
+ * a valid call in between terminates the turn cleanly (same `break` style as
+ * the retry-exhausted path). Near-miss structured-output calls are excluded —
+ * they have their own bounded retry budget. See docs/daemon.md → "Tool Loop:
+ * Circuit Breakers".
  */
 const MAX_CONSECUTIVE_INVALID_TOOL_CALLS = 5;
 
 /**
- * Detect a near-miss of the synthetic structured-output tool name.
- *
- * Models under stress sometimes emit a garbled variant — e.g.
- * `__structured_output__parameter` — that contains the exact synthetic name as a
- * substring. The provider adapters match the synthetic tool with an exact-name
- * check (`isSyntheticToolCall`), so these near-misses fall through to the
- * daemon's generic unknown-tool path, which has no counter and would let the
- * `for (;;)` loop spin unbounded. Routing them into the structured-output retry
- * budget (instead) bounds the spin. Deliberately simple: exact-name-substring
- * containment, excluding the exact name itself (which the adapter intercepts).
+ * Detect a near-miss of the synthetic structured-output tool name (a garbled
+ * variant containing it as a substring). The provider adapters match the
+ * synthetic tool by exact name, so near-misses fall through to the generic
+ * unknown-tool path and would let the `for (;;)` loop spin unbounded; routing
+ * them into the structured-output retry budget bounds the spin. See
+ * docs/daemon.md → "Tool Loop: Circuit Breakers".
  */
 function isNearMissStructuredOutputTool(name: string): boolean {
   return name !== STRUCTURED_OUTPUT_TOOL_NAME && name.includes(STRUCTURED_OUTPUT_TOOL_NAME);
@@ -606,29 +594,14 @@ async function hitlApprovalGate(
 // ---------------------------------------------------------------------------
 
 /**
- * Validates, gates (policy + HITL), and executes a single tool call.
- *
- * Returns a {@link ToolCallDispatchResult} so the caller knows whether to
- * `continue` (skip) or proceed with execution.  Errors and denials are
- * pushed back to the model via `pushToolMessage` and appended to the
- * transcript inside this function.
- *
- * The function is organized into distinct stages:
- *   1. Name / thinking-leak / unknown-tool validation
- *   2. Args validation
- *   3. Policy check
- *   4. System gates + HITL approval gate
- *   4.5. `beforeExecute` hook — fired at the proceed-decision point, BEFORE
- *        execution, so the runaway breaker can record the call and trip
- *        (steer/cancel) while preventing a tripping call from ever running
- *   5. Execution with timeout
- *   6. Result feedback to model + transcript
- *
- * `beforeExecute` returns `{ kind: "prevented", runawayVerdict }` when the
- * runaway breaker trips on this call: the call is answered with a synthetic
- * tool result (written by the hook), never reaches the executor, and the
- * caller discards the rest of the batch. Otherwise it returns `{ kind: "ok" }`
- * and execution proceeds normally.
+ * Validates, gates (policy + HITL), and executes a single tool call in the
+ * numbered stages documented in docs/daemon.md → "Tool Loop: Per-Call
+ * Dispatch". Returns a {@link ToolCallDispatchResult} so the caller knows
+ * whether to `continue` (skip) or proceed; errors and denials are pushed back
+ * to the model via `pushToolMessage` and appended to the transcript here.
+ * `beforeExecute` fires at the proceed-decision point: `{ kind: "prevented",
+ * runawayVerdict }` answers the call with a synthetic tool result (written by
+ * the hook), never reaches the executor, and discards the rest of the batch.
  */
 async function processSingleToolCall(
   ctx: ToolLoopContext,

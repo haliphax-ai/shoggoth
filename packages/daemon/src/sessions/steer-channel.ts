@@ -1,19 +1,8 @@
 /**
- * Per-session steer channel for injecting operator guidance into active tool loops.
- * Follows the same singleton-map pattern as system-context-buffer.ts.
- *
- * Pushed messages may carry an `onDropped` callback: guaranteed
- * in-turn delivery needs to know when a queued message will never reach the
- * model — the turn ended (unregister) or a new turn replaced the channel
- * before the message was drained — so the sender can fall back to another
- * delivery path (e.g. an OOB turn) instead of silently losing the message.
- *
- * Drained messages additionally get an "answered" handshake: injection
- * consumes the entry, but the consumption only counts as delivered when the
- * receiving turn settles normally (the tool loop marks it answered on
- * completion). If the turn aborts or fails first, the message stays tracked
- * as injected-but-unanswered so a teardown can re-deliver it instead of
- * dropping a directive the model never responded to.
+ * Per-session steer channel for injecting operator guidance into active tool
+ * loops (same singleton-map pattern as system-context-buffer.ts); see
+ * docs/daemon.md → "Steer Channel" for the drop and answered handshake
+ * semantics that guarantee delivery.
  */
 import { getLogger } from "../logging";
 

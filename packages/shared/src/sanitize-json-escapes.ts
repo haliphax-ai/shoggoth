@@ -1,16 +1,11 @@
 /**
- * Sanitize invalid JSON escape sequences in a raw JSON string.
+ * Sanitize invalid JSON escape sequences in a raw JSON string: replaces any
+ * `\` not followed by a valid JSON escape character with `\\`, preserving the
+ * agent's intent (valid escapes: `"`, `\\`, `/`, `b`, `f`, `n`, `r`, `t`,
+ * `uXXXX`). Returns the input unchanged when no backslash is present.
  *
- * LLMs generating tool call arguments often produce regex patterns with
- * invalid JSON escapes like `\{`, `\(`, `\[`, `\.`, etc. Lenient parsers
- * silently drop the backslash; strict parsers throw. Either way the agent's
- * intent is lost.
- *
- * This function replaces any `\` NOT followed by a valid JSON escape character
- * with `\\`, preserving the original intent.
- *
- * Valid JSON escapes after `\`:
- *   `"`, `\`, `/`, `b`, `f`, `n`, `r`, `t`, `uXXXX` (4 hex digits)
+ * Why: LLM-generated tool args often contain regex escapes like `\{` that
+ * strict parsers reject — see docs/shared.md — "JSON Escape Sanitization".
  */
 export function sanitizeJsonEscapes(raw: string): string {
   // Fast path: no backslashes means nothing to fix

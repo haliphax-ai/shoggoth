@@ -1,23 +1,11 @@
 /**
- * Control-plane spawn claims for platform threads.
- *
- * A Discord `THREAD_CREATE` gateway event carries no signal distinguishing a thread the
- * operator's `subagent_spawn` op just created from a thread a user created — so the
- * thread-subagent autocreate routine would race the spawn op for the same thread and, on
- * losing the binding, leave a banner-only zombie session behind. The spawn flow therefore
- * claims its target thread *before* the thread can exist; `handlePlatformThreadCreate`
- * then skips the event with a distinct reason instead of spawning a competing session.
- *
- * Two claim shapes, both synchronous (registration must not await an event that may
- * already be queued):
- * - An **explicit thread id** claim (`spawn_persistent` with a concrete `platform_thread_id`).
- * - A **pending creation** claim keyed by parent channel, registered *before* the spawn op
- *   creates the thread via REST: for the `thread_id: "0"` auto-create sentinel the id is
- *   unknown until that call returns, but the gateway event may be dispatched first.
- *
- * Claims are released on every spawn exit path (success, thrown error, bind conflict), so
- * a failed spawn never leaves a poisoned claim behind; tests reset the registry through
- * `clearThreadSpawnClaims`.
+ * Control-plane spawn claims for platform threads: an in-flight control-plane
+ * `subagent_spawn` claims its target thread (explicit id, or a pending creation
+ * keyed by the parent channel) so `handlePlatformThreadCreate` skips the event
+ * with reason `control_plane_claimed` instead of spawning a competing session.
+ * Claims are synchronous, refcounted for pending creations, and released on
+ * every spawn exit path; tests reset the registry via `clearThreadSpawnClaims`.
+ * See docs/daemon.md (Subagents — Thread subagents) for the full rationale.
  */
 
 const claimedThreadIds = new Set<string>();

@@ -1,19 +1,8 @@
 /**
- * Diagnostics preload for CI: prints the exit status of every forked child.
- *
- * Vitest's own worker forks ignore the (code, signal) arguments of the child's
- * "exit" event when reporting an unexpected worker death, so a run that loses a
- * worker mid-file shows no reason in the log. This preload wraps
- * child_process.fork in the process that loads it and logs one plain,
- * greppable line per forked child exit:
- *
+ * Diagnostics preload for CI (loaded via NODE_OPTIONS in the CI step): wraps
+ * child_process.fork to print one greppable line per forked child exit:
  *   [worker-exit-diag] pid=<pid> code=<code> signal=<signal>
- *
- * Loaded via NODE_OPTIONS in the CI step. It also loads inside test workers
- * and inside node children spawned by tests: it defines no output and no
- * top-level work of its own, is CommonJS with no dependencies, and adds an
- * "exit" listener only to children forked from that process (waiting only for
- * children that exit; it never extends the lifetime of exiting children).
+ * Why it exists: docs/cli.md — "Worker exit diagnostics preload".
  */
 "use strict";
 

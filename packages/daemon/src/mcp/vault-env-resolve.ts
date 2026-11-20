@@ -18,13 +18,9 @@ const VAULT_PREFIX_LEN = VAULT_PREFIX.length;
 const CREDENTIAL_NAME_PATTERN = /^([A-Z][A-Z0-9_-]*|[a-z][a-z0-9_-]*)$/;
 
 /**
- * Regex for matching $vault:<name> as a substring within a larger string.
- *
- * The name portion must be entirely uppercase or entirely lowercase (with
- * digits, underscores, and hyphens). A negative lookahead ensures the name
- * is not followed by additional valid-name characters (e.g. $vault:API_KEYsuffix
- * does not match because "suffix" would extend the name beyond a valid
- * credential identifier).
+ * Regex matching `$vault:<name>` as a substring within a larger string. The name
+ * is all-uppercase or all-lowercase (digits, underscores, hyphens); the negative
+ * lookahead rejects names extended by further name characters (e.g. `$vault:API_KEYsuffix`).
  */
 const VAULT_REF_PATTERN = /\$vault:([A-Z][A-Z0-9_-]*|[a-z][a-z0-9_-]*)(?![A-Za-z0-9_-])/g;
 
@@ -52,12 +48,8 @@ export function extractVaultName(value: string): string | null {
 }
 
 /**
- * Resolve all $vault:<name> substrings within a value.
- *
- * Finds every valid $vault:<name> reference in the string, resolves each
- * using the vault service with the agent's scope precedence, and returns
- * the fully resolved string. If any referenced credential is not found, the
- * `$vault:<name>` literal is left in place and a warning is logged.
+ * Resolve all `$vault:<name>` substrings within a value via the agent's scope
+ * precedence, leaving unresolvable literals in place (with a warning); see docs/vault.md.
  *
  * @param value - The env var value that may contain $vault:<name> substrings.
  * @param vault - The vault service instance.
@@ -124,15 +116,8 @@ async function resolveVaultSubstrings(
 }
 
 /**
- * Resolve vault references in an MCP server's environment variables.
- *
- * Scans the env map for values containing `$vault:<name>` references (as full
- * values or inline substrings), resolves each using the vault service with the
- * agent's scope precedence (agent:<agentId> first, then global), and replaces
- * references with plaintext values.
- *
- * If a credential is not found, the `$vault:<name>` literal is left in place.
- * Non-vault env vars are left unchanged.
+ * Resolve vault references in an MCP server's env map (full values or inline
+ * substrings) to plaintext, leaving unresolvable references in place; see docs/vault.md.
  *
  * @param env - The environment variable map from the MCP server config.
  * @param vault - The vault service instance.

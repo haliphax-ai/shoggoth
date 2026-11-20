@@ -114,6 +114,10 @@ Agents access the vault via the `builtin-vault` tool:
 
 The `inject` action creates a one-time-read FIFO at `/tmp/.vault/<random>` that delivers the secret on first read, then self-destructs. This avoids exposing secrets in command arguments or environment variables.
 
+#### FIFO lifecycle (`fifo-proxy.ts`)
+
+`createSecretFifo` creates `/tmp/.vault/<random>` (directory pre-created with mode `0711`) via `mkfifo`, chmods the FIFO to `0644` so any local user (including the agent) can read it, then spawns a background writer that opens the FIFO for writing — blocking until a reader opens it — writes the secret, and unlinks the FIFO. A cleanup timer (default 30s) unlinks the FIFO if no reader ever connects; the writer also unlinks on failure so a broken write never leaves the FIFO behind. The `uid`/`gid` parameters are unused (kept for API compatibility).
+
 ### Scope enforcement
 
 - `get`: resolves agent scope first, then global fallback
@@ -142,7 +146,7 @@ mcp:
         PLAIN_VAR: "not-a-secret"
 ```
 
-When the MCP server is spawned, `$vault:API_KEY` is resolved using the connecting agent's scope precedence. If the credential is not found, the env var is omitted (the server still starts).
+When the MCP server is spawned, each `$vault:<name>` reference is resolved using the connecting agent's scope precedence (agent scope first, then global). Resolution applies to inline substrings too — any env value containing one or more `$vault:<name>` references has each replaced in place (e.g. `Bearer $vault:API_KEY`), and non-vault env vars are left unchanged. Credential names must be all-uppercase or all-lowercase (`[A-Z][A-Z0-9_-]*` / `[a-z][a-z0-9_-]*`); a reference whose name does not fit is left as the literal `$vault:<name>` text. If a referenced credential is not found, the `$vault:<name>` literal stays in the value (the server still starts) and a warning is logged. The `resolveVaultEnv(env, vault, agentId)` helper in `packages/daemon/src/mcp/vault-env-resolve.ts` implements this.
 
 ## Security Model
 

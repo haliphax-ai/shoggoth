@@ -11,20 +11,14 @@ export interface StatusManagerOptions {
 }
 
 /**
- * Manages the lifecycle of status messages for a workflow.
+ * Manages the lifecycle of a workflow's status message: tracks the posted
+ * message ID, edits in place, and decides when a repost is safe.
  *
- * Tracks the posted message ID so subsequent updates can edit in-place.
- * Falls back to reposting when the message is genuinely gone (`not_found`) or
- * the platform cannot edit at all (`unsupported`) — never on transient
- * failures (rate limits, 5xx, network), where the message still exists and
- * the next tick can retry the edit. Reposting on transient failures is what
- * orphaned duplicate status posts.
- * A `permanent` failure (e.g. HTTP 400 — archived thread) latches the manager
- * dead: no further edits and no repost, because the failure is the SURFACE
- * itself — a repost would target the same broken surface and every retry
- * would fail identically forever.
- * Pins the status post whenever it is (re)created when the platform supports
- * pinning and `pinStatusPost` is enabled (default).
+ * The edit/repost/latch decision per edit-failure reason is documented in
+ * docs/workflow.md ("Status Messages — Edit, Repost, and Latch").
+ *
+ * Pins the status post whenever it is (re)created, when the platform
+ * supports pinning and `pinStatusPost` is enabled (default).
  */
 export class StatusManager {
   private readonly adapter: MessageAdapter;

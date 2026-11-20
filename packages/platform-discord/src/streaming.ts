@@ -90,15 +90,13 @@ export function createDiscordStreamingOutbound(
         return run;
       };
       /**
-       * Permanent-failure circuit breaker. A 404 (message/thread deleted),
-       * a 403 (permissions revoked), or ANY 400 (the request will be
-       * rejected identically forever — archived thread, malformed payload,
-       * unknown code) means this handle's target cannot be edited: every
-       * further edit would fail the same way, instantly, forever. The first
-       * permanent rejection poisons the handle (logged once at warn) and all
-       * subsequent pushUpdate / setFullContent / setStatusBar calls resolve
-       * immediately as no-ops with zero REST traffic, so one permanent
-       * rejection ends the edit loop instead of becoming its steady state.
+       * Permanent-failure circuit breaker. A 404 (message/thread deleted), a
+       * 403 (permissions revoked), or ANY 400 (rejected identically forever)
+       * means this handle's target cannot be edited. The first permanent
+       * rejection poisons the handle (logged once at warn) and all later
+       * pushUpdate / setFullContent / setStatusBar calls resolve as no-ops
+       * with zero REST traffic, so one permanent rejection ends the edit loop
+       * instead of becoming its steady state.
        */
       let dead = false;
       const isPermanent = (

@@ -2,15 +2,9 @@
 /**
  * Standalone managed service entrypoint for the demo service.
  *
- * Run with: npx tsx packages/service-demo/src/server.ts [port]
- *
- * Exposes:
- *   GET  /              — HTML page showing current message
- *   GET  /health        — Lightweight health check (returns "ok")
- *   GET  /manifest      — Service manifest for Shoggoth discovery
- *   POST /_shoggoth/identity — Identity provisioning endpoint
- *   POST /api/set_message  — Set the displayed message (auth required)
- *   GET  /api/get_message  — Get the current message (auth required)
+ * Run with: npx tsx packages/service-demo/src/server.ts [port].
+ * Endpoints and their auth requirements are documented in docs/services.md
+ * ("Writing a Service — Required Endpoints").
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -54,15 +48,10 @@ let storedIdentity: string | null = loadStoredIdentity();
 
 /**
  * Tail of an in-module promise-chain mutex guarding `storedIdentity`.
- *
- * Node executes JS on a single thread, but async handlers still interleave
- * at every `await`. The rotation path reads `storedIdentity`, awaits
- * `TokenValidator.validate` against it, and only then writes the new
- * identity — so two concurrent rotations (or a rotation racing a
- * provision) could otherwise interleave read-validate-write and store an
- * identity nobody validated. Chaining each critical section onto the
- * previous one's tail serializes identity handling; routes, status codes,
- * response bodies, and log wording are unchanged.
+ * Async handlers interleave at every `await`; without serializing the
+ * read-validate-write on the identity, two concurrent rotations (or a
+ * rotation racing a provision) could store an identity nobody validated.
+ * See docs/services.md ("Identity Mutation Serialization").
  */
 let identityLockTail: Promise<void> = Promise.resolve();
 

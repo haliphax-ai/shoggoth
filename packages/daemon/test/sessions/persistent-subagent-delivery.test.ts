@@ -1,17 +1,10 @@
 /**
- * Tests for persistent subagent all-turn delivery.
- *
- * Verifies that after each persistent subagent turn completes:
- * 1. Non-thread-bound sessions with delivery_mode != 'drop' deliver results to parent
- * 2. Thread-bound sessions do NOT deliver results (handled via platform thread)
- * 3. delivery_mode='drop' sessions do NOT deliver results
- *
- * The delivery hook is in runInboundSessionTurn after executeSessionAgentTurn completes.
- *
- * Phase 2: the queue path uses a structured-output OOB response (both
- * to_operator and to_sender fields). The structured JSON is returned by the
- * model turn; deliverOobStructuredResponse routes it to the operator surface
- * and the sender session.
+ * Persistent subagent all-turn delivery: after each turn, non-thread-bound
+ * sessions with delivery_mode inline/queue deliver results to the parent,
+ * while thread-bound and drop-mode sessions do not. The queue path delivers
+ * a structured-output OOB response routed via deliverOobStructuredResponse;
+ * runInboundSessionTurn and session rows provide the hook conditions
+ * (thread binding, delivery mode, respond_to target).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";

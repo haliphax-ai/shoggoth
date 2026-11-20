@@ -38,16 +38,13 @@ function requireRootForDac(t: { skip: (m?: string) => void }, canDrop: boolean):
 
 /**
  * Drive an async operation to completion with no wall-clock waits: install
- * fake timers, then yield real event-loop ticks (setImmediate is deliberately
- * left un-faked) so real child-process I/O can settle, until the operation's
- * promise settles, `maxTicks` turns pass, or the `maxWallMs` safety cap
- * elapses. The tick cap is generous enough that even a multi-second
- * child-process spawn cannot exhaust it, and the loop exits the moment the
- * promise settles, so the bound costs nothing when healthy. The wall cap uses
- * `process.hrtime.bigint()`, which vitest fake timers do not intercept — it
- * only bounds the failure path; the wait itself remains purely tick-based.
- * Fake timers keep every timeout based delay frozen — nothing in the gate
- * ever sleeps. Restores real timers in `finally` whether it succeeds or fails.
+ * fake timers, then yield real event-loop ticks (setImmediate stays real) so
+ * real child-process I/O can settle, until the promise settles, `maxTicks`
+ * turns pass, or the `maxWallMs` safety cap elapses (hrtime, which vitest
+ * does not fake, bounds only the failure path; the tick cap is generous —
+ * even a multi-second spawn cannot exhaust it, and the loop exits the moment
+ * the promise settles). Restores real timers in `finally` whether it
+ * succeeds or fails.
  */
 async function runUnderFakeTimers<T>(
   op: () => Promise<T>,

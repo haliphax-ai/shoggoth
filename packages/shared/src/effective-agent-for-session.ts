@@ -201,18 +201,13 @@ export function evaluateMcpServerRules(
 }
 
 /**
- * Resolve effective MCP server rules via merge cascade.
- * Per-field replace: if the narrower scope provides `allow`, it replaces inherited `allow`; same for `deny`.
+ * Resolve effective MCP server rules via merge cascade. Per-field replace:
+ * a narrower scope providing `allow`/`deny` replaces the inherited list.
  *
- * Top-level sessions: global `mcp.serverRules` → per-agent `mcp.serverRules`.
- * Subagent sessions: the same top-level cascade (so subagents inherit their
- * agent's effective access), then global `agents.subagentMcp.serverRules` →
- * per-agent `agents.subagentMcp.serverRules` override per-field on top.
- *
- * Inheriting the per-agent top-level level matters for `explicit` servers:
- * the default wildcard `*` never matches them, so without it a server named
- * in the agent's allow list would be denied to every subagent whenever no
- * `subagentMcp` rules are configured.
+ * Top-level: global `mcp.serverRules` → per-agent `mcp.serverRules`.
+ * Subagents: same cascade, then global → per-agent `agents.subagentMcp`
+ * rules on top (they inherit the agent's top-level rules so `explicit`
+ * servers stay reachable) — docs/shared.md — "Effective Agent Resolution".
  */
 export function resolveEffectiveMcpServerRules(
   config: ShoggothConfig,

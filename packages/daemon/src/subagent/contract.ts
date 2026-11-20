@@ -136,20 +136,9 @@ function isCredsUnsupported(e: unknown): boolean {
 }
 
 /**
- * Run `git` as the resolved contract credentials.
- *
- * Two portability measures:
- *
- * - `safe.directory` is relaxed for these invocations only. Contract checks
- *   are read-only inspections of the caller's own working directory, and git
- *   otherwise refuses a repository owned by a different uid (its "dubious
- *   ownership" guard) even when DAC permissions allow reading it — which is
- *   exactly the daemon/agent uid split this feature runs under.
- * - When the switch to the target uid is not permitted (no `CAP_SETUID`, e.g.
- *   CI runners) the command is retried as the current user rather than
- *   failing every contract check outright. This applies to explicit creds
- *   too: callers always pass them, so gating the retry on an absent override
- *   would defeat it.
+ * Run `git` as the resolved contract credentials, retrying as the current
+ * user when the uid switch is not permitted (see docs/daemon.md, Contract
+ * mode — portability notes).
  */
 function runGit(args: string[], cwd: string | undefined, creds?: ContractCreds): string {
   const target = creds ?? defaultCreds();
@@ -195,20 +184,9 @@ export function repoTopLevel(cwd: string, creds?: ContractCreds): string | undef
 }
 
 /**
- * Discover the repository containing `start`, or undefined.
- *
- * Discovery runs in two directions because git's own discovery only ever
- * walks *upward* from its cwd:
- *
- * 1. Upward from `start` — a repo containing `start`.
- * 2. Downward from `downFrom` (BFS over directory names, probing each
- *    candidate upward) — a repo *nested below* `downFrom`. The session
- *    workspace is the natural base for this direction: a scratch repo like
- *    `workspace/tmp/contract-test` sits below the workspace root, so an
- *    upward-only probe from the root can never find it.
- *
- * With `downFrom === start` this is pure upward discovery — the historical
- * behavior.
+ * Discover the repository containing `start`, or undefined: upward from
+ * `start` first, then downward (BFS) from `downFrom` for repos nested below
+ * it. `downFrom === start` is pure upward discovery.
  */
 function findRepoTopLevel(
   start: string,
@@ -253,20 +231,10 @@ export interface ContractRepoCheck {
 }
 
 /**
- * Validate that every contract target resolves inside a git repository at call
- * time. Called before the child session exists so a bad contract fails and
- * notifies the agent instead of spawning a doomed session.
- *
- * Repositories are discovered *per target* — starting at the target's own
- * directory (upward) and then from the session base directory downward — so a
- * contract pointing at a nested scratch repo validates on its own merits
- * instead of demanding that the base directory itself be a repository.
- * Every target must land in the same repository: the contract is diffed as a
- * single unit against one baseline, so split targets are rejected rather than
- * silently judged from the wrong repo.
- *
- * When no target resolves, the error names the base directory and the
- * unwalked target so the failure is diagnosable.
+ * Validate that every contract target resolves inside one git repository at
+ * call time (repos are discovered per target — see docs/daemon.md, Contract
+ * mode). Fails before the child session exists so a bad contract notifies
+ * the agent instead of spawning a doomed session.
  */
 export function validateContractRepository(
   base: string,

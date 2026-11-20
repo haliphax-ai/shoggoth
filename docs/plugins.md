@@ -95,6 +95,10 @@ By npm package name:
 | `daemon.ready`     | `AsyncHook`         | `DaemonReadyCtx`     | All plugins started, platforms connected. System is live.                         |
 | `daemon.shutdown`  | `AsyncHook`         | `DaemonShutdownCtx`  | Graceful shutdown. Plugins release resources.                                     |
 
+#### Boot firing order
+
+`fireDaemonHooks` (`packages/daemon/src/plugins/daemon-hooks.ts`) fires the boot hooks in one fixed sequence: `daemon.configure` (sync waterfall — returns the transformed config carried through all later contexts), `platform.register` and `health.register` (sync), then `platform.start`, `daemon.startup`, the `service.register` hook (plugin services register themselves), a plugin-system lock (no further registrations), and finally `daemon.ready`. It returns the final config plus two drain closures for shutdown — `platform.stop` and `daemon.shutdown`.
+
 ### Platform Lifecycle
 
 | Hook                | Type        | Context               | Description                                                     |
@@ -257,6 +261,18 @@ Service plugins expose HTTP/WebSocket servers and register direct-call tools tha
 | `service.register` | Start the server, register service entry and tools      |
 | `health.register`  | Register a health probe for the service                 |
 | `daemon.shutdown`  | Graceful shutdown (close server, watchers, connections) |
+
+### Required Hook Validation
+
+Plugins that must implement a fixed set of hooks can be validated at registration time with `definePluginWithRequiredHooks(kind, plugin, requiredHooks)`. It throws the first time a required hook is missing or is not a function, with an error naming the plugin kind, the plugin name, and the missing hook; otherwise the plugin is returned unchanged. `defineMessagingPlatformPlugin` is the canonical user of this helper (see [Required Hooks](#required-hooks) under Platform Plugin Guide).
+
+### Service Registration Gating
+
+Plugin service registrations are gated by the operator approval flow (see [Services](services.md#fingerprinting)): the daemon wraps the `ServiceRegisterCtx` handed to the `service.register` hook in a gate that computes the plugin fingerprint from its manifest and resolves approval status against the approval store.
+
+- **Pending / pending-reapproval** — the service entry still registers (so it stays visible in the registry) but tool registration is suspended: the inner `registerTools` is not called and a warning is logged.
+- **Approved (fingerprint matches)** — service and tools register normally.
+- **Ops enforcement** — when deps are provided and the plugin has declared `ops`, deps are wrapped in an enforcement proxy so undeclared ops throw at access time (see [Ops Enforcement](services.md#ops-enforcement)).
 
 ### Example: Canvas Service
 

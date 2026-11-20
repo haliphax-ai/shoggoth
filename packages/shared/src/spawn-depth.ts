@@ -7,24 +7,14 @@ export const DEFAULT_MAX_SPAWN_DEPTH = 1;
 const MAX_LINEAGE_WALK = 64;
 
 /**
- * Effective `maxSpawnDepth` for an agent id. Per-agent
- * `agents.list.<id>.maxSpawnDepth` overrides top-level `maxSpawnDepth` when set;
- * omitted or invalid values fall back to {@link DEFAULT_MAX_SPAWN_DEPTH} (1 — the
- * historical behavior: only top-level sessions may spawn).
+ * Effective `maxSpawnDepth` for an agent id: per-agent
+ * `agents.list.<id>.maxSpawnDepth` overrides top-level `maxSpawnDepth` when
+ * set (non-negative integers only); otherwise falls back to
+ * {@link DEFAULT_MAX_SPAWN_DEPTH}.
  *
- * Depth of a top-level session is 0; a session at depth `d` may spawn a subagent
- * iff `d < maxDepth`. With `maxSpawnDepth: 1` a subagent at depth 1 may not spawn;
- * with `2` it may spawn a depth-2 subagent which then may not spawn, and so on.
- * `0` disables subagent spawning entirely.
- *
- * This is purely an *additional* nesting gate that applies to sessions already
- * permitted to spawn by the `subagentSpawnAllow` allowlist — it does not
- * replace or modify those gates. It also governs session-level subagent nesting
- * only, not the workflow engine's separate `maxDepth`.
- *
- * The gate is uniform: thread-bound persistent subagents are subject to it like
- * any other session — depth is pure `parent_session_id` lineage with no
- * platform-thread exemptions.
+ * An *additional* nesting gate only — does not replace the
+ * `subagentSpawnAllow` allowlist or the workflow engine's separate `maxDepth`.
+ * Depth semantics and the uniform (no thread exemptions) gate: docs/shared.md — "Subagent Spawn Depth".
  */
 export function effectiveMaxSpawnDepth(
   cfg: ShoggothConfig,

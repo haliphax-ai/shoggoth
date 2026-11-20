@@ -206,16 +206,14 @@ export function buildReverseGraph(graph: DependencyGraph): Map<number, Set<numbe
 }
 
 /**
- * Get all transitive dependents of a task (tasks that depend on it, directly or transitively).
- * This is the reverse of getTransitiveDeps — it finds all tasks that have `taskId`
- * as a transitive dependency.
+ * Get all transitive dependents of a task (tasks that depend on it, directly
+ * or transitively) — the reverse of getTransitiveDeps.
  *
  * @param taskId - The task to find dependents for.
  * @param graph - The forward dependency graph.
- * @param reverseGraph - Optional precomputed reverse graph (from buildReverseGraph).
- *                       If provided, avoids O(V²) rebuild on each call.
- *                       Pass the same reverse graph instance across multiple calls
- *                       to amortize the build cost.
+ * @param reverseGraph - Optional precomputed reverse graph (from
+ *   buildReverseGraph); share one instance across calls to amortize
+ *   the build cost.
  */
 export function getTransitiveDependents(
   taskId: number,

@@ -1,15 +1,9 @@
 /**
- * Shoggoth session ids are URNs so future resource types can coexist:
- * - Top-level: `agent:<agentId>:<platform>:<resourceType>:<leaf>` — `resourceType` identifies the
- *   kind of resource (e.g. `channel`, `dm`); `leaf` is an **opaque** platform-defined id
- *   that must pass {@link isValidSessionUrnTailSegment} (portable charset/length only).
- * - Subagent: `agent:<agentId>:<platform>:<resourceType>:<parentLeaf>:<childLeaf>:…` (same rules per segment).
- *
- * **Platform bridges** must validate their own tail shapes (identifiers, UUIDs, etc.)
- * before trusting a route; core only enforces structure so new platforms can ship as plugins.
- *
- * `agentId` matches {@link assertValidAgentId} (no colons). `platform` is a short bridge name (e.g. `discord`).
- * `resourceType` follows the same charset rules as tail segments.
+ * Session id URN grammar: `agent:<agentId>:<platform>:<resourceType>:<leaf>`
+ * (top-level), with `:<childLeaf>:…` appended for subagent chains. `leaf` is
+ * an opaque platform-defined segment passing {@link isValidSessionUrnTailSegment};
+ * `agentId` must pass {@link assertValidAgentId}. Segment rules and the
+ * bridge-validation contract: docs/shared.md — "Session URNs".
  */
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";

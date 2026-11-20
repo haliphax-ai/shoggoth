@@ -1,14 +1,11 @@
 /**
- * Async file sink for the root logger.
+ * Async file sink for the root logger: bounded in-process queue drained to
+ * date-stamped JSON-lines files by a serialized flush loop, so logging never
+ * blocks on disk I/O. Handles drop accounting, date-rollover gzip rotation,
+ * archive pruning, and one-shot disable on I/O failure.
  *
- * Log records are enqueued in-process and drained to a date-stamped JSON-lines
- * file (`shoggoth-YYYY-MM-DD.log`) by a serialized async flush loop, so the
- * logging call path never blocks on disk I/O. The queue is bounded: when it is
- * full, new entries are dropped and counted, and a single drop-report record is
- * appended once the queue drains. On date rollover the current file is closed,
- * gzipped (node:zlib — no external binaries) to `.log.gz`, and rotated away;
- * old archives beyond `maxFiles` are pruned. Any I/O failure disables the sink
- * (stderr logging is unaffected) and reports once via `onFatalError`.
+ * Full behavior (queue/drop/rotation/failure semantics): docs/shared.md —
+ * "Logging File Sink".
  */
 
 import { createReadStream, createWriteStream, promises as fsp } from "node:fs";

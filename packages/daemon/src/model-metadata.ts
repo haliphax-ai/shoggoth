@@ -99,17 +99,10 @@ export function setModelMetadataFromProvider(
 }
 
 /**
- * Get the context window tokens for a model.
- *
- * There are no hard-coded model defaults anywhere: providers are the single
- * source of truth for model metadata. The store only contains values from the
- * models config (`contextWindowTokens`) or reported by the provider itself
- * (models-API fetches and provider-reported usage). Models with neither a
- * configured nor a provider-reported window have no entry, and callers are
- * expected to handle an undefined window (e.g. the mid-turn compaction arming
- * check logs an error instead of silently guessing a window size).
- *
- * Returns undefined if no metadata is available.
+ * Get the context window tokens for a model; undefined if no metadata is
+ * available. Providers are the single source of truth for model metadata —
+ * store sources and the undefined-window contract: docs/models.md →
+ * "Model Metadata Store".
  */
 export function getModelContextWindowTokens(
   providerId: string,

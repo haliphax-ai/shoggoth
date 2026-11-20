@@ -23,8 +23,6 @@ export function buildFollowUpMessages(
 
 /**
  * Execute a provider-agnostic follow-up API call and parse the JSON response.
- * Handles the common pattern: POST → text → strip thinking tags → JSON.parse.
- *
  * @param fetchFn - The fetch implementation (e.g. `resilientFetch`).
  * @param url - The API endpoint URL.
  * @param headers - Request headers.

@@ -55,17 +55,13 @@ const OPERATION_PRIORITY: Record<string, DiscordRestPriority> = {
 
 /**
  * Discord REST v10 transport. Uses Bot token; suitable for daemon wiring and
- * CI mocks via `fetchFn`.
- *
- * All requests flow through a single rate-limit-aware client (see
- * `rest-client.ts`): proactive bucket metering from response headers,
- * per-bucket priority queues, latest-wins coalescing of same-message edits,
- * one backoff mechanism for 429/503 (whole-client pause on `global` limits),
- * and a typed error taxonomy instead of string-matched errors.
- *
- * Route keys follow Discord's major-parameter rules (channel/guild/webhook ids
- * kept; other dynamic segments normalized) so the `X-RateLimit-Bucket` hash
- * learned on one route meters every sibling route.
+ * CI mocks via `fetchFn`. All requests flow through a single rate-limit-aware
+ * client (see `rest-client.ts`): proactive bucket metering, per-bucket
+ * priority queues, latest-wins coalescing of same-message edits, one backoff
+ * mechanism for 429/503, and a typed error taxonomy. Route keys follow
+ * Discord's major-parameter rules so the bucket hash learned on one route
+ * meters every sibling route. See docs/platform-discord.md ("REST
+ * Transport").
  */
 export function createDiscordRestTransport(
   options: DiscordRestTransportOptions,

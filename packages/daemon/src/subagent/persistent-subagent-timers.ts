@@ -1,15 +1,11 @@
 /**
- * Shared inactivity timer for persistent subagent sessions.
- *
- * Every persistent subagent (thread-bound or threadless, regardless of spawn path) is
- * terminated after an inactivity window with no delivered assistant response. The clock
- * starts at arm time, is re-armed by `touchPersistentSubagentInactivityTimer` after each
- * delivered response, and the computed expiry is persisted (`subagentExpiresAtMs`) so the
- * startup reconcile re-arms the remaining window after a restart.
- *
- * Spawn, autocreate, and reconcile all arm through this module so there is exactly one
- * arm/reset implementation. `disposeSubagentRuntime` (via the `clearTtl` handle each
- * arming site registers) tears the timer down on kill.
+ * Shared inactivity timer for persistent subagent sessions: every persistent
+ * subagent is terminated after an inactivity window with no delivered response.
+ * The clock starts at arm time, is re-armed after each delivered response, and
+ * the computed expiry is persisted (`subagentExpiresAtMs`) so the startup
+ * reconcile re-arms the remaining window after a restart. Spawn, autocreate,
+ * and reconcile all arm through this module; `disposeSubagentRuntime` (via the
+ * registered `clearTtl` handle) tears the timer down on kill.
  */
 
 import { getLogger } from "../logging";

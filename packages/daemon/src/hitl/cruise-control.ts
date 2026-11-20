@@ -146,17 +146,8 @@ export interface CruiseJudgeInput {
 }
 
 /**
- * Run the cruise control judge for one HITL request.
- *
- * - No escalation guidance → `noul` question; the yes/no guidance map to the
- *   true/false criteria and the returned probability decides.
- * - Escalation guidance → `choice` question with approve/deny/escalate routes;
- *   the escalation route scoring at or above `escalateMinScore` escalates even
- *   when it is not the highest-scoring option (enough doubt).
- *
- * Any failure (no model, decision error, timeout, missing answer) falls back
- * to `"escalate"` so the request reaches true HITL instead of being silently
- * auto-decided.
+ * Run the cruise control judge for one HITL request. Decision shape and the
+ * fail-closed-to-escalate rule: docs/daemon.md → "Cruise Control".
  */
 export async function judgeCruiseControl(input: CruiseJudgeInput): Promise<CruiseControlDecision> {
   const { policy, config } = input;

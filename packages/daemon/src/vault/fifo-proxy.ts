@@ -12,9 +12,8 @@ export const DEFAULT_VAULT_DIR = "/tmp/.vault";
 const DEFAULT_TIMEOUT_MS = 30000;
 
 /**
- * Create a FIFO (named pipe) and return its path. Spawns a background
- * task that writes the secret on first reader open, then unlinks.
- *
+ * Create a FIFO (named pipe) and return its path. Background task writes the
+ * secret on first reader open, then unlinks (docs/vault.md → Secret Injection).
  * @param secret - The plaintext to write.
  * @param uid - Owner UID for the FIFO (unused, kept for API compat).
  * @param gid - Owner GID for the FIFO (unused, kept for API compat).

@@ -65,18 +65,9 @@ interface DaemonHooksResult {
 }
 
 /**
- * Fires daemon lifecycle hooks in the correct boot sequence order:
- *
- * 1. daemon.configure  (sync waterfall — returns transformed config)
- * 2. platform.register (sync)
- * 3. health.register   (sync)
- * 4. platform.start    (async)
- * 5. daemon.startup    (async)
- * 6. service.register  (async) - plugin services register themselves
- * 7. Lock plugin system
- * 8. daemon.ready      (async)
- *
- * Returns the final config and drain functions for shutdown hooks.
+ * Fires daemon lifecycle hooks in the correct boot sequence order; returns
+ * the final config and drain functions for shutdown hooks.
+ * The fixed firing sequence: docs/plugins.md → "Boot firing order".
  */
 export async function fireDaemonHooks(
   system: ShoggothPluginSystem,

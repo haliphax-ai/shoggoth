@@ -1,17 +1,10 @@
 /**
- * One-shot subagent spawns carry an absolute wall-clock TTL instead of
- * `subagent_expires_at_ms: null`:
- * - an absent `ttl_minutes` resolves to `runtime.maxTtlMs`, a provided value is
- *   clamped to it, and the resolved deadline is persisted (never null),
- * - at expiry the child session is terminated and a structured
- *   `ERR_SUBAGENT_TTL_EXPIRED` failure is surfaced to the spawning session
- *   (foreground spawns settle the awaited op at the deadline rather than
- *   hanging past it; background spawns get an in-process delivery turn),
- * - a one-shot that completes before its deadline is unaffected.
- *
- * Persistence/clamp wiring goes through the control-plane socket like the
- * sibling inactivity tests; expiry semantics use fake timers against the
- * control op directly so no test sleeps through a minutes-scale window.
+ * One-shot subagent spawns carry an absolute wall-clock TTL: an absent
+ * ttl_minutes resolves to runtime.maxTtlMs, provided values are clamped,
+ * and the deadline is persisted non-null. At expiry the child is terminated
+ * and a structured ERR_SUBAGENT_TTL_EXPIRED failure surfaces to the spawner
+ * (foreground spawns settle the awaited op; background spawns get an
+ * in-process delivery turn); early completion is unaffected.
  */
 
 import { describe, it, beforeAll, afterAll, afterEach, vi } from "vitest";

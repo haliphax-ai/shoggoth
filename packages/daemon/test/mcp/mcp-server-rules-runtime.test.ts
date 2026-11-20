@@ -1,14 +1,8 @@
 /**
- * Phase 4 — MCP server allow/deny runtime filtering.
- *
- * These tests verify that `createSessionMcpRuntime` respects `McpServerRules`
- * when building the `SessionMcpToolContext`:
- *   1. Denied servers' tools are excluded from `resolveContext`.
- *   2. `ExternalMcpInvoke` rejects calls targeting a denied `sourceId`.
- *   3. Re-enabling a previously denied server makes its tools visible again.
- *
- * All tests mock `connectShoggothMcpServers` so no real MCP processes are needed.
- * They should FAIL until the filtering logic is wired into `session-mcp-runtime.ts`.
+ * MCP server allow/deny runtime filtering: denied servers are excluded from
+ * resolveContext and from the pools passed to connectShoggothMcpServers,
+ * ExternalMcpInvoke rejects denied sourceIds, and re-enabling a server
+ * makes its tools visible again.
  */
 import assert from "node:assert";
 import Database from "better-sqlite3";

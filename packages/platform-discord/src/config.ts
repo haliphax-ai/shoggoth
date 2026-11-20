@@ -53,19 +53,14 @@ export function resolveShoggothAgentId(cfg: ShoggothConfig): string {
 }
 
 /**
- * Resolve the Discord bot token.
- *
- * **Resolution order** (env wins, matching this platform's historical behavior):
+ * Resolve the Discord bot token. Resolution order (env wins):
  * 1. `process.env[tokenEnv]` when `discord.tokenEnv` names an env var (the
  *    `*Env` convention used elsewhere in the configuration).
- * 2. `process.env.DISCORD_BOT_TOKEN` — the long-standing default, kept so
- *    existing deployments that never set `tokenEnv` behave unchanged.
+ * 2. `process.env.DISCORD_BOT_TOKEN` — the default when `tokenEnv` is absent.
  * 3. The layered `discord.token` inline value.
- *
- * Note: model/memory providers resolve the inline value first
- * (`apiKey ?? apiKeyEnv`). Discord has always resolved the environment first,
- * and flipping that would silently change which token wins for existing
- * deployments, so the platform-local order is preserved.
+ * Unlike model/memory providers (inline first), Discord has always resolved
+ * the environment first; details: docs/platform-discord.md ("Config Schema
+ * (Zod-validated)").
  */
 export function resolveDiscordBotToken(cfg: ShoggothConfig): string | undefined {
   const dc = resolveDiscordPlatformConfig(cfg);

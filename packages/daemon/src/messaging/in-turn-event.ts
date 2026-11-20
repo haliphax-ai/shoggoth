@@ -1,20 +1,9 @@
 /**
- * In-turn event banners and delivery.
- *
- * Async completions that land while the agent's turn is still running —
- * background exec notifications, async agent-to-agent replies, inline tool
- * results with truncated args — are delivered into the *current* turn through
+ * In-turn event banners and delivery: async completions that land while the
+ * agent's turn is still running are delivered into the *current* turn through
  * the session's steer channel instead of spinning up an out-of-band turn.
- *
- * Display uses the familiar emoji-lead blockquote banner pattern (the same
- * aesthetic as the OOB turn banners in `oob-turn-banner.ts`): a `> emoji
- * Title: *detail* `id`` lead line followed by the event body. Builders are
- * platform-neutral and the strings are unit-tested.
- *
- * Delivery is guaranteed: `deliverInTurnEvent` falls back to the caller's
- * fallback path (typically the OOB turn) both when no turn is active *and*
- * when the turn ends before the queued event was drained — the steer channel
- * invokes the drop callback registered alongside the message.
+ * Banners use the emoji-lead blockquote pattern shared with `oob-turn-banner.ts`.
+ * See docs/daemon.md (Turn Output Presentation) for the full delivery model.
  */
 import { pushSteer } from "../sessions/steer-channel";
 import { getLogger } from "../logging";
@@ -77,15 +66,11 @@ export type InTurnEventOutcome = "in_turn" | "fallback";
 
 /**
  * Deliver an event into the session's active turn via the steer channel.
- *
- * - Active turn: the message (banner + body) is queued for injection into the
- *   current tool loop; resolves `in_turn`.
- * - No active turn, or the turn ends before the message is drained: `fallback`
- *   runs instead (awaited for the no-turn case, fired from the channel's drop
- *   callback for the late case); resolves `fallback` only for the former.
- *
- * The fallback should be idempotent-safe to call at most once per delivery;
- * this function guarantees exactly one of the two paths delivers.
+ * Active turn: the message (banner + body) is queued for injection into the
+ * current tool loop (resolves `in_turn`). No active turn — or the turn ends
+ * before the message is drained — and the caller's `fallback` path delivers
+ * instead (resolves `fallback` only for the no-turn case). Guarantees exactly
+ * one of the two paths delivers; see docs/daemon.md (Turn Output Presentation).
  */
 export async function deliverInTurnEvent(input: {
   readonly sessionId: string;

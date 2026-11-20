@@ -7,7 +7,6 @@ import type { ShoggothHooks } from "./plugin-system";
 
 /**
  * Validates that a plugin implements every hook in `requiredHooks`.
- *
  * Throws the first time a required hook is missing or is not a function,
  * with an error naming the plugin kind, the plugin name, and the missing
  * hook. Returns the plugin unchanged.

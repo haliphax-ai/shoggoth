@@ -1,17 +1,11 @@
 /**
- * OOB turn banners (issue #363).
- *
- * When a message-surface-bound session (top-level agent or thread-bound
- * subagent) handles an out-of-band turn — a timer, an incoming inter-session
- * message, or a workflow status notification — the operator gets no normal
- * turn surface. These banners give that feedback: a "processing" banner at turn
- * start, the status bar streamed live into that message while the turn runs,
- * and a terminal banner (plus any `to_operator` content) when it finishes.
- *
- * The exact formatting (block quote, italics, monospace ids) is part of the
- * display aesthetic called out in the issue, so the strings live here and are
- * unit-tested. Builders are platform-neutral; a platform that cannot edit
- * messages falls back to posting the terminal banner as a new message.
+ * OOB turn banners: a blockquoted "processing" banner at turn start, the status
+ * bar streamed live into that message while the turn runs, and a terminal banner
+ * (plus any `to_operator` content) when an out-of-band turn (timer, inter-session
+ * message, workflow notification) finishes. Builders are platform-neutral and the
+ * strings are unit-tested; a platform that cannot edit messages falls back to
+ * posting the terminal banner as a new message. See docs/daemon.md (Turn Output
+ * Presentation).
  */
 
 /** Terminal outcome of an OOB turn, mirroring the status bar's terminal emoji. */

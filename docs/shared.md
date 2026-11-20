@@ -19,10 +19,13 @@ The `@shoggoth/shared` package (`packages/shared`) contains cross-cutting utilit
 11. [Subagent Spawn Allow Policy (`subagent-spawn-allow-policy.ts`)](#subagent-spawn-allow-policy)
 12. [Platform Config (`platform-config.ts`)](#platform-config)
 13. [Logging (`logging.ts`)](#logging)
-14. [Network Utilities (`network.ts`)](#network-utilities)
-15. [Image Constants (`image.ts`)](#image-constants)
-16. [JSON Redaction (`redact-json.ts`)](#json-redaction)
-17. [Version (`version.ts`)](#version)
+14. [Logging File Sink (`logging-file-sink.ts`)](#logging-file-sink)
+15. [Tool Call Args (`tool-call-args.ts`)](#tool-call-args)
+16. [JSON Escape Sanitization (`sanitize-json-escapes.ts`)](#json-escape-sanitization)
+17. [Network Utilities (`network.ts`)](#network-utilities)
+18. [Image Constants (`image.ts`)](#image-constants)
+19. [JSON Redaction (`redact-json.ts`)](#json-redaction)
+20. [Version (`version.ts`)](#version)
 
 ---
 
@@ -164,9 +167,10 @@ agent:<agentId>:<platform>:<resourceType>:<leaf>[:<childLeaf>:…]
 
 - `agentId`: alphanumeric plus `._-`, no colons.
 - `platform`: short bridge name (e.g. `discord`).
-- `resourceType`: e.g. `channel`, `dm`.
+- `resourceType`: e.g. `channel`, `dm` — same charset rules as tail segments.
 - `leaf` / `childLeaf`: opaque segments matching `/^[A-Za-z0-9._-]{1,128}$/`.
 - Subagent URNs have 2+ tail segments after `resourceType`.
+- Core enforces structure only; platform bridges must validate their own tail shapes (identifiers, UUIDs, etc.) before trusting a route.
 
 ### Functions
 
@@ -233,12 +237,12 @@ Provides a structured, anti-spoofed metadata channel for system-to-agent communi
 
 ### Functions
 
-| Function                                         | Description                                                                                                                      |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| `generateSystemContextToken()`                   | Returns an 8-char hex anti-spoofing token (random per session).                                                                  |
-| `renderSystemContextEnvelope(ctx, token)`        | Renders a `SystemContext` into `--- BEGIN TRUSTED SYSTEM CONTEXT [token:…] ---` / `--- END …` block.                             |
-| `wrapWithSystemContext(userContent, ctx, token)` | Prepends the envelope to user content.                                                                                           |
-| `stripFalsifiedSystemContext(text)`              | Detects and discards inbound messages containing forged system context blocks. Replaces the entire message with a safety notice. |
+| Function                                         | Description                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `generateSystemContextToken()`                   | Returns an 8-char hex anti-spoofing token (random per session).                                                                                                                                                                                                                          |
+| `renderSystemContextEnvelope(ctx, token)`        | Renders a `SystemContext` into `--- BEGIN TRUSTED SYSTEM CONTEXT [token:…] ---` / `--- END …` block.                                                                                                                                                                                     |
+| `wrapWithSystemContext(userContent, ctx, token)` | Prepends the envelope to user content.                                                                                                                                                                                                                                                   |
+| `stripFalsifiedSystemContext(text, validToken?)` | Detects forged system context blocks in untrusted inbound text. With no valid token the entire message is discarded and replaced with a safety notice; with a valid token, blocks carrying it are preserved and mismatched (or token-less) blocks are replaced in-place with a sentinel. |
 
 ---
 
@@ -250,16 +254,16 @@ Resolves per-session effective configuration by merging global config with per-a
 
 ### Functions
 
-| Function                                                          | Description                                                                                                                                                                                                 |
-| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `resolveAgentIdFromSessionId(sessionId)`                          | Extracts the logical agent id from a session URN.                                                                                                                                                           |
-| `resolveEffectiveModelsConfig(cfg, sessionId)`                    | Merges global `models` with per-agent `models` overrides (failover chain, invocation, compaction).                                                                                                          |
-| `resolveEffectiveMemoryForSession(cfg, sessionId)`                | Global `memory.paths` + per-agent `memory.paths` (deduped).                                                                                                                                                 |
-| `resolveEffectiveSessionQueryAllowedAgentIds(cfg, callerAgentId)` | Set of agent ids the caller may query transcripts for (own id always included).                                                                                                                             |
-| `resolveEffectiveThinkingDisplay(cfg, sessionId)`                 | Per-agent `thinkingDisplay` or default `"none"`.                                                                                                                                                            |
-| `formatAgentIdentityPrefix(cfg, sessionId)`                       | Returns `**<emoji> <displayName>:**\n` for platform messages. Emoji defaults to 🦑.                                                                                                                         |
-| `evaluateMcpServerRules(serverId, rules, explicit?)`              | Evaluates allow/deny for a single MCP server id. Deny wins → allow check → default-deny. With `explicit: true`, a `*` allow pattern will not match the server — it must be named exactly in the allow list. |
-| `resolveEffectiveMcpServerRules(config, agentId, isSubagent)`     | Merge cascade: global MCP rules → per-agent MCP rules (subagent sessions first inherit the agent's top-level rules) → global subagent rules → per-agent subagent rules. Per-field replace semantics.        |
+| Function                                                          | Description                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `resolveAgentIdFromSessionId(sessionId)`                          | Extracts the logical agent id from a session URN.                                                                                                                                                                                                                                                                                                                                                                                      |
+| `resolveEffectiveModelsConfig(cfg, sessionId)`                    | Merges global `models` with per-agent `models` overrides (failover chain, invocation, compaction).                                                                                                                                                                                                                                                                                                                                     |
+| `resolveEffectiveMemoryForSession(cfg, sessionId)`                | Global `memory.paths` + per-agent `memory.paths` (deduped).                                                                                                                                                                                                                                                                                                                                                                            |
+| `resolveEffectiveSessionQueryAllowedAgentIds(cfg, callerAgentId)` | Set of agent ids the caller may query transcripts for (own id always included).                                                                                                                                                                                                                                                                                                                                                        |
+| `resolveEffectiveThinkingDisplay(cfg, sessionId)`                 | Per-agent `thinkingDisplay` or default `"none"`.                                                                                                                                                                                                                                                                                                                                                                                       |
+| `formatAgentIdentityPrefix(cfg, sessionId)`                       | Returns `**<emoji> <displayName>:**\n` for platform messages. Emoji defaults to 🦑.                                                                                                                                                                                                                                                                                                                                                    |
+| `evaluateMcpServerRules(serverId, rules, explicit?)`              | Evaluates allow/deny for a single MCP server id. Deny wins → allow check → default-deny. With `explicit: true`, a `*` allow pattern will not match the server — it must be named exactly in the allow list.                                                                                                                                                                                                                            |
+| `resolveEffectiveMcpServerRules(config, agentId, isSubagent)`     | Merge cascade: global MCP rules → per-agent MCP rules (subagent sessions first inherit the agent's top-level rules) → global subagent rules → per-agent subagent rules. Per-field replace: a narrower scope providing `allow`/`deny` replaces the inherited list. The inheritance matters for `explicit` servers (never matched by a wildcard `*`): they stay reachable for subagents even when no `subagentMcp` rules are configured. |
 
 ### Constants
 
@@ -297,16 +301,16 @@ Governs _session-level subagent nesting depth_ — how many nested subagent leve
 
 Depth of a top-level session is 0; a session at depth `d` may spawn a subagent iff `d < maxSpawnDepth`. With the default of `1`, subagents may not spawn; with `2`, a subagent may spawn a depth-2 subagent which then may not spawn, and so on. `0` disables subagent spawning entirely.
 
-This is the sole spawn-permission and nesting gate for agent principals on the subagent builtins and control ops. Thread-bound persistent subagents are governed by it like any other session — depth is pure `parent_session_id` lineage with no platform-thread exemptions. It is evaluated alongside (never widened by) the `subagentSpawnAllow` allowlist, which governs which agent ids a sender may spawn _as_.
+It is evaluated alongside — never widened or replaced by — the `subagentSpawnAllow` allowlist, which governs which agent ids a sender may spawn _as_; `maxSpawnDepth` is purely an additional nesting gate. The gate is uniform: thread-bound persistent subagents are governed by it like any other session — depth is pure `parent_session_id` lineage with no platform-thread exemptions.
 
 **Helpers (`spawn-depth.ts`):**
 
-| Function                                          | Description                                                                                                           |
-| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `DEFAULT_MAX_SPAWN_DEPTH`                         | `1` — top-level sessions may spawn; subagents may not (historical behavior).                                          |
-| `effectiveMaxSpawnDepth(cfg, logicalAgentId)`     | Effective limit. Precedence: `agents.list.<id>.maxSpawnDepth` → top-level `maxSpawnDepth` → default `1`.              |
-| `computeSessionDepth(lookupParent, sessionId)`    | Depth by walking parent-session lineage (top-level = 0). `-1` when unresolvable (missing row / cycle) — callers deny. |
-| `maySpawnSubagentAtDepth(currentDepth, maxDepth)` | `currentDepth < maxDepth`; unresolvable depth (`-1`) is always denied.                                                |
+| Function                                          | Description                                                                                                                                                                                                                                         |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DEFAULT_MAX_SPAWN_DEPTH`                         | `1` — top-level sessions may spawn; subagents may not (historical behavior).                                                                                                                                                                        |
+| `effectiveMaxSpawnDepth(cfg, logicalAgentId)`     | Effective limit. Precedence: `agents.list.<id>.maxSpawnDepth` → top-level `maxSpawnDepth` → default `1`; omitted or invalid values fall back to the default. Purely an additional gate — does not affect the workflow engine's separate `maxDepth`. |
+| `computeSessionDepth(lookupParent, sessionId)`    | Depth by walking parent-session lineage (top-level = 0). `-1` when unresolvable (missing row / cycle) — callers deny.                                                                                                                               |
+| `maySpawnSubagentAtDepth(currentDepth, maxDepth)` | `currentDepth < maxDepth`; unresolvable depth (`-1`) is always denied.                                                                                                                                                                              |
 
 ---
 
@@ -512,6 +516,73 @@ Structured JSON-lines logger writing to stderr, suitable for container log aggre
 
 Log level ordering: `debug(10) < info(20) < warn(30) < error(40)`.
 
+For file-based log output (`shoggoth-*.log` JSON lines with gzip rotation and pruning), see [Logging File Sink](#logging-file-sink).
+
+---
+
+## Logging File Sink
+
+**File:** `logging-file-sink.ts`
+
+Async file sink for the root logger (`FileLogSink`). Log records are enqueued in-process and drained to a date-stamped JSON-lines file (`shoggoth-YYYY-MM-DD.log`, UTC date) by a serialized async flush loop, so the logging call path never blocks on disk I/O.
+
+### Behavior
+
+- **Bounded queue:** when the pending queue (`maxQueue`, default 10000) is full, new entries are dropped and counted; a single drop-report record (warn, `component: "file-log-sink"`, with the dropped count) is appended once the queue drains.
+- **Date rollover:** on the first write past a UTC date change, the current file is closed, gzipped with `node:zlib` (no external binaries) to `shoggoth-YYYY-MM-DD.log.gz`, and the plain file removed.
+- **Pruning:** only the newest `maxFiles` (default 7) rotated archives are retained.
+- **Failure handling:** any I/O error disables the sink (stderr logging is unaffected), clears the queue, and reports once via `onFatalError`.
+
+### Options (`FileLogSinkOptions`)
+
+| Option          | Description                                                            |
+| --------------- | ---------------------------------------------------------------------- |
+| `dir`           | Directory for the log files (must already exist).                      |
+| `maxQueue?`     | Max pending queue entries; further entries are dropped. Default 10000. |
+| `maxFiles?`     | Rotated `.log.gz` archives to retain. Default 7.                       |
+| `now?`          | Clock injection for tests.                                             |
+| `onFatalError?` | Called once when the sink disables itself after an I/O failure.        |
+
+### Other members
+
+| Member                               | Description                                                                 |
+| ------------------------------------ | --------------------------------------------------------------------------- |
+| `logFileNameForDate(date)`           | `shoggoth-YYYY-MM-DD.log` (UTC date).                                       |
+| `logArchiveNameForDate(date)`        | `shoggoth-YYYY-MM-DD.log.gz` (UTC date).                                    |
+| `enqueue(line)`                      | Bounded enqueue — never throws, never blocks, schedules an async drain.     |
+| `flush()`                            | Drains the queue to disk; serialized with any in-flight drain (await-safe). |
+| `pending` / `dropped` / `isDisabled` | Pending entries, drops since last drain-to-zero, disabled flag.             |
+| `close()`                            | Flushes pending entries and closes the current file (daemon shutdown).      |
+
+---
+
+## Tool Call Args
+
+**File:** `tool-call-args.ts`
+
+### `normalizeToolCallArgsJson(raw: unknown): string`
+
+Normalizes a tool call's raw arguments into a string that always parses as JSON:
+
+1. Non-string input (provider omitted `arguments`) → `"{}"`.
+2. Otherwise, escape-sanitize via `sanitizeJsonEscapes` (see [JSON Escape Sanitization](#json-escape-sanitization)) and test-parse: parseable → the sanitized string, else → `"{}"`.
+
+**Why this exists:** provider-bound tool calls carry their arguments as a JSON _string_ (`function.arguments` in the OpenAI wire format; a JSON object in the Anthropic / Gemini formats). A provider that cuts a response off at the output-token limit leaves that string truncated mid-JSON, and adapter behavior then diverges: the Anthropic and Gemini adapters throw on parse, while the OpenAI-compatible adapter forwards the broken string verbatim and the upstream rejects the whole request with an opaque 400. `normalizeToolCallArgsJson` is the single place that decides what arguments become when they cannot be parsed; the daemon's tool loop and its model client both call it, so the transcript and the provider request cannot diverge.
+
+---
+
+## JSON Escape Sanitization
+
+**File:** `sanitize-json-escapes.ts`
+
+### `sanitizeJsonEscapes(raw: string): string`
+
+Sanitizes invalid JSON escape sequences in a raw JSON string: any `\` NOT followed by a valid JSON escape character is replaced with `\\`, preserving the original intent. Input without backslashes is returned unchanged.
+
+Valid JSON escapes after `\`: `"`, `\\`, `/`, `b`, `f`, `n`, `r`, `t`, `uXXXX` (4 hex digits).
+
+**Why:** LLMs generating tool call arguments often produce regex patterns with invalid JSON escapes like `\{`, `\(`, `\[`, `\.`. Lenient parsers silently drop the backslash; strict parsers throw. Either way the agent's intent is lost — doubling the backslash preserves it.
+
 ---
 
 ## Network Utilities
@@ -520,11 +591,11 @@ Log level ordering: `debug(10) < info(20) < warn(30) < error(40)`.
 
 ### `isPrivateIp(hostname: string): boolean`
 
-Returns `true` when the IP address falls within a private/internal range that should be blocked for outbound fetch. Covers:
+Returns `true` when the IP address falls within a private/internal range that should be blocked for outbound fetch by default. Covered ranges:
 
-- IPv4: `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `0.0.0.0/8`, `169.254.0.0/16`
-- IPv6: `::1`, `::`, `fc00::/7` (ULA), `fe80::/10` (link-local)
-- IPv4-mapped IPv6 (`::ffff:x.x.x.x`) delegates to IPv4 check.
+- IPv4: `127.0.0.0/8` (loopback), `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` (RFC 1918), `0.0.0.0/8` (current network), `169.254.0.0/16` (link-local)
+- IPv6: `::1` (loopback), `::` (unspecified), `fc00::/7` (ULA), `fe80::/10` (link-local)
+- IPv4-mapped IPv6 (`::ffff:0:0/96`) delegates to the IPv4 check.
 
 Returns `false` for non-IP-literal strings (caller should DNS-resolve first).
 

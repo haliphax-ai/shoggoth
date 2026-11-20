@@ -40,15 +40,11 @@ async function walkMarkdownFiles(dir: string, out: string[]): Promise<void> {
 const TAG_PATTERN = /^[a-z0-9-]+$/;
 
 /**
- * Parses a YAML-ish inline array string like `[foo, bar, baz]` into a
- * lowercase string array.  Returns `[]` for missing or malformed input.
+ * Parses a YAML-ish inline array string like `[foo, bar, baz]` into a lowercase
+ * string array. Returns `[]` for missing or malformed input.
  *
- * Tags are normalized (trimmed, lowercased) and then validated against
- * `TAG_PATTERN`.  Non-conforming tags are **dropped** rather than kept or
- * rejected: tags are advisory metadata parsed from untrusted frontmatter,
- * so a malformed tag should never fail a skill scan, and keeping it would
- * leak characters that search (exact-match tag filters, substring scoring)
- * never matches.  A tag that trims to empty is also dropped.
+ * Tags are trimmed, lowercased, and validated against `TAG_PATTERN`; see the
+ * "Tag Parsing" section in docs/skills.md for the drop-on-mismatch policy.
  */
 function parseTags(raw: string | undefined): string[] {
   if (!raw) return [];
@@ -70,18 +66,9 @@ function pathSlugId(root: string, filePath: string): string {
 /**
  * Recursively scans each root for `*.md` skills; parses YAML-like frontmatter.
  *
- * A file whose frontmatter block is malformed under the skip policy (see
- * `parseMarkdownFrontmatter`) is treated as if it did not exist: it produces
- * no `SkillRecord`, so it cannot shadow other skills or be shadowed, and it
- * never surfaces partial metadata from a typo'd frontmatter block.
- *
- * Duplicate ids are deduplicated **last-wins**: when two skills across the
- * roots share the same `id`, the one scanned later (later root in `roots`,
- * then lexicographically later file within a root) silently replaces the
- * earlier entry. There is no error and no partial merge — callers get one
- * `SkillRecord` per id, so direct callers of this function (as opposed to
- * `listSkillsForConfig`) must not assume every input file survived.
- * A warning is logged whenever a collision is detected.
+ * Malformed frontmatter is skipped (treated as if the file did not exist);
+ * duplicate ids are deduplicated last-wins with a logged warning. See the
+ * "Skill Discovery" section in docs/skills.md for details and caller caveats.
  */
 export async function scanSkillDirectories(
   roots: readonly string[],

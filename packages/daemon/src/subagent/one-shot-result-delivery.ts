@@ -15,20 +15,11 @@ const OOB_MAX_CHARS = 8000;
 
 /**
  * Deliver a one-shot's post-first-turn output to its parent as an out-of-band
- * turn. Mirrors `runSubagentResultOobTurn` in shape (banner-less structured
- * OOB delivery; the parent re-routes through `to_operator`/`to_sender`), but
- * without the result wrapper: the child session is still alive at dispatch
- * time and is terminated right after, so the parent needs the transcript text
- * plus the completion tag, not a re-delivery envelope.
- *
- * Delivery targets mirror the spawn path: `respond_to` when one was recorded
- * on the child row, else the spawning session. A target that cannot run a
- * turn (missing or terminated) drops the delivery with a log — the child
- * still terminates, and the caller never retries.
- *
- * Resolves to the transcript text that was delivered (the same string the
- * caller passed); the teardown re-marks it so a concurrent settle landing
- * mid-delivery cannot deliver it a second time.
+ * turn (banner-less structured OOB delivery; no re-delivery envelope — the
+ * child is still alive and terminated right after). Targets mirror the spawn
+ * path: `respond_to` when recorded on the child row, else the spawning
+ * session; an unusable target drops the delivery with a log. Resolves to the
+ * delivered transcript text so the teardown can re-mark it (no double delivery).
  */
 export async function deliverOneShotFollowupResult(input: {
   /** The one-shot child session id (for logs and the completion tag). */

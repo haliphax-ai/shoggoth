@@ -17,8 +17,10 @@ The `@shoggoth/models` package (`shoggoth/packages/models`) is the model abstrac
 9. [Transcript Compaction](#transcript-compaction)
 10. [Image Codec](#image-codec)
 11. [Extended Thinking](#extended-thinking)
-12. [Token Usage Tracking](#token-usage-tracking)
-13. [Type Reference](#type-reference)
+12. [Structured Output](#structured-output)
+13. [Truncation and Finish Reasons](#truncation-and-finish-reasons)
+14. [Token Usage Tracking](#token-usage-tracking)
+15. [Type Reference](#type-reference)
 
 ---
 
@@ -223,6 +225,10 @@ Determined by `isFailoverEligibleError()` in `classify.ts`:
 | `TypeError` with message containing "fetch" | Yes (network failure) |
 | Everything else                             | No                    |
 
+The failover layer's status allow-list is maintained as `FAILOVER_STATUSES` in `src/classify.ts`. It is a **strict superset** of the resilience layer's `RETRYABLE_STATUSES` (408, 500, 502, 503, 504 — which controls same-provider retries): failover additionally includes `429`, because rate limits are per-provider — a different provider is unlikely to share the same quota.
+
+Not every 5xx is failover-eligible: status codes like 501 (Not Implemented) or 507 (Insufficient Storage) indicate a capability or infrastructure problem unlikely to resolve by switching providers.
+
 ---
 
 ## Configuration & Model Selection
@@ -238,6 +244,12 @@ Determined by `isFailoverEligibleError()` in `classify.ts`:
 - `models.providers.<id>.requestTimeoutMs` — per-provider request timeout (ms); overrides the top-level value for that provider only.
 
 When `failoverChain` is empty or absent, a single-hop provider is created from environment variables.
+
+### Model Metadata Store
+
+Context-window metadata is stored per `providerId/modelName` in an in-process store (`packages/daemon/src/model-metadata.ts`), sourced two ways: the models config (`contextWindowTokens` overrides, source `config`) and provider-reported values (models-API fetches, provider-reported usage — source `provider`). Provider values overwrite config values; overwriting a config-derived value with a different number logs a warning.
+
+There are no hard-coded model defaults anywhere: providers are the single source of truth for model metadata. Models with neither a configured nor a provider-reported window have no entry, and callers are expected to handle an undefined window (e.g. the mid-turn compaction arming check logs an error instead of silently guessing a window size).
 
 ### Request Timeout
 
@@ -497,6 +509,35 @@ Handles models that emit reasoning/thinking content alongside their response.
 ### Streaming Normalization
 
 `ThinkingStreamNormalizer` is a stateful streaming processor that buffers partial `<thinking>`/`<think>` tags character-by-character, emitting `{ text?, thinking? }` results per chunk. Used by all three providers during SSE consumption when `thinkingFormat === "xml-tags"`.
+
+---
+
+## Structured Output
+
+When a `responseSchema` is supplied, the daemon captures the model's final answer as validated JSON. Two modes exist: `"strict"` (the provider enforces the schema server-side) and `"best-effort"` (the model self-attaches schema; the daemon validates with `validateResponseSchema` in `response-validation.ts`).
+
+The capture mechanism is a **synthetic tool** named `__structured_output__` (`STRUCTURED_OUTPUT_TOOL_NAME`, appended to the tool list alongside real tools) so schema capture works uniformly on providers without a dedicated JSON-mode API. Its description text (`SYNTHETIC_TOOL_DESCRIPTION`) is part of the contract: models under-use the tool (reply with prose, or call it alongside real tools where the call would be discarded), so it states explicitly that the arguments must be a single JSON object matching the advertised schema, that the tool must be called alone as the final action, and that plain text is never captured as structured output.
+
+- `buildSyntheticTool(schema, formatTool)` — wraps the common name, description, and schema into each adapter's wire format.
+- `isSyntheticToolCall(toolCall)` — checks whether a tool call targets the synthetic tool.
+- `validateSyntheticToolCall(toolCall, schema, mode, finishReason?)` — parses and validates the call's arguments; returns the normalized (re-serialized) JSON string. Throws `StructuredOutputValidationError` — carrying the raw arguments, the schema, and the finish reason — when the arguments are not valid JSON or do not conform, so callers (e.g. the daemon tool loop) can hand the model a concrete schema error and count the attempt against the retry budget instead of silently discarding a non-conformant call.
+
+When the model returns plain text instead of calling the tool, `structuredOutputFollowUp()` orchestrates a second API call with `tool_choice` forcing the synthetic tool:
+
+1. Append the assistant's text response and a user nudge (`FOLLOW_UP_NUDGE`) to the original messages (`buildFollowUpMessages`).
+2. Execute a provider-specific follow-up call (`executeStructuredOutputApiCall`: POST → response text → strip `xml-tags` thinking → JSON parse).
+3. Find the synthetic call (`findAndValidateForcedToolCall`) and validate it; return `{ content, usage }` on success, or `null` when no synthetic call was found.
+
+---
+
+## Truncation and Finish Reasons
+
+Providers spell the "output budget exhausted" stop reason differently: OpenAI-compatible APIs report `finish_reason: "length"`, Anthropic reports `stop_reason: "max_tokens"`, and Gemini reports `finishReason: "MAX_TOKENS"`. All mean the same thing for the daemon: generation stopped mid-stream because the output-token limit was reached, so a tool call's arguments may have been cut off mid-JSON.
+
+`isTruncationFinishReason()` normalizes these variants (plus `max_output_tokens`) and is used by the daemon tool loop to tell two very different failures apart when a tool call's arguments do not parse:
+
+- **Malformed JSON emitted by the model itself** — healable: the model is handed a structured tool error and can retry with the same intent.
+- **Arguments truncated by the provider** — not healable: the call can never succeed, and replaying it poisons the next request with an opaque 400, so the loop fails fast instead of retrying.
 
 ---
 
