@@ -1,8 +1,6 @@
-// ---------------------------------------------------------------------------
-// Plugin Registration Gate — integrates fingerprinting + approval into the
-// service.register hook flow so that unapproved plugins have their tools
-// suspended and approved plugins get ops enforcement on their deps.
-// ---------------------------------------------------------------------------
+// Plugin registration gate — integrates fingerprinting + approval into the
+// service.register hook flow: unapproved plugins get their tools suspended,
+// approved plugins get ops enforcement on their deps.
 
 import { type PluginManifestForFingerprint } from "./plugin-fingerprint";
 import {

@@ -1,22 +1,6 @@
-// ---------------------------------------------------------------------------
-// Contract mode for one-shot subagent spawns.
-//
-// A spawn-time `contract` is a list of target files/folders with the required
-// modification type (create, update, delete) and a brief summary of the
-// expected change. When active:
-//
-// 1. All targets must live inside a git repository at call time (validated
-//    before the child session is created — a failure aborts the spawn).
-// 2. After the turn, a target not acted upon with its contractual type is a
-//    structural contract break (no decision call is made for it).
-// 3. Otherwise the per-file `git diff` against the baseline (source branch
-//    HEAD, or the spawn HEAD when there is no source branch) is judged by the
-//    decision model in batches (`agents.contract.batchSize`, default 5).
-//    Deleted files are not sent to the decision model.
-// 4. Any per-file "yes" probability below `agents.contract.yesMinimum`
-//    (default 0.85), any structural break, or any decision failure marks the
-//    contract as not fulfilled.
-// ---------------------------------------------------------------------------
+// Contract mode for one-shot subagent spawns: a spawn-time `contract` lists
+// targets with the required modification type + expected change; targets must
+// live in a git repo; unacted targets are structural breaks; diffs judged in batches.
 
 import { execFileSync, type ExecFileSyncOptions } from "node:child_process";
 import { existsSync, readdirSync, statSync, type Dirent } from "node:fs";

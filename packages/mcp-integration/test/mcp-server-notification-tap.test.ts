@@ -89,7 +89,6 @@ describe("server notification tap (createMcpJsonRpcSession)", () => {
       input.write(`${JSON.stringify({ jsonrpc: "2.0" })}\n`); // no id, no method
       input.write("this is not json\n"); // malformed → onProtocolError
 
-      // The session stays fully functional afterwards.
       const reqPromise = readLine(output);
       const pong = session.request("ping");
       const req = JSON.parse(await reqPromise) as { id: number };

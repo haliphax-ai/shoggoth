@@ -15,10 +15,9 @@ import { migrate, defaultMigrationsDir } from "../../src/db/migrate";
 
 const SESSION_ID = "agent:test:discord:channel:123";
 
-// The timer handler writes to the `timers` table through the scheduler, so the
-// stub context needs a real migrated db. The same db backs `onTimersChanged`
-// counts (`fired = 0` rows — queued and active timers as one cumulative sum),
-// so set/cancel notifications reflect exactly what the status bar section shows.
+/** The timer handler writes to the `timers` table through the scheduler, so the
+ *  stub context needs a real migrated db; the same db backs `onTimersChanged`
+ *  counts, so set/cancel notifications reflect the status bar section exactly. */
 function stubCtx(onTimersChanged?: BuiltinToolContext["onTimersChanged"]): {
   ctx: BuiltinToolContext;
   db: Database.Database;

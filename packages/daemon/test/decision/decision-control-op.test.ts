@@ -260,10 +260,8 @@ describe("decision_evaluate control op", () => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Feature gating: with no decision models configured at all, the op must be
-  // indistinguishable from a nonexistent op (ERR_UNKNOWN_OP downstream).
-  // ---------------------------------------------------------------------------
+  /** Feature gating: with no decision models configured at all, the op must be
+   *  indistinguishable from a nonexistent op (ERR_UNKNOWN_OP downstream). */
 
   describe("feature gating (no models configured)", () => {
     it("is invisible when providers exist but have no models", async () => {

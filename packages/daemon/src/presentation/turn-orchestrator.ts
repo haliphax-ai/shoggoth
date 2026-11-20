@@ -192,10 +192,9 @@ export class PresentationTurnOrchestrator {
     const sliceDisplayText = (text: string): string =>
       text.length > maxLen ? text.slice(0, maxLen) : text;
 
-    // If a pre-started stream handle was provided, wrap it; otherwise let
-    // runInboundSessionTurn call adapter.startStream lazily. When a status bar
-    // dep is configured, wrap the stream handle with attachSink so the in-flight
-    // message handle carries setStatusBar (the sink IS the augmented handle).
+    // Wrap a pre-started stream handle (or let runInboundSessionTurn start it
+    // lazily); with a status bar dep, attachSink so the in-flight handle
+    // carries setStatusBar (the sink IS the augmented handle).
     const wrapForStatusBar = (handle: StreamHandle): StreamHandle => {
       const sink = this.deps.statusBar?.attachSink(handle);
       return (sink ?? handle) as unknown as StreamHandle;
@@ -291,12 +290,9 @@ export class PresentationTurnOrchestrator {
       );
     };
 
-    // Adapt the platform statusBar dep ({config, render, attachSink, stats})
-    // through ONE turn tracker: the tracker's snapshots rendered by the
-    // platform renderer are the live bar, and finish() returns the terminal
-    // line for delivery — no second composition path. Direct pass-through
-    // left `enabled` undefined at runtime, so inbound turns silently skipped
-    // the bar.
+    // Adapt the platform statusBar dep through ONE turn tracker: its snapshots
+    // are the live bar, finish() the terminal line — no second path
+    // (pass-through left `enabled` undefined, silently skipping the bar).
     let tracker: TurnStatusBarTracker | undefined;
     const statusBarDep = this.deps.statusBar;
     const statusBarOption: RunInboundSessionTurnOptions["statusBar"] = statusBarDep

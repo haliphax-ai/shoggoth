@@ -10,17 +10,16 @@ import assert from "node:assert";
 import { describe, it, vi, beforeEach } from "vitest";
 import type { McpJsonRpcSession, McpStdioConnectOptions } from "@shoggoth/mcp-integration";
 
-// ---------------------------------------------------------------------------
-// Capture every call to openMcpStdioClient so we can inspect the options.
-//
-// The stdio opener is INJECTED via `options.openStdioClient` rather than
-// intercepted with `vi.mock("@shoggoth/mcp-integration")`. Under vitest
-// `--no-isolate` the module cache is shared across files, so a `vi.mock` can be
-// silently defeated when another test file imports the real module first (the
-// pool then binds the real openMcpStdioClient and actually spawns). DI is
-// order-independent and isolation-proof. The real mcpFetchToolsList /
-// mcpToolsToSourceCatalog run against fakeSession and return an empty catalog.
-// ---------------------------------------------------------------------------
+/**
+ * Captures every call to openMcpStdioClient so we can inspect the options.
+ * The stdio opener is INJECTED via `options.openStdioClient` instead of
+ * `vi.mock("@shoggoth/mcp-integration")`: under vitest `--no-isolate` the
+ * module cache is shared across files, so a `vi.mock` can be silently defeated
+ * when another file imports the real module first (the pool then binds the
+ * real opener and actually spawns). DI is order-independent and
+ * isolation-proof; the real mcpFetchToolsList / mcpToolsToSourceCatalog run
+ * against fakeSession and return an empty catalog.
+ */
 const capturedStdioOpts: McpStdioConnectOptions[] = [];
 
 const fakeSession: McpJsonRpcSession = {

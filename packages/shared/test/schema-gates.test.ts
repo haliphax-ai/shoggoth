@@ -1,10 +1,6 @@
 // ---------------------------------------------------------------------------
-// gates config schema — `gates.agentsMd.tools` / `gates.reRead.tools` glob
-// lists for the system gates (AGENTS.md discovery, re-read-required).
-//
-// Covers the gates schema (defaults, strictness) and `gates` acceptance in
-// both the fragment and full config schemas.
-// ---------------------------------------------------------------------------
+// Gates config schema tests: `gates.agentsMd.tools` / `gates.reRead.tools` glob
+// lists; covers defaults, strictness, and `gates` acceptance in fragment + full config.
 import { describe, it } from "vitest";
 import assert from "node:assert";
 import {

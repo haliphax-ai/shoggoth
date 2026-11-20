@@ -14,10 +14,10 @@ const SESSION_ID = "agent:test:discord:channel:123";
 
 type Invoker = (op: string, payload: unknown) => Promise<unknown>;
 
-// The subagent handler resolves the invoking session's spawn depth through the
-// session store, so the stub context needs a real db with the session row present.
-// The same db backs `onSubagentsChanged` counts, so the invoker factory receives
-// it and can create child rows like the real spawn op does before returning.
+/** The subagent handler resolves the invoking session's spawn depth through the
+ *  session store, so the stub context needs a real db with the session row; the
+ *  same db backs `onSubagentsChanged` counts, and the invoker factory uses it to
+ *  create child rows like the real spawn op does before returning. */
 function stubCtx(
   invokerFactory: (db: Database.Database) => Invoker,
   onSubagentsChanged?: BuiltinToolContext["onSubagentsChanged"],

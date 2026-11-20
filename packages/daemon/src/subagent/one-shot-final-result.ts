@@ -1,17 +1,6 @@
-// ---------------------------------------------------------------------------
-// one-shot final result — the parent-facing delivery owed at teardown
-// ---------------------------------------------------------------------------
-//
-// The spawn path delivers a one-shot's FIRST settled turn to its parent and
-// marks the delivered text here. Every later turn (a parent steer, an OOB
-// wake-up) leaves newer transcript text the parent would otherwise never
-// see: the notify-drain teardown calls `terminateOneShotWithFinalResult`
-// as its terminate closure, which dispatches the undelivered delta as a
-// structured OOB follow-up turn before the session terminates.
-//
-// Kept separate from `one-shot-notify-drain.ts` so the drain module's
-// hold/release machinery stays metric-identical to its historical shape and
-// the delivery stack (`control/ops-shared.ts`) never imports either.
+// one-shot final result — the parent-facing delivery owed at teardown: the
+// spawn path delivers a one-shot's FIRST settled turn, and the teardown's
+// terminate closure dispatches any undelivered delta as an OOB follow-up.
 
 import type Database from "better-sqlite3";
 import type { Logger } from "../logging";

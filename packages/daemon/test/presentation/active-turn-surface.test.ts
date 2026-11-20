@@ -114,10 +114,9 @@ describe("createTurnBannerCollector", () => {
     });
 
     it("keeps a banner in place when committed segments are multi-paragraph", () => {
-      // A round's content may contain blank lines (the model narrates
-      // "Raw spec:\n\n<paragraph>"), so a committed segment spans several
-      // display blocks. The banner anchored after such a segment must land
-      // after its LAST paragraph — never fall back to the tail.
+      // A round's content may contain blank lines, so a committed segment
+      // spans several display blocks: the banner anchored after such a segment
+      // must land after its LAST paragraph — never fall back to the tail.
       let committed = 0;
       const banners = createTurnBannerCollector({
         captureAnchor: () => anchor(committed),
@@ -134,9 +133,8 @@ describe("createTurnBannerCollector", () => {
 
     it("survives subsequent round commits after a multi-paragraph segment", () => {
       // Regression: every live push re-renders from scratch, so a lookup
-      // failure would drag the banner to the tail as new rounds commit. With
-      // segment-aware location the banner stays at its fire-time slot while
-      // the turn keeps streaming.
+      // failure would drag the banner to the tail as new rounds commit; with
+      // segment-aware location it stays at its fire-time slot.
       let committed = 1;
       const banners = createTurnBannerCollector({
         captureAnchor: () => anchor(committed),
@@ -304,10 +302,8 @@ describe("createTurnBannerCollector", () => {
 
     it("anchors a round-boundary notice at the final segment count as an explicit trailing block", () => {
       // 3b semantics: a notice whose anchor equals the final segment count
-      // fired after the last committed segment (a cancel banner after the
-      // trip hop's round settled, with no further prose). It is a
-      // CHRONOLOGICAL trailing notice and lands after the final segment —
-      // distinct from the unresolvable-locate fallback below.
+      // fired after the last committed segment — a CHRONOLOGICAL trailing
+      // notice after the final segment, distinct from the fallback below.
       const banners = createTurnBannerCollector({
         captureAnchor: () => anchor(2),
       });

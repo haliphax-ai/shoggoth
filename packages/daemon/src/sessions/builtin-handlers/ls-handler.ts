@@ -1,6 +1,4 @@
-// -----------------------------------------------------------------------------
 // builtin-ls — structured directory listing
-// -----------------------------------------------------------------------------
 
 import { runAsUser, resolvePathForRead } from "@shoggoth/os-exec";
 import type { BuiltinToolRegistry, BuiltinToolContext } from "../builtin-tool-registry";
@@ -10,11 +8,8 @@ export function register(registry: BuiltinToolRegistry): void {
   registry.register("ls", lsHandler);
 }
 
-// -----------------------------------------------------------------------------
-// Subprocess script — runs as agent UID/GID so kernel DAC applies.
-// Receives parameters via env vars, writes JSON to stdout.
-// Uses the same string-array pattern as other builtin handler scripts.
-// -----------------------------------------------------------------------------
+// Subprocess script — runs as agent UID/GID so kernel DAC applies;
+// receives parameters via env vars, writes JSON to stdout.
 
 function buildLsScript(): string {
   return [

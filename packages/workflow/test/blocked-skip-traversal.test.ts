@@ -224,16 +224,6 @@ describe("Single-pass blocked/skipped traversal", () => {
       const notifier = mockNotifyAdapter();
       const orch = new Orchestrator({ spawner, poller, notifier });
 
-      // Task 1 is a gate that will fail (so it won't be spawned by the orchestrator)
-      // Instead, we simulate the skip by directly failing task 1 then using a gate
-      // Actually, let's just use the fact that task 1 is a gate that evaluates to false.
-      // But for simplicity, let's test via the control plane: we can set a task to skipped
-      // by using a gate task.
-
-      // Let's use a simpler approach: we'll use two branches where one has a gate
-      // Actually, the simplest approach is to test through the tick cycle where a gate
-      // evaluates to false.
-
       // Gate task 1 that evaluates to false → task 2 depends on it
       const tasks: TaskDef[] = [
         {
@@ -358,12 +348,8 @@ describe("Single-pass blocked/skipped traversal", () => {
       const notifier = mockNotifyAdapter();
       const orch = new Orchestrator({ spawner, poller, notifier });
 
-      // Complex graph:
-      //   Gate 1 (false) → 3 → 5
-      //   Task 2 (fails) → 4
-      //   Task 3 also depends on Task 2
-      //
-      // 1,2>3 2>4 3>5
+      // Graph `1,2>3 2>4 3>5`: gate 1 (false) → 3 → 5; task 2 (fails) → 4;
+      // task 3 also depends on task 2.
       const tasks: TaskDef[] = [
         {
           kind: "gate",

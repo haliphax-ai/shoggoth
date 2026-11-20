@@ -201,10 +201,9 @@ export function extractTurnTranscriptAssistantProse(
     });
     for (const m of page.messages) {
       if (m.role === "assistant" && m.content) {
-        // Real models record newline-padded segment content ("\n\n…\n\n\n",
-        // even blank-only rounds): normalize each segment and skip blank
-        // ones so the composed prose joins with exactly one blank-line
-        // separator — matching the display pipeline's round normalization.
+        // Normalize newline-padded segment content and skip blank segments so
+        // composed prose joins with one blank-line separator (matching the
+        // display pipeline's round normalization).
         const prose = normalizeRoundProse(m.content);
         if (prose) segments.push(prose);
       }

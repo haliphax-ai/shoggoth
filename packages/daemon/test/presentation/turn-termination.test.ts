@@ -74,9 +74,8 @@ describe("turn termination shaping", () => {
     banners.add("> ⚙️ banner");
 
     // The capture wrapper stands in for the in-flight message: every shape
-    // must run against the coordinator's in-memory copy, so the surface
-    // never observes the un-spliced body (banners still at the bottom of
-    // the block list) as an intermediate state.
+    // runs against the coordinator's in-memory copy, so the surface never
+    // observes the un-spliced body as an intermediate state.
     const observed: string[] = [];
     const final = await renderTurnTerminationBody("One\n\nTwo", [
       (body) => {

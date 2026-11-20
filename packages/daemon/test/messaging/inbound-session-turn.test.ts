@@ -99,10 +99,8 @@ describe("runInboundSessionTurn streaming final delivery", () => {
       sendErrorBody: vi.fn().mockResolvedValue(undefined),
     });
 
-    // The mock sends 10 deltas: 30, 60, 90, 120, 150, 180, 210, 240, 270, 300 chars.
-    // With the new approach, pushUpdate receives the full accumulated text
-    // not the sliced version, so we should verify that pushUpdate was called
-    // with the full text, not the sliced text.
+    // The mock sends 10 deltas (30..300 chars); pushUpdate must receive the
+    // full accumulated text, not the sliced version.
     expect(pushUpdate).toHaveBeenCalled();
 
     // The last call should have the full 300-character text
@@ -216,11 +214,9 @@ describe("runInboundSessionTurn chronological notice placement", () => {
     // The final body splices the notice chronologically — between the two
     // prose segments — not as a trailing block.
     expect(setFullContent).toHaveBeenLastCalledWith(`first\n\n${notice}\n\nsecond`);
-    // The live frames place the notice at the same chronological position.
-    // The coalescing pusher dispatches deferred microtasks that all read the
-    // LATEST state, so any frame carrying the notice carries the final
-    // render: find one such frame and pin its structure exactly — the notice
-    // must sit between the two committed segments, not pinned to the tail.
+    // Live frames: the coalescing pusher's deferred microtasks all read the
+    // LATEST state, so any frame carrying the notice carries the final render
+    // — the notice sits between the two committed segments, not at the tail.
     const liveFrame = pushUpdate.mock.calls
       .map(([text]) => text as string)
       .find((text) => text.includes(notice));
@@ -268,11 +264,9 @@ describe("runInboundSessionTurn chronological notice placement", () => {
     const notice = "> ↩️ ✅ Exec notification delivered in-turn: *echo hi* `n1`";
 
     mockExecuteSessionAgentTurn.mockImplementationOnce(async (input: any) => {
-      // The turn streamed one settled round, then a banner fired, then the
-      // turn FAILED — the delivered body must keep the streamed snapshot
-      // (banner spliced in place) and append the failure notice as the LAST
-      // block. The old bug recomposed this body from a transcript fallback,
-      // replacing the streamed output outright.
+      // One settled round streamed, then a banner fired, then the turn FAILED:
+      // the delivered body keeps the streamed snapshot (banner spliced in place)
+      // with the failure notice appended last — not a transcript fallback.
       input.stream?.onModelTextDelta?.({
         delta: "hello",
         accumulated: "hello",

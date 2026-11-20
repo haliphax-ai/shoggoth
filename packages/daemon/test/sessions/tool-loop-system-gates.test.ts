@@ -1,15 +1,11 @@
-// ---------------------------------------------------------------------------
-// tool-loop integration for configurable system gates.
-//
-// Exercises the tool loop's system-gate hook: `pre` short-circuits a call
-// before execution (and before HITL), while a null `pre` lets the external
-// executor run normally.
-//
-// Fixture pattern from `mcp/tool-loop-mcp.test.ts` (in-memory migrated DB +
-// createSessionStore + createToolLoopPolicyAndAudit) and the HITL queueing
-// pattern from `tool-loop.test.ts` (auto-deny notifier so a queued row never
-// hangs the loop).
-// ---------------------------------------------------------------------------
+/** tool-loop integration for configurable system gates: the tool loop's
+ *  system-gate hook — `pre` short-circuits a call before execution (and before
+ *  HITL), a null `pre` lets the external executor run normally.
+ *
+ *  Fixture pattern from `mcp/tool-loop-mcp.test.ts` (in-memory migrated DB +
+ *  createSessionStore + createToolLoopPolicyAndAudit) and the HITL queueing
+ *  pattern from `tool-loop.test.ts` (auto-deny notifier so a queued row never
+ *  hangs the loop). */
 import type { AuthenticatedPrincipal } from "@shoggoth/authn";
 import { DEFAULT_HITL_CONFIG, DEFAULT_POLICY_CONFIG } from "@shoggoth/shared";
 import assert from "node:assert";

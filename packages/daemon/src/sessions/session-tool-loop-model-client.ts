@@ -388,10 +388,9 @@ export function createSessionToolLoopModelClient(input: {
           servingWindowTokens != null
             ? Math.min(c.ctxWindowTokens, servingWindowTokens)
             : c.ctxWindowTokens;
-        // Provider-reported input tokens are ground truth for what was really
-        // sent this turn (the char heuristic undercounts); use them directly
-        // whenever available and fall back to the heuristic only when the
-        // provider reported no usage yet.
+        // Provider-reported input tokens are ground truth (the char heuristic
+        // undercounts); fall back to the heuristic only when the provider
+        // reported no usage yet.
         const actualInputTokens =
           lastInputTokens != null && Number.isFinite(lastInputTokens) && lastInputTokens > 0
             ? lastInputTokens
@@ -501,25 +500,16 @@ export function createSessionToolLoopModelClient(input: {
         });
       }
 
-      // The round is settled: hand the display layer the authoritative final
-      // content so it can reconcile any drifted streamed tail and keep the
-      // display round-truthful across tool follow-ups.
+      // Round settled: hand the display layer the authoritative final content
+      // to reconcile any drifted streamed tail (display round-truthful).
       if (input.streamModel === true) {
         input.onModelRoundEnd?.({ round, content: out.content ?? "" });
       }
 
       if (out.toolCalls.length > 0) {
-        // The assistant turn is replayed to the provider on the next request,
-        // so its tool-call arguments MUST be parseable: a provider that
-        // truncates a response mid-arguments leaves an incomplete JSON
-        // prefix, and replaying that verbatim makes the upstream reject the
-        // whole request with an opaque 400 (no detail about which call or
-        // why). Normalizing here keeps the replayed history well-formed.
-        //
-        // The RAW arguments are still returned to the tool loop, which needs
-        // them to tell a truncated call (unrecoverable — the arguments are an
-        // incomplete prefix) from a merely malformed one (the model can
-        // retry).
+        // Replayed history must carry parseable args: a truncated call leaves
+        // an incomplete JSON prefix that gets the whole request rejected with
+        // an opaque 400. Raw args are still returned for the tool loop.
         const replayableToolCalls = out.toolCalls.map((tc) => ({
           ...tc,
           arguments: normalizeToolCallArgsJson(tc.arguments),
@@ -542,11 +532,9 @@ export function createSessionToolLoopModelClient(input: {
             ...(tc.thoughtSignature ? { thoughtSignature: tc.thoughtSignature } : {}),
           })),
           reasoningContent: out.reasoningContent,
-          // Provider stop reason for THIS round. `length` / `max_tokens` means
-          // the response was cut off at the output-token limit — the tool call's
-          // arguments may be truncated mid-JSON. The tool loop needs this to
-          // tell a truncated call (unrecoverable) from a merely malformed one
-          // (the model can retry).
+          // Provider stop reason for THIS round: `length` means the response
+          // was cut off mid-arguments — the tool loop needs this to tell a
+          // truncated call (unrecoverable) from a merely malformed one.
           finishReason: out.finishReason,
         };
       }

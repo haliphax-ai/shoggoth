@@ -70,11 +70,9 @@ export function buildThreadSubagentCreatedBanner(input: {
   readonly logger?: Logger;
 }): string {
   const l = input.logger ?? log;
-  // The subagent's model comes from its session row (stamped at spawn: the
-  // spawn model_options.model, the configured subagentModel, or the parent's
-  // inherited selection). resolveModel with no ref reads the *config*
-  // failover chain — the parent's model — so the session's primary model ref
-  // is resolved first and only the ref-less fallback consults the config chain.
+  // The subagent's model comes from its session row (stamped at spawn: spawn
+  // model_options.model, configured subagentModel, or the parent's selection);
+  // resolveModel with no ref reads the *config* failover chain.
   let resolvedModel: ReturnType<typeof resolveModel> = null;
   try {
     const sessionRef = getSessionPrimaryModelRef(
@@ -169,10 +167,9 @@ export async function handlePlatformThreadCreate(
     return { created: false, reason: "invalid_ids" };
   }
 
-  // Control-plane spawn claim: this thread (or a pending thread creation in this parent
-  // channel) belongs to an in-flight `subagent_spawn` op, which will bind its own session
-  // and deliver the spawn prompt as the thread's first turn. Autocreating here would race
-  // that op and leave a banner-only zombie session behind.
+  // Control-plane spawn claim: this thread (or a pending creation here)
+  // belongs to an in-flight `subagent_spawn` op that binds its own session;
+  // autocreating would race it and leave a banner-only zombie session.
   if (isThreadClaimedByControlPlaneSpawn({ threadId, parentChannelId })) {
     return { created: false, reason: "control_plane_claimed" };
   }
@@ -228,11 +225,8 @@ export async function handlePlatformThreadCreate(
   );
 
   // Stamp the configured subagent model (per-agent override > global
-  // agents.subagentModel) onto the child's model selection, mirroring the
-  // control-plane subagent_spawn op: the session row then carries a model from
-  // creation, so model-metadata lookups (e.g. the status bar's context-window
-  // total) resolve on the first turn. Unconfigured: inherit the parent's
-  // selection as-is.
+  // agents.subagentModel), mirroring the subagent_spawn op, so model-metadata
+  // lookups resolve on the first turn; unconfigured: inherit the parent's.
   const parentAgentId = parseAgentSessionUrn(parentSessionId)?.agentId;
   const configSubagentModel = resolveConfiguredSubagentModel(input.config, parentAgentId);
   const modelSelection = mergeSubagentSpawnModelSelection(

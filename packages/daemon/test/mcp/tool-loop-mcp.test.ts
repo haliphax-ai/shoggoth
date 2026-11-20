@@ -94,11 +94,9 @@ describe("tool-loop MCP bridge", () => {
     db.close();
   });
 
-  // -------------------------------------------------------------------------
-  // Universal argument validation (issue #435): every dispatch path — session
-  // tool loop, workflow tool tasks, subagent runtime — must reject unknown
-  // arguments and missing required arguments before the tool runs.
-  // -------------------------------------------------------------------------
+  /** Universal argument validation (issue #435): every dispatch path — session
+   *  tool loop, workflow tool tasks, subagent runtime — must reject unknown
+   *  arguments and missing required arguments before the tool runs. */
   it("rejects unknown arguments before dispatching to the builtin delegate", async () => {
     let calls = 0;
     const ex = createMcpRoutingToolExecutor({
@@ -280,11 +278,9 @@ describe("tool-loop MCP bridge", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Mid-turn MCP session lapse recovery (idle eviction closing a pooled session
-// while the turn holds the captured `external` — see research
-// mcp-session-lifecycle.md, recommendation #1)
-// ---------------------------------------------------------------------------
+/** Mid-turn MCP session lapse recovery (idle eviction closing a pooled session
+ *  while the turn holds the captured `external` — see research
+ *  mcp-session-lifecycle.md, recommendation #1). */
 describe("MCP session lapse mid-turn — reconnect and retry once", () => {
   const lapsedResult = () =>
     JSON.stringify({

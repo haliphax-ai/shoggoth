@@ -1,17 +1,6 @@
-// ---------------------------------------------------------------------------
-// one-shot wake window — delivery markers for held one-shot sessions
-// ---------------------------------------------------------------------------
-//
-// A held one-shot (one waiting for its pending exec-notify handles to drain)
-// must not be torn down while a wake-up delivery is still running. Delivery
-// paths mark the window with `beginOneShotDelivery` / `settleOneShotDelivery`
-// and `oneShotWakeFallback` wraps a delivery body in the same marker.
-//
-// This is a leaf module on purpose: both the notify-drain teardown (which
-// consults the window) and the delivery stack in `control/ops-shared.ts`
-// (which opens it) import it. Routing the marker through the drain module
-// would tie ops-shared back into the teardown module it must stay independent
-// of.
+// one-shot wake window — delivery markers for held one-shot sessions: paths
+// mark the window with beginOneShotDelivery/settleOneShotDelivery and
+// oneShotWakeFallback wraps a body in the same marker (leaf module on purpose).
 
 const deliveryInFlight = new Set<string>();
 

@@ -8,14 +8,9 @@ import {
 
 const log = getLogger("rerank-service");
 
-// ---------------------------------------------------------------------------
-// Rerank model support — Cohere-style rerank API.
-//
-// Implements POST {baseUrl}/v1/rerank as specified by Cohere and served
-// compatibly by OpenRouter: a `query` is scored against a list of `documents`
-// and results come back as `{ index, relevance_score }` pairs ordered by
-// relevance (index maps to the position in the input documents array).
-// ---------------------------------------------------------------------------
+// Rerank model support — Cohere-style rerank API. Implements POST
+// {baseUrl}/v1/rerank (Cohere spec, served compatibly by OpenRouter): a
+// `query` scored against `documents` returns ordered relevance pairs.
 
 export interface RerankProviderConfig {
   id: string;

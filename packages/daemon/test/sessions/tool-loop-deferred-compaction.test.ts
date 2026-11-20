@@ -154,11 +154,9 @@ describe("runToolLoop deferred compaction", () => {
     });
     await loop;
 
-    // Parked AFTER the loop finished: a stale gate would be unregistered, so a
-    // fresh gate has taken over... but here the loop already unregistered its
-    // gate, so the park falls to the next loop (none) and must not hang. The
-    // parked request in this test targets a NEW registration to verify the
-    // post-loop drain still runs (the loop's own gate drained at post-loop).
+    // Parked AFTER the loop finished: the loop already unregistered its gate, so
+    // the park falls to the next loop (none) and must not hang; the request here
+    // targets a NEW registration to verify the post-loop drain still runs.
     assert.deepEqual(compactionRuns, []);
   });
 

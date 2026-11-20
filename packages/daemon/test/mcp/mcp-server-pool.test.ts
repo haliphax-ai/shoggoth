@@ -561,11 +561,9 @@ describe("connectShoggothMcpServers + createMcpRoutingToolExecutor", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Mid-turn MCP session lapse — end-to-end against a REAL pooled stdio session
-// that was closed under the turn-captured `external` (the incident signature:
-// 30-minute idle eviction vs. a turn that resolved its MCP context at start).
-// ---------------------------------------------------------------------------
+/** Mid-turn MCP session lapse — end-to-end against a REAL pooled stdio session
+ *  closed under the turn-captured `external` (the incident signature:
+ *  30-minute idle eviction vs. a turn that resolved its MCP context at start). */
 describe("MCP session lapse mid-turn — real pool close (stdio)", () => {
   const serverEntry: ShoggothMcpServerEntry = {
     id: "mocksrv",
@@ -664,11 +662,8 @@ describe("MCP session lapse mid-turn — real pool close (stdio)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Parallel startup: configured servers connect concurrently, outcomes are
-// gathered asynchronously, config order is preserved, and failures are
-// isolated per server.
-// ---------------------------------------------------------------------------
+// gathered asynchronously, config order is preserved, failures isolated per server.
 
 type MockMcpHttpHandle = {
   readonly url: string;

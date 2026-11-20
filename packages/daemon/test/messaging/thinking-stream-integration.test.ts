@@ -96,10 +96,9 @@ describe("tool-loop → thinking-output streaming pipeline", () => {
         content: "Step one.",
         toolCalls: [TOOL_CALL],
       },
-      // The next round re-emits the prior reasoning (context quoting) and
-      // continues it: the shared prefix renders where it first arrived, and
-      // the new text opens its own 💭 block at the arrival position —
-      // after the prose that streamed in between.
+      // The next round re-emits the prior reasoning (context quoting): the
+      // shared prefix renders where it first arrived, and the new text opens
+      // its own 💭 block after the prose streamed in between.
       {
         reasoning: ["Planning the", " steps"],
         deltas: ["Step two."],
@@ -125,10 +124,9 @@ describe("tool-loop → thinking-output streaming pipeline", () => {
         toolCalls: [TOOL_CALL],
       },
       {
-        // The round opens like the earlier one, then veers immediately:
-        // the coincidental opening is NEW reasoning and must display in
-        // full — never stripped down to the divergence point, never
-        // glued onto the earlier block.
+        // Opens like the earlier round, then veers: the coincidental opening
+        // is NEW reasoning and must display in full — never stripped to the
+        // divergence point or glued onto the earlier block.
         reasoning: ["Let me ", "fix the tool calls"],
         deltas: ["Fixed."],
         content: "Fixed.",

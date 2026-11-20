@@ -94,10 +94,9 @@ describe("WorkflowServer", () => {
     fs.rmSync(baseDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
-  // Every server.start() spins up a live polling loop, so each test must
-  // register its server here: the shared teardown stops polling and drains
-  // in-flight ticks before the state directory is deleted (an undrained
-  // tick's saveWorkflow would otherwise race rmSync with ENOTEMPTY).
+  // Every server.start() spins up a live polling loop, so each test registers its
+  // server here: shared teardown stops polling and drains in-flight ticks before
+  // the state dir is deleted (an undrained saveWorkflow would race rmSync).
   const servers: WorkflowServer[] = [];
   function trackServer(opts: WorkflowServerOptions): WorkflowServer {
     const s = new WorkflowServer(opts);

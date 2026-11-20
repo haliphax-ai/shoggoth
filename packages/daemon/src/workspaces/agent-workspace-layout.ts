@@ -135,10 +135,9 @@ export async function ensureAgentWorkspaceLayout(
   if (r.exitCode !== 0) {
     throw new Error(r.stderr.trim() || `workspace layout setup failed (exit ${r.exitCode})`);
   }
-  // Default ACLs for the daemon uid: on the root itself and on every directory
-  // it created (the root's own default ACL propagates to pre-existing
-  // subdirectories, but not the other way around), plus access ACLs for any
-  // template files copied above.
+  // Default ACLs for the daemon uid on the root and every directory it
+  // created (the root's default ACL propagates to pre-existing subdirectories
+  // but not the reverse), plus access ACLs for template files copied above.
   setDefaultAcls([root, ...WORKSPACE_DIRS.map((d) => join(root, d))]);
   setFileAccessAcls(WORKSPACE_TEMPLATE_FILES.map((f) => join(root, f)));
 }

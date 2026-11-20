@@ -300,11 +300,9 @@ export async function runMemoryBuiltin(input: {
       filters,
     });
 
-    // --- Automatic rerank step (RAG integration) ---
-    // Config-driven and on by default: unless rerank.memorySearch.enabled
-    // is explicitly false, a configured rerank.defaultModel makes the
-    // retrieved candidates re-scored and re-ordered by relevance. Any
-    // rerank failure degrades gracefully to the original retrieval order.
+    // Automatic rerank step (RAG): config-driven, on by default (unless
+    // rerank.memorySearch.enabled is false) when rerank.defaultModel is set;
+    // failures degrade to the original retrieval order.
     let searchHits = hits;
     let reranked = false;
     let rerankNote: string | undefined;

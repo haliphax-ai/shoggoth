@@ -1,8 +1,6 @@
-// ---------------------------------------------------------------------------
-// builtin-decision — evaluate a state against typed questions (`noul`,
-// `choice`, `score`) via a TypeSafe System One classifier model, using the
+// builtin-decision — evaluate a state against typed questions (`choice`,
+// `score`) via a TypeSafe System One classifier model, using the
 // decision_evaluate control plane op.
-// ---------------------------------------------------------------------------
 
 import type {
   BuiltinToolRegistry,
