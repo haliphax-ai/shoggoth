@@ -5,6 +5,7 @@ import { closeTestDb } from "../helpers/close-test-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
+import { ProcessManager } from "@shoggoth/procman";
 import { openStateDb } from "../../src/db/open";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
 import { createSessionStore } from "../../src/sessions/session-store";
@@ -15,6 +16,9 @@ import {
 } from "../../src/sessions/builtin-handlers/fs-tools";
 import { register as registerLs } from "../../src/sessions/builtin-handlers/ls-handler";
 import { register as registerExec } from "../../src/sessions/builtin-handlers/exec-handler";
+import { disposeFsHelper, _resetFsHelpersForTests } from "../../src/sessions/fs-helper-process";
+
+let procman: ProcessManager | undefined;
 
 function openMigratedDb(): { db: Database.Database; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "shoggoth-cwdint-"));
@@ -42,7 +46,7 @@ function makeCtx(
     creds: { uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 },
     orchestratorEnv: process.env,
     getAgentIntegrationInvoker: () => undefined,
-    getProcessManager: () => undefined,
+    getProcessManager: () => procman,
     messageToolCtx: undefined,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     memoryConfig: {} as any,
@@ -57,6 +61,7 @@ describe("BuiltinToolContext workingDirectory integration", () => {
   let wsPath: string;
 
   beforeEach(() => {
+    procman = new ProcessManager({} as never);
     const o = openMigratedDb();
     db = o.db;
     tmp = o.dir;
@@ -68,6 +73,9 @@ describe("BuiltinToolContext workingDirectory integration", () => {
   });
 
   afterEach(async () => {
+    await disposeFsHelper("s1");
+    _resetFsHelpersForTests();
+    await procman.stopAll();
     await closeTestDb(db, tmp);
   });
 
