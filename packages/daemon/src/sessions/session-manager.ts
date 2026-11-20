@@ -26,6 +26,7 @@ import { requestSessionTurnAbort } from "./session-turn-abort";
 import { disposeSubagentRuntime } from "../subagent/subagent-disposables";
 import { clearSteerChannel } from "./steer-channel";
 import { clearCompactionGate } from "./compaction-gate";
+import { disposeFsHelper } from "./fs-helper-process";
 
 export type SpawnSessionResult = {
   sessionId: string;
@@ -251,6 +252,8 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
         // Per-session registries must not outlive the terminated session.
         clearSteerChannel(id);
         clearCompactionGate(id);
+        // The per-session fs helper process is torn down with its session.
+        void disposeFsHelper(id).catch(() => {});
         options.agentTokens.revoke(id);
         options.sessions.update(id, { status: "terminated" });
         getTimerScheduler()?.cancelByAnchorSession(id);

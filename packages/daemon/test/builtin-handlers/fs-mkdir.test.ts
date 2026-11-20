@@ -3,11 +3,15 @@ import assert from "node:assert";
 import { mkdtempSync, rmSync, existsSync, statSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { ProcessManager } from "@shoggoth/procman";
 import {
   BuiltinToolRegistry,
   type BuiltinToolContext,
 } from "../../src/sessions/builtin-tool-registry";
 import { registerFsTools as registerFs } from "../../src/sessions/builtin-handlers/fs-tools";
+import { disposeFsHelper, _resetFsHelpersForTests } from "../../src/sessions/fs-helper-process";
+
+let procman: ProcessManager | undefined;
 
 function stubCtx(workspacePath: string): BuiltinToolContext {
   return {
@@ -22,7 +26,7 @@ function stubCtx(workspacePath: string): BuiltinToolContext {
     creds: { uid: process.getuid!(), gid: process.getgid!() },
     orchestratorEnv: {},
     getAgentIntegrationInvoker: () => undefined,
-    getProcessManager: () => undefined,
+    getProcessManager: () => procman,
     messageToolCtx: undefined,
     memoryConfig: { paths: [], embeddings: { enabled: false } },
     runtimeOpenaiBaseUrl: undefined,
@@ -35,12 +39,16 @@ describe("builtin-fs mkdir action", () => {
   let registry: BuiltinToolRegistry;
 
   beforeEach(() => {
+    procman = new ProcessManager({} as never);
     workspace = mkdtempSync(join(tmpdir(), "fs-mkdir-test-"));
     registry = new BuiltinToolRegistry();
     registerFs(registry);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await disposeFsHelper("agent:test:discord:channel:123");
+    _resetFsHelpersForTests();
+    await procman?.stopAll();
     rmSync(workspace, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
