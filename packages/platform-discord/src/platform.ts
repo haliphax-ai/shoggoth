@@ -476,17 +476,15 @@ export async function startDiscordPlatform(
     extraUserMetadata: Record<string, unknown>,
     attachments?: readonly import("@shoggoth/messaging").MessageAttachment[],
   ): Promise<void> {
-    /*
-     * Thread sentinel: a thread subagent session's first "." message only starts
-     * the thread (the creation status message was already posted at thread-create
-     * time), so exit before anything turn-shaped happens — no streaming placeholder
-     * ("…"), no typing indicator, no queue entry. The core check in
-     * runInboundSessionTurn runs after the platform has already posted the
-     * placeholder and started typing, so it cannot suppress them. Attachment-bearing
-     * "." messages keep their existing behavior: their enriched content is not ".",
-     * so the core sentinel check does not match them either. The session stays
-     * bound and later messages fire turns normally.
-     */
+    // Thread sentinel: a thread subagent session's first "." message only starts
+    // the thread (the creation status message was already posted at thread-create
+    // time), so exit before anything turn-shaped happens — no streaming placeholder
+    // ("…"), no typing indicator, no queue entry. The core check in
+    // runInboundSessionTurn runs after the platform has already posted the
+    // placeholder and started typing, so it cannot suppress them. Attachment-bearing
+    // "." messages keep their existing behavior: their enriched content is not ".",
+    // so the core sentinel check does not match them either. The session stays
+    // bound and later messages fire turns normally.
     if (
       !attachments?.length &&
       shouldSkipThreadSessionSentinel({
@@ -503,12 +501,10 @@ export async function startDiscordPlatform(
       return;
     }
 
-    /*
-     * Queued-message indicator (issue #399): a ⏳ reaction on the operator's
-     * message while it waits behind an in-flight turn (reply/post fallback for
-     * platforms without reactions), removed when the queued turn starts or the
-     * entry is dropped.
-     */
+    // Queued-message indicator (issue #399): a ⏳ reaction on the operator's
+    // message while it waits behind an in-flight turn (reply/post fallback for
+    // platforms without reactions), removed when the queued turn starts or the
+    // entry is dropped.
     const queuedIndicator = createQueuedMessageIndicator({
       sessionId: msg.sessionId,
       messageId: msg.id,
@@ -591,12 +587,10 @@ export async function startDiscordPlatform(
             if (streamingOutbound) {
               try {
                 const raw = await streamingOutbound.start();
-                /*
-                 * Wrap the raw stream handle with the status-bar sink so the bar
-                 * can be applied to the in-flight message (mirrors the
-                 * messaging_surface path below). Delegates to any native
-                 * setStatusBar on the handle.
-                 */
+                // Wrap the raw stream handle with the status-bar sink so the bar
+                // can be applied to the in-flight message (mirrors the
+                // messaging_surface path below). Delegates to any native
+                // setStatusBar on the handle.
                 if (statusBarDep.config.enabled) {
                   statusBarDep.attachSink(raw as unknown as StreamHandle);
                 }
@@ -765,12 +759,10 @@ export async function startDiscordPlatform(
               })
           : undefined;
 
-      /*
-       * One tracker for the messaging_surface turn: the live bar AND the
-       * terminal bar are its snapshots rendered by the same renderer (the only
-       * live/terminal difference is the phase emoji). Captures until the stream
-       * handle exists; attachSink flushes the ⏳ line onto the placeholder.
-       */
+      // One tracker for the messaging_surface turn: the live bar AND the
+      // terminal bar are its snapshots rendered by the same renderer (the only
+      // live/terminal difference is the phase emoji). Captures until the stream
+      // handle exists; attachSink flushes the ⏳ line onto the placeholder.
       let surfaceTracker: TurnStatusBarTracker | undefined;
       let thinkingOutput: ReturnType<typeof createThinkingOutput> | undefined;
       let surfaceStreamPusher: ReturnType<typeof createCoalescingStreamPusher> | undefined;
@@ -785,26 +777,22 @@ export async function startDiscordPlatform(
       // segments / tool calls) captured at notice-fire time.
       let surfaceCommittedProseSegments = 0;
       let surfaceToolCalls = 0;
-      /*
-       * The turn's committed prose segments so far — pushed in lockstep with
-       * `surfaceCommittedProseSegments` (same admission condition), so the
-       * live splice always sees the same notion of "committed segment" as
-       * the anchors and the terminal splice. The round still streaming is
-       * not in here: it is not a committed block, so notices firing
-       * mid-round splice after the last settled segment and a segment not
-       * yet joined into the display just rides the tail append — never
-       * dropped, never thrown.
-       */
+      // The turn's committed prose segments so far — pushed in lockstep with
+      // `surfaceCommittedProseSegments` (same admission condition), so the
+      // live splice always sees the same notion of "committed segment" as
+      // the anchors and the terminal splice. The round still streaming is
+      // not in here: it is not a committed block, so notices firing
+      // mid-round splice after the last settled segment and a segment not
+      // yet joined into the display just rides the tail append — never
+      // dropped, never thrown.
       const surfaceCommittedProse: string[] = [];
       let surfaceDisplay = "";
-      /*
-       * Every push re-renders display + notices from scratch — the
-       * coalescing pusher always ships the latest state, so a banner is
-       * never patched into an already-pushed message; it lands in
-       * chronological position instead of being pinned to the tail. Lives at
-       * this scope so EVERY producer (text deltas, round ends, thinking
-       * deltas, notice re-pushes) renders through the banner splice.
-       */
+      // Every push re-renders display + notices from scratch — the
+      // coalescing pusher always ships the latest state, so a banner is
+      // never patched into an already-pushed message; it lands in
+      // chronological position instead of being pinned to the tail. Lives at
+      // this scope so EVERY producer (text deltas, round ends, thinking
+      // deltas, notice re-pushes) renders through the banner splice.
       const surfaceBanners = createTurnBannerCollector({
         captureAnchor: () => ({
           committedProseSegments: surfaceCommittedProseSegments,
@@ -814,13 +802,11 @@ export async function startDiscordPlatform(
           if (surfaceStreamPusher) pushDisplay(surfaceDisplay || "…");
         },
       });
-      /*
-       * A caller-provided banner (e.g. the steer banner on a steer that
-       * started this turn) anchors at slot 0 — BEFORE the model's first prose
-       * segment — so the output attributes the turn to its prompt instead of
-       * showing an unattributed reply. Added before any turn output exists,
-       * so both the live display and the terminal body carry it first.
-       */
+      // A caller-provided banner (e.g. the steer banner on a steer that
+      // started this turn) anchors at slot 0 — BEFORE the model's first prose
+      // segment — so the output attributes the turn to its prompt instead of
+      // showing an unattributed reply. Added before any turn output exists,
+      // so both the live display and the terminal body carry it first.
       if (input.turnBanner) surfaceBanners.add(input.turnBanner);
       const pushDisplay = (display: string): void => {
         surfaceDisplay = display;
@@ -864,13 +850,11 @@ export async function startDiscordPlatform(
           createToolCallingClient: createToolClient,
           resolveMcpContext: mcpRuntime.resolveContext,
           ...(streamOverride ? { stream: streamOverride } : {}),
-          /*
-           * Forward turn events into the tracker so the live bar re-renders
-           * mid-turn (thinking / tool count / HITL pause / compaction /
-           * context fill). `onTurnAborted` stops the stream pusher and
-           * freezes the tracker even when the aborted turn promise never
-           * settles (hung model call).
-           */
+          // Forward turn events into the tracker so the live bar re-renders
+          // mid-turn (thinking / tool count / HITL pause / compaction /
+          // context fill). `onTurnAborted` stops the stream pusher and
+          // freezes the tracker even when the aborted turn promise never
+          // settles (hung model call).
           ...(surfaceTracker || thinkingOutput || surfaceStreamPusher
             ? {
                 events: {
@@ -892,23 +876,19 @@ export async function startDiscordPlatform(
                   onCompaction: () => surfaceTracker?.onCompaction?.(),
                   onCompactionFailed: () => surfaceTracker?.onCompactionFailed?.(),
                   onContextUpdate: (update) => surfaceTracker?.onContextUpdate?.(update),
-                  /*
-                   * Count-change events: keep the 🕵️/⏰/↩️ sections live on
-                   * this path (the inbound path forwards these too; the
-                   * render-time providers backstop changes that fire without
-                   * an event — subagent termination, timer fire).
-                   */
+                  // Count-change events: keep the 🕵️/⏰/↩️ sections live on
+                  // this path (the inbound path forwards these too; the
+                  // render-time providers backstop changes that fire without
+                  // an event — subagent termination, timer fire).
                   onSubagentsChanged: (counts) => surfaceTracker?.onSubagentsChanged?.(counts),
                   onTimersChanged: (count) => surfaceTracker?.onTimersChanged?.(count),
                   onNotifiesChanged: (count) => surfaceTracker?.onNotifiesChanged?.(count),
-                  /*
-                   * Abort while the model call may still be streaming (or
-                   * hung): stop the producers immediately — post-turn delivery
-                   * never runs for a promise that never settles, so nothing
-                   * else would ever stop the edits. finish("aborted") freezes
-                   * the tracker at its terminal render (🛑); if the turn
-                   * still settles later, delivery reuses the captured line.
-                   */
+                  // Abort while the model call may still be streaming (or
+                  // hung): stop the producers immediately — post-turn delivery
+                  // never runs for a promise that never settles, so nothing
+                  // else would ever stop the edits. finish("aborted") freezes
+                  // the tracker at its terminal render (🛑); if the turn
+                  // still settles later, delivery reuses the captured line.
                   onTurnAborted: () => {
                     surfaceStreamPusher?.stop();
                     // Deterministic teardown: no producer (late deltas,
@@ -945,12 +925,10 @@ export async function startDiscordPlatform(
           });
         }
 
-        /*
-         * When streaming is enabled, post the placeholder ("…") BEFORE starting
-         * the typing indicator — Discord cancels typing when a bot posts a
-         * message — and coalesce model text deltas into live edits of that
-         * message, matching the standard inbound-turn pathway.
-         */
+        // When streaming is enabled, post the placeholder ("…") BEFORE starting
+        // the typing indicator — Discord cancels typing when a bot posts a
+        // message — and coalesce model text deltas into live edits of that
+        // message, matching the standard inbound-turn pathway.
         thinkingOutput =
           (opts.configRef?.current ?? opts.config).platforms?.showThinking === false
             ? undefined
@@ -997,13 +975,11 @@ export async function startDiscordPlatform(
           ? createCoalescingStreamPusher((s) => surfaceStreamHandle!.pushUpdate(s), streamMinMs())
           : undefined;
 
-        /*
-         * In-turn surface notices: banners landing mid-turn are folded into
-         * this messaging_surface turn's output (streamed display and final
-         * body) instead of being posted as standalone messages. Register the
-         * collector created above (every live push already renders through
-         * its splice).
-         */
+        // In-turn surface notices: banners landing mid-turn are folded into
+        // this messaging_surface turn's output (streamed display and final
+        // body) instead of being posted as standalone messages. Register the
+        // collector created above (every live push already renders through
+        // its splice).
         const surfaceUnregister = registerActiveTurnSurface(sid, surfaceBanners).unregister;
 
         try {
@@ -1022,17 +998,15 @@ export async function startDiscordPlatform(
                       surfaceTracker?.onProse?.(ev.accumulated);
                     },
                     onModelRoundEnd: (ev: { round: number; content: string }) => {
-                      /*
-                       * A settled round commits exactly one prose segment when
-                       * its NORMALIZED content is non-blank — the same
-                       * condition and the same normalization as the inbound
-                       * path (inbound-session-turn) and the display builder
-                       * (thinking-output endRound), so the segment list
-                       * matches the rendered display block-for-block and
-                       * anchors map 1:1 onto final body positions.
-                       * Whitespace-only round content must never enter the
-                       * display, the committed segment list, or the anchors.
-                       */
+                      // A settled round commits exactly one prose segment when
+                      // its NORMALIZED content is non-blank — the same
+                      // condition and the same normalization as the inbound
+                      // path (inbound-session-turn) and the display builder
+                      // (thinking-output endRound), so the segment list
+                      // matches the rendered display block-for-block and
+                      // anchors map 1:1 onto final body positions.
+                      // Whitespace-only round content must never enter the
+                      // display, the committed segment list, or the anchors.
                       const prose = normalizeRoundProse(ev.content);
                       if (prose) {
                         surfaceCommittedProseSegments += 1;
@@ -1056,31 +1030,27 @@ export async function startDiscordPlatform(
                   : undefined,
             );
             const cfg = opts.configRef?.current ?? opts.config;
-            /*
-             * Compose the body from the turn's full prose — every assistant
-             * text segment of this turn, in order — so prose → tools → prose
-             * turns deliver ALL segments, not only the last one that
-             * latestAssistantText carries. Both delivery paths (streamed and
-             * at-once) deliver this same composition.
-             *
-             * A FAILED turn is delivered differently: the body is what the
-             * operator already saw streamed — the raw live display snapshot
-             * (or the turn's transcript prose when nothing streamed) — with
-             * `failureNotice` appended as a trailing block after the banner
-             * splice. Recomposing from `latestAssistantText` would REPLACE
-             * the streamed output with a stale whole-session reply (or the
-             * bare notice) and un-locate every in-turn banner anchor.
-             */
+            // Compose the body from the turn's full prose — every assistant
+            // text segment of this turn, in order — so prose → tools → prose
+            // turns deliver ALL segments, not only the last one that
+            // latestAssistantText carries. Both delivery paths (streamed and
+            // at-once) deliver this same composition.
+            //
+            // A FAILED turn is delivered differently: the body is what the
+            // operator already saw streamed — the raw live display snapshot
+            // (or the turn's transcript prose when nothing streamed) — with
+            // `failureNotice` appended as a trailing block after the banner
+            // splice. Recomposing from `latestAssistantText` would REPLACE
+            // the streamed output with a stale whole-session reply (or the
+            // bare notice) and un-locate every in-turn banner anchor.
             const failed = turnResult.outcome === "failed";
             const snapshot = surfaceDisplay.trim() && surfaceDisplay !== "…" ? surfaceDisplay : "";
             const replyText = turnResult.assistantTurnProse ?? turnResult.latestAssistantText;
-            /*
-             * ONE terminal composition: the tracker's finish() renders the
-             * frozen bar (✅/🛑/❌) through the same renderer as the live bar and
-             * returns the line for delivery — the terminal snapshot carries this
-             * turn's real tool-call count (the tracker, not a stats-derived
-             * parallel composition, is the source).
-             */
+            // ONE terminal composition: the tracker's finish() renders the
+            // frozen bar (✅/🛑/❌) through the same renderer as the live bar and
+            // returns the line for delivery — the terminal snapshot carries this
+            // turn's real tool-call count (the tracker, not a stats-derived
+            // parallel composition, is the source).
             const outcome =
               turnResult.outcome === "aborted" ||
               turnResult.outcome === "failed" ||
@@ -1089,20 +1059,16 @@ export async function startDiscordPlatform(
                 : "finished";
             const barLine = surfaceTracker ? await surfaceTracker.finish(outcome) : undefined;
             if (surfaceStreamPusher && surfaceStreamHandle) {
-              /*
-               * The final streamed edit first — it renders ONLY the live display
-               * re-spliced with the banners (never the terminal composition), so
-               * the in-flight message can never show an intermediate layout with
-               * the banners smashed to the bottom while the turn is in the act
-               * of terminating.
-               */
+              // The final streamed edit first — it renders ONLY the live display
+              // re-spliced with the banners (never the terminal composition), so
+              // the in-flight message can never show an intermediate layout with
+              // the banners smashed to the bottom while the turn is in the act
+              // of terminating.
               await surfaceStreamPusher.flush();
-              /*
-               * Clear the in-flight handle's active-bar state first — a
-               * state-only operation that makes no edit — so the delivery edit
-               * below (whose body already carries barLine) lands the bar
-               * exactly once. Never block delivery.
-               */
+              // Clear the in-flight handle's active-bar state first — a
+              // state-only operation that makes no edit — so the delivery edit
+              // below (whose body already carries barLine) lands the bar
+              // exactly once. Never block delivery.
               if (barLine && surfaceStreamHandle.setStatusBar) {
                 try {
                   await surfaceStreamHandle.setStatusBar(null);
@@ -1114,16 +1080,14 @@ export async function startDiscordPlatform(
                 }
               }
             }
-            /*
-             * Termination shaping runs ONE final body through ONE terminal
-             * render: the banner collector claims its single terminal splice
-             * inside this pass, so no intermediate bottom-smashed layout can
-             * exist and the termination can never render more than once. The
-             * pass is fail-open per delivery path — if shaping throws or is
-             * interrupted, the streamed path makes no edit (the
-             * already-streamed output stands) while the non-streamed path
-             * still delivers the unshaped body.
-             */
+            // Termination shaping runs ONE final body through ONE terminal
+            // render: the banner collector claims its single terminal splice
+            // inside this pass, so no intermediate bottom-smashed layout can
+            // exist and the termination can never render more than once. The
+            // pass is fail-open per delivery path — if shaping throws or is
+            // interrupted, the streamed path makes no edit (the
+            // already-streamed output stands) while the non-streamed path
+            // still delivers the unshaped body.
             const formattedBody = formatAssistantReply(
               cfg,
               sid,
@@ -1131,14 +1095,12 @@ export async function startDiscordPlatform(
               replyText,
               turnResult.failoverMeta,
             );
-            /*
-             * Failed: the display snapshot IS the formatted body (it already
-             * carries whatever decoration/degraded prefix was rendered live);
-             * normal: format the reply text and let the thinking composer
-             * wrap it. Segments for the banner splice are cut from the same
-             * source (exact block match for the snapshot, decoration
-             * endsWith rule for the plain reply text).
-             */
+            // Failed: the display snapshot IS the formatted body (it already
+            // carries whatever decoration/degraded prefix was rendered live);
+            // normal: format the reply text and let the thinking composer
+            // wrap it. Segments for the banner splice are cut from the same
+            // source (exact block match for the snapshot, decoration
+            // endsWith rule for the plain reply text).
             const terminationBase = failed
               ? snapshot || turnResult.assistantTurnProse || ""
               : (thinkingOutput?.render(formattedBody) ?? formattedBody);
@@ -1149,11 +1111,9 @@ export async function startDiscordPlatform(
                 (body: string) =>
                   surfaceBanners.terminalBody(body, { segments: terminationSegments }),
               ]);
-              /*
-               * The failure notice is the LAST block: appended after the
-               * banner splice so it can never fall into an
-               * unresolvable-anchor fallback slot ahead of in-turn banners.
-               */
+              // The failure notice is the LAST block: appended after the
+              // banner splice so it can never fall into an
+              // unresolvable-anchor fallback slot ahead of in-turn banners.
               const withNotice =
                 failed && turnResult.failureNotice
                   ? shaped
@@ -1167,22 +1127,18 @@ export async function startDiscordPlatform(
                 err: String(e),
               });
               if (surfaceStreamPusher && surfaceStreamHandle) {
-                /*
-                 * Streamed path fails open: the already-streamed output
-                 * stands unchanged, so no terminal edit is made. On a failed
-                 * turn the streamed output already shows what streamed — the
-                 * failure notice is lost here rather than risking a wrong
-                 * body (the bar still carries the ❌ outcome).
-                 */
+                // Streamed path fails open: the already-streamed output
+                // stands unchanged, so no terminal edit is made. On a failed
+                // turn the streamed output already shows what streamed — the
+                // failure notice is lost here rather than risking a wrong
+                // body (the bar still carries the ❌ outcome).
                 return;
               }
-              /*
-               * The non-streamed path has nothing streamed to fall back on —
-               * deliver the body unshaped, exactly once, with the bar the
-               * tracker already rendered (and the failure notice, when the
-               * turn failed: the notice rides with the unshaped body rather
-               * than being dropped).
-               */
+              // The non-streamed path has nothing streamed to fall back on —
+              // deliver the body unshaped, exactly once, with the bar the
+              // tracker already rendered (and the failure notice, when the
+              // turn failed: the notice rides with the unshaped body rather
+              // than being dropped).
               const unshaped =
                 failed && turnResult.failureNotice && terminationBase
                   ? `${terminationBase}\n\n${turnResult.failureNotice}`
@@ -1225,13 +1181,11 @@ export async function startDiscordPlatform(
         }
       }
 
-      /*
-       * OOB banner surface (issue #363): when the caller passed a status-bar
-       * sink, create the same tracker used for messaging_surface turns so the
-       * live bar (starting / thinking / prose / tools) streams into the banner
-       * message while this out-of-band turn executes. Stats are snapshotted
-       * BEFORE the turn so the bar reports this turn's sequence.
-       */
+      // OOB banner surface (issue #363): when the caller passed a status-bar
+      // sink, create the same tracker used for messaging_surface turns so the
+      // live bar (starting / thinking / prose / tools) streams into the banner
+      // message while this out-of-band turn executes. Stats are snapshotted
+      // BEFORE the turn so the bar reports this turn's sequence.
       if (input.statusBarSink && statusBarDep.config.enabled) {
         surfaceTracker = createStatusBarTurnTracker({
           cfg: statusBarDep.config,

@@ -52,12 +52,10 @@ export function parseMarkdownFrontmatter(source: string): ParsedFrontmatter {
     if (line.trim().length === 0) {
       continue;
     }
-    /*
-     * Linear-time split instead of a regex: `[^:]+\s*:\s*(.*)` matches a
-     * non-colon prefix, optional spaces, the colon, and the value — but the
-     * repeated `\s*` makes the engine backtrack quadratically on long
-     * space runs (polynomial ReDoS on untrusted frontmatter lines).
-     */
+    // Linear-time split instead of a regex: `[^:]+\s*:\s*(.*)` matches a
+    // non-colon prefix, optional spaces, the colon, and the value — but the
+    // repeated `\s*` makes the engine backtrack quadratically on long
+    // space runs (polynomial ReDoS on untrusted frontmatter lines).
     const colon = line.indexOf(":");
     if (colon <= 0) {
       // No colon at all, or an empty key (`: value`): malformed line, which

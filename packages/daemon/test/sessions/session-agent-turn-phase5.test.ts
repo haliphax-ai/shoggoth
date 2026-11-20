@@ -122,22 +122,20 @@ describe(
       assert.ok(result);
       assert.equal(result.latestAssistantText, "PHASE5_REPLY");
 
-      /*
-       * Phase 5: when sessionModelRef is present, resolveModel() should NOT be called.
-       * The metadata store provides ctxWindowTokens directly, and the log line uses
-       * sessionModelRef directly. No resolveModel() needed at all.
-       *
-       * Currently (pre-Phase 5): resolveModel() IS called as a fallback for ctxWindowTokens
-       * (via the ?? chain) even though the metadata store already has the value. The log
-       * line also calls resolveModel() when sessionModelRef is absent, but here it IS
-       * present so that path is skipped. However the ctxWindowTokens path still calls it
-       * as a fallback after getModelContextWindowTokens succeeds (the ?? short-circuits).
-       * Actually, since metadata store HAS the value, the ?? won't reach resolveModel.
-       * But the effectiveModel line: `sessionModelRef ?? resolveModel(...)?.ref` — since
-       * sessionModelRef is set, resolveModel is NOT called there either.
-       * So this test may pass even before Phase 5 if the metadata store has the value.
-       * The real RED test is the next one.
-       */
+      // Phase 5: when sessionModelRef is present, resolveModel() should NOT be called.
+      // The metadata store provides ctxWindowTokens directly, and the log line uses
+      // sessionModelRef directly. No resolveModel() needed at all.
+      //
+      // Currently (pre-Phase 5): resolveModel() IS called as a fallback for ctxWindowTokens
+      // (via the ?? chain) even though the metadata store already has the value. The log
+      // line also calls resolveModel() when sessionModelRef is absent, but here it IS
+      // present so that path is skipped. However the ctxWindowTokens path still calls it
+      // as a fallback after getModelContextWindowTokens succeeds (the ?? short-circuits).
+      // Actually, since metadata store HAS the value, the ?? won't reach resolveModel.
+      // But the effectiveModel line: `sessionModelRef ?? resolveModel(...)?.ref` — since
+      // sessionModelRef is set, resolveModel is NOT called there either.
+      // So this test may pass even before Phase 5 if the metadata store has the value.
+      // The real RED test is the next one.
       assert.strictEqual(
         resolveModelSpy.mock.calls.length,
         0,
@@ -146,12 +144,10 @@ describe(
     });
 
     it("does NOT call resolveModel() for ctxWindowTokens when session has a valid model ref but metadata store has no entry", async () => {
-      /*
-       * Do NOT seed the metadata store for provUnique/modelUnique.
-       * The provider config DOES have contextWindowTokens on the model definition,
-       * so resolveModel() would return it. After Phase 5, this fallback is removed:
-       * resolveModel() should NOT be called at all when sessionModelRef is present.
-       */
+      // Do NOT seed the metadata store for provUnique/modelUnique.
+      // The provider config DOES have contextWindowTokens on the model definition,
+      // so resolveModel() would return it. After Phase 5, this fallback is removed:
+      // resolveModel() should NOT be called at all when sessionModelRef is present.
       const config = defaultConfig(tmp);
       config.models = {
         providers: {
@@ -196,14 +192,12 @@ describe(
       assert.ok(result);
       assert.equal(result.latestAssistantText, "PHASE5_REPLY");
 
-      /*
-       * Phase 5 assertion: resolveModel() must NOT be called when sessionModelRef is set.
-       * Currently (pre-Phase 5): resolveModel() IS called as a fallback in the
-       * ctxWindowTokens ?? chain because getModelContextWindowTokens returns undefined
-       * (no metadata store entry for provUnique/modelUnique).
-       * The effectiveModel line also short-circuits (sessionModelRef is set), so the
-       * only resolveModel call comes from the ctxWindowTokens fallback.
-       */
+      // Phase 5 assertion: resolveModel() must NOT be called when sessionModelRef is set.
+      // Currently (pre-Phase 5): resolveModel() IS called as a fallback in the
+      // ctxWindowTokens ?? chain because getModelContextWindowTokens returns undefined
+      // (no metadata store entry for provUnique/modelUnique).
+      // The effectiveModel line also short-circuits (sessionModelRef is set), so the
+      // only resolveModel call comes from the ctxWindowTokens fallback.
       assert.strictEqual(
         resolveModelSpy.mock.calls.length,
         0,

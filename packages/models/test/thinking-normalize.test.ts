@@ -325,13 +325,11 @@ describe("thinking normalization edge cases", () => {
   });
 
   it("handles thinking tags in tool results (extracts anyway)", () => {
-    /*
-     * Note: The plan says "don't extract" for tool results, but extraction
-     * happens at the adapter level before we know the context. The adapter
-     * should handle this by not calling normalization for tool results.
-     * This test documents that the extraction function itself doesn't
-     * discriminate based on context.
-     */
+    // Note: The plan says "don't extract" for tool results, but extraction
+    // happens at the adapter level before we know the context. The adapter
+    // should handle this by not calling normalization for tool results.
+    // This test documents that the extraction function itself doesn't
+    // discriminate based on context.
     const toolResult = `<tool_result>
 <thinking>Processing the result</thinking>
 The actual result data

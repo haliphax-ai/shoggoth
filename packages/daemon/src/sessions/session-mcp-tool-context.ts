@@ -799,10 +799,10 @@ export function createMediaGenerateToolFinalizer(
   };
 }
 
-/*
- * Decision tool (TypeSafe System One classifiers) — conditionally injected
- * via finalizer when a decision provider with models is configured
- */
+// ---------------------------------------------------------------------------
+// Decision tool (TypeSafe System One classifiers) — conditionally injected
+// via finalizer when a decision provider with models is configured
+// ---------------------------------------------------------------------------
 
 /**
  * Creates a context finalizer that appends `builtin-decision` when a decision
@@ -832,10 +832,10 @@ export function createDecisionToolFinalizer(
   };
 }
 
-/*
- * Rerank tool (Cohere-style rerank models) — conditionally injected
- * via finalizer when a rerank provider with models is configured
- */
+// ---------------------------------------------------------------------------
+// Rerank tool (Cohere-style rerank models) — conditionally injected
+// via finalizer when a rerank provider with models is configured
+// ---------------------------------------------------------------------------
 
 /**
  * Creates a context finalizer that appends `builtin-rerank` when a rerank

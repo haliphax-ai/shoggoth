@@ -223,15 +223,13 @@ export async function handleSessionCompact(
   const pl = payloadObject(req);
   const sessionId = requireSessionId(pl, ctx.config, ctx.sessions);
 
-  /*
-   * An active turn owns the transcript: park the compaction on its gate so
-   * it runs at the loop's next logical break (the loop freezes the turn
-   * queue for the duration). If the turn ends before the loop drains the
-   * parked request, the gate rejects it and the compaction falls through
-   * to the queued path below. No active turn: run it as a queued system
-   * turn so the session's queue serializes it against the next inbound
-   * turn, then falls back to inline when the queue is unavailable (tests).
-   */
+  // An active turn owns the transcript: park the compaction on its gate so
+  // it runs at the loop's next logical break (the loop freezes the turn
+  // queue for the duration). If the turn ends before the loop drains the
+  // parked request, the gate rejects it and the compaction falls through
+  // to the queued path below. No active turn: run it as a queued system
+  // turn so the session's queue serializes it against the next inbound
+  // turn, then falls back to inline when the queue is unavailable (tests).
   let result: Awaited<ReturnType<typeof compactSessionTranscript>>;
   let deferred = false;
   const parked = pushCompactionRequest(sessionId);

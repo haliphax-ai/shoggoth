@@ -2344,13 +2344,11 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       },
     });
 
-    /*
-     * Mirrors the daemon prompt op: runs the turn (delivered via the
-     * messaging_surface path) and returns the rendered reply in the result.
-     * (The op also honors `wait: false`, but this stub always completes the
-     * turn before responding — the delivery confirmation is what matters
-     * here, not the op's timing.)
-     */
+    // Mirrors the daemon prompt op: runs the turn (delivered via the
+    // messaging_surface path) and returns the rendered reply in the result.
+    // (The op also honors `wait: false`, but this stub always completes the
+    // turn before responding — the delivery confirmation is what matters
+    // here, not the op's timing.)
     const handler = createDiscordInteractionHandler({
       transport: {
         interactionCallback: async (_id, _token, body) => {
@@ -2538,12 +2536,10 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
       "model text deltas should reach the stream handle as live updates",
     );
 
-    /*
-     * …and the terminal edit delivers the turn-scoped reply body. This stub
-     * handle can't render a status bar itself, so the terminal edit always
-     * runs — it must carry the streamed reply, never a segment-scoped
-     * truncation of it.
-     */
+    // …and the terminal edit delivers the turn-scoped reply body. This stub
+    // handle can't render a status bar itself, so the terminal edit always
+    // runs — it must carry the streamed reply, never a segment-scoped
+    // truncation of it.
     assert.ok(finalBody?.includes(marker), "terminal edit (if any) must carry the full reply text");
 
     // The reply must NOT also be posted at once via the outbound surface.
@@ -2634,13 +2630,11 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
     const sessionUrn = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
     createSessionStore(db).create({ id: sessionUrn, workspacePath: tmp });
 
-    /*
-     * The orchestrator wraps pre-started stream handles with attachSink only when
-     * streaming is enabled. To observe the dep end-to-end we enable streaming so
-     * the platform builds a stream handle; the orchestrator then calls the dep's
-     * attachSink. The stub attachSink is a no-op, so the returned handle never
-     * gains setStatusBar — asserting on that proves the sink was NOT attached.
-     */
+    // The orchestrator wraps pre-started stream handles with attachSink only when
+    // streaming is enabled. To observe the dep end-to-end we enable streaming so
+    // the platform builds a stream handle; the orchestrator then calls the dep's
+    // attachSink. The stub attachSink is a no-op, so the returned handle never
+    // gains setStatusBar — asserting on that proves the sink was NOT attached.
     const capture: { body: string }[] = [];
     const streamHandles: Array<{
       setFullContent(text: string): Promise<void>;
@@ -2691,12 +2685,10 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
     });
     await platform.stop();
 
-    /*
-     * The platform builds a status bar dep and the orchestrator wraps the pre-started
-     * stream handle via attachSink, returning a handle that can carry setStatusBar.
-     * With the minimal no-op stub the handle never gains setStatusBar, so this FAILS
-     * until the real attachSink is wired (GREEN task).
-     */
+    // The platform builds a status bar dep and the orchestrator wraps the pre-started
+    // stream handle via attachSink, returning a handle that can carry setStatusBar.
+    // With the minimal no-op stub the handle never gains setStatusBar, so this FAILS
+    // until the real attachSink is wired (GREEN task).
     assert.ok(
       streamHandles.length > 0,
       "streaming should start a stream handle for the messaging_surface path",
@@ -2863,19 +2855,15 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
               };
             }
             if (round === 2) {
-              /*
-               * Round 1's round-end already committed its segment — the turn
-               * surface is live and anchored at 1 of 3 (mid-count), exactly
-               * like a runaway steer firing between rounds. Fire it here,
-               * BEFORE round 2 streams its (padded) content.
-               */
+              // Round 1's round-end already committed its segment — the turn
+              // surface is live and anchored at 1 of 3 (mid-count), exactly
+              // like a runaway steer firing between rounds. Fire it here,
+              // BEFORE round 2 streams its (padded) content.
               postTurnSurfaceNotice(sessionUrn, BANNER);
-              /*
-               * Round 2: content carries PADDING the display normalizes
-               * away (normalizeRoundProse strips it). Storing it raw made
-               * the segment unlocatable and pinned the banner to the tail of
-               * every subsequent frame.
-               */
+              // Round 2: content carries PADDING the display normalizes
+              // away (normalizeRoundProse strips it). Storing it raw made
+              // the segment unlocatable and pinned the banner to the tail of
+              // every subsequent frame.
               return {
                 content: "\n\nsecond\n\n",
                 toolCalls: [{ id: "c2", name: "missing_tool", argsJson: "{}" }],
@@ -2901,13 +2889,11 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
     });
     await platform.stop();
 
-    /*
-     * Every frame carrying the banner must hold it AFTER round 1 and, once
-     * round 2 is on screen, BEFORE it — a live position that survives the
-     * later round commits instead of riding the tail downward (the observed
-     * production pin). (The coalescing pusher may only dispatch the final
-     * frame, so assertions are per-frame, not per-transition.)
-     */
+    // Every frame carrying the banner must hold it AFTER round 1 and, once
+    // round 2 is on screen, BEFORE it — a live position that survives the
+    // later round commits instead of riding the tail downward (the observed
+    // production pin). (The coalescing pusher may only dispatch the final
+    // frame, so assertions are per-frame, not per-transition.)
     const bannerFrames = pushes.filter((p) => p.includes(BANNER));
     assert.ok(bannerFrames.length > 0, "the banner must reach the live surface");
     for (const frame of bannerFrames) {
@@ -3428,13 +3414,11 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
       }),
     };
 
-    /*
-     * This path (messaging_surface via runSessionModelTurn) historically never
-     * received the count-change events, and the counts were seed-cached with no
-     * render-time provider — a timer queued mid-turn stayed invisible for the
-     * whole turn and only appeared on the NEXT turn's seed. Real builtin-timer
-     * call through the tool loop: the terminal bar must carry ⏰ 1.
-     */
+    // This path (messaging_surface via runSessionModelTurn) historically never
+    // received the count-change events, and the counts were seed-cached with no
+    // render-time provider — a timer queued mid-turn stayed invisible for the
+    // whole turn and only appeared on the NEXT turn's seed. Real builtin-timer
+    // call through the tool loop: the terminal bar must carry ⏰ 1.
     let round = 0;
     const base = defaultConfig(tmp);
     const platform = await startDiscordPlatform({
@@ -3527,13 +3511,11 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
       }),
     };
 
-    /*
-     * Round 2's streamed tail ("Done partial") differs from its final content
-     * ("Done.") — as happens with trimmed content, failover hops, or
-     * steering-injected rounds. The round boundary reconciles the tail with
-     * the authoritative content; the DELIVERED message must be the clean
-     * turn-scoped prose with each segment exactly once.
-     */
+    // Round 2's streamed tail ("Done partial") differs from its final content
+    // ("Done.") — as happens with trimmed content, failover hops, or
+    // steering-injected rounds. The round boundary reconciles the tail with
+    // the authoritative content; the DELIVERED message must be the clean
+    // turn-scoped prose with each segment exactly once.
     let round = 0;
     const platform = await startDiscordPlatform({
       db,

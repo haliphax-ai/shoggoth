@@ -1,22 +1,22 @@
-/*
- * Configurable system gates — apply the AGENTS.md discovery gate and the
- * re-read-required gate to configured external (MCP) tool names.
- *
- * The two gates are hard-wired into specific builtin handlers; this module
- * reuses the same gate functions (`checkAgentsMdGate`, `checkReReadRequired`,
- * `markReReadRequired`) for any tool whose namespaced name matches
- * `config.gates.<gate>.tools` globs.
- *
- * The factory is built once per turn (closes over session context) and exposes
- * a pre/post hook consumed by the tool loop:
- *   - `pre` runs BEFORE HITL: AGENTS.md discovery + re-read consumer; returns
- *     a `{ resultJson }` payload to short-circuit with, or null to proceed.
- *   - `post` runs after successful execution: re-read producer (line-count
- *     snapshot around the call), mirroring the builtin-replace producer.
- *
- * A gate must never fail a tool call: all hook bodies degrade to no-ops on
- * internal errors (logged via the "system-gates" logger).
- */
+// ---------------------------------------------------------------------------
+// Configurable system gates — apply the AGENTS.md discovery gate and the
+// re-read-required gate to configured external (MCP) tool names.
+//
+// The two gates are hard-wired into specific builtin handlers; this module
+// reuses the same gate functions (`checkAgentsMdGate`, `checkReReadRequired`,
+// `markReReadRequired`) for any tool whose namespaced name matches
+// `config.gates.<gate>.tools` globs.
+//
+// The factory is built once per turn (closes over session context) and exposes
+// a pre/post hook consumed by the tool loop:
+//   - `pre` runs BEFORE HITL: AGENTS.md discovery + re-read consumer; returns
+//     a `{ resultJson }` payload to short-circuit with, or null to proceed.
+//   - `post` runs after successful execution: re-read producer (line-count
+//     snapshot around the call), mirroring the builtin-replace producer.
+//
+// A gate must never fail a tool call: all hook bodies degrade to no-ops on
+// internal errors (logged via the "system-gates" logger).
+// ---------------------------------------------------------------------------
 
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";

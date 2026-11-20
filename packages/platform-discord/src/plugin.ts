@@ -160,12 +160,10 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           current: DiscordMessagingRuntime["discordRestTransport"] | undefined;
         } = { current: undefined };
 
-        /*
-         * Thread-create handling: parse/resolve/send stay here; every decision
-         * (toggle, guards, session creation, status body) belongs to the daemon core.
-         * The gateway connects before the platform handle exists, so early events
-         * are queued until both are wired.
-         */
+        // Thread-create handling: parse/resolve/send stay here; every decision
+        // (toggle, guards, session creation, status body) belongs to the daemon core.
+        // The gateway connects before the platform handle exists, so early events
+        // are queued until both are wired.
         const threadCreateRefs: {
           messaging: DiscordMessagingRuntime | undefined;
           platform: DiscordPlatformHandle | undefined;
@@ -334,12 +332,10 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
         if (discordMessaging) {
           state.messaging = discordMessaging;
           interactionTransportRef.current = discordMessaging.discordRestTransport;
-          /*
-           * De-register slash commands (if this instance registered them) before the
-           * transport stops, so an offline instance leaves no stale commands behind.
-           * Slash commands stay registered at shutdown (durable command IDs):
-           * nothing tears the command list down when messaging stops.
-           */
+          // De-register slash commands (if this instance registered them) before the
+          // transport stops, so an offline instance leaves no stale commands behind.
+          // Slash commands stay registered at shutdown (durable command IDs):
+          // nothing tears the command list down when messaging stops.
           registerDrain("discord-messaging", () => discordMessaging.stop());
         }
 

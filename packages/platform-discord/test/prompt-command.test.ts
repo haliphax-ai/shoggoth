@@ -566,12 +566,10 @@ describe("custom_id length safety (long subagent session URNs)", () => {
     vi.useRealTimers();
   });
 
-  /*
-   * A thread-bound subagent session URN = parent channel URN + ":<uuid>" (87
-   * chars). Before the fix this was embedded in custom_id and overflowed
-   * Discord's 100-char limit (400 BASE_TYPE_BAD_LENGTH), breaking /prompt in
-   * any thread with an attached subagent.
-   */
+  // A thread-bound subagent session URN = parent channel URN + ":<uuid>" (87
+  // chars). Before the fix this was embedded in custom_id and overflowed
+  // Discord's 100-char limit (400 BASE_TYPE_BAD_LENGTH), breaking /prompt in
+  // any thread with an attached subagent.
   const SUBAGENT_URN =
     "agent:developer:discord:channel:1480957862858719232:b5a49a1b-24f9-44ce-a9a1-669c43f2dea4";
 

@@ -10,11 +10,11 @@ export function register(registry: BuiltinToolRegistry): void {
   registry.register("ls", lsHandler);
 }
 
-/*
- * Subprocess script — runs as agent UID/GID so kernel DAC applies.
- * Receives parameters via env vars, writes JSON to stdout.
- * Uses the same string-array pattern as other builtin handler scripts.
- */
+// -----------------------------------------------------------------------------
+// Subprocess script — runs as agent UID/GID so kernel DAC applies.
+// Receives parameters via env vars, writes JSON to stdout.
+// Uses the same string-array pattern as other builtin handler scripts.
+// -----------------------------------------------------------------------------
 
 function buildLsScript(): string {
   return [

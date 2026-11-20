@@ -367,13 +367,11 @@ export async function executeSessionAgentTurn(
   const baseModels =
     resolveEffectiveModelsConfig(input.config, input.sessionId) ?? input.config.models;
 
-  /*
-   * Snapshot of everything the turn resolved from the current model selection:
-   * failover chain (with the session's model prepended), tool client, merged
-   * invocation params, context window, and image block codec. Re-resolved on
-   * every tool-loop round so a session_model switch mid-turn takes effect on
-   * the NEXT round (next tool call / generation), not only on the next turn.
-   */
+  // Snapshot of everything the turn resolved from the current model selection:
+  // failover chain (with the session's model prepended), tool client, merged
+  // invocation params, context window, and image block codec. Re-resolved on
+  // every tool-loop round so a session_model switch mid-turn takes effect on
+  // the NEXT round (next tool call / generation), not only on the next turn.
   interface TurnModelResolution {
     readonly models: ShoggothModelsConfig | undefined;
     readonly modelRef: string | undefined;
@@ -458,14 +456,12 @@ export async function executeSessionAgentTurn(
       })?.model?.contextWindowTokens;
     }
     if (!ctxWindowTokens) {
-      /*
-       * The context window could not be resolved, so there is no threshold to
-       * arm mid-turn compaction against. Surface this loudly instead of
-       * silently degrading: the compaction path itself handles overflow, and
-       * quietly leaving the check off for the whole turn is the failure mode
-       * this guards against. Context level must never decide whether the
-       * check is armed — a minimal-context session can still blow its window.
-       */
+      // The context window could not be resolved, so there is no threshold to
+      // arm mid-turn compaction against. Surface this loudly instead of
+      // silently degrading: the compaction path itself handles overflow, and
+      // quietly leaving the check off for the whole turn is the failure mode
+      // this guards against. Context level must never decide whether the
+      // check is armed — a minimal-context session can still blow its window.
       log.error("mid-turn compaction could not be armed: context window could not be resolved", {
         sessionId: input.sessionId,
         modelRef: modelRef ?? null,
@@ -589,26 +585,22 @@ export async function executeSessionAgentTurn(
   const { signal: turnAbortSignal, end: endTurnAbortScope } = beginSessionTurnAbortScope(
     input.sessionId,
   );
-  /*
-   * Notify the presentation pipeline the moment the turn is aborted. Cleanup
-   * that runs only when the turn promise settles is not enough: an aborted
-   * model call can hang forever (e.g. a stuck provider streaming deltas),
-   * leaving stream pushers/status bars editing a dead message indefinitely.
-   * notifyOnTurnAbort also covers an ALREADY-aborted signal (the abort raced
-   * turn setup against a slow provider): a bare addEventListener would never
-   * fire and the display pipeline would outlive the session.
-   */
+  // Notify the presentation pipeline the moment the turn is aborted. Cleanup
+  // that runs only when the turn promise settles is not enough: an aborted
+  // model call can hang forever (e.g. a stuck provider streaming deltas),
+  // leaving stream pushers/status bars editing a dead message indefinitely.
+  // notifyOnTurnAbort also covers an ALREADY-aborted signal (the abort raced
+  // turn setup against a slow provider): a bare addEventListener would never
+  // fire and the display pipeline would outlive the session.
   const notifyTurnAborted = () => input.events?.onTurnAborted?.();
   notifyOnTurnAbort(turnAbortSignal, notifyTurnAborted);
 
-  /*
-   * The tool loop calls this client once per round. Re-resolving INSIDE the
-   * wrapper (rather than at loop construction) is what makes a mid-turn
-   * session_model switch land on the very next round: every round's
-   * completeWithTools first re-reads the session's model selection and swaps
-   * the whole snapshot (failover chain, tool client, invocation params,
-   * context window / compaction config), then delegates to the current client.
-   */
+  // The tool loop calls this client once per round. Re-resolving INSIDE the
+  // wrapper (rather than at loop construction) is what makes a mid-turn
+  // session_model switch land on the very next round: every round's
+  // completeWithTools first re-reads the session's model selection and swaps
+  // the whole snapshot (failover chain, tool client, invocation params,
+  // context window / compaction config), then delegates to the current client.
   const roundDynamicToolClient: FailoverToolCallingClient = {
     get capabilities() {
       return toolClient.capabilities;
@@ -638,22 +630,18 @@ export async function executeSessionAgentTurn(
     onCompactionFailed: input.events?.onCompactionFailed,
     onCompactionBanner: input.events?.onCompactionBanner,
     onUsageDelta: (delta) => {
-      /*
-       * Provider-reported actuals: this call's total input+output is the best
-       * available gauge of current context fill once the turn's final message
-       * lands in the transcript (it includes system prompt and tool schema
-       * overhead that transcript heuristics cannot see).
-       */
+      // Provider-reported actuals: this call's total input+output is the best
+      // available gauge of current context fill once the turn's final message
+      // lands in the transcript (it includes system prompt and tool schema
+      // overhead that transcript heuristics cannot see).
       incrementTokenUsage(input.db, input.sessionId, {
         ...delta,
         contextFillTokens: delta.inputTokens + delta.outputTokens,
       });
-      /*
-       * Tap the same delta for the live status bar (provider actuals, no DB
-       * re-read): the call's input tokens are the best mid-turn gauge of
-       * context fill; the window is provider-reported when available, else
-       * the turn's resolved model metadata.
-       */
+      // Tap the same delta for the live status bar (provider actuals, no DB
+      // re-read): the call's input tokens are the best mid-turn gauge of
+      // context fill; the window is provider-reported when available, else
+      // the turn's resolved model metadata.
       input.events?.onContextUpdate?.({
         currentTokens: delta.inputTokens,
         totalTokens: delta.contextWindowTokens ?? ctxWindowTokens,
@@ -727,13 +715,11 @@ export async function executeSessionAgentTurn(
   const executor = createMcpRoutingToolExecutor({
     aggregated: mcpCtx.fullAggregated ?? mcpCtx.aggregated,
     ...(mcpCtx.external ? { external: mcpCtx.external } : {}),
-    /*
-     * Mid-turn lapse recovery: if the pooled MCP session was closed under this
-     * turn (e.g. 30-minute idle eviction — see tool-loop-mcp), re-resolve the
-     * context so `external` dispatches against a freshly reconnected pool, then
-     * retry the call once. Reassigning `mcpCtx` keeps refreshTools (below) and
-     * the executor's retry reading from the same refreshed context.
-     */
+    // Mid-turn lapse recovery: if the pooled MCP session was closed under this
+    // turn (e.g. 30-minute idle eviction — see tool-loop-mcp), re-resolve the
+    // context so `external` dispatches against a freshly reconnected pool, then
+    // retry the call once. Reassigning `mcpCtx` keeps refreshTools (below) and
+    // the executor's retry reading from the same refreshed context.
     reconnectExternal: async () => {
       mcpCtx = await input.resolveMcpContext(input.sessionId);
       return mcpCtx.external;
@@ -853,13 +839,11 @@ export async function executeSessionAgentTurn(
       toolCallTimeoutMs: resolveToolCallTimeoutMs(input.config, input.sessionId),
       maxToolsPerBatch: input.config.agents?.maxToolsPerBatch ?? 10,
       onStatsUpdate: (update) => {
-        /*
-         * `estimatedInputTokens` (char heuristics for tool args/results) is
-         * intentionally NOT added to session_stats.input_tokens: tool content
-         * is billed inside the next model call's provider-reported prompt
-         * tokens, so persisting estimates here would double-count against
-         * provider actuals.
-         */
+        // `estimatedInputTokens` (char heuristics for tool args/results) is
+        // intentionally NOT added to session_stats.input_tokens: tool content
+        // is billed inside the next model call's provider-reported prompt
+        // tokens, so persisting estimates here would double-count against
+        // provider actuals.
         if (update.transcriptMessageCount != null) {
           updateTranscriptMessageCount(input.db, input.sessionId, update.transcriptMessageCount);
         }
@@ -867,16 +851,14 @@ export async function executeSessionAgentTurn(
       // --- Mid-loop tool refresh for tool discovery ---
       refreshTools: discoveryConfig.enabled
         ? () => {
-            /*
-             * Synchronously re-resolve: the finalizer reads updated session_tool_state
-             * We can't await here, but the finalizer pipeline is sync (DB reads only).
-             * Re-run the finalizer chain by calling resolveMcpContext would be async,
-             * so instead we import and call the finalizer directly.
-             * For now, re-resolve via the same async path isn't possible in the sync callback.
-             * The tool loop will pick up changes on the next turn if we can't refresh synchronously.
-             * However, the discovery finalizer IS synchronous (just DB reads), so we can
-             * build a lightweight refresh here.
-             */
+            // Synchronously re-resolve: the finalizer reads updated session_tool_state
+            // We can't await here, but the finalizer pipeline is sync (DB reads only).
+            // Re-run the finalizer chain by calling resolveMcpContext would be async,
+            // so instead we import and call the finalizer directly.
+            // For now, re-resolve via the same async path isn't possible in the sync callback.
+            // The tool loop will pick up changes on the next turn if we can't refresh synchronously.
+            // However, the discovery finalizer IS synchronous (just DB reads), so we can
+            // build a lightweight refresh here.
 
             const baseMcpCtx = mcpCtx.fullAggregated
               ? { ...mcpCtx, aggregated: mcpCtx.fullAggregated }
@@ -925,17 +907,15 @@ export async function executeSessionAgentTurn(
     pushSystemContext(input.sessionId, `Previous turn encountered an error: ${errMsg}`);
     const failoverMeta2 = model.getSessionToolLoopFailoverState();
     const primaryModel2 = modelsForSession?.failoverChain?.[0];
-    /*
-     * Compose the FAILED body from what THIS turn streamed — every assistant
-     * segment written since seqBefore — plus a trailing failure notice. The
-     * whole-session `extractLatestTranscriptAssistantText` fallback is
-     * deliberately NOT used: it would replace the streamed output with a
-     * stale older reply (or with the bare notice when no tool-free row
-     * exists), and the replacement body's different segment boundaries would
-     * additionally un-locate every in-turn banner anchor. Callers append
-     * `failureNotice` as the final block AFTER the banner splice, so the
-     * notice never lands inside an unresolvable-anchor fallback slot.
-     */
+    // Compose the FAILED body from what THIS turn streamed — every assistant
+    // segment written since seqBefore — plus a trailing failure notice. The
+    // whole-session `extractLatestTranscriptAssistantText` fallback is
+    // deliberately NOT used: it would replace the streamed output with a
+    // stale older reply (or with the bare notice when no tool-free row
+    // exists), and the replacement body's different segment boundaries would
+    // additionally un-locate every in-turn banner anchor. Callers append
+    // `failureNotice` as the final block AFTER the banner splice, so the
+    // notice never lands inside an unresolvable-anchor fallback slot.
     const failureNotice = `_Turn failed: ${errMsg}_`;
     const turnProse = extractTurnTranscriptAssistantProse(
       input.db,
@@ -1010,13 +990,11 @@ export async function executeSessionAgentTurn(
     });
   }
 
-  /*
-   * Full prose of THIS turn: every assistant segment written since seqBefore,
-   * in order (tool-call rounds included — their pre-tools prose rides the
-   * same row). Non-streaming delivery paths compose their body from this so
-   * prose → tools → prose turns deliver ALL segments, not only the last one
-   * `latestAssistantText` carries.
-   */
+  // Full prose of THIS turn: every assistant segment written since seqBefore,
+  // in order (tool-call rounds included — their pre-tools prose rides the
+  // same row). Non-streaming delivery paths compose their body from this so
+  // prose → tools → prose turns deliver ALL segments, not only the last one
+  // `latestAssistantText` carries.
   const assistantTurnProse = extractTurnTranscriptAssistantProse(
     input.db,
     input.sessionId,

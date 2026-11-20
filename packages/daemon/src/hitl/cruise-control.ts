@@ -5,16 +5,16 @@ import { DecisionService } from "../decision/decision-service.js";
 
 const log = getLogger("cruise-control");
 
-/*
- * Cruise control — per-session HITL auto-pilot.
- *
- * When cruise control is active for a session, every HITL approval request
- * that does not pass configured auto-approvals is routed to a tiny
- * decision-driven judge agent (TypeSafe System One) instead of the operator.
- * The judge approves or denies according to the operator's guidance; when an
- * escalation route is configured and the judge has enough doubt, the request
- * escalates to true HITL as usual.
- */
+// ---------------------------------------------------------------------------
+// Cruise control — per-session HITL auto-pilot.
+//
+// When cruise control is active for a session, every HITL approval request
+// that does not pass configured auto-approvals is routed to a tiny
+// decision-driven judge agent (TypeSafe System One) instead of the operator.
+// The judge approves or denies according to the operator's guidance; when an
+// escalation route is configured and the judge has enough doubt, the request
+// escalates to true HITL as usual.
+// ---------------------------------------------------------------------------
 
 /** Default minimum score the escalation route must reach to escalate. */
 export const DEFAULT_CRUISE_ESCALATE_MIN_SCORE = 0.34;
@@ -49,13 +49,13 @@ export function createCruiseControlStore(): CruiseControlStore {
   };
 }
 
-/*
- * Decision banners — in-turn operator visibility.
- *
- * The judge decides mid-turn, so verdicts are folded into the active turn's
- * output as blockquote banners (via the active turn surface) instead of
- * being buried in logs.
- */
+// ---------------------------------------------------------------------------
+// Decision banners — in-turn operator visibility.
+//
+// The judge decides mid-turn, so verdicts are folded into the active turn's
+// output as blockquote banners (via the active turn surface) instead of
+// being buried in logs.
+// ---------------------------------------------------------------------------
 
 /** Cap on the extracted command shown in a decision banner. */
 const BANNER_COMMAND_MAX_CHARS = 60;

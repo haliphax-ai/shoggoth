@@ -63,12 +63,10 @@ export class StatusManager {
       return;
     }
     if (res.reason === "permanent") {
-      /*
-       * The surface itself rejects the request (e.g. HTTP 400 — archived
-       * thread): every edit and every repost would fail identically forever.
-       * Latch dead so the poll tick stops issuing platform traffic after
-       * this one request.
-       */
+      // The surface itself rejects the request (e.g. HTTP 400 — archived
+      // thread): every edit and every repost would fail identically forever.
+      // Latch dead so the poll tick stops issuing platform traffic after
+      // this one request.
       this.dead = true;
       return;
     }

@@ -120,27 +120,21 @@ describe("TokenValidator", () => {
     const token = await minter.mint("agent-1", "test-service");
     const payload = await TokenValidator.validate(token, identity);
 
-    /*
-     * For this test to work properly, the implementation should allow us to
-     * verify expiry. We simulate by checking that a token with exp in the past
-     * returns null. Since we can't easily forge an expired token without the
-     * implementation, we validate the concept: if exp < now, result is null.
-     * The real test relies on the implementation respecting expiry.
-     * For now, we just verify the token is valid (not expired yet).
-     */
+    // For this test to work properly, the implementation should allow us to
+    // verify expiry. We simulate by checking that a token with exp in the past
+    // returns null. Since we can't easily forge an expired token without the
+    // implementation, we validate the concept: if exp < now, result is null.
+    // The real test relies on the implementation respecting expiry.
+    // For now, we just verify the token is valid (not expired yet).
     expect(payload).not.toBeNull();
 
-    /*
-     * Manually craft an expired scenario: we expect validate to return null
-     * for a token whose exp has passed. We'll use a mock approach:
-     * Fast-forward time conceptually — the implementation should check exp > Date.now()/1000
-     * This test will properly fail with the stub and pass once implemented with time manipulation.
-     */
+    // Manually craft an expired scenario: we expect validate to return null
+    // for a token whose exp has passed. We'll use a mock approach:
+    // Fast-forward time conceptually — the implementation should check exp > Date.now()/1000
+    // This test will properly fail with the stub and pass once implemented with time manipulation.
     const _farFuture = Date.now() / 1000 + 600; // 10 min from now
-    /*
-     * If the token exp is ~5 min, then checking after 6 min should fail
-     * We test by verifying exp - iat ≈ 300 (5 minutes)
-     */
+    // If the token exp is ~5 min, then checking after 6 min should fail
+    // We test by verifying exp - iat ≈ 300 (5 minutes)
     expect(payload!.exp - payload!.iat).toBeCloseTo(300, -1);
   });
 

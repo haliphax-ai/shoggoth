@@ -401,12 +401,10 @@ describe("deliverOobStructuredResponse", () => {
   });
 
   it("is invoked by deliverSubagentResult after the queue-path model turn", async () => {
-    /*
-     * This test is behavioral: we replace runSessionModelTurn with a mock that
-     * returns a structured response, then verify postToOperator receives the
-     * to_operator field. deliverOobStructuredResponse is a same-module call,
-     * so vi.mock cannot intercept it — we test the effect.
-     */
+    // This test is behavioral: we replace runSessionModelTurn with a mock that
+    // returns a structured response, then verify postToOperator receives the
+    // to_operator field. deliverOobStructuredResponse is a same-module call,
+    // so vi.mock cannot intercept it — we test the effect.
     const { deliverSubagentResult } = await import("../../src/control/ops-shared");
 
     const structured = JSON.stringify({

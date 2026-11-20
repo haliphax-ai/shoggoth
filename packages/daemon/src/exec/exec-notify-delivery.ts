@@ -97,12 +97,10 @@ export async function deliverExecNotifyMessage(completion: ExecNotifyCompletion)
     `Background builtin-exec completed (notify handle \`${handle.id}\`):\n` +
       JSON.stringify(payload, null, 2),
   );
-  /*
-   * --- In-turn path: inject into the active turn's steer
-   * channel when one exists. Falls back to the OOB turn below when no turn
-   * is active, or when the turn ends before the queued event is drained
-   * (guaranteed delivery via the steer channel's drop callback).
-   */
+  // --- In-turn path: inject into the active turn's steer
+  // channel when one exists. Falls back to the OOB turn below when no turn
+  // is active, or when the turn ends before the queued event is drained
+  // (guaranteed delivery via the steer channel's drop callback).
   const banner = buildInTurnEventBanner({
     emoji: "↩️",
     title: "Exec notification",
@@ -116,12 +114,10 @@ export async function deliverExecNotifyMessage(completion: ExecNotifyCompletion)
     fallback: () =>
       oneShotWakeFallback(handle.sessionId, () => deliverExecNotifyOobTurn(completion)),
   });
-  /*
-   * Surface trace for in-turn delivery (best-effort): folded into the
-   * active turn's own output when one is live, posted as a standalone
-   * message only when no turn surface exists. The OOB fallback
-   * posts its own processing/terminal banners, so it needs no extra post.
-   */
+  // Surface trace for in-turn delivery (best-effort): folded into the
+  // active turn's own output when one is live, posted as a standalone
+  // message only when no turn surface exists. The OOB fallback
+  // posts its own processing/terminal banners, so it needs no extra post.
   if (outcome === "in_turn") {
     const command = handle.command.length > 60 ? `${handle.command.slice(0, 60)}…` : handle.command;
     const deliveryBanner = `> ↩️ ✅ Exec notification delivered in-turn: *${command}* \`${handle.id}\``;
@@ -160,13 +156,11 @@ async function deliverExecNotifyOobTurn(completion: ExecNotifyCompletion): Promi
     summary: "This turn was triggered by a background builtin-exec completing.",
     guidance: OOB_NO_SENDER_GUIDANCE,
   };
-  /*
-   * Surface the completion as an OOB banner (↩️): post a "processing" banner,
-   * stream the status bar into it while the turn runs, then append the
-   * terminal banner + to_operator content on completion. Falls back gracefully
-   * to plain (no-banner) delivery when the session is not message-surface
-   * bound or the platform lacks the capability.
-   */
+  // Surface the completion as an OOB banner (↩️): post a "processing" banner,
+  // stream the status bar into it while the turn runs, then append the
+  // terminal banner + to_operator content on completion. Falls back gracefully
+  // to plain (no-banner) delivery when the session is not message-surface
+  // bound or the platform lacks the capability.
   const bannerText = buildExecNotifyTurnBanner({
     handleId: handle.id,
     command: handle.command,

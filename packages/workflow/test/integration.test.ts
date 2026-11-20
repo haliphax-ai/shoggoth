@@ -212,16 +212,14 @@ async function setup(
   };
 }
 
-/*
- * --- Shared test lifecycle ---
- *
- * File-level hooks shared by every describe below. Teardown stops polling on
- * every orchestrator a test created and then waits for in-flight ticks to
- * settle before deleting the state directory: a tick that is still inside
- * saveWorkflow (real mkdir + write, reachable when fake timers fired the
- * polling loop) would otherwise recreate baseDir while rmSync is walking it
- * and fail with ENOTEMPTY. rmSync retries stay as defense-in-depth.
- */
+// --- Shared test lifecycle ---
+//
+// File-level hooks shared by every describe below. Teardown stops polling on
+// every orchestrator a test created and then waits for in-flight ticks to
+// settle before deleting the state directory: a tick that is still inside
+// saveWorkflow (real mkdir + write, reachable when fake timers fired the
+// polling loop) would otherwise recreate baseDir while rmSync is walking it
+// and fail with ENOTEMPTY. rmSync retries stay as defense-in-depth.
 
 let baseDir: string;
 const liveSetups: { orchestrators: Map<string, Orchestrator> }[] = [];

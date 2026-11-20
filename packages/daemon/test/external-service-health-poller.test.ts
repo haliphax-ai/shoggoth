@@ -230,13 +230,10 @@ describe("ExternalServiceHealthPoller", () => {
 
       poller.add(declaration);
 
-      /*
-       * 3 failures — stays unknown since never healthy:
-       * failure 1 → failure 2 → failure 3
-       */
-      await vi.advanceTimersByTimeAsync(0);
-      await vi.advanceTimersByTimeAsync(100);
-      await vi.advanceTimersByTimeAsync(100);
+      // 3 failures — stays unknown since never healthy
+      await vi.advanceTimersByTimeAsync(0); // failure 1
+      await vi.advanceTimersByTimeAsync(100); // failure 2
+      await vi.advanceTimersByTimeAsync(100); // failure 3
 
       expect(poller.getState("http-unhealthy")).toBe("unknown");
       httpSpy.mockRestore();

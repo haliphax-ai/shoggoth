@@ -84,13 +84,11 @@ export async function detectOrphans(wf: TaskList, poller: PollAdapter): Promise<
 
     try {
       const result = await poller.poll(task.sessionKey);
-      /*
-       * If the poll returns a terminal status, the orchestrator's normal tick
-       * would handle it. We only care about sessions that are truly gone.
-       * A "running" result means the session is alive — skip.
-       * A "done" or "failed" result means the session finished — the normal
-       * tick will pick it up. We only flag orphans when poll throws (session gone).
-       */
+      // If the poll returns a terminal status, the orchestrator's normal tick
+      // would handle it. We only care about sessions that are truly gone.
+      // A "running" result means the session is alive — skip.
+      // A "done" or "failed" result means the session finished — the normal
+      // tick will pick it up. We only flag orphans when poll throws (session gone).
       void result;
     } catch {
       // Session is gone — mark as orphaned

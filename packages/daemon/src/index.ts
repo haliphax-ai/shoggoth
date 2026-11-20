@@ -164,19 +164,20 @@ import { TokenMinter } from "./service-auth";
 import { createVaultService } from "./vault/vault-service-impl";
 import { vaultServiceRef } from "./vault/vault-ref";
 
-/*
- * Import convention
- *
- * Static imports (top-level): core modules that are always needed
- * during daemon startup — logging, config, types, database, session
- * management, policy, health probes, etc.
- *
- * Dynamic imports (await import()): conditionally-loaded features
- * that depend on runtime config:
- *   - HTTP gateway (only when config.gateway.enabled is true)
- *
- * Module-level setup
- */
+// ============================================================
+// Import convention
+// ============================================================
+//
+// Static imports (top-level): core modules that are always needed
+// during daemon startup — logging, config, types, database, session
+// management, policy, health probes, etc.
+//
+// Dynamic imports (await import()): conditionally-loaded features
+// that depend on runtime config:
+//   - HTTP gateway (only when config.gateway.enabled is true)
+//
+// Module-level setup
+// ============================================================
 
 registerContextFinalizer(messageToolFinalizer);
 
@@ -234,12 +235,10 @@ function modelProviderEntries(
   return models?.providers ? modelProvidersToEntries(models.providers) : undefined;
 }
 
-/*
- * Initialize the model metadata store from config. There are no hard-coded
- * model defaults: provider-reported values (fetched after the model health
- * check) layer on top of configured windows, and models with neither have no
- * entry in the store.
- */
+// Initialize the model metadata store from config. There are no hard-coded
+// model defaults: provider-reported values (fetched after the model health
+// check) layer on top of configured windows, and models with neither have no
+// entry in the store.
 if (config.models?.failoverChain) {
   initModelMetadataFromConfig(config.models.failoverChain, modelProviderEntries(config.models));
 }
@@ -288,16 +287,16 @@ const rt = createDaemonRuntime({
   },
 });
 
-/*
- * init*() functions — extracted from the bootstrap IIFE for
- * readability, testability, and clear dependency boundaries.
- *
- * Each function encapsulates one logical subsystem. Functions
- * that need IIFE-local state accept it as a parameter; module-
- * level references (config, configRef, hitlRef, rt, etc.) are
- * accessed directly. Disposable resources are returned so the
- * IIFE can wire them into the shutdown path.
- */
+// ============================================================
+// init*() functions — extracted from the bootstrap IIFE for
+// readability, testability, and clear dependency boundaries.
+//
+// Each function encapsulates one logical subsystem. Functions
+// that need IIFE-local state accept it as a parameter; module-
+// level references (config, configRef, hitlRef, rt, etc.) are
+// accessed directly. Disposable resources are returned so the
+// IIFE can wire them into the shutdown path.
+// ============================================================
 
 /**
  * Open the state database, run migrations, bootstrap the main
@@ -862,10 +861,10 @@ function registerHealthProbes() {
   );
 }
 
-/*
- * Bootstrap IIFE — orchestrates init*() calls in sequence and
- * wires disposers into the shutdown path.
- */
+// ============================================================
+// Bootstrap IIFE — orchestrates init*() calls in sequence and
+// wires disposers into the shutdown path.
+// ============================================================
 
 void (async () => {
   // --- State Database, HITL stack, vault ---
@@ -913,12 +912,10 @@ void (async () => {
     agentId: resolveShoggothAgentId(config),
     agentsConfig: config.agents,
   });
-  /*
-   * Give the one-shot teardown (and the steer re-delivery it schedules) access
-   * to the session store so a terminated target is never re-checked into a
-   * turn. Other guards (session_steer op, OOB delivery) resolve the store via
-   * their own op context.
-   */
+  // Give the one-shot teardown (and the steer re-delivery it schedules) access
+  // to the session store so a terminated target is never re-checked into a
+  // turn. Other guards (session_steer op, OOB delivery) resolve the store via
+  // their own op context.
   bindOneShotSessionStore(sessions);
   bindIntegrationOpsSessionStore(sessions);
 

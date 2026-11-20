@@ -652,12 +652,10 @@ describe("mid-turn compaction in complete()", () => {
   });
 
   it("prefers provider-reported input tokens over the heuristic on every check", async () => {
-    /*
-     * Round 1 reports 10 input tokens (well under the 50-token budget). The
-     * tool result pushed afterwards makes the char heuristic exceed the
-     * budget, but the provider actual is present and takes precedence, so the
-     * next check must NOT compact.
-     */
+    // Round 1 reports 10 input tokens (well under the 50-token budget). The
+    // tool result pushed afterwards makes the char heuristic exceed the
+    // budget, but the provider actual is present and takes precedence, so the
+    // next check must NOT compact.
     vi.mocked(compactSessionTranscript).mockResolvedValue({ compacted: false, messageCount: 2 });
 
     let round = 0;
@@ -755,12 +753,10 @@ describe("mid-turn compaction in complete()", () => {
   });
 
   it("thresholds against the smaller of the configured and provider-reported windows", async () => {
-    /*
-     * Configured window is 100k, but the first call reports the serving
-     * model's window is only 1k. 960 input tokens exceed 1_000 - 50 = 950
-     * but stay far below the configured window's threshold, so only the
-     * min-window threshold can trip here.
-     */
+    // Configured window is 100k, but the first call reports the serving
+    // model's window is only 1k. 960 input tokens exceed 1_000 - 50 = 950
+    // but stay far below the configured window's threshold, so only the
+    // min-window threshold can trip here.
     vi.mocked(compactSessionTranscript).mockResolvedValue({ compacted: false, messageCount: 2 });
 
     let round = 0;

@@ -112,12 +112,10 @@ async function replaceHandler(
     };
   }
 
-  /*
-   * ── Positional edits mode (batch or single) ──────────────────────────────
-   * All positional edits use the normalized format: { start, end, replacement? }
-   * - replacement present → replace lines start..end with replacement content
-   * - replacement absent → delete lines start..end
-   */
+  // ── Positional edits mode (batch or single) ──────────────────────────────
+  // All positional edits use the normalized format: { start, end, replacement? }
+  // - replacement present → replace lines start..end with replacement content
+  // - replacement absent → delete lines start..end
   if (isBatch || isPositional) {
     const dryRun = args.dryRun === true;
 

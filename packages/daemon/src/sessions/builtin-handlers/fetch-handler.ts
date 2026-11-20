@@ -21,10 +21,10 @@ export function register(registry: BuiltinToolRegistry): void {
   registry.register("fetch", fetchHandler);
 }
 
-/*
- * Dispatcher cache — every request goes through undici's fetch with one of
- * these dispatchers; only the dispatcher config differs.
- */
+// ---------------------------------------------------------------------------
+// Dispatcher cache — every request goes through undici's fetch with one of
+// these dispatchers; only the dispatcher config differs.
+// ---------------------------------------------------------------------------
 
 let defaultDispatcher: Agent | undefined;
 let cachedCaBundlePath: string | undefined;
@@ -285,12 +285,10 @@ async function fetchHandler(
     };
   }
 
-  /*
-   * --- Execute fetch ---
-   * Redirects are followed manually (rather than via undici's redirect mode)
-   * so that every hop is re-checked against the SSRF rules above. Following
-   * is on by default and capped by fetch.maxRedirects.
-   */
+  // --- Execute fetch ---
+  // Redirects are followed manually (rather than via undici's redirect mode)
+  // so that every hop is re-checked against the SSRF rules above. Following
+  // is on by default and capped by fetch.maxRedirects.
   const followRedirects = (args.followRedirects as boolean) ?? true;
   const maxRedirects = Math.max(fetchConfig?.maxRedirects ?? DEFAULT_MAX_REDIRECTS, 0);
 

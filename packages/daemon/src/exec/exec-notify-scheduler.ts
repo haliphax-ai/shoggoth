@@ -1,19 +1,19 @@
-/*
- * ExecNotifyScheduler — background exec completion notifications (issue #478)
- *
- * Tracks in-flight background `builtin-exec` handles whose calls asked to be
- * notified on completion (the `notify` flag, default true). Mirrors the timer
- * mechanism: handles are persisted in the `exec_notifies` table (so counts
- * survive within the daemon and are visible to the turn status bar), are
- * session-scoped with list/cancel operations, and their completions surface as
- * OOB turns through the injected delivery function — the same boundary timers
- * use.
- *
- * Unlike timers (wall-clock scheduled), a handle activates on its subprocess
- * reaching a terminal state. On daemon restore the process manager is
- * in-memory, so unfired handles whose process is no longer tracked resolve as
- * "lost" (exit code unknown) rather than hanging forever.
- */
+// ---------------------------------------------------------------------------
+// ExecNotifyScheduler — background exec completion notifications (issue #478)
+// ---------------------------------------------------------------------------
+//
+// Tracks in-flight background `builtin-exec` handles whose calls asked to be
+// notified on completion (the `notify` flag, default true). Mirrors the timer
+// mechanism: handles are persisted in the `exec_notifies` table (so counts
+// survive within the daemon and are visible to the turn status bar), are
+// session-scoped with list/cancel operations, and their completions surface as
+// OOB turns through the injected delivery function — the same boundary timers
+// use.
+//
+// Unlike timers (wall-clock scheduled), a handle activates on its subprocess
+// reaching a terminal state. On daemon restore the process manager is
+// in-memory, so unfired handles whose process is no longer tracked resolve as
+// "lost" (exit code unknown) rather than hanging forever.
 
 import type Database from "better-sqlite3";
 import type { ManagedProcess } from "@shoggoth/procman";

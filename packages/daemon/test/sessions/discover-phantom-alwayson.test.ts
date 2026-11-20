@@ -1,8 +1,8 @@
-/*
- * Phantom alwaysOn entries: configured `toolDiscovery.alwaysOn` IDs that match
- * no tool in the aggregated catalog (e.g. after an MCP server rename) must be
- * diagnosable instead of silently "working" in `builtin-discover list`.
- */
+// ---------------------------------------------------------------------------
+// Phantom alwaysOn entries: configured `toolDiscovery.alwaysOn` IDs that match
+// no tool in the aggregated catalog (e.g. after an MCP server rename) must be
+// diagnosable instead of silently "working" in `builtin-discover list`.
+// ---------------------------------------------------------------------------
 
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";

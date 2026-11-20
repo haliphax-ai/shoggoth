@@ -269,12 +269,10 @@ export async function deliverOobStructuredResponse(opts: {
     const nudgeGuidance = hasSender ? OOB_NUDGE_WITH_SENDER : OOB_NUDGE_NO_SENDER;
 
     try {
-      /*
-       * The nudge turn is a continuation of the failed OOB turn: it replays the
-       * same OOB system context, runs on the same session with the same tool
-       * set, and — via `responseSchema` — is presented with the synthetic
-       * `__structured_output__` tool so the model can actually recover.
-       */
+      // The nudge turn is a continuation of the failed OOB turn: it replays the
+      // same OOB system context, runs on the same session with the same tool
+      // set, and — via `responseSchema` — is presented with the synthetic
+      // `__structured_output__` tool so the model can actually recover.
       const nudgeResult = await ext.runSessionModelTurn({
         sessionId: respondTo,
         userContent: nudgeGuidance,
@@ -361,12 +359,10 @@ export async function deliverOobStructuredResponse(opts: {
       await deliverInTurnEvent({
         sessionId: respondTo,
         content: truncated,
-        /*
-         * Wrapped fallback: the wake marker covers the OOB turn so a held
-         * one-shot parent cannot release mid-delivery, and a terminated
-         * parent is never dispatched (the stale to_sender is logged, not
-         * laundered onto a dead row).
-         */
+        // Wrapped fallback: the wake marker covers the OOB turn so a held
+        // one-shot parent cannot release mid-delivery, and a terminated
+        // parent is never dispatched (the stale to_sender is logged, not
+        // laundered onto a dead row).
         fallback: () =>
           oneShotWakeFallback(respondTo, async () => {
             if (!(await assertDeliveryTargetNotTerminated(respondTo, subLog))) return;
@@ -479,15 +475,13 @@ export async function runSubagentResultOobTurn(input: {
   } = opts;
   const { ext, asyncContent, systemContext, maxChars } = input;
 
-  /*
-   * Only the turn dispatch is guarded for fallback: a throw here means the target
-   * session could not run a turn (missing/terminated), so the result has not been
-   * delivered anywhere yet and can safely be re-routed.
-   * The dispatch is wrapped in the one-shot wake marker: a held one-shot parent
-   * must not release while this parent-delivery turn is in flight. A terminated
-   * target is never dispatched — the guard skips the turn so the delivery falls
-   * through to the re-route/drop handling below instead of throwing on a dead row.
-   */
+  // Only the turn dispatch is guarded for fallback: a throw here means the target
+  // session could not run a turn (missing/terminated), so the result has not been
+  // delivered anywhere yet and can safely be re-routed.
+  // The dispatch is wrapped in the one-shot wake marker: a held one-shot parent
+  // must not release while this parent-delivery turn is in flight. A terminated
+  // target is never dispatched — the guard skips the turn so the delivery falls
+  // through to the re-route/drop handling below instead of throwing on a dead row.
   let turnResult: Awaited<ReturnType<typeof ext.runSessionModelTurn>>;
   try {
     turnResult = await oneShotWakeFallback(respondTo, async () => {
@@ -612,13 +606,11 @@ export async function deliverSubagentResult(
     : `\`${childSessionId}\``;
   const baseContent = `${completedTag} session_id: ${childLabel}\n\n${truncatedText}`;
 
-  /*
-   * Reminders appended to the delivery paths:
-   * - baseReminder tells the parent its reply routes back to the subagent, not the operator.
-   *   (inline steer path only)
-   * - OOB_WITH_SENDER_GUIDANCE instructs the parent to respond with structured OOB
-   *   output (to_operator / to_sender) on the async/queue path.
-   */
+  // Reminders appended to the delivery paths:
+  // - baseReminder tells the parent its reply routes back to the subagent, not the operator.
+  //   (inline steer path only)
+  // - OOB_WITH_SENDER_GUIDANCE instructs the parent to respond with structured OOB
+  //   output (to_operator / to_sender) on the async/queue path.
   const baseReminder = "\n\n— Your reply text is delivered to the subagent, not to the operator.";
   const steerContent = baseContent + baseReminder;
   const asyncContent = baseContent + OOB_WITH_SENDER_GUIDANCE;
@@ -644,12 +636,10 @@ export async function deliverSubagentResult(
       maxChars,
     });
 
-  /*
-   * inline mode: attempt steer injection first. Delivery is guaranteed: if the
-   * turn ends (or is replaced) before the entry is drained, the drop callback
-   * re-delivers via the OOB queue turn so the completion notice can never be
-   * silently destroyed by the channel teardown.
-   */
+  // inline mode: attempt steer injection first. Delivery is guaranteed: if the
+  // turn ends (or is replaced) before the entry is drained, the drop callback
+  // re-delivers via the OOB queue turn so the completion notice can never be
+  // silently destroyed by the channel teardown.
   if (deliveryMode === "inline") {
     const delivered = await deliverInTurnEvent({
       sessionId: respondTo,

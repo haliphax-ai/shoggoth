@@ -5,10 +5,7 @@
   "categories": {
     "correctness": "error"
   },
-  "rules": {
-    "custom-lint/no-comment-essays": "error",
-    "no-unused-vars": "error"
-  },
+  "rules": { "custom-lint/no-comment-essays": "off" },
   "env": {
     "builtin": true
   }

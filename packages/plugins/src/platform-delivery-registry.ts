@@ -1,12 +1,10 @@
-/*
- * -------------------------------------------------------------------------------
- * Platform Delivery Registry — platform-agnostic operator delivery resolution
- *
- * Plugins register a resolver for their platform segment (e.g. "discord").
- * The daemon uses this to determine how to reach the operator on a given session's
- * platform without knowing platform-specific details.
- * -------------------------------------------------------------------------------
- */
+// -------------------------------------------------------------------------------
+// Platform Delivery Registry — platform-agnostic operator delivery resolution
+//
+// Plugins register a resolver for their platform segment (e.g. "discord").
+// The daemon uses this to determine how to reach the operator on a given session's
+// platform without knowing platform-specific details.
+// -------------------------------------------------------------------------------
 
 import type { ShoggothConfig } from "@shoggoth/shared";
 

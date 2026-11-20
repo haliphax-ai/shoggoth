@@ -21,14 +21,12 @@ import type { VaultService } from "../vault/vault-service";
 
 const log = getLogger("mcp-pool");
 
-/*
- * Connect retry + circuit breaker
- *
- * Every per-server connect attempt covers the WHOLE handshake (spawn, connect,
- * initialize, tools/list), so any failure mode — spawn errors (ENOENT, EACCES,
- * EMFILE, ENOEXEC, invalid uid/gid, ...), early process death, protocol
- * errors, timeouts — is retried the same way.
- */
+// ── Connect retry + circuit breaker ─────────────────────────────────────────
+//
+// Every per-server connect attempt covers the WHOLE handshake (spawn, connect,
+// initialize, tools/list), so any failure mode — spawn errors (ENOENT, EACCES,
+// EMFILE, ENOEXEC, invalid uid/gid, ...), early process death, protocol
+// errors, timeouts — is retried the same way.
 
 /** Max connect attempts per server per pool connect (first try + retries). */
 const MCP_CONNECT_MAX_ATTEMPTS = 3;
@@ -353,13 +351,11 @@ export async function connectShoggothMcpServers(
           httpSession = await openMcpStreamableHttpClient({
             url: s.url,
             headers: s.headers,
-            /*
-             * Always wired: the HTTP transport funnels id-less notifications through
-             * onServerMessage (POST JSON, POST SSE, and standing GET SSE all share
-             * one dispatch), so the tap doubles as the tools/list_changed trigger.
-             * The optional debug log tap (SHOGGOTH_MCP_LOG_SERVER_MESSAGES) still
-             * receives every forwarded message first.
-             */
+            // Always wired: the HTTP transport funnels id-less notifications through
+            // onServerMessage (POST JSON, POST SSE, and standing GET SSE all share
+            // one dispatch), so the tap doubles as the tools/list_changed trigger.
+            // The optional debug log tap (SHOGGOTH_MCP_LOG_SERVER_MESSAGES) still
+            // receives every forwarded message first.
             onServerMessage: (msg) => {
               onPoolMessage?.({ sourceId: s.id, msg });
               handleServerNotification(s.id, msg);

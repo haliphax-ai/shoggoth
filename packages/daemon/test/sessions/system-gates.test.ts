@@ -1,12 +1,12 @@
-/*
- * createSystemGates — configurable system gates for external (MCP) tools.
- *
- * Covers `createSystemGates(deps)` and its pre/post hook contract (AGENTS.md
- * discovery gate and re-read-required gate applied to config.gates.*.tools globs).
- *
- * Follows the fixture pattern of `agents-md-gate.test.ts` (openStateDb +
- * migrate + tmp workspace + createSessionStore).
- */
+// ---------------------------------------------------------------------------
+// createSystemGates — configurable system gates for external (MCP) tools.
+//
+// Covers `createSystemGates(deps)` and its pre/post hook contract (AGENTS.md
+// discovery gate and re-read-required gate applied to config.gates.*.tools globs).
+//
+// Follows the fixture pattern of `agents-md-gate.test.ts` (openStateDb +
+// migrate + tmp workspace + createSessionStore).
+// ---------------------------------------------------------------------------
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";

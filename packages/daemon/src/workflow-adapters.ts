@@ -176,12 +176,10 @@ export function createDaemonSpawnAdapter(deps: DaemonSpawnAdapterDeps): SpawnAda
       }
       if (req.responseSchema) {
         modelSelection.responseSchema = req.responseSchema;
-        /*
-         * Schema-bearing task turns belong to the same family as OOB structured
-         * turns, which pin best-effort explicitly. Left unset, the mode resolves
-         * to the provider adapter's ceiling (strict on OpenAI-compatible and
-         * Gemini), where capture-path schema validation is skipped.
-         */
+        // Schema-bearing task turns belong to the same family as OOB structured
+        // turns, which pin best-effort explicitly. Left unset, the mode resolves
+        // to the provider adapter's ceiling (strict on OpenAI-compatible and
+        // Gemini), where capture-path schema validation is skipped.
         modelSelection.structuredOutputMode = "best-effort";
       }
 
@@ -549,15 +547,13 @@ export function createDaemonMessageAdapter(deps: DaemonMessageAdapterDeps): Mess
             messageId,
             sessionId: deps.sessionId,
           });
-          /*
-           * Classify from the message-tool result: 404 means the message is
-           * genuinely gone (repost is safe); the unsupported code means the
-           * platform cannot edit; 400 means the request is rejected
-           * identically forever (e.g. archived thread) — the SURFACE is the
-           * problem, so never repost and never retry; everything else is
-           * transient — never treat a rate limit or 5xx as "message gone"
-           * and repost an orphan.
-           */
+          // Classify from the message-tool result: 404 means the message is
+          // genuinely gone (repost is safe); the unsupported code means the
+          // platform cannot edit; 400 means the request is rejected
+          // identically forever (e.g. archived thread) — the SURFACE is the
+          // problem, so never repost and never retry; everything else is
+          // transient — never treat a rate limit or 5xx as "message gone"
+          // and repost an orphan.
           if (res.http_status === 404) return { ok: false, reason: "not_found" };
           if (res.code === "edit_unsupported") return { ok: false, reason: "unsupported" };
           if (res.http_status === 400) return { ok: false, reason: "permanent" };

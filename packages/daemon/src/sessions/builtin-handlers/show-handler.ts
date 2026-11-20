@@ -50,12 +50,10 @@ async function showHandler(
 
   for (const input of inputs) {
     try {
-      /*
-       * For path-based inputs, store a lightweight reference instead of
-       * the full base64 payload so the transcript stays small.  The
-       * extraction step (extractShowBlocks) will read the file at
-       * delivery time.
-       */
+      // For path-based inputs, store a lightweight reference instead of
+      // the full base64 payload so the transcript stays small.  The
+      // extraction step (extractShowBlocks) will read the file at
+      // delivery time.
       if (input.path) {
         // Resolve path against workingDirectory, then make workspace-relative
         // so toolReadBinary (which joins with workspacePath) finds the file.

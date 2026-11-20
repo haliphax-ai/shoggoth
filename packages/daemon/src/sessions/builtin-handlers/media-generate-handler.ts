@@ -1,7 +1,7 @@
-/*
- * builtin-media-generate — generate images, audio, video, or music via
- * the media_generate control plane op, saving the result to disk.
- */
+// ---------------------------------------------------------------------------
+// builtin-media-generate — generate images, audio, video, or music via
+// the media_generate control plane op, saving the result to disk.
+// ---------------------------------------------------------------------------
 
 import { readFile } from "node:fs/promises";
 import type {

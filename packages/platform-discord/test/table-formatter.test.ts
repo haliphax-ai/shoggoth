@@ -70,9 +70,9 @@ test("inline HTML tags are stripped from table cells", () => {
   ].join("\n");
   const result = mdTableToAscii(md2);
   // HTML tags should be stripped, keeping only text content
-  expect(result).toContain("b"); /* plain "b" after stripping <b> tags */
-  expect(result).toContain("i"); /* plain "i" after stripping <i> tags */
-  expect(result).toContain("text"); /* plain "text" after stripping <ins> tags */
+  expect(result).toContain("b"); // plain "b" after stripping <b> tags
+  expect(result).toContain("i"); // plain "i" after stripping <i> tags
+  expect(result).toContain("text"); // plain "text" after stripping <ins> tags
   expect(result).not.toContain("<b>");
   expect(result).not.toContain("</b>");
   expect(result).not.toContain("<i>");
@@ -211,12 +211,10 @@ test("narrow columns keep natural width, wide columns get remaining budget", () 
   const lineWidth = lines[0].length;
   // Should use close to 80 chars total (narrow cols lock in, wide col expands)
   expect(lineWidth).toBeLessThanOrEqual(80);
-  /*
-   * The wide column should be wider than 20 since narrow cols free up budget
-   * Overhead for 3 cols: 3*3+1 = 10. "Status"=3, "Enabled"=7 → locked = 10.
-   * Remaining = 80 - 10 - 3 - 7 = 60 for the description column.
-   * So the table should be much wider than a naive 3*20 + 10 = 70 layout.
-   */
+  // The wide column should be wider than 20 since narrow cols free up budget
+  // Overhead for 3 cols: 3*3+1 = 10. "Status"=3, "Enabled"=7 → locked = 10.
+  // Remaining = 80 - 10 - 3 - 7 = 60 for the description column.
+  // So the table should be much wider than a naive 3*20 + 10 = 70 layout.
   expect(lineWidth).toBeGreaterThan(70);
 });
 

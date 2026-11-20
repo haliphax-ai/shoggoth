@@ -586,13 +586,11 @@ export async function createSessionMcpRuntime(
             err: String(e),
             agentId,
           });
-          /*
-           * Do NOT cache the failure: an empty entry with no close fn would
-           * survive idle-eviction sweeps (evictPool finds nothing to clear) and
-           * pin the agent to a manifest without its servers until restart. The
-           * empty result serves this call and its coalesced callers only; the
-           * next resolveContext retries the connect.
-           */
+          // Do NOT cache the failure: an empty entry with no close fn would
+          // survive idle-eviction sweeps (evictPool finds nothing to clear) and
+          // pin the agent to a manifest without its servers until restart. The
+          // empty result serves this call and its coalesced callers only; the
+          // next resolveContext retries the connect.
           return { sources: [] as McpSourceCatalog[], external: undefined };
         }
       })();
@@ -614,13 +612,11 @@ export async function createSessionMcpRuntime(
       return runContextFinalizers(builtinMcpCtx, sessionId);
     }
 
-    /*
-     * Reconnect the global pool when it is not connected: after an explicit
-     * idle eviction (re-arms the circuit breakers), or after a failed connect
-     * only when some server's breaker has closed meanwhile. A failed connect
-     * with all circuits open is NOT retried here — that would re-run the
-     * retry budget on every resolveContext.
-     */
+    // Reconnect the global pool when it is not connected: after an explicit
+    // idle eviction (re-arms the circuit breakers), or after a failed connect
+    // only when some server's breaker has closed meanwhile. A failed connect
+    // with all circuits open is NOT retried here — that would re-run the
+    // retry budget on every resolveContext.
     if (
       globalServers.length > 0 &&
       !globalPoolConnected &&
@@ -783,14 +779,12 @@ export async function createSessionMcpRuntime(
             );
           };
           const fallback = buildFallback();
-          /*
-           * A FAILED per-session connect must not pin the session to a tool
-           * manifest missing its servers: a transient failure (or a server
-           * still down right after an idle eviction) would otherwise be
-           * served from cache on every subsequent resolve with no retry.
-           * The fallback serves this call and its coalesced callers only;
-           * nothing is cached, so the next resolveContext re-runs the connect.
-           */
+          // A FAILED per-session connect must not pin the session to a tool
+          // manifest missing its servers: a transient failure (or a server
+          // still down right after an idle eviction) would otherwise be
+          // served from cache on every subsequent resolve with no retry.
+          // The fallback serves this call and its coalesced callers only;
+          // nothing is cached, so the next resolveContext re-runs the connect.
           return fallback;
         }
       })();

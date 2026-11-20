@@ -418,13 +418,11 @@ describe("MCP server rules — runtime filtering", () => {
     const mock = mockConnectMcp(catalogs);
     db = makeDb();
 
-    /*
-     * Top-level rules deny "denied-server", but NO subagentMcp rules configured.
-     * resolveEffectiveMcpServerRules for subagent falls back to global defaults
-     * { allow: ["*"], deny: [] }, which would allow "denied-server".
-     * With || logic, denied-server would be included (subagent path overrides).
-     * With && logic, denied-server is excluded (denied in ANY context).
-     */
+    // Top-level rules deny "denied-server", but NO subagentMcp rules configured.
+    // resolveEffectiveMcpServerRules for subagent falls back to global defaults
+    // { allow: ["*"], deny: [] }, which would allow "denied-server".
+    // With || logic, denied-server would be included (subagent path overrides).
+    // With && logic, denied-server is excluded (denied in ANY context).
     const config = buildConfig({
       mcp: {
         servers: {

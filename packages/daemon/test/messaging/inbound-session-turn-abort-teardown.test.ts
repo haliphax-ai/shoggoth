@@ -131,13 +131,11 @@ describe("runInboundSessionTurn abort teardown", () => {
       // "nothing new reaches the platform AFTER this point".
       let editsAtAbort = -1;
 
-      /*
-       * Models the Hole A scenario end-to-end: the turn's AbortSignal was
-       * already aborted while setup dragged (slow provider), so the
-       * notifyOnTurnAbort guard fires onTurnAborted synchronously at turn
-       * entry. A live bar render was already scheduled before the abort, and
-       * a hung stream keeps emitting deltas afterwards.
-       */
+      // Models the Hole A scenario end-to-end: the turn's AbortSignal was
+      // already aborted while setup dragged (slow provider), so the
+      // notifyOnTurnAbort guard fires onTurnAborted synchronously at turn
+      // entry. A live bar render was already scheduled before the abort, and
+      // a hung stream keeps emitting deltas afterwards.
       __setImpl(async (input) => {
         // 1. Live turn: prose arrives, scheduling tracker/pusher renders.
         input.stream?.onModelTextDelta?.({ delta: "x", accumulated: "hello", round: 0 });

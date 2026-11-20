@@ -205,24 +205,20 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
     }
   }
 
-  /*
-   * In-turn surface notices: banners that land while this turn runs are
-   * folded into the turn's active output — the streamed display and the
-   * final/error bodies — instead of being posted as standalone messages. A
-   * single per-turn banner manager owns capture (anchored to the runner's
-   * live position), live rendering, and terminal splicing.
-   */
+  // In-turn surface notices: banners that land while this turn runs are
+  // folded into the turn's active output — the streamed display and the
+  // final/error bodies — instead of being posted as standalone messages. A
+  // single per-turn banner manager owns capture (anchored to the runner's
+  // live position), live rendering, and terminal splicing.
   let committedProseSegments = 0;
   let toolCalls = 0;
-  /*
-   * The turn's committed prose segments so far — pushed in lockstep with
-   * `committedProseSegments` (same admission condition), so the live splice
-   * always sees the same notion of "committed segment" as the anchors and
-   * the terminal splice. The round still streaming is not in here: it is not
-   * a committed block, so notices firing mid-round splice after the last
-   * settled segment and a segment not yet joined into the display just rides
-   * the tail append — never dropped, never thrown.
-   */
+  // The turn's committed prose segments so far — pushed in lockstep with
+  // `committedProseSegments` (same admission condition), so the live splice
+  // always sees the same notion of "committed segment" as the anchors and
+  // the terminal splice. The round still streaming is not in here: it is not
+  // a committed block, so notices firing mid-round splice after the last
+  // settled segment and a segment not yet joined into the display just rides
+  // the tail append — never dropped, never thrown.
   const committedProse: string[] = [];
   const banners = createTurnBannerCollector({
     captureAnchor: () => ({ committedProseSegments, toolCalls }),
@@ -233,12 +229,10 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
     },
   });
   let surfaceDisplay = "";
-  /*
-   * Every push re-renders display + notices from scratch — the coalescing
-   * pusher always ships the latest state, so a banner is never patched into
-   * an already-pushed message; it lands in chronological position instead of
-   * being pinned to the tail.
-   */
+  // Every push re-renders display + notices from scratch — the coalescing
+  // pusher always ships the latest state, so a banner is never patched into
+  // an already-pushed message; it lands in chronological position instead of
+  // being pinned to the tail.
   const pushDisplay = (display: string): void => {
     surfaceDisplay = display;
     if (!streamPusher) return;
@@ -252,13 +246,11 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       surfaceUnregister = registerActiveTurnSurface(turn.sessionId, banners).unregister;
     }
 
-    /*
-     * Thread sentinel (core inbound path, upstream of the turn): a thread-bound
-     * subagent session ignores a leading inbound message that is only "." while it
-     * has no transcript history yet — lets the operator set the thread up (e.g.
-     * switch the model) before submitting a real prompt. The session stays bound and
-     * later messages fire turns normally.
-     */
+    // Thread sentinel (core inbound path, upstream of the turn): a thread-bound
+    // subagent session ignores a leading inbound message that is only "." while it
+    // has no transcript history yet — lets the operator set the thread up (e.g.
+    // switch the model) before submitting a real prompt. The session stays bound and
+    // later messages fire turns normally.
     if (
       turn.db &&
       turn.sessionId &&
@@ -298,16 +290,14 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
                       statusBar?.onProse?.(ev.accumulated);
                     },
                     onModelRoundEnd: (ev: { round: number; content: string }) => {
-                      /*
-                       * A settled round commits exactly one prose segment when
-                       * its normalized content is non-blank — the same
-                       * condition that admits it into the display and the
-                       * turn's composed prose, so anchors map 1:1 onto final
-                       * body positions.
-                       * Whitespace-only round content carries no prose: it must never enter
-                       * the display, the committed segment list, or the
-                       * anchors.
-                       */
+                      // A settled round commits exactly one prose segment when
+                      // its normalized content is non-blank — the same
+                      // condition that admits it into the display and the
+                      // turn's composed prose, so anchors map 1:1 onto final
+                      // body positions.
+                      // Whitespace-only round content carries no prose: it must never enter
+                      // the display, the committed segment list, or the
+                      // anchors.
                       const prose = normalizeRoundProse(ev.content);
                       if (prose) {
                         committedProseSegments += 1;
@@ -329,12 +319,10 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
                 : {}),
             }
           : undefined,
-      /*
-       * Forward status bar events (thinking / tool / hitl / compaction /
-       * context fill) into the turn so the tracker can re-render live while
-       * the turn executes. `onTurnAborted` stops the stream pusher and
-       * freezes the tracker even when the aborted turn promise never settles.
-       */
+      // Forward status bar events (thinking / tool / hitl / compaction /
+      // context fill) into the turn so the tracker can re-render live while
+      // the turn executes. `onTurnAborted` stops the stream pusher and
+      // freezes the tracker even when the aborted turn promise never settles.
       events:
         statusBar || thinkingOutput || streamPusher
           ? {
@@ -357,19 +345,17 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
               onSubagentsChanged: (counts) => statusBar?.onSubagentsChanged?.(counts),
               onTimersChanged: (count) => statusBar?.onTimersChanged?.(count),
               onNotifiesChanged: (count) => statusBar?.onNotifiesChanged?.(count),
-              /*
-               * Abort while the model call may still be streaming (or hung):
-               * stop the producers immediately — post-turn delivery never runs
-               * for a promise that never settles, so nothing else would ever
-               * stop the edits. finish("aborted") freezes the tracker at its
-               * terminal render; if the turn still settles later, delivery
-               * reuses the captured line. Closing the stream handle makes the
-               * teardown deterministic: even a producer that slips past the
-               * pusher/tracker stops (late model deltas, a deferred abort that
-               * settles minutes later via the compaction path and runs
-               * delivery, an unknown renderer) can never issue another edit —
-               * every later op is a no-op with zero platform traffic.
-               */
+              // Abort while the model call may still be streaming (or hung):
+              // stop the producers immediately — post-turn delivery never runs
+              // for a promise that never settles, so nothing else would ever
+              // stop the edits. finish("aborted") freezes the tracker at its
+              // terminal render; if the turn still settles later, delivery
+              // reuses the captured line. Closing the stream handle makes the
+              // teardown deterministic: even a producer that slips past the
+              // pusher/tracker stops (late model deltas, a deferred abort that
+              // settles minutes later via the compaction path and runs
+              // delivery, an unknown renderer) can never issue another edit —
+              // every later op is a no-op with zero platform traffic.
               onTurnAborted: () => {
                 streamPusher?.stop();
                 streamSink?.close?.();
@@ -420,32 +406,28 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
         });
       }
 
-      /*
-       * Compose from the turn's full prose — every assistant text segment of
-       * this turn, in order — so prose → tools → prose turns deliver ALL
-       * segments, not only the last one `latestAssistantText` carries. This
-       * also keeps the streamed display's snapshot matching the final body
-       * so the streamed thinking quotes interleave instead of being replaced
-       * by the quotes-plus-last-round fallback.
-       *
-       * A FAILED turn is delivered differently: the body is WHAT THE
-       * OPERATOR ALREADY SAW STREAMED — the raw live display snapshot — with
-       * `failureNotice` appended as a trailing block after the banner splice.
-       * Recomposing a failed body from a transcript-derived fallback would
-       * REPLACE the streamed output (with a stale older reply, or the bare
-       * notice) and its different segment boundaries would un-locate every
-       * in-turn banner anchor.
-       */
+      // Compose from the turn's full prose — every assistant text segment of
+      // this turn, in order — so prose → tools → prose turns deliver ALL
+      // segments, not only the last one `latestAssistantText` carries. This
+      // also keeps the streamed display's snapshot matching the final body
+      // so the streamed thinking quotes interleave instead of being replaced
+      // by the quotes-plus-last-round fallback.
+      //
+      // A FAILED turn is delivered differently: the body is WHAT THE
+      // OPERATOR ALREADY SAW STREAMED — the raw live display snapshot — with
+      // `failureNotice` appended as a trailing block after the banner splice.
+      // Recomposing a failed body from a transcript-derived fallback would
+      // REPLACE the streamed output (with a stale older reply, or the bare
+      // notice) and its different segment boundaries would un-locate every
+      // in-turn banner anchor.
       const failed = turnResult.outcome === "failed";
       const snapshot = surfaceDisplay.trim() && surfaceDisplay !== "…" ? surfaceDisplay : "";
       const replyText = turnResult.assistantTurnProse ?? turnResult.latestAssistantText;
       const baseBody = failed
-        ? /*
-           * Display snapshot first; the turn's transcript prose only when
-           * nothing streamed (non-streaming surface, failure before the
-           * first delta); never `latestAssistantText` — on failure it is
-           * already prose + notice, which would duplicate the append below.
-           */
+        ? // Display snapshot first; the turn's transcript prose only when
+          // nothing streamed (non-streaming surface, failure before the
+          // first delta); never `latestAssistantText` — on failure it is
+          // already prose + notice, which would duplicate the append below.
           snapshot || turnResult.assistantTurnProse || ""
         : formatAssistantReply(replyText, turnResult.failoverMeta);
       const renderedBase = failed ? baseBody : (thinkingOutput?.render(baseBody) ?? baseBody);
@@ -482,13 +464,11 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
       const bodyWithBar = barLine ? `${rawBody}\n\n${barLine}` : rawBody;
 
       if (streamPusher && streamSink) {
-        /*
-         * Flush first: its renders still carry the active terminal bar, so the
-         * bar stays visible right up to the final edit. Then clear the in-flight
-         * handle's active-bar state — a state-only operation that makes no edit —
-         * so the delivery edit below (whose body already appends barLine itself)
-         * lands the bar exactly once. A sink failure must never block delivery.
-         */
+        // Flush first: its renders still carry the active terminal bar, so the
+        // bar stays visible right up to the final edit. Then clear the in-flight
+        // handle's active-bar state — a state-only operation that makes no edit —
+        // so the delivery edit below (whose body already appends barLine itself)
+        // lands the bar exactly once. A sink failure must never block delivery.
         await streamPusher.flush();
         if (barLine && streamSink.setStatusBar) {
           try {
@@ -546,13 +526,11 @@ export async function runInboundSessionTurn(options: RunInboundSessionTurnOption
           });
         }
       }
-      /*
-       * finish()'s terminal render flowed through the sink into the in-flight
-       * handle's setStatusBar, which keeps the bar as active state and re-applies
-       * it on future renders. Clear that state — a state-only operation that makes
-       * no edit, so the in-flight message keeps its terminal ❌ bar until the
-       * error body lands as a separate message — and never block error delivery.
-       */
+      // finish()'s terminal render flowed through the sink into the in-flight
+      // handle's setStatusBar, which keeps the bar as active state and re-applies
+      // it on future renders. Clear that state — a state-only operation that makes
+      // no edit, so the in-flight message keeps its terminal ❌ bar until the
+      // error body lands as a separate message — and never block error delivery.
       if (barLine && streamSink?.setStatusBar) {
         try {
           await streamSink.setStatusBar(null);
