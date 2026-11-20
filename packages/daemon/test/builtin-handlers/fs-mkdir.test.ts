@@ -7,7 +7,7 @@ import {
   BuiltinToolRegistry,
   type BuiltinToolContext,
 } from "../../src/sessions/builtin-tool-registry";
-import { register as registerFs } from "../../src/sessions/builtin-handlers/fs-handler";
+import { registerFsTools as registerFs } from "../../src/sessions/builtin-handlers/fs-tools";
 
 function stubCtx(workspacePath: string): BuiltinToolContext {
   return {

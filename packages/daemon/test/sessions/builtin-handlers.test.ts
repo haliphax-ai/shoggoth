@@ -266,7 +266,7 @@ describe("message handler", () => {
 // fs-handlers: image read support
 // ---------------------------------------------------------------------------
 
-import { register as registerFs } from "../../src/sessions/builtin-handlers/fs-handlers";
+import { registerFsReadWrite as registerFs } from "../../src/sessions/builtin-handlers/fs-tools";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
