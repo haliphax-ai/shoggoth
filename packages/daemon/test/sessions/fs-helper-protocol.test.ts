@@ -1,5 +1,5 @@
 // Tests for the fs helper entry process: framing, dispatch, and op behavior.
-// Spawns a real `node fs-helper-entry.mjs` and exchanges framed JSON lines.
+// Spawns a real tsx-loaded `node fs-helper-entry.ts` and exchanges framed JSON lines.
 
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
@@ -18,6 +18,7 @@ import {
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
 const entryPath = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -25,14 +26,18 @@ const entryPath = join(
   "..",
   "src",
   "sessions",
-  "fs-helper-entry.mjs",
+  "fs-helper-entry.ts",
 );
 
 /** Driver for one helper child process with framed request/response. */
 class HelperHandle {
-  private readonly proc = spawn(process.execPath, [entryPath], {
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+  private readonly proc = spawn(
+    process.execPath,
+    ["--import", createRequire(import.meta.url).resolve("tsx/esm"), entryPath],
+    {
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
   private buffer = "";
   private readonly responses = new Map<string, Record<string, unknown>>();
   private readonly waiters = new Map<string, (value: Record<string, unknown>) => void>();

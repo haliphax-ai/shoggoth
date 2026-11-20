@@ -1,13 +1,34 @@
 // fs helper entry — persistent per-session helper process for fs mutations.
 // Spawned by the daemon via procman (one per session, first fs op), running as
-// the agent UID/GID so kernel DAC applies. NDJSON requests/responses on stdio.
+// the agent UID/GID; NDJSON on stdio; plain TS via the tsx loader, no daemon imports.
 
 import readline from "node:readline";
 import fs from "node:fs";
 import path from "node:path";
 
+interface FsHelperCommand {
+  action?: unknown;
+  id?: unknown;
+  params?: Record<string, unknown>;
+}
+
+interface FsHelperParams {
+  src?: unknown;
+  dst?: unknown;
+  recursive?: unknown;
+  modeInt?: unknown;
+}
+
+/** Params for one fs op, loosely validated before the fs calls use them. */
+function asPath(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`missing ${label} path`);
+  }
+  return value;
+}
+
 /** Recursively count entries in a directory tree (the directory itself included). */
-function countDir(dir) {
+function countDir(dir: string): number {
   let n = 0;
   for (const entry of fs.readdirSync(dir)) {
     const fp = path.join(dir, entry);
@@ -22,22 +43,26 @@ function countDir(dir) {
 }
 
 /** fs move: mkdir -p the destination parent, then rename. */
-function doMove(params) {
-  fs.mkdirSync(path.dirname(params.dst), { recursive: true });
-  fs.renameSync(params.src, params.dst);
+function doMove(params: FsHelperParams): Record<string, unknown> {
+  const src = asPath(params.src, "source");
+  const dst = asPath(params.dst, "destination");
+  fs.mkdirSync(path.dirname(dst), { recursive: true });
+  fs.renameSync(src, dst);
   return { ok: true };
 }
 
 /** fs copy: mkdir -p the destination parent, then recursive copy. */
-function doCopy(params) {
-  fs.mkdirSync(path.dirname(params.dst), { recursive: true });
-  fs.cpSync(params.src, params.dst, { recursive: true });
+function doCopy(params: FsHelperParams): Record<string, unknown> {
+  const src = asPath(params.src, "source");
+  const dst = asPath(params.dst, "destination");
+  fs.mkdirSync(path.dirname(dst), { recursive: true });
+  fs.cpSync(src, dst, { recursive: true });
   return { ok: true };
 }
 
 /** fs delete: refuse non-empty directories unless recursive; returns removed entry count. */
-function doDelete(params) {
-  const target = params.src;
+function doDelete(params: FsHelperParams): Record<string, unknown> {
+  const target = asPath(params.src, "target");
   const recursive = params.recursive === true;
   const st = fs.lstatSync(target);
   let count = 0;
@@ -56,10 +81,11 @@ function doDelete(params) {
 }
 
 /** fs stat: lstat, following the link for type/size/times when target is a symlink. */
-function doStat(params) {
-  const lst = fs.lstatSync(params.src);
+function doStat(params: FsHelperParams): Record<string, unknown> {
+  const src = asPath(params.src, "target");
+  const lst = fs.lstatSync(src);
   const isLink = lst.isSymbolicLink();
-  const st = isLink ? fs.statSync(params.src) : lst;
+  const st = isLink ? fs.statSync(src) : lst;
   let type = "other";
   if (st.isFile()) type = "file";
   else if (st.isDirectory()) type = "directory";
@@ -77,25 +103,30 @@ function doStat(params) {
   };
 }
 
-/** fs chmod: apply an octal mode string to the target. */
-function doChmod(params) {
-  fs.chmodSync(params.src, parseInt(params.modeInt, 10));
+/** fs chmod: apply a decimal-string mode (client sends parseInt(mode, 8).toString()). */
+function doChmod(params: FsHelperParams): Record<string, unknown> {
+  const src = asPath(params.src, "target");
+  if (typeof params.modeInt !== "string" || !/^\d+$/.test(params.modeInt)) {
+    throw new Error("missing or invalid modeInt (expect a decimal-string mode)");
+  }
+  fs.chmodSync(src, parseInt(params.modeInt, 10));
   return { ok: true };
 }
 
 /** fs mkdir: succeed silently when the target already is a directory. */
-function doMkdir(params) {
+function doMkdir(params: FsHelperParams): Record<string, unknown> {
+  const src = asPath(params.src, "target");
   const recursive = params.recursive === true;
   try {
-    if (fs.statSync(params.src).isDirectory()) return { ok: true };
+    if (fs.statSync(src).isDirectory()) return { ok: true };
   } catch {
     // not there yet — create below
   }
-  fs.mkdirSync(params.src, { recursive });
+  fs.mkdirSync(src, { recursive });
   return { ok: true };
 }
 
-const ACTIONS = {
+const ACTIONS: Record<string, (params: FsHelperParams) => Record<string, unknown>> = {
   move: doMove,
   copy: doCopy,
   delete: doDelete,
@@ -105,26 +136,26 @@ const ACTIONS = {
 };
 
 /** Execute one command object; never throws — failures come back as results. */
-function execute(command) {
-  const action = ACTIONS[command?.action];
+function execute(command: FsHelperCommand | undefined): Record<string, unknown> {
+  const action = ACTIONS[String(command?.action ?? "")];
   if (!action) {
     return { ok: false, error: `unknown action: ${String(command?.action)}` };
   }
   try {
-    return action(command.params ?? {});
+    return action(command?.params ?? {});
   } catch (err) {
-    return { ok: false, error: err?.message ?? String(err) };
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 
-rl.on("line", (line) => {
+rl.on("line", (line: string) => {
   const trimmed = line.trim();
   if (!trimmed) return;
-  let command;
+  let command: FsHelperCommand | undefined;
   try {
-    command = JSON.parse(trimmed);
+    command = JSON.parse(trimmed) as FsHelperCommand;
   } catch {
     // Unparseable frame: no id is recoverable, answer with a bare error result.
     process.stdout.write(`${JSON.stringify({ ok: false, error: "invalid JSON frame" })}\n`);

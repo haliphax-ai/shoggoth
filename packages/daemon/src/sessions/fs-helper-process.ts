@@ -2,6 +2,7 @@
 // NDJSON framing over stdio) replaces the former per-op `node -e` spawn.
 
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import type { ManagedProcess, ProcessSpec } from "@shoggoth/procman";
 import { getLogger } from "../logging";
 
@@ -18,7 +19,7 @@ export interface FsHelperSpawnOptions {
   readonly workspacePath: string;
   /** DI seam for tests; defaults to the daemon's procman singleton. */
   readonly processManager: FsHelperProcessManager;
-  /** DI seam for tests; defaults to the bundled fs-helper-entry.mjs path. */
+  /** DI seam for tests; defaults to the bundled fs-helper-entry.ts path. */
   readonly entryPath?: string;
 }
 
@@ -137,7 +138,7 @@ export class FsHelperClient {
         id: this.specId(),
         owner: { kind: "session", scopeId: this.sessionId },
         command: process.execPath,
-        args: [this.entryPath],
+        args: ["--import", resolveTsxLoader(), this.entryPath],
         cwd: this.workspacePath,
         env: { SHOGGOTH_FS_HELPER: "1" },
         uid: this.uid,
@@ -272,9 +273,18 @@ export class FsHelperClient {
   }
 }
 
-/** Workspace-relative path of the bundled helper entry script. */
+/** Path of the bundled helper entry script, resolved from this module. */
 function defaultEntryPath(): string {
-  return new URL("./fs-helper-entry.mjs", import.meta.url).pathname;
+  return new URL("./fs-helper-entry.ts", import.meta.url).pathname;
+}
+
+/**
+ * Absolute path of tsx's ESM loader, so the helper child can run plain TS
+ * from any cwd (the helper's cwd is the session workspace, where the bare
+ * `tsx/esm` specifier would not resolve to the daemon's node_modules).
+ */
+function resolveTsxLoader(): string {
+  return createRequire(import.meta.url).resolve("tsx/esm");
 }
 
 // ---------------------------------------------------------------------------

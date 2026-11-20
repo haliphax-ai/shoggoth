@@ -1,6 +1,6 @@
 // Tests for FsHelperClient: lazy spawn via procman, framed round-trips,
 // pending-request failure on exit, and dispose semantics. Uses a stub
-// process manager with a real `node fs-helper-entry.mjs` child.
+// process manager with a real tsx-loaded `fs-helper-entry.ts` child.
 
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
@@ -25,7 +25,7 @@ const entryPath = join(
   "..",
   "src",
   "sessions",
-  "fs-helper-entry.mjs",
+  "fs-helper-entry.ts",
 );
 
 /**
