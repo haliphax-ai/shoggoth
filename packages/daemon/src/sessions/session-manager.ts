@@ -250,10 +250,7 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
       for (const id of targets) {
         requestSessionTurnAbort(id);
         disposeSubagentRuntime(id);
-        // The per-session in-process registries must not outlive their owner:
-        // a steer channel / parked compaction request keyed by a terminated
-        // session id either addresses nothing (the turn is gone) or, for a
-        // session id reused in-process, leaks into the new occupant's turn.
+        // Per-session registries must not outlive the terminated session.
         clearSteerChannel(id);
         clearCompactionGate(id);
         options.agentTokens.revoke(id);
