@@ -528,7 +528,7 @@ export function getStatusBarStats(db: Database.Database, sessionId: string): Sta
         context_window_tokens: number | null;
       }
     | undefined;
-  const sessionRow = createSessionStore(db).getById(sessionId);
+  const sessionRow = createSessionStore(db).getById(sessionId); // WeakMap-memoized per db handle
   const segmentId = sessionRow?.contextSegmentId;
   const currentTokens =
     segmentId !== undefined && segmentId.length > 0 ? getContextFill(db, sessionId, segmentId) : 0;
@@ -575,26 +575,14 @@ export function getStatusBarStats(db: Database.Database, sessionId: string): Sta
 /** Active (non-terminated) subagents belonging to `sessionId`, counting the entire
  *  descendant tree but pruning at thread subagents: a thread-bound subagent and its
  *  whole subtree are excluded from both the total and the persistent count.
- *  `persistent` counts the included subagents spawned with mode "persistent". */
+ *  `persistent` counts the included subagents spawned with mode "persistent".
+ *  Resolved in SQL by the store's recursive CTE (O(1) prepared statements, no
+ *  full-row app-side walk); the store itself is memoized per db handle. */
 export function getSessionSubagentCounts(
   db: Database.Database,
   sessionId: string,
 ): { total: number; persistent: number } {
-  const store = createSessionStore(db);
-  let total = 0;
-  let persistent = 0;
-  const walk = (parentId: string): void => {
-    for (const child of store.list({ parentSessionId: parentId })) {
-      if (child.status === "terminated") continue;
-      // Thread-bound subagent: excluded along with its entire subtree.
-      if (child.subagentPlatformThreadId) continue;
-      total += 1;
-      if (child.subagentMode === "persistent") persistent += 1;
-      walk(child.id);
-    }
-  };
-  walk(sessionId);
-  return { total, persistent };
+  return createSessionStore(db).countSubagentTree(sessionId);
 }
 
 /** Unfired timer count for the session — the same state the builtin
