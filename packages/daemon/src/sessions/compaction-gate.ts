@@ -1,15 +1,10 @@
 /**
  * Per-session compaction gate for deferring manual compaction requests into an
  * active tool loop (the steer-channel pattern: singleton map, one queue per
- * session).
- *
- * Compaction rewrites the session transcript while the model client holds the
- * same messages in memory, so it must only run when the loop is parked at a
- * logical break (top of round, after steering injection, after the loop) and
- * the turn queue is frozen behind the in-flight turn. A compaction request
- * parked here is drained by the loop at the next break; a request that arrives
- * with no active loop returns undefined and the caller falls back to running
- * the compaction as a queued turn instead.
+ * session). Compaction rewrites the transcript while the model client holds the
+ * same messages in memory, so it only runs when the loop is parked at a logical
+ * break with the turn queue frozen behind the in-flight turn. See docs/daemon.md
+ * → "Compaction Gate" for drain/fallback semantics.
  */
 
 import type { compactSessionTranscript } from "../transcript-compact";

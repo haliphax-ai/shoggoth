@@ -70,32 +70,13 @@ const canCloseMarker = (
 
 /**
  * Determine which inline markers are "open" at the end of `raw`, starting
- * from `prevOpen` state.
- *
- * Only markers outside of fenced code blocks are tracked.
- *
- * The chunk is scanned as a viewer sees it: the reopen prefix built from
- * `prevOpen` is prepended to `raw` before scanning, so markers at the very
- * start of a chunk get their true surrounding context (a hard split can land
- * right before a closing marker, where the prefix supplies the preceding
- * content).
- *
- * A marker toggles only at positions where Discord can actually format:
- *
- * - it OPENS only when preceded by a word boundary (or line start) and
- *   followed by non-whitespace;
- * - it CLOSES only when preceded by non-whitespace and followed by a word
- *   boundary (or line end).
- *
- * This is the asymmetric word-boundary rule that already applied to a
- * single `_`; extending it to `**`, `*`, `__`, and `~~` keeps intra-word
- * and word-end markers (`5 * 3`, `ends with *`, `snake_case_name`) from
- * counting as toggles — an unpaired marker there is literal text in Discord,
- * and appending its companion would corrupt later text that legitimately
- * uses the marker. Spoilers (`||`) are the exception: Discord formats them
- * with no word boundary at all (`foo||bar||baz`), so each marker only
- * requires content on its inside (non-whitespace after an opener, before a
- * closer).
+ * from `prevOpen` state (markers outside fenced code blocks only). The chunk
+ * is scanned as a viewer sees it — the reopen prefix built from `prevOpen`
+ * is prepended to `raw` first, so start-of-chunk markers get their true
+ * context. A marker toggles only where Discord can actually format: OPENS
+ * at a word boundary before non-whitespace, CLOSES after non-whitespace at
+ * a word boundary; spoilers (`||`) need only inside content. Details:
+ * docs/platform-discord.md ("Message Splitting").
  */
 export function computeOpenInlineMarkers(
   raw: string,
@@ -229,20 +210,11 @@ export function buildReopenPrefix(state: OpenFormattingState): string {
 /**
  * Close any formatting constructs left open at the end of `text` with
  * synthetic markers so the rendered output cannot leak into whatever follows
- * it (e.g. the turn status bar).
- *
- * - Unclosed inline markers get their closing marker appended. A marker is
- *   only tracked where Discord would actually format it — at its opener or
- *   closer word boundary — so intra-word and word-end markers in prose
- *   (`5 * 3`, `snake_case_name`, a trailing `*`) never trigger a synthetic
- *   close. When a later chunk completes the pair, the synthetic close
- *   disappears on its own.
- * - An unclosed fenced block gets a closing ``` (the fence swallows everything
- *   after it, including the bar, until closed).
- * - Inside a fenced block, inline markers are literal text and are ignored,
- *   per the fence-only rule.
- *
- * Returns `text` unchanged when every construct is closed.
+ * it (e.g. the turn status bar). Unclosed inline markers get their closing
+ * marker appended; an unclosed fenced block gets a closing ```; inside a
+ * fence, inline markers are literal text and are ignored. Returns `text`
+ * unchanged when every construct is closed. Details:
+ * docs/platform-discord.md ("Message Splitting").
  */
 export function appendSyntheticClose(text: string): string {
   const { suffix } = computeChunkClose(text);

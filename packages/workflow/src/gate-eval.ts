@@ -165,15 +165,9 @@ function resolveRef(token: Token, ctx: GateContext): Value {
  * Evaluate a gate condition expression against a context.
  * Returns true (pass) or false (skip).
  *
- * Supported syntax:
- * - `{{task:N:success}}`, `{{task:N:output}}` — template references (converted to dot notation)
- * - `task.N.success`, `task.N.output` — dot notation references to upstream task results
- * - `==`, `!=` — equality comparisons
- * - `contains` — string containment check
- * - `&&`, `||`, `!` — logical operators
- * - `true`, `false` — boolean literals
- * - `"string"` or `'string'` — string literals
- * - Parentheses for grouping
+ * Supported syntax (task references, comparisons, `contains`, logical
+ * operators, literals, grouping) is documented in docs/workflow.md
+ * ("Gate Expression Language").
  */
 export function evaluateGateCondition(expr: string, ctx: GateContext): boolean {
   const normalized = resolveGateTemplates(expr);

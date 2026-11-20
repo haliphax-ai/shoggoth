@@ -1,19 +1,13 @@
 import type { PlatformCapabilities } from "./platform-adapter";
 
 /**
- * Queued-message indicator (issue #399).
- *
- * When an operator's message lands in the turn queue behind an in-flight turn,
- * the platform marks the message so the operator knows it was received:
- *
- * 1. a ⏳ reaction on the queued message when the platform supports reactions;
- * 2. otherwise a reply ("⏳ Agent is busy; message has been queued.") when the
- *    platform declares reply support;
- * 3. otherwise a standalone post with the same content.
- *
- * The reaction mark is removed via {@link QueuedMessageIndicator.clear} once the
- * queued message is processed or dropped from the queue. Reply/post fallbacks
- * carry nothing to clear.
+ * Queued-message indicator: when an operator's message lands in the turn queue
+ * behind an in-flight turn, the platform marks the message so the operator knows
+ * it was received — a ⏳ reaction when reactions are supported, else a ⏳ reply,
+ * else a standalone post. The reaction mark is removed via
+ * {@link QueuedMessageIndicator.clear} once the queued message is processed or
+ * dropped; reply/post fallbacks carry nothing to clear. See docs/daemon.md
+ * (Turn Output Presentation).
  */
 
 /** Emoji reaction marking an operator message that is waiting in the turn queue. */

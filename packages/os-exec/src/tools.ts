@@ -223,18 +223,10 @@ const ENV_WRITE_AFTER = "SHOGGOTH_TOOL_WRITE_AFTER";
 const ENV_WRITE_MKDIRP = "SHOGGOTH_TOOL_WRITE_MKDIRP";
 
 /**
- * Subprocess script for the extended write tool.
- *
- * The script itself lives in `src/scripts/write-extended.cjs` (read at
- * runtime) — see that file for the full documentation of the supported modes.
- *
- * Reads content from stdin, then performs the operation indicated by env vars:
- *   MODE=overwrite  — write stdin to file (with optional mkdirp)
- *   MODE=append     — append stdin to file (with optional mkdirp)
- *   MODE=replace    — replace lines START..END with stdin content
- *   MODE=insert     — insert stdin content after line AFTER
- *
- * Outputs JSON to stdout: { bytesWritten, dirCreated }
+ * Subprocess script for the extended write tool: reads content from stdin,
+ * then performs the operation indicated by env vars (script source in
+ * `src/scripts/write-extended.cjs`, read at runtime — see it for the full
+ * documentation of the supported modes). Outputs JSON to stdout.
  */
 // nodeWriteExtendedScript removed — scripts are now executed via tsxScriptArgs()
 

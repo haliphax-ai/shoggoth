@@ -2,17 +2,9 @@ import { createHash } from "node:crypto";
 import type { ServiceManifest } from "./service-registry";
 
 /**
- * Compute a deterministic fingerprint of a service manifest.
- * Used to detect changes that require re-approval.
- *
- * The fingerprint covers:
- * - tool names, descriptions, parameters, methods, paths
- * - capabilities (from config, not manifest)
- * - requested ops
- *
- * It does NOT cover:
- * - manifest name/version (informational)
- * - wsEndpoints (informational)
+ * Compute a deterministic fingerprint of a service manifest, used to detect
+ * changes that require re-approval. Covered and excluded fields:
+ * docs/services.md → Fingerprinting.
  */
 export interface ServiceIdentity {
   /** How this service was loaded (managed, external, plugin). */

@@ -442,18 +442,12 @@ export class ManagedProcess extends EventEmitter {
     const policy = this.spec.restart;
 
     /**
-     * Restart policy decision:
-     *
-     * - `"always"`: restart regardless of exit reason.
-     * - `"on-failure"`: restart only on a non-zero exit code (i.e., the process
-     *   crashed or returned an error). Spawn failures — the child never
-     *   started, so the exit code is null — count as failures under this
-     *   policy. Processes killed by an external signal
-     *   (e.g., SIGKILL from OOM or a manual `kill`) are **not** considered
-     *   failures and will not trigger a restart under this policy.
-     * - `"on-unexpected-exit"`: restart on any exit that is not a clean exit
-     *   (code 0), including signal-killed processes.
-     * - `"never"`: never restart.
+     * Restart policy decision: `"always"` restarts regardless of exit
+     * reason; `"on-failure"` on non-zero exit codes (spawn failures count,
+     * signal-killed processes do not); `"on-unexpected-exit"` on any exit
+     * that is not clean (code 0), including signal kills; `"never"`
+     * never restarts. See docs/services.md ("Managed Services — Restart
+     * Policies") for the full decision table.
      */
     const isSignalKilled = signal !== null && code === null;
     const shouldRestart =

@@ -11,14 +11,9 @@
 
 /**
  * Whether a provider-reported finish reason means the response was truncated
- * at the output-token limit.
- *
- * Used to tell two very different failures apart when a tool call's arguments
- * do not parse:
- *  - the model emitted malformed JSON on its own (healable — the model can
- *    retry with the same intent), versus
- *  - the provider cut the response off mid-arguments (NOT healable — the call
- *    can never succeed, and replaying it poisons the next request).
+ * at the output-token limit. Used to distinguish healable malformed-JSON
+ * failures from non-healable provider truncation when a tool call's arguments
+ * fail to parse (see docs/models.md, "Truncation and Finish Reasons").
  *
  * @param finishReason - Provider-reported stop reason, if any.
  */

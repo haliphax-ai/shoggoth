@@ -28,18 +28,10 @@ type DrainResult = { name: string; ok: true } | { name: string; ok: false; err: 
 /**
  * Coordinates graceful shutdown: stop accepting work, run drains (grouped
  * by dependency level for parallel execution), then optional failure marking.
- *
- * Drains with the same `group` number run in parallel via
- * `Promise.allSettled`. Groups execute in ascending numeric order.
- * Drains registered without a group are sequential (backward compatible).
- *
+ * Drain grouping semantics: docs/daemon.md → "Drain Groups".
  * @example
  * ```ts
- * // Independent drains — same group, runs in parallel
  * coordinator.registerDrain("gateway", () => gw.stop(), { group: 1 });
- * coordinator.registerDrain("health-poller", () => hp.stop(), { group: 1 });
- *
- * // Dependent drain — runs after group 1 completes
  * coordinator.registerDrain("cleanup", () => cleanup(), { group: 2 });
  * ```
  */

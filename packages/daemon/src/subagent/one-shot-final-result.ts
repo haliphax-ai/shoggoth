@@ -64,13 +64,10 @@ function pendingFollowupFor(
 /**
  * The terminate closure for a one-shot's end-of-turn settle: deliver the
  * final transcript text as a structured OOB follow-up turn to its parent
- * when that text was not already delivered (the normal case for a steered
- * follow-up turn), then run the plain teardown either way.
- *
- * Every teardown path — the direct one, the deferred release, and the
- * safety timer — routes through here, so the parent always hears one of
- * "result" or (via the terminate notice) "ended" for the post-steer
- * lifetime of the child.
+ * when not already delivered, then run the plain teardown either way.
+ * Every teardown path routes through here (see docs/daemon.md, Subagents —
+ * One-shot notify drain), so the parent always hears one of "result" or
+ * "ended" for the post-steer lifetime of the child.
  */
 export function terminateOneShotWithFinalResult(deps: {
   readonly sessionId: string;

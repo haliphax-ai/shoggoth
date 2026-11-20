@@ -295,6 +295,17 @@ The `StatusManager` posts and edits a live status message for each workflow via 
 
 When the platform supports message pinning, the status post is pinned whenever it is (re)created (e.g. the initial post or a repost after a failed edit). Pinning is enabled by default and can be disabled by setting `workflow.pinStatusPost: false` in the system configuration.
 
+### Edit, Repost, and Latch
+
+Each tick edits the tracked message in place. `MessageAdapter.editMessage` returns a typed result whose failure reason drives the fallback decision:
+
+| Failure reason | Meaning                                                                                          | StatusManager response                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `not_found`    | Target message no longer exists (e.g. Discord 404)                                               | Repost a fresh status message and pin it if supported                                                       |
+| `unsupported`  | Platform has no edit capability at all                                                           | Repost a fresh status message and pin it if supported                                                       |
+| `transient`    | Rate limit, 5xx, network error — the message still exists                                        | Keep the message ID and retry the edit on the next tick. Reposting here orphans the old post as a duplicate |
+| `permanent`    | The surface rejects the request (e.g. HTTP 400 — archived thread); every retry fails identically | Latch dead: no further edits and no repost, since a repost would target the same broken surface             |
+
 ### Status Message Format
 
 ```

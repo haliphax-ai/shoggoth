@@ -34,16 +34,10 @@ const WORKSPACE_DIRS = [
 ] as const;
 
 /**
- * Node does not expose xattr syscalls, so default ACLs are installed with
- * `setfacl` (the `acl` package; present in the runtime image).
- *
- * One `setfacl` invocation applies both the access ACL (so the daemon can read
- * a freshly bootstrapped workspace) and the default ACL (so every file and
- * subdirectory created beneath inherits daemon access — no recursive walk now
- * or ever). The bootstrap runs as the agent user, the owner of these dirs, so
- * it may set ACLs on them without root or `CAP_FOWNER`. Failures are non-fatal:
- * the workspace is still fully usable by the agent; only the daemon's ACL
- * bridge is missing (it surfaces later as `EACCES` for the daemon uid).
+ * Install default ACLs on workspace directories with `setfacl` (Node exposes
+ * no xattr syscalls): access ACL so the daemon can read the workspace, default
+ * ACL so everything created beneath inherits it. Non-fatal on failure —
+ * details and failure behavior: docs/daemon.md → Agent Workspace Layout.
  */
 function setDefaultAcls(dirs: readonly string[]): void {
   if (process.platform !== "linux") return;

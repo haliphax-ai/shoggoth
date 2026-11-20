@@ -1,26 +1,12 @@
 /**
- * Runaway agent circuit breaker.
+ * Runaway agent circuit breaker (see docs/daemon.md → "Runaway Breaker").
  *
  * Deterministic detection of runaway model behavior that burns the token
  * budget until the TTL expires. Two heuristics, one shared two-stage state:
- *
- * - **Duplicate tool calls**: the model keeps issuing the same call (same
- *   tool name, same — truncated — arguments). A rolling window of the most
- *   recent tool-call signatures trips when any one signature's count within
- *   the window exceeds the configured maximum.
- * - **Excessive prose**: the model generates long prose without the tool
- *   activity needed to make progress (a runaway monologue). Accumulated
- *   assistant prose is charged against a per-turn character budget.
- *
- * Two-stage response, mirroring a physical circuit breaker:
- *
- * 1. First trip — `steer`: the model receives an injected steering message
- *    telling it to change approach; the window resets so it gets a fresh
- *    chance to recover.
- * 2. Second trip — `cancel`: the turn is terminated cleanly (same
- *    `break`-style as the other in-loop circuit breakers) and an operator
- *    notice is posted once through the active turn surface's in-turn banner
- *    path (silently skipped when no live surface exists).
+ * - **Duplicate tool calls**: repeated identical calls (same tool name, same
+ *   truncated arguments) tracked in a rolling signature window.
+ * - **Excessive prose**: long assistant prose with no tool activity to make
+ *   progress, charged against a per-turn character budget.
  */
 
 import { createHash } from "node:crypto";

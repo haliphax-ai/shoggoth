@@ -8,18 +8,12 @@ import {
 
 /**
  * Split a Discord message into chunks that each fit within `maxLength`.
- *
- * Splitting priority: newline → space → hard-cut.
- *
- * Fenced code blocks (triple backticks with optional language tag) are tracked:
- * if a chunk ends inside a code block the chunk is closed with ``` and the next
- * chunk reopens with the same fence (including language tag).
- *
- * Paired inline formatting markers (`**`, `*`, `__`, `~~`, `||`) that are opened
- * but not closed within a chunk are closed at the end and reopened at the start
- * of the next chunk.
- *
- * Formatting state is tracked via the shared helpers in `formatting-state.ts`.
+ * Split priority: newline → space → hard-cut. Fenced code blocks (triple
+ * backticks with optional language tag) and paired inline formatting markers
+ * (`**`, `*`, `__`, `~~`, `||`) are closed at each chunk boundary and reopened
+ * at the start of the next chunk; state is tracked via the shared helpers in
+ * `formatting-state.ts`. Details: docs/platform-discord.md ("Message
+ * Splitting").
  */
 export function splitDiscordMessage(
   text: string,

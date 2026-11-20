@@ -12,18 +12,7 @@ import { getLogger } from "../logging";
 
 const log = getLogger("tool-loop-mcp");
 
-/**
- * Closed-session signature produced when a pooled MCP session was closed out from
- * under an in-flight turn (e.g. the 30-minute per-instance idle eviction closing the
- * pool while a turn captured `external` at turn start).
- *
- * Origin: `mcp-jsonrpc-transport.ts` `request()` / `mcp-streamable-http-transport.ts`
- * `postOnce()` throw `Error: MCP session is closed`; the pool's `external` invoke
- * (`mcp-server-pool.ts`) catches it and wraps it as
- * `{ error: "mcp_tools_call_failed", message: String(e) }`, so the message reads
- * `Error: MCP session is closed`. The pattern also matches `MCP session closed`
- * (the wording used when `close()` fails still-pending requests).
- */
+/** Matches the closed-session error signature of a lapsed pooled MCP session. */
 const LAPSED_MCP_SESSION_RE = /MCP session (?:is )?closed/i;
 
 /**
@@ -58,10 +47,9 @@ export type ExternalMcpInvoke = (input: {
 }) => Promise<{ resultJson: string }>;
 
 /**
- * Validates `argsJson` against a routed tool's `inputSchema` (issue #435:
- * every dispatch path — session tool loop, workflow tool tasks, subagent
- * runtime — must fail loudly on unknown or missing arguments instead of
- * silently dropping them).
+ * Validates `argsJson` against a routed tool's `inputSchema`: every dispatch
+ * path — session tool loop, workflow tool tasks, subagent runtime — must fail
+ * loudly on unknown or missing arguments instead of silently dropping them.
  *
  * Returns a structured `invalid_arguments` error body when validation fails,
  * or `undefined` when the args are acceptable. Tools without a schema cannot
@@ -152,9 +140,9 @@ export function createMcpRoutingToolExecutor(options: {
         throw new Error(routed.error);
       }
       const { tool } = routed;
-      // Universal argument validation (issue #435). The session tool loop
-      // validates at Stage 2, but workflow tool tasks and the subagent
-      // runtime dispatch through here directly — so every path checks.
+      // Universal argument validation: the session tool loop validates at
+      // Stage 2, but workflow tool tasks and the subagent runtime dispatch
+      // through here directly — so every path checks.
       const validationError = validateRoutedToolArgs(name, tool.inputSchema, argsJson);
       if (validationError) {
         log.warn("tool call args validation failed (routing executor)", {

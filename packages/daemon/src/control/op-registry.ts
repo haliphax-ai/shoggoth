@@ -1,15 +1,12 @@
 /**
  * Static control-op handler registry.
  *
- * `req.op` arrives as an arbitrary string from the wire (parseRequestLine does
- * not constrain its format); safety relies on exact-string map lookups against
- * literal keys and on `get()` returning `undefined` for anything else (callers
- * then reject with ERR_UNKNOWN_OP). Never index, resolve, or interpolate `op`
- * into paths, imports, or command names — including computed keys on this map.
- *
- * This module must stay a leaf: it is imported by the policy engine (for the
- * derived defined-op set), so it must not pull runtime state or config back
- * into the import graph.
+ * `req.op` arrives as an arbitrary string from the wire; safety relies on
+ * exact-string map lookups against literal keys and on `get()` returning
+ * `undefined` for anything else. Never index, resolve, or interpolate `op`
+ * into paths, imports, or command names. This module must stay a leaf
+ * (imported by the policy engine) — no runtime state or config in its
+ * import graph. Threat model and constraints: docs/daemon.md → Control Plane.
  */
 import type { AuthenticatedPrincipal, WireRequest } from "@shoggoth/authn";
 import type { IntegrationOpsContext } from "./integration-ops";

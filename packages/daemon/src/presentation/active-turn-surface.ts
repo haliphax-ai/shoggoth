@@ -1,38 +1,11 @@
 /**
- * Active turn surface registry + unified banner manager for in-turn banners.
- *
- * Banners that belong to an in-flight turn — the session-send yield notice,
- * the "delivered in-turn" traces for exec / session-send notifications — must
- * land IN the turn's active output instead of being posted as separate
- * channel messages. The turn runner creates a per-turn {@link
- * TurnBannerCollector} and registers it for its session while the turn is
- * live; producers call `postTurnSurfaceNotice` and fall back to
- * `sendStatusMessage` only when no surface is registered (no live turn
- * output: OOB/internal turns, bare test harnesses).
- *
- * The collector owns both capture and rendering of notices:
- *  - capture: notices are recorded with an anchor captured from the runner's
- *    live state at fire time (`{ committedProseSegments, toolCalls }`);
- *  - live render: on every push the current display is re-rendered FROM
- *    SCRATCH with the recorded notices spliced in at their anchors — the
- *    banner lands mid-turn, in chronological position, not pinned to the
- *    tail of the streamed message;
- *  - terminal render: the same splice runs against the composed body at
- *    delivery, so the live stream and the delivered message place each
- *    notice between the prose segments it fired between. Each body renders
- *    at most once — the delivered body's first render is the final one and
- *    later calls return it untouched — so termination can never produce an
- *    intermediate layout or render the delivered body more than once.
- *
- * Both renders share one splice helper: slot s = after the s-th committed
- * prose segment (s=0 → before the first block; s=K → at the end), clamped to
- * the segment list the caller passes, firing order preserved within a slot.
- * When an anchor cannot be resolved — it exceeded the committed segment
- * count, or the body's segment boundaries are not locatable — the notices
- * fall back to the end-of-body block; they are never dropped and never throw
- * mid-stream.
- *
- * Mirrors the singleton-map pattern used by `sessions/steer-channel.ts`.
+ * Active turn surface registry + unified banner manager for in-turn banners:
+ * banners that belong to an in-flight turn must land in the turn's active output
+ * instead of separate channel messages. The turn runner registers a per-turn
+ * {@link TurnBannerCollector} for its session; producers call
+ * `postTurnSurfaceNotice` and fall back to `sendStatusMessage` only when no
+ * surface is registered. Full model (anchors, splicing, single-render guarantee):
+ * docs/daemon.md, "Turn Output Presentation".
  */
 
 /** The turn position at which a notice fired. */
@@ -75,13 +48,8 @@ export interface TurnBannerCollector {
    * Terminal render: splice the recorded notices into `body` at their anchor
    * positions. `segments` are the turn's committed prose segments, in order
    * (the split of the turn's composed prose). Falls back to appending the
-   * whole block at the end of `body` when anchors cannot be resolved.
-   *
-   * Renders each body at most once: the first render of `body` is the final
-   * one — calling again with that same body returns it untouched, so a
-   * re-run of the termination sequence can never produce a second (or
-   * bottom-smashed) layout for the delivered body. A distinct body (e.g.
-   * the error body after a failed delivery) gets its own single render.
+   * whole block at the end of `body` when anchors cannot be resolved. Each
+   * body renders at most once — see docs/daemon.md (Turn Output Presentation).
    */
   readonly terminalBody: (body: string, opts: { readonly segments: readonly string[] }) => string;
 }
@@ -96,19 +64,13 @@ const splitBlocks = (body: string): string[] => body.split(/\n\n+/);
 
 /**
  * Locates, for each prose segment in order, the block index of the segment's
- * LAST block — the insertion point for a notice anchored "after this
- * segment".
- *
- * Segments are round-sized: a round's content can contain blank lines (the
- * model narrates multi-paragraph chunks like "Raw spec:\n\n<paragraph>"), so
- * a segment may span several blocks after `splitBlocks`. Each PARAGRAPH of a
- * segment is therefore located individually: a paragraph matches a block
- * when it IS the block (exact, preferred) or when the block ends with it (a
- * decoration like the agent identity prefix glued onto the same block), and
- * the paragraphs are located forward in order so the segment's block run is
- * contiguous in the block list. Returns undefined when any paragraph cannot
- * be located — the body was rewritten away from the composed prose (e.g. a
- * mid-stream failover hop), so anchor positions are unresolvable.
+ * LAST block — the insertion point for a notice anchored "after this segment".
+ * Segments are round-sized and may span several blocks, so each paragraph of a
+ * segment is located individually (exact block match preferred, then a block
+ * ending with the paragraph), forward in order. Returns undefined when any
+ * paragraph cannot be located (the body was rewritten away from the composed
+ * prose, e.g. a mid-stream failover hop). Details: docs/daemon.md (Turn Output
+ * Presentation).
  */
 function locateSegmentBlocks(body: string, segments: readonly string[]): number[] | undefined {
   const blocks = splitBlocks(body);

@@ -1,25 +1,10 @@
 /**
- * RED tests for deliverOobStructuredResponse in integration-ops.ts (Phase 2).
- *
- * After the parent's queue-path model turn completes with a structured OOB
- * response, the response JSON is parsed and routed:
- * - `to_operator` → posted to the platform's operator surface (via ext.postToOperator)
- * - `to_sender`   → delivered to the originating subagent/sender session
- *                   (via pushSteer when an active steer channel exists, else runSessionModelTurn)
- *
- * The function does not exist yet — importing it fails (module not found).
- * That is the intended RED state for Phase 2.
- *
- * Signature under test (per plans/2026-09-08_structured-output-oob-delivery/spec.md):
- *   deliverOobStructuredResponse(opts: {
- *     structuredResponse: string;
- *     respondTo: string;
- *     childSessionId?: string;
- *     ext: SubagentRuntimeExtension;
- *     subLog: Logger;
- *     maxChars?: number;
- *     hasSender: boolean;
- *   }): Promise<void>;
+ * deliverOobStructuredResponse routing after the parent's queue-path model
+ * turn: to_operator posts to the operator surface, to_sender reaches the
+ * originating session via pushSteer (or an OOB turn when the steer entry is
+ * dropped / no channel exists); invalid JSON triggers a continuation nudge
+ * turn whose failure surfaces to the operator; deliveries are truncated to
+ * maxChars and statusBar state is forwarded.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 

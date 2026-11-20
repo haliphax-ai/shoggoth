@@ -475,6 +475,32 @@ Commands fall into two categories:
 
 ---
 
+## Building the CLI
+
+`scripts/build-cli.mjs` builds the operator CLI entry (`packages/cli/src/cli.ts`) into a single self-contained bundle at `packages/cli/dist/cli.mjs`:
+
+```
+node scripts/build-cli.mjs
+```
+
+- Workspace packages export raw TypeScript sources (their `exports` point at `./src/*.ts`), so a bare-node build cannot resolve cross-package imports without a TypeScript loader. Bundling inlines those workspace sources, which lets the published bin run under plain `node` with no `tsx` loader and no spawn wrapper.
+- Dependencies installed from the registry are `external`, resolved from `node_modules` at runtime.
+- The esbuild `banner: { js: ... }` shims CommonJS interop: esbuild's ESM output throws on `require()` calls reached through CJS dependency graphs (e.g. `better-sqlite3`); providing a real `require` avoids that.
+
+---
+
+## Worker exit diagnostics preload
+
+`scripts/worker-exit-diag.cjs` (loaded via `NODE_OPTIONS` in the CI step) wraps `child_process.fork` to print one greppable line per forked child exit:
+
+```
+[worker-exit-diag] pid=<pid> code=<code> signal=<signal>
+```
+
+Vitest's own worker forks ignore the `(code, signal)` arguments of the child's `exit` event when reporting an unexpected worker death, so a run that loses a worker mid-file shows no reason in the log — this preload restores that reason.
+
+---
+
 ## See Also
 
 - [Daemon](daemon.md) — the runtime process the CLI controls

@@ -4,13 +4,11 @@ import { contextLevelSchema } from "./schema";
 /**
  * Resolve the effective context level for a session.
  *
- * Precedence (highest first):
- * 1. Explicit spawn override parameter
- * 2. Per-agent config (`agents.list[agentId].subagentContextLevel` for subagents,
- *    `agents.list[agentId].contextLevel` for top-level agents)
- * 3. Top-level config (`agents.subagentContextLevel` for subagents,
- *    `agents.contextLevel` for top-level agents)
- * 4. Default: `"full"` for top-level agents, `"light"` for subagents
+ * Precedence (highest first): explicit spawn override, then per-agent config
+ * (`agents.list[agentId].subagentContextLevel` / `.contextLevel`), then
+ * top-level config (`agents.subagentContextLevel` / `agents.contextLevel`),
+ * then defaults (`"full"` top-level, `"light"` subagents). Full details:
+ * docs/shared.md — "Context Levels".
  */
 export function resolveContextLevel(
   config: ShoggothConfig,

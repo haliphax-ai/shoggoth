@@ -296,16 +296,12 @@ const SLASH_COMMANDS = [
 ] as const;
 /**
  * Register slash commands for each configured guild via bulk overwrite.
- *
- * Discord matches existing commands by name during a bulk overwrite: same-named
- * commands are updated in place (their snowflake IDs are preserved), missing
- * ones are created, and unknown leftovers are pruned. Startup registration is
- * therefore a convergent sync — command IDs stay stable across restarts as
- * long as nothing tears the list down.
- *
- * The application ID equals the bot user ID for bot applications. Performs no
- * transport calls when `guildIds` is empty (guild commands cannot exist
- * without a guild).
+ * Discord matches same-named commands during a bulk overwrite, so startup
+ * registration is a convergent sync: definitions update in place (snowflake
+ * IDs preserved) and stale entries are pruned — IDs stay stable across
+ * restarts. The application ID equals the bot user ID for bot applications.
+ * Performs no transport calls when `guildIds` is empty. See
+ * docs/platform-discord.md ("Slash Commands").
  */
 export async function registerDiscordSlashCommands(opts: {
   readonly transport: DiscordRestTransport;
@@ -387,25 +383,14 @@ const CRUISE_MODAL_PREFIX = "cruise_modal|";
 type PromptListEntry = { slug: string; placeholders?: readonly string[] };
 
 /**
- * How a prompt delivery is reported back to Discord. Each stage of the
- * staged `/prompt` flow uses a different style so message A (the slug
- * dropdown) always transitions forward instead of being left behind:
+ * How a prompt delivery is reported back to Discord in the staged `/prompt`
+ * flow, so message A (the slug dropdown) always transitions forward:
  *
- * - `direct-response` — the prompt op returns as soon as the prompt is
- *   delivered, so the slash command's initial response IS the delivery
- *   confirmation (`✅ Canned prompt … submitted to session …`). No deferred
- *   "thinking" placeholder and no post-turn edit.
- * - `inline-update` — ACK FIRST with UPDATE_MESSAGE (7), rewriting message A
- *   in place with the same delivery confirmation. Used by BOTH the
- *   slug-dropdown selection (no placeholders) and modal submits: Discord text
- *   inputs are modal-only, so message A stays visible as the dropdown while
- *   the modal is open and is rewritten here once the parameters are known.
- *   For the dropdown selection the rewrite clears the dropdown immediately.
- *
- * Either way the status is posted the moment the prompt is delivered — the
- * turn keeps running detached and announces itself via the typing indicator
- * and the session's delivery surface. Only a failure rewrites the status
- * afterwards (into `⚠️ Prompt failed: …`).
+ * - `direct-response` — the initial slash response IS the delivery
+ *   confirmation; no deferred placeholder, no post-turn edit.
+ * - `inline-update` — ACK first with UPDATE_MESSAGE (7), rewriting message A
+ *   in place (dropdown selection and modal submits). Details:
+ *   docs/platform-discord.md ("Slash Commands").
  */
 type PromptReplyStyle = "direct-response" | "inline-update";
 
@@ -530,20 +515,13 @@ async function runPromptProxy(
 }
 
 /**
- * Shared parameter-modal logic for the canned-prompt flow, used by both the
- * slug-dropdown handler (stage 2) and the `/prompt` slash command when the
- * slug arrives as an argument. Select-menu pre-selection never fires the
- * onchange event, so a slug WITH placeholders must open this modal directly
- * instead of routing through a pre-selected dropdown (a dead end).
- *
- * - More than 5 placeholders → guard error, delivered per `guardStyle`:
- *   in-place message update on the dropdown path, ephemeral slash response.
- * - Placeholders present → type-9 modal with `custom_id`
- *   `prompt_modal|<slug>`, so stage 3 rebuilds the params from the input
- *   custom_ids and re-derives the session from the interaction's channel.
- *
- * Callers must only invoke this with a non-empty placeholders list; the
- * no-placeholders shortcut (run the prompt directly) belongs to each caller.
+ * Shared parameter-modal logic for the canned-prompt flow: opens a type-9
+ * modal (`prompt_modal|<slug>`) with one text input per placeholder so stage
+ * 3 can rebuild the params and re-derive the session from the channel. More
+ * than 5 placeholders → guard error delivered per `guardStyle` (in-place
+ * update on the dropdown path, ephemeral response on the slash path). Callers
+ * must invoke this only with a non-empty placeholders list. Details:
+ * docs/platform-discord.md ("Slash Commands").
  */
 async function respondWithPromptParameterModal(
   deps: DiscordInteractionHandlerDeps,

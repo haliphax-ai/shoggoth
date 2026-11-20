@@ -1,17 +1,9 @@
 /**
- * One-shot teardown lifecycle: the end-of-turn settle must not destroy a
- * steering directive the settling turn never answered, and must not abort a
- * wake-up turn still in flight.
- *
- * Covered here:
- * - a failed turn with NO unanswered steers tears down normally (the
- *   historical behavior — regression guard for the outcome gate itself);
- * - a failed turn WITH unanswered steers is held, the steers are re-delivered
- *   via an OOB turn on the still-active session, and the teardown fires after
- *   that turn settles;
- * - a steer re-delivery turn that fails again does not wedge the session (the
- *   teardown fires; the wall-clock safety timer remains the absolute backstop);
- * - a delivery still in flight defers the direct terminate path.
+ * End-of-turn teardown lifecycle for one-shot subagents: failed turns with
+ * unanswered steers are held and the steers re-delivered via an OOB turn
+ * before teardown; a failed re-delivery still tears down; in-flight wake-up
+ * deliveries defer the direct terminate path until the turn ends. Also
+ * covers steer-channel drain/settle/take semantics and result dedupe.
  */
 
 import { afterEach, beforeEach, describe, it, vi } from "vitest";

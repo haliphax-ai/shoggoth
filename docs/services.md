@@ -38,6 +38,19 @@ Managed services are spawned and supervised by the daemon's process manager (pro
 
 If the process crashes, procman restarts it. If the manifest changes, the service enters `pending-reapproval` until the operator re-approves.
 
+#### Restart Policies
+
+The restart decision is made per process exit from the `restart` policy in the process spec:
+
+| Mode                 | Restarts when                                                                                                                                                                                                                                             |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `always`             | Always, regardless of exit reason                                                                                                                                                                                                                         |
+| `on-failure`         | Exit code is non-zero. Spawn failures — the child never started, so the exit code is null — count as failures. Processes killed by an external signal (e.g. SIGKILL from OOM or a manual `kill`) do **not** count and are not restarted under this policy |
+| `on-unexpected-exit` | Any exit that is not clean (code 0), including signal-killed processes                                                                                                                                                                                    |
+| `never`              | Never                                                                                                                                                                                                                                                     |
+
+Restart attempts are capped at `maxRetries` (default 5) consecutive failures, scheduled with exponential backoff (`initialDelayMs` default 1000, `backoffMultiplier` default 2, capped at `maxDelayMs` default 30000). A process that stays `running` for `resetAfterMs` (default 60000) resets the consecutive-failure counter.
+
 ### External Services
 
 External services are not spawned by the daemon. They run wherever the operator puts them — a separate host, a container, a cloud function. The daemon only knows their address and polls their health endpoint.
@@ -93,6 +106,7 @@ The daemon fetches the manifest from the service's manifest endpoint (default: `
 A fingerprint is computed from the manifest contents and service metadata (tier, URL, capabilities). This fingerprint is stored when the operator approves the service. On subsequent startups, if the fingerprint doesn't match the stored approval, the service enters `pending-reapproval` and its tools are suspended.
 
 This prevents a service from silently adding new tools or changing behavior without operator awareness.
+The fingerprint covers tool names, descriptions, parameters, methods, paths, and dispatch modes, plus the requested `ops` and the configured `capabilities` — identity (tier, URL) is included so approvals never transfer across tiers or URLs. It deliberately excludes informational manifest fields (name, version, `wsEndpoints`): editing those does not change behavior, so it must not force re-approval.
 
 ### Approval Flow
 
@@ -406,3 +420,14 @@ If a plugin update changes its tools or ops, the fingerprint changes and the plu
 All services (including plugins) must declare their intended control plane operations in the `ops` array. At runtime, every operation is checked against the approved ops list. Unauthorized operations are rejected.
 
 This is defense-in-depth for plugins — they run in-process so they can't be impersonated, but ops enforcement prevents a buggy plugin from accessing operations it never declared.
+
+### Identity Mutation Serialization
+
+The reference implementation (`packages/service-demo/src/server.ts`) guards its identity state with an in-module promise-chain mutex: each critical section is chained onto the tail of the previous one.
+
+The serialization is required because Node executes JS on a single thread but async handlers still interleave at every `await`. The rotation path reads the stored identity, awaits `TokenValidator.validate` against it, and only then writes the new identity — so two concurrent rotations (or a rotation racing a provision) could otherwise interleave the read-validate-write sequence and store an identity nobody validated.
+
+Two invariants make the chain robust:
+
+- A failing critical section never breaks the chain — the lock tail is always restored to a resolved promise, so later callers are not blocked by an earlier rejection.
+- All identity writers (rotation and provisioning) funnel through the same lock, so every read-validate-write on the identity is serialized.

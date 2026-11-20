@@ -29,25 +29,11 @@ function killableSubagentChildIds(sessions: SessionStore, sessionId: string): st
 }
 
 /**
- * Transport-agnostic session context segments (`sessions.context_segment_id`). Callers: control-plane
- * ops (`session_context_new` / `session_context_reset`), messaging adapters, future CLI.
- *
- * **New** mints a new segment id, so the previous segment's transcript rows are abandoned (excluded
- * from model context by the new segment id) and left for the retention workflow to clean up. **Reset**
- * does NOT mint a new segment id: it wipes the transcript of the CURRENT segment — the rows are
- * deleted, not abandoned — and the session continues with the segment it already had.
- *
- * Both **New** and **Reset** deny pending HITL for the session, clear the re-read-required list
- * (stale line numbers no longer apply to a fresh transcript), reset the session's tool state to the
- * agent's defaults (session tool discovery overlays from the previous transcript do not carry over),
- * regenerate the system-context token, reset the segment stats, and kill the session's
- * still-running **one-shot** subagents (via the optional `killSubagents` callback).
- * **Persistent** subagents (`subagentMode === "persistent"`) are never killed by either operation —
- * they outlive the parent's context lifecycle and are torn down only by TTL/inactivity or an
- * explicit subagent kill.
- *
- * **New** additionally clears **per-session** tool auto-approve (`hitl_session_tool_auto_approve`,
- * e.g. ✅ "this tool for session"). **Reset** retains per-session auto-approvals.
+ * Transport-agnostic session context segments (`sessions.context_segment_id`)
+ * for control-plane ops, messaging adapters, and the future CLI. **New** mints
+ * a segment id; **Reset** wipes the current segment's transcript rows and keeps
+ * the segment id. Both kill one-shot subagents; persistent subagents survive.
+ * Full semantics: docs/daemon.md → "Context Segments".
  */
 export function applySessionContextSegmentNew(input: {
   readonly db: Database.Database;

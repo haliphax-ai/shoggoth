@@ -1,17 +1,10 @@
 /**
- * Catalog refresh visibility through resolveContext (the acceptance criterion
- * for tools/list_changed handling): after a pool replaces a source's catalog
- * entry in place and notifies the runtime, the NEXT resolveContext serves the
- * refreshed tool list without reconnecting — for every context shape:
- *
- * 1. global-only fast path (cached `globalOnlyMcpCtx` snapshot),
- * 2. per-session cached context (two/three-tier shapes),
- * 3. per-agent merged context (built fresh from live arrays),
- * 4. denied-then-re-enabled server (pool refresh is rules-agnostic).
- *
- * The fake connect reproduces exactly what the real pool does on
- * notifications/tools/list_changed: swap the entry in `externalSources` at the
- * same index (array identity preserved), then call `onToolCatalogChange`.
+ * Catalog refresh visibility through resolveContext: after a pool replaces a
+ * source's catalog entry in place and notifies the runtime, the next
+ * resolveContext serves the refreshed tool list without reconnecting — for
+ * the global-only fast path, per-session cached contexts, per-agent merged
+ * contexts, and denied-then-re-enabled servers. The fake connect mimics the
+ * real pool's tools/list_changed handling.
  */
 import type { McpSourceCatalog } from "@shoggoth/mcp-integration";
 import type {

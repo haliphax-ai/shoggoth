@@ -280,15 +280,11 @@ function holdOneShotForNotifyDrain(input: {
 
 /**
  * End-of-turn teardown for a one-shot child session: terminate immediately
- * when nothing is pending (the historical behavior), otherwise hold the
- * session until its pending exec-notify handles drain (capped by the
- * persisted wall-clock expiry).
- *
- * `turnOutcome` is the settling turn's own result. A turn that ended
- * non-normally (`aborted` / `failed` / `canceled`) never answers the steers
- * it received; when the session has no other pending work, the outstanding
- * messages are re-delivered as an OOB turn before the teardown fires. A
- * failed turn with no unanswered steers tears down normally.
+ * when nothing is pending, otherwise hold the session until its pending
+ * exec-notify handles drain (capped by the persisted wall-clock expiry).
+ * A turn that ended non-normally never answers the steers it received; when
+ * no other work is pending they are re-delivered as an OOB turn before the
+ * teardown fires (see docs/daemon.md, Subagents — One-shot notify drain).
  */
 export function settleOneShotAfterTurn(input: {
   readonly sessionManager: SessionManager;
@@ -378,16 +374,10 @@ export function settleOneShotAfterTurn(input: {
 /**
  * The teardown that fires at the end of the LAST settle: deliver the one-shot's
  * final transcript text as a structured OOB follow-up turn to its parent when
- * that text was not already delivered (the normal case for a steered follow-up
- * turn), then terminate the session. The decision and delivery live in
- * {@link terminateOneShotWithFinalResult}; this wrapper binds the settle's
- * session context and the plain teardown every path shares.
- *
- * Every teardown path — the direct one here, the deferred release in
- * {@link tryReleaseOneShot}, and the safety timer inside
- * `holdOneShotForNotifyDrain` — routes through this closure, so the parent
- * always hears one of "result" or (via the terminate notice) "ended" for the
- * post-steer lifetime of the child.
+ * not already delivered, then terminate. Binds the settle's session context and
+ * the plain teardown; delegates the decision/delivery to
+ * {@link terminateOneShotWithFinalResult}. Every teardown path routes through
+ * this closure (see docs/daemon.md, Subagents — One-shot notify drain).
  */
 function buildOneShotTerminate(input: {
   readonly sessionManager: SessionManager;

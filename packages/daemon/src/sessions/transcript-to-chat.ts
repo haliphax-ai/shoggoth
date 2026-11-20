@@ -172,16 +172,13 @@ export function extractLatestTranscriptAssistantText(
 }
 
 /**
- * Concatenates every assistant text segment written after `afterSeq` — i.e.
- * the prose emitted during a single turn — in transcript order, joined by a
- * blank line. Prose that rides along a tool-call round is included (the tool
- * loop writes content and tool calls in one row, so the pre-tools segment
- * would otherwise be lost); pure tool-call rows carry no content and are
- * skipped naturally. Returns undefined when the turn produced no assistant
- * prose (tool-only turns). Unlike `extractLatestTranscriptAssistantText`
- * (which by design keeps only the LAST tool-call-free segment), this
- * preserves every pre-tools and post-tools segment so prose → tools → prose
- * turns can be delivered whole on non-streaming paths.
+ * Concatenates every assistant text segment written after `afterSeq` — the
+ * prose emitted during a single turn — in transcript order, joined by a blank
+ * line; returns undefined for tool-only turns. Unlike
+ * `extractLatestTranscriptAssistantText` (which keeps only the LAST
+ * tool-call-free segment), this preserves every pre- and post-tools segment so
+ * prose → tools → prose turns are delivered whole. See docs/daemon.md →
+ * "Transcript Assistant-Prose Extraction".
  */
 export function extractTurnTranscriptAssistantProse(
   db: Database.Database,

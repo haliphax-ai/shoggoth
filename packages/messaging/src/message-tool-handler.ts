@@ -30,14 +30,10 @@ export interface MessageToolCoreDeps {
  * Deps accepted by {@link executeMessageToolAction}: the core plus whichever
  * action-specific groups this wiring provides.
  *
- * Rather than leaving callers to remember which optionals each action needs,
- * the per-action groups ({@link SearchActionDeps}, {@link PostActionDeps},
- * {@link AttachmentDownloadActionDeps}) spell out what fully supporting an
- * action requires. Construction sites declare the groups they support with
- * those interfaces (e.g.
- * `satisfies SearchActionDeps & AttachmentDownloadActionDeps`) and confirm
- * them up front via {@link createActionToolDispatcher}, instead of
- * discovering a missing dep as a runtime null-check inside a handler.
+ * Action support is declared structurally: construction sites type deps as
+ * the dep-group interfaces (e.g. `satisfies SearchActionDeps &
+ * AttachmentDownloadActionDeps`) so a missing dep is a compile-time error,
+ * not a runtime null-check inside a handler.
  */
 export interface MessageToolDeps extends MessageToolCoreDeps {
   /** "search": resolves a session's guild scope. */
@@ -79,21 +75,13 @@ export interface AttachmentDownloadActionDeps extends MessageToolCoreDeps {
 }
 
 /**
- * Build the action dispatcher, confirming once — at construction time, not
- * at action execution time — that every dep group required by the enabled
- * capability extensions is wired:
- *
- * - `search` ⇒ `sessionToGuild` (without it, search can never succeed)
- * - `attachmentDownload` ⇒ `downloadFile` (without it, downloads can never succeed)
- *
- * `post`'s `readWorkspaceFile` and `attachment-download`'s
- * `getSessionWorkspace` stay request-scoped: only `content_path` uploads and
- * relative download paths need them, so the handlers negotiate those per
- * request with an explicit error.
- *
- * Throws an `Error` naming the missing dep when a required group is absent.
- * The returned function has the same contract as
- * {@link executeMessageToolAction}.
+ * Build the action dispatcher, confirming at construction time — not at
+ * action execution time — that every dep group required by the enabled
+ * capability extensions is wired: `search` ⇒ `sessionToGuild`,
+ * `attachmentDownload` ⇒ `downloadFile` (the workspace deps stay
+ * request-scoped, negotiated per request with an explicit error).
+ * Throws an `Error` naming the missing dep when a required group is
+ * absent; same contract as {@link executeMessageToolAction}.
  */
 export function createActionToolDispatcher(
   deps: MessageToolDeps,

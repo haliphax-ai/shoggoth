@@ -10,12 +10,8 @@ const log = getLogger("timer");
 
 /**
  * Resolve the session a timer fires onto. A timer owned by a terminated
- * session whose `session_anchor` is still alive retargets to the anchor:
- * otherwise the platform's turn guard rejects the dead owner, the timer is
- * already marked fired, and the anchored session silently never receives the
- * wake-up (a one-shot subagent scheduling a parent-anchored check-in loses it
- * the moment its own teardown terminates the owner row).
- *
+ * session whose `session_anchor` is still alive retargets to the anchor
+ * (rationale: docs/daemon.md → Timers, Delivery and Cancel Semantics).
  * Returns the owner unchanged when it is alive, when no store is bound
  * (tests/embeds — fail-open), or when the anchor is missing or itself
  * terminated (nothing live to deliver to).

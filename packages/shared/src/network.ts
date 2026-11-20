@@ -1,25 +1,12 @@
-// ---------------------------------------------------------------------------
-// Network utilities — private/internal IP range detection
-// ---------------------------------------------------------------------------
-
 import { isIP } from "node:net";
 
 /**
- * Returns true when the given IP address string falls within a private or
- * internal range that should be blocked for outbound fetch by default.
- *
- * Covered ranges:
- *  - 127.0.0.0/8   (IPv4 loopback)
- *  - 10.0.0.0/8    (RFC 1918)
- *  - 172.16.0.0/12 (RFC 1918)
- *  - 192.168.0.0/16 (RFC 1918)
- *  - 0.0.0.0/8     (current network)
- *  - 169.254.0.0/16 (link-local)
- *  - ::1            (IPv6 loopback)
- *  - fc00::/7       (IPv6 ULA)
- *  - fe80::/10      (IPv6 link-local)
- *  - ::             (unspecified)
- *  - ::ffff:0:0/96  mapped IPv4 (delegates to IPv4 check)
+ * Returns true when the IP address falls within a private/internal range that
+ * should be blocked for outbound fetch by default. Covered ranges: IPv4
+ * loopback, RFC 1918, `0.0.0.0/8`, link-local; IPv6 loopback, unspecified,
+ * ULA, link-local; IPv4-mapped IPv6 delegates to the IPv4 check. Returns
+ * `false` for non-IP-literal strings (caller should DNS-resolve first).
+ * Full list: docs/shared.md — "Network Utilities".
  */
 export function isPrivateIp(hostname: string): boolean {
   const version = isIP(hostname);

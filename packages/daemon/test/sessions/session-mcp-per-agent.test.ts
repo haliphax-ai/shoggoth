@@ -1,17 +1,10 @@
 /**
- * RED-phase TDD tests for per-agent MCP pool scope (Phase 3).
- *
- * These tests verify:
- * 1. Two sessions with the same agent ID share one per-agent pool.
- * 2. Two sessions with different agent IDs get separate per-agent pools.
- * 3. Agent credentials (agentContext) are passed through to connectShoggothMcpServers.
- * 4. Fallback: unparseable session URN falls back to the global pool.
- * 5. shutdown() closes all per-agent pools.
- * 6. Three-tier context merging: global + per-agent + per-session tools are merged.
- * 7. Per-agent idle eviction — after notifyTurnEnd with no subsequent turn, agent pool evicted.
- * 8. Per-agent idle eviction — notifyTurnBegin cancels pending per-agent idle timer.
- * 9. Per-agent idle eviction — two sessions sharing agent pool: eviction only when both idle.
- * 10. shutdown() clears per-agent idle timers.
+ * Per-agent MCP pool scope: sessions sharing an agent ID share one per-agent
+ * pool (separate agents get separate pools), agentContext is passed through
+ * to connectShoggothMcpServers, unparseable URNs fall back to the global
+ * pool, shutdown closes pools and their idle timers, resolveContext merges
+ * global + per-agent + per-session tools, and idle eviction fires only when
+ * every session for the agent is idle (turn begin cancels pending timers).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSessionMcpRuntime } from "../../src/sessions/session-mcp-runtime";

@@ -15,15 +15,10 @@ interface BootstrapMainSessionOptions {
 
 /**
  * Ensures every configured agent's workspace and primary session row exist.
+ * Steps: docs/daemon.md → "Bootstrap Main Session".
  *
- * 1. Creates workspace directory + subdirs (skills, memory, tmp, prompts,
- *    media/inbound + template files) with default ACLs for the daemon uid
- * 1. Creates workspace directory + subdirs (memory, tmp, skills, template files)
- * 2. Resolves session id from the agent's first platform route
- * 3. Inserts the session row if missing
- *
- * Backward-compatible: if no agents are configured, falls back to bootstrapping
- * a single "main" agent using `config.runtime?.agentId`.
+ * Backward-compatible: if no agents are configured, falls back to
+ * bootstrapping a single "main" agent using `config.runtime?.agentId`.
  */
 export async function bootstrapMainSession(opts: BootstrapMainSessionOptions): Promise<void> {
   const log = getLogger("bootstrap");

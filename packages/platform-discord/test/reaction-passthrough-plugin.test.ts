@@ -2,15 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
  * Reaction passthrough session resolution, wired inside plugin.ts's
- * `platform.start` hook.
- *
- * Regression coverage for the `reaction.passthrough.no_session` drop:
- * reactions on dynamically-bound threads (thread/persistent subagents) must
- * resolve their session via the messaging runtime's `resolveSessionId`
- * (dynamic thread bindings first, static config routes second), not a
- * static-routes-only scan. A full gateway/platform stack is not needed —
- * the messaging bootstrap and platform handle are mocked and the reaction
- * event is delivered through the captured gateway handler.
+ * `platform.start` hook. Regression coverage for the
+ * `reaction.passthrough.no_session` drop: reactions on dynamically-bound
+ * threads must resolve their session via the messaging runtime's
+ * `resolveSessionId` (dynamic bindings first, static routes second). The
+ * messaging bootstrap and platform handle are mocked; the reaction event is
+ * delivered through the captured gateway handler.
  */
 
 const h = vi.hoisted(() => ({

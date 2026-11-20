@@ -1,17 +1,8 @@
 /**
- * RED tests for the OOB (out-of-band) response schema constants.
- *
- * These constants will be created in `src/messaging/oob-response-schemas.ts`.
- * The module does not exist yet, so importing it fails (module not found) —
- * that is the intended RED state for Phase 1.
- *
- * Verified:
- * - OOB_SCHEMA_WITH_SENDER is a valid JSON Schema requiring `to_operator`
- *   and `to_sender`, both nullable strings, with additionalProperties: false.
- * - OOB_SCHEMA_NO_SENDER is a valid JSON Schema requiring `to_operator`
- *   (nullable string) with additionalProperties: false.
- * - OOB_WITH_SENDER_GUIDANCE and OOB_NO_SENDER_GUIDANCE are non-empty strings
- *   containing the key phrases the model needs to produce conformant output.
+ * OOB response schema constants: OOB_SCHEMA_WITH_SENDER requires nullable
+ * `to_operator` and `to_sender` strings, OOB_SCHEMA_NO_SENDER requires only
+ * `to_operator` (both with additionalProperties: false), and the guidance
+ * strings are non-empty and mention structured output.
  */
 import { describe, it, expect } from "vitest";
 import { validateResponseSchema } from "@shoggoth/models";

@@ -99,15 +99,10 @@ export function buildThreadSubagentCreatedBanner(input: {
 }
 
 /**
- * Find the session a control-plane spawn may adopt when its thread binding is refused:
- * the freshly autocreated thread subagent — a live, persistent, thread-bound session that
- * has never fired a turn (banner-only, zero transcript messages). Adoption hands the
- * thread back to the spawn op, which delivers its prompt as the session's first model
- * turn instead of failing the spawn and leaving a banner-only zombie.
- *
- * Returns undefined when no adoptable session exists (an unrelated session holds the
- * thread, or the autocreated one already has history), so callers fail the spawn the
- * usual way.
+ * Find the session a control-plane spawn may adopt when its thread binding is
+ * refused: the freshly autocreated thread subagent (live, persistent, thread-bound,
+ * never fired a turn). Returns undefined when no adoptable session exists, so
+ * callers fail the spawn the usual way.
  */
 export function findAdoptableThreadSubagentSession(input: {
   readonly sessions: SessionStore;
@@ -140,22 +135,12 @@ export function findAdoptableThreadSubagentSession(input: {
 }
 
 /**
- * Core entry point for platform thread-create events: decides whether an automatic
- * thread-based subagent session should be created and performs the creation when it
- * should. Platforms stay thin — they parse the gateway event, resolve channel→session,
- * and deliver the status message; every decision lives here.
- *
- * Guarantees:
- * - No-op when `agents.threadSubagents` is false.
- * - No-op when the parent channel is unbound or its session is not top-level.
- * - No-op with `control_plane_claimed` when the thread (or a pending creation in the
- *   parent channel) is claimed by an in-flight control-plane `subagent_spawn`, which
- *   binds its own session instead.
- * - Idempotent: a thread that already has a session binding (durable store or runtime
- *   map) never gets a second session, including re-fired gateway events and threads
- *   restored by the startup reconcile.
+ * Core entry point for platform thread-create events: decides whether an
+ * automatic thread-based subagent session should be created and performs the
+ * creation when it should. No-op when disabled, when the parent channel is
+ * unbound or its session is not top-level, or when the thread is claimed by an
+ * in-flight control-plane `subagent_spawn`; idempotent per thread.
  */
-
 export async function handlePlatformThreadCreate(
   input: PlatformThreadCreateInput,
 ): Promise<ThreadCreateHandlingResult> {

@@ -187,16 +187,12 @@ function tryResolveRef(
 }
 
 /**
- * Resolve a model ref to its full definition, walking the failover chain when the
- * target provider is marked as failed.
- *
- * Resolution algorithm:
- * 1. Determine target ref: explicit ref > first in effective failover chain
- * 2. Look up provider by providerId from the ref
- * 3. Check provider_failures: if failed and not stale → skip to failover; if stale → clear and try
- * 4. If provider down, find position in failover chain, walk from next entry until non-failed provider found
- * 5. If chain exhausted, return null + log warning
- * 6. Resolve model definition from provider's keyed `models` record by name
+ * Resolve a model ref to its full definition, walking the failover chain when
+ * the target provider is marked as failed. The target ref is explicit when
+ * given, else the first entry of the effective failover chain; a down provider
+ * skips ahead from its chain position until a healthy provider is found, and
+ * an exhausted chain returns null with a warning. See docs/daemon.md →
+ * "Model Resolution" for the full algorithm and failure bookkeeping.
  */
 export function resolveModel(
   db: Database.Database,

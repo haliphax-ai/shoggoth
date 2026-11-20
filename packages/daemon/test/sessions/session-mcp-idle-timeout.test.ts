@@ -1,13 +1,10 @@
 /**
- * RED-phase TDD tests for unified MCP pool idle eviction (Phase 5).
- *
- * These tests verify:
- * 1. `trackInstanceIdle` — true when perInstanceIdleTimeoutMs > 0 and at least one MCP server.
- * 2. `notifyTurnBegin` / `notifyTurnEnd` are called during inbound turns (wiring gap).
- * 3. Per-session idle eviction using `perInstanceIdleTimeoutMs`.
- * 4. Global pool idle eviction — after notifyTurnEnd with no subsequent turn, global pool evicted.
- * 5. Turn begin cancels eviction timers for all applicable scopes.
- * 6. shutdown() clears global, per-agent, and per-session idle timers.
+ * Unified MCP pool idle eviction: trackInstanceIdle gating on
+ * perInstanceIdleTimeoutMs, notifyTurnBegin/End wiring in
+ * runInboundSessionTurn (including the error path), per-session and global
+ * pool eviction after idle timeouts, turn begin canceling timers across all
+ * scopes, shutdown clearing every idle timer, and reconnect-after-eviction
+ * recovery for failed connects.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSessionMcpRuntime } from "../../src/sessions/session-mcp-runtime";

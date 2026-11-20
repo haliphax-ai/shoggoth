@@ -41,21 +41,14 @@ export function isSyntheticToolCall(toolCall: ChatToolCall): boolean {
 }
 
 /**
- * Parse and validate a synthetic `__structured_output__` tool call's
- * arguments against the response schema.
- *
- * Returns the normalized (re-serialized) JSON string on success. Throws
- * {@link StructuredOutputValidationError} — carrying the raw arguments and the
- * schema — when the arguments are not valid JSON or do not conform, so
- * callers (e.g. the daemon tool loop) can hand the model a concrete schema
- * error and count the attempt against the retry budget instead of silently
- * discarding a non-conformant call.
+ * Parse and validate a synthetic `__structured_output__` tool call's arguments
+ * against the response schema. Returns the normalized (re-serialized) JSON
+ * string on success; throws {@link StructuredOutputValidationError} otherwise.
  *
  * @param mode - When `"strict"`, schema validation is skipped (the provider
  *   enforces the schema server-side); JSON parsing is always enforced.
- * @param finishReason - Provider-reported finish reason for the response that
- *   carried this tool call (e.g. `length` = truncated). Attached to any
- *   validation error so callers can surface truncation explicitly.
+ * @param finishReason - Provider-reported finish reason; attached to any
+ *   validation error.
  */
 export function validateSyntheticToolCall(
   toolCall: ChatToolCall,

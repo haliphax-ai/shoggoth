@@ -89,6 +89,14 @@ presented to agents when they read the skill.
 - Values are taken as raw strings; boolean coercion and tag array parsing happen in dedicated helpers.
 - If the file does not start with `---`, the entire content is treated as the body with no frontmatter fields (this is **not** malformed — see below).
 
+### Tag Parsing
+
+The `tags` frontmatter field is parsed from a YAML-ish inline array (`[tag1, tag2]`) or a bare comma-separated string by `parseTags`:
+
+- Tags are trimmed and lowercased, then validated against `/^[a-z0-9-]+$/` (lowercase letters, digits, hyphens); non-conforming tags are **dropped**, not rejected.
+- Dropping is deliberate: tags are advisory metadata parsed from untrusted frontmatter, so a malformed tag must never fail a skill scan, and a kept-but-invalid tag would leak characters that search (exact-match tag filters, substring scoring) never matches.
+- A tag that trims to empty is also dropped. Missing or entirely malformed input yields `[]`, never an error.
+
 ### Malformed Frontmatter (Skip Policy)
 
 A frontmatter block is **malformed** when any of the following is true:

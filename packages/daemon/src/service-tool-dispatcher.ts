@@ -69,11 +69,10 @@ export class ServiceToolDispatcher {
 
   /**
    * Dispatch a tool call to a managed/external service via HTTP.
-   * Resolves service URL from registry, injects auth header,
-   * sends request, returns response body.
    *
    * @param serviceId - The service ID to dispatch to
-   * @param decl - The tool declaration
+   * @param decl - The tool declaration (route path, method, dispatch mode —
+   *   docs/services.md → Writing a Service)
    * @param args - Arguments to pass to the tool
    * @param ctx - Invocation context
    * @returns The result as a JSON string

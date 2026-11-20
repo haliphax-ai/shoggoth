@@ -1,14 +1,8 @@
 /**
- * RED tests for `modelInvocationOverride` threading in `executeSessionAgentTurn`.
- *
- * `ExecuteSessionAgentTurnInput` does not yet have a `modelInvocationOverride`
- * field (Phase 1 of the structured-output OOB delivery plan). These tests call
- * `executeSessionAgentTurn` with the override provided via `as any` and assert
- * that the override fields are merged (with override precedence) into the model
- * invocation params forwarded to the model client's `completeWithTools`.
- *
- * Because the merge is not implemented yet, the responseSchema / structuredOutputMode
- * assertions below FAIL — that is the intended RED state.
+ * modelInvocationOverride threading in executeSessionAgentTurn: override
+ * fields merge into the model invocation params forwarded to the model
+ * client with override precedence, no-override behavior is unchanged, and
+ * the session's stored modelSelection is never mutated.
  */
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
