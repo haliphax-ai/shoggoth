@@ -65,17 +65,12 @@ export type IntegrationOpsContext = {
     readonly hitlRef: HitlConfigRef;
     readonly autoApproveGate: HitlAutoApproveGate;
   };
-  /**
-   * MCP streamable HTTP cancel routing (default: process registry filled by the active platform).
-   * Override in tests.
-   */
   /** The vault service for credential management. */
   readonly vault?: import("../vault/vault-service").VaultService;
   /** The service approval store for managed services. */
   readonly serviceApprovalStore?: import("../service-approval-store").ServiceApprovalStore;
   /** The service registry for managed services. */
   readonly serviceRegistry?: import("../service-registry").ServiceRegistry;
-  /** The service tool registry for managed services. */
   /** The service tool registry for managed services. */
   readonly serviceToolRegistry?: import("../service-tool-registry").ServiceToolRegistry;
   /** The service key store for age key management. */

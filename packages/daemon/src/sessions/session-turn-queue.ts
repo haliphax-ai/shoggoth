@@ -75,7 +75,6 @@ export class TieredTurnQueue {
   private readonly sessions = new Map<string, SessionQueue>();
   readonly starvationThreshold: number;
   readonly maxDepth: number;
-  // New field for the callback
   private onTurnEnd?: (sessionId: string) => void;
   /** Additional per-event turn-end listeners. */
   private readonly turnEndListeners = new Set<(sessionId: string) => void>();
@@ -404,9 +403,7 @@ export class TieredTurnQueue {
         // A session left blocked by a crashed turn would wedge forever, so a
         // turn-end always clears the freeze alongside the running slot.
         this.blocked.delete(sessionId);
-        // *** IMPLEMENTATION 2: Call the hook upon turn completion ***
         this.fireTurnEnd(sessionId);
-        // ***********************************************************
         current.running = false;
         current.runningEntry = undefined;
         current.runningSince = undefined;
