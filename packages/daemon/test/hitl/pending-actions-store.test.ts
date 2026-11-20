@@ -192,4 +192,40 @@ describe("PendingActionsStore", () => {
     assert.equal(pending.length, 1);
     assert.equal(pending[0]!.id, "b");
   });
+
+  it("deletePendingForSessionIds deletes only pending rows of given sessions", () => {
+    const store = createPendingActionsStore(db);
+    for (const id of ["d1", "d2", "d3", "d4"]) {
+      store.enqueue({
+        id,
+        sessionId: id === "d4" ? "s-other" : "s-del",
+        toolName: "exec",
+        payload: {},
+        riskTier: "critical",
+        expiresAtIso: "2099-01-01T00:00:00.000Z",
+      });
+    }
+    store.approve("d1", "op");
+
+    const deleted = store.deletePendingForSessionIds(["s-del", " s-other "]);
+    assert.equal(deleted, 3);
+    assert.equal(store.getById("d2"), undefined);
+    assert.equal(store.getById("d3"), undefined);
+    assert.equal(store.getById("d4"), undefined);
+    assert.ok(store.getById("d1"), "approved row must survive");
+  });
+
+  it("deletePendingForSessionIds returns 0 for empty input", () => {
+    const store = createPendingActionsStore(db);
+    store.enqueue({
+      id: "keep",
+      sessionId: "s-keep",
+      toolName: "read",
+      payload: {},
+      riskTier: "safe",
+      expiresAtIso: "2099-01-01T00:00:00.000Z",
+    });
+    assert.equal(store.deletePendingForSessionIds([]), 0);
+    assert.ok(store.getById("keep"));
+  });
 });
