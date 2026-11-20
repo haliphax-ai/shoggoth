@@ -217,10 +217,12 @@ describe("persistent subagent all-turn delivery", () => {
     });
 
     it("does NOT deliver result for thread-bound session (has platform_thread_id)", async () => {
-      // Note: thread-bound check is done at the CALL site in integration-ops.ts (line ~1280),
-      // not inside deliverSubagentResult. The call site checks `if (!platformThreadId)` before
-      // calling deliverSubagentResult. For the all-turn hook, we'll need to add similar logic.
-      // This test verifies the session row has the right data for the hook to make that decision.
+      /*
+       * Note: thread-bound check is done at the CALL site in integration-ops.ts (line ~1280),
+       * not inside deliverSubagentResult. The call site checks `if (!platformThreadId)` before
+       * calling deliverSubagentResult. For the all-turn hook, we'll need to add similar logic.
+       * This test verifies the session row has the right data for the hook to make that decision.
+       */
       const childId = "child-thread";
       const parentId = "parent-thread";
       const respondTo = parentId;

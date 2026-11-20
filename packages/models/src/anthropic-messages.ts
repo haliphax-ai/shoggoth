@@ -955,12 +955,14 @@ export function createAnthropicMessagesProvider(
               finishReason,
             };
           } else if (syntheticCall && realToolCalls.length > 0) {
-            // Mixed with real tool calls: validate the synthetic attempt so a
-            // non-conformant call surfaces a schema error (and counts against
-            // the retry budget) instead of being silently discarded, which
-            // previously let models retry forever. Valid structured output is
-            // still stripped here — the model must finish by calling the tool
-            // alone.
+            /*
+             * Mixed with real tool calls: validate the synthetic attempt so a
+             * non-conformant call surfaces a schema error (and counts against
+             * the retry budget) instead of being silently discarded, which
+             * previously let models retry forever. Valid structured output is
+             * still stripped here — the model must finish by calling the tool
+             * alone.
+             */
             validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode, finishReason);
             return {
               content: outText,
@@ -1094,12 +1096,14 @@ export function createAnthropicMessagesProvider(
             finishReason,
           };
         } else if (syntheticCall && realToolCalls.length > 0) {
-          // Mixed with real tool calls: validate the synthetic attempt so a
-          // non-conformant call surfaces a schema error (and counts against
-          // the retry budget) instead of being silently discarded, which
-          // previously let models retry forever. Valid structured output is
-          // still stripped here — the model must finish by calling the tool
-          // alone.
+          /*
+           * Mixed with real tool calls: validate the synthetic attempt so a
+           * non-conformant call surfaces a schema error (and counts against
+           * the retry budget) instead of being silently discarded, which
+           * previously let models retry forever. Valid structured output is
+           * still stripped here — the model must finish by calling the tool
+           * alone.
+           */
           validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode, finishReason);
           return {
             content: outText,

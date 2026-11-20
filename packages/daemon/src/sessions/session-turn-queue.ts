@@ -328,13 +328,15 @@ export class TieredTurnQueue {
     sq.running = false;
     sq.runningEntry = undefined;
     sq.runningSince = undefined;
-    // An in-turn block (e.g. a mid-loop compaction) is intentionally KEPT: the
-    // force-released turn's work continues in the background, and the next
-    // pumped entry must not start until the block owner releases (or the turn
-    // ends, which also clears the freeze). Operator recovery un-wedges the
-    // entry's promise, not an in-flight transcript rewrite.
-    // Settle the wedged entry's promise so its caller is unblocked. A no-op
-    // if the entry somehow already settled.
+    /*
+     * An in-turn block (e.g. a mid-loop compaction) is intentionally KEPT: the
+     * force-released turn's work continues in the background, and the next
+     * pumped entry must not start until the block owner releases (or the turn
+     * ends, which also clears the freeze). Operator recovery un-wedges the
+     * entry's promise, not an in-flight transcript rewrite.
+     * Settle the wedged entry's promise so its caller is unblocked. A no-op
+     * if the entry somehow already settled.
+     */
     entry?.reject(new TurnDroppedError(entry.id));
     this.pump(sessionId);
     return true;

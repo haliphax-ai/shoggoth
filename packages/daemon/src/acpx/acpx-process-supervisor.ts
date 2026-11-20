@@ -68,10 +68,12 @@ export class AcpxProcessSupervisor {
 
     const pid = child.pid;
     const root = input.acpWorkspaceRoot;
-    // Attach listeners synchronously, before the pid check below: a spawn
-    // failure (ENOENT, EACCES, ...) surfaces as an async 'error' event, and
-    // throwing before a listener exists would leave that event unhandled —
-    // an uncaught exception that takes the whole daemon down.
+    /*
+     * Attach listeners synchronously, before the pid check below: a spawn
+     * failure (ENOENT, EACCES, ...) surfaces as an async 'error' event, and
+     * throwing before a listener exists would leave that event unhandled —
+     * an uncaught exception that takes the whole daemon down.
+     */
     child.on("exit", (code, signal) => {
       const t = this.byRoot.get(root);
       if (t?.pid === pid) {

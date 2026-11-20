@@ -251,15 +251,17 @@ describe("config_request control op", { concurrency: false }, () => {
       acpxSupervisor: undefined,
       recordIntegrationAudit: () => {},
     };
-    // stateDbPath must be min(1) in full schema — setting to empty string passes fragment
-    // (fragment allows optional) but after merge the full schema should reject it.
-    // Actually, fragment also validates min(1). Use a different approach:
-    // Set configDirectory to empty string — fragment allows optional, but full schema requires non-empty.
-    // Fragment schema: configDirectory: z.string().min(1).optional() — empty string fails fragment too.
-    // Instead, test that a valid fragment that produces a valid merged config returns ok: true
-    // (already covered above). For merged validation failure, we'd need the base config to be
-    // in a state where the overlay breaks it — which is hard to construct.
-    // Instead, verify that an unrecognized key in strict mode fails fragment validation.
+    /*
+     * stateDbPath must be min(1) in full schema — setting to empty string passes fragment
+     * (fragment allows optional) but after merge the full schema should reject it.
+     * Actually, fragment also validates min(1). Use a different approach:
+     * Set configDirectory to empty string — fragment allows optional, but full schema requires non-empty.
+     * Fragment schema: configDirectory: z.string().min(1).optional() — empty string fails fragment too.
+     * Instead, test that a valid fragment that produces a valid merged config returns ok: true
+     * (already covered above). For merged validation failure, we'd need the base config to be
+     * in a state where the overlay breaks it — which is hard to construct.
+     * Instead, verify that an unrecognized key in strict mode fails fragment validation.
+     */
     const req = makeWireRequest("config_request", {
       key: "unknownField",
       fragment: true,

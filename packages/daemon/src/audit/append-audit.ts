@@ -16,10 +16,12 @@ export interface AppendAuditRowInput {
   readonly argsRedactedJson?: string;
 }
 
-// The audit INSERT is prepared once per database handle and reused across
-// calls: the tool loop records several audit rows per tool call, so preparing
-// the statement on every append would repeat the same parse per row. A WeakMap
-// keys the cache on the handle so entries do not outlive a closed db.
+/*
+ * The audit INSERT is prepared once per database handle and reused across
+ * calls: the tool loop records several audit rows per tool call, so preparing
+ * the statement on every append would repeat the same parse per row. A WeakMap
+ * keys the cache on the handle so entries do not outlive a closed db.
+ */
 const insertAuditStmts = new WeakMap<Database.Database, Database.Statement>();
 
 export function appendAuditRow(db: Database.Database, row: AppendAuditRowInput): void {

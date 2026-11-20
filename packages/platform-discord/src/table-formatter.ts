@@ -275,12 +275,14 @@ export function mdTableToAscii(md: string): string {
         a === "left" ? "left" : a === "right" ? "right" : a === "center" ? "center" : "left",
     );
 
-    // Splice the boxed table into the ORIGINAL text by source offsets.
-    // Re-serializing the whole document would rewrite unrelated markdown —
-    // notably, remark-stringify re-emits empty blockquote continuation
-    // lines as a bare `>` (no trailing space), which breaks Discord's
-    // blockquote rendering — so everything outside the table stays
-    // byte-identical.
+    /*
+     * Splice the boxed table into the ORIGINAL text by source offsets.
+     * Re-serializing the whole document would rewrite unrelated markdown —
+     * notably, remark-stringify re-emits empty blockquote continuation
+     * lines as a bare `>` (no trailing space), which breaks Discord's
+     * blockquote rendering — so everything outside the table stays
+     * byte-identical.
+     */
     const start: number | undefined = tableNode.position?.start?.offset;
     const end: number | undefined = tableNode.position?.end?.offset;
     if (start == null || end == null || start < cursor) return SKIP;

@@ -118,10 +118,12 @@ describe("runToolLoop runaway circuit breaker", () => {
       toolRuns: createToolRunStore(db),
     });
 
-    // Hop 1-2: ok. Hop 3: steer (3rd identical, prevented before execution).
-    // Window resets. Hop 4-5: ok. Hop 6: the cancel verdict also trips
-    // BEFORE execution, so only 4 calls reach the executor (hops 1, 2, 4,
-    // 5); the loop stops without a 7th model call (completions stay at 6).
+    /*
+     * Hop 1-2: ok. Hop 3: steer (3rd identical, prevented before execution).
+     * Window resets. Hop 4-5: ok. Hop 6: the cancel verdict also trips
+     * BEFORE execution, so only 4 calls reach the executor (hops 1, 2, 4,
+     * 5); the loop stops without a 7th model call (completions stay at 6).
+     */
     assert.equal(completions.length, 6);
     assert.equal(executor.mock.calls.length, 4);
     assert.ok(
@@ -344,10 +346,12 @@ describe("runToolLoop runaway circuit breaker", () => {
     );
     assert.ok(!leaked, "prose cancel notice must not be appended to the transcript");
 
-    // The trip hop's assistant row is persisted BEFORE the prose budget is
-    // charged: its prose already streamed live, so the transcript-derived
-    // turn prose must be exactly as long as the streamed display. The final
-    // assistant row carries the trip hop's content and tool calls.
+    /*
+     * The trip hop's assistant row is persisted BEFORE the prose budget is
+     * charged: its prose already streamed live, so the transcript-derived
+     * turn prose must be exactly as long as the streamed display. The final
+     * assistant row carries the trip hop's content and tool calls.
+     */
     const assistantRows = page.messages.filter((m) => m.role === "assistant");
     const tripRow = assistantRows[assistantRows.length - 1];
     assert.ok(tripRow, "cancel must persist the trip hop's assistant row");

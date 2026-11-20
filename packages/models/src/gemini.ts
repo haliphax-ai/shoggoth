@@ -228,11 +228,13 @@ export function sanitizeSchemaForGemini(schema: unknown): unknown {
   delete s.additionalProperties;
 
   if (Array.isArray(s.type)) {
-    // Gemini function-declaration schemas accept a single type string only.
-    // Nullable unions such as `["string", "null"]` (used heavily by the OOB
-    // response schemas) are collapsed to the non-null member — nullability
-    // cannot be expressed in Gemini's schema subset — or dropped entirely
-    // when no single type remains.
+    /*
+     * Gemini function-declaration schemas accept a single type string only.
+     * Nullable unions such as `["string", "null"]` (used heavily by the OOB
+     * response schemas) are collapsed to the non-null member — nullability
+     * cannot be expressed in Gemini's schema subset — or dropped entirely
+     * when no single type remains.
+     */
     const nonNull = (s.type as unknown[]).filter((t) => t !== "null");
     if (nonNull.length === 1 && typeof nonNull[0] === "string") {
       s.type = nonNull[0];
@@ -791,12 +793,14 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
             return { content: structuredContent, toolCalls: [], usage, finishReason };
           }
           if (syntheticCall && realCalls.length > 0) {
-            // Mixed with real tool calls: validate the synthetic attempt so a
-            // non-conformant call surfaces a schema error (and counts against
-            // the retry budget) instead of being silently discarded, which
-            // previously let models retry forever. Valid structured output is
-            // still stripped here — the model must finish by calling the tool
-            // alone.
+            /*
+             * Mixed with real tool calls: validate the synthetic attempt so a
+             * non-conformant call surfaces a schema error (and counts against
+             * the retry budget) instead of being silently discarded, which
+             * previously let models retry forever. Valid structured output is
+             * still stripped here — the model must finish by calling the tool
+             * alone.
+             */
             validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode, finishReason);
             return {
               content:
@@ -938,12 +942,14 @@ export function createGeminiProvider(options: GeminiProviderOptions): ModelProvi
           };
         }
         if (syntheticCall && realCalls.length > 0) {
-          // Mixed with real tool calls: validate the synthetic attempt so a
-          // non-conformant call surfaces a schema error (and counts against
-          // the retry budget) instead of being silently discarded, which
-          // previously let models retry forever. Valid structured output is
-          // still stripped here — the model must finish by calling the tool
-          // alone.
+          /*
+           * Mixed with real tool calls: validate the synthetic attempt so a
+           * non-conformant call surfaces a schema error (and counts against
+           * the retry budget) instead of being silently discarded, which
+           * previously let models retry forever. Valid structured output is
+           * still stripped here — the model must finish by calling the tool
+           * alone.
+           */
           validateSyntheticToolCall(syntheticCall, input.responseSchema!, mode, finishReason);
           return {
             content: finalContent,

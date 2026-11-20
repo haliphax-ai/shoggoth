@@ -1,18 +1,18 @@
-// ---------------------------------------------------------------------------
-// one-shot result delivery — post-teardown follow-up to the parent session
-// ---------------------------------------------------------------------------
-//
-// A one-shot subagent's result is delivered by the spawn path when its FIRST
-// turn settles. Any later turn (a parent steer, an OOB wake-up turn) produces
-// output the parent would otherwise never see: the teardown terminates the
-// session silently. The teardown calls `deliverOneShotFollowupResult` right
-// before terminating so the parent's final turn text reaches its
-// `respond_to` session as a structured OOB delivery — the same surface a
-// normal result uses.
-//
-// Kept separate from `one-shot-notify-drain.ts` (its only caller) so the
-// delivery stack (`control/ops-shared.ts`) never has to import the teardown
-// module — and vice versa.
+/*
+ * one-shot result delivery — post-teardown follow-up to the parent session
+ *
+ * A one-shot subagent's result is delivered by the spawn path when its FIRST
+ * turn settles. Any later turn (a parent steer, an OOB wake-up turn) produces
+ * output the parent would otherwise never see: the teardown terminates the
+ * session silently. The teardown calls `deliverOneShotFollowupResult` right
+ * before terminating so the parent's final turn text reaches its
+ * `respond_to` session as a structured OOB delivery — the same surface a
+ * normal result uses.
+ *
+ * Kept separate from `one-shot-notify-drain.ts` (its only caller) so the
+ * delivery stack (`control/ops-shared.ts`) never has to import the teardown
+ * module — and vice versa.
+ */
 
 import type { SystemContext } from "@shoggoth/shared";
 import { subagentRuntimeExtensionRef } from "./subagent-extension-ref";

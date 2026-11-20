@@ -7,14 +7,14 @@ import {
 
 const log = getLogger("decision-service");
 
-// ---------------------------------------------------------------------------
-// Decision (classifier) model support — TypeSafe System One API.
-//
-// Implements POST {baseUrl}/v1/systemone as specified at
-// https://docs.typesafe.ai/api — a `state` is evaluated against a map of typed
-// `questions` (`noul`, `choice`, `score`) and answers come back under the same
-// question ids.
-// ---------------------------------------------------------------------------
+/*
+ * Decision (classifier) model support — TypeSafe System One API.
+ *
+ * Implements POST {baseUrl}/v1/systemone as specified at
+ * https://docs.typesafe.ai/api — a `state` is evaluated against a map of typed
+ * `questions` (`noul`, `choice`, `score`) and answers come back under the same
+ * question ids.
+ */
 
 export interface DecisionProviderConfig {
   id: string;

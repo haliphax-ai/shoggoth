@@ -26,10 +26,12 @@ function fakeSpawn(...args: unknown[]) {
     pid: 99999,
     kill: vi.fn(),
   });
-  // Real ChildProcess emits 'spawn' asynchronously after a successful start;
-  // the connect handshake awaits it before returning the session. Zero-delay
-  // setImmediate ticks keep both events on the loop, in order, with no
-  // wall-clock wait.
+  /*
+   * Real ChildProcess emits 'spawn' asynchronously after a successful start;
+   * the connect handshake awaits it before returning the session. Zero-delay
+   * setImmediate ticks keep both events on the loop, in order, with no
+   * wall-clock wait.
+   */
   setImmediate(() => proc.emit("spawn"));
   // End stdout right after so the session doesn't hang.
   setImmediate(() => stdout.end());

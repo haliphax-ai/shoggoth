@@ -1,12 +1,12 @@
-// ---------------------------------------------------------------------------
-// deliverSessionSendNotifyMessage — yielded session-send reply → in-turn steer
-// or OOB turn
-// ---------------------------------------------------------------------------
-//
-// Delivery twin of `deliverExecNotifyMessage`: when a yielded
-// `builtin-session-send` handle's target turn finally settles, the reply is
-// delivered to the *calling* session — in-turn through the steer channel when
-// a turn is active, as an OOB turn otherwise (guaranteed via the fallback).
+/*
+ * deliverSessionSendNotifyMessage — yielded session-send reply → in-turn steer
+ * or OOB turn
+ *
+ * Delivery twin of `deliverExecNotifyMessage`: when a yielded
+ * `builtin-session-send` handle's target turn finally settles, the reply is
+ * delivered to the *calling* session — in-turn through the steer channel when
+ * a turn is active, as an OOB turn otherwise (guaranteed via the fallback).
+ */
 
 import { subagentRuntimeExtensionRef } from "../subagent/subagent-extension-ref";
 import { buildInTurnEventBanner, deliverInTurnEvent } from "./in-turn-event";
@@ -58,10 +58,12 @@ export async function deliverSessionSendNotifyMessage(
     `Delayed session-send reply ${outcomeLabel} (notify handle \`${handle.id}\`):\n` +
       JSON.stringify(payload, null, 2),
   );
-  // --- In-turn path: inject into the active turn's steer channel when one
-  // exists. Falls back to the OOB turn below when no turn is active, or when
-  // the turn ends before the queued event is drained (guaranteed delivery via
-  // the steer channel's drop callback).
+  /*
+   * --- In-turn path: inject into the active turn's steer channel when one
+   * exists. Falls back to the OOB turn below when no turn is active, or when
+   * the turn ends before the queued event is drained (guaranteed delivery via
+   * the steer channel's drop callback).
+   */
   const banner = buildInTurnEventBanner({
     emoji: "📨",
     title: "Session-send reply",
@@ -75,10 +77,12 @@ export async function deliverSessionSendNotifyMessage(
     fallback: () =>
       oneShotWakeFallback(handle.sessionId, () => deliverSessionSendOobTurn(completion)),
   });
-  // Surface trace for in-turn delivery (best-effort): folded into the
-  // active turn's own output when one is live, posted as a standalone
-  // message only when no turn surface exists. The OOB fallback
-  // posts its own processing/terminal banners, so it needs no extra post.
+  /*
+   * Surface trace for in-turn delivery (best-effort): folded into the
+   * active turn's own output when one is live, posted as a standalone
+   * message only when no turn surface exists. The OOB fallback
+   * posts its own processing/terminal banners, so it needs no extra post.
+   */
   if (outcome === "in_turn") {
     const deliveryBanner = `> 📨 ✅ Session-send reply delivered in-turn: *${handle.targetSessionId}* \`${handle.id}\``;
     if (!postTurnSurfaceNotice(handle.sessionId, deliveryBanner)) {
@@ -117,11 +121,13 @@ async function deliverSessionSendOobTurn(completion: SessionSendNotifyCompletion
     summary: "This turn was triggered by a delayed session-send reply arriving.",
     guidance: OOB_NO_SENDER_GUIDANCE,
   };
-  // Surface the reply as an OOB banner (📨): post a "processing" banner,
-  // stream the status bar into it while the turn runs, then append the
-  // terminal banner + to_operator content on completion. Falls back gracefully
-  // to plain (no-banner) delivery when the session is not message-surface
-  // bound or the platform lacks the capability.
+  /*
+   * Surface the reply as an OOB banner (📨): post a "processing" banner,
+   * stream the status bar into it while the turn runs, then append the
+   * terminal banner + to_operator content on completion. Falls back gracefully
+   * to plain (no-banner) delivery when the session is not message-surface
+   * bound or the platform lacks the capability.
+   */
   const bannerText = buildSessionSendReplyTurnBanner({
     handleId: handle.id,
     targetSessionId: handle.targetSessionId,

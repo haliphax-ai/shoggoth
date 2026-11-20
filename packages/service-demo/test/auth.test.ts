@@ -111,10 +111,12 @@ describe("demo service auth integration", () => {
 
   afterAll(async () => {
     if (serverProcess) {
-      // The direct child's stdio pipes are inherited by the tsx grandchild,
-      // so "close" never fires here; wait for "exit" of the npx wrapper
-      // instead. Request graceful shutdown first, then warn and escalate to
-      // SIGKILL if the server hangs so a stuck shutdown can't pass silently.
+      /*
+       * The direct child's stdio pipes are inherited by the tsx grandchild,
+       * so "close" never fires here; wait for "exit" of the npx wrapper
+       * instead. Request graceful shutdown first, then warn and escalate to
+       * SIGKILL if the server hangs so a stuck shutdown can't pass silently.
+       */
       await new Promise<void>((resolve) => {
         const forceKillTimer = setTimeout(() => {
           console.warn(

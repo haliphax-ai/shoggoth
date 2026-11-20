@@ -58,11 +58,13 @@ export async function deliverTimerMessage(entry: TimerEntry): Promise<void> {
     summary: "This turn was triggered by a deferred timer.",
     guidance: OOB_NO_SENDER_GUIDANCE,
   };
-  // Surface the timer as an OOB banner (issue #363): post a "processing"
-  // banner, stream the status bar into it while the turn runs, then append the
-  // terminal banner + to_operator content on completion. Falls back gracefully
-  // to plain (no-banner) delivery when the session is not message-surface
-  // bound or the platform lacks the capability.
+  /*
+   * Surface the timer as an OOB banner (issue #363): post a "processing"
+   * banner, stream the status bar into it while the turn runs, then append the
+   * terminal banner + to_operator content on completion. Falls back gracefully
+   * to plain (no-banner) delivery when the session is not message-surface
+   * bound or the platform lacks the capability.
+   */
   const bannerText = buildTimerTurnBanner({ timerId, message });
   const bannerHandle = await ext.oobTurnBanner?.begin({
     sessionId,

@@ -62,10 +62,12 @@ export function reconcilePersistentSubagents(input: {
       ? input.ext.registerPlatformThreadBinding(threadId, s.id)
       : () => {};
     const unsubscribeBus = input.ext.subscribeSubagentSession(s.id);
-    // Arm the shared inactivity timer: honors the remaining persisted window (restart
-    // safety), or defaults to a fresh full inactivity window when the persisted expiry
-    // is missing/invalid. The timer persists the expiry again and is re-armed by
-    // touchPersistentSubagentInactivityTimer on each delivered response.
+    /*
+     * Arm the shared inactivity timer: honors the remaining persisted window (restart
+     * safety), or defaults to a fresh full inactivity window when the persisted expiry
+     * is missing/invalid. The timer persists the expiry again and is re-armed by
+     * touchPersistentSubagentInactivityTimer on each delivered response.
+     */
     const { expiresAtMs: expiresAt, dispose: clearTtl } = armPersistentSubagentInactivityTimer(
       {
         sessions,

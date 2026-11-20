@@ -1,29 +1,29 @@
-// ---------------------------------------------------------------------------
-// one-shot notify drain — keep a finished one-shot alive for pending notifies
-// ---------------------------------------------------------------------------
-//
-// A one-shot subagent's turn ends the moment the model stops, but the task may
-// have backgrounded `builtin-exec` calls with `notify: true` that have not
-// finished yet. Terminating the session at turn finish cancels every pending
-// handle (SessionManager.kill → ExecNotifyScheduler.cancelBySession), so the
-// completion notifications never arrive and the subagent cannot react to its
-// own background jobs.
-//
-// Instead, when a one-shot finishes its turn with live notify handles, the
-// session is HELD: it stays `active` and the pending completion notifications
-// keep their delivery path (in-turn steer or the OOB turn). The last handle
-// to resolve releases the hold — but only after that notification is
-// delivered and its wake-up turn settles, so a release can never destroy the
-// notification it was held for (issue #620). An operator kill drains the hold
-// immediately; the persisted wall-clock TTL safety timer caps the hold.
-//
-// The teardown decision also honors in-flight deliveries and steers the
-// settling turn left unanswered: the direct terminate path defers while a
-// delivery (exec-notify or any OOB turn) is still running, and steering
-// messages consumed by a turn that aborted or failed — the model never
-// responded to them — are re-delivered as an out-of-band turn on the
-// still-active session before the teardown fires. The same wall-clock TTL
-// safety timer caps the whole wait.
+/*
+ * one-shot notify drain — keep a finished one-shot alive for pending notifies
+ *
+ * A one-shot subagent's turn ends the moment the model stops, but the task may
+ * have backgrounded `builtin-exec` calls with `notify: true` that have not
+ * finished yet. Terminating the session at turn finish cancels every pending
+ * handle (SessionManager.kill → ExecNotifyScheduler.cancelBySession), so the
+ * completion notifications never arrive and the subagent cannot react to its
+ * own background jobs.
+ *
+ * Instead, when a one-shot finishes its turn with live notify handles, the
+ * session is HELD: it stays `active` and the pending completion notifications
+ * keep their delivery path (in-turn steer or the OOB turn). The last handle
+ * to resolve releases the hold — but only after that notification is
+ * delivered and its wake-up turn settles, so a release can never destroy the
+ * notification it was held for (issue #620). An operator kill drains the hold
+ * immediately; the persisted wall-clock TTL safety timer caps the hold.
+ *
+ * The teardown decision also honors in-flight deliveries and steers the
+ * settling turn left unanswered: the direct terminate path defers while a
+ * delivery (exec-notify or any OOB turn) is still running, and steering
+ * messages consumed by a turn that aborted or failed — the model never
+ * responded to them — are re-delivered as an out-of-band turn on the
+ * still-active session before the teardown fires. The same wall-clock TTL
+ * safety timer caps the whole wait.
+ */
 
 import type Database from "better-sqlite3";
 import type { HitlAutoApproveGate } from "../hitl/hitl-auto-approve";

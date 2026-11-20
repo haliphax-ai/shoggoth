@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /* eslint-env node */
-// Launcher for the compiled CLI bundle (`dist/cli.mjs`, built by
-// scripts/build-cli.mjs). Runs it directly — no child process, no loader —
-// so the bin pays none of the tsx startup cost. If the bundle has not been
-// built yet (fresh checkout), print the build command and fail.
+/*
+ * Launcher for the compiled CLI bundle (`dist/cli.mjs`, built by
+ * scripts/build-cli.mjs). Runs it directly — no child process, no loader —
+ * so the bin pays none of the tsx startup cost. If the bundle has not been
+ * built yet (fresh checkout), print the build command and fail.
+ */
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";

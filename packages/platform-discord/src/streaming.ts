@@ -239,14 +239,16 @@ export function createDiscordStreamingOutbound(
             formattedText = mdTableToAscii(formattedText);
             lastPushedText = formattedText;
 
-            // Incomplete formatting only matters when a status bar will be
-            // appended to the rendered text: an open marker/fence would bleed
-            // into the bar line. Close it synthetically; the next chunk
-            // recomputes state from the raw text, so the close disappears as
-            // soon as the real pair completes. Deliberately NOT gated on
-            // tracker activity — the delivery-time bar arrives via the
-            // statusBar option without a preceding setStatusBar call, and a
-            // body left open there would corrupt the bar just the same.
+            /*
+             * Incomplete formatting only matters when a status bar will be
+             * appended to the rendered text: an open marker/fence would bleed
+             * into the bar line. Close it synthetically; the next chunk
+             * recomputes state from the raw text, so the close disappears as
+             * soon as the real pair completes. Deliberately NOT gated on
+             * tracker activity — the delivery-time bar arrives via the
+             * statusBar option without a preceding setStatusBar call, and a
+             * body left open there would corrupt the bar just the same.
+             */
             const renderedText =
               _statusBarLine === null || formattedText === ""
                 ? formattedText
@@ -269,14 +271,16 @@ export function createDiscordStreamingOutbound(
             formattedText = mdTableToAscii(formattedText);
             lastPushedText = formattedText;
 
-            // Incomplete formatting only matters when a status bar will be
-            // appended to the rendered text: an open marker/fence would bleed
-            // into the bar line. Close it synthetically; the next chunk
-            // recomputes state from the raw text, so the close disappears as
-            // soon as the real pair completes. Deliberately NOT gated on
-            // tracker activity — the delivery-time bar arrives via the
-            // statusBar option without a preceding setStatusBar call, and a
-            // body left open there would corrupt the bar just the same.
+            /*
+             * Incomplete formatting only matters when a status bar will be
+             * appended to the rendered text: an open marker/fence would bleed
+             * into the bar line. Close it synthetically; the next chunk
+             * recomputes state from the raw text, so the close disappears as
+             * soon as the real pair completes. Deliberately NOT gated on
+             * tracker activity — the delivery-time bar arrives via the
+             * statusBar option without a preceding setStatusBar call, and a
+             * body left open there would corrupt the bar just the same.
+             */
             const renderedText =
               _statusBarLine === null || formattedText === ""
                 ? formattedText
@@ -290,10 +294,12 @@ export function createDiscordStreamingOutbound(
             if (finalChunks.length === 1) {
               // Simple case: update original message only
               await transport.editMessage(channelId, messageId, { content: finalChunks[0] });
-              // Delete all overflow messages. Each deletion is retried with
-              // backoff a finite number of times; a failure on one message must
-              // never abort cleanup of the remaining ones. Entries that still
-              // fail after the final attempt are dropped (already logged).
+              /*
+               * Delete all overflow messages. Each deletion is retried with
+               * backoff a finite number of times; a failure on one message must
+               * never abort cleanup of the remaining ones. Entries that still
+               * fail after the final attempt are dropped (already logged).
+               */
               for (const [index, overflow] of overflowMessages) {
                 // Success removes the message; give-up (already logged inside
                 // the helper) drops the entry so it is not retried forever.
@@ -310,26 +316,32 @@ export function createDiscordStreamingOutbound(
           // State changes stay synchronous so operations already queued see the
           // latest line; only the render is serialized with the other mutations.
           _statusBarLine = line;
-          // A null line is a state-only clear: no re-render. Delivery clears the
-          // bar immediately before its final edit (which carries its own bar
-          // line), so re-editing here would visibly strip the bar — and force a
-          // full-budget re-split — for the duration of the delivery gap.
+          /*
+           * A null line is a state-only clear: no re-render. Delivery clears the
+           * bar immediately before its final edit (which carries its own bar
+           * line), so re-editing here would visibly strip the bar — and force a
+           * full-budget re-split — for the duration of the delivery gap.
+           */
           if (line === null) return;
-          // Re-render the in-flight message so the bar appears without waiting
-          // for the next push. Before the first push there is no body text yet,
-          // so the bar renders against the "…" placeholder created by start();
-          // the turn-start ⏳ flush depends on this to be visible.
-          // The enqueued render re-reads state at run time: prose pushed in the
-          // meantime wins as the base content, and a clear in the meantime
-          // suppresses the bar (never clobbers the newer state).
+          /*
+           * Re-render the in-flight message so the bar appears without waiting
+           * for the next push. Before the first push there is no body text yet,
+           * so the bar renders against the "…" placeholder created by start();
+           * the turn-start ⏳ flush depends on this to be visible.
+           * The enqueued render re-reads state at run time: prose pushed in the
+           * meantime wins as the base content, and a clear in the meantime
+           * suppresses the bar (never clobbers the newer state).
+           */
           await enqueueGuarded(async () => {
             const activeLine = _statusBarLine;
             if (activeLine === null) return;
             const baseText = lastPushedText ?? "…";
-            // Synthetic-close incomplete formatting so an open marker/fence
-            // cannot bleed into the appended bar (see setFullContent). The
-            // raw text stays unmodified in lastPushedText, so the synthetic
-            // markers vanish once the next chunk completes the pair.
+            /*
+             * Synthetic-close incomplete formatting so an open marker/fence
+             * cannot bleed into the appended bar (see setFullContent). The
+             * raw text stays unmodified in lastPushedText, so the synthetic
+             * markers vanish once the next chunk completes the pair.
+             */
             const renderedText = baseText === "" ? baseText : appendSyntheticClose(baseText);
             const budget = splitBudget(activeLine);
             const chunks = splitDiscordMessage(renderedText, budget);

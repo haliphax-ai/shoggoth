@@ -27,10 +27,12 @@ describe("createThinkingOutput", () => {
   });
 
   it("delivers round separators at round boundaries, never mid-round", () => {
-    // The producer streams each round's content WITHOUT a separator and
-    // settles the round via endRound; the separator belongs to the boundary
-    // and must appear with the next round's first delta — a round boundary
-    // must never render as a spurious divergence or a trailing blank line.
+    /*
+     * The producer streams each round's content WITHOUT a separator and
+     * settles the round via endRound; the separator belongs to the boundary
+     * and must appear with the next round's first delta — a round boundary
+     * must never render as a spurious divergence or a trailing blank line.
+     */
     const output = createThinkingOutput();
     expect(output.onText({ accumulated: "R1", round: 0 })).toBe("R1");
     expect(output.endRound({ round: 0, content: "R1" })).toBe("R1");
@@ -42,10 +44,12 @@ describe("createThinkingOutput", () => {
   });
 
   it("replaces a round's drifted streamed tail at the round boundary", () => {
-    // A round whose streamed tail differs from its final content (trim,
-    // failover hop, steering-injected round) is reconciled by endRound —
-    // the superseded tail shows live, then the authoritative content lands
-    // exactly once, before the next round's separator.
+    /*
+     * A round whose streamed tail differs from its final content (trim,
+     * failover hop, steering-injected round) is reconciled by endRound —
+     * the superseded tail shows live, then the authoritative content lands
+     * exactly once, before the next round's separator.
+     */
     const output = createThinkingOutput();
     output.onText({ accumulated: "R1", round: 0 });
     output.endRound({ round: 0, content: "R1" });
@@ -80,11 +84,13 @@ describe("createThinkingOutput", () => {
   });
 
   it("opens a new quote block for a re-emitted prefix continuation at a round boundary", () => {
-    // Many providers re-emit the prior reasoning at the start of a new round
-    // (context quoting, not one continuous thought). The shared prefix is
-    // already displayed — the new round renders only its NEW text in its own
-    // 💭 block at its arrival position; the earlier block is never extended,
-    // reordered, or re-emitted.
+    /*
+     * Many providers re-emit the prior reasoning at the start of a new round
+     * (context quoting, not one continuous thought). The shared prefix is
+     * already displayed — the new round renders only its NEW text in its own
+     * 💭 block at its arrival position; the earlier block is never extended,
+     * reordered, or re-emitted.
+     */
     const output = createThinkingOutput();
     output.onText({ accumulated: "Before ", round: 0 });
     output.onThinking({ accumulated: "Reasoning so far", round: 0 });
@@ -99,10 +105,12 @@ describe("createThinkingOutput", () => {
   });
 
   it("strips a genuine re-emission at a round boundary and shows only the new tail", () => {
-    // A provider that re-emits the prior reasoning VERBATIM at the start of
-    // a new round (context quoting) must not double it: the re-emission is
-    // stripped and only the genuinely new tail opens the round's own 💭
-    // block, at its arrival position.
+    /*
+     * A provider that re-emits the prior reasoning VERBATIM at the start of
+     * a new round (context quoting) must not double it: the re-emission is
+     * stripped and only the genuinely new tail opens the round's own 💭
+     * block, at its arrival position.
+     */
     const output = createThinkingOutput();
     output.onText({ accumulated: "Before ", round: 0 });
     output.onThinking({ accumulated: "Let me check the config", round: 0 });
@@ -144,10 +152,12 @@ describe("createThinkingOutput", () => {
   });
 
   it("never splices a partially re-emitted round onto an earlier round's block", () => {
-    // A round that streams a strict PREFIX of the earlier reasoning and
-    // then veers must not cut the earlier block or glue text mid-word:
-    // the earlier block stays intact and the veering text lands whole in
-    // its own block at its arrival position.
+    /*
+     * A round that streams a strict PREFIX of the earlier reasoning and
+     * then veers must not cut the earlier block or glue text mid-word:
+     * the earlier block stays intact and the veering text lands whole in
+     * its own block at its arrival position.
+     */
     const output = createThinkingOutput();
     output.onThinking({ accumulated: "The issue says tests fail", round: 0 });
     output.endRound({ round: 0, content: "" });
@@ -230,10 +240,12 @@ describe("createThinkingOutput", () => {
   });
 
   it("drops a round's streamed tail when its final content is blank", () => {
-    // The turn record carries no segment for a blank round: once the round
-    // boundary confirms it, the streamed tail leaves the display and the
-    // next round attaches to the previous round's separator — never to a
-    // dangling blank line.
+    /*
+     * The turn record carries no segment for a blank round: once the round
+     * boundary confirms it, the streamed tail leaves the display and the
+     * next round attaches to the previous round's separator — never to a
+     * dangling blank line.
+     */
     const output = createThinkingOutput();
     output.onText({ accumulated: "R1", round: 0 });
     output.endRound({ round: 0, content: "R1" });
@@ -252,10 +264,12 @@ describe("createThinkingOutput", () => {
     const output = createThinkingOutput();
     output.onText({ accumulated: "R1", round: 0 });
     output.endRound({ round: 0, content: "R1" });
-    // The model padded the round's content with newlines on both edges: the
-    // live display and the committed segment never stack blank lines onto
-    // the round separator. (A trailing SPACE is prose, not padding, and is
-    // preserved — pinned by the re-emit test above.)
+    /*
+     * The model padded the round's content with newlines on both edges: the
+     * live display and the committed segment never stack blank lines onto
+     * the round separator. (A trailing SPACE is prose, not padding, and is
+     * preserved — pinned by the re-emit test above.)
+     */
     expect(output.onText({ accumulated: "\n\nHello.\n\n", round: 1 })).toBe("R1\n\nHello.");
     expect(output.endRound({ round: 1, content: "\n\nHello.\n\n\n" })).toBe("R1\n\nHello.");
   });
@@ -280,10 +294,12 @@ describe("createThinkingOutput", () => {
   });
 
   it("maps every round's prose onto the final turn body verbatim", () => {
-    // Terminal composition: the streamed snapshot is the turn-scoped prose
-    // (rounds joined by the transcript separator), so the delivered body —
-    // including decoration around the prose — lands verbatim, with the
-    // streamed thinking quotes interleaved.
+    /*
+     * Terminal composition: the streamed snapshot is the turn-scoped prose
+     * (rounds joined by the transcript separator), so the delivered body —
+     * including decoration around the prose — lands verbatim, with the
+     * streamed thinking quotes interleaved.
+     */
     const output = createThinkingOutput();
     output.onText({ accumulated: "R1", round: 0 });
     output.onThinking({ accumulated: "Thinking of R2", round: 0 });

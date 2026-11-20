@@ -102,10 +102,12 @@ describe("session_queue_manage control op (1-based indexes)", () => {
       })
       .catch(() => {});
     for (const label of ["u1", "u2", "u3"]) {
-      // u1 yields a macrotask so the post-release observation window is
-      // deterministic: a synchronous no-op settles within microtasks and the
-      // queue self-drains before a follow-up control-op round-trip can
-      // snapshot it (async dispatch adds promise-adoption hops).
+      /*
+       * u1 yields a macrotask so the post-release observation window is
+       * deterministic: a synchronous no-op settles within microtasks and the
+       * queue self-drains before a follow-up control-op round-trip can
+       * snapshot it (async dispatch adds promise-adoption hops).
+       */
       queue
         .enqueue(
           SESSION_ID,

@@ -1,7 +1,7 @@
-// ---------------------------------------------------------------------------
-// builtin-rerank — score and order documents against a query via a
-// Cohere-style rerank model, using the rerank_documents control plane op.
-// ---------------------------------------------------------------------------
+/*
+ * builtin-rerank — score and order documents against a query via a
+ * Cohere-style rerank model, using the rerank_documents control plane op.
+ */
 
 import type {
   BuiltinToolRegistry,

@@ -311,10 +311,12 @@ async function subagentHandler(
       resultJson: JSON.stringify({ error: "subagent_control_unavailable" }),
     };
   }
-  // Nesting gate: a session may use subagent ops only while its depth in the
-  // subagent tree is below maxSpawnDepth (default 1 — top-level sessions only).
-  // Depth is computed by walking parent-session lineage, not URN shape. The
-  // control-op layer re-checks this authoritatively on spawn.
+  /*
+   * Nesting gate: a session may use subagent ops only while its depth in the
+   * subagent tree is below maxSpawnDepth (default 1 — top-level sessions only).
+   * Depth is computed by walking parent-session lineage, not URN shape. The
+   * control-op layer re-checks this authoritatively on spawn.
+   */
   const sessions = createSessionStore(ctx.db);
   const depth = computeSessionDepthFromStore(sessions, ctx.sessionId);
   const agentId = resolveAgentIdFromSessionId(ctx.sessionId);
@@ -533,10 +535,12 @@ async function subagentHandler(
       childId,
       parentSessionId: ctx.sessionId,
     });
-    // Successful spawn: refresh the live subagent counts so the in-flight
-    // turn status bar shows the new subagent immediately (not next turn).
-    // Inline one-shots are already terminated when their op returns, so
-    // they leave the counts unchanged.
+    /*
+     * Successful spawn: refresh the live subagent counts so the in-flight
+     * turn status bar shows the new subagent immediately (not next turn).
+     * Inline one-shots are already terminated when their op returns, so
+     * they leave the counts unchanged.
+     */
     if (childId) {
       ctx.onSubagentsChanged?.(getSessionSubagentCounts(ctx.db, ctx.sessionId));
     }
@@ -648,12 +652,14 @@ async function sessionSendHandler(
   const rt = args.reply_to_message_id;
   if (typeof rt === "string" && rt.trim()) payload.reply_to_message_id = rt.trim();
 
-  // --- Yield + notify (mirrors the background-exec notify mechanism) ---
-  // Race the target's turn against the reply window. A reply that lands in
-  // time returns inline exactly as before; an expired window hands the pending
-  // call off to a notify handle (default) and returns a pending result. The
-  // reply is then delivered to the calling session in-turn when a turn is
-  // active, out of band otherwise.
+  /*
+   * --- Yield + notify (mirrors the background-exec notify mechanism) ---
+   * Race the target's turn against the reply window. A reply that lands in
+   * time returns inline exactly as before; an expired window hands the pending
+   * call off to a notify handle (default) and returns a pending result. The
+   * reply is then delivered to the calling session in-turn when a turn is
+   * active, out of band otherwise.
+   */
   const resultPromise = invokeIntegration(inv, ctx.sessionId, "session_send", payload);
   const yieldMs = resolveSendYieldMs(args, ctx);
   if (yieldMs === undefined) return resultPromise;
@@ -692,10 +698,12 @@ async function sessionSendHandler(
     // never surfaces as an unhandled rejection.
     void resultPromise.catch(() => undefined);
   }
-  // Surface trace for the yield itself (best-effort): post an emoji-stamped
-  // banner to the session's bound surface so the operator can see the call
-  // stopped blocking, mirroring the OOB notify banners. The later reply
-  // delivery carries its own banner, so the two moments stay distinguishable.
+  /*
+   * Surface trace for the yield itself (best-effort): post an emoji-stamped
+   * banner to the session's bound surface so the operator can see the call
+   * stopped blocking, mirroring the OOB notify banners. The later reply
+   * delivery carries its own banner, so the two moments stay distinguishable.
+   */
   const yieldBanner = scheduler
     ? `> 📨 Session-send yielded: waiting for reply from *${targetSessionId}* \`${handle.id}\` …`
     : `> 📨 Session-send yielded: reply from *${targetSessionId}* will not be delivered (notify disabled)`;

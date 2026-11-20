@@ -1,7 +1,7 @@
-// ---------------------------------------------------------------------------
-// Config-side alwaysOn defaults: glob patterns in global toolDiscovery.alwaysOn
-// and per-agent toolDiscovery.alwaysOn (subagent defaults).
-// ---------------------------------------------------------------------------
+/*
+ * Config-side alwaysOn defaults: glob patterns in global toolDiscovery.alwaysOn
+ * and per-agent toolDiscovery.alwaysOn (subagent defaults).
+ */
 
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";

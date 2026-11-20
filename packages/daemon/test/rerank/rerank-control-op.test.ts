@@ -1,11 +1,11 @@
 import { describe, it, vi, beforeEach } from "vitest";
 import assert from "node:assert";
 
-// ---------------------------------------------------------------------------
-// DI: inject a fake RerankService factory into the integration ops context
-// instead of mocking the module (vi.mock is import-order dependent under
-// --no-isolate).
-// ---------------------------------------------------------------------------
+/*
+ * DI: inject a fake RerankService factory into the integration ops context
+ * instead of mocking the module (vi.mock is import-order dependent under
+ * --no-isolate).
+ */
 
 const mockRerank = vi.fn();
 
@@ -323,10 +323,10 @@ describe("rerank_documents control op", () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Feature gating: with no rerank models configured at all, the op must be
-  // indistinguishable from a nonexistent op (ERR_UNKNOWN_OP downstream).
-  // -------------------------------------------------------------------------
+  /*
+   * Feature gating: with no rerank models configured at all, the op must be
+   * indistinguishable from a nonexistent op (ERR_UNKNOWN_OP downstream).
+   */
 
   describe("feature gating (no models configured)", () => {
     it("is invisible when providers exist but have no models", async () => {

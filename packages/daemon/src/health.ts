@@ -336,11 +336,13 @@ async function fetchOpenAIModelMetadata(
     const res = await fetch(url, { method: "GET", signal, headers });
     if (res.ok) {
       const json = (await res.json()) as Record<string, unknown>;
-      // Various OpenAI-compatible providers use different field names:
-      // - context_length (Ollama)
-      // - max_model_len (vLLM)
-      // - context_window (LiteLLM)
-      // - max_context_length
+      /*
+       * Various OpenAI-compatible providers use different field names:
+       * - context_length (Ollama)
+       * - max_model_len (vLLM)
+       * - context_window (LiteLLM)
+       * - max_context_length
+       */
       for (const field of [
         "context_length",
         "max_model_len",

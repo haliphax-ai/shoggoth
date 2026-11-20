@@ -541,10 +541,8 @@ describe("systemContext adoption: workflow completion notification", () => {
 });
 
 // ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 // 6. Workflow task spawning — systemContext
 // ---------------------------------------------------------------------------
-
 describe("systemContext adoption: workflow task spawning", () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });

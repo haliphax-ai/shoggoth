@@ -1,15 +1,17 @@
 import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-// Subprocess script for the extended write tool.
-//
-// Reads content from stdin, then performs the operation indicated by env vars:
-//   SHOGGOTH_TOOL_WRITE_MODE=overwrite — write stdin to file (with optional mkdirp)
-//   SHOGGOTH_TOOL_WRITE_MODE=append    — append stdin to file (with optional mkdirp)
-//   SHOGGOTH_TOOL_WRITE_MODE=replace   — replace lines START..END with stdin content
-//   SHOGGOTH_TOOL_WRITE_MODE=insert    — insert stdin content after line AFTER
-//
-// Outputs JSON to stdout: { bytesWritten, dirCreated }
+/*
+ * Subprocess script for the extended write tool.
+ *
+ * Reads content from stdin, then performs the operation indicated by env vars:
+ *   SHOGGOTH_TOOL_WRITE_MODE=overwrite — write stdin to file (with optional mkdirp)
+ *   SHOGGOTH_TOOL_WRITE_MODE=append    — append stdin to file (with optional mkdirp)
+ *   SHOGGOTH_TOOL_WRITE_MODE=replace   — replace lines START..END with stdin content
+ *   SHOGGOTH_TOOL_WRITE_MODE=insert    — insert stdin content after line AFTER
+ *
+ * Outputs JSON to stdout: { bytesWritten, dirCreated }
+ */
 
 const filePath = process.env.SHOGGOTH_TOOL_WRITE_PATH!;
 const mode = process.env.SHOGGOTH_TOOL_WRITE_MODE ?? "overwrite";

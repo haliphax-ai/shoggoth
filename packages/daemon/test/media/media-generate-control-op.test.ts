@@ -1,10 +1,11 @@
 import { describe, it, vi, beforeEach } from "vitest";
 import assert from "node:assert";
 
-// ---------------------------------------------------------------------------
-// DI: inject a fake MediaGenerationService factory into the integration ops
-// context instead of mocking the module (vi.mock is import-order dependent
-// under --no-isolate).
+/*
+ * DI: inject a fake MediaGenerationService factory into the integration ops
+ * context instead of mocking the module (vi.mock is import-order dependent
+ * under --no-isolate).
+ */
 
 const mockGenerate = vi.fn();
 

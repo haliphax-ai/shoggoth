@@ -149,14 +149,16 @@ export class ManagedProcess extends EventEmitter {
     this._killFailed = false;
     const child = this._spawn();
 
-    // Wait for the spawn handshake before declaring the process running.
-    // A spawn failure (ENOENT, EACCES/EPERM, EMFILE/ENFILE, ENOEXEC/failed
-    // exec, invalid uid/gid, resource exhaustion, ...) surfaces as an async
-    // 'error' event; without this gate start() would resolve as "running" for
-    // a process that never existed, leaving callers unable to tell a failed
-    // spawn from a healthy start. Node only emits 'spawn' once the child
-    // actually started. The 'close' event still fires after a failed spawn
-    // and runs the normal exit/restart-policy accounting.
+    /*
+     * Wait for the spawn handshake before declaring the process running.
+     * A spawn failure (ENOENT, EACCES/EPERM, EMFILE/ENFILE, ENOEXEC/failed
+     * exec, invalid uid/gid, resource exhaustion, ...) surfaces as an async
+     * 'error' event; without this gate start() would resolve as "running" for
+     * a process that never existed, leaving callers unable to tell a failed
+     * spawn from a healthy start. Node only emits 'spawn' once the child
+     * actually started. The 'close' event still fires after a failed spawn
+     * and runs the normal exit/restart-policy accounting.
+     */
     const spawned = new Promise<void>((resolve, reject) => {
       child.once("spawn", resolve);
       child.once("error", reject);
@@ -354,10 +356,12 @@ export class ManagedProcess extends EventEmitter {
     if (spec.gid != null) (opts as SpawnOptions).gid = spec.gid;
 
     const child = spawn(spec.command, spec.args ?? [], opts);
-    // Detach from the Node.js event loop so the child doesn't keep the
-    // process alive.  libuv still tracks the child internally and reaps
-    // it via SIGCHLD — this only prevents the ChildProcess handle from
-    // being counted as an active libuv handle.
+    /*
+     * Detach from the Node.js event loop so the child doesn't keep the
+     * process alive.  libuv still tracks the child internally and reaps
+     * it via SIGCHLD — this only prevents the ChildProcess handle from
+     * being counted as an active libuv handle.
+     */
     child.unref();
     this._child = child;
     this._pid = child.pid;

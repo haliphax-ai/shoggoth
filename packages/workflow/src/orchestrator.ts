@@ -420,10 +420,12 @@ export class Orchestrator {
         return;
       }
       this.pollingTimer = setTimeout(() => {
-        // Track the tick so waitForIdle() can await stragglers that outlive
-        // this timer (stopPolling() can cancel the timer but cannot await an
-        // in-flight tick — awaiting it here is what keeps state persistence
-        // from racing downstream cleanup).
+        /*
+         * Track the tick so waitForIdle() can await stragglers that outlive
+         * this timer (stopPolling() can cancel the timer but cannot await an
+         * in-flight tick — awaiting it here is what keeps state persistence
+         * from racing downstream cleanup).
+         */
         const tick = this.track(
           (async () => {
             try {
@@ -669,10 +671,12 @@ export class Orchestrator {
     const _opts = this.opts!;
     const notifyTasks: TaskState[] = [];
 
-    // Collect tasks that just failed this tick (have completedAt set recently and are failed)
-    // We process all failed tasks that haven't been handled yet.
-    // To avoid re-processing, we check for tasks that are failed and have no special marker.
-    // Simple approach: iterate and handle based on behavior. The abort/pause actions are idempotent.
+    /*
+     * Collect tasks that just failed this tick (have completedAt set recently and are failed)
+     * We process all failed tasks that haven't been handled yet.
+     * To avoid re-processing, we check for tasks that are failed and have no special marker.
+     * Simple approach: iterate and handle based on behavior. The abort/pause actions are idempotent.
+     */
     const newlyFailed = wf.tasks.filter(
       (t) =>
         t.status === "failed" &&

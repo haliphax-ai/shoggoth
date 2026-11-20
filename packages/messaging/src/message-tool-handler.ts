@@ -257,10 +257,12 @@ export async function executeMessageToolAction(
     return await handler({ deps, sid, channelId: boundChannel }, args);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    // Platform transports may attach a numeric `status` to errors (e.g. the
-    // Discord REST client's typed errors). Surface it so callers can tell a
-    // permanent 404 ("message gone, safe to repost") from transient failures
-    // (rate limits, 5xx, network) instead of matching on error strings.
+    /*
+     * Platform transports may attach a numeric `status` to errors (e.g. the
+     * Discord REST client's typed errors). Surface it so callers can tell a
+     * permanent 404 ("message gone, safe to repost") from transient failures
+     * (rate limits, 5xx, network) instead of matching on error strings.
+     */
     const status = (e as { status?: unknown } | null)?.status;
     return {
       ok: false,

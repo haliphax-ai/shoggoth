@@ -1232,12 +1232,12 @@ describe(
   },
 );
 
-// ---------------------------------------------------------------------------
-// Mid-turn MCP session lapse recovery — the turn captured `external` at start,
-// then the pool was idle-evicted mid-turn (see research/mcp-session-lifecycle.md,
-// recommendation #1). The executor must re-resolve the MCP context once and
-// retry the call; a persistent lapse must NOT loop.
-// ---------------------------------------------------------------------------
+/*
+ * Mid-turn MCP session lapse recovery — the turn captured `external` at start,
+ * then the pool was idle-evicted mid-turn (see research/mcp-session-lifecycle.md,
+ * recommendation #1). The executor must re-resolve the MCP context once and
+ * retry the call; a persistent lapse must NOT loop.
+ */
 describe("executeSessionAgentTurn — mid-turn MCP session lapse", { concurrency: false }, () => {
   let db: Database.Database;
   let tmp: string;

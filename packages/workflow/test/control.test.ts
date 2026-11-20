@@ -338,11 +338,6 @@ describe("ControlPlane", () => {
 
       await cp.pause(wfId);
       assert.ok(orch.isPaused());
-
-      // Task 2 should not have been spawned yet (paused before tick could spawn it)
-      // Actually, tick() already ran and spawned task 2 before pause. Let me adjust:
-      // We need to pause BEFORE completing task 1
-      // Let me restructure: pause first, then complete task 1, then resume
     });
 
     it("spawns ready tasks after resuming from pause", async () => {
@@ -566,11 +561,13 @@ describe("ControlPlane", () => {
     const activeOrchestrators: Orchestrator[] = [];
 
     beforeEach(() => {
-      // cp.retry() arms the orchestrator's polling timer (startPolling), which
-      // would otherwise fire background ticks during retry's real-fs awaits and
-      // race the retry assertions (pending → in_progress before we read it).
-      // Fake timers pin those ticks; afterEach restores real time first so the
-      // explicit orch.tick() calls below never dead-stop.
+      /*
+       * cp.retry() arms the orchestrator's polling timer (startPolling), which
+       * would otherwise fire background ticks during retry's real-fs awaits and
+       * race the retry assertions (pending → in_progress before we read it).
+       * Fake timers pin those ticks; afterEach restores real time first so the
+       * explicit orch.tick() calls below never dead-stop.
+       */
       vi.useFakeTimers();
     });
 
@@ -685,11 +682,13 @@ describe("ControlPlane", () => {
       pollResults.set("session-3", { status: "failed", error: "boom" });
       await orch.tick();
 
-      // Now: task 1=done, 2=done, 3=failed
-      // Retry task 3 without cascade — only task 3 resets, 1 and 2 stay done
-      // But we want to test cascade, so let's retry task 3 with cascade.
-      // Task 3 has no downstream, so let's use a different approach:
-      // Manually set task 1 to failed to simulate a re-evaluation scenario.
+      /*
+       * Now: task 1=done, 2=done, 3=failed
+       * Retry task 3 without cascade — only task 3 resets, 1 and 2 stay done
+       * But we want to test cascade, so let's retry task 3 with cascade.
+       * Task 3 has no downstream, so let's use a different approach:
+       * Manually set task 1 to failed to simulate a re-evaluation scenario.
+       */
       const wf = orch.getWorkflowStatus()!;
       const task1 = wf.tasks.find((t) => t.taskDef.id === 1)!;
       task1.status = "failed";

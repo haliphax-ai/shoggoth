@@ -385,10 +385,12 @@ describe("runDecisionCli models", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Feature gating: with no decision models configured at all, the command is
-// inert on every subcommand (including --help).
-// ---------------------------------------------------------------------------
+/*
+ * ---------------------------------------------------------------------------
+ * Feature gating: with no decision models configured at all, the command is
+ * inert on every subcommand (including --help).
+ * ---------------------------------------------------------------------------
+ */
 
 describe("runDecisionCli — feature gating (no models configured)", () => {
   it("is inert for evaluate and reports 'not configured'", async () => {

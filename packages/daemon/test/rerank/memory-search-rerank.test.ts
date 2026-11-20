@@ -8,12 +8,12 @@ import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
 import { runMemoryBuiltin } from "../../src/memory/builtin-memory-tools";
 import type { FetchLike } from "@shoggoth/models";
 
-// ---------------------------------------------------------------------------
-// RAG integration: the automatic, config-driven rerank step of memory-search.
-// Reranking runs by default when rerank.defaultModel is configured; setting
-// rerank.memorySearch.enabled to false opts out. There are no per-call
-// rerank parameters.
-// ---------------------------------------------------------------------------
+/*
+ * RAG integration: the automatic, config-driven rerank step of memory-search.
+ * Reranking runs by default when rerank.defaultModel is configured; setting
+ * rerank.memorySearch.enabled to false opts out. There are no per-call
+ * rerank parameters.
+ */
 
 const rerankConfigBase = {
   defaultModel: "openrouter-cohere/cohere/rerank-v3.5",
