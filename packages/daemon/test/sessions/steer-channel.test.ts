@@ -5,6 +5,8 @@ import {
   registerSteerChannel,
   pushSteer,
   drainSteers,
+  settleSteersAnswered,
+  takeUnansweredSteers,
   _resetAllChannels,
 } from "../../src/sessions/steer-channel";
 
@@ -60,6 +62,20 @@ describe("steer-channel", () => {
     unregister();
     assert.equal(pushSteer("sess-1", "too late"), false);
     assert.deepStrictEqual(drainSteers("sess-1"), []);
+  });
+
+  it("session ids are normalized consistently across entry points", () => {
+    // The settle path always trimmed, so a caller passing `s1 ` used to
+    // address a different channel than the register/push path: the message
+    // drained into a separate unanswered bucket the settle never cleared.
+    const { unregister } = registerSteerChannel("s1 ");
+    assert.equal(pushSteer("s1 ", "padded"), true);
+    assert.deepStrictEqual(drainSteers("s1 "), ["padded"]);
+    settleSteersAnswered("s1 ");
+    assert.deepStrictEqual(takeUnansweredSteers("s1 "), []);
+    assert.equal(pushSteer("s1 ", "again"), true);
+    unregister();
+    assert.equal(pushSteer("s1 ", "after unregister"), false);
   });
 
   it("channels are independent per session", () => {

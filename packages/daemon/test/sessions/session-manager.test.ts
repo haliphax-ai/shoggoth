@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { describe, it } from "vitest";
+import { describe, it, afterEach } from "vitest";
 import { SHOGGOTH_AGENT_TOKEN_ENV } from "@shoggoth/authn";
 import {
   formatAgentSessionUrn,
@@ -15,6 +15,20 @@ import { migrate, defaultMigrationsDir } from "../../src/db/migrate";
 import { createSqliteAgentTokenStore } from "../../src/auth/sqlite-agent-tokens";
 import { createSessionStore } from "../../src/sessions/session-store";
 import { createSessionManager } from "../../src/sessions/session-manager";
+import {
+  pushSteer,
+  registerSteerChannel,
+  steerDepth,
+  takeUnansweredSteers,
+  drainSteers,
+  _resetAllChannels,
+} from "../../src/sessions/steer-channel";
+import {
+  registerCompactionGate,
+  _resetAllCompactionGates,
+  CompactionGateClosedError,
+  pushCompactionRequest,
+} from "../../src/sessions/compaction-gate";
 
 describe("createSessionManager", () => {
   it("spawn resolves platform from agentsConfig when no explicit platform given", async () => {
@@ -294,5 +308,75 @@ describe("createSessionManager kill descendant cascade", () => {
 
     assert.equal(sessions.getById(parent)?.status, "terminated");
     assert.equal(sessions.getById(child)?.status, "terminated");
+  });
+});
+
+describe("createSessionManager kill registry cleanup", () => {
+  function setupManager() {
+    const db = new Database(":memory:");
+    migrate(db, defaultMigrationsDir());
+    const sessions = createSessionStore(db);
+    const agentTokens = createSqliteAgentTokenStore(db);
+    const workspacesRoot = mkdtempSync(join(tmpdir(), "shoggoth-ws-"));
+    const mgr = createSessionManager({
+      ensureAgentWorkspaceLayout: async () => {},
+      db,
+      sessions,
+      agentTokens,
+      workspacesRoot,
+      agentId: "main",
+      mintToken: () => "tok",
+    });
+    return { sessions, agentTokens, mgr };
+  }
+
+  function topLevelUrn(leaf: string): string {
+    return formatAgentSessionUrn("main", "discord", "channel", leaf);
+  }
+
+  afterEach(() => {
+    _resetAllChannels();
+    _resetAllCompactionGates();
+  });
+
+  it("kill clears the session's steer channel and parked compaction requests", async () => {
+    const { sessions, mgr } = setupManager();
+    const sid = topLevelUrn("60000000-0000-4000-8000-000000000001");
+    sessions.create({ id: sid, workspacePath: "/w", status: "active" });
+
+    const { unregister } = registerSteerChannel(sid);
+    assert.equal(pushSteer(sid, "queued"), true);
+    const gate = registerCompactionGate(sid);
+    const parked = pushCompactionRequest(sid);
+    assert.ok(parked, "expected a compaction request to park");
+
+    mgr.kill(sid);
+
+    // The channel is gone and the unanswered-tracking entry (written by
+    // drainSteers) is cleared with it; the parked compaction request is
+    // rejected so it cannot dangle past the session's death.
+    assert.equal(pushSteer(sid, "after kill"), false);
+    assert.deepStrictEqual(drainSteers(sid), []);
+    assert.deepStrictEqual(takeUnansweredSteers(sid), []);
+    assert.equal(steerDepth(sid), 0);
+    await assert.rejects(parked, CompactionGateClosedError);
+    unregister();
+    gate.unregister();
+  });
+
+  it("kill clears steer state for every descendant in the cascade", () => {
+    const { sessions, mgr } = setupManager();
+    const parent = topLevelUrn("70000000-0000-4000-8000-000000000001");
+    const child = mintSubagentSessionUrnFromParent(parent);
+    sessions.create({ id: parent, workspacePath: "/w", status: "active" });
+    sessions.create({ id: child, workspacePath: "/w", status: "active" });
+    sessions.update(child, { parentSessionId: parent });
+    registerSteerChannel(child);
+    pushSteer(child, "child steer");
+
+    mgr.kill(parent);
+
+    assert.equal(steerDepth(child), 0);
+    assert.equal(steerDepth(parent), 0);
   });
 });

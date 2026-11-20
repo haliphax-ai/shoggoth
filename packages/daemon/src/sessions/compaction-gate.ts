@@ -46,15 +46,16 @@ export function registerCompactionGate(sessionId: string): {
   /** Reject leftovers and tear the gate down (idempotent per registration). */
   unregister: () => void;
 } {
+  const sid = sessionId.trim();
   const queue: GateEntry[] = [];
-  const prev = gates.get(sessionId);
+  const prev = gates.get(sid);
   if (prev) rejectEntries(prev.splice(0), new CompactionGateClosedError());
-  gates.set(sessionId, queue);
+  gates.set(sid, queue);
   let closed = false;
   return {
     drain: () => (closed ? [] : queue.splice(0)),
     unregister: () => {
-      if (gates.get(sessionId) === queue) gates.delete(sessionId);
+      if (gates.get(sid) === queue) gates.delete(sid);
       if (closed) return;
       closed = true;
       rejectEntries(queue.splice(0), new CompactionGateClosedError());
@@ -72,11 +73,20 @@ export function registerCompactionGate(sessionId: string): {
 export function pushCompactionRequest(
   sessionId: string,
 ): Promise<DeferredCompactionResult> | undefined {
-  const q = gates.get(sessionId);
+  const q = gates.get(sessionId.trim());
   if (!q) return undefined;
   return new Promise<DeferredCompactionResult>((resolve, reject) => {
     q.push({ resolve, reject });
   });
+}
+
+/** Rejects and clears the session's parked compaction requests (tests, teardown). */
+export function clearCompactionGate(sessionId: string): void {
+  const sid = sessionId.trim();
+  const queue = gates.get(sid);
+  if (!queue) return;
+  gates.delete(sid);
+  rejectEntries(queue.splice(0), new CompactionGateClosedError());
 }
 
 /** Visible for testing — clears all gates. */
