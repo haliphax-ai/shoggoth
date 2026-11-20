@@ -366,18 +366,25 @@ function hasRealDb(ctx: BuiltinToolContext): boolean {
 }
 
 /**
+ * Run `fn` only when `ctx.db` is a real better-sqlite3 handle (tests may pass
+ * a stub `db`); swallow errors so the gate never blocks on internal issues.
+ */
+function withDbGate(ctx: BuiltinToolContext, fn: (segmentId: string) => void): void {
+  if (!hasRealDb(ctx)) return;
+  try {
+    fn(getSessionContextSegmentId(ctx.db, ctx.sessionId));
+  } catch {
+    // ignore
+  }
+}
+
+/**
  * Clear the re-read flag for `absPath` in the current segment. Used by the
  * read handler after a successful content read so that subsequent edits
  * are not gated as stale. Best-effort: never throws.
  */
 function clearReReadFlag(ctx: BuiltinToolContext, absPath: string): void {
-  if (!hasRealDb(ctx)) return;
-  try {
-    const segmentId = getSessionContextSegmentId(ctx.db, ctx.sessionId);
-    clearReReadRequired(ctx.db, ctx.sessionId, segmentId, absPath);
-  } catch {
-    // ignore
-  }
+  withDbGate(ctx, (segmentId) => clearReReadRequired(ctx.db, ctx.sessionId, segmentId, absPath));
 }
 
 /**
@@ -386,16 +393,12 @@ function clearReReadFlag(ctx: BuiltinToolContext, absPath: string): void {
  * looking up the gate. Best-effort: never throws.
  */
 function clearMultiReReadFlags(ctx: BuiltinToolContext, files: Record<string, string>): void {
-  if (!hasRealDb(ctx)) return;
-  try {
-    const segmentId = getSessionContextSegmentId(ctx.db, ctx.sessionId);
+  withDbGate(ctx, (segmentId) => {
     for (const relPath of Object.keys(files)) {
       const abs = pathJoin(ctx.workspacePath, relPath);
       clearReReadRequired(ctx.db, ctx.sessionId, segmentId, abs);
     }
-  } catch {
-    // ignore
-  }
+  });
 }
 
 /**
@@ -406,8 +409,12 @@ function clearMultiReReadFlags(ctx: BuiltinToolContext, files: Record<string, st
 function reReadGateFor(ctx: BuiltinToolContext, absPath: string): unknown | null {
   if (!hasRealDb(ctx)) return null;
   try {
-    const segmentId = getSessionContextSegmentId(ctx.db, ctx.sessionId);
-    return checkReReadRequired(ctx.db, ctx.sessionId, segmentId, absPath);
+    return checkReReadRequired(
+      ctx.db,
+      ctx.sessionId,
+      getSessionContextSegmentId(ctx.db, ctx.sessionId),
+      absPath,
+    );
   } catch {
     return null;
   }
@@ -442,105 +449,129 @@ function formatBodyLines(body: string, lines: boolean, lineNumbers: boolean): st
   return cappedOutput === joined ? content : cappedOutput;
 }
 
+type ReadResult = { resultJson: string; contentParts?: ChatContentPart[] };
+
+interface ReadArgs {
+  path: string;
+  paths?: string[];
+  lines: boolean;
+  lineNumbers: boolean;
+  fromLine?: number;
+  toLine?: number;
+  offset?: number;
+  limit?: number;
+  stat: boolean;
+  maxFiles?: number;
+}
+
+function parseReadArgs(args: Record<string, unknown>): ReadArgs {
+  return {
+    path: String(args.path ?? ""),
+    paths: args.paths as string[] | undefined,
+    lines: args.lines === true,
+    lineNumbers: args.lineNumbers === true,
+    fromLine: typeof args.fromLine === "number" ? args.fromLine : undefined,
+    toLine: typeof args.toLine === "number" ? args.toLine : undefined,
+    offset: typeof args.offset === "number" ? args.offset : undefined,
+    limit: typeof args.limit === "number" ? args.limit : undefined,
+    stat: args.stat === true,
+    maxFiles: typeof args.maxFiles === "number" ? args.maxFiles : undefined,
+  };
+}
+
+/** Single-path image read: inline the image as model content parts. */
+async function readImage(
+  ctx: BuiltinToolContext,
+  parsed: ReadArgs,
+  resolvedPath: string,
+  imageMime: string,
+): Promise<ReadResult> {
+  if (!ctx.imageBlockCodec) {
+    return {
+      resultJson: JSON.stringify({
+        error: "Image content not supported by the active model provider.",
+        path: parsed.path,
+      }),
+    };
+  }
+  const buf = await toolReadBinary(ctx.workspacePath, resolvedPath, ctx.creds);
+  if (buf.length > MAX_IMAGE_BLOCK_BYTES) {
+    const sizeMB = (buf.length / (1024 * 1024)).toFixed(1);
+    return {
+      resultJson: JSON.stringify({
+        error: `Image too large to include in context (${sizeMB} MB, limit ${MAX_IMAGE_BLOCK_BYTES / (1024 * 1024)} MB). Consider resizing.`,
+        path: parsed.path,
+      }),
+    };
+  }
+  const contentParts: ChatContentPart[] = [
+    { type: "image", mediaType: imageMime, base64: buf.toString("base64") },
+    { type: "text", text: `Image file: ${parsed.path}` },
+  ];
+  clearReReadFlag(ctx, resolvedPath);
+  return { resultJson: JSON.stringify({ path: parsed.path }), contentParts };
+}
+
+/** Multi-file / ranged / stat reads (toolReadExtended). */
+async function readExtended(
+  ctx: BuiltinToolContext,
+  parsed: ReadArgs,
+  resolvedPath: string,
+): Promise<ReadResult> {
+  const resolvedPaths = parsed.paths?.map((p) => toWorkspaceRelative(ctx, resolveUserPath(ctx, p)));
+  const opts: ReadExtendedOptions = {
+    path: parsed.paths ? undefined : toWorkspaceRelative(ctx, resolvedPath),
+    paths: resolvedPaths,
+    fromLine: parsed.fromLine,
+    toLine: parsed.toLine,
+    offset: parsed.offset,
+    limit: parsed.limit,
+    stat: parsed.stat,
+    maxFiles: parsed.maxFiles,
+  };
+  const result = await toolReadExtended(ctx.workspacePath, opts, ctx.creds);
+  if (result.kind === "stat-single") {
+    return { resultJson: JSON.stringify({ path: parsed.path, stat: result.stat }) };
+  }
+  if (result.kind === "stat-multi") {
+    return { resultJson: JSON.stringify({ stats: result.stats }) };
+  }
+  if (result.kind === "multi") {
+    clearMultiReReadFlags(ctx, result.files);
+    return { resultJson: JSON.stringify({ files: result.files, notices: result.notices }) };
+  }
+  clearReReadFlag(ctx, resolvedPath);
+  return {
+    resultJson: JSON.stringify({
+      path: parsed.path,
+      content: formatBodyLines(result.content, parsed.lines, parsed.lineNumbers),
+    }),
+  };
+}
+
 async function readHandler(
   args: Record<string, unknown>,
   ctx: BuiltinToolContext,
-): Promise<{ resultJson: string; contentParts?: ChatContentPart[] }> {
-  const path = String(args.path ?? "");
-  const paths = args.paths as string[] | undefined;
-  const lines = args.lines === true;
-  const lineNumbers = args.lineNumbers === true;
-  const fromLine = typeof args.fromLine === "number" ? args.fromLine : undefined;
-  const toLine = typeof args.toLine === "number" ? args.toLine : undefined;
-  const offset = typeof args.offset === "number" ? args.offset : undefined;
-  const limit = typeof args.limit === "number" ? args.limit : undefined;
-  const stat = args.stat === true;
-  const maxFiles = typeof args.maxFiles === "number" ? args.maxFiles : undefined;
+): Promise<ReadResult> {
+  const parsed = parseReadArgs(args);
+  const resolvedPath = resolveUserPath(ctx, parsed.path);
+  const imageMime = IMAGE_EXTENSION_TO_MIME[extname(parsed.path).toLowerCase()];
 
-  const resolvedPath = resolveUserPath(ctx, path);
-  const ext = extname(path).toLowerCase();
-  const imageMime = IMAGE_EXTENSION_TO_MIME[ext];
+  if (parsed.path && imageMime) return readImage(ctx, parsed, resolvedPath, imageMime);
 
-  // Image handling (single path only)
-  if (path && imageMime) {
-    if (!ctx.imageBlockCodec) {
-      return {
-        resultJson: JSON.stringify({
-          error: "Image content not supported by the active model provider.",
-          path,
-        }),
-      };
-    }
-    const buf = await toolReadBinary(ctx.workspacePath, resolvedPath, ctx.creds);
-    if (buf.length > MAX_IMAGE_BLOCK_BYTES) {
-      const sizeMB = (buf.length / (1024 * 1024)).toFixed(1);
-      return {
-        resultJson: JSON.stringify({
-          error: `Image too large to include in context (${sizeMB} MB, limit ${MAX_IMAGE_BLOCK_BYTES / (1024 * 1024)} MB). Consider resizing.`,
-          path,
-        }),
-      };
-    }
-    const base64 = buf.toString("base64");
-    const contentParts: ChatContentPart[] = [
-      { type: "image", mediaType: imageMime, base64 },
-      { type: "text", text: `Image file: ${path}` },
-    ];
-    clearReReadFlag(ctx, resolvedPath);
-    return { resultJson: JSON.stringify({ path }), contentParts };
-  }
-
-  const hasExtended =
-    (paths && paths.length > 0) ||
-    fromLine !== undefined ||
-    toLine !== undefined ||
-    offset !== undefined ||
-    limit !== undefined ||
-    stat === true;
-
-  if (hasExtended) {
-    const resolvedPaths = paths?.map((p) => toWorkspaceRelative(ctx, resolveUserPath(ctx, p)));
-
-    const opts: ReadExtendedOptions = {
-      path: paths ? undefined : toWorkspaceRelative(ctx, resolvedPath),
-      paths: resolvedPaths,
-      fromLine,
-      toLine,
-      offset,
-      limit,
-      stat,
-      maxFiles,
-    };
-
-    const result = await toolReadExtended(ctx.workspacePath, opts, ctx.creds);
-
-    if (result.kind === "stat-single") {
-      return { resultJson: JSON.stringify({ path, stat: result.stat }) };
-    }
-    if (result.kind === "stat-multi") {
-      return { resultJson: JSON.stringify({ stats: result.stats }) };
-    }
-
-    if (result.kind === "multi") {
-      const output: Record<string, unknown> = { files: result.files };
-      if (result.notices) output.notices = result.notices;
-      clearMultiReReadFlags(ctx, result.files);
-      return { resultJson: JSON.stringify({ files: result.files, notices: result.notices }) };
-    }
-
-    const body = result.content;
-    const content = formatBodyLines(body, lines, lineNumbers);
-
-    clearReReadFlag(ctx, resolvedPath);
-    return { resultJson: JSON.stringify({ path, content }) };
+  const firstRange = parsed.fromLine ?? parsed.toLine ?? parsed.offset ?? parsed.limit;
+  if (parsed.stat || firstRange !== undefined || (parsed.paths?.length ?? 0) > 0) {
+    return readExtended(ctx, parsed, resolvedPath);
   }
 
   const body = await toolRead(ctx.workspacePath, resolvedPath, ctx.creds);
-
-  const content = formatBodyLines(body, lines, lineNumbers);
-
   clearReReadFlag(ctx, resolvedPath);
-  return { resultJson: JSON.stringify({ path, content }) };
+  return {
+    resultJson: JSON.stringify({
+      path: parsed.path,
+      content: formatBodyLines(body, parsed.lines, parsed.lineNumbers),
+    }),
+  };
 }
 
 async function writeHandler(
