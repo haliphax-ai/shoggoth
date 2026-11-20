@@ -1,24 +1,6 @@
-// ---------------------------------------------------------------------------
-// re-read-required — line-shift gate for builtin-read/write/replace
-// ---------------------------------------------------------------------------
-//
-// Goal: stop the agent from editing a file using stale line numbers.
-//
-// Producer (builtin-replace): after a successful non-dry-run modification
-// that may have shifted line numbers, mark the file as needing a re-read.
-//
-// Consumer (builtin-write, builtin-replace): before applying, check the
-// current segment. If the file is flagged, return a `gated: true` payload
-// asking the agent to re-read first.
-//
-// Clear (builtin-read): a successful content read of the file removes the
-// flag for the current segment.
-//
-// Segment reset: applySessionContextSegmentNew/Reset clears all rows for
-// the session. The new context_segment_id is naturally invisible to the
-// old rows, but explicit deletion keeps the table from growing across
-// resets and matches the spec's "list should be emptied" wording.
-// ---------------------------------------------------------------------------
+// re-read-required — line-shift gate for builtin-read/write/replace (stops
+// edits with stale line numbers): replace marks, write/replace checks and
+// gates, read clears per segment; segment resets clear all rows.
 
 import type Database from "better-sqlite3";
 

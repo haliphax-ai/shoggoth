@@ -163,11 +163,8 @@ export function createTurnBannerCollector(
 ): TurnBannerCollector {
   const notices: BannerEntry[] = [];
   // The ONE placement rule: slot s = after the s-th committed prose segment
-  // (s=0 → before the first block; s=K → at the end), clamped to the segment
-  // count, firing order preserved within a slot. Falls back to one trailing
-  // block when anchors cannot be resolved (no prose segments, or the segment
-  // boundaries are not locatable in `body`) — a notice is never dropped and
-  // this never throws.
+  // (s=0 → before the first block; s=K → at the end), clamped, order kept;
+  // unresolvable anchors fall back to one trailing block.
   const splice = (body: string, segments: readonly string[]): string => {
     if (notices.length === 0) return body;
     const noticeBlock = notices.map((entry) => entry.notice).join("\n\n");
@@ -185,20 +182,9 @@ export function createTurnBannerCollector(
       // end of the body. Never drop a notice.
       return trailing(body);
     }
-    // Group notices by their clamped slot: slot s = after the s-th
-    // committed prose segment (s=0 → before the first segment; s=K → at
-    // the end of the body). Firing order is preserved within a slot.
-    //
-    // EXPLICIT semantics for the two tail-adjacent slots:
-    //  - s > K: the anchor exceeds the segment list — unresolvable, clamped
-    //    to K (same trailing placement as the fallbacks above).
-    //  - s == K: the notice fired at a round boundary that turned out to be
-    //    the LAST one (a cancel banner firing after the trip hop's round
-    //    settled, with no further prose committed). Chronologically this is
-    //    a TRAILING notice and is placed after the final segment by
-    //    definition — distinct from the unresolvable-locate fallback, which
-    //    only fires when the body cannot be reconciled with the segments
-    //    at all.
+    // Group notices by clamped slot, order preserved; s>K clamps to K
+    // (trailing, like the fallbacks), s==K fired at the last round boundary
+    // and is chronologically trailing (after the final segment).
     const bySlot = new Map<number, string[]>();
     for (const entry of notices) {
       const slot = Math.max(0, Math.min(entry.anchor.committedProseSegments, proseSegments.length));
@@ -230,12 +216,9 @@ export function createTurnBannerCollector(
     return out.join("\n\n");
   };
 
-  // The terminal path renders each body at most once: the first render of a
-  // body is memoized, so a re-run of the termination sequence against the
-  // delivered body can never splice a second (bottom-smashed) layout — there
-  // is no phase where the banners are dropped to the bottom — while a
-  // distinct body (e.g. the error body after a failed delivery) still gets
-  // its own single render.
+  // Terminal renders are memoized per body: a re-run of the termination
+  // sequence against the delivered body can never splice a second
+  // (bottom-smashed) layout; a distinct body still gets its own single render.
   const terminalRenders = new Map<string, string>();
 
   return {

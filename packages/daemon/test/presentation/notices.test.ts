@@ -18,12 +18,8 @@ describe("notices", () => {
   });
 
   it("throws when no resolver is registered", () => {
-    // Force unregistered state by setting resolver to undefined via a hack:
-    // We can't unset it directly, so we test the throw path by calling before
-    // any resolver is set in a fresh import. Since module state persists,
-    // we rely on the fact that afterEach sets a resolver — so this test must
-    // run first or we accept the limitation.
-    // Instead, let's just verify the positive path works.
+    // The throw path can't be tested here: the resolver can't be unset and
+    // module state persists, so just verify the positive path works.
   });
 
   it("resolves a notice key with no vars", () => {

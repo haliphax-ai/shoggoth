@@ -48,10 +48,9 @@ export function createResilientFetcher(
   const { id, gate, fetchImpl, providerType } = options;
   const formatBody = options.formatErrorBody ?? ((text: string) => text.slice(0, 500));
 
-  // Undici dispatcher that overrides Node's internal fetch timeouts when a
-  // request timeout is configured. Built once and reused across calls so the
-  // underlying connection pool is shared. Skipped when no timeout is set so
-  // Node's defaults remain in effect and no extra sockets are opened.
+  // Undici dispatcher overriding Node's internal fetch timeouts when a request
+  // timeout is configured. Built once and reused so the connection pool is shared;
+  // skipped without a timeout so Node's defaults stay in effect.
   const timeoutDispatcher =
     options.requestTimeoutMs !== undefined
       ? new Agent({

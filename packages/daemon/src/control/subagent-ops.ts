@@ -162,10 +162,9 @@ function assertAgentMayUseSubagentSpawn(
       "parent session is missing or terminated",
     );
   }
-  // Thread-bound persistent subagents are subject to this gate like any other
-  // session: pure `parent_session_id` lineage depth, no platform-thread carve-outs.
-  // They were previously exempt from the nesting ban; `maxSpawnDepth` now governs
-  // them uniformly.
+  // Thread-bound persistent subagents: pure `parent_session_id` lineage
+  // depth, no platform-thread carve-outs — `maxSpawnDepth` governs them
+  // uniformly.
   const depth = computeSessionDepthFromStore(sessions, principal.sessionId);
   const maxDepth = effectiveMaxSpawnDepth(
     config,
@@ -265,11 +264,9 @@ export async function handleSubagentSpawn(
     }
     const modelOptions = optionalRecordObject(pl, "model_options");
 
-    // Contract mode (one-shot only): an optional list of target files with
-    // the required modification type and a brief expectation. Validation
-    // runs BEFORE the child session exists so a target outside a git
-    // repository (or a malformed entry) fails the spawn and notifies the
-    // agent. An unset/empty contract leaves the mode inactive.
+    // Contract mode (one-shot only): optional target files with required
+    // modification type + expectation; validated BEFORE the child exists
+    // (outside-git or malformed fails the spawn). Unset/empty: inactive.
     let contract: ShoggothContractEntry[] | undefined;
     let contractRepoDir: string | undefined;
     let contractBaselineRef: string | undefined;
@@ -291,11 +288,9 @@ export async function handleSubagentSpawn(
       }
     }
     if (contract) {
-      // Contract paths resolve against where the session actually lives: an
-      // explicit `cd` working directory, else the agent workspace root. The
-      // daemon's own cwd (`/app` in a container) must never enter the
-      // resolution — it is not the session's directory, so a check against
-      // it can only ever report ERR_CONTRACT_NOT_IN_REPO.
+      // Contract paths resolve against where the session actually lives
+      // (explicit `cd` working directory, else the agent workspace root) —
+      // never the daemon's own cwd, which can only report ERR_CONTRACT_NOT_IN_REPO.
       const parentWorkingDirectory = parent.workingDirectory ?? parent.workspacePath;
       // Contract git runs with the parent session's runtime creds so the
       // checks read the same workspace the agent session owns — not the
@@ -419,10 +414,9 @@ export async function handleSubagentSpawn(
     // Spawn-time tool enables: exact tool IDs or glob patterns (e.g. "kanban-*"),
     // merged into the child session's tool state alongside configured defaults.
     const enableTools = optionalStringArray(pl, "enable_tools");
-    // Persistent-mode thread target: resolve (and for the `"0"` sentinel, create) the
-    // platform thread BEFORE the child session exists, so a resolution failure never
-    // strands a spawned session, and claim the target so the platform's thread-create
-    // event cannot race this op for the binding (see thread-subagent-claims).
+    // Persistent-mode thread target: resolve (and for the `"0"` sentinel,
+    // create) the thread BEFORE the child exists (no stranded spawns) and
+    // claim it so thread-create events cannot race the binding.
     let platformThreadId: string | undefined;
     let releaseThreadClaim: () => void = () => {};
     if (modeRaw === "persistent") {
@@ -510,15 +504,9 @@ export async function handleSubagentSpawn(
       enableToolsForSession(ctx.stateDb, childId, enableTools);
     }
     if (modeRaw === "one_shot") {
-      // `ttl_minutes` (if provided) is the wall-clock lifetime: the child is
-      // terminated when the deadline fires. The deadline is absolute — one-shot
-      // turns are non-resumable, so unlike the persistent inactivity clock there
-      // is nothing to reset. It is never "forever": an absent `ttl_minutes`
-      // defaults to the tiered one-shot ceiling, and a provided value is
-      // capped at that same ceiling, so the persisted expiry below is always
-      // finite. The ceiling is `runtime.maxOneShotTtlMs` when set (clamped
-      // down to `runtime.maxTtlMs`, which remains the global cap), falling
-      // back to `runtime.maxTtlMs` when that tier is unset.
+      // `ttl_minutes` is the wall-clock lifetime; the deadline is absolute
+      // (non-resumable one-shots). Never "forever": absent defaults to the
+      // tiered one-shot ceiling, provided values are capped there.
       const maxTtlMs = resolveMaxOneShotTtlMs(ctx.config);
       const oneShotTtlMs = clampTtlMs(
         oneShotTtlMinutes !== undefined ? oneShotTtlMinutes * 60_000 : undefined,
@@ -544,10 +532,9 @@ export async function handleSubagentSpawn(
         promptLen: prompt.length,
       });
       pushSystemContext(childId, "One-shot subagent task spawned by parent session.");
-      // Contract mode: verify after the turn that every target was acted
-      // upon with its contractual type, then judge each resulting diff with
-      // the decision model in batches. A broken contract or any "yes"
-      // below agents.contract.yesMinimum marks the contract unfulfilled.
+      // Contract mode: after the turn, verify each target was acted on with
+      // its contractual type, then judge each diff with the decision model
+      // in batches; any break or "yes" below agents.contract.yesMinimum fails.
       const runContractDecision = async (req: {
         state: unknown;
         questions: Record<string, unknown>;
@@ -625,10 +612,9 @@ export async function handleSubagentSpawn(
       };
       const backgroundSpawn = pl.background === true;
       if (backgroundSpawn) {
-        // Wall-clock TTL for the fire-and-forget turn: at the absolute deadline
-        // the child is terminated, the structured failure is delivered to the
-        // spawning session, and any still-pending completion handlers are
-        // ignored so a killed child can never surface a spurious result.
+        // Wall-clock TTL for the fire-and-forget turn: at the deadline the
+        // child is terminated, the failure delivered, pending completion
+        // handlers ignored (no spurious result from a killed child).
         let oneShotTtlFired = false;
         // Outcome of the settling turn, captured for the end-of-turn
         // teardown (a failed/aborted turn never answers its steers).
@@ -712,13 +698,9 @@ export async function handleSubagentSpawn(
           })
           .finally(() => {
             clearTimeout(ttlTimer);
-            // Keep the session alive when background execs it started are
-            // still pending: the notifications carry the exit codes the
-            // subagent must react to. The last handle completion (or the
-            // TTL-capped safety timer) settles the teardown. `turnOutcome`
-            // lets the settle decide whether the steers this turn received
-            // were answered (a turn that aborted or failed never answered
-            // them — they are re-delivered before the teardown fires).
+            // Keep the session alive while background execs are pending (their
+            // notifications carry the exit codes to react to); the last
+            // completion or TTL safety timer settles the teardown.
             settleOneShotAfterTurn({
               sessionManager,
               sessions,
@@ -749,10 +731,9 @@ export async function handleSubagentSpawn(
           ...(contract ? { contract: { active: true, pending: true } } : {}),
         };
       }
-      // Wall-clock TTL for the awaited foreground turn: at the absolute deadline
-      // the child is terminated (aborting its in-flight turn) and the awaited
-      // race is settled with the structured failure, so the spawn op can never
-      // hang past its TTL. The child's turn result is discarded after expiry.
+      // Wall-clock TTL for the awaited foreground turn: at the deadline the
+      // child is terminated (aborting its in-flight turn) and the awaited
+      // race settled with the structured failure — the spawn never hangs.
       let oneShotTtlFired = false;
       // Outcome of the settling turn, captured for the end-of-turn teardown
       // (a failed/aborted turn never answers its steers).
@@ -844,10 +825,9 @@ export async function handleSubagentSpawn(
       } finally {
         clearTimeout(ttlTimer);
         settleTurn = undefined;
-        // Keep the session alive when background execs it started are still
-        // pending: the notifications carry the exit codes the subagent must
-        // react to. The last handle completion (or the TTL-capped safety
-        // timer) settles the teardown.
+        // Keep the session alive while background execs are pending (their
+        // notifications carry the exit codes the subagent must react to);
+        // the last handle completion or TTL safety timer settles the teardown.
         settleOneShotAfterTurn({
           sessionManager,
           sessions,
@@ -914,16 +894,9 @@ export async function handleSubagentSpawn(
         ...(contractStatus ? { contract: contractStatus } : {}),
       };
     }
-    // `inactivity_minutes` (if provided) is the inactivity window: the session is
-    // terminated after this long without a delivered assistant response. The clock
-    // resets on every delivered response (touchPersistentSubagentInactivityTimer),
-    // and the computed expiry is persisted so restart reconcile re-arms it correctly.
-    //
-    // The window is never "forever": when `inactivity_minutes` is absent it defaults
-    // to the configured max TTL, and a provided value is capped at that same max TTL
-    // (see #439). With the default max TTL (24h) this matches the prior 1440-minute
-    // default; an operator lowering `runtime.maxTtlMs` shrinks both the default and
-    // the ceiling together.
+    // `inactivity_minutes` is the inactivity window: the session is
+    // terminated after this long without a delivered response; the clock
+    // resets per response and the persisted expiry re-arms on reconcile.
     const maxTtlMs = resolveMaxTtlMs(ctx.config);
     const providedMinutes = optionalFinitePositiveInt(pl, "inactivity_minutes");
     const inactivityMinutes = Math.max(
@@ -956,13 +929,9 @@ export async function handleSubagentSpawn(
         ? ext.registerPlatformThreadBinding(platformThreadId, childId)
         : () => {};
     } catch (bindErr) {
-      // The thread is already bound: normally a conflict with a concurrent flow, so
-      // terminate this child and surface it to the caller. But the platform's
-      // thread-create autocreate routine may have won the thread in the window between
-      // this op's claim and its bind (or before the claim for auto-created threads):
-      // when the holder is a freshly autocreated, zero-turn banner-only session under
-      // this parent, ADOPT it — deliver the spawn prompt as its first turn instead of
-      // failing the spawn and leaving a banner-only zombie behind.
+      // The thread is already bound: normally a conflict — terminate this
+      // child. But if the holder is a freshly autocreated, zero-turn
+      // banner-only session under this parent, ADOPT it (prompt = first turn).
       const adoptable =
         platformThreadId && ctx.stateDb
           ? findAdoptableThreadSubagentSession({
@@ -1004,10 +973,9 @@ export async function handleSubagentSpawn(
     const subLog = getLogger("subagent");
     let expiresAtMs: number;
     if (adoptedSessionId) {
-      // Take over the adoptee's runtime: it was fully wired by the autocreate routine
-      // (binding, bus subscription, inactivity clock). Refresh the clock against this
-      // spawn's window, keep its live handles, then discard the spawn's own child so it
-      // cannot linger as an orphan.
+      // Take over the adoptee's runtime (binding, bus subscription, inactivity
+      // clock): refresh the clock against this spawn's window, keep its live
+      // handles, and discard the spawn's own child.
       const adoptedHandles = getSubagentHandles(adoptedSessionId);
       clearPersistentSubagentInactivityTimer(adoptedSessionId);
       const adoptedTtl = armPersistentSubagentInactivityTimer(
@@ -1080,10 +1048,8 @@ export async function handleSubagentSpawn(
         })()
       : ({ kind: "internal" } as const);
     // Fire the first model turn asynchronously so the parent is not blocked.
-    // Creation banner: thread-bound spawns post it BEFORE the first model turn
-    // so the thread reads creation → response, matching the automatic
-    // thread-create path. Skipped for an adopted session — the autocreate routine
-    // already posted its creation banner. Best-effort: a failed banner never blocks the spawn.
+    // Thread-bound spawns post the creation banner BEFORE it; skipped for an
+    // adopted session (banner already posted). Best-effort: never blocks.
     if (platformThreadId && !adoptedSessionId && ext.sendStatusMessage && ctx.stateDb) {
       try {
         await ext.sendStatusMessage(

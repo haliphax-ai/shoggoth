@@ -120,10 +120,9 @@ async function discoverHandler(
         });
       }
     } else {
-      // Fallback: no cached catalog descriptions are available. There is no
-      // way to verify which configured/state IDs are real tools here, so the
-      // catalog is left empty rather than emitting rows that could mask stale
-      // or unknown IDs (see #550).
+      // Fallback: with no cached descriptions, real tool IDs cannot be
+      // verified — leave the catalog empty rather than mask stale/unknown IDs
+      // (see #550).
     }
     result.catalog = catalog;
   }

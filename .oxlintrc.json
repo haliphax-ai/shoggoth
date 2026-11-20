@@ -1,10 +1,14 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "jsPlugins": ["./scripts/lint/no-comment-essays.js"],
   "plugins": ["typescript", "unicorn", "oxc"],
   "categories": {
     "correctness": "error"
   },
-  "rules": {},
+  "rules": {
+    "custom-lint/no-comment-essays": "error",
+    "no-unused-vars": "error"
+  },
   "env": {
     "builtin": true
   }

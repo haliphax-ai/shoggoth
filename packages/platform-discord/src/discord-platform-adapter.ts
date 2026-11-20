@@ -66,10 +66,9 @@ export class DiscordPlatformAdapter implements PlatformAdapter {
       data: a.data,
     }));
 
-    // Append the pre-rendered status bar to the body BEFORE splitting so the
-    // bar stays intact at the end of the last chunk (blockquote on its own line).
-    // When a bar is present, any formatting marker left open at the end of the
-    // body is closed synthetically first so it cannot bleed into the bar line.
+    // Append the pre-rendered status bar to the body BEFORE splitting so the bar
+    // stays intact at the end of the last chunk; any open formatting marker is
+    // closed synthetically first so it cannot bleed into the bar line.
     const converted = mdTableToAscii(body);
     const guarded =
       opts?.statusBar && converted !== "" ? appendSyntheticClose(converted) : converted;

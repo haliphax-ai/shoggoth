@@ -618,9 +618,8 @@ export function createDiscordRestClient(options: DiscordRestClientOptions): Disc
     }
     if (target !== cur) {
       // Merge: move queued work over and carry in-flight counts so settle()
-      // decrements stay balanced after route-based re-resolution. The header
-      // state just applied to `cur` is the freshest view of the shared
-      // bucket, so it wins over the target's older numbers.
+      // decrements stay balanced; the header state just applied to `cur` is the
+      // freshest view of the shared bucket, so it wins.
       target.inFlight += cur.inFlight;
       target.queue.push(...cur.queue);
       sortQueue(target.queue);

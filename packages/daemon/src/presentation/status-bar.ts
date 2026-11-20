@@ -703,12 +703,9 @@ export function createStatusBarTurnTracker(opts: {
     },
   };
 
-  // Live count providers: an explicit opt wins, else the collected stats'
-  // bound closures (`getStatusBarStats` supplies them). With a provider
-  // present, every render — including the terminal one — reflects counts
-  // that changed mid-turn (handles fired/cancelled, timers queued/fired/
-  // cancelled, subagents spawned/terminated) instead of the pre-turn
-  // snapshot, even when no push event fired on this path.
+  // Live count providers: explicit opt wins, else the collected stats' bound
+  // closures; with a provider, every render — including the terminal one —
+  // reflects mid-turn count changes instead of the pre-turn snapshot.
   const notifiesCount = opts.notifiesCount ?? opts.stats.liveNotifies;
   const timersCount = opts.timersCount ?? opts.stats.liveTimers;
   const subagentsCount = opts.subagentsCount ?? opts.stats.liveSubagents;

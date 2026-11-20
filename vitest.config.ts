@@ -16,16 +16,19 @@ const include = (() => {
     "packages/*/test/**/*.test.ts",
     "packages/*/packages/*/test/**/*.test.ts",
     "docker/test/**/*.test.ts",
+    "scripts/lint/test/**/*.test.mjs",
   ];
 })();
 
-// NOTE: Do NOT run this suite with `--no-isolate` (isolate: false). Under a
-// shared module registry, `vi.mock` interception becomes import-order dependent:
-// whichever test file imports the real module first pins the real binding, so a
-// later file's mock is silently bypassed. The failure set is non-deterministic
-// (it shifts run-to-run with scheduling), so it cannot be fixed by quarantining
-// specific files. Full isolation is required until the vi.mock-heavy tests are
-// refactored to dependency injection (github.com/haliphax-ai/shoggoth/issues/479).
+/*
+ * NOTE: Do NOT run this suite with `--no-isolate` (isolate: false). Under a
+ * shared module registry, `vi.mock` interception becomes import-order dependent:
+ * whichever test file imports the real module first pins the real binding, so a
+ * later file's mock is silently bypassed. The failure set is non-deterministic
+ * (it shifts run-to-run with scheduling), so it cannot be fixed by quarantining
+ * specific files. Full isolation is required until the vi.mock-heavy tests are
+ * refactored to dependency injection (github.com/haliphax-ai/shoggoth/issues/479).
+ */
 
 export default defineConfig({
   cacheDir: ".vite",

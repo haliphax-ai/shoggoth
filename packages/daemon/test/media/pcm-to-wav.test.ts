@@ -86,11 +86,11 @@ describe("wrapPcmAsWav", () => {
     assert.equal(wav.toString("ascii", 12, 16), "fmt ");
     assert.equal(wav.readUInt32LE(16), 16); // Subchunk1Size
     assert.equal(wav.readUInt16LE(20), 1); // AudioFormat (PCM)
-    assert.equal(wav.readUInt16LE(22), 1); // NumChannels
-    assert.equal(wav.readUInt32LE(24), 24000); // SampleRate
-    assert.equal(wav.readUInt32LE(28), 24000 * 1 * 2); // ByteRate
-    assert.equal(wav.readUInt16LE(32), 1 * 2); // BlockAlign
-    assert.equal(wav.readUInt16LE(34), 16); // BitsPerSample
+    assert.equal(wav.readUInt16LE(22), 1);
+    assert.equal(wav.readUInt32LE(24), 24000);
+    assert.equal(wav.readUInt32LE(28), 24000 * 1 * 2);
+    assert.equal(wav.readUInt16LE(32), 1 * 2);
+    assert.equal(wav.readUInt16LE(34), 16);
 
     // data sub-chunk
     assert.equal(wav.toString("ascii", 36, 40), "data");
@@ -104,10 +104,10 @@ describe("wrapPcmAsWav", () => {
     const pcm = Buffer.alloc(200);
     const wav = wrapPcmAsWav(pcm, { sampleRate: 48000, channels: 2, bitsPerSample: 16 });
 
-    assert.equal(wav.readUInt16LE(22), 2); // NumChannels
-    assert.equal(wav.readUInt32LE(24), 48000); // SampleRate
-    assert.equal(wav.readUInt32LE(28), 48000 * 2 * 2); // ByteRate
-    assert.equal(wav.readUInt16LE(32), 2 * 2); // BlockAlign
+    assert.equal(wav.readUInt16LE(22), 2);
+    assert.equal(wav.readUInt32LE(24), 48000);
+    assert.equal(wav.readUInt32LE(28), 48000 * 2 * 2);
+    assert.equal(wav.readUInt16LE(32), 2 * 2);
   });
 
   it("handles empty PCM data", () => {

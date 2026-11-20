@@ -259,11 +259,6 @@ export interface ToolLoopStatsUpdate {
   readonly transcriptMessageCount?: number;
 }
 
-// ---------------------------------------------------------------------------
-// Dispatch result – returned by `processSingleToolCall` so the caller can
-// decide whether to skip or proceed with the next tool call.
-// ---------------------------------------------------------------------------
-
 /** Discriminant for the per-tool-call dispatch result. */
 export type ToolCallDispatchResultKind =
   | "skip_invalid_name"
@@ -288,10 +283,8 @@ export interface ToolCallDispatchResult {
   readonly runawayVerdict?: RunawayVerdict;
 }
 
-// ---------------------------------------------------------------------------
 // Shared loop context – bundles the recurring dependencies so helper
 // function signatures stay concise.
-// ---------------------------------------------------------------------------
 
 interface ToolLoopContext {
   readonly options: RunToolLoopOptions;
@@ -450,10 +443,9 @@ async function hitlApprovalGate(
     return true; // No approval needed
   }
 
-  // Cruise control: requests that did not pass auto-approvals are routed to
-  // the decision judge before being queued for true HITL. Approvals execute;
-  // denials are pushed back to the model like an operator denial; escalations
-  // (and judge failures) fall through to the normal HITL queue.
+  // Cruise control: requests that failed auto-approval are judged by the
+  // decision judge first — approvals execute, denials are pushed back like an
+  // operator denial, escalations (and judge failures) fall through to HITL.
   if (!autoApproved && h.cruiseControl?.isActive(options.sessionId)) {
     let cruiseDecision: CruiseControlDecision = "escalate";
     try {
@@ -705,11 +697,9 @@ async function processSingleToolCall(
   }
 
   if (!names.has(tc.name)) {
-    // Near-miss of the synthetic structured-output tool (e.g.
-    // `__structured_output__parameter`): do NOT take the generic unknown-tool
-    // path, which is unbounded. Hand the model a correction naming the EXACT
-    // tool and flag it so the caller charges the structured-output retry budget
-    // and terminates the turn once that budget is exhausted.
+    // Near-miss of the synthetic structured-output tool: correct with the
+    // exact tool name and flag it so the caller charges the retry budget and
+    // ends the turn once spent.
     if (isNearMissStructuredOutputTool(tc.name)) {
       log.warn("near-miss structured output tool call", {
         toolName: tc.name,
@@ -769,11 +759,9 @@ async function processSingleToolCall(
   }
 
   if (truncatedArgIds.has(tc.id)) {
-    // The provider cut this response off at the output-token limit, so the
-    // arguments are an incomplete prefix of a larger JSON object. The model
-    // cannot repair them by retrying the same call, and replaying the broken
-    // call would poison the next provider request with an opaque 400 — so
-    // the turn is failed fast with an actionable message.
+    // Provider cut the response at the output-token limit: the args are an
+    // unrecoverable prefix, and replaying the broken call would poison the
+    // next request with an opaque 400 — fail the turn fast.
     const errBody = JSON.stringify({
       error: "output_truncated",
       tool: tc.name,
@@ -947,10 +935,8 @@ async function processSingleToolCall(
     return { kind: "skip_review_unavailable" };
   }
 
-  // ---- Stage 3.5: system gates (AGENTS.md / re-read for configured tools) ----
-  // Runs BEFORE HITL so an approval-worthy external tool is gated first —
-  // otherwise the operator approves a tool that then gets gated, and the
-  // model's retry triggers a second HITL prompt.
+  // Stage 3.5: system gates — run BEFORE HITL so an approval-worthy tool is
+  // gated first (otherwise the operator approves a tool that then gets gated).
 
   if (options.systemGates) {
     const gated = await options.systemGates.pre({
@@ -996,11 +982,9 @@ async function processSingleToolCall(
     }
   }
 
-  // ---- Stage 4.5: pre-execute hook (runaway breaker trip point) ----
-  // Runs only for calls that would otherwise execute — validation, policy,
-  // system-gate, and HITL paths above keep their existing behavior and stay
-  // owned by the consecutive-invalid backstop. A "prevent" verdict means the
-  // call never reaches the executor and emits no onToolCallEvent start/end.
+  // Stage 4.5: pre-execute hook (runaway breaker trip point) — only calls that
+  // would execute reach it; a "prevent" verdict stops the call before the
+  // executor and emits no onToolCallEvent start/end.
   const preExecute = beforeExecute?.();
   if (preExecute && preExecute.kind !== "ok") {
     return { kind: "prevented", runawayVerdict: preExecute.runawayVerdict };
@@ -1023,8 +1007,7 @@ async function processSingleToolCall(
     sessionId: options.sessionId,
   });
 
-  // Fired only for calls that proceed to execution (not policy-denied,
-  // HITL-queued, or validation-skipped dispatches).
+  // Fired only for calls that proceed to execution (not skipped dispatches).
   options.onToolCallEvent?.({
     phase: "start",
     name: compoundResource,
@@ -1267,9 +1250,8 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
 
   const emitStats = options.onStatsUpdate;
   // In-memory count of the current segment's transcript rows, kept in sync by
-  // appendTx below. Sourced once from the DB — the loop may enter mid-segment —
-  // then maintained incrementally instead of issuing a COUNT(*) scan after
-  // every append.
+  // appendTx below; sourced once from the DB (the loop may enter mid-segment),
+  // then maintained incrementally.
   let transcriptCount = options.transcript
     ? (
         options.db
@@ -1280,9 +1262,8 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
       ).cnt
     : 0;
   const getTranscriptCount = (): number => transcriptCount;
-  // Compaction rewrites the current segment's rows outside appendTx; pull the
-  // fresh count from the DB so the in-memory counter matches the rewritten
-  // segment for the rest of the run.
+  // Compaction rewrites the segment's rows outside appendTx; pull the fresh
+  // count from the DB so the in-memory counter matches.
   const resyncTranscriptCount = (): void => {
     transcriptCount = (
       options.db
@@ -1366,10 +1347,9 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
     for (;;) {
       assertNotAborted(options.turnAbortSignal);
 
-      // ---- Deferred compaction break (top of round) ----
-      // A manual compaction parked while this loop was mid-turn runs here:
-      // the queue is frozen, no model call is in flight, and the in-memory
-      // history is consistent with the DB transcript.
+      // Deferred compaction break (top of round): a manual compaction parked
+      // mid-turn runs here — queue frozen, no model call in flight, in-memory
+      // history consistent with the DB transcript.
       await drainDeferredCompaction();
 
       // ---- Model call ----
@@ -1414,11 +1394,9 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
               sessionId: options.sessionId,
               attempts: structuredOutputAttempt,
             });
-            // Retry budget spent: stop and let the model's last attempt bubble
-            // up as the turn's terminal response (it was just written to the
-            // transcript) instead of failing the whole turn. Callers such as
-            // OOB delivery then parse it — or surface it verbatim — rather
-            // than retrying forever.
+            // Retry budget spent: stop; the model's last attempt bubbles up as
+            // the terminal response (callers parse it) instead of failing the
+            // whole turn.
             break;
           }
           // Build and inject correction message
@@ -1465,29 +1443,9 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
         | "runaway_cancel"
         | undefined;
 
-      // ---- Per-tool-call dispatch ----
-
-      // Sanitize malformed argsJson before transcript storage.
-      //
-      // Two distinct failures are separated here, because only one of them is
-      // recoverable by the model:
-      //
-      //  - Malformed args (the model emitted bad JSON but finished normally):
-      //    healable — the model sees the error and retries with the same
-      //    intent, so the call is answered with `invalid_arguments` and the
-      //    turn continues.
-      //
-      //  - Truncated args (the provider stopped at the output-token limit,
-      //    `finish_reason: "length"`): NOT recoverable — the arguments are a
-      //    cut-off prefix of a larger JSON object, so no retry of the same
-      //    call can ever succeed. Worse, replaying the broken call poisons
-      //    the NEXT provider request: the model client re-serializes the
-      //    assistant turn with the truncated `function.arguments`, and the
-      //    upstream rejects the whole request with an opaque 400 that kills
-      //    the turn with no useful detail. So this case fails the turn fast
-      //    with an explicit "output truncated — split the write" error
-      //    instead of healing the arguments to "{}" and asking the model to
-      //    try again.
+      // Sanitize malformed argsJson; malformed is healable (answered
+      // invalid_arguments), truncated is not — replaying truncated args
+      // poisons the next request with an opaque 400, so it fails fast.
       const badArgIds = new Set<string>();
       const truncatedArgIds = new Set<string>();
       const roundWasTruncated = isTruncationFinishReason(turn.finishReason);
@@ -1548,26 +1506,13 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
         emitStats?.({ transcriptMessageCount: getTranscriptCount() });
       }
 
-      // --- Runaway prose budget ---
-      // The hop continues the loop (it carries tool calls), so its prose is
-      // charged against the turn's budget — a runaway monologue is prose
-      // generated hop after hop without concluding. A terminal response is
-      // the turn's deliverable and is never charged.
-      //
-      // Charged AFTER the per-hop assistant row above: the prose already
-      // streamed live (onModelRoundEnd fired when the round settled), so a
-      // cancel must still persist this hop's assistant row — otherwise the
-      // transcript-derived turn prose is one segment shorter than the
-      // streamed display and delivery would drop the trip hop's final
-      // paragraph. On cancel the trip hop's tool calls are answered with
-      // synthetic tool rows below so the next turn's history never carries
-      // a dangling assistant tool_calls entry.
+      // Runaway prose budget: hops (with tool calls) are charged; a terminal
+      // response is never. Charged after the per-hop assistant row (the prose
+      // already streamed, so a cancel must still persist this hop's row).
       if (runawayBreaker && turn.content) {
         if (handleRunawayVerdict(runawayBreaker.recordProse(turn.content.length))) {
           if (options.transcript) {
-            // Answer every tool-call id of the canceled hop: same synthetic
-            // results the dispatch-path breaker uses (blocked for the call it
-            // would have tripped on, skipped for the rest of the batch).
+            // Same synthetic results the dispatch-path breaker uses.
             for (let i = 0; i < sanitizedToolCalls.length; i += 1) {
               const canceledTc = sanitizedToolCalls[i]!;
               const canceled = JSON.stringify({
@@ -1592,11 +1537,8 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
         }
       }
 
-      // --- Tool call batch limit ---
-      // Reject an oversized batch wholesale: none of its calls execute, and
-      // every tool_call id receives a structured failure response so the
-      // conversation stays well-formed and the model can retry with a
-      // smaller batch.
+      // Tool call batch limit: an oversized batch is rejected wholesale with a
+      // structured failure per id so the conversation stays well-formed.
       const effectiveMaxToolsPerBatch = options.maxToolsPerBatch ?? 10;
       if (sanitizedToolCalls.length > effectiveMaxToolsPerBatch) {
         log.warn("tool call batch exceeds limit; rejecting", {
@@ -1694,13 +1636,9 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
         }
 
         if (dispatch.kind === "skip_truncated_args") {
-          // The provider truncated this call's arguments at the output-token
-          // limit. The call cannot succeed as written and the model cannot
-          // repair it by retrying, so the turn ends here rather than issuing
-          // another request that would carry the broken arguments back to
-          // the provider (an opaque 400 that killed the turn with no useful
-          // detail). The rest of the batch is answered so the transcript
-          // stays well-formed.
+          // Truncated args: unrecoverable; end the turn instead of replaying
+          // the broken arguments to the provider. Rest of the batch is answered
+          // so the transcript stays well-formed.
           log.error("tool call arguments truncated by output-token limit; terminating turn", {
             sessionId: options.sessionId,
             toolName: tc.name,
@@ -1734,9 +1672,8 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
             emitStats?.({ transcriptMessageCount: getTranscriptCount() });
           }
           // Surface the truncation as the turn's failure: the operator (and
-          // the model, on the next turn) sees an explicit "output truncated —
-          // split the write" instead of a silent stop that looks like the
-          // agent simply gave up.
+          // the model, on the next turn) sees an explicit error instead of a
+          // silent stop that looks like the agent gave up.
           throw new ToolCallTruncatedError(tc.name, turn.finishReason);
         } else if (dispatch.kind === "skip_structured_output_near_miss") {
           // Charge the structured-output retry budget (shared with the
@@ -1785,12 +1722,8 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
           consecutiveInvalidToolCalls = 0;
         }
 
-        // --- Runaway agent circuit breaker ---
-        // Recording happens at the pre-execute hook above (stage 4.5 of
-        // processSingleToolCall), before executor.execute, so a tripping
-        // call is prevented rather than executed. Validation/policy/HITL/
-        // system-gate skips never reach the hook and stay owned by the
-        // consecutive-invalid backstop above.
+        // Runaway breaker records at the pre-execute hook (stage 4.5): a
+        // tripping call is prevented, not executed.
 
         // --- Mid-loop tool refresh (tool discovery) ---
         if (toolRefreshNeeded.get(options.sessionId) && options.refreshTools) {
@@ -1816,13 +1749,10 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
           message: s,
         });
         options.model.pushSteerMessage?.(s);
-        // Surface the steer in the active turn's output, anchored to the spot
-        // where it was injected. Content that already carries its own banner
-        // (in-turn exec / session-send deliveries) surfaces verbatim —
-        // see `buildInjectedSteerSurface`.
+        // Surface the steer in the active turn's output (content that already
+        // carries its own banner surfaces verbatim); persist it in the
+        // transcript for context assembly on subsequent turns.
         postTurnSurfaceNotice(options.sessionId, buildInjectedSteerSurface(s));
-        // Persist the steer in the transcript so it survives the turn and is
-        // available to context assembly on subsequent turns.
         if (options.transcript) {
           appendTx({
             role: "user",
@@ -1841,10 +1771,9 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
     // still runs here, while the turn (and its queue freeze) is still held.
     await drainDeferredCompaction();
 
-    // The turn is completing normally: every steering message drained into
-    // it is now answered (the model will have responded to them). The
-    // injected-but-unanswered tracking clears; an aborted/failed turn leaves
-    // it intact for the teardown's re-delivery.
+    // Turn completing normally: all drained steers are now answered, so the
+    // injected-but-unanswered tracking clears (an aborted/failed turn leaves
+    // it intact for teardown re-delivery).
     settleSteersAnswered(options.sessionId);
     options.toolRuns.markCompleted(options.runId);
     steerHandle.unregister();

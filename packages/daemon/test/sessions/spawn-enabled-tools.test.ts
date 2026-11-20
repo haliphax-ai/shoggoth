@@ -1,7 +1,5 @@
-// ---------------------------------------------------------------------------
 // Spawn-time tool enables: enableToolsForSession + glob resolution at
 // advertisement time (tool discovery finalizer).
-// ---------------------------------------------------------------------------
 
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";

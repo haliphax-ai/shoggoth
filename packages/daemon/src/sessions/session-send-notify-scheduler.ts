@@ -1,21 +1,6 @@
-// ---------------------------------------------------------------------------
-// SessionSendNotifyScheduler — yielded session-send reply notifications
-// ---------------------------------------------------------------------------
-//
-// Mirrors ExecNotifyScheduler (the background-exec notify mechanism), but is
-// in-memory: a yielded `builtin-session-send` call hands off its pending
-// integration promise, which only lives as long as the daemon process — there
-// is nothing durable to persist or restore across restarts.
-//
-// A handle registers when the call's reply window expires (the yield path in
-// the session-send handler) and fires when the target's turn finally settles.
-// The completion then surfaces to the *calling* session through the injected
-// delivery function — in-turn via the steer channel when a turn is active,
-// OOB otherwise — the same boundary timers and exec notifies use.
-//
-// Handles are session-scoped with list/cancel operations; cancelling a session
-// (e.g. terminate) silently drops its unfired handles so a dead session is
-// never notified.
+// SessionSendNotifyScheduler — yielded session-send reply notifications,
+// in-memory (mirrors ExecNotifyScheduler): a handle registers when the reply
+// window expires, fires when the target's turn settles; session-scoped.
 
 import { getLogger } from "../logging";
 

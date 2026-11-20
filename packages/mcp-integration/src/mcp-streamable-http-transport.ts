@@ -214,12 +214,9 @@ function dispatchIncomingMessage(
   const m = asRecord(msg);
   if (!m) return;
 
-  // A cancelled notification that matched a pending request is fully consumed here: the
-  // awaiting caller already learns about it through the rejection, so also forwarding it
-  // would report the same event twice. Matched responses/errors are likewise never
-  // forwarded, so handled cancellations follow the same rule — onServerMessage only sees
-  // messages the transport did not act on. Cancellations with no matching pending request
-  // fall through below and are still reported, since no rejection covers them.
+  // A cancelled notification matching a pending request is fully consumed: the caller
+  // learns of it via the rejection, so forwarding would double-report. Handled
+  // cancellations follow the same rule — onServerMessage only sees unhandled messages.
   if (tryRejectPendingFromCancelledNotification(m, pending, timers)) {
     return;
   }

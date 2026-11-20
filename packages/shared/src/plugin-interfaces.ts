@@ -1,10 +1,6 @@
-// -------------------------------------------------------------------------------
-// Plugin Interface Types — minimal interfaces for cross-package plugin contracts
-//
-// These define the shapes that platform plugins receive from the daemon via hook
-// contexts. They live in @shoggoth/shared so plugins can import real types without
+// Plugin interface types — shapes platform plugins receive from the daemon via
+// hook contexts, in @shoggoth/shared so plugins import real types without
 // depending on daemon internals.
-// -------------------------------------------------------------------------------
 
 import type { ShoggothHitlConfig } from "./schema";
 

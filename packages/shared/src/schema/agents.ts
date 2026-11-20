@@ -35,10 +35,9 @@ export const shoggothCruiseControlConfigSchema = z
   .strict();
 export type ShoggothCruiseControlConfig = z.infer<typeof shoggothCruiseControlConfigSchema>;
 
-// Subagent contract mode — one-shot spawn contract verification defaults.
-// Activation is per-spawn (non-empty `contract` array); this block only tunes
-// the verification: which decision model judges, how sure it must be, and how
-// many contract entries are judged per decision call.
+// Subagent contract mode — spawn contract verification tuning: which decision
+// model judges, the required confidence, and entries judged per decision call.
+// Activation is per-spawn via a non-empty `contract` array.
 export const shoggothContractConfigSchema = z
   .object({
     /** Decision model (`provider-id/model-name`) used to judge contract fulfillment. Unset implies the default decision model. */

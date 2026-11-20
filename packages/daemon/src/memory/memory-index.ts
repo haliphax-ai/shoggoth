@@ -253,10 +253,8 @@ export function ingestMemoryRoots(
     }
 
     // Detect removed files: query index entries under each scanned root and
-    // remove any that no longer exist on disk. Stored source_path values are
-    // realpath'd paths, so a prefix match against the realpath'd root in SQL
-    // is sound and avoids loading the entire table.
-    // For scoped ingests, only check files that match the scope filters.
+    // remove those no longer on disk (source_path values are realpath'd, so
+    // a SQL prefix match is sound); scoped ingests check only matching files.
     const selectUnderRoot = db.prepare(
       "SELECT id, source_path FROM memory_documents WHERE source_path LIKE @prefix ESCAPE '\\'",
     );

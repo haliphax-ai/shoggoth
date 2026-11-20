@@ -462,20 +462,14 @@ async function connectMcpStdioSessionDirect(
     stdio: ["pipe", "pipe", "ignore"],
     ...(hasIdentity ? { detached: true } : {}),
   });
-  // Sink stream errors synchronously — on a failed spawn Node may destroy the
-  // pipes with an error before anything else attaches a listener, and an
-  // unhandled 'error' event on any stream is an uncaught exception. Write
-  // failures against a dead/dying server (EPIPE, ERR_STREAM_DESTROYED) also
-  // surface here; pending requests are already failed through the write
-  // callback and the session's stdout handlers.
+  // Sink stream errors synchronously — on a failed spawn Node may destroy the pipes
+  // before anything attaches a listener, and an unhandled 'error' is uncaught; write
+  // failures (EPIPE, ERR_STREAM_DESTROYED) surface here the same way.
   proc.stdout?.on("error", () => {});
   proc.stdin?.on("error", () => {});
-  // Attach failure handling synchronously — before any await — so EVERY spawn
-  // failure mode (ENOENT, EACCES/EPERM, EMFILE/ENFILE, ENOEXEC/failed exec,
-  // invalid uid/gid, resource exhaustion, ...) rejects the connect below
-  // instead of surfacing as an unhandled 'error' event that takes the whole
-  // daemon down. Node only emits 'spawn' when the child actually started;
-  // 'error' without 'spawn' means the process never existed.
+  // Attach failure handling synchronously, before any await, so every spawn
+  // failure mode (ENOENT, EACCES, invalid uid/gid, ...) rejects the connect below
+  // instead of surfacing as an unhandled 'error' that takes down the daemon.
   let spawnedOk = false;
   const spawned = new Promise<void>((resolve, reject) => {
     proc.once("spawn", () => {
@@ -555,10 +549,9 @@ async function connectMcpStdioSessionViaProcman(
 
   const managed: ManagedProcess = await pm.start(spec);
 
-  // pm.start() never rejects on a failed spawn — the failure is recorded in
-  // the process state instead — so check it here: wiring stdio to a process
-  // that never started would hang the initialize handshake until its timeout
-  // instead of failing the connect promptly.
+  // pm.start() never rejects on a failed spawn — the failure is recorded in the
+  // process state instead. Check it here: wiring stdio to a dead process would
+  // hang the initialize handshake until timeout instead of failing promptly.
   if (managed.state !== "running") {
     const failedState = managed.state;
     // Deregister and cancel any pending restart attempts for this spec.
@@ -568,10 +561,9 @@ async function connectMcpStdioSessionViaProcman(
     );
   }
 
-  // The managed process exposes stdout/stdin via events and writeStdin.
-  // We need Readable/Writable streams for createMcpJsonRpcSession.
-  // Build a PassThrough for stdout that receives data from the managed process events,
-  // and a writable shim that forwards to managed.writeStdin.
+  // Bridge the managed process's event-based stdout/stdin to real streams for
+  // createMcpJsonRpcSession: a PassThrough fed by stdout events, and a writable
+  // shim forwarding to managed.writeStdin.
   const { PassThrough } = await import("node:stream");
   const stdoutStream = new PassThrough();
   managed.on("stdout", (chunk: Buffer) => {

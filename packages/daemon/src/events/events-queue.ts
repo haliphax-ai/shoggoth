@@ -40,11 +40,7 @@ function backoffSecondsAfterFailure(attemptsAfterIncrement: number): number {
   return Math.min(cap, base ** Math.min(attemptsAfterIncrement, 20));
 }
 
-// ---------------------------------------------------------------------------
-// Prepared-statement cache: avoids re-parsing SQL on every call.
-// better-sqlite3 has an internal WeakMap cache, but explicit caching makes the
-// intent clear and avoids repeated hash lookups in hot loops.
-// ---------------------------------------------------------------------------
+// Prepared-statement cache per db handle: avoids re-parsing SQL in hot loops.
 const stmtCache = new WeakMap<Database.Database, Map<string, Database.Statement>>();
 
 function getStmt(db: Database.Database, sql: string): Database.Statement {

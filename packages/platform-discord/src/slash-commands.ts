@@ -359,10 +359,8 @@ const TEXT_INPUT = 4;
 /** Text input style 1 = SHORT. */
 const TEXT_INPUT_SHORT = 1;
 
-// ---------------------------------------------------------------------------
-// Canned prompt flow: staged inline message updates (slug dropdown →
-// optional parameter modal → delivery confirmation), mirroring the /model flow
-// ---------------------------------------------------------------------------
+// Canned prompt flow: staged inline message updates (slug dropdown → optional
+// parameter modal → delivery confirmation), mirroring the /model flow.
 
 /**
  * Dropdown custom_id. Format: `prompt_select|` (no payload). The session is
@@ -446,10 +444,8 @@ async function runPromptProxy(
     });
     return;
   }
-  // `wait: false` — the op returns as soon as the prompt is delivered to the
-  // agent, so the delivery confirmation below is the whole status. The turn
-  // keeps running detached and is announced by the typing indicator and the
-  // session's delivery surface, so there is no post-turn status edit.
+  // `wait: false` — the op returns once the prompt is delivered, so the delivery
+  // confirmation below is the whole status. The turn runs detached; no post-turn edit.
   payload.wait = false;
   const submitted = `✅ Canned prompt \`${options.slug}\` submitted to session \`${payload.session_id}\`.`;
   // Terminal-state editor: every terminal state clears components so the
@@ -480,13 +476,9 @@ async function runPromptProxy(
     }
   };
   if (replyStyle === "inline-update") {
-    // ACK FIRST with UPDATE_MESSAGE (7): this satisfies the ~3s window AND
-    // rewrites message A (the dropdown) in place with the delivery
-    // confirmation, so the dropdown is cleared immediately instead of sitting
-    // inert for the whole model turn. If Discord rejects type 7 the first ack
-    // throws — only then fall back to DEFERRED (5) and report the outcome by
-    // editing that deferred response. Never send a second POST after a
-    // successful first ack.
+    // ACK FIRST with UPDATE_MESSAGE (7): satisfies the ~3s window and rewrites
+    // message A in place with the delivery confirmation. If type 7 is rejected,
+    // fall back to DEFERRED (5) — never a second POST after a successful first ack.
     let deferredFallback = false;
     try {
       try {
@@ -709,13 +701,9 @@ async function handleInteraction(
   deps: DiscordInteractionHandlerDeps,
   ev: DiscordInteractionEvent,
 ): Promise<void> {
-  // Guild-ownership guard: multiple daemons sharing one bot token all receive
-  // every INTERACTION_CREATE, so an instance must only answer interactions
-  // from its own guilds. Drop foreign-guild interactions WITHOUT acknowledging
-  // them: the interaction callback token is single-use, so any response here
-  // would race (and can beat) the owning instance's response. Guild-less
-  // interactions (DMs) pass through; an absent/empty ownedGuildIds disables
-  // the guard entirely (DM-only deployments).
+  // Guild-ownership guard: daemons sharing one bot token all receive every
+  // INTERACTION_CREATE. Drop foreign-guild interactions WITHOUT acknowledging —
+  // the single-use callback token would race the owning instance's response.
   if (
     ev.guildId !== undefined &&
     deps.ownedGuildIds !== undefined &&
@@ -742,22 +730,16 @@ async function handleInteraction(
       return;
     }
 
-    // Stage 2: canned prompt slug dropdown selected. No placeholders →
-    // immediate UPDATE_MESSAGE (7) delivery confirmation on message A;
-    // placeholders → modal (9), after which stage 3 rewrites message A on
-    // submit. The
-    // /prompt slash command with a slug argument opens the same modal
-    // directly when the prompt has placeholders (bypassing this dropdown).
+    // Stage 2: slug dropdown selected. No placeholders → immediate UPDATE_MESSAGE
+    // (7) confirmation on message A; placeholders → modal (9), stage 3 rewrites A.
+    // /prompt with a slug argument opens the same modal directly.
     if (customId.startsWith(PROMPT_SELECT_PREFIX)) {
       const values = ev.data?.values;
       if (!values || values.length === 0) return;
       const slug = values[0];
-      // The session is no longer carried in custom_id (Discord's 100-char limit
-      // overflows for long thread-bound subagent URNs). Re-derive it from the
-      // interaction's channel, which resolves subagent sessions via the dynamic
-      // thread binding. NOTE: an explicit cross-channel `session_id` override is
-      // intentionally only honored on the direct-run path (slug + no placeholders);
-      // this staged browse/modal flow always targets the channel-bound session.
+      // The session is no longer carried in custom_id (100-char limit); re-derive
+      // from the channel. Cross-channel `session_id` override is only honored on
+      // the direct-run path; staged flows target the bound session.
       const sessionId = deps.resolveSessionForChannel?.(ev.channelId, ev.guildId);
       if (!sessionId) {
         await deps.transport.interactionCallback(ev.id, ev.token, {
@@ -794,10 +776,9 @@ async function handleInteraction(
         );
         return;
       }
-      // Placeholders present → shared parameter modal. Message A stays
-      // visible while the modal is open — unavoidable, since Discord text
-      // inputs exist only inside modals; stage 3 rewrites message A when
-      // the modal is submitted.
+      // Placeholders → shared parameter modal. Message A stays visible while the
+      // modal is open (Discord text inputs exist only inside modals); stage 3
+      // rewrites message A when the modal is submitted.
       await respondWithPromptParameterModal(
         deps,
         ev.id,
@@ -997,9 +978,8 @@ async function handleInteraction(
       return;
     }
 
-    // Cruise control activation modal submitted → activate and report.
-    // The session is re-derived from the channel (never embedded in the
-    // custom_id — thread-bound subagent URNs overflow the 100-char limit);
+    // Cruise control activation modal submitted → activate and report. The session
+    // is re-derived from the channel (never in custom_id — 100-char limit);
     // an optional model rides in the custom_id suffix.
     if (customId === CRUISE_MODAL_ID || customId.startsWith(CRUISE_MODAL_PREFIX)) {
       const model = customId.startsWith(CRUISE_MODAL_PREFIX)
@@ -1226,9 +1206,8 @@ async function handleInteraction(
   }
 
   if (controlOp.op === "session_kill") {
-    // `/close`: reap a subagent session attached to this surface (or an
-    // explicit session_id). The `subagent_only` guard in the translated
-    // payload makes the daemon refuse top-level agent sessions, which is
+    // `/close`: reap a subagent session on this surface (or explicit session_id).
+    // The `subagent_only` guard makes the daemon refuse top-level agent sessions,
     // surfaced here as an operator-facing warning instead of a kill.
     const payload = { ...controlOp.payload };
     if (!payload.session_id && deps.resolveSessionForChannel) {
@@ -1278,11 +1257,9 @@ async function handleInteraction(
       });
       return;
     }
-    // The steer control op returns as soon as the prompt is delivered
-    // (`wait: false`) — the turn keeps running detached and announces itself
-    // via the typing indicator and the session's delivery surface — so the
-    // initial slash response reports the delivery immediately. No deferred
-    // "thinking" placeholder, no post-turn edit.
+    // The steer op returns once the prompt is delivered (`wait: false`) — the turn
+    // runs detached, announced via typing indicator and delivery surface — so the
+    // initial slash response reports delivery immediately. No placeholder, no edit.
     payload.wait = false;
     let steerContent: string;
     try {
@@ -1311,11 +1288,9 @@ async function handleInteraction(
   }
 
   if (controlOp.op === "hitl_cruise_control") {
-    // `/cruise` — cruise control (HITL auto-pilot):
-    // - No options + active → deactivate.
-    // - No options (or partial required guidance) → activation modal, prefilled
-    //   with whatever was provided.
-    // - All required guidance (yes + no) → activate directly, no modal.
+    // `/cruise` — cruise control (HITL auto-pilot): no options + active →
+    // deactivate; no/partial required guidance → prefilled activation modal;
+    // all required guidance (yes + no) → activate directly, no modal.
     const payload = { ...controlOp.payload };
     if (!payload.session_id && deps.resolveSessionForChannel) {
       const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
@@ -1501,11 +1476,9 @@ async function handleInteraction(
       return;
     }
     if (requestedSlug && requestedEntry) {
-      // Slug given and the prompt HAS placeholders: go straight to the
-      // parameter modal as the initial interaction response. A pre-selected
-      // dropdown would be a dead end — Discord never fires a select menu's
-      // onchange for `default_values` pre-selection, so the flow could not
-      // advance to the modal.
+      // Slug given and the prompt HAS placeholders: go straight to the parameter
+      // modal as the initial response. A pre-selected dropdown is a dead end —
+      // Discord never fires onchange for `default_values` pre-selection.
       await respondWithPromptParameterModal(
         deps,
         parsed.interactionId,

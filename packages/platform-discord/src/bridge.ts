@@ -383,10 +383,9 @@ export async function startDiscordMessagingIfConfigured(
       if (!t || !s) return () => {};
       const current = discordDynamicSessionByChannel.get(t);
       if (current !== undefined && current !== s) {
-        // A thread binds to at most one live session: refuse to shadow an
-        // active binding (e.g. an explicit subagent spawn racing the
-        // thread-create autocreate). A stale binding — terminated holder — is
-        // reclaimed so the thread is not wedged forever.
+        // A thread binds to at most one live session: refuse to shadow an active
+        // binding; a stale binding (terminated holder) is reclaimed so the thread
+        // is not wedged forever.
         if (!opts.isSessionActive || opts.isSessionActive(current)) {
           throw new Error(`Discord thread ${t} already bound to session ${current}`);
         }

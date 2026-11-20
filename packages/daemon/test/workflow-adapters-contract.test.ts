@@ -40,9 +40,8 @@ function gitFixtureEnv(): NodeJS.ProcessEnv {
     GIT_COMMITTER_NAME: "test",
     GIT_COMMITTER_EMAIL: "test@test.local",
     // Fixture repos must not inherit the operator's global/system git config
-    // (commit signing, credential helpers, includes): identity comes from the
-    // GIT_* vars above and repo-local `git config`, and a signing key or
-    // include chain that fails on this host would fail every fixture commit.
+    // (signing, credential helpers, includes): identity comes from the GIT_*
+    // vars above and repo-local config; a broken chain fails every commit.
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_SYSTEM: "/dev/null",
   };

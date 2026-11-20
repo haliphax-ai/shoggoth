@@ -67,10 +67,9 @@ const COMMAND_TO_OP: Record<string, (opts: Readonly<Record<string, string>>) => 
       op: "session_abort",
       payload: opts.session_id ? { session_id: opts.session_id } : {},
     }),
-    // `/close` kills a session but only ever targets subagent sessions: the
-    // `subagent_only` guard makes the daemon refuse top-level agent sessions
-    // (which have no parent) so the command can never orphan an agent's main
-    // session from a messaging surface.
+    // `/close` only ever targets subagent sessions: the `subagent_only` guard
+    // refuses top-level agent sessions (which have no parent), so the command
+    // can never orphan an agent's main session from a messaging surface.
     close: (opts) => ({
       op: "session_kill",
       payload: {
@@ -124,8 +123,7 @@ const COMMAND_TO_OP: Record<string, (opts: Readonly<Record<string, string>>) => 
     prompt: (opts) => {
       // Primary option is the slug; `session_id` and `platform_user_id` are
       // routing fields forwarded as-is; every other option is a placeholder
-      // parameter passed as its own name/value pair. All values are required
-      // (validation happens in the daemon op against the prompt file).
+      // parameter as its own name/value pair (validated in the daemon op).
       const slug = opts.slug?.trim();
       const payload: Record<string, unknown> = {};
       if (slug) payload.slug = slug;

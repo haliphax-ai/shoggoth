@@ -331,10 +331,9 @@ export async function handleWorkflowToolCall(
         const finalName = name ?? "unnamed-workflow";
         const replyTo = requireField(args.reply_to, "reply_to");
 
-        // Cap provided TTLs at the configured max TTL so an over-large (or absent)
-        // runtime limit is never interpreted as "forever" (see #439). The absent case
-        // keeps the tighter 10-minute subsystem default; only the ceiling comes from
-        // maxTtl here.
+        // Cap provided TTLs at the configured max TTL so an over-large limit is
+        // never treated as "forever" (see #439); the absent case keeps the tighter
+        // 10-minute subsystem default — only the ceiling comes from maxTtl.
         const maxTtlMs = deps.maxTtlMs ?? DEFAULT_MAX_TTL_MS;
         const taskDefs = toTaskDefs(finalTasks).map((t) =>
           t.runtimeLimitMs !== undefined

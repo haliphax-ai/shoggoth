@@ -209,10 +209,9 @@ describe("runToolLoop structured output validation retry", () => {
       limit: 20,
     });
 
-    // Expect 3 transcript entries:
-    // 1. assistant message with failed content + structuredOutputValidationFailed metadata
-    // 2. user message with correction + structuredOutputCorrection metadata
-    // 3. assistant message with successful content
+    // Expect 3 transcript entries: (1) failed assistant with
+    // structuredOutputValidationFailed metadata, (2) correction user message with
+    // structuredOutputCorrection metadata, (3) successful assistant response.
     assert.ok(page.messages.length >= 3, `expected >= 3 messages, got ${page.messages.length}`);
 
     // First: failed assistant response
@@ -241,13 +240,9 @@ describe("runToolLoop structured output validation retry", () => {
   });
 
   it("resets retry counter after a successful terminal response", async () => {
-    // Scenario: first complete() returns tool calls, tool executes, second complete()
-    // throws validation error, third complete() succeeds (counter should be at 1),
-    // then on a hypothetical next failure cycle the counter should start fresh.
-    //
-    // We simulate: tool call round → validation fail → success → done.
-    // The key assertion is that the retry counter resets after the success,
-    // meaning a subsequent validation failure would get a fresh set of retries.
+    // Simulate: tool call round → validation fail → success → done; the retry
+    // counter must reset after the success, so a subsequent validation failure
+    // would get a fresh set of retries.
     let completeCall = 0;
     const steered: string[] = [];
     const model: ModelClient = {
@@ -472,10 +467,9 @@ describe("runToolLoop circuit breakers (structured-output near-miss + unknown-to
       async complete() {
         completeCall++;
         if (completeCall <= 3) {
-          // Ordinary unrelated unknown tools — must take the generic path and
-          // must NOT increment structuredOutputAttempt. If they did, the
-          // structured-output breaker would trip at the 3rd and the turn would
-          // end before reaching the terminal response below.
+          // Ordinary unrelated unknown tools must take the generic path and NOT
+          // increment structuredOutputAttempt, or the breaker would trip at the 3rd
+          // and end the turn before the terminal response below.
           return {
             content: null,
             toolCalls: [

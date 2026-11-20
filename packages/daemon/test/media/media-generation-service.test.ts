@@ -7,10 +7,8 @@ import type { MediaAdapterResult } from "../../src/media/adapters/types";
 import type { MediaProviderConfig } from "../../src/media/resolve-model";
 import type { ShoggothMediaGenerationConfig } from "@shoggoth/shared";
 
-// -----------------------------------------------------------------------------
-// DI: inject fake adapters via the constructor registry instead of mocking the
-// adapter modules (vi.mock is import-order dependent under --no-isolate).
-// -----------------------------------------------------------------------------
+/** DI: inject fake adapters via the constructor registry instead of mocking the
+ *  adapter modules (vi.mock is import-order dependent under --no-isolate). */
 
 function completeImage(): MediaAdapterResult {
   return { status: "complete", path: "/tmp/media/output.png", mime_type: "image/png" };

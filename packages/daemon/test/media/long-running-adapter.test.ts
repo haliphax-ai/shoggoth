@@ -410,9 +410,9 @@ describe("longRunningAdapter", () => {
 // media_generate_poll control op
 // ---------------------------------------------------------------------------
 
-// DI: inject a fake MediaGenerationService factory into the integration ops
-// context instead of mocking the module (vi.mock is import-order dependent
-// under --no-isolate).
+/** DI: inject a fake MediaGenerationService factory into the integration ops
+ *  context instead of mocking the module (vi.mock is import-order dependent
+ *  under --no-isolate). */
 const mockPoll = vi.fn();
 
 function makeFakeMediaGenerationService() {

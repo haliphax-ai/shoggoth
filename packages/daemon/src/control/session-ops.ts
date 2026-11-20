@@ -553,12 +553,8 @@ export async function handleSessionSteer(
       throw new IntegrationOpError("ERR_FORBIDDEN", "agent may only steer direct child subagents");
     }
     // --- Split path: inject directly into active tool loop if one exists ---
-    // A channel can exist without a live turn for a few ticks (turn
-    // teardown vs. session termination race). A steer pushed into such a
-    // channel is dropped by the next channel teardown and — via the wait
-    // path's fallback — can resurface as a stray turn on another session
-    // (the stale-steer bounce). If the row is gone, fail fast here instead
-    // of pushing into a channel owned by no live loop.
+    // A channel can outlive its turn a few ticks; a steer pushed there
+    // resurfaces as a stray turn (the stale-steer bounce) — fail fast instead.
     if (pushSteer(sessionId, prompt)) {
       const steeredRow = sessions.getById(sessionId);
       if (!steeredRow || steeredRow.status === "terminated") {
@@ -602,10 +598,9 @@ export async function handleSessionSteer(
           })();
     const senderInfo =
       principal.kind === "agent" ? principal.sessionId : `operator:${principal.operatorId}`;
-    // The steer fell through to a new turn (no active tool loop to inject
-    // it mid-turn). Carry the steer banner on the turn so its output
-    // surface shows the directive before the model output instead of an
-    // unattributed reply (visual context is otherwise lost).
+    // The steer fell through to a new turn (no active tool loop): carry the
+    // steer banner so the output surface shows the directive before the
+    // model output, not an unattributed reply.
     const turnInput: Parameters<typeof ext.runSessionModelTurn>[0] = {
       sessionId,
       userContent: prompt,
@@ -716,11 +711,9 @@ export async function handleSessionKill(
     const pl = payloadObject(req);
     const sessionId = requireSessionId(pl, ctx.config, ctx.sessions);
     const targetRow = sessions.getById(sessionId);
-    // Platform `/close` guard: the command may only reap subagent sessions.
-    // A known row without a parent is a top-level agent session (its
-    // durability comes from being bound to a platform channel) — killing it
-    // from a messaging surface would orphan the agent, so refuse with a
-    // warning instead. Unknown rows fall through to the idempotent kill.
+    // Platform `/close` guard: only subagent sessions may be reaped. A known
+    // row without a parent is a top-level agent session — killing it would
+    // orphan the agent, so refuse; unknown rows fall through to idempotent kill.
     if (pl.subagent_only === true && targetRow && !targetRow.parentSessionId) {
       throw new IntegrationOpError(
         "ERR_FORBIDDEN",
@@ -748,10 +741,9 @@ export async function handleSessionKill(
       ctx.hitlClear?.autoApproveGate,
       "session_kill_op",
     );
-    // Killing a session must not leave a wedged running entry or a queued
-    // backlog behind: clear any queued turns and force-release the running
-    // slot so the queue does not stay blocked on a dead session. The queue
-    // may not be initialized (e.g. tests), so swallow any error.
+    // Killing a session must not leave a wedged queue entry or running slot
+    // behind; the queue may not be initialized (e.g. tests), so swallow any
+    // error.
     try {
       const turnQueue = getTurnQueue();
       turnQueue.clear(sessionId);
@@ -808,10 +800,9 @@ export async function handleSessionModel(
         }
       }
 
-      // Model-switch guards (mid-turn AND idle). Only apply when the new
-      // selection actually changes the session's primary model ref: an
-      // invocation-only tweak (no `model`) or re-selecting the current
-      // model is always allowed.
+      // Model-switch guards (mid-turn AND idle) apply only when the new
+      // selection changes the session's primary model ref: an invocation-only
+      // tweak (no `model`) or re-selecting the current model is always allowed.
       const effective = resolveEffectiveModelsConfig(ctx.config, sessionId) ?? ctx.config.models;
       const previousRef =
         getSessionPrimaryModelRef(row.modelSelection) ??
@@ -820,10 +811,9 @@ export async function handleSessionModel(
           : undefined);
       const requestedRef = getSessionPrimaryModelRef(val);
       if (requestedRef && requestedRef !== previousRef) {
-        // Compatibility guard: the ref must resolve in the session's
-        // effective models config (same tool-calling interface — every
-        // configured provider serves completeWithTools), otherwise the
-        // daemon could not serve it.
+        // Compatibility guard: the ref must resolve in the session's effective
+        // models config (same tool-calling interface — every configured
+        // provider serves completeWithTools), else the daemon cannot serve it.
         const exists = validateModelRefExists(effective, requestedRef);
         if (!exists.ok) {
           throw new IntegrationOpError("ERR_MODEL_NOT_FOUND", exists.error);
@@ -919,10 +909,9 @@ export async function handleSessionQueueManage(
       throw new IntegrationOpError("ERR_QUEUE_UNAVAILABLE", "turn queue not initialized");
     }
 
-    // Queue indexes are 1-based on the wire: `list` numbers entries from 1
-    // and `remove` accepts 1-based index/start/end bounds. Markdown
-    // renderers (e.g. Discord) always start numbered lists at 1, so 0-based
-    // output would desync from what the operator actually sees.
+    // Queue indexes are 1-based on the wire (`list`, `remove` bounds): 0-based
+    // output would desync from what the operator sees in Markdown renderers,
+    // which always start numbered lists at 1.
     if (action === "list") {
       const entries = queue.listQueued(sessionId, priority).map((e, i) => ({
         id: e.id,

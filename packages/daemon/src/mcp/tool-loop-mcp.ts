@@ -181,10 +181,9 @@ export function createMcpRoutingToolExecutor(options: {
         if (!reconnectExternal || !isLapsedMcpSessionResult(result.resultJson)) {
           return result;
         }
-        // The pool lapsed mid-turn (e.g. idle eviction closed the session the
-        // turn captured at start). Re-resolve so `external` points at a freshly
-        // reconnected pool, then retry once. A second closed-session failure
-        // surfaces as-is.
+        // Pool lapsed mid-turn (idle eviction closed the captured session):
+        // re-resolve `external` to a fresh pool and retry once; a second
+        // closed-session failure surfaces as-is.
         log.warn("mcp session lapsed mid-turn; reconnecting and retrying once", {
           sourceId: tool.sourceId,
           tool: tool.originalName,

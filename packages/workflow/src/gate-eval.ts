@@ -40,10 +40,10 @@ type TokenType =
   | "TASK_REF" // task.N.success or task.N.output
   | "BOOL" // true / false
   | "STRING" // "..." or '...'
-  | "OP" // ==, !=, &&, ||, !
-  | "CONTAINS" // contains
-  | "LPAREN" // (
-  | "RPAREN" // )
+  | "OP"
+  | "CONTAINS"
+  | "LPAREN"
+  | "RPAREN"
   | "EOF";
 
 interface Token {

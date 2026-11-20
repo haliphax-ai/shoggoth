@@ -520,9 +520,8 @@ describe("DiscordStreamingOutbound status bar", () => {
       expect(call[2].content.length).toBeLessThanOrEqual(maxLen);
     }
     // The bar made it onto the last delivered chunk as a blank-line-separated
-    // blockquote. With the bar reserved in the split budget the reduced budget
-    // produces an extra overflow message, so the last delivered chunk may be a
-    // create rather than an edit.
+    // blockquote. With the bar reserved in the budget the reduced budget may
+    // produce an extra overflow message (a create, not an edit).
     const editCallsAll = vi.mocked(transport.editMessage).mock.calls;
     const createCallsAll = vi.mocked(transport.createMessage).mock.calls;
     const delivered = [
@@ -799,10 +798,9 @@ describe("DiscordStreamingOutbound concurrency", () => {
     const handle = await streaming.start();
     vi.mocked(transport.createMessage).mockClear();
 
-    // Delay message creation to widen the race window between concurrent
-    // renders: without the per-handle mutex, each racing reconcile pass sees
-    // "no overflow message yet" for the same chunk index and creates its own
-    // copy — orphans no later pass ever edits or deletes.
+    // Delay message creation to widen the race window between concurrent renders:
+    // without the per-handle mutex, each racing pass sees "no overflow message yet"
+    // for the same chunk index and creates its own copy — orphaned forever.
     let created = 0;
     vi.mocked(transport.createMessage).mockImplementation(async () => {
       await new Promise((resolve) => setTimeout(resolve, 15));

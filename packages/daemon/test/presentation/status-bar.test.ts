@@ -1197,9 +1197,7 @@ describe("createStatusBarTurnTracker", () => {
          VALUES (?, ?, 0, 'user', ?)`,
       ).run("rt1", segmentId, "x".repeat(4_000)); // ≈1_000 estimated tokens
       // Same regression shape as the platform e2e test: the snapshot must
-      // carry the segment-estimate fill (0.1%/1M), never the cumulative
-      // input_tokens column — and it reaches delivery via the tracker's
-      // finish() (the ONE terminal composition).
+      // carry the segment-estimate fill (0.1%/1M), never the cumulative input_tokens.
       const render = vi.fn((_snap: StatusBarSnapshot, _cfg: ResolvedStatusBarConfig) => "x");
       const tracker = createStatusBarTurnTracker({
         cfg: defaultCfg,

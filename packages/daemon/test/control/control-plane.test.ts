@@ -2486,10 +2486,9 @@ describe("control plane (unix socket + JSONL)", () => {
         payload: {},
       });
       const res = parseResponseLine(line);
-      // The wire gate rejects unregistered ops with ERR_UNKNOWN_OP before
-      // dispatch, and an agent-only op would reject the CLI's operator
-      // token with ERR_FORBIDDEN. The CLI sends operator_token for all of
-      // these, so neither failure is acceptable.
+      // The wire gate must reject unregistered ops with ERR_UNKNOWN_OP before
+      // dispatch, and never ERR_FORBIDDEN (agent-only ops would reject the
+      // CLI's operator token) — the CLI sends operator_token for all of these.
       assert.notEqual(res.error?.code, "ERR_UNKNOWN_OP");
       assert.notEqual(res.error?.code, "ERR_FORBIDDEN");
     });

@@ -1,6 +1,4 @@
-// ---------------------------------------------------------------------------
-// Ring Buffer — Fixed-size circular byte buffer for output capture
-// ---------------------------------------------------------------------------
+// Ring Buffer — fixed-size circular byte buffer for output capture.
 
 const DEFAULT_MAX_BYTES = 1024 * 1024; // 1 MB
 
