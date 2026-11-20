@@ -59,17 +59,18 @@ function dropEntries(sessionId: string, entries: SteerEntry[]): void {
 export function registerSteerChannel(sessionId: string): {
   unregister: () => void;
 } {
+  const sid = sessionId.trim();
   const queue: SteerEntry[] = [];
-  const prev = channels.get(sessionId);
-  if (prev) dropEntries(sessionId, prev.splice(0)); // replaced turn: undrained messages are dropped
-  channels.set(sessionId, queue);
+  const prev = channels.get(sid);
+  if (prev) dropEntries(sid, prev.splice(0)); // replaced turn: undrained messages are dropped
+  channels.set(sid, queue);
   let dropped = false;
   return {
     unregister: () => {
-      if (channels.get(sessionId) === queue) channels.delete(sessionId);
+      if (channels.get(sid) === queue) channels.delete(sid);
       if (dropped) return;
       dropped = true;
-      dropEntries(sessionId, queue.splice(0));
+      dropEntries(sid, queue.splice(0));
     },
   };
 }
@@ -83,7 +84,7 @@ export function pushSteer(
   message: string,
   opts: { onDropped?: () => void } = {},
 ): boolean {
-  const q = channels.get(sessionId);
+  const q = channels.get(sessionId.trim());
   if (!q) return false;
   q.push({ message, ...(opts.onDropped ? { onDropped: opts.onDropped } : {}) });
   return true;
@@ -95,12 +96,13 @@ export function pushSteer(
  * injection to count as delivered (the tool loop settles on completion).
  */
 export function drainSteers(sessionId: string): string[] {
-  const q = channels.get(sessionId);
+  const sid = sessionId.trim();
+  const q = channels.get(sid);
   if (!q || q.length === 0) return [];
   const drained = q.splice(0).map((e) => e.message);
-  const pending = unansweredBySession.get(sessionId) ?? [];
+  const pending = unansweredBySession.get(sid) ?? [];
   pending.push(...drained);
-  unansweredBySession.set(sessionId, pending);
+  unansweredBySession.set(sid, pending);
   return drained;
 }
 
@@ -125,6 +127,13 @@ export function takeUnansweredSteers(sessionId: string): string[] {
 export function steerDepth(sessionId: string): number {
   const sid = sessionId.trim();
   return (channels.get(sid)?.length ?? 0) + (unansweredBySession.get(sid)?.length ?? 0);
+}
+
+/** Clears the session's queued channel and unanswered-steer tracking (tests, teardown). */
+export function clearSteerChannel(sessionId: string): void {
+  const sid = sessionId.trim();
+  channels.delete(sid);
+  unansweredBySession.delete(sid);
 }
 
 /** Visible for testing — clears all channels. */
