@@ -1860,6 +1860,24 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
       const reason = e instanceof TurnAbortedError ? "aborted" : `error:${String(e)}`;
       options.toolRuns.markFailed(options.runId, reason);
     }
+    // Turn errors are the last writer for this turn's unanswered-steer
+    // tracking: the entries exist only because this loop drained the channel
+    // and then died, so they cannot be a replacement turn's live state
+    // (drainSteers runs inside the turn body; a replacement turn cannot drain
+    // until this one exits). The injected-but-unanswered accounting exists to
+    // catch a message the model never got to respond to across turn
+    // boundaries — a turn that failed on its own (provider error, tool-loop
+    // bug) is exactly that case and must keep the entries for the teardown's
+    // re-delivery. An operator `session_abort` of THIS turn, however, is a
+    // deliberate withdrawal of the directive: aborting the only turn that
+    // could answer it, on a session that keeps living, would otherwise strand
+    // the entries until the next steer or teardown and eventually trigger a
+    // re-delivery turn the operator just declined to wait for. The abort
+    // scope is still open here (the turn that owns it is the one unwinding),
+    // so the signal's reason identifies the requesting caller.
+    if (e instanceof TurnAbortedError && options.turnAbortSignal?.reason === "operator_abort") {
+      settleSteersAnswered(options.sessionId);
+    }
     throw e;
   }
 }

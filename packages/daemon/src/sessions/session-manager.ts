@@ -24,6 +24,8 @@ import { getExecNotifyScheduler } from "../exec/exec-notify-scheduler";
 import { getSessionSendNotifyScheduler } from "./session-send-notify-scheduler";
 import { requestSessionTurnAbort } from "./session-turn-abort";
 import { disposeSubagentRuntime } from "../subagent/subagent-disposables";
+import { clearSteerChannel } from "./steer-channel";
+import { clearCompactionGate } from "./compaction-gate";
 
 export type SpawnSessionResult = {
   sessionId: string;
@@ -248,6 +250,12 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
       for (const id of targets) {
         requestSessionTurnAbort(id);
         disposeSubagentRuntime(id);
+        // The per-session in-process registries must not outlive their owner:
+        // a steer channel / parked compaction request keyed by a terminated
+        // session id either addresses nothing (the turn is gone) or, for a
+        // session id reused in-process, leaks into the new occupant's turn.
+        clearSteerChannel(id);
+        clearCompactionGate(id);
         options.agentTokens.revoke(id);
         options.sessions.update(id, { status: "terminated" });
         getTimerScheduler()?.cancelByAnchorSession(id);
