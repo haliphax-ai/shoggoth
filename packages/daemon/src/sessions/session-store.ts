@@ -244,6 +244,263 @@ export function createSessionStore(db: Database.Database): SessionStore {
   return store;
 }
 
+type SessionDbRow = {
+  id: string;
+  agent_id: string | null;
+  agent_profile_id: string | null;
+  workspace_path: string;
+  status: string;
+  context_segment_id: string | null;
+  model_selection_json: string | null;
+  light_context: number;
+  prompt_stack_json: string;
+  runtime_uid: number | null;
+  runtime_gid: number | null;
+  parent_session_id: string | null;
+  subagent_mode: string | null;
+  subagent_platform_thread_id: string | null;
+  subagent_expires_at_ms: number | null;
+  subagent_delivery_mode: string | null;
+  subagent_respond_to: string | null;
+  system_context_token: string | null;
+  context_level: string | null;
+  working_directory: string | null;
+};
+
+function getSessionRow(stmt: Database.Statement, id: string): SessionRow | undefined {
+  const r = stmt.get({ id }) as SessionDbRow | undefined;
+  return r ? rowToSession(r) : undefined;
+}
+
+function createSessionRow(stmt: Database.Statement, input: CreateSessionInput): void {
+  validateCreateInput(input);
+  stmt.run({
+    id: input.id,
+    agent_id: input.subagentId ?? null,
+    agent_profile_id: input.agentProfileId ?? null,
+    workspace_path: input.workspacePath,
+    status: input.status ?? "starting",
+    context_segment_id: randomUUID(),
+    model_selection_json:
+      input.modelSelection !== undefined ? JSON.stringify(input.modelSelection) : null,
+    light_context: input.lightContext ? 1 : 0,
+    prompt_stack_json: JSON.stringify(input.promptStack ?? []),
+    runtime_uid: input.runtimeUid ?? null,
+    runtime_gid: input.runtimeGid ?? null,
+    parent_session_id: null,
+    subagent_mode: null,
+    subagent_platform_thread_id: null,
+    subagent_expires_at_ms: null,
+    subagent_delivery_mode: null,
+    subagent_respond_to: null,
+    system_context_token: generateSystemContextToken(),
+    context_level: input.contextLevel ?? null,
+  });
+}
+
+function validateCreateInput(input: CreateSessionInput): void {
+  if (input.subagentId === undefined) return;
+  assertValidSubagentAgentId(input.subagentId);
+  const parsed = parseAgentSessionUrn(input.id);
+  if (!parsed || parsed.agentId === input.subagentId) {
+    throw new Error("subagent shorthand must be distinct from its owning agent ID");
+  }
+}
+
+function validateUpdateInput(patch: UpdateSessionInput): void {
+  if (patch.subagentId) assertValidSubagentAgentId(patch.subagentId);
+}
+
+function deleteSessionRow(stmt: Database.Statement, id: string): void {
+  stmt.run({ id });
+}
+
+function countSubagentTreeRows(
+  stmt: Database.Statement,
+  rootSessionId: string,
+): { total: number; persistent: number } {
+  const r = stmt.get({ root: rootSessionId }) as
+    | { total: number; persistent: number | null }
+    | undefined;
+  return { total: r?.total ?? 0, persistent: r?.persistent ?? 0 };
+}
+
+const UPDATE_SESSION_SQL = `
+        UPDATE sessions SET
+          agent_id = @agent_id,
+          agent_profile_id = @agent_profile_id,
+          workspace_path = @workspace_path,
+          status = @status,
+          context_segment_id = @context_segment_id,
+          model_selection_json = @model_selection_json,
+          light_context = @light_context,
+          prompt_stack_json = @prompt_stack_json,
+          runtime_uid = @runtime_uid,
+          runtime_gid = @runtime_gid,
+          parent_session_id = @parent_session_id,
+          subagent_mode = @subagent_mode,
+          subagent_platform_thread_id = @subagent_platform_thread_id,
+          subagent_expires_at_ms = @subagent_expires_at_ms,
+          subagent_delivery_mode = @subagent_delivery_mode,
+          subagent_respond_to = @subagent_respond_to,
+          system_context_token = @system_context_token,
+          context_level = @context_level,
+          working_directory = @working_directory,
+          updated_at = datetime('now')
+        WHERE id = @id
+      `;
+
+/** Subagent linkage columns for an update: the patch value when provided,
+ *  the current row's value when the patch leaves the field undefined. */
+function keptSubagentLinks(cur: SessionRow, patch: UpdateSessionInput) {
+  return {
+    parent_session_id:
+      patch.parentSessionId === undefined ? (cur.parentSessionId ?? null) : patch.parentSessionId,
+    subagent_mode:
+      patch.subagentMode === undefined ? (cur.subagentMode ?? null) : patch.subagentMode,
+    subagent_platform_thread_id:
+      patch.subagentPlatformThreadId === undefined
+        ? (cur.subagentPlatformThreadId ?? null)
+        : patch.subagentPlatformThreadId,
+    subagent_expires_at_ms:
+      patch.subagentExpiresAtMs === undefined
+        ? (cur.subagentExpiresAtMs ?? null)
+        : patch.subagentExpiresAtMs,
+    subagent_delivery_mode:
+      patch.subagentDeliveryMode === undefined
+        ? (cur.subagentDeliveryMode ?? null)
+        : patch.subagentDeliveryMode,
+    subagent_respond_to:
+      patch.subagentRespondTo === undefined
+        ? (cur.subagentRespondTo ?? null)
+        : patch.subagentRespondTo,
+  };
+}
+
+/** Remaining update column values (non-linkage), derived from the patch with
+ *  fallbacks to the current row. */
+function updatedSessionColumns(cur: SessionRow, patch: UpdateSessionInput) {
+  return {
+    agent_id: patch.subagentId === undefined ? (cur.subagentAgentId ?? null) : patch.subagentId,
+    agent_profile_id: patch.agentProfileId ?? cur.agentProfileId ?? null,
+    workspace_path: cur.workspacePath,
+    status: patch.status ?? cur.status,
+    context_segment_id: patch.contextSegmentId?.trim() ?? cur.contextSegmentId,
+    model_selection_json:
+      patch.modelSelection !== undefined
+        ? JSON.stringify(patch.modelSelection)
+        : cur.modelSelection !== undefined
+          ? JSON.stringify(cur.modelSelection)
+          : null,
+    light_context:
+      patch.lightContext !== undefined ? (patch.lightContext ? 1 : 0) : cur.lightContext ? 1 : 0,
+    prompt_stack_json:
+      patch.promptStack !== undefined
+        ? JSON.stringify(patch.promptStack)
+        : JSON.stringify(cur.promptStack),
+    runtime_uid: patch.runtimeUid ?? cur.runtimeUid ?? null,
+    runtime_gid: patch.runtimeGid ?? cur.runtimeGid ?? null,
+    system_context_token: patch.systemContextToken ?? cur.systemContextToken ?? null,
+    context_level:
+      patch.contextLevel === undefined ? (cur.contextLevel ?? null) : patch.contextLevel,
+    working_directory:
+      patch.workingDirectory === undefined
+        ? (cur.workingDirectory ?? null)
+        : patch.workingDirectory,
+  };
+}
+
+function updateSessionRow(
+  getById: (id: string) => SessionRow | undefined,
+  updateStmt: Database.Statement,
+  id: string,
+  patch: UpdateSessionInput,
+): void {
+  const cur = getById(id);
+  if (!cur) return;
+  validateUpdateInput(patch);
+  const runParams = {
+    ...updatedSessionColumns(cur, patch),
+    ...keptSubagentLinks(cur, patch),
+  };
+  updateStmt.run({ id, ...runParams });
+}
+
+function listSessionRows(
+  db: Database.Database,
+  filter: SessionListFilter | undefined,
+): SessionRow[] {
+  type R = Parameters<typeof rowToSession>[0];
+  const cols = `id, agent_id, agent_profile_id, workspace_path, status, context_segment_id, model_selection_json,
+                 light_context, prompt_stack_json, runtime_uid, runtime_gid,
+                 parent_session_id, subagent_mode, subagent_platform_thread_id, subagent_expires_at_ms,
+                 subagent_delivery_mode, subagent_respond_to,
+                 created_at, updated_at, system_context_token, context_level, working_directory`;
+
+  // --- Map sortBy to DB column ---
+  const sortByMap: Record<string, string> = {
+    created: "created_at",
+    lastActivity: "updated_at",
+    name: "id",
+  };
+  const sortCol = sortByMap[filter?.sortBy ?? "created"] ?? "created_at";
+  const sortDir = filter?.sortOrder === "asc" ? "ASC" : "DESC";
+
+  // --- Build WHERE clauses ---
+  const clauses: string[] = [];
+  const params: Record<string, unknown> = {};
+  collectListFilters(filter, clauses, params);
+
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+  let sql = `SELECT ${cols} FROM sessions ${where} ORDER BY ${sortCol} ${sortDir}`;
+
+  if (filter?.limit !== undefined) {
+    sql += " LIMIT @limit";
+    params.limit = filter.limit;
+  }
+
+  const rows = db.prepare(sql).all(params) as R[];
+  return rows.map(rowToSession);
+}
+
+/** Appends the parameterized WHERE clauses for the active list filters. Sort
+ *  and limit are handled by the caller; every clause binds a named parameter
+ *  (identifiers come only from the fixed whitelist/sort map, never user input). */
+function collectListFilters(
+  filter: SessionListFilter | undefined,
+  clauses: string[],
+  params: Record<string, unknown>,
+): void {
+  if (filter?.status !== undefined) {
+    clauses.push("status = @status");
+    params.status = filter.status;
+  }
+  if (filter?.subagentAgentId !== undefined) {
+    assertValidSubagentAgentId(filter.subagentAgentId);
+    clauses.push("agent_id = @subagentAgentId");
+    params.subagentAgentId = filter.subagentAgentId;
+  }
+
+  if (filter?.activeSince) {
+    clauses.push("updated_at >= @activeSince");
+    params.activeSince = filter.activeSince;
+  }
+
+  // agentId filtering at the SQL level (session IDs use the URN format
+  // "agent:<agentId>:..." so a LIKE prefix match is exact and efficient)
+  const agentId = filter?.agentId?.trim();
+  if (agentId) {
+    assertValidAgentId(agentId);
+    clauses.push("id LIKE @agentIdPrefix");
+    params.agentIdPrefix = `agent:${agentId}:%`;
+  }
+
+  if (filter?.parentSessionId !== undefined) {
+    clauses.push("parent_session_id = @parentSessionId");
+    params.parentSessionId = filter.parentSessionId;
+  }
+}
+
 function buildSessionStore(db: Database.Database): SessionStore {
   const insert = db.prepare(`
     INSERT INTO sessions (
@@ -271,6 +528,8 @@ function buildSessionStore(db: Database.Database): SessionStore {
            created_at, updated_at, system_context_token, context_level, working_directory
     FROM sessions WHERE id = @id
   `);
+
+  const update = db.prepare(UPDATE_SESSION_SQL);
 
   const del = db.prepare(`DELETE FROM sessions WHERE id = @id`);
 
@@ -300,234 +559,14 @@ function buildSessionStore(db: Database.Database): SessionStore {
            SUM(CASE WHEN subagent_mode = 'persistent' THEN 1 ELSE 0 END) AS persistent
     FROM tree
   `);
+
   return {
-    create(input) {
-      if (input.subagentId !== undefined) {
-        assertValidSubagentAgentId(input.subagentId);
-        const parsed = parseAgentSessionUrn(input.id);
-        if (!parsed || parsed.agentId === input.subagentId) {
-          throw new Error("subagent shorthand must be distinct from its owning agent ID");
-        }
-      }
-      const status = input.status ?? "starting";
-      insert.run({
-        id: input.id,
-        agent_id: input.subagentId ?? null,
-        agent_profile_id: input.agentProfileId ?? null,
-        workspace_path: input.workspacePath,
-        status,
-        context_segment_id: randomUUID(),
-        model_selection_json:
-          input.modelSelection !== undefined ? JSON.stringify(input.modelSelection) : null,
-        light_context: input.lightContext ? 1 : 0,
-        prompt_stack_json: JSON.stringify(input.promptStack ?? []),
-        runtime_uid: input.runtimeUid ?? null,
-        runtime_gid: input.runtimeGid ?? null,
-        parent_session_id: null,
-        subagent_mode: null,
-        subagent_platform_thread_id: null,
-        subagent_expires_at_ms: null,
-        subagent_delivery_mode: null,
-        subagent_respond_to: null,
-        system_context_token: generateSystemContextToken(),
-        context_level: input.contextLevel ?? null,
-      });
-    },
-
-    getById(id) {
-      const r = selectOne.get({ id }) as
-        | {
-            id: string;
-            agent_id: string | null;
-            agent_profile_id: string | null;
-            workspace_path: string;
-            status: string;
-            context_segment_id: string | null;
-            model_selection_json: string | null;
-            light_context: number;
-            prompt_stack_json: string;
-            runtime_uid: number | null;
-            runtime_gid: number | null;
-            parent_session_id: string | null;
-            subagent_mode: string | null;
-            subagent_platform_thread_id: string | null;
-            subagent_expires_at_ms: number | null;
-            subagent_delivery_mode: string | null;
-            subagent_respond_to: string | null;
-            system_context_token: string | null;
-            context_level: string | null;
-            working_directory: string | null;
-          }
-        | undefined;
-      return r ? rowToSession(r) : undefined;
-    },
-
-    update(id, patch) {
-      const cur = this.getById(id);
-      if (!cur) return;
-      const nextParent =
-        patch.parentSessionId === undefined ? (cur.parentSessionId ?? null) : patch.parentSessionId;
-      const nextSubMode =
-        patch.subagentMode === undefined ? (cur.subagentMode ?? null) : patch.subagentMode;
-      const nextThread =
-        patch.subagentPlatformThreadId === undefined
-          ? (cur.subagentPlatformThreadId ?? null)
-          : patch.subagentPlatformThreadId;
-      const nextExp =
-        patch.subagentExpiresAtMs === undefined
-          ? (cur.subagentExpiresAtMs ?? null)
-          : patch.subagentExpiresAtMs;
-      const nextDeliveryMode =
-        patch.subagentDeliveryMode === undefined
-          ? (cur.subagentDeliveryMode ?? null)
-          : patch.subagentDeliveryMode;
-      const nextRespondTo =
-        patch.subagentRespondTo === undefined
-          ? (cur.subagentRespondTo ?? null)
-          : patch.subagentRespondTo;
-      const nextToken = patch.systemContextToken ?? cur.systemContextToken ?? null;
-      const nextContextLevel =
-        patch.contextLevel === undefined ? (cur.contextLevel ?? null) : patch.contextLevel;
-      const nextWorkingDirectory =
-        patch.workingDirectory === undefined
-          ? (cur.workingDirectory ?? null)
-          : patch.workingDirectory;
-      if (patch.subagentId) assertValidSubagentAgentId(patch.subagentId);
-      const next = {
-        agent_id: patch.subagentId === undefined ? (cur.subagentAgentId ?? null) : patch.subagentId,
-        agent_profile_id: patch.agentProfileId ?? cur.agentProfileId ?? null,
-        workspace_path: cur.workspacePath,
-        status: patch.status ?? cur.status,
-        context_segment_id: patch.contextSegmentId?.trim() ?? cur.contextSegmentId,
-        model_selection_json:
-          patch.modelSelection !== undefined
-            ? JSON.stringify(patch.modelSelection)
-            : cur.modelSelection !== undefined
-              ? JSON.stringify(cur.modelSelection)
-              : null,
-        light_context:
-          patch.lightContext !== undefined
-            ? patch.lightContext
-              ? 1
-              : 0
-            : cur.lightContext
-              ? 1
-              : 0,
-        prompt_stack_json:
-          patch.promptStack !== undefined
-            ? JSON.stringify(patch.promptStack)
-            : JSON.stringify(cur.promptStack),
-        runtime_uid: patch.runtimeUid ?? cur.runtimeUid ?? null,
-        runtime_gid: patch.runtimeGid ?? cur.runtimeGid ?? null,
-        parent_session_id: nextParent,
-        subagent_mode: nextSubMode,
-        subagent_platform_thread_id: nextThread,
-        subagent_expires_at_ms: nextExp,
-        subagent_delivery_mode: nextDeliveryMode,
-        subagent_respond_to: nextRespondTo,
-        system_context_token: nextToken,
-        context_level: nextContextLevel,
-        working_directory: nextWorkingDirectory,
-      };
-      db.prepare(
-        `
-        UPDATE sessions SET
-          agent_id = @agent_id,
-          agent_profile_id = @agent_profile_id,
-          workspace_path = @workspace_path,
-          status = @status,
-          context_segment_id = @context_segment_id,
-          model_selection_json = @model_selection_json,
-          light_context = @light_context,
-          prompt_stack_json = @prompt_stack_json,
-          runtime_uid = @runtime_uid,
-          runtime_gid = @runtime_gid,
-          parent_session_id = @parent_session_id,
-          subagent_mode = @subagent_mode,
-          subagent_platform_thread_id = @subagent_platform_thread_id,
-          subagent_expires_at_ms = @subagent_expires_at_ms,
-          subagent_delivery_mode = @subagent_delivery_mode,
-          subagent_respond_to = @subagent_respond_to,
-          system_context_token = @system_context_token,
-          context_level = @context_level,
-          working_directory = @working_directory,
-          updated_at = datetime('now')
-        WHERE id = @id
-      `,
-      ).run({ id, ...next });
-    },
-
-    delete(id) {
-      del.run({ id });
-    },
-
-    countSubagentTree(rootSessionId) {
-      const r = countSubagents.get({ root: rootSessionId }) as
-        | { total: number; persistent: number | null }
-        | undefined;
-      return { total: r?.total ?? 0, persistent: r?.persistent ?? 0 };
-    },
-
-    list(filter) {
-      type R = Parameters<typeof rowToSession>[0];
-      const cols = `id, agent_id, agent_profile_id, workspace_path, status, context_segment_id, model_selection_json,
-                 light_context, prompt_stack_json, runtime_uid, runtime_gid,
-                 parent_session_id, subagent_mode, subagent_platform_thread_id, subagent_expires_at_ms,
-                 subagent_delivery_mode, subagent_respond_to,
-                 created_at, updated_at, system_context_token, context_level, working_directory`;
-
-      // --- Map sortBy to DB column ---
-      const sortByMap: Record<string, string> = {
-        created: "created_at",
-        lastActivity: "updated_at",
-        name: "id",
-      };
-      const sortCol = sortByMap[filter?.sortBy ?? "created"] ?? "created_at";
-      const sortDir = filter?.sortOrder === "asc" ? "ASC" : "DESC";
-
-      // --- Build WHERE clauses ---
-      const clauses: string[] = [];
-      const params: Record<string, unknown> = {};
-
-      if (filter?.status !== undefined) {
-        clauses.push("status = @status");
-        params.status = filter.status;
-      }
-      if (filter?.subagentAgentId !== undefined) {
-        assertValidSubagentAgentId(filter.subagentAgentId);
-        clauses.push("agent_id = @subagentAgentId");
-        params.subagentAgentId = filter.subagentAgentId;
-      }
-
-      if (filter?.activeSince) {
-        clauses.push("updated_at >= @activeSince");
-        params.activeSince = filter.activeSince;
-      }
-
-      // agentId filtering at the SQL level (session IDs use the URN format
-      // "agent:<agentId>:..." so a LIKE prefix match is exact and efficient)
-      const agentId = filter?.agentId?.trim();
-      if (agentId) {
-        assertValidAgentId(agentId);
-        clauses.push("id LIKE @agentIdPrefix");
-        params.agentIdPrefix = `agent:${agentId}:%`;
-      }
-
-      if (filter?.parentSessionId !== undefined) {
-        clauses.push("parent_session_id = @parentSessionId");
-        params.parentSessionId = filter.parentSessionId;
-      }
-
-      const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-      let sql = `SELECT ${cols} FROM sessions ${where} ORDER BY ${sortCol} ${sortDir}`;
-
-      if (filter?.limit !== undefined) {
-        sql += " LIMIT @limit";
-        params.limit = filter.limit;
-      }
-
-      const rows = db.prepare(sql).all(params) as R[];
-      return rows.map(rowToSession);
-    },
+    create: (input) => createSessionRow(insert, input),
+    getById: (id) => getSessionRow(selectOne, id),
+    update: (id, patch) =>
+      updateSessionRow((rowId) => getSessionRow(selectOne, rowId), update, id, patch),
+    delete: (id) => deleteSessionRow(del, id),
+    countSubagentTree: (rootSessionId) => countSubagentTreeRows(countSubagents, rootSessionId),
+    list: (filter) => listSessionRows(db, filter),
   };
 }
