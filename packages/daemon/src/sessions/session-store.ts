@@ -195,6 +195,11 @@ export interface SessionStore {
   update(id: string, patch: UpdateSessionInput): void;
   delete(id: string): void;
   list(filter?: SessionListFilter): SessionRow[];
+  /** Active (non-terminated, non-thread) descendant subagent counts for the
+   *  whole tree under `rootSessionId`, thread-bound branches (and their
+   *  subtrees) pruned; `persistent` counts the included sessions spawned with
+   *  mode "persistent". Resolved entirely in SQL (recursive CTE). */
+  countSubagentTree(rootSessionId: string): { total: number; persistent: number };
 }
 
 /**
@@ -222,7 +227,24 @@ export function getSessionContextSegmentId(db: Database.Database, sessionId: str
   return seg;
 }
 
+/**
+ * Module-level memo of stores per db handle: preparing the store's statements
+ * is not free, and hot callers (status-bar render snapshots) re-derive a store
+ * from the same db many times a second. The db handle is process-lifetime (one
+ * handle from openStateDb, closed only at shutdown), so per-handle statements
+ * stay valid. Mirrors the events-queue.ts prepared-statement cache pattern.
+ */
+const storeCache = new WeakMap<Database.Database, SessionStore>();
+
 export function createSessionStore(db: Database.Database): SessionStore {
+  const cached = storeCache.get(db);
+  if (cached) return cached;
+  const store = buildSessionStore(db);
+  storeCache.set(db, store);
+  return store;
+}
+
+function buildSessionStore(db: Database.Database): SessionStore {
   const insert = db.prepare(`
     INSERT INTO sessions (
       id, agent_profile_id, workspace_path, status, context_segment_id, agent_id,
@@ -252,6 +274,32 @@ export function createSessionStore(db: Database.Database): SessionStore {
 
   const del = db.prepare(`DELETE FROM sessions WHERE id = @id`);
 
+  /** Active descendant subagent counts: non-terminated, thread-branch-free,
+   *  full-tree — the SQL twin of the status bar's former app-side walk.
+   *  Recursion only descends into rows kept in the previous level, so a
+   *  terminated or thread-bound branch (and its whole subtree) never enters
+   *  the result. Thread pruning uses `IS NULL` because
+   *  `parent_session_id`/`status` may be NULL while a thread id cannot be. */
+  const countSubagents = db.prepare(`
+    WITH RECURSIVE tree AS (
+      SELECT s.id AS id, s.subagent_mode AS subagent_mode,
+             (s.subagent_platform_thread_id IS NOT NULL) AS is_thread
+      FROM sessions s
+      WHERE s.parent_session_id = @root
+        AND s.status != 'terminated'
+        AND s.subagent_platform_thread_id IS NULL
+      UNION ALL
+      SELECT s.id, s.subagent_mode,
+             (s.subagent_platform_thread_id IS NOT NULL) AS is_thread
+      FROM sessions s
+      JOIN tree t ON s.parent_session_id = t.id
+      WHERE s.status != 'terminated'
+        AND s.subagent_platform_thread_id IS NULL
+    )
+    SELECT COUNT(*) AS total,
+           SUM(CASE WHEN subagent_mode = 'persistent' THEN 1 ELSE 0 END) AS persistent
+    FROM tree
+  `);
   return {
     create(input) {
       if (input.subagentId !== undefined) {
@@ -411,6 +459,13 @@ export function createSessionStore(db: Database.Database): SessionStore {
 
     delete(id) {
       del.run({ id });
+    },
+
+    countSubagentTree(rootSessionId) {
+      const r = countSubagents.get({ root: rootSessionId }) as
+        | { total: number; persistent: number | null }
+        | undefined;
+      return { total: r?.total ?? 0, persistent: r?.persistent ?? 0 };
     },
 
     list(filter) {

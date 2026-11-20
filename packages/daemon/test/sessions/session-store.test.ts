@@ -300,3 +300,75 @@ describe("SessionStore", () => {
     });
   });
 });
+
+describe("SessionStore countSubagentTree", () => {
+  let db: Database.Database;
+  let tmp: string;
+
+  beforeEach(() => {
+    const o = openMigratedDb();
+    db = o.db;
+    tmp = o.dir;
+    createSessionStore(db).create({ id: "root", workspacePath: tmp });
+  });
+
+  afterEach(async () => {
+    await closeTestDb(db, tmp);
+  });
+
+  /** Seed a subagent row under `parent` (create + reparent via update). */
+  function seedSubagent(
+    id: string,
+    parent: string,
+    opts: { mode?: "one_shot" | "persistent"; threadId?: string | null; status?: string } = {},
+  ): void {
+    const store = createSessionStore(db);
+    store.create({ id, workspacePath: tmp });
+    store.update(id, {
+      parentSessionId: parent,
+      ...(opts.mode ? { subagentMode: opts.mode } : {}),
+      ...(opts.threadId !== undefined ? { subagentPlatformThreadId: opts.threadId } : {}),
+      ...(opts.status ? { status: opts.status } : {}),
+    });
+  }
+
+  it("returns zero counts for a session with no subagents (or a missing session)", () => {
+    const store = createSessionStore(db);
+    assert.deepEqual(store.countSubagentTree("root"), { total: 0, persistent: 0 });
+    assert.deepEqual(store.countSubagentTree("missing"), { total: 0, persistent: 0 });
+  });
+
+  it("counts the entire multi-level descendant tree", () => {
+    const store = createSessionStore(db);
+    seedSubagent("a", "root", { mode: "one_shot" });
+    seedSubagent("b", "root", { mode: "persistent" });
+    seedSubagent("a1", "a", { mode: "one_shot" });
+    seedSubagent("a1x", "a1", { mode: "one_shot" });
+    assert.deepEqual(store.countSubagentTree("root"), { total: 4, persistent: 1 });
+  });
+
+  it("excludes terminated subagents and their whole subtrees", () => {
+    const store = createSessionStore(db);
+    seedSubagent("live", "root");
+    seedSubagent("dead", "root", { status: "terminated" });
+    seedSubagent("dead-child", "dead");
+    seedSubagent("dead-grandchild", "dead-child");
+    assert.deepEqual(store.countSubagentTree("root"), { total: 1, persistent: 0 });
+  });
+
+  it("prunes thread subagent branches (thread subagent and its whole subtree)", () => {
+    const store = createSessionStore(db);
+    seedSubagent("bg", "root");
+    seedSubagent("thr", "root", { threadId: "thread-1", mode: "persistent" });
+    seedSubagent("thr-child", "thr");
+    seedSubagent("thr-child2", "thr-child");
+    assert.deepEqual(store.countSubagentTree("root"), { total: 1, persistent: 0 });
+  });
+
+  it("never loops on a corrupted self-parenting cycle", () => {
+    const store = createSessionStore(db);
+    seedSubagent("looper", "root");
+    db.prepare("UPDATE sessions SET parent_session_id = id WHERE id = ?").run("looper");
+    assert.deepEqual(store.countSubagentTree("root"), { total: 0, persistent: 0 });
+  });
+});
