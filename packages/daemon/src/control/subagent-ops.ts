@@ -218,9 +218,7 @@ export async function handleSubagentSpawn(
     const reservedAgentIds = new Set(Object.keys(ctx.config.agents?.list ?? {}));
     const parentAgentIdForSubagent = parseAgentSessionUrn(parentSessionId)?.agentId;
     if (parentAgentIdForSubagent) reservedAgentIds.add(parentAgentIdForSubagent);
-    for (const row of sessions.list())
-      if (row.status !== "terminated" && row.subagentAgentId)
-        reservedAgentIds.add(row.subagentAgentId);
+    for (const id of sessions.activeSubagentAgentIds()) reservedAgentIds.add(id);
     let childAgentId: string;
     if (typeof agentIdRaw === "string" && agentIdRaw.trim()) {
       try {

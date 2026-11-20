@@ -111,6 +111,10 @@ describe("builtin-subagent spawn agent_id derivation", () => {
       status: "terminated",
       subagentId: "test-2",
     });
+    const other = sessions.getById(OTHER_SESSION_ID);
+    assert.ok(other, "terminated subagent row must exist");
+    assert.equal(other!.status, "terminated");
+    assert.equal(other!.subagentAgentId, "test-2");
     const { payload } = await spawnAndCapture(db, {
       action: "spawn_one_shot",
       prompt: "do it",

@@ -372,3 +372,54 @@ describe("SessionStore countSubagentTree", () => {
     assert.deepEqual(store.countSubagentTree("root"), { total: 0, persistent: 0 });
   });
 });
+
+describe("SessionStore activeSubagentAgentIds", () => {
+  let db: Database.Database;
+  let tmp: string;
+
+  beforeEach(() => {
+    const o = openMigratedDb();
+    db = o.db;
+    tmp = o.dir;
+  });
+
+  afterEach(async () => {
+    await closeTestDb(db, tmp);
+  });
+
+  it("returns an empty list when the sessions table is empty", () => {
+    assert.deepEqual(createSessionStore(db).activeSubagentAgentIds(), []);
+  });
+
+  it("returns distinct active subagent agent ids only", () => {
+    const store = createSessionStore(db);
+    store.create({ id: "top", workspacePath: tmp, status: "active" });
+    for (const [id, sid] of [
+      ["s-1", "alpha"],
+      ["s-2", "alpha"], // duplicate agent_id across two sessions
+      ["s-3", "beta"],
+    ] as const) {
+      store.create({ id, workspacePath: tmp, status: "active" });
+      store.update(id, { subagentId: sid });
+    }
+    assert.deepEqual(store.activeSubagentAgentIds().slice().sort(), ["alpha", "beta"]);
+  });
+
+  it("excludes terminated subagent sessions", () => {
+    const store = createSessionStore(db);
+    store.create({ id: "top", workspacePath: tmp, status: "active" });
+    store.create({ id: "s-live", workspacePath: tmp, status: "active" });
+    store.create({ id: "s-dead", workspacePath: tmp, status: "terminated" });
+    store.update("s-live", { subagentId: "live-agent" });
+    store.update("s-dead", { subagentId: "dead-agent" });
+    assert.deepEqual(store.activeSubagentAgentIds(), ["live-agent"]);
+  });
+
+  it("excludes rows with a null or empty agent_id", () => {
+    const store = createSessionStore(db);
+    store.create({ id: "top", workspacePath: tmp, status: "active" });
+    store.create({ id: "s-empty", workspacePath: tmp, status: "active" });
+    db.prepare("UPDATE sessions SET agent_id = '' WHERE id = 's-empty'").run();
+    assert.deepEqual(store.activeSubagentAgentIds(), []);
+  });
+});
