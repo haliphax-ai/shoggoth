@@ -9,8 +9,10 @@ import { openStateDb } from "../../src/db/open";
 import { defaultMigrationsDir, migrate } from "../../src/db/migrate";
 import { createSessionStore } from "../../src/sessions/session-store";
 import { BuiltinToolRegistry } from "../../src/sessions/builtin-tool-registry";
-import { register as registerFs } from "../../src/sessions/builtin-handlers/fs-handler";
-import { register as registerFsHandlers } from "../../src/sessions/builtin-handlers/fs-handlers";
+import {
+  registerFsTools,
+  registerFsReadWrite as registerFsHandlers,
+} from "../../src/sessions/builtin-handlers/fs-tools";
 import { register as registerLs } from "../../src/sessions/builtin-handlers/ls-handler";
 import { register as registerExec } from "../../src/sessions/builtin-handlers/exec-handler";
 
@@ -157,7 +159,7 @@ describe("BuiltinToolContext workingDirectory integration", () => {
     store.create({ id: "s1", workspacePath: wsPath, status: "active" });
 
     const registry = new BuiltinToolRegistry();
-    registerFs(registry);
+    registerFsTools(registry);
 
     const ctx = makeCtx(db, "s1", wsPath, join(wsPath, "subdir"));
     const result = await registry.execute("fs", { action: "stat", path: "child.txt" }, ctx);

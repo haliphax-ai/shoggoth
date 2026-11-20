@@ -19,7 +19,7 @@ import {
   BuiltinToolRegistry,
   type BuiltinToolContext,
 } from "../../src/sessions/builtin-tool-registry";
-import { register as registerFs } from "../../src/sessions/builtin-handlers/fs-handlers";
+import { registerFsReadWrite as registerFs } from "../../src/sessions/builtin-handlers/fs-tools";
 import { checkReReadRequired } from "../../src/sessions/re-read-required";
 
 function openMigratedDb(): { db: Database.Database; dir: string } {
