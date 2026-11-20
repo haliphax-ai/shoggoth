@@ -24,6 +24,8 @@ import { getExecNotifyScheduler } from "../exec/exec-notify-scheduler";
 import { getSessionSendNotifyScheduler } from "./session-send-notify-scheduler";
 import { requestSessionTurnAbort } from "./session-turn-abort";
 import { disposeSubagentRuntime } from "../subagent/subagent-disposables";
+import { clearSteerChannel } from "./steer-channel";
+import { clearCompactionGate } from "./compaction-gate";
 
 export type SpawnSessionResult = {
   sessionId: string;
@@ -248,6 +250,9 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
       for (const id of targets) {
         requestSessionTurnAbort(id);
         disposeSubagentRuntime(id);
+        // Per-session registries must not outlive the terminated session.
+        clearSteerChannel(id);
+        clearCompactionGate(id);
         options.agentTokens.revoke(id);
         options.sessions.update(id, { status: "terminated" });
         getTimerScheduler()?.cancelByAnchorSession(id);

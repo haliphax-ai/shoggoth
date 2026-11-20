@@ -79,6 +79,17 @@ describe("compaction gate", () => {
     await expect(parked).rejects.toThrow(CompactionGateClosedError);
   });
 
+  it("session ids are normalized consistently across entry points", async () => {
+    // register took the raw id while push/lookup paths trimmed, so the two
+    // entry points could resolve different queues for the same session.
+    const gate = registerCompactionGate("s1 ");
+    const parked = pushCompactionRequest("s1 ");
+    expect(parked).toBeDefined();
+    const [entry] = gate.drain();
+    entry!.resolve({ compacted: false, messageCount: 1 });
+    await expect(parked).resolves.toEqual({ compacted: false, messageCount: 1 });
+  });
+
   it("gates are per-session", async () => {
     const gate = registerCompactionGate("s1");
     expect(pushCompactionRequest("s2")).toBeUndefined();

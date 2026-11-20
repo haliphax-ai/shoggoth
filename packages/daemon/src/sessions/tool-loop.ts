@@ -1892,6 +1892,11 @@ export async function runToolLoop(options: RunToolLoopOptions): Promise<ToolLoop
       const reason = e instanceof TurnAbortedError ? "aborted" : `error:${String(e)}`;
       options.toolRuns.markFailed(options.runId, reason);
     }
+    // Failed turns keep the entries (one-shot redelivery handshake); an operator
+    // abort withdraws the directive, so settle them here.
+    if (e instanceof TurnAbortedError && options.turnAbortSignal?.reason === "operator_abort") {
+      settleSteersAnswered(options.sessionId);
+    }
     throw e;
   }
 }
