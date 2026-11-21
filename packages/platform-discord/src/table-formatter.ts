@@ -254,9 +254,16 @@ function boxTable(cells: string[][], aligns: Array<"left" | "right" | "center">)
   return lines.join("\n");
 }
 
+/**
+ * Module-level singleton processor. The parse call site is stateless (the
+ * AST is consumed synchronously and never mutated), so a shared processor
+ * avoids rebuilding the remark plugin pipeline per call — streaming edits
+ * re-parse the growing body on every coalesced push.
+ */
+const mdProcessor = unified().use(remarkParse).use(remarkGfm);
+
 export function mdTableToAscii(md: string): string {
-  const processor = unified().use(remarkParse).use(remarkGfm);
-  const tree = processor.parse(md) as any;
+  const tree = mdProcessor.parse(md) as any;
 
   let result = "";
   let cursor = 0;

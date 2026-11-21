@@ -48,6 +48,25 @@ export interface DiscordStreamingOutbound {
   start(): Promise<DiscordStreamHandle>;
 }
 
+/**
+ * Chunks to render a status bar against. Reuses the unbarred chunks captured
+ * by the last full/push render when the split budget is unchanged
+ * (steady-state bar renders); a different bar length changes the budget, so
+ * re-split. The re-split path synthetic-closes incomplete formatting so an
+ * open marker/fence cannot bleed into the appended bar; the raw text stays
+ * unmodified in lastPushedText, so markers vanish once the pair completes.
+ */
+function barRenderChunks(
+  lastRender: { chunks: string[] | null; budget: number | null },
+  budget: number,
+  lastPushedText: string | null,
+): string[] {
+  if (lastRender.chunks !== null && lastRender.budget === budget) {
+    return lastRender.chunks;
+  }
+  return splitDiscordMessage(appendSyntheticClose(lastPushedText ?? "…"), budget);
+}
+
 export function createDiscordStreamingOutbound(
   config: DiscordStreamingOutboundConfig,
 ): DiscordStreamingOutbound {
@@ -135,6 +154,12 @@ export function createDiscordStreamingOutbound(
       let _statusBarLine: string | null = null;
       /** Most recently pushed/full body text (formatted, bar excluded). */
       let lastPushedText: string | null = null;
+      /**
+       * Unbarred chunks captured by the last full/push render, with the split
+       * budget that produced them. setStatusBar reuses them instead of
+       * re-splitting the body text when the budget is unchanged.
+       */
+      const lastRender = { chunks: null as string[] | null, budget: null as number | null };
 
       const reconcileOverflow = async (chunks: string[]): Promise<void> => {
         // Edit original message with first chunk
@@ -247,6 +272,8 @@ export function createDiscordStreamingOutbound(
 
             const budget = splitBudget(_statusBarLine);
             const chunks = splitDiscordMessage(renderedText, budget);
+            lastRender.chunks = chunks;
+            lastRender.budget = budget;
             const finalChunks =
               _statusBarLine === null ? chunks : applyStatusBar(chunks, _statusBarLine);
             await reconcileOverflow(finalChunks);
@@ -272,6 +299,8 @@ export function createDiscordStreamingOutbound(
 
             const budget = splitBudget(_statusBarLine);
             const chunks = splitDiscordMessage(renderedText, budget);
+            lastRender.chunks = chunks;
+            lastRender.budget = budget;
             const finalChunks =
               _statusBarLine === null ? chunks : applyStatusBar(chunks, _statusBarLine);
 
@@ -307,13 +336,8 @@ export function createDiscordStreamingOutbound(
           await enqueueGuarded(async () => {
             const activeLine = _statusBarLine;
             if (activeLine === null) return;
-            const baseText = lastPushedText ?? "…";
-            // Synthetic-close incomplete formatting so an open marker/fence cannot
-            // bleed into the appended bar; the raw text stays unmodified in
-            // lastPushedText, so markers vanish once the pair completes.
-            const renderedText = baseText === "" ? baseText : appendSyntheticClose(baseText);
             const budget = splitBudget(activeLine);
-            const chunks = splitDiscordMessage(renderedText, budget);
+            const chunks = barRenderChunks(lastRender, budget, lastPushedText);
             const finalChunks = applyStatusBar(chunks, activeLine);
             await reconcileOverflow(finalChunks);
           });
@@ -331,6 +355,8 @@ export function createDiscordStreamingOutbound(
           dead = true;
           _statusBarLine = null;
           lastPushedText = null;
+          lastRender.chunks = null;
+          lastRender.budget = null;
         },
       };
     },
