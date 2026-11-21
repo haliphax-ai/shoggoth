@@ -182,6 +182,8 @@ export {
   type TurnQueueEntryHooks,
 } from "./sessions/session-turn-queue";
 export { getTurnQueue, setTurnQueue } from "./sessions/session-turn-queue-singleton";
+export { setTimerScheduler, getTimerScheduler } from "./sessions/builtin-handlers/timer-handler";
+export { TimerScheduler } from "./timers/timer-scheduler";
 export {
   runInboundSessionTurn,
   type InboundSessionTurnStreaming,
