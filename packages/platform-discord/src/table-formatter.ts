@@ -50,10 +50,18 @@ function borderRow(widths: number[], left: string, mid: string, right: string): 
   );
 }
 
+/** Width of the widest whitespace-separated token in a cell. */
+function maxTokenWidth(cell: string): number {
+  let max = 0;
+  for (const token of cell.split(" ")) {
+    const w = stringWidth(token);
+    if (w > max) max = w;
+  }
+  return max;
+}
+
 /** Maximum total table width before responsive reflow kicks in. */
 const MAX_TABLE_WIDTH = 80;
-/** Maximum column content width when reflowing. */
-const MAX_COL_WIDTH = 20;
 
 /**
  * Wrap a string into lines that fit within `maxWidth` visual columns.
@@ -68,20 +76,22 @@ function wrapText(text: string, maxWidth: number): string[] {
   let curW = 0;
 
   /**
-   * Hard-break a token that is wider than maxWidth, character by character,
-   * appending resulting lines to `lines` and leaving the remainder in cur/curW.
+   * Hard-break a token that is wider than maxWidth, character by character.
+   * Pure: appends completed lines to `lines` and returns the carry-in state
+   * for the next token instead of mutating `cur`/`curW` via closure.
    */
-  function hardBreak(token: string): void {
+  function hardBreak(token: string, curIn: string, curWIn: number): string {
     for (const ch of token) {
       const cw = stringWidth(ch);
-      if (curW + cw > maxWidth && cur.length > 0) {
-        lines.push(cur);
-        cur = "";
-        curW = 0;
+      if (curWIn + cw > maxWidth && curIn.length > 0) {
+        lines.push(curIn);
+        curIn = "";
+        curWIn = 0;
       }
-      cur += ch;
-      curW += cw;
+      curIn += ch;
+      curWIn += cw;
     }
+    return curIn;
   }
 
   for (const word of words) {
@@ -91,7 +101,7 @@ function wrapText(text: string, maxWidth: number): string[] {
       curW += ww;
     } else if (curW === 0) {
       // Single token wider than maxWidth — hard-break character by character
-      hardBreak(word);
+      cur = hardBreak(word, cur, curW);
     } else {
       // Push current line (trim trailing spaces) and start fresh
       lines.push(cur.trimEnd());
@@ -100,7 +110,7 @@ function wrapText(text: string, maxWidth: number): string[] {
       // If the new word itself exceeds maxWidth, hard-break it too
       const trimmed = word.trimStart();
       if (stringWidth(trimmed) > maxWidth) {
-        hardBreak(trimmed);
+        cur = hardBreak(trimmed, "", 0);
       } else {
         cur = trimmed;
         curW = stringWidth(cur);
@@ -109,6 +119,116 @@ function wrapText(text: string, maxWidth: number): string[] {
   }
   if (cur.length > 0) lines.push(cur.trimEnd());
   return lines.length > 0 ? lines : [""];
+}
+
+/**
+ * Distribute the content-column budget across columns. Every column is
+ * guaranteed at least its longest token's width (so words wrap at spaces
+ * instead of being hard-broken whenever possible); columns whose remaining
+ * wrap-need fits within the even share then lock in at their natural width,
+ * and the leftover budget is shared by the rest in proportion to how much
+ * wrapping they need. The budget is fully used whenever the natural widths
+ * allow it. When even the per-token minimums cannot fit, the floors
+ * themselves are squeezed proportionally. Pure — returns a fresh array.
+ */
+function distributeColumnWidths(
+  availableContent: number,
+  naturalWidths: number[],
+  minTokenWidths: number[],
+): number[] {
+  const colCount = naturalWidths.length;
+  if (colCount === 0) return [];
+  if (availableContent <= 0) return naturalWidths.map(() => 1);
+
+  const floors = minTokenWidths.map((w) => Math.max(w, 1));
+  const floorTotal = floors.reduce((a, b) => a + b, 0);
+  if (floorTotal > availableContent) return squeezedFloors(availableContent, floors);
+
+  const demand = naturalWidths.map((n, c) => n - floors[c]);
+  const state = lockFittingColumns(availableContent, naturalWidths, demand, floors);
+  shareLeftover(state, demand);
+  return state.widths;
+}
+
+/** Squeeze floors proportionally when even the minimums cannot fit. */
+function squeezedFloors(availableContent: number, floors: number[]): number[] {
+  const floorTotal = floors.reduce((a, b) => a + b, 0);
+  const absorber = floors.length - 1;
+  const widths: number[] = [];
+  let assigned = 0;
+  for (let c = 0; c < floors.length; c++) {
+    if (c === absorber) continue;
+    widths[c] = Math.max(
+      Math.min(Math.floor((availableContent * floors[c]) / floorTotal), floors[c]),
+      1,
+    );
+    assigned += widths[c];
+  }
+  widths[absorber] = Math.max(Math.min(availableContent - assigned, floors[absorber]), 1);
+  return widths;
+}
+
+/**
+ * Give columns whose remaining wrap-need fits within the even share of the
+ * leftover budget their full natural width (repeat until stable), so the
+ * rest of the budget can be shared by the columns that actually wrap.
+ */
+function lockFittingColumns(
+  availableContent: number,
+  naturalWidths: number[],
+  demand: number[],
+  floors: number[],
+): { widths: number[]; locked: boolean[]; leftover: number; unlocked: number } {
+  const colCount = naturalWidths.length;
+  const widths = [...floors];
+  const locked = Array.from<boolean>({ length: colCount }).fill(false);
+  let leftover = availableContent;
+  for (const w of floors) leftover -= w;
+  let unlocked = colCount;
+
+  for (;;) {
+    if (unlocked === 0) break;
+    const cap = Math.floor(leftover / unlocked);
+    let changed = false;
+    for (let c = 0; c < colCount; c++) {
+      if (locked[c] || demand[c] > cap) continue;
+      widths[c] = naturalWidths[c];
+      leftover -= demand[c];
+      locked[c] = true;
+      unlocked--;
+      changed = true;
+    }
+    if (!changed) break;
+  }
+  return { widths, locked, leftover, unlocked };
+}
+
+/** Share the leftover budget over unlocked columns by wrap-need weight. */
+function shareLeftover(
+  state: { widths: number[]; locked: boolean[]; leftover: number; unlocked: number },
+  demand: number[],
+): void {
+  const { widths, locked } = state;
+  if (state.unlocked === 0) return;
+
+  let tailDemand = 0;
+  let absorber = -1;
+  for (let c = 0; c < demand.length; c++) {
+    if (locked[c]) continue;
+    tailDemand += demand[c];
+    absorber = c;
+  }
+  const budget = Math.max(state.leftover, 0);
+  let used = 0;
+  for (let c = 0; c < demand.length; c++) {
+    if (locked[c]) continue;
+    const extra =
+      c === absorber
+        ? Math.min(budget - used, demand[c])
+        : Math.min(Math.floor((budget * demand[c]) / tailDemand), demand[c]);
+    widths[c] += Math.max(extra, 0);
+    used += extra;
+  }
 }
 
 function boxTable(cells: string[][], aligns: Array<"left" | "right" | "center">): string {
@@ -125,46 +245,16 @@ function boxTable(cells: string[][], aligns: Array<"left" | "right" | "center">)
   // (each col has +2 padding, +1 separator except last, +2 outer borders)
   const totalWidth = naturalWidths.reduce((a, b) => a + b, 0) + 3 * colCount + 1;
 
-  // If table exceeds max width, redistribute column widths to fit.
-  // Columns that naturally fit within the fair-share cap keep their width;
-  // remaining budget is distributed among the wider columns.
+  // Over budget: narrow columns keep natural width; the leftover is shared
+  // by the wrapping columns proportionally to their wrap-need, so the
+  // budget is fully used instead of flattening every wide column to one cap.
   let widths: number[];
   if (totalWidth > MAX_TABLE_WIDTH) {
     const availableContent = MAX_TABLE_WIDTH - (3 * colCount + 1);
-    widths = [...naturalWidths];
-
-    // Iteratively assign fair-share caps: narrow columns lock in, freeing
-    // budget for the wider ones, until stable.
-    let remaining = availableContent;
-    const locked = Array.from<boolean>({ length: colCount }).fill(false);
-    let unlocked = colCount;
-
-    for (;;) {
-      const cap = Math.max(Math.floor(remaining / unlocked), MAX_COL_WIDTH);
-      let changed = false;
-      for (let c = 0; c < colCount; c++) {
-        if (locked[c]) continue;
-        if (naturalWidths[c] <= cap) {
-          // This column fits naturally — lock it in at its natural width
-          widths[c] = naturalWidths[c];
-          remaining -= naturalWidths[c];
-          locked[c] = true;
-          unlocked--;
-          changed = true;
-        }
-      }
-      if (!changed) break;
-    }
-
-    // Cap all remaining (wide) columns to the final fair-share value
-    if (unlocked > 0) {
-      const finalCap = Math.max(Math.floor(remaining / unlocked), MAX_COL_WIDTH);
-      for (let c = 0; c < colCount; c++) {
-        if (!locked[c]) {
-          widths[c] = finalCap;
-        }
-      }
-    }
+    const minTokenWidths = naturalWidths.map((_, c) =>
+      Math.max(...cells.map((r) => maxTokenWidth(r[c] ?? "")), 1),
+    );
+    widths = distributeColumnWidths(availableContent, naturalWidths, minTokenWidths);
   } else {
     widths = naturalWidths;
   }
@@ -212,7 +302,8 @@ function boxTable(cells: string[][], aligns: Array<"left" | "right" | "center">)
       return;
     }
 
-    // Wrap each cell into multiple visual lines
+    // Wrap each cell into multiple visual lines (wrapText hard-breaks any
+    // content wider than the column, so no row line can overflow the border)
     const wrapped: string[][] = row.map((cell: string, c: number) => wrapText(cell, widths[c]));
     const maxLines = Math.max(...wrapped.map((w) => w.length), 1);
 
@@ -288,6 +379,7 @@ export function mdTableToAscii(md: string): string {
     const start: number | undefined = tableNode.position?.start?.offset;
     const end: number | undefined = tableNode.position?.end?.offset;
     if (start == null || end == null || start < cursor) return SKIP;
+
     result += md.slice(cursor, start) + "```text\n" + boxTable(cells, aligns) + "\n```";
     cursor = end;
     return SKIP;
