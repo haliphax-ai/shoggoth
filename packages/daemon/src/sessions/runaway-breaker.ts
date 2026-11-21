@@ -37,13 +37,6 @@ export const RUNAWAY_MAX_DUPLICATES = 2;
  * Argument characters folded into a call's signature. Calls that differ only
  * past this point (timestamps deep in a JSON blob, etc.) count as duplicates.
  */
-/**
- * Argument characters folded into a call's signature. Calls that differ only
- * past this point (timestamps deep in a JSON blob, etc.) count as duplicates.
- * The issue: 200 chars isn't capturing enough of the tool call to be useful,
- * and is often canceling model turns for a valid series of tool calls that
- * have a large, common JSON prefix. Extend the capture to 2000 characters.
- */
 export const RUNAWAY_SIGNATURE_ARGS_CHARS = 2000;
 
 /**
