@@ -363,3 +363,101 @@ test("emoji cells keep box alignment in wide table that reflows and wraps", () =
   expect(box).toContain("❌");
   expect(box).toContain("😀");
 });
+
+test("leftover width budget is fully used", () => {
+  // Natural widths [30, 30, 40] (total 100) over a 70-content budget: the
+  // old code flattened every column to one cap, leaving most of the budget
+  // unused. The rendered table must now fill the full 80-column budget.
+  const mdWide = [
+    "| aaaaaa bb cc | aaaaaa bb cc | aaaaaa bb cc |",
+    "|---|---|---|",
+    "| " + "x".repeat(30) + " | " + "y".repeat(30) + " | " + "z".repeat(40) + " |",
+    "",
+  ].join("\n");
+  const result = mdTableToAscii(mdWide);
+
+  const codeMatch = result.match(/```text\n([\s\S]*?)```/);
+  expect(codeMatch).toBeTruthy();
+  const box = codeMatch![1].trim();
+  const lines = box.split("\n");
+
+  // Box alignment invariant: every line identical visual width
+  const firstLineWidth = stringWidth(lines[0]);
+  for (const line of lines) {
+    expect(stringWidth(line)).toBe(firstLineWidth);
+  }
+
+  // 3 content columns → available = 80 − 10 = 70; natural total 100. The
+  // rendered width must fill the whole budget instead of stopping at
+  // 3 × 20 + 10 = 70 (the old all-columns-flattened result).
+  expect(firstLineWidth).toBe(80);
+
+  // Shares: 70 × 30/100 = 21, 70 × 40/100 = 28. Border dashes sum to
+  // 23 + 23 + 30 = 76 (corners/junctions are not dashes).
+  const topDashes = [...lines[0]].filter((ch) => ch === "─").length;
+  expect(topDashes).toBe(76);
+  expect(lines[0]).toContain("─".repeat(21 + 2));
+  expect(lines[0]).toContain("─".repeat(28 + 2));
+  expect(lines[0]).not.toContain("─".repeat(29 + 2));
+
+  // Content wraps inside its share: the 28-wide column stays ≤ 28 chars.
+  for (const line of lines) {
+    const cells = line.split("│").slice(1, -1);
+    if (cells.length === 3) {
+      expect(stringWidth(cells[2].trim())).toBeLessThanOrEqual(28);
+    }
+  }
+});
+
+test("leftover budget is shared proportionally between wide columns", () => {
+  // Two equal wide columns (natural 25 each) could not both fit under the
+  // old cap-at-20 behavior; now the full 57-column width (50 + 7 overhead)
+  // is used and both cells stay on one line.
+  const mdMixed = [
+    "| Column A | Column B |",
+    "|---|---|",
+    "| " + "a".repeat(25) + " | " + "b".repeat(25) + " |",
+    "",
+  ].join("\n");
+  const result = mdTableToAscii(mdMixed);
+
+  const codeMatch = result.match(/```text\n([\s\S]*?)```/);
+  expect(codeMatch).toBeTruthy();
+  const box = codeMatch![1].trim();
+  const lines = box.split("\n");
+
+  const firstLineWidth = stringWidth(lines[0]);
+  // 2 content columns → available = 80 − 7 = 67; natural total 50 fits in
+  // full, so the rendered width uses all of it: 50 + 7 = 57.
+  expect(firstLineWidth).toBe(57);
+  for (const line of lines) {
+    expect(stringWidth(line)).toBe(firstLineWidth);
+  }
+  expect(box).toContain("a".repeat(25));
+  expect(box).toContain("b".repeat(25));
+});
+
+test("wrapText returns the break remainder explicitly via hardBreak", () => {
+  // The carry-out state after a hard break must land on the next wrapped
+  // line exactly once: a 12-char token hard-broken at column width 4 must
+  // reconstruct to the original token with nothing duplicated or dropped.
+  const mdPaths = [
+    "| A | B |",
+    "|---|---|",
+    "| aaaa-bbbb-cccc | " + "filler ".repeat(12) + "|",
+    "",
+  ].join("\n");
+  const result = mdTableToAscii(mdPaths);
+
+  const codeMatch = result.match(/```text\n([\s\S]*?)```/);
+  expect(codeMatch).toBeTruthy();
+  const box = codeMatch![1].trim();
+  const lines = box.split("\n");
+
+  // Hard-broken token reconstructs exactly across its wrapped lines
+  const joined = lines
+    .filter((l) => l.includes("aaaa"))
+    .map((l) => l.split("│")[1].trim())
+    .join("");
+  expect(joined).toBe("aaaa-bbbb-cccc");
+});
