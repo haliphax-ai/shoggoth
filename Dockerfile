@@ -51,17 +51,15 @@ RUN userdel node 2>/dev/null; groupdel node 2>/dev/null; \
   && usermod -aG agent shoggoth
 
 WORKDIR /app
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/packages ./packages
-COPY --from=build /app/package.json ./
-COPY --from=build /app/.git-hash ./.git-hash
-COPY scripts ./scripts
-COPY templates/agent-workspace /app/templates/agent-workspace
-COPY migrations /app/migrations
-COPY docs /app/docs
-
 # Ensure all app files are world-readable (build context from agent workspaces may have restrictive ACL-derived permissions)
-RUN chmod -R a+rX /app
+COPY --from=build --chmod=755 /app/node_modules ./node_modules
+COPY --from=build --chmod=755 /app/packages ./packages
+COPY --from=build --chmod=755 /app/package.json ./
+COPY --from=build --chmod=755 /app/.git-hash ./.git-hash
+COPY --chmod=755 scripts ./scripts
+COPY --chmod=755 templates/agent-workspace /app/templates/agent-workspace
+COPY --chmod=755 migrations /app/migrations
+COPY --chmod=755 docs /app/docs
 
 COPY docker/entrypoint.sh /usr/local/bin/shoggoth-entrypoint.sh
 COPY docker/shoggoth-wrapper.sh /usr/local/bin/shoggoth
