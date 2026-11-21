@@ -407,17 +407,16 @@ Applied during both outbound message formatting and streaming edits.
 
 `startDaemonDiscordMessaging(opts)` orchestrates startup:
 
-1. Registers the daemon's notice resolver via `setNoticeResolver()`.
-2. Checks `isPlatformEnabled(config, "discord")` — returns `undefined` if disabled.
-3. Resolves routes from `agents.list.<agentId>.platforms.discord.routes`.
-4. Calls `startDiscordMessagingIfConfigured()` which:
+1. Checks `isPlatformEnabled(config, "discord")` — returns `undefined` if disabled.
+2. Resolves routes from `agents.list.<agentId>.platforms.discord.routes`.
+3. Calls `startDiscordMessagingIfConfigured()` which:
    - Validates the bot token exists.
    - Validates routes exist and pass URN policy checks (including agent ID guard).
    - Creates the adapter, agent-to-agent bus, REST transport, and outbound sender.
    - Connects the Gateway.
    - Resolves the bot user ID (from Gateway READY or REST fallback).
-5. Registers guild-scoped slash commands per configured guild and cleans up legacy global commands (unless `registerSlashCommands: false`).
-6. Returns the `DiscordMessagingRuntime`.
+4. Registers guild-scoped slash commands per configured guild and cleans up legacy global commands (unless `registerSlashCommands: false`).
+5. Returns the `DiscordMessagingRuntime`.
 
 Then `startDiscordPlatform(opts)` wires the runtime into the daemon:
 

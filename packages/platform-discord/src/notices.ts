@@ -1,25 +1,17 @@
 /**
- * Notice resolver for platform-discord.
+ * Notice resolution helper for platform-discord.
  *
- * Delegates to the presentation layer's notice resolver. The daemon registers
- * the real implementation at startup via `setPresentationNoticeResolver`.
- * This module re-exports a thin wrapper so existing platform-discord code
- * can continue calling `daemonNotice(key, vars)` without change.
+ * The daemon's notice resolver is injected through `DiscordPlatformOptions`
+ * at platform construction; this module hosts the shared delegate used by
+ * platform-discord call sites.
  */
 import type { NoticeResolver } from "./daemon-types";
 
-let _resolver: NoticeResolver | undefined;
-
-/** Register the daemon's notice resolver. Call once during platform startup. */
-export function setNoticeResolver(resolver: NoticeResolver): void {
-  _resolver = resolver;
-}
-
-/** Resolve a notice template. Throws if no resolver has been registered. */
-export function daemonNotice(key: string, vars: Record<string, string> = {}): string {
-  if (!_resolver)
-    throw new Error(
-      "platform-discord: notice resolver not registered; call setNoticeResolver() at startup",
-    );
-  return _resolver(key, vars);
+/** Resolve a notice template through the injected daemon resolver. */
+export function notice(
+  resolve: NoticeResolver,
+  key: string,
+  vars: Record<string, string> = {},
+): string {
+  return resolve(key, vars);
 }

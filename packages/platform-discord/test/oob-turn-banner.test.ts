@@ -19,11 +19,10 @@ import {
 } from "@shoggoth/daemon/lib";
 import { startDiscordPlatform } from "../src/platform";
 import type { DiscordMessagingRuntime } from "../src/bridge";
-import { daemonNotice, setNoticeResolver } from "../src/notices";
+import { daemonNotice } from "../src/notices";
 import type { OobTurnBannerHandle } from "@shoggoth/daemon/lib";
 
 loadDaemonNotices();
-setNoticeResolver(daemonNotice);
 setPresentationNoticeResolver(daemonNotice);
 
 const SESSION_URN = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
@@ -166,6 +165,7 @@ describe("oobTurnBanner (issue #363)", { concurrency: false }, () => {
     const routes = [{ channelId: "c1", sessionId: SESSION_URN }];
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: defaultConfig(tmp),
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord: buildDiscordStub({ sent, streamingSupported, routes }),

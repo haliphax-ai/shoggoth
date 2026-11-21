@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   captured: {
     onReactionAdd: undefined as ((ev: unknown) => void) | undefined,
     messagingOpts: undefined as Record<string, any> | undefined,
+    platformOpts: undefined as Record<string, any> | undefined,
     bindings: undefined as Map<string, string> | undefined,
     platformHandle: undefined as Record<string, any> | undefined,
   },
@@ -70,7 +71,8 @@ vi.mock("../src/bootstrap", () => ({
 }));
 
 vi.mock("../src/platform", () => ({
-  startDiscordPlatform: vi.fn(() => {
+  startDiscordPlatform: vi.fn((opts: Record<string, any>) => {
+    h.captured.platformOpts = opts;
     const handle = {
       runSessionModelTurn: vi.fn(async () => {}),
       subscribeSubagentSession: vi.fn(() => () => {}),
@@ -120,6 +122,7 @@ function platformHandleSpy(): ReturnType<typeof vi.fn> {
 beforeEach(async () => {
   h.captured.onReactionAdd = undefined;
   h.captured.messagingOpts = undefined;
+  h.captured.platformOpts = undefined;
   h.captured.bindings = new Map<string, string>();
   h.captured.platformHandle = undefined;
   vi.clearAllMocks();
@@ -138,7 +141,7 @@ beforeEach(async () => {
     registerPlatform: vi.fn(),
     stopAllPlatforms: vi.fn(async () => {}),
     reconcilePersistentSubagents: vi.fn(() => ({ restored: 0, expiredKilled: 0 })),
-    noticeResolver: undefined,
+    noticeResolver: (key: string) => `notice:${key}`,
     platformAssistantDeps: undefined,
   };
   ctx = {
@@ -155,6 +158,8 @@ beforeEach(async () => {
   };
 
   await passthrough.hooks["platform.start"](ctx as any);
+  // Notice resolver from PlatformDeps flows into the platform options (DI, not a global).
+  expect(h.captured.platformOpts?.noticeResolver).toBe(deps.noticeResolver);
   handleReactionPassthrough = platformHandleSpy();
 });
 
