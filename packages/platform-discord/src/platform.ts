@@ -51,6 +51,7 @@ import {
   type StreamHandle,
   type OobTurnBannerHandle,
   type PlatformAssistantDeps,
+  renderTurnTerminationBody,
   resolveModel,
   shouldSkipThreadSessionSentinel,
 } from "@shoggoth/daemon/lib";
@@ -67,7 +68,6 @@ import { DiscordPlatformAdapter } from "./discord-platform-adapter";
 import { resolveStatusBarConfig, type ResolvedStatusBarConfig } from "@shoggoth/shared";
 import type { CruiseControlHandle } from "@shoggoth/shared";
 import { renderDiscordStatusBar } from "./status-bar";
-import { renderTurnTerminationBody } from "../../daemon/src/presentation/stream-coordinator";
 
 /** Minimal status-bar dep: config from resolveStatusBarConfig, render from renderDiscordStatusBar,
  *  attachSink for live-bar stream wrapping, and stats seeded from session_stats (turn.db is

@@ -188,7 +188,11 @@ export {
   type InboundSessionTurnInput,
   type RunInboundSessionTurnOptions,
 } from "./messaging/inbound-session-turn";
-export { createCoalescingStreamPusher } from "./presentation/stream-coordinator";
+export {
+  createCoalescingStreamPusher,
+  renderTurnTerminationBody,
+  type TurnTerminationShapingStep,
+} from "./presentation/stream-coordinator";
 export {
   buildSessionSystemContext,
   type BuildSessionSystemContextInput,
