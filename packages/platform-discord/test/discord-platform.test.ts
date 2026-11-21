@@ -2,8 +2,6 @@ import { describe, it, vi, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { mkdtempSync } from "node:fs";
 import { closeTestDb } from "../../daemon/test/helpers/close-test-db";
-import { setTimerScheduler } from "../../daemon/src/sessions/builtin-handlers/timer-handler";
-import { TimerScheduler } from "../../daemon/src/timers/timer-scheduler";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -26,6 +24,8 @@ import {
   TieredTurnQueue,
   setTurnQueue,
   setPresentationNoticeResolver,
+  setTimerScheduler,
+  TimerScheduler,
 } from "@shoggoth/daemon/lib";
 import { formatErrorUserText } from "@shoggoth/daemon/lib";
 import {
