@@ -11,6 +11,8 @@ import {
   buildModelSelectOptions,
   encodeModelSelectCustomId,
   decodeModelSelectCustomId,
+  type FailoverChainEntry,
+  type ProviderConfig,
 } from "./model-select";
 
 /** The set of slash commands Shoggoth registers (guild-scoped). */
@@ -394,12 +396,147 @@ type PromptListEntry = { slug: string; placeholders?: readonly string[] };
  */
 type PromptReplyStyle = "direct-response" | "inline-update";
 
+/** The unbound-channel warning text shared by every session-resolution guard. */
+const PROVIDER_MODEL_WARNING = "⚠️ No session bound to this channel. Provide a session_id.";
+/** Title of the shared free-text "Enter Model" modal. */
+const PROVIDER_MODEL_MODAL_TITLE = "Enter Model";
+
+/**
+ * Transport body types only declare `content`/`flags`, but Discord's
+ * interaction-callback and PATCH endpoints both accept `components`. Extras
+ * ride in this local before serialization — a fresh inline literal with
+ * `components` would fail excess-property checks (the field is still
+ * serialized to Discord's request body).
+ */
+type CallbackDataExtras = { readonly components?: ReadonlyArray<Record<string, unknown>> };
+
+/**
+ * Resolve the target session for an interaction: the explicit `session_id`
+ * from the command payload, else the channel's bound session. When nothing
+ * resolves, answer the interaction with the unbound-channel warning (the
+ * response type and delivery shape are per-site divergences, preserved by the
+ * `warn` callback: it fires with the shared warning text before the undefined
+ * return).
+ */
+async function resolveSessionOrRespond(
+  deps: DiscordInteractionHandlerDeps,
+  payload: Readonly<Record<string, unknown>>,
+  channelId: string,
+  guildId: string | undefined,
+  warn: (content: string) => Promise<void>,
+): Promise<string | undefined> {
+  if (payload.session_id) return payload.session_id as string;
+  const resolved = deps.resolveSessionForChannel?.(channelId, guildId);
+  if (resolved) return resolved;
+  await warn(PROVIDER_MODEL_WARNING);
+  return undefined;
+}
+
+/**
+ * Shared "Enter Model" free-text modal (type 9) with a single required short
+ * input — opened when no provider list is available to render pickers.
+ */
+function buildEnterModelModal(): {
+  readonly title: string;
+  readonly custom_id: string;
+  readonly components: [
+    {
+      readonly type: number;
+      readonly components: [
+        {
+          readonly type: number;
+          readonly custom_id: string;
+          readonly label: string;
+          readonly style: number;
+          readonly required: boolean;
+          readonly placeholder: string;
+        },
+      ];
+    },
+  ];
+} {
+  return {
+    title: PROVIDER_MODEL_MODAL_TITLE,
+    custom_id: encodeModelSelectCustomId("custom_modal"),
+    components: [
+      {
+        type: ACTION_ROW,
+        components: [
+          {
+            type: TEXT_INPUT,
+            custom_id: "model_input",
+            label: "Model (provider/model)",
+            style: TEXT_INPUT_SHORT,
+            required: true,
+            placeholder: "e.g., openai/gpt-4",
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/**
+ * Invoke `session_model` with a model selection and report the ✅/⚠️ outcome
+ * through `callback` (one call per divergent site: in-place message rewrite,
+ * plain channel message, ...). Never throws for control-op failures —
+ * transport failures inside `callback` still propagate to the caller.
+ */
+async function setSessionModel(
+  deps: DiscordInteractionHandlerDeps,
+  payload: Readonly<Record<string, unknown>>,
+  model: string,
+  callback: (content: string) => Promise<void>,
+): Promise<void> {
+  let content: string;
+  try {
+    const res = await deps.invokeControlOp("session_model", {
+      ...payload,
+      model_selection: { model },
+    });
+    content = res.ok
+      ? `✅ Model set to \`${model}\``
+      : `⚠️ Failed to set model: ${res.error ?? "unknown error"}`;
+  } catch (err) {
+    content = `⚠️ Failed to set model: ${String(err)}`;
+  }
+  await callback(content);
+}
+
+/**
+ * Reshape the models-config provider list (name-keyed models → id/name
+ * tuples) for the select-menu option builders. Read-only input; the returned
+ * list is safe to share across builder calls.
+ */
+function toProviderConfigList(
+  providers: ReadonlyArray<{
+    id: string;
+    name: string;
+    models?: ReadonlyArray<{ name: string }>;
+  }>,
+): ProviderConfig[] {
+  return providers.map((p) => ({
+    id: p.id,
+    name: p.name,
+    models: p.models?.map((m) => ({ id: m.name, name: m.name })) || [],
+  }));
+}
+
+/** Reshape the models-config failover chain for the option builders. */
+function toFailoverChainList(
+  failoverChain: ReadonlyArray<{ providerId: string; model: string }> | undefined,
+): FailoverChainEntry[] {
+  return (failoverChain ?? []).map((e) => ({
+    providerId: e.providerId,
+    modelId: e.model,
+  }));
+}
+
 /**
  * Translate the prompt options to a control op, resolving the target session
- * from the interaction's channel when the payload carries none (responding
- * with the unbound-channel warning instead of running the op when there is
- * nothing to target), then run the op — which returns as soon as the prompt
- * is delivered — and report that delivery per `replyStyle` (see
+ * from the interaction's channel when the payload carries none, then run the
+ * op — which returns as soon as the prompt is delivered — and report that
+ * delivery per `replyStyle` (see
  * {@link PromptReplyStyle}). A failure rewrites the status message; a
  * successful run never does (the turn announces itself on the session's
  * delivery surface).
@@ -418,17 +555,20 @@ async function runPromptProxy(
   // Same session-resolution pattern as the slash-command branches: fall back
   // to the channel's bound session when the payload does not carry one.
   const payload = { ...controlOp.payload };
-  if (!payload.session_id && deps.resolveSessionForChannel) {
-    const resolved = deps.resolveSessionForChannel(channelId, guildId);
-    if (resolved) payload.session_id = resolved;
-  }
-  if (!payload.session_id) {
-    await deps.transport.interactionCallback(interactionId, interactionToken, {
-      type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-      data: { content: "⚠️ No session bound to this channel. Provide a session_id." },
-    });
-    return;
-  }
+  const sessionId = await resolveSessionOrRespond(
+    deps,
+    payload,
+    channelId,
+    guildId,
+    async (content) => {
+      await deps.transport.interactionCallback(interactionId, interactionToken, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content },
+      });
+    },
+  );
+  if (!sessionId) return;
+  payload.session_id = sessionId;
   // `wait: false` — the op returns once the prompt is delivered, so the delivery
   // confirmation below is the whole status. The turn runs detached; no post-turn edit.
   payload.wait = false;
@@ -436,10 +576,7 @@ async function runPromptProxy(
   // Terminal-state editor: every terminal state clears components so the
   // message never keeps an inert slug dropdown (or modal-era inputs) around.
   const edit = async (content: string): Promise<void> => {
-    // Held in a variable: the transport body type only declares `content`, so
-    // a fresh inline literal with `components` would fail excess-property
-    // checks (the field is still serialized to Discord's PATCH body).
-    const data = { content, components: [] as Array<Record<string, unknown>> };
+    const data: { content: string } & CallbackDataExtras = { content, components: [] };
     try {
       await deps.transport.editOriginalInteractionResponse(
         deps.applicationId,
@@ -718,14 +855,19 @@ async function handleInteraction(
       // The session is no longer carried in custom_id (100-char limit); re-derive
       // from the channel. Cross-channel `session_id` override is only honored on
       // the direct-run path; staged flows target the bound session.
-      const sessionId = deps.resolveSessionForChannel?.(ev.channelId, ev.guildId);
-      if (!sessionId) {
-        await deps.transport.interactionCallback(ev.id, ev.token, {
-          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-          data: { content: "⚠️ No session bound to this channel.", flags: 64 },
-        });
-        return;
-      }
+      const sessionId = await resolveSessionOrRespond(
+        deps,
+        {},
+        ev.channelId,
+        ev.guildId,
+        async (content) => {
+          await deps.transport.interactionCallback(ev.id, ev.token, {
+            type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+            data: { content, flags: 64 },
+          });
+        },
+      );
+      if (!sessionId) return;
       let placeholders: readonly string[] = [];
       try {
         const res = await deps.invokeControlOp("prompt_list", { session_id: sessionId });
@@ -782,14 +924,19 @@ async function handleInteraction(
     const { step, extra } = decoded;
     // The session is not encoded in custom_id (Discord's 100-char limit breaks
     // for long thread-bound subagent URNs); re-derive it from the channel.
-    const sessionId = deps.resolveSessionForChannel?.(ev.channelId, ev.guildId);
-    if (!sessionId) {
-      await deps.transport.interactionCallback(ev.id, ev.token, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content: "⚠️ No session bound to this channel.", flags: 64 },
-      });
-      return;
-    }
+    const sessionId = await resolveSessionOrRespond(
+      deps,
+      {},
+      ev.channelId,
+      ev.guildId,
+      async (content) => {
+        await deps.transport.interactionCallback(ev.id, ev.token, {
+          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+          data: { content, flags: 64 },
+        });
+      },
+    );
+    if (!sessionId) return;
 
     if (step === "provider") {
       const values = ev.data?.values;
@@ -802,25 +949,7 @@ async function handleInteraction(
         // Respond with modal for custom input
         await deps.transport.interactionCallback(ev.id, ev.token, {
           type: INTERACTION_RESPONSE_MODAL,
-          data: {
-            title: "Enter Model",
-            custom_id: encodeModelSelectCustomId("custom_modal"),
-            components: [
-              {
-                type: ACTION_ROW,
-                components: [
-                  {
-                    type: TEXT_INPUT,
-                    custom_id: "model_input",
-                    label: "Model (provider/model)",
-                    style: TEXT_INPUT_SHORT,
-                    required: true,
-                    placeholder: "e.g., openai/gpt-4",
-                  },
-                ],
-              },
-            ],
-          },
+          data: buildEnterModelModal(),
         });
         return;
       }
@@ -841,27 +970,18 @@ async function handleInteraction(
         return;
       }
 
+      const providers = toProviderConfigList(modelsConfig.providers);
+
       // Build model options
       const modelOptions = buildModelSelectOptions({
         providerId: value,
-        providers: modelsConfig.providers.map((p) => ({
-          id: p.id,
-          name: p.name,
-          models: p.models?.map((m) => ({ id: m.name, name: m.name })) || [],
-        })),
-        failoverChain: (modelsConfig.failoverChain || []).map((e) => ({
-          providerId: e.providerId,
-          modelId: e.model,
-        })),
+        providers,
+        failoverChain: toFailoverChainList(modelsConfig.failoverChain),
       });
 
       // Rebuild provider options with the newly selected provider highlighted
       const providerOptions = buildProviderSelectOptions({
-        providers: modelsConfig.providers.map((p) => ({
-          id: p.id,
-          name: p.name,
-          models: p.models?.map((m) => ({ id: m.name, name: m.name })) || [],
-        })),
+        providers,
         currentProviderId: value,
       });
 
@@ -910,34 +1030,17 @@ async function handleInteraction(
         return;
       }
 
-      const modelSelection = { model: `${providerId}/${selectedModel}` };
-
-      try {
-        const res = await deps.invokeControlOp("session_model", {
-          session_id: sessionId,
-          model_selection: modelSelection,
-        });
-
-        const content = res.ok
-          ? `✅ Model set to \`${providerId}/${selectedModel}\``
-          : `⚠️ Failed to set model: ${res.error ?? "unknown error"}`;
-
-        await deps.transport.interactionCallback(ev.id, ev.token, {
-          type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
-          data: {
-            content,
-            components: [],
-          },
-        });
-      } catch (err) {
-        await deps.transport.interactionCallback(ev.id, ev.token, {
-          type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
-          data: {
-            content: `⚠️ Failed to set model: ${String(err)}`,
-            components: [],
-          },
-        });
-      }
+      await setSessionModel(
+        deps,
+        { session_id: sessionId },
+        `${providerId}/${selectedModel}`,
+        async (content) => {
+          await deps.transport.interactionCallback(ev.id, ev.token, {
+            type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
+            data: { content, components: [] },
+          });
+        },
+      );
       return;
     }
 
@@ -963,14 +1066,19 @@ async function handleInteraction(
       const model = customId.startsWith(CRUISE_MODAL_PREFIX)
         ? customId.slice(CRUISE_MODAL_PREFIX.length)
         : undefined;
-      const sessionId = deps.resolveSessionForChannel?.(ev.channelId, ev.guildId);
-      if (!sessionId) {
-        await deps.transport.interactionCallback(ev.id, ev.token, {
-          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-          data: { content: "⚠️ No session bound to this channel." },
-        });
-        return;
-      }
+      const sessionId = await resolveSessionOrRespond(
+        deps,
+        {},
+        ev.channelId,
+        ev.guildId,
+        async (content) => {
+          await deps.transport.interactionCallback(ev.id, ev.token, {
+            type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+            data: { content },
+          });
+        },
+      );
+      if (!sessionId) return;
       const inputs: Record<string, string> = {};
       for (const row of ev.data?.components ?? []) {
         const input = row.components?.[0];
@@ -1071,14 +1179,19 @@ async function handleInteraction(
 
     // The session is not encoded in custom_id (Discord's 100-char limit breaks
     // for long thread-bound subagent URNs); re-derive it from the channel.
-    const sessionId = deps.resolveSessionForChannel?.(ev.channelId, ev.guildId);
-    if (!sessionId) {
-      await deps.transport.interactionCallback(ev.id, ev.token, {
-        type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
-        data: { content: "⚠️ No session bound to this channel.", components: [] },
-      });
-      return;
-    }
+    const sessionId = await resolveSessionOrRespond(
+      deps,
+      {},
+      ev.channelId,
+      ev.guildId,
+      async (content) => {
+        await deps.transport.interactionCallback(ev.id, ev.token, {
+          type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
+          data: { content, components: [] },
+        });
+      },
+    );
+    if (!sessionId) return;
 
     // Extract text input value
     const components = ev.data?.components;
@@ -1105,32 +1218,12 @@ async function handleInteraction(
       return;
     }
 
-    try {
-      const res = await deps.invokeControlOp("session_model", {
-        session_id: sessionId,
-        model_selection: { model: value },
-      });
-
-      const content = res.ok
-        ? `✅ Model set to \`${value}\``
-        : `⚠️ Failed to set model: ${res.error ?? "unknown error"}`;
-
+    await setSessionModel(deps, { session_id: sessionId }, value, async (content) => {
       await deps.transport.interactionCallback(ev.id, ev.token, {
         type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
-        data: {
-          content,
-          components: [],
-        },
+        data: { content, components: [] },
       });
-    } catch (err) {
-      await deps.transport.interactionCallback(ev.id, ev.token, {
-        type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
-        data: {
-          content: `⚠️ Failed to set model: ${String(err)}`,
-          components: [],
-        },
-      });
-    }
+    });
     return;
   }
 
@@ -1495,19 +1588,20 @@ async function handleInteraction(
     try {
       // Resolve session_id from channel if not explicitly provided
       const payload = { ...controlOp.payload };
-      if (!payload.session_id && deps.resolveSessionForChannel) {
-        const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
-        if (resolved) payload.session_id = resolved;
-      }
-      if (!payload.session_id) {
-        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-          data: {
-            content: "⚠️ No session bound to this channel. Provide a session_id.",
-          },
-        });
-        return;
-      }
+      const sessionId = await resolveSessionOrRespond(
+        deps,
+        payload,
+        parsed.channelId,
+        parsed.guildId,
+        async (content) => {
+          await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+            type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+            data: { content },
+          });
+        },
+      );
+      if (!sessionId) return;
+      payload.session_id = sessionId;
       const res = await deps.invokeControlOp(controlOp.op, payload);
       let content: string;
       if (res.ok && res.result) {
@@ -1584,62 +1678,55 @@ async function handleInteraction(
       }
 
       const shortcutPayload = { ...controlOp.payload };
-      if (!shortcutPayload.session_id && !shortcutPayload.agent_id) {
-        const resolved = deps.resolveSessionForChannel
-          ? deps.resolveSessionForChannel(parsed.channelId, parsed.guildId)
-          : undefined;
-        if (resolved) shortcutPayload.session_id = resolved;
-      }
-      if (!shortcutPayload.session_id && !shortcutPayload.agent_id) {
-        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-          data: {
-            content: "⚠️ No session bound to this channel. Provide a session_id or agent_id.",
-          },
-        });
+      const shortcutSessionId = await resolveSessionOrRespond(
+        deps,
+        shortcutPayload,
+        parsed.channelId,
+        parsed.guildId,
+        async (_content) => {
+          await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+            type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+            data: {
+              content: "⚠️ No session bound to this channel. Provide a session_id or agent_id.",
+            },
+          });
+        },
+      );
+      if (!shortcutSessionId && !shortcutPayload.agent_id) {
         return;
       }
+      if (shortcutSessionId) shortcutPayload.session_id = shortcutSessionId;
 
-      try {
-        const res = await deps.invokeControlOp("session_model", {
-          ...shortcutPayload,
-          model_selection: { model: modelId },
-        });
-        const content = res.ok
-          ? `✅ Model set to \`${modelId}\``
-          : `⚠️ Failed to set model: ${res.error ?? "unknown error"}`;
+      await setSessionModel(deps, shortcutPayload, modelId, async (content) => {
         await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
           type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
           data: { content },
         });
-      } catch (err) {
-        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-          data: { content: `⚠️ Failed to set model: ${String(err)}` },
-        });
-      }
+      });
       return;
     }
 
     try {
       const payload = { ...controlOp.payload };
-      if (!payload.session_id && deps.resolveSessionForChannel) {
-        const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
-        if (resolved) payload.session_id = resolved;
-      }
-      if (!payload.session_id) {
-        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-          data: {
-            content: "⚠️ No session bound to this channel. Provide a session_id or agent_id.",
-          },
-        });
-        return;
-      }
+      const sessionId = await resolveSessionOrRespond(
+        deps,
+        payload,
+        parsed.channelId,
+        parsed.guildId,
+        async (_content) => {
+          await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+            type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+            data: {
+              content: "⚠️ No session bound to this channel. Provide a session_id or agent_id.",
+            },
+          });
+        },
+      );
+      if (!sessionId) return;
 
       // Get current model (read-only, no model_selection in payload)
       const currentModelRes = await deps.invokeControlOp(controlOp.op, {
-        session_id: payload.session_id,
+        session_id: sessionId,
       });
 
       // Extract current provider/model for defaults
@@ -1682,36 +1769,15 @@ async function handleInteraction(
         // No providers available - respond with modal for free-text input
         await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
           type: INTERACTION_RESPONSE_MODAL,
-          data: {
-            title: "Enter Model",
-            custom_id: encodeModelSelectCustomId("custom_modal"),
-            components: [
-              {
-                type: 1,
-                components: [
-                  {
-                    type: 4, // TEXT_INPUT
-                    custom_id: "model_input",
-                    label: "Model (provider/model)",
-                    style: 1, // SHORT
-                    required: true,
-                    placeholder: "e.g., openai/gpt-4",
-                  },
-                ],
-              },
-            ],
-          },
+          data: buildEnterModelModal(),
         });
         return;
       }
+      const providers = toProviderConfigList(modelsConfig.providers);
 
       // Build provider select options
       const providerOptions = buildProviderSelectOptions({
-        providers: modelsConfig.providers.map((p) => ({
-          id: p.id,
-          name: p.name,
-          models: p.models?.map((m) => ({ id: m.name, name: m.name })) || [],
-        })),
+        providers,
         currentProviderId,
       });
 
@@ -1721,19 +1787,12 @@ async function handleInteraction(
 
       // Respond with both provider and model select menus
       // Determine which provider to show models for (current or first available)
-      const activeProviderId = currentProviderId || modelsConfig.providers[0]?.id;
+      const activeProviderId = currentProviderId || providers[0]?.id;
       const modelOptions = activeProviderId
         ? buildModelSelectOptions({
             providerId: activeProviderId,
-            providers: modelsConfig.providers.map((p) => ({
-              id: p.id,
-              name: p.name,
-              models: p.models?.map((m) => ({ id: m.name, name: m.name })) || [],
-            })),
-            failoverChain: (modelsConfig.failoverChain || []).map((e) => ({
-              providerId: e.providerId,
-              modelId: e.model,
-            })),
+            providers,
+            failoverChain: toFailoverChainList(modelsConfig.failoverChain),
           })
         : [];
 
