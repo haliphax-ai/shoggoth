@@ -115,7 +115,8 @@ export function buildProviderSelectOptions({
 /**
  * Builds model select menu options for a specific provider.
  * Collects models from provider.models[] and failoverChain entries.
- * Deduplicates model names and caps at 25 options.
+ * Deduplicates model names, pins the current model (if present) to the front
+ * so it always survives the cap, then caps at 25 options.
  */
 export function buildModelSelectOptions({
   providerId,
@@ -160,6 +161,17 @@ export function buildModelSelectOptions({
 
     options.push(option);
   }
+
+  // Pin the current model to the front so it survives the option cap below
+  // (Discord allows at most 25 options per select menu).
+  if (currentModel !== undefined && modelsById.has(currentModel)) {
+    const currentIndex = options.findIndex((o) => o.value === currentModel);
+    if (currentIndex > 0) {
+      const [currentOption] = options.splice(currentIndex, 1);
+      options.unshift(currentOption!);
+    }
+  }
+
   // Cap at 25 options
   return options.slice(0, 25);
 }

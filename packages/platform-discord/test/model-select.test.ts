@@ -262,6 +262,37 @@ describe("buildModelSelectOptions", () => {
     assert.strictEqual(options.length, 25);
   });
 
+  it("keeps currentModel in options when truncation would drop it", () => {
+    const manyProviders: ProviderConfig[] = [
+      {
+        id: "openai",
+        name: "OpenAI",
+        models: Array.from({ length: 30 }, (_, i) => ({ id: `model-${i}`, name: `Model ${i}` })),
+      },
+    ];
+    const options = buildModelSelectOptions({
+      providerId: "openai",
+      providers: manyProviders,
+      failoverChain: [],
+      currentModel: "model-29",
+    });
+    assert.strictEqual(options.length, 25);
+    const currentOption = options.find((o) => o.value === "model-29");
+    assert.ok(currentOption, "currentModel should survive the cap");
+    assert.strictEqual(currentOption.default, true);
+  });
+
+  it("pins currentModel to the front of the options list", () => {
+    const options = buildModelSelectOptions({
+      providerId: "openai",
+      providers: mockProviders,
+      failoverChain: [],
+      currentModel: "gpt-3.5",
+    });
+    assert.strictEqual(options[0]!.value, "gpt-3.5");
+    assert.strictEqual(options[0]!.default, true);
+  });
+
   it("empty models → empty array", () => {
     const emptyProviders: ProviderConfig[] = [{ id: "openai", name: "OpenAI", models: [] }];
     const options = buildModelSelectOptions({
