@@ -18,13 +18,11 @@ import {
   setTurnQueue,
   setPresentationNoticeResolver,
 } from "@shoggoth/daemon/lib";
-import { setNoticeResolver } from "../src/notices";
 import { startDiscordPlatform } from "../src/platform";
 import type { DiscordMessagingRuntime } from "../src/bridge";
 
-// Wire daemon notice resolver so daemonNotice() works in tests.
+// Wire the daemon notice resolver so platform code resolves notices.
 loadDaemonNotices();
-setNoticeResolver(daemonNotice);
 setPresentationNoticeResolver(daemonNotice);
 
 const SESSION_URN = "agent:test:discord:channel:10000000-0000-4000-8000-000000000001";
@@ -134,6 +132,7 @@ describe("queued operator message indication", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: defaultConfig(tmp),
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -238,6 +237,7 @@ describe("queued operator message indication", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: defaultConfig(tmp),
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,

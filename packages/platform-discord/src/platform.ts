@@ -12,6 +12,7 @@ import {
 } from "@shoggoth/shared";
 import {
   createTurnBannerCollector,
+  daemonNotice,
   registerActiveTurnSurface,
   createCoalescingStreamPusher,
   createThinkingOutput,
@@ -55,8 +56,14 @@ import {
   resolveModel,
   shouldSkipThreadSessionSentinel,
 } from "@shoggoth/daemon/lib";
-import type { HitlNotifier, PendingActionRow, Logger, HitlAutoApproveGate } from "./daemon-types";
-import { daemonNotice } from "./notices";
+import type {
+  HitlNotifier,
+  PendingActionRow,
+  Logger,
+  HitlAutoApproveGate,
+  NoticeResolver,
+} from "./daemon-types";
+import { notice } from "./notices";
 import type { DiscordMessagingRuntime } from "./bridge";
 import { mergeOrchestratorEnv, resolveDiscordOwnerUserId } from "./config";
 import { registerDiscordHitlNoticeAndAddReactions } from "./hitl/reaction-wiring";
@@ -121,6 +128,11 @@ export function buildStatusBarDep(
   };
 }
 
+/** Notice resolution for this platform instance: opts.noticeResolver if set. */
+function platformNoticeResolver(opts: DiscordPlatformOptions): NoticeResolver {
+  return opts.noticeResolver ?? daemonNotice;
+}
+
 function pickDiscordAssistantDeps(
   input?: Partial<PlatformAssistantDeps> & {
     readonly hitlNotifier?: HitlNotifier;
@@ -167,6 +179,8 @@ export interface DiscordPlatformOptions {
   readonly hitlAutoApproveGate?: HitlAutoApproveGate;
   /** Cruise control (HITL auto-pilot): per-session store + judge. */
   readonly cruiseControl?: CruiseControlHandle;
+  /** Daemon's notice resolver for this platform instance; falls back to the daemon module global. */
+  readonly noticeResolver?: NoticeResolver;
   readonly env?: NodeJS.ProcessEnv;
   readonly deps?: Partial<PlatformAssistantDeps> & {
     readonly hitlNotifier?: HitlNotifier;
@@ -248,6 +262,7 @@ export async function startDiscordPlatform(
   });
 
   const assistantDeps = pickDiscordAssistantDeps(opts.deps);
+  const noticeResolver = platformNoticeResolver(opts);
   const hitlNotifier =
     opts.deps?.hitlNotifier ??
     createDiscordHitlNotifier({
@@ -416,7 +431,7 @@ export async function startDiscordPlatform(
               userId: msg.userId,
               createdAt: new Date().toISOString(),
               body: sliceDiscordPlatformMessageBody(
-                daemonNotice("segment-command-error", {
+                notice(noticeResolver, "segment-command-error", {
                   mode: segmentMode,
                   error: String(e),
                 }),
@@ -434,8 +449,8 @@ export async function startDiscordPlatform(
       const segShort = sessionAfter.contextSegmentId.slice(0, 8);
       const ack =
         segmentMode === "new"
-          ? daemonNotice("segment-ack-new", { segmentPreview: segShort })
-          : daemonNotice("segment-ack-reset", { segmentPreview: segShort });
+          ? notice(noticeResolver, "segment-ack-new", { segmentPreview: segShort })
+          : notice(noticeResolver, "segment-ack-reset", { segmentPreview: segShort });
       try {
         await opts.discord.outbound.sendDiscord(
           createOutboundMessage({
@@ -1197,8 +1212,8 @@ export async function startDiscordPlatform(
     const cfg = opts.configRef?.current ?? opts.config;
     const line =
       input.reason === "ttl_expired"
-        ? daemonNotice("subagent-persistent-ended-ttl")
-        : daemonNotice("subagent-persistent-ended-killed");
+        ? notice(noticeResolver, "subagent-persistent-ended-ttl")
+        : notice(noticeResolver, "subagent-persistent-ended-killed");
     const body = sliceDiscordPlatformMessageBody(
       `${formatAgentIdentityPrefix(cfg, input.sessionId)}${line}`,
     );

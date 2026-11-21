@@ -232,7 +232,6 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
               .get(sessionId.trim()) as { status: string } | undefined;
             return row !== undefined && row.status !== "terminated";
           },
-          noticeResolver,
           onThreadCreate: processThreadCreate,
           onInteractionCreate: createDiscordInteractionHandler({
             transport: {
@@ -356,6 +355,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           hitlDiscordNoticeRegistry,
           hitlAutoApproveGate: hitlAutoApproveGate as any,
           cruiseControl: platformDeps.cruiseControl,
+          noticeResolver,
           logger,
           discord: discordMessaging,
           deps: platformAssistantDeps as DiscordPlatformOptions["deps"],

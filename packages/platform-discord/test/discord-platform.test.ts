@@ -41,13 +41,11 @@ import {
 } from "../src/hitl/notifier";
 import type { PendingActionRow } from "../src/daemon-types";
 import type { DiscordMessagingRuntime } from "../src/bridge";
-import { setNoticeResolver } from "../src/notices";
 import { createDiscordInteractionHandler } from "../src/slash-commands";
 import type { DiscordInteractionEvent } from "../src/interaction";
 
-// Wire daemon notice resolver so platform-discord's daemonNotice() works in tests.
+// Wire the presentation notice resolver; platform notices are injected per-platform.
 loadDaemonNotices();
-setNoticeResolver(daemonNotice);
 setPresentationNoticeResolver(daemonNotice);
 
 /** Stub type for connectShoggothMcpServers (daemon internal) */
@@ -341,6 +339,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: {
         ...defaultConfig(tmp),
         agents: {
@@ -433,6 +432,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: defaultConfig(tmp),
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -502,6 +502,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: defaultConfig(tmp),
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -565,6 +566,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: defaultConfig(tmp),
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -646,6 +648,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: cfg,
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -715,6 +718,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: cfg,
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -813,6 +817,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: cfg,
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -899,6 +904,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: cfg,
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -996,6 +1002,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: cfg,
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -1115,6 +1122,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: cfg,
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -1234,6 +1242,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: cfg,
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -1312,6 +1321,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: defaultConfig(tmp),
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -1396,6 +1406,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: defaultConfig(tmp),
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -1469,6 +1480,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
       const platform = await startDiscordPlatform({
         db,
+        noticeResolver: daemonNotice,
         config: defaultConfig(tmp),
         logger: createLogger({ component: "t", minLevel: "error" }),
         discord,
@@ -1575,6 +1587,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
       const platform = await startDiscordPlatform({
         db,
+        noticeResolver: daemonNotice,
         config: defaultConfig(tmp),
         logger: createLogger({ component: "t", minLevel: "error" }),
         discord,
@@ -1667,6 +1680,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
       const platform = await startDiscordPlatform({
         db,
+        noticeResolver: daemonNotice,
         config: defaultConfig(tmp),
         logger: createLogger({ component: "t", minLevel: "error" }),
         discord,
@@ -1734,6 +1748,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: defaultConfig(tmp),
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -1809,6 +1824,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: defaultConfig(tmp),
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -1887,6 +1903,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: cfg,
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -1959,6 +1976,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: cfg,
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -2037,6 +2055,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: cfg,
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -2125,6 +2144,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: defaultConfig(tmp),
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -2233,6 +2253,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: defaultConfig(tmp),
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -2327,6 +2348,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: defaultConfig(tmp),
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -2485,6 +2507,7 @@ describe("startDiscordPlatform", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: defaultConfig(tmp),
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord,
@@ -2651,6 +2674,7 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: {
         ...defaultConfig(tmp),
         platforms: { statusBar: { enabled: true } },
@@ -2723,6 +2747,7 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: {
         ...defaultConfig(tmp),
         platforms: { statusBar: { enabled: true } },
@@ -2828,6 +2853,7 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: defaultConfig(tmp),
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord: runtime,
@@ -2910,6 +2936,7 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
     const capture: { body: string }[] = [];
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: {
         ...defaultConfig(tmp),
         platforms: { statusBar: { enabled: true } },
@@ -2973,6 +3000,7 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
     let round = 0;
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: {
         ...defaultConfig(tmp),
         platforms: { statusBar: { enabled: true } },
@@ -3062,6 +3090,7 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
 
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: defaultConfig(tmp),
       logger: createLogger({ component: "t", minLevel: "error" }),
       discord: runtime,
@@ -3143,6 +3172,7 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
     const capture: { body: string }[] = [];
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: {
         ...defaultConfig(tmp),
         platforms: { statusBar: { enabled: true } },
@@ -3222,6 +3252,7 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
     let round = 0;
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: {
         ...defaultConfig(tmp),
         platforms: { statusBar: { enabled: true } },
@@ -3321,6 +3352,7 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
     let round = 0;
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: {
         ...defaultConfig(tmp),
         platforms: { statusBar: { enabled: true } },
@@ -3407,6 +3439,7 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
     const base = defaultConfig(tmp);
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: {
         ...base,
         hitl: { ...base.hitl, bypassUpTo: "caution" },
@@ -3501,6 +3534,7 @@ describe("platform status bar dep wiring", { concurrency: false }, () => {
     let round = 0;
     const platform = await startDiscordPlatform({
       db,
+      noticeResolver: daemonNotice,
       config: {
         ...defaultConfig(tmp),
         platforms: { statusBar: { enabled: true } },

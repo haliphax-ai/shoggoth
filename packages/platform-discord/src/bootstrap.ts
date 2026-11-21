@@ -7,8 +7,6 @@ import {
 import type { DiscordInteractionEvent } from "./interaction";
 import { isPlatformEnabled, type ShoggothConfig } from "@shoggoth/shared";
 import type { DiscordBridgeLogger } from "./bridge";
-import type { NoticeResolver } from "./daemon-types";
-import { setNoticeResolver } from "./notices";
 import {
   resolveDiscordAllowBotMessages,
   resolveDiscordCommandGuildIds,
@@ -39,8 +37,6 @@ export interface StartDaemonDiscordMessagingOptions {
    */
   readonly isSessionActive?: (sessionId: string) => boolean;
   readonly reactionBotUserIdRef?: { current: string | undefined };
-  /** Daemon's notice resolver — wired into platform-discord's `setNoticeResolver` at startup. */
-  readonly noticeResolver?: NoticeResolver;
   /** When true, register guild slash commands on startup (requires bot user id). */
   readonly registerSlashCommands?: boolean;
 }
@@ -52,9 +48,6 @@ export interface StartDaemonDiscordMessagingOptions {
 export async function startDaemonDiscordMessaging(
   opts: StartDaemonDiscordMessagingOptions,
 ): Promise<DiscordMessagingRuntime | undefined> {
-  if (opts.noticeResolver) {
-    setNoticeResolver(opts.noticeResolver);
-  }
   if (!isPlatformEnabled(opts.config, "discord")) {
     return undefined;
   }
