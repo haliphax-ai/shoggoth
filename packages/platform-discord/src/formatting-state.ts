@@ -68,6 +68,41 @@ const canCloseMarker = (
   return !isSpaceChar(prevCh) && !isWordChar(nextCh);
 };
 
+/** A backticks-only line (a run of three or more): closes an open fence. */
+const isClosingFenceLine = (trimmed: string): boolean =>
+  trimmed.startsWith("```") && trimmed.replace(/`/g, "").trim() === "";
+
+/**
+ * Opening fence tag when `trimmed` opens a fence (three or more backticks
+ * plus an optional language tag); "" when it does not.
+ */
+const openedFenceTag = (trimmed: string): string => {
+  const m = trimmed.match(FENCE_OPEN_RE);
+  return m && m[1].length >= 3 ? (m[2] ? "```" + m[2] : "```") : "";
+};
+
+/**
+ * Apply one line's fence rules to the fence state (`trimmed` is the line with
+ * leading whitespace removed). Returns the updated state plus whether the
+ * line is consumed by the fence logic — fence content, a closing fence, or an
+ * opening fence — and therefore never reaches the inline-marker scan.
+ */
+function stepFenceState(
+  inFence: boolean,
+  tag: string,
+  trimmed: string,
+): { inFence: boolean; tag: string; isFenceLine: boolean } {
+  if (inFence) {
+    return isClosingFenceLine(trimmed)
+      ? { inFence: false, tag: "", isFenceLine: true }
+      : { inFence, tag, isFenceLine: true };
+  }
+  const openTag = openedFenceTag(trimmed);
+  return openTag === ""
+    ? { inFence, tag, isFenceLine: false }
+    : { inFence: true, tag: openTag, isFenceLine: true };
+}
+
 /**
  * Resumable scan cursor for the fence-and-inline-marker pass. Fence rules
  * match the line-based scanner: a backticks-only ``` line closes an open
@@ -106,6 +141,48 @@ const canonicalOpen = (open: Set<string>): string[] =>
   TRACKED_MARKERS.filter((marker) => open.has(marker));
 
 /**
+ * Scan one line's inline markers with Discord's boundary rules, toggling
+ * membership in `open`. Fence lines never reach this: callers route them to
+ * the fence-toggle logic instead.
+ */
+function scanInlineLine(line: string, open: Set<string>): void {
+  let pos = 0;
+  while (pos < line.length) {
+    // Inline code spans are literal text: skip to the closing backtick.
+    if (line[pos] === "`") {
+      pos = skipInlineCode(line, pos);
+      continue;
+    }
+
+    const marker = TRACKED_MARKERS.find((m) => line.startsWith(m, pos));
+    if (marker === undefined) {
+      pos++;
+      continue;
+    }
+    toggleTrackedMarker(line, pos, marker, open);
+    pos += marker.length;
+  }
+}
+
+/** Advance past an inline code span whose opening backtick is at `pos`. */
+function skipInlineCode(line: string, pos: number): number {
+  pos++;
+  while (pos < line.length && line[pos] !== "`") pos++;
+  return pos < line.length ? pos + 1 : pos; // skip the closing backtick when present
+}
+
+/** Toggle `marker` at `pos` in `open` where Discord's boundary rules allow. */
+function toggleTrackedMarker(line: string, pos: number, marker: string, open: Set<string>): void {
+  const prevCh = pos > 0 ? line[pos - 1] : undefined;
+  const nextCh = pos + marker.length < line.length ? line[pos + marker.length] : undefined;
+  if (open.has(marker)) {
+    if (canCloseMarker(marker, prevCh, nextCh)) open.delete(marker);
+  } else if (canOpenMarker(marker, prevCh, nextCh)) {
+    open.add(marker);
+  }
+}
+
+/**
  * Consume `text` into the scan cursor; `text` must extend the text already
  * consumed. Only unconsumed lines are scanned, so the cost across growing
  * snapshots stays proportional to the appended text. Lines finalize only
@@ -114,42 +191,6 @@ const canonicalOpen = (open: Set<string>): string[] =>
  * every line is scanned exactly once over its final content and the result
  * matches a single full scan of the concatenated text.
  */
-/**
- * Scan one line's inline markers with Discord's boundary rules, toggling
- * membership in `open`. Fence lines never reach this: callers route them to
- * the fence-toggle logic instead.
- */
-function scanInlineLine(line: string, open: Set<string>): void {
-  let pos = 0;
-  while (pos < line.length) {
-    // Skip inline code spans.
-    if (line[pos] === "`") {
-      pos++;
-      while (pos < line.length && line[pos] !== "`") pos++;
-      if (pos < line.length) pos++; // skip closing backtick
-      continue;
-    }
-
-    let matched = false;
-    for (const marker of TRACKED_MARKERS) {
-      if (line.startsWith(marker, pos)) {
-        const prevCh = pos > 0 ? line[pos - 1] : undefined;
-        const nextCh = pos + marker.length < line.length ? line[pos + marker.length] : undefined;
-        if (open.has(marker)) {
-          if (canCloseMarker(marker, prevCh, nextCh)) open.delete(marker);
-        } else if (canOpenMarker(marker, prevCh, nextCh)) {
-          open.add(marker);
-        }
-        pos += marker.length;
-        matched = true;
-        break;
-      }
-    }
-    if (matched) continue;
-    pos++;
-  }
-}
-
 function scanInto(cursor: ScanCursor, text: string): void {
   let { inFence, fenceTag, pos } = cursor;
   let open = cursor.open;
@@ -177,22 +218,11 @@ function scanInto(cursor: ScanCursor, text: string): void {
       cursor.tailOpen = new Set(open);
     }
     const line = text.slice(lineStart, lineEnd);
-    const trimmed = line.trimStart();
 
-    if (inFence) {
-      if (trimmed.startsWith("```") && trimmed.replace(/`/g, "").trim() === "") {
-        inFence = false;
-        fenceTag = "";
-      }
-    } else {
-      const m = trimmed.match(FENCE_OPEN_RE);
-      if (m && m[1].length >= 3) {
-        inFence = true;
-        fenceTag = m[2] ? "```" + m[2] : "```";
-      } else {
-        scanInlineLine(line, open);
-      }
-    }
+    const step = stepFenceState(inFence, fenceTag, line.trimStart());
+    inFence = step.inFence;
+    fenceTag = step.tag;
+    if (!step.isFenceLine) scanInlineLine(line, open);
 
     if (!complete) {
       pos = lineStart; // fragment: rescanned once its newline arrives
@@ -231,22 +261,10 @@ export function computeOpenInlineMarkers(
   const open = new Set<string>();
   let inFence = prevOpenFence !== "";
 
-  const lines = text.split("\n");
-  for (const line of lines) {
-    const trimmed = line.trimStart();
-    if (inFence) {
-      if (trimmed.startsWith("```") && trimmed.replace(/`/g, "").trim() === "") {
-        inFence = false;
-      }
-      continue;
-    }
-    const m = trimmed.match(FENCE_OPEN_RE);
-    if (m && m[1].length >= 3) {
-      inFence = true;
-      continue;
-    }
-
-    scanInlineLine(line, open);
+  for (const line of text.split("\n")) {
+    const step = stepFenceState(inFence, "", line.trimStart());
+    inFence = step.inFence;
+    if (!step.isFenceLine) scanInlineLine(line, open);
   }
 
   // Canonical order: INLINE_MARKERS order, then "_".
@@ -262,20 +280,9 @@ function walkFences(
   let inFence = inFenceStart;
   let tag = tagStart;
   for (const line of raw.split("\n")) {
-    const trimmed = line.trimStart();
-    if (inFence) {
-      // Check for closing fence.
-      if (trimmed.startsWith("```") && trimmed.replace(/`/g, "").trim() === "") {
-        inFence = false;
-        tag = "";
-      }
-    } else {
-      const m = trimmed.match(FENCE_OPEN_RE);
-      if (m && m[1].length >= 3) {
-        inFence = true;
-        tag = m[2] ? "```" + m[2] : "```";
-      }
-    }
+    const step = stepFenceState(inFence, tag, line.trimStart());
+    inFence = step.inFence;
+    tag = step.tag;
   }
   return { inFence, tag };
 }
