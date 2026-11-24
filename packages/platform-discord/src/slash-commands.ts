@@ -3,9 +3,15 @@
  */
 
 import type { DiscordRestTransport } from "./transport";
-import type { DiscordInteractionEvent } from "./interaction";
-import { discordInteractionToCommand } from "./interaction";
-import { translateCommandToControlOp } from "@shoggoth/daemon/lib";
+import type { DiscordInteractionEvent, DiscordParsedInteraction } from "./interaction";
+import {
+  discordInteractionToCommand,
+  INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+  INTERACTION_RESPONSE_DEFERRED,
+  INTERACTION_RESPONSE_MODAL,
+  INTERACTION_RESPONSE_UPDATE_MESSAGE,
+} from "./interaction";
+import { translateCommandToControlOp, type ControlOpRequest } from "@shoggoth/daemon/lib";
 import {
   buildProviderSelectOptions,
   buildModelSelectOptions,
@@ -340,14 +346,6 @@ export async function cleanupLegacyGlobalCommands(opts: {
   }
 }
 
-/** Interaction response type 4 = CHANNEL_MESSAGE_WITH_SOURCE. */
-const INTERACTION_RESPONSE_CHANNEL_MESSAGE = 4;
-/** Interaction response type 5 = DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE. */
-const INTERACTION_RESPONSE_DEFERRED = 5;
-/** Interaction response type 7 = UPDATE_MESSAGE. */
-const INTERACTION_RESPONSE_UPDATE_MESSAGE = 7;
-/** Interaction response type 9 = MODAL. */
-const INTERACTION_RESPONSE_MODAL = 9;
 /** Component type 1 = ACTION_ROW. */
 const ACTION_ROW = 1;
 /** Component type 3 = STRING_SELECT. */
@@ -833,400 +831,69 @@ async function handleInteraction(
     return;
   }
 
-  // Handle component interactions (type 3) and modal submits (type 5)
-  if (ev.type === 3) {
-    // MESSAGE_COMPONENT interaction
-    const customId = ev.data?.custom_id;
-    if (!customId) {
-      deps.logger.debug("discord.interaction.ignored", {
-        type: ev.type,
-        id: ev.id,
-      });
-      return;
-    }
-
-    // Stage 2: slug dropdown selected. No placeholders → immediate UPDATE_MESSAGE
-    // (7) confirmation on message A; placeholders → modal (9), stage 3 rewrites A.
-    // /prompt with a slug argument opens the same modal directly.
-    if (customId.startsWith(PROMPT_SELECT_PREFIX)) {
-      const values = ev.data?.values;
-      if (!values || values.length === 0) return;
-      const slug = values[0];
-      // The session is no longer carried in custom_id (100-char limit); re-derive
-      // from the channel. Cross-channel `session_id` override is only honored on
-      // the direct-run path; staged flows target the bound session.
-      const sessionId = await resolveSessionOrRespond(
-        deps,
-        {},
-        ev.channelId,
-        ev.guildId,
-        async (content) => {
-          await deps.transport.interactionCallback(ev.id, ev.token, {
-            type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-            data: { content, flags: 64 },
-          });
-        },
-      );
-      if (!sessionId) return;
-      let placeholders: readonly string[] = [];
-      try {
-        const res = await deps.invokeControlOp("prompt_list", { session_id: sessionId });
-        if (res.ok && res.result) {
-          const prompts = (res.result as { prompts?: PromptListEntry[] }).prompts ?? [];
-          placeholders = prompts.find((p) => p.slug === slug)?.placeholders ?? [];
-        }
-      } catch (err) {
-        deps.logger.warn("discord.interaction.prompt_list_failed", {
-          sessionId,
-          err: String(err),
-        });
-      }
-      if (placeholders.length === 0) {
-        // No placeholders — nothing to ask. ACK FIRST with UPDATE_MESSAGE (7)
-        // so message A is immediately rewritten in place with the delivery
-        // confirmation (dropdown cleared).
-        await runPromptProxy(
-          deps,
-          ev.id,
-          ev.token,
-          { slug, session_id: sessionId, platform_user_id: ev.userId },
-          ev.channelId,
-          ev.guildId,
-          "inline-update",
-        );
-        return;
-      }
-      // Placeholders → shared parameter modal. Message A stays visible while the
-      // modal is open (Discord text inputs exist only inside modals); stage 3
-      // rewrites message A when the modal is submitted.
-      await respondWithPromptParameterModal(
-        deps,
-        ev.id,
-        ev.token,
-        slug,
-        placeholders,
-        "update-message",
-      );
-      return;
-    }
-
-    const decoded = decodeModelSelectCustomId(customId);
-    if (!decoded) {
-      // Unknown component - ignore
-      deps.logger.debug("discord.interaction.ignored", {
-        type: ev.type,
-        id: ev.id,
-        customId,
-      });
-      return;
-    }
-
-    const { step, extra } = decoded;
-    // The session is not encoded in custom_id (Discord's 100-char limit breaks
-    // for long thread-bound subagent URNs); re-derive it from the channel.
-    const sessionId = await resolveSessionOrRespond(
-      deps,
-      {},
-      ev.channelId,
-      ev.guildId,
-      async (content) => {
-        await deps.transport.interactionCallback(ev.id, ev.token, {
-          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-          data: { content, flags: 64 },
-        });
-      },
-    );
-    if (!sessionId) return;
-
-    if (step === "provider") {
-      const values = ev.data?.values;
-      if (!values || values.length === 0) {
-        return;
-      }
-      const value = values[0];
-
-      if (value === "__custom__") {
-        // Respond with modal for custom input
-        await deps.transport.interactionCallback(ev.id, ev.token, {
-          type: INTERACTION_RESPONSE_MODAL,
-          data: buildEnterModelModal(),
-        });
-        return;
-      }
-
-      // Real provider selected - show model select
-      if (!deps.getModelsConfig) {
-        // Shouldn't happen if we got here, but handle gracefully
-        return;
-      }
-
-      const modelsConfig = await deps.getModelsConfig();
-      if (!modelsConfig || !modelsConfig.providers) {
-        return;
-      }
-
-      const provider = modelsConfig.providers.find((p) => p.id === value);
-      if (!provider) {
-        return;
-      }
-
-      const providers = toProviderConfigList(modelsConfig.providers);
-
-      // Build model options
-      const modelOptions = buildModelSelectOptions({
-        providerId: value,
-        providers,
-        failoverChain: toFailoverChainList(modelsConfig.failoverChain),
-      });
-
-      // Rebuild provider options with the newly selected provider highlighted
-      const providerOptions = buildProviderSelectOptions({
-        providers,
-        currentProviderId: value,
-      });
-
-      await deps.transport.interactionCallback(ev.id, ev.token, {
-        type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
-        data: {
-          content: `🎯 **Model Configuration**\nSession: \`${sessionId}\`\nProvider: ${provider.name}`,
-          components: [
-            {
-              type: ACTION_ROW,
-              components: [
-                {
-                  type: STRING_SELECT,
-                  custom_id: encodeModelSelectCustomId("provider"),
-                  placeholder: "Select a provider",
-                  options: providerOptions,
-                },
-              ],
-            },
-            {
-              type: ACTION_ROW,
-              components: [
-                {
-                  type: STRING_SELECT,
-                  custom_id: encodeModelSelectCustomId("model", value),
-                  placeholder: "Select a model",
-                  options: modelOptions,
-                },
-              ],
-            },
-          ],
-        },
-      });
-      return;
-    }
-
-    if (step === "model") {
-      const values = ev.data?.values;
-      if (!values || values.length === 0) {
-        return;
-      }
-      const selectedModel = values[0];
-      const providerId = extra;
-
-      if (!providerId) {
-        return;
-      }
-
-      await setSessionModel(
-        deps,
-        { session_id: sessionId },
-        `${providerId}/${selectedModel}`,
-        async (content) => {
-          await deps.transport.interactionCallback(ev.id, ev.token, {
-            type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
-            data: { content, components: [] },
-          });
-        },
-      );
-      return;
-    }
-
-    // Unknown step - ignore
+  // Component interactions (type 3) and modal submits (type 5) route on their
+  // interaction type; everything else is a slash command routed on its
+  // translated control op.
+  if (ev.type === 3 || ev.type === 5) {
+    const componentHandler = COMPONENT_ROUTE[ev.type];
+    if (componentHandler) await componentHandler({ deps, ev });
     return;
   }
+  await handleSlashCommandInteraction({ deps, ev });
+}
 
-  if (ev.type === 5) {
-    // MODAL_SUBMIT interaction
-    const customId = ev.data?.custom_id;
-    if (!customId) {
-      deps.logger.debug("discord.interaction.ignored", {
-        type: ev.type,
-        id: ev.id,
-      });
-      return;
-    }
+/** Context handed to every component-route handler. */
+interface InteractionContext {
+  readonly deps: DiscordInteractionHandlerDeps;
+  readonly ev: DiscordInteractionEvent;
+}
 
-    // Cruise control activation modal submitted → activate and report. The session
-    // is re-derived from the channel (never in custom_id — 100-char limit);
-    // an optional model rides in the custom_id suffix.
-    if (customId === CRUISE_MODAL_ID || customId.startsWith(CRUISE_MODAL_PREFIX)) {
-      const model = customId.startsWith(CRUISE_MODAL_PREFIX)
-        ? customId.slice(CRUISE_MODAL_PREFIX.length)
-        : undefined;
-      const sessionId = await resolveSessionOrRespond(
-        deps,
-        {},
-        ev.channelId,
-        ev.guildId,
-        async (content) => {
-          await deps.transport.interactionCallback(ev.id, ev.token, {
-            type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-            data: { content },
-          });
-        },
-      );
-      if (!sessionId) return;
-      const inputs: Record<string, string> = {};
-      for (const row of ev.data?.components ?? []) {
-        const input = row.components?.[0];
-        if (input && typeof input.custom_id === "string") {
-          inputs[input.custom_id] = input.value ?? "";
-        }
-      }
-      const yes = inputs.yes?.trim();
-      const no = inputs.no?.trim();
-      const escalate = inputs.escalate?.trim();
-      if (!yes || !no) {
-        await deps.transport.interactionCallback(ev.id, ev.token, {
-          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-          data: {
-            content: "⚠️ Approve (`yes`) and deny (`no`) guidance are both required.",
-          },
-        });
-        return;
-      }
-      let content: string;
-      try {
-        const res = await deps.invokeControlOp("hitl_cruise_control", {
-          session_id: sessionId,
-          yes,
-          no,
-          ...(escalate ? { escalate } : {}),
-          ...(model ? { model } : {}),
-        });
-        if (res.ok) {
-          const warnings = (res.result as { warnings?: string[] } | undefined)?.warnings ?? [];
-          const warnSuffix = warnings.length
-            ? `\n${warnings.map((w) => `⚠️ ${w}`).join("\n")}`
-            : "";
-          content = `🚗 Cruise control activated for \`${sessionId}\`${escalate ? " (with escalation route)" : ""}.${warnSuffix}`;
-        } else {
-          content = `⚠️ Failed to activate cruise control: ${res.error ?? "unknown error"}`;
-        }
-      } catch (err) {
-        content = `⚠️ Failed to activate cruise control: ${String(err)}`;
-      }
-      await deps.transport.interactionCallback(ev.id, ev.token, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content },
-      });
-      return;
-    }
+/**
+ * Route table for component (type 3) and modal (type 5) interactions. Both
+ * stages share one handler per interaction type: the `custom_id` prefix and
+ * (for model selects) the decoded step select the flow inside.
+ */
+const COMPONENT_ROUTE: Readonly<Record<number, (ctx: InteractionContext) => Promise<void>>> = {
+  3: handleComponentInteraction,
+  5: handleModalSubmitInteraction,
+};
 
-    // Stage 3: canned prompt modal submitted → run the prompt and rewrite
-    // message A (the dropdown) with the final recap.
-    if (customId.startsWith(PROMPT_MODAL_PREFIX)) {
-      // custom_id carries only the slug (`prompt_modal|<slug>`); the session is
-      // NOT embedded (a thread-bound subagent URN overflows Discord's 100-char
-      // custom_id limit). runPromptProxy resolves it from this channel.
-      const slug = customId.slice(PROMPT_MODAL_PREFIX.length);
-      if (!slug) return;
-      // Rebuild params from the inputs; every placeholder key must be present
-      // even when the user left the field empty (empty values are valid).
-      const params: Record<string, string> = {};
-      for (const row of ev.data?.components ?? []) {
-        const input = row.components?.[0];
-        if (input && typeof input.custom_id === "string") {
-          params[input.custom_id] = input.value ?? "";
-        }
-      }
-      await runPromptProxy(
-        deps,
-        ev.id,
-        ev.token,
-        {
-          slug,
-          platform_user_id: ev.userId,
-          ...params,
-        },
-        ev.channelId,
-        ev.guildId,
-        // ACK FIRST with UPDATE_MESSAGE (7), rewriting message A in place
-        // with the delivery confirmation (type 6 is invalid for modal
-        // submits — component interactions only).
-        "inline-update",
-      );
-      return;
-    }
+/**
+ * Route table for slash commands: control op name → handler. Three ops share
+ * a formatted-response handler (session context trio) and three share the
+ * elevation guard variant; every other op gets its own cohesive handler.
+ */
+const COMMAND_OP_ROUTES: Readonly<Record<string, (ctx: SlashCommandContext) => Promise<void>>> = {
+  session_abort: handleSessionAbort,
+  session_kill: handleSessionKill,
+  session_steer: handleSessionSteer,
+  hitl_cruise_control: handleCruiseCommand,
+  prompt: handlePromptCommand,
+  session_context_status: handleStatusCommand,
+  session_model: handleModelCommand,
+  session_context_new: handleContextChange,
+  session_context_reset: handleContextChange,
+  session_compact: handleContextChange,
+  session_queue_manage: handleQueueCommand,
+  elevation_grant: handleElevationCommand,
+  elevation_revoke: handleElevationCommand,
+  elevation_list: handleElevationCommand,
+  yolo_mode: handleYoloCommand,
+};
 
-    const decoded = decodeModelSelectCustomId(customId);
-    if (!decoded) {
-      // Unknown modal - ignore
-      deps.logger.debug("discord.interaction.ignored", {
-        type: ev.type,
-        id: ev.id,
-        customId,
-      });
-      return;
-    }
+/** Context for a parsed slash-command interaction. */
+interface SlashCommandContext extends InteractionContext {
+  readonly parsed: DiscordParsedInteraction;
+  readonly controlOp: ControlOpRequest;
+}
 
-    if (decoded.step !== "custom_modal") {
-      return;
-    }
-
-    // The session is not encoded in custom_id (Discord's 100-char limit breaks
-    // for long thread-bound subagent URNs); re-derive it from the channel.
-    const sessionId = await resolveSessionOrRespond(
-      deps,
-      {},
-      ev.channelId,
-      ev.guildId,
-      async (content) => {
-        await deps.transport.interactionCallback(ev.id, ev.token, {
-          type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
-          data: { content, components: [] },
-        });
-      },
-    );
-    if (!sessionId) return;
-
-    // Extract text input value
-    const components = ev.data?.components;
-    if (!components || components.length === 0) {
-      return;
-    }
-
-    const textInput = components[0]?.components?.[0];
-    if (!textInput || !textInput.value) {
-      return;
-    }
-
-    const value = textInput.value;
-
-    // Validate it contains '/'
-    if (!value.includes("/")) {
-      await deps.transport.interactionCallback(ev.id, ev.token, {
-        type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
-        data: {
-          content: `⚠️ Invalid model format. Expected \`provider/model\`, got \`${value}\``,
-          components: [],
-        },
-      });
-      return;
-    }
-
-    await setSessionModel(deps, { session_id: sessionId }, value, async (content) => {
-      await deps.transport.interactionCallback(ev.id, ev.token, {
-        type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
-        data: { content, components: [] },
-      });
-    });
-    return;
-  }
-
+/**
+ * Route a slash command through {@link COMMAND_OP_ROUTES}. Parsing, command
+ * logging, and the unknown-command / unknown-op guard rails are shared here
+ * so each op handler only implements its own flow.
+ */
+async function handleSlashCommandInteraction(ctx: InteractionContext): Promise<void> {
+  const { deps, ev } = ctx;
   const parsed = discordInteractionToCommand(ev);
   if (!parsed) {
     deps.logger.debug("discord.interaction.ignored", {
@@ -1251,215 +918,289 @@ async function handleInteraction(
     interactionId: parsed.interactionId,
   });
 
-  if (controlOp.op === "session_abort") {
-    let sessionId = (controlOp.payload.session_id as string | undefined) ?? undefined;
-    if (!sessionId && deps.resolveSessionForChannel) {
-      const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
-      if (resolved) sessionId = resolved;
-    }
-    let aborted: boolean;
-    try {
-      aborted = await deps.abortSession(sessionId);
-    } catch (err) {
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content: `⚠️ Abort failed: ${String(err)}` },
-      });
-      return;
-    }
-
-    const content = aborted ? "✅ Session abort initiated." : "⚠️ No active session turn to abort.";
+  const handler = COMMAND_OP_ROUTES[controlOp.op];
+  if (!handler) {
     await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
       type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-      data: { content },
+      data: { content: `Unhandled operation: \`${controlOp.op}\`` },
     });
     return;
   }
+  await handler({ deps, ev, parsed, controlOp });
+}
 
-  if (controlOp.op === "session_kill") {
-    // `/close`: reap a subagent session on this surface (or explicit session_id).
-    // The `subagent_only` guard makes the daemon refuse top-level agent sessions,
-    // surfaced here as an operator-facing warning instead of a kill.
-    const payload = { ...controlOp.payload };
-    if (!payload.session_id && deps.resolveSessionForChannel) {
-      const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
-      if (resolved) payload.session_id = resolved;
+/**
+ * Respond with a plain channel message. The `flags` parameter keeps the two
+ * flag shapes used by the op handlers (plain vs. ephemeral) explicit at the
+ * call sites instead of a spread.
+ */
+async function respondChannelMessage(
+  deps: DiscordInteractionHandlerDeps,
+  interactionId: string,
+  interactionToken: string,
+  content: string,
+  flags?: number,
+): Promise<void> {
+  await deps.transport.interactionCallback(interactionId, interactionToken, {
+    type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+    data: flags !== undefined ? { content, flags } : { content },
+  });
+}
+
+/**
+ * Fill in the target session from the command payload, else the channel's
+ * bound session. Returns null (after answering the interaction with the
+ * unbound-channel warning) when neither resolves.
+ */
+async function requireSession(
+  ctx: SlashCommandContext,
+  payload: Record<string, unknown>,
+  flags?: number,
+): Promise<string | null> {
+  const { deps, parsed } = ctx;
+  if (!payload.session_id && deps.resolveSessionForChannel) {
+    const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
+    if (resolved) payload.session_id = resolved;
+  }
+  const sessionId = payload.session_id as string | undefined;
+  if (sessionId) return sessionId;
+  await respondChannelMessage(
+    deps,
+    parsed.interactionId,
+    parsed.interactionToken,
+    PROVIDER_MODEL_WARNING,
+    flags,
+  );
+  return null;
+}
+
+/**
+ * Resolve a session through the shared #711 resolver for the per-op guards.
+ * `warnFlags` controls the channel-message flags on the failure response
+ * (some ops warn ephemerally, some rewrite the message in place).
+ */
+async function resolveSlashSession(
+  ctx: SlashCommandContext,
+  payload: Record<string, unknown>,
+  warnFlags?: number,
+): Promise<string | undefined> {
+  const { deps, parsed } = ctx;
+  return resolveSessionOrRespond(deps, payload, parsed.channelId, parsed.guildId, (content) =>
+    respondChannelMessage(deps, parsed.interactionId, parsed.interactionToken, content, warnFlags),
+  );
+}
+
+/**
+ * Shared formatted-response body for the status/queue/elevation/yolo ops:
+ * invoke the op with its payload and answer with the formatted result (or an
+ * error notice on a thrown op).
+ */
+async function invokeOpAndRespond(
+  ctx: SlashCommandContext,
+  payload: Record<string, unknown>,
+  format: (res: { ok: boolean; result?: unknown; error?: string }) => string,
+): Promise<void> {
+  const { deps, parsed, controlOp } = ctx;
+  try {
+    const res = await deps.invokeControlOp(controlOp.op, payload);
+    await respondChannelMessage(deps, parsed.interactionId, parsed.interactionToken, format(res));
+  } catch (err) {
+    await respondChannelMessage(
+      deps,
+      parsed.interactionId,
+      parsed.interactionToken,
+      `⚠️ \`${controlOp.op}\` failed: ${String(err)}`,
+    );
+  }
+}
+
+/** `/abort`: abort the channel's active turn (or the given session's). */
+async function handleSessionAbort(ctx: SlashCommandContext): Promise<void> {
+  const { deps, parsed, controlOp } = ctx;
+  const { interactionId, interactionToken } = parsed;
+  let sessionId = (controlOp.payload.session_id as string | undefined) ?? undefined;
+  if (!sessionId && deps.resolveSessionForChannel) {
+    const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
+    if (resolved) sessionId = resolved;
+  }
+  let aborted: boolean;
+  try {
+    aborted = await deps.abortSession(sessionId);
+  } catch (err) {
+    await respondChannelMessage(
+      deps,
+      interactionId,
+      interactionToken,
+      `⚠️ Abort failed: ${String(err)}`,
+    );
+    return;
+  }
+
+  const content = aborted ? "✅ Session abort initiated." : "⚠️ No active session turn to abort.";
+  await respondChannelMessage(deps, interactionId, interactionToken, content);
+}
+
+/** `/close`: reap a subagent session on this surface (or explicit session_id). */
+async function handleSessionKill(ctx: SlashCommandContext): Promise<void> {
+  const { deps, parsed } = ctx;
+  const { interactionId, interactionToken } = parsed;
+  const payload = { ...ctx.controlOp.payload };
+  const sessionId = await requireSession(ctx, payload);
+  if (!sessionId) return;
+  // The `subagent_only` guard makes the daemon refuse top-level agent sessions,
+  // surfaced here as an operator-facing warning instead of a kill.
+  let content: string;
+  try {
+    const res = await deps.invokeControlOp("session_kill", payload);
+    if (res.ok) {
+      content = `✅ Closed session \`${payload.session_id}\`.`;
+    } else if (res.error && res.error.includes("top-level agent session")) {
+      content = `🔒 Close refused: \`${payload.session_id}\` is a top-level agent session. \`/close\` reaps subagent sessions only.`;
+    } else {
+      content = `⚠️ Close failed: ${res.error ?? "unknown error"}`;
     }
-    if (!payload.session_id) {
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content: "⚠️ No session bound to this channel. Provide a session_id." },
-      });
-      return;
-    }
-    let content: string;
-    try {
-      const res = await deps.invokeControlOp("session_kill", payload);
-      if (res.ok) {
-        content = `✅ Closed session \`${payload.session_id}\`.`;
-      } else if (res.error && res.error.includes("top-level agent session")) {
-        content = `🔒 Close refused: \`${payload.session_id}\` is a top-level agent session. \`/close\` reaps subagent sessions only.`;
-      } else {
-        content = `⚠️ Close failed: ${res.error ?? "unknown error"}`;
-      }
-    } catch (err) {
-      const msg = String(err);
-      content = msg.includes("top-level agent session")
-        ? `🔒 Close refused: \`${payload.session_id}\` is a top-level agent session. \`/close\` reaps subagent sessions only.`
-        : `⚠️ Close failed: ${msg}`;
-    }
-    await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-      type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-      data: { content },
+  } catch (err) {
+    const msg = String(err);
+    content = msg.includes("top-level agent session")
+      ? `🔒 Close refused: \`${payload.session_id}\` is a top-level agent session. \`/close\` reaps subagent sessions only.`
+      : `⚠️ Close failed: ${msg}`;
+  }
+  await respondChannelMessage(deps, interactionId, interactionToken, content);
+}
+
+/**
+ * `/steer`: deliver a steering prompt to the session. The op returns once the
+ * prompt is delivered (`wait: false`) — the turn runs detached, announced via
+ * typing indicator and delivery surface — so the initial slash response
+ * reports delivery immediately. No placeholder, no edit.
+ */
+async function handleSessionSteer(ctx: SlashCommandContext): Promise<void> {
+  const { deps, parsed } = ctx;
+  const { interactionId, interactionToken } = parsed;
+  const payload = { ...ctx.controlOp.payload };
+  const sessionId = await requireSession(ctx, payload);
+  if (!sessionId) return;
+  payload.wait = false;
+  let steerContent: string;
+  try {
+    const res = await deps.invokeControlOp("session_steer", payload);
+    steerContent = res.ok
+      ? `✅ Steering prompt submitted to session \`${payload.session_id}\`.`
+      : `⚠️ Steer failed: ${res.error ?? "unknown error"}`;
+  } catch (err) {
+    steerContent = `⚠️ Steer failed: ${String(err)}`;
+  }
+  try {
+    await respondChannelMessage(deps, interactionId, interactionToken, steerContent, 64);
+  } catch (err) {
+    // The steer already ran; an undeliverable status must stay non-fatal
+    // (and distinct from a handler error).
+    deps.logger.warn("discord.interaction.steer_reply_undeliverable", {
+      interactionId,
+      sessionId: payload.session_id,
+      err: String(err),
     });
+  }
+}
+
+/**
+ * `/cruise` — cruise control (HITL auto-pilot): no options + active →
+ * deactivate; no/partial required guidance → prefilled activation modal;
+ * all required guidance (yes + no) → activate directly, no modal.
+ */
+/** `/cruise`: cruise control (HITL auto-pilot) — toggle, modal, or direct activation. */
+async function handleCruiseCommand(ctx: SlashCommandContext): Promise<void> {
+  const payload = { ...ctx.controlOp.payload };
+  const sessionId = await requireSession(ctx, payload);
+  if (!sessionId) return;
+  const guidance = extractCruiseGuidance(payload);
+  if (!guidance.hasGuidance) {
+    // No options: deactivate when active, otherwise open the activation modal.
+    await handleCruiseToggle(ctx, sessionId);
     return;
   }
+  await handleCruiseWithGuidance(ctx, guidance, sessionId);
+}
 
-  if (controlOp.op === "session_steer") {
-    const payload = { ...controlOp.payload };
-    if (!payload.session_id && deps.resolveSessionForChannel) {
-      const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
-      if (resolved) payload.session_id = resolved;
-    }
-    if (!payload.session_id) {
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content: "⚠️ No session bound to this channel. Provide a session_id." },
-      });
-      return;
-    }
-    // The steer op returns once the prompt is delivered (`wait: false`) — the turn
-    // runs detached, announced via typing indicator and delivery surface — so the
-    // initial slash response reports delivery immediately. No placeholder, no edit.
-    payload.wait = false;
-    let steerContent: string;
-    try {
-      const res = await deps.invokeControlOp("session_steer", payload);
-      steerContent = res.ok
-        ? `✅ Steering prompt submitted to session \`${payload.session_id}\`.`
-        : `⚠️ Steer failed: ${res.error ?? "unknown error"}`;
-    } catch (err) {
-      steerContent = `⚠️ Steer failed: ${String(err)}`;
-    }
-    try {
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content: steerContent, flags: 64 },
-      });
-    } catch (err) {
-      // The steer already ran; an undeliverable status must stay non-fatal
-      // (and distinct from a handler error).
-      deps.logger.warn("discord.interaction.steer_reply_undeliverable", {
-        interactionId: parsed.interactionId,
-        sessionId: payload.session_id,
-        err: String(err),
-      });
-    }
+/** Required/optional cruise guidance extracted from the command payload. */
+interface CruiseGuidance {
+  readonly yes?: string;
+  readonly no?: string;
+  readonly escalate?: string;
+  readonly model?: string;
+  readonly hasGuidance: boolean;
+}
+
+/** Pull trimmed guidance fields from the `/cruise` payload. */
+function extractCruiseGuidance(payload: Record<string, unknown>): CruiseGuidance {
+  const asGuidance = (v: unknown): string | undefined =>
+    typeof v === "string" && v.trim() ? v.trim() : undefined;
+  const yes = asGuidance(payload.yes);
+  const no = asGuidance(payload.no);
+  const escalate = asGuidance(payload.escalate);
+  const model = asGuidance(payload.model);
+  return {
+    yes,
+    no,
+    escalate,
+    model,
+    hasGuidance:
+      yes !== undefined || no !== undefined || escalate !== undefined || model !== undefined,
+  };
+}
+
+/** `/cruise` with no options: deactivate when active, else open the modal. */
+async function handleCruiseToggle(ctx: SlashCommandContext, sessionId: string): Promise<void> {
+  const { deps, parsed } = ctx;
+  const { interactionId, interactionToken } = parsed;
+  let active = false;
+  try {
+    const res = await deps.invokeControlOp("hitl_cruise_control", { session_id: sessionId });
+    active = Boolean(res.ok && (res.result as { active?: boolean } | undefined)?.active);
+  } catch (err) {
+    deps.logger.warn("discord.interaction.cruise_status_failed", {
+      interactionId,
+      err: String(err),
+    });
+  }
+  if (!active) {
+    await respondWithCruiseModal(deps, interactionId, interactionToken, {});
     return;
   }
+  let content: string;
+  try {
+    const res = await deps.invokeControlOp("hitl_cruise_control", {
+      session_id: sessionId,
+      deactivate: true,
+    });
+    content = res.ok
+      ? `🚗 Cruise control deactivated for \`${sessionId}\`.`
+      : `⚠️ Failed to deactivate cruise control: ${res.error ?? "unknown error"}`;
+  } catch (err) {
+    content = `⚠️ Failed to deactivate cruise control: ${String(err)}`;
+  }
+  await respondChannelMessage(deps, interactionId, interactionToken, content);
+}
 
-  if (controlOp.op === "hitl_cruise_control") {
-    // `/cruise` — cruise control (HITL auto-pilot): no options + active →
-    // deactivate; no/partial required guidance → prefilled activation modal;
-    // all required guidance (yes + no) → activate directly, no modal.
-    const payload = { ...controlOp.payload };
-    if (!payload.session_id && deps.resolveSessionForChannel) {
-      const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
-      if (resolved) payload.session_id = resolved;
-    }
-    if (!payload.session_id) {
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content: "⚠️ No session bound to this channel. Provide a session_id." },
-      });
-      return;
-    }
-    const asGuidance = (v: unknown): string | undefined =>
-      typeof v === "string" && v.trim() ? v.trim() : undefined;
-    const yes = asGuidance(payload.yes);
-    const no = asGuidance(payload.no);
-    const escalate = asGuidance(payload.escalate);
-    const model = asGuidance(payload.model);
-    const hasGuidance =
-      yes !== undefined || no !== undefined || escalate !== undefined || model !== undefined;
-
-    const reportActivation = async (result: unknown, sessionId: string): Promise<void> => {
-      const r = result as { warnings?: string[] } | undefined;
-      const warnings = r?.warnings ?? [];
-      const warnSuffix = warnings.length ? `\n${warnings.map((w) => `⚠️ ${w}`).join("\n")}` : "";
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: {
-          content: `🚗 Cruise control activated for \`${sessionId}\`${escalate ? " (with escalation route)" : ""}.${warnSuffix}`,
-        },
-      });
-    };
-
-    if (!hasGuidance) {
-      // Toggle: deactivate when active, otherwise open the activation modal.
-      let active = false;
-      try {
-        const res = await deps.invokeControlOp("hitl_cruise_control", {
-          session_id: payload.session_id,
-        });
-        active = Boolean(res.ok && (res.result as { active?: boolean } | undefined)?.active);
-      } catch (err) {
-        deps.logger.warn("discord.interaction.cruise_status_failed", {
-          interactionId: parsed.interactionId,
-          err: String(err),
-        });
-      }
-      if (active) {
-        let content: string;
-        try {
-          const res = await deps.invokeControlOp("hitl_cruise_control", {
-            session_id: payload.session_id,
-            deactivate: true,
-          });
-          content = res.ok
-            ? `🚗 Cruise control deactivated for \`${payload.session_id}\`.`
-            : `⚠️ Failed to deactivate cruise control: ${res.error ?? "unknown error"}`;
-        } catch (err) {
-          content = `⚠️ Failed to deactivate cruise control: ${String(err)}`;
-        }
-        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-          data: { content },
-        });
-        return;
-      }
-      await respondWithCruiseModal(deps, parsed.interactionId, parsed.interactionToken, {});
-      return;
-    }
-
-    if (yes !== undefined && no !== undefined) {
-      // Complete required guidance — activate directly, no modal.
-      let content: string;
-      try {
-        const res = await deps.invokeControlOp("hitl_cruise_control", {
-          session_id: payload.session_id,
-          yes,
-          no,
-          ...(escalate ? { escalate } : {}),
-          ...(model ? { model } : {}),
-        });
-        if (res.ok) {
-          await reportActivation(res.result, payload.session_id as string);
-          return;
-        }
-        content = `⚠️ Failed to activate cruise control: ${res.error ?? "unknown error"}`;
-      } catch (err) {
-        content = `⚠️ Failed to activate cruise control: ${String(err)}`;
-      }
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content },
-      });
-      return;
-    }
-
+/**
+ * `/cruise` with guidance: complete yes+no activates directly; anything
+ * partial reopens the modal prefilled with what was provided.
+ */
+/**
+ * `/cruise` with guidance: complete yes+no activates directly; anything
+ * partial reopens the modal prefilled with what was provided.
+ */
+async function handleCruiseWithGuidance(
+  ctx: SlashCommandContext,
+  guidance: CruiseGuidance,
+  sessionId: string,
+): Promise<void> {
+  const { deps, parsed } = ctx;
+  const { interactionId, interactionToken } = parsed;
+  const { yes, no, escalate, model } = guidance;
+  if (yes === undefined || no === undefined) {
     // Partial guidance — modal prefilled with whatever was provided.
-    await respondWithCruiseModal(deps, parsed.interactionId, parsed.interactionToken, {
+    await respondWithCruiseModal(deps, interactionId, interactionToken, {
       ...(yes ? { yes } : {}),
       ...(no ? { no } : {}),
       ...(escalate ? { escalate } : {}),
@@ -1467,464 +1208,511 @@ async function handleInteraction(
     });
     return;
   }
+  // Complete required guidance — activate directly, no modal.
+  let content: string;
+  try {
+    const res = await deps.invokeControlOp("hitl_cruise_control", {
+      session_id: sessionId,
+      yes,
+      no,
+      ...(escalate ? { escalate } : {}),
+      ...(model ? { model } : {}),
+    });
+    if (res.ok) {
+      await reportCruiseActivation(ctx, sessionId, escalate, res.result);
+      return;
+    }
+    content = `⚠️ Failed to activate cruise control: ${res.error ?? "unknown error"}`;
+  } catch (err) {
+    content = `⚠️ Failed to activate cruise control: ${String(err)}`;
+  }
+  await respondChannelMessage(deps, interactionId, interactionToken, content);
+}
 
-  if (controlOp.op === "prompt") {
-    // Resolve the target session first — the prompt list is workspace-scoped.
-    const payload = { ...controlOp.payload };
-    if (!payload.session_id && deps.resolveSessionForChannel) {
-      const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
-      if (resolved) payload.session_id = resolved;
+/** Report a successful cruise activation with per-warning suffix lines. */
+async function reportCruiseActivation(
+  ctx: SlashCommandContext,
+  sessionId: string,
+  escalate: string | undefined,
+  result: unknown,
+): Promise<void> {
+  const { deps, parsed } = ctx;
+  const r = result as { warnings?: string[] } | undefined;
+  const warnings = r?.warnings ?? [];
+  const warnSuffix = warnings.length ? `\n${warnings.map((w) => `⚠️ ${w}`).join("\n")}` : "";
+  await respondChannelMessage(
+    deps,
+    parsed.interactionId,
+    parsed.interactionToken,
+    `🚗 Cruise control activated for \`${sessionId}\`${escalate ? " (with escalation route)" : ""}.${warnSuffix}`,
+  );
+}
+
+/** `/prompt`: browse the workspace-scoped prompt list or run a canned prompt. */
+async function handlePromptCommand(ctx: SlashCommandContext): Promise<void> {
+  const { deps, parsed } = ctx;
+  const payload = { ...ctx.controlOp.payload };
+  const sessionId = await requireSession(ctx, payload);
+  if (!sessionId) return;
+  const list = await fetchPromptList(deps, payload.session_id as string);
+  const requestedSlug = typeof payload.slug === "string" ? payload.slug : undefined;
+  const plan = planPromptReply(list, requestedSlug, payload.session_id as string);
+  if (plan.kind === "error") {
+    await respondChannelMessage(
+      deps,
+      parsed.interactionId,
+      parsed.interactionToken,
+      plan.content,
+      plan.flags,
+    );
+    return;
+  }
+  await dispatchPromptPlan(ctx, plan);
+}
+
+/** Result of fetching the canned prompt list for a session. */
+type PromptListResult =
+  | { kind: "error"; content: string; flags?: number }
+  | { kind: "ok"; prompts: PromptListEntry[] };
+
+/** Fetch the workspace-scoped canned prompt list for a session. */
+async function fetchPromptList(
+  deps: DiscordInteractionHandlerDeps,
+  sessionId: string,
+): Promise<PromptListResult> {
+  try {
+    const res = await deps.invokeControlOp("prompt_list", { session_id: sessionId });
+    if (!res.ok) {
+      return {
+        kind: "error",
+        content: `⚠️ Failed to list prompts: ${res.error ?? "unknown error"}`,
+      };
     }
-    if (!payload.session_id) {
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content: "⚠️ No session bound to this channel. Provide a session_id." },
-      });
-      return;
-    }
-    const requestedSlug = typeof payload.slug === "string" ? payload.slug : undefined;
-    let prompts: PromptListEntry[] = [];
-    try {
-      const res = await deps.invokeControlOp("prompt_list", {
-        session_id: payload.session_id,
-      });
-      if (!res.ok) {
-        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-          data: { content: `⚠️ Failed to list prompts: ${res.error ?? "unknown error"}` },
-        });
-        return;
-      }
-      prompts = (res.result as { prompts?: PromptListEntry[] } | undefined)?.prompts ?? [];
-    } catch (err) {
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content: `⚠️ Failed to list prompts: ${String(err)}` },
-      });
-      return;
-    }
-    if (requestedSlug && !prompts.some((p) => p.slug === requestedSlug)) {
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: {
-          content: `⚠️ Prompt not found: \`${requestedSlug}\``,
-          flags: 64, // Ephemeral
-        },
-      });
-      return;
-    }
-    if (prompts.length === 0) {
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: {
-          content: "No canned prompts available.",
-          flags: 64, // Ephemeral
-        },
-      });
-      return;
-    }
-    const sessionId = payload.session_id as string;
-    const requestedEntry = requestedSlug
-      ? prompts.find((p) => p.slug === requestedSlug)
-      : undefined;
-    if (requestedSlug && requestedEntry && (requestedEntry.placeholders ?? []).length === 0) {
-      // Slug given and the prompt takes no parameters: skip the dropdown
-      // confirmation round-trip entirely and run it directly (the slash
-      // response itself reports the delivery).
-      await runPromptProxy(
-        deps,
-        parsed.interactionId,
-        parsed.interactionToken,
-        {
-          slug: requestedSlug,
-          session_id: sessionId,
-          platform_user_id: ev.userId,
-        },
-        parsed.channelId,
-        parsed.guildId,
-        "direct-response",
-      );
-      return;
-    }
-    if (requestedSlug && requestedEntry) {
-      // Slug given and the prompt HAS placeholders: go straight to the parameter
-      // modal as the initial response. A pre-selected dropdown is a dead end —
-      // Discord never fires onchange for `default_values` pre-selection.
-      await respondWithPromptParameterModal(
-        deps,
-        parsed.interactionId,
-        parsed.interactionToken,
-        requestedSlug,
-        requestedEntry.placeholders ?? [],
-        "ephemeral-channel",
-      );
-      return;
-    }
-    // Slug omitted — stage 1: interactive selection via the dropdown.
-    const options = prompts.map((p) => ({
-      label: p.slug.slice(0, 100),
-      value: p.slug,
-    }));
-    const selectComponent: Record<string, unknown> = {
-      type: STRING_SELECT,
-      // Session is re-derived at stage 2 from this channel — never embed the
-      // (potentially long) session URN in custom_id.
-      custom_id: `${PROMPT_SELECT_PREFIX}`,
-      placeholder: "Select a canned prompt",
-      options,
+    const prompts = (res.result as { prompts?: PromptListEntry[] } | undefined)?.prompts ?? [];
+    return { kind: "ok", prompts };
+  } catch (err) {
+    return { kind: "error", content: `⚠️ Failed to list prompts: ${String(err)}` };
+  }
+}
+
+/**
+ * Decide how the `/prompt` interaction proceeds from the prompt list and the
+ * (optional) requested slug. Pure decision layer — the caller performs the
+ * returned plan's side effects.
+ */
+/**
+ * Decide how the `/prompt` interaction proceeds from the prompt list and the
+ * (optional) requested slug. Pure decision layer — the caller performs the
+ * returned plan's side effects.
+ */
+function planPromptReply(
+  list: PromptListResult,
+  requestedSlug: string | undefined,
+  sessionId: string,
+): PromptReplyPlan {
+  if (list.kind === "error") {
+    return { kind: "error", content: list.content, flags: list.flags };
+  }
+  const guardError = promptListGuard(list.prompts, requestedSlug);
+  if (guardError) {
+    return { kind: "error", content: guardError, flags: 64 };
+  }
+  const requestedEntry = requestedSlug
+    ? list.prompts.find((p) => p.slug === requestedSlug)
+    : undefined;
+  if (requestedSlug && requestedEntry && (requestedEntry.placeholders ?? []).length === 0) {
+    // Slug given and the prompt takes no parameters: skip the dropdown
+    // confirmation round-trip entirely and run it directly (the slash
+    // response itself reports the delivery).
+    return { kind: "run-direct", slug: requestedSlug, sessionId };
+  }
+  if (requestedSlug && requestedEntry) {
+    // Slug given and the prompt HAS placeholders: go straight to the parameter
+    // modal as the initial response. A pre-selected dropdown is a dead end —
+    // Discord never fires onchange for `default_values` pre-selection.
+    return {
+      kind: "modal",
+      slug: requestedSlug,
+      placeholders: requestedEntry.placeholders ?? [],
     };
-    await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-      type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-      data: {
-        content: `📜 **Canned Prompts**\nSession: \`${sessionId}\``,
-        flags: 64, // Ephemeral
-        components: [{ type: ACTION_ROW, components: [selectComponent] }],
+  }
+  // Slug omitted — stage 1: interactive selection via the dropdown.
+  return { kind: "dropdown", prompts: list.prompts, sessionId };
+}
+
+/**
+ * Ephemeral-guard wording for a fetched prompt list: the requested slug must
+ * exist and the list must not be empty. Returns the error content, or null
+ * when the list is usable.
+ */
+function promptListGuard(
+  prompts: PromptListEntry[],
+  requestedSlug: string | undefined,
+): string | null {
+  if (requestedSlug && !prompts.some((p) => p.slug === requestedSlug)) {
+    return `⚠️ Prompt not found: \`${requestedSlug}\``;
+  }
+  if (prompts.length === 0) {
+    return "No canned prompts available.";
+  }
+  return null;
+}
+
+/** What to do after the prompt list resolves. */
+type PromptReplyPlan =
+  | { kind: "error"; content: string; flags?: number }
+  | { kind: "run-direct"; slug: string; sessionId: string }
+  | { kind: "modal"; slug: string; placeholders: readonly string[] }
+  | { kind: "dropdown"; prompts: PromptListEntry[]; sessionId: string };
+
+/** Perform the prompt flow decided by {@link planPromptReply}. */
+async function dispatchPromptPlan(
+  ctx: SlashCommandContext,
+  plan: Exclude<PromptReplyPlan, { kind: "error" }>,
+): Promise<void> {
+  const { deps, ev, parsed } = ctx;
+  const { interactionId, interactionToken, channelId, guildId } = parsed;
+  if (plan.kind === "run-direct") {
+    await runPromptProxy(
+      deps,
+      interactionId,
+      interactionToken,
+      {
+        slug: plan.slug,
+        session_id: plan.sessionId,
+        platform_user_id: ev.userId,
       },
+      channelId,
+      guildId,
+      "direct-response",
+    );
+    return;
+  }
+  if (plan.kind === "modal") {
+    await respondWithPromptParameterModal(
+      deps,
+      interactionId,
+      interactionToken,
+      plan.slug,
+      plan.placeholders,
+      "ephemeral-channel",
+    );
+    return;
+  }
+  // Slug omitted — stage 1: interactive selection via the dropdown.
+  const options = plan.prompts.map((p) => ({
+    label: p.slug.slice(0, 100),
+    value: p.slug,
+  }));
+  const selectComponent: Record<string, unknown> = {
+    type: STRING_SELECT,
+    // Session is re-derived at stage 2 from this channel — never embed the
+    // (potentially long) session URN in custom_id.
+    custom_id: PROMPT_SELECT_PREFIX,
+    placeholder: "Select a canned prompt",
+    options,
+  };
+  await deps.transport.interactionCallback(interactionId, interactionToken, {
+    type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+    data: {
+      content: `📜 **Canned Prompts**\nSession: \`${plan.sessionId}\``,
+      flags: 64, // Ephemeral
+      components: [{ type: ACTION_ROW, components: [selectComponent] }],
+    },
+  });
+}
+
+/** `/status`: formatted session status card (id, state, model, stats, queue). */
+/** `/status`: formatted session status card (id, state, model, stats, queue). */
+async function handleStatusCommand(ctx: SlashCommandContext): Promise<void> {
+  const payload = { ...ctx.controlOp.payload };
+  const sessionId = await resolveSlashSession(ctx, payload);
+  if (!sessionId) return;
+  payload.session_id = sessionId;
+  await invokeOpAndRespond(ctx, payload, (res) => {
+    if (res.ok && res.result) {
+      return formatStatusResult(res.result as Record<string, unknown>);
+    }
+    return `⚠️ Failed to get status: ${res.error ?? "unknown error"}`;
+  });
+}
+
+/** Render the `/status` result payload as the session status card. */
+function formatStatusResult(r: Record<string, unknown>): string {
+  if (r.session === null) {
+    return "Session not found.";
+  }
+  const session = r.session as Record<string, unknown>;
+  const stats = r.stats as Record<string, unknown> | null;
+  const model = r.model as Record<string, unknown> | null;
+  const lines: (string | null)[] = [
+    `📋 **Session Status**`,
+    `ID: \`${session.id}\``,
+    `Status: ${session.status}`,
+    model?.model ? `Model: ${model.model}` : null,
+    `Context segment: \`${session.contextSegmentId}\``,
+  ];
+  if (stats) {
+    const fmt = r.formattedStats as {
+      contextFill: string;
+      contextWindowSuffix: string;
+      turns: number;
+      compactions: number;
+      messages: number;
+    } | null;
+    const contextLine = fmt
+      ? `Context: ${fmt.contextFill}${fmt.contextWindowSuffix}`
+      : `Turns: ${stats.turnCount ?? 0}`;
+    lines.push(
+      ``,
+      `📊 **Stats**`,
+      contextLine,
+      fmt ? `Turns: ${fmt.turns}` : null,
+      `Messages: ${fmt?.messages ?? stats.transcriptMessageCount ?? 0}`,
+      `Compactions: ${fmt?.compactions ?? stats.compactionCount ?? 0}`,
+    );
+  }
+  const qd = r.queueDepth as { system: number; user: number } | null;
+  if (qd) {
+    lines.push(`Queue: ${qd.system} system / ${qd.user} user`);
+  }
+  return lines.filter(Boolean).join("\n");
+}
+
+/** `/model`: direct model assignment shortcut or the picker menus. */
+/** `/model`: direct model assignment shortcut or the picker menus. */
+async function handleModelCommand(ctx: SlashCommandContext): Promise<void> {
+  const { deps, parsed, controlOp } = ctx;
+  const { interactionId, interactionToken } = parsed;
+  // Optional `model_id` shortcut: assign the model directly and skip the
+  // modal/dropdown picker. Same provider/model validation as the modal path.
+  const modelId = parsed.command.options.model_id?.trim();
+  if (modelId) {
+    const invalid = isInvalidModelId(modelId);
+    if (invalid) {
+      await respondChannelMessage(deps, interactionId, interactionToken, invalid);
+      return;
+    }
+    const shortcutPayload = { ...controlOp.payload };
+    const shortcutSessionId = await resolveSlashSession(ctx, shortcutPayload);
+    if (!shortcutSessionId && !shortcutPayload.agent_id) {
+      return;
+    }
+    if (shortcutSessionId) shortcutPayload.session_id = shortcutSessionId;
+    await setSessionModel(deps, shortcutPayload, modelId, async (content) => {
+      await respondChannelMessage(deps, interactionId, interactionToken, content);
     });
     return;
   }
+  await respondWithModelPicker(ctx);
+}
 
-  if (controlOp.op === "session_context_status") {
-    try {
-      // Resolve session_id from channel if not explicitly provided
-      const payload = { ...controlOp.payload };
-      const sessionId = await resolveSessionOrRespond(
-        deps,
-        payload,
-        parsed.channelId,
-        parsed.guildId,
-        async (content) => {
-          await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-            type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-            data: { content },
-          });
-        },
-      );
-      if (!sessionId) return;
-      payload.session_id = sessionId;
-      const res = await deps.invokeControlOp(controlOp.op, payload);
-      let content: string;
-      if (res.ok && res.result) {
-        const r = res.result as Record<string, unknown>;
-        if (r.session === null) {
-          content = "Session not found.";
-        } else {
-          const session = r.session as Record<string, unknown>;
-          const stats = r.stats as Record<string, unknown> | null;
-          const model = r.model as Record<string, unknown> | null;
-          const lines: (string | null)[] = [
-            `📋 **Session Status**`,
-            `ID: \`${session.id}\``,
-            `Status: ${session.status}`,
-            model?.model ? `Model: ${model.model}` : null,
-            `Context segment: \`${session.contextSegmentId}\``,
-          ];
-          if (stats) {
-            const fmt = r.formattedStats as {
-              contextFill: string;
-              contextWindowSuffix: string;
-              turns: number;
-              compactions: number;
-              messages: number;
-            } | null;
-            const contextLine = fmt
-              ? `Context: ${fmt.contextFill}${fmt.contextWindowSuffix}`
-              : `Turns: ${stats.turnCount ?? 0}`;
-            lines.push(
-              ``,
-              `📊 **Stats**`,
-              contextLine,
-              fmt ? `Turns: ${fmt.turns}` : null,
-              `Messages: ${fmt?.messages ?? stats.transcriptMessageCount ?? 0}`,
-              `Compactions: ${fmt?.compactions ?? stats.compactionCount ?? 0}`,
-            );
-          }
-          const qd = r.queueDepth as { system: number; user: number } | null;
-          if (qd) {
-            lines.push(`Queue: ${qd.system} system / ${qd.user} user`);
-          }
-          content = lines.filter(Boolean).join("\n");
-        }
-      } else {
-        content = `⚠️ Failed to get status: ${res.error ?? "unknown error"}`;
-      }
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content },
-      });
-    } catch (err) {
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content: `⚠️ Status failed: ${String(err)}` },
-      });
-    }
-    return;
-  }
+/** Open the provider/model picker menus for `/model` (modal fallback when no providers). */
+async function respondWithModelPicker(ctx: SlashCommandContext): Promise<void> {
+  const { deps, parsed, controlOp } = ctx;
+  const { interactionId, interactionToken } = parsed;
+  try {
+    const payload = { ...controlOp.payload };
+    const sessionId = await resolveSlashSession(ctx, payload);
+    if (!sessionId) return;
 
-  if (controlOp.op === "session_model") {
-    // Optional `model_id` shortcut: assign the model directly and skip the
-    // modal/dropdown picker. Same provider/model validation as the modal path.
-    const modelId = parsed.command.options.model_id?.trim();
-    if (modelId) {
-      const slashIdx = modelId.indexOf("/");
-      if (slashIdx < 1 || slashIdx === modelId.length - 1) {
-        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-          data: {
-            content: `⚠️ Invalid model format. Expected \`provider/model\`, got \`${modelId}\``,
-          },
-        });
-        return;
-      }
+    // Get current model (read-only, no model_selection in payload)
+    const currentModelRes = await deps.invokeControlOp(controlOp.op, {
+      session_id: sessionId,
+    });
 
-      const shortcutPayload = { ...controlOp.payload };
-      const shortcutSessionId = await resolveSessionOrRespond(
-        deps,
-        shortcutPayload,
-        parsed.channelId,
-        parsed.guildId,
-        async (_content) => {
-          await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-            type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-            data: {
-              content: "⚠️ No session bound to this channel. Provide a session_id or agent_id.",
-            },
-          });
-        },
-      );
-      if (!shortcutSessionId && !shortcutPayload.agent_id) {
-        return;
-      }
-      if (shortcutSessionId) shortcutPayload.session_id = shortcutSessionId;
+    const { currentProviderId, currentModel } = extractCurrentModelSelection(currentModelRes);
 
-      await setSessionModel(deps, shortcutPayload, modelId, async (content) => {
-        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-          data: { content },
-        });
+    // Get models configuration
+    const modelsConfig = deps.getModelsConfig ? await deps.getModelsConfig() : null;
+
+    if (!modelsConfig || !modelsConfig.providers || modelsConfig.providers.length === 0) {
+      // No providers available - respond with modal for free-text input
+      await deps.transport.interactionCallback(interactionId, interactionToken, {
+        type: INTERACTION_RESPONSE_MODAL,
+        data: buildEnterModelModal(),
       });
       return;
     }
+    const providers = toProviderConfigList(modelsConfig.providers);
 
-    try {
-      const payload = { ...controlOp.payload };
-      const sessionId = await resolveSessionOrRespond(
-        deps,
-        payload,
-        parsed.channelId,
-        parsed.guildId,
-        async (_content) => {
-          await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-            type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-            data: {
-              content: "⚠️ No session bound to this channel. Provide a session_id or agent_id.",
-            },
-          });
-        },
-      );
-      if (!sessionId) return;
+    // Build provider select options
+    const providerOptions = buildProviderSelectOptions({
+      providers,
+      currentProviderId,
+    });
 
-      // Get current model (read-only, no model_selection in payload)
-      const currentModelRes = await deps.invokeControlOp(controlOp.op, {
-        session_id: sessionId,
-      });
+    // Build current model display
+    const currentModelDisplay =
+      currentProviderId && currentModel ? `\`${currentProviderId}/${currentModel}\`` : "Not set";
 
-      // Extract current provider/model for defaults
-      let currentProviderId: string | undefined;
-      let currentModel: string | undefined;
+    // Respond with both provider and model select menus
+    // Determine which provider to show models for (current or first available)
+    const activeProviderId = currentProviderId || providers[0]?.id;
+    const modelOptions = activeProviderId
+      ? buildModelSelectOptions({
+          providerId: activeProviderId,
+          providers,
+          failoverChain: toFailoverChainList(modelsConfig.failoverChain),
+        })
+      : [];
 
-      if (currentModelRes.ok && currentModelRes.result) {
-        const r = currentModelRes.result as Record<string, unknown>;
-        // Check explicit model_selection override first
-        const modelSel = r.model_selection as Record<string, unknown> | null | undefined;
-        if (modelSel && typeof modelSel.model === "string") {
-          const m = modelSel.model as string;
-          const slashIdx = m.indexOf("/");
-          if (slashIdx > 0) {
-            currentProviderId = m.slice(0, slashIdx);
-            currentModel = m.slice(slashIdx + 1);
-          }
-        }
-        // Fall back to first failoverChain entry from effective config
-        if (!currentProviderId || !currentModel) {
-          const effectiveModels = r.effective_models as Record<string, unknown> | null;
-          if (effectiveModels) {
-            const chain = effectiveModels.failoverChain as string[] | undefined;
-            if (chain && chain.length > 0) {
-              const first = chain[0];
-              const slashIdx = first.indexOf("/");
-              if (slashIdx > 0) {
-                currentProviderId = first.slice(0, slashIdx);
-                currentModel = first.slice(slashIdx + 1);
-              }
-            }
-          }
-        }
-      }
+    const components: Record<string, unknown>[] = [
+      {
+        type: ACTION_ROW,
+        components: [
+          {
+            type: STRING_SELECT,
+            custom_id: encodeModelSelectCustomId("provider"),
+            placeholder: "Select a provider",
+            options: providerOptions,
+          },
+        ],
+      },
+    ];
 
-      // Get models configuration
-      const modelsConfig = deps.getModelsConfig ? await deps.getModelsConfig() : null;
-
-      if (!modelsConfig || !modelsConfig.providers || modelsConfig.providers.length === 0) {
-        // No providers available - respond with modal for free-text input
-        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-          type: INTERACTION_RESPONSE_MODAL,
-          data: buildEnterModelModal(),
-        });
-        return;
-      }
-      const providers = toProviderConfigList(modelsConfig.providers);
-
-      // Build provider select options
-      const providerOptions = buildProviderSelectOptions({
-        providers,
-        currentProviderId,
-      });
-
-      // Build current model display
-      const currentModelDisplay =
-        currentProviderId && currentModel ? `\`${currentProviderId}/${currentModel}\`` : "Not set";
-
-      // Respond with both provider and model select menus
-      // Determine which provider to show models for (current or first available)
-      const activeProviderId = currentProviderId || providers[0]?.id;
-      const modelOptions = activeProviderId
-        ? buildModelSelectOptions({
-            providerId: activeProviderId,
-            providers,
-            failoverChain: toFailoverChainList(modelsConfig.failoverChain),
-          })
-        : [];
-
-      const components: Record<string, unknown>[] = [
-        {
-          type: 1,
-          components: [
-            {
-              type: 3, // STRING_SELECT
-              custom_id: encodeModelSelectCustomId("provider"),
-              placeholder: "Select a provider",
-              options: providerOptions,
-            },
-          ],
-        },
-      ];
-
-      if (modelOptions.length > 0) {
-        components.push({
-          type: 1,
-          components: [
-            {
-              type: 3, // STRING_SELECT
-              custom_id: encodeModelSelectCustomId("model", activeProviderId),
-              placeholder: "Select a model",
-              options: modelOptions,
-            },
-          ],
-        });
-      }
-
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: {
-          content: `🎯 **Model Configuration**\nSession: \`${payload.session_id}\`\nCurrent: ${currentModelDisplay}`,
-          flags: 64, // Ephemeral
-          components,
-        },
-      });
-    } catch (err) {
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content: `⚠️ Model command failed: ${String(err)}` },
+    if (modelOptions.length > 0) {
+      components.push({
+        type: ACTION_ROW,
+        components: [
+          {
+            type: STRING_SELECT,
+            custom_id: encodeModelSelectCustomId("model", activeProviderId),
+            placeholder: "Select a model",
+            options: modelOptions,
+          },
+        ],
       });
     }
-    return;
+
+    await deps.transport.interactionCallback(interactionId, interactionToken, {
+      type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+      data: {
+        content: `🎯 **Model Configuration**\nSession: \`${payload.session_id}\`\nCurrent: ${currentModelDisplay}`,
+        flags: 64, // Ephemeral
+        components,
+      },
+    });
+  } catch (err) {
+    await respondChannelMessage(
+      deps,
+      interactionId,
+      interactionToken,
+      `⚠️ Model command failed: ${String(err)}`,
+    );
   }
+}
 
-  if (
-    controlOp.op === "session_context_new" ||
-    controlOp.op === "session_context_reset" ||
-    controlOp.op === "session_compact"
-  ) {
-    const isCompact = controlOp.op === "session_compact";
-    try {
-      // Resolve session_id from channel if not explicitly provided
-      const payload = { ...controlOp.payload };
-      if (!payload.session_id && deps.resolveSessionForChannel) {
-        const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
-        if (resolved) payload.session_id = resolved;
-      }
-      if (!payload.session_id) {
-        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-          data: {
-            content: "⚠️ No session bound to this channel. Provide a session_id.",
-          },
-        });
-        return;
-      }
+/** Current provider/model extracted from a `session_model` read result. */
+interface CurrentModelSelection {
+  readonly currentProviderId?: string;
+  readonly currentModel?: string;
+}
 
-      // Compact can take a long time (model summarization call) — defer the response.
-      if (isCompact) {
-        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-          type: INTERACTION_RESPONSE_DEFERRED,
-        });
-        try {
-          const res = await deps.invokeControlOp(controlOp.op, payload);
-          const content = res.ok
-            ? `✅ \`${controlOp.op}\` completed.`
-            : `⚠️ \`${controlOp.op}\` failed: ${res.error ?? "unknown error"}`;
-          await deps.transport.editOriginalInteractionResponse(
-            deps.applicationId,
-            parsed.interactionToken,
-            { content },
-          );
-        } catch (err) {
-          await deps.transport.editOriginalInteractionResponse(
-            deps.applicationId,
-            parsed.interactionToken,
-            {
-              content: `⚠️ \`${controlOp.op}\` failed: ${String(err)}`,
-            },
-          );
-        }
-        return;
-      }
-
-      const res = await deps.invokeControlOp(controlOp.op, payload);
-      const content = res.ok
-        ? `✅ \`${controlOp.op}\` completed.`
-        : `⚠️ \`${controlOp.op}\` failed: ${res.error ?? "unknown error"}`;
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content },
-      });
-    } catch (err) {
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content: `⚠️ \`${controlOp.op}\` failed: ${String(err)}` },
-      });
+/** Extract the effective provider/model for picker defaults. */
+function extractCurrentModelSelection(res: {
+  ok: boolean;
+  result?: unknown;
+}): CurrentModelSelection {
+  if (!res.ok || !res.result) {
+    return {};
+  }
+  const r = res.result as Record<string, unknown>;
+  // Check explicit model_selection override first
+  const modelSel = r.model_selection as Record<string, unknown> | null | undefined;
+  if (modelSel && typeof modelSel.model === "string") {
+    const m = modelSel.model as string;
+    const slashIdx = m.indexOf("/");
+    if (slashIdx > 0) {
+      return { currentProviderId: m.slice(0, slashIdx), currentModel: m.slice(slashIdx + 1) };
     }
-    return;
   }
+  // Fall back to first failoverChain entry from effective config
+  const effectiveModels = r.effective_models as Record<string, unknown> | null;
+  if (effectiveModels) {
+    const chain = effectiveModels.failoverChain as string[] | undefined;
+    if (chain && chain.length > 0) {
+      const first = chain[0];
+      const slashIdx = first.indexOf("/");
+      if (slashIdx > 0) {
+        return {
+          currentProviderId: first.slice(0, slashIdx),
+          currentModel: first.slice(slashIdx + 1),
+        };
+      }
+    }
+  }
+  return {};
+}
 
-  if (controlOp.op === "session_queue_manage") {
-    try {
-      const payload = { ...controlOp.payload };
-      if (!payload.session_id && deps.resolveSessionForChannel) {
-        const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
-        if (resolved) payload.session_id = resolved;
-      }
-      if (!payload.session_id) {
-        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-          data: {
-            content: "⚠️ No session bound to this channel. Provide a session_id.",
-          },
+/** Validate a `provider/model` reference for the `/model` shortcut path. */
+function isInvalidModelId(modelId: string): string | undefined {
+  const slashIdx = modelId.indexOf("/");
+  return slashIdx < 1 || slashIdx === modelId.length - 1
+    ? `⚠️ Invalid model format. Expected \`provider/model\`, got \`${modelId}\``
+    : undefined;
+}
+
+/**
+ * `/new`, `/reset`, `/compact`: session-context lifecycle ops. `/compact` can
+ * take a long time (model summarization call) — it defers the response first
+ * and edits the deferred placeholder with the outcome; the other two answer
+ * directly.
+ */
+async function handleContextChange(ctx: SlashCommandContext): Promise<void> {
+  const { deps, parsed, controlOp } = ctx;
+  const { interactionId, interactionToken } = parsed;
+  const isCompact = controlOp.op === "session_compact";
+  try {
+    const payload = { ...controlOp.payload };
+    const sessionId = await requireSession(ctx, payload);
+    if (!sessionId) return;
+
+    if (isCompact) {
+      // Compact can take a long time (model summarization call) — defer the
+      // response and edit the placeholder with the outcome.
+      await deps.transport.interactionCallback(interactionId, interactionToken, {
+        type: INTERACTION_RESPONSE_DEFERRED,
+      });
+      try {
+        const res = await deps.invokeControlOp(controlOp.op, payload);
+        const content = res.ok
+          ? `✅ \`${controlOp.op}\` completed.`
+          : `⚠️ \`${controlOp.op}\` failed: ${res.error ?? "unknown error"}`;
+        await deps.transport.editOriginalInteractionResponse(deps.applicationId, interactionToken, {
+          content,
         });
-        return;
+      } catch (err) {
+        await deps.transport.editOriginalInteractionResponse(deps.applicationId, interactionToken, {
+          content: `⚠️ \`${controlOp.op}\` failed: ${String(err)}`,
+        });
       }
-      const res = await deps.invokeControlOp(controlOp.op, payload);
+      return;
+    }
+
+    const res = await deps.invokeControlOp(controlOp.op, payload);
+    const content = res.ok
+      ? `✅ \`${controlOp.op}\` completed.`
+      : `⚠️ \`${controlOp.op}\` failed: ${res.error ?? "unknown error"}`;
+    await respondChannelMessage(deps, interactionId, interactionToken, content);
+  } catch (err) {
+    await respondChannelMessage(
+      deps,
+      interactionId,
+      interactionToken,
+      `⚠️ \`${controlOp.op}\` failed: ${String(err)}`,
+    );
+  }
+}
+
+/** `/queue`: formatted queue listing, removal counts, and errors. */
+async function handleQueueCommand(ctx: SlashCommandContext): Promise<void> {
+  const { deps, parsed } = ctx;
+  try {
+    const payload = { ...ctx.controlOp.payload };
+    const sessionId = await requireSession(ctx, payload);
+    if (!sessionId) return;
+    await invokeOpAndRespond(ctx, payload, (res) => {
       let content: string;
       if (!res.ok) {
         content = `⚠️ Queue operation failed: ${res.error ?? "unknown error"}`;
@@ -1947,128 +1735,585 @@ async function handleInteraction(
           content = `✅ Removed ${r.removed ?? 0} entries.`;
         }
       }
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content },
-      });
-    } catch (err) {
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content: `⚠️ Queue failed: ${String(err)}` },
-      });
+      return content;
+    });
+  } catch (err) {
+    await respondChannelMessage(
+      deps,
+      parsed.interactionId,
+      parsed.interactionToken,
+      `⚠️ Queue failed: ${String(err)}`,
+    );
+  }
+}
+
+/** `/elevate`: grant, revoke, or list elevation — same guard, three formats. */
+/** `/elevate`: grant, revoke, or list elevation — same guard, three formats. */
+/** `/elevate`: grant, revoke, or list elevation — same guard, three formats. */
+async function handleElevationCommand(ctx: SlashCommandContext): Promise<void> {
+  const { deps, parsed } = ctx;
+  const { interactionId, interactionToken } = parsed;
+  try {
+    const payload = { ...ctx.controlOp.payload };
+    const sessionId = await requireSession(ctx, payload);
+    if (!sessionId && ctx.controlOp.op === "elevation_grant") {
+      return;
     }
+    await invokeOpAndRespond(ctx, payload, (res) => formatElevationResult(ctx, res, payload));
+  } catch (err) {
+    await respondChannelMessage(
+      deps,
+      interactionId,
+      interactionToken,
+      `⚠️ Elevation failed: ${String(err)}`,
+    );
+  }
+}
+
+/** Render the elevation op result for grant / list / revoke. */
+function formatElevationResult(
+  ctx: SlashCommandContext,
+  res: { ok: boolean; result?: unknown; error?: string },
+  payload: Record<string, unknown>,
+): string {
+  if (res.ok && res.result) {
+    const r = res.result as Record<string, unknown>;
+    if (ctx.controlOp.op === "elevation_grant") {
+      return `🔓 Elevation granted for \`${r.sessionId ?? payload.session_id}\` (expires: ${r.expiresAt ?? "unknown"}, grant: \`${r.id ?? "?"}\`)`;
+    }
+    if (ctx.controlOp.op === "elevation_list") {
+      const grants = (r.grants ?? []) as Array<{
+        id: string;
+        sessionId: string;
+        expiresAt: string;
+      }>;
+      if (grants.length === 0) {
+        return "📋 No active elevation grants.";
+      }
+      const lines = grants.map(
+        (g) => `• \`${g.id}\` — \`${g.sessionId}\` (expires: ${g.expiresAt})`,
+      );
+      return `📋 Active elevation grants (${grants.length}):\n${lines.join("\n")}`;
+    }
+    const count = r.revokedCount ?? (r.revoked === true ? 1 : 0);
+    return `🔒 Elevation revoked. ${count} grant(s) removed.`;
+  }
+  return `⚠️ \`${ctx.controlOp.op}\` failed: ${res.error ?? "unknown error"}`;
+}
+
+/** `/yolo`: toggle (or query) the per-session HITL auto-approve flag. */
+/** `/yolo`: toggle (or query) the per-session HITL auto-approve flag. */
+async function handleYoloCommand(ctx: SlashCommandContext): Promise<void> {
+  const { deps, parsed } = ctx;
+  try {
+    const payload = { ...ctx.controlOp.payload };
+    const sessionId = await requireSession(ctx, payload);
+    if (!sessionId) return;
+    await invokeOpAndRespond(ctx, payload, (res) => formatYoloResult(res, payload));
+  } catch (err) {
+    await respondChannelMessage(
+      deps,
+      parsed.interactionId,
+      parsed.interactionToken,
+      `⚠️ Yolo mode failed: ${String(err)}`,
+    );
+  }
+}
+
+/** Render the yolo_mode op result (status query vs. toggle wording). */
+function formatYoloResult(
+  res: { ok: boolean; result?: unknown; error?: string },
+  payload: Record<string, unknown>,
+): string {
+  if (res.ok && res.result) {
+    const r = res.result as Record<string, unknown>;
+    const sessionId = r.sessionId ?? payload.session_id;
+    const isStatus = payload.action === "status";
+    if (r.enabled === true) {
+      return isStatus
+        ? `🤖 Yolo mode status for \`${sessionId}\`: ON — HITL auto-approved until cleared.`
+        : `🤖 Yolo mode ON for \`${sessionId}\` — HITL auto-approved until cleared.`;
+    }
+    return isStatus
+      ? `🤖 Yolo mode status for \`${sessionId}\`: OFF.`
+      : `🤖 Yolo mode OFF for \`${sessionId}\`.`;
+  }
+  return `⚠️ \`yolo_mode\` failed: ${res.error ?? "unknown error"}`;
+}
+
+/**
+ * Stage-2 entry for canned prompts (type 3): slug dropdown selected. The
+ * session is re-derived from the channel (never carried in custom_id — a
+ * thread-bound subagent URN overflows Discord's 100-char limit). No
+ * placeholders → immediate `inline-update` prompt run rewriting message A;
+ * placeholders → shared parameter modal, stage 3 rewrites message A. `/prompt`
+ * with a slug argument opens the same modal directly.
+ */
+/**
+ * Stage-2 entry for canned prompts (type 3): slug dropdown selected. The
+ * session is re-derived from the channel (never carried in custom_id — a
+ * thread-bound subagent URN overflows Discord's 100-char limit). No
+ * placeholders → immediate `inline-update` prompt run rewriting message A;
+ * placeholders → shared parameter modal, stage 3 rewrites message A. `/prompt`
+ * with a slug argument opens the same modal directly.
+ */
+async function handleComponentInteraction(ctx: InteractionContext): Promise<void> {
+  const { deps, ev } = ctx;
+  const customId = ev.data?.custom_id;
+  if (!customId) {
+    deps.logger.debug("discord.interaction.ignored", {
+      type: ev.type,
+      id: ev.id,
+    });
     return;
   }
 
-  if (
-    controlOp.op === "elevation_grant" ||
-    controlOp.op === "elevation_revoke" ||
-    controlOp.op === "elevation_list"
-  ) {
-    try {
-      const payload = { ...controlOp.payload };
-      if (!payload.session_id && deps.resolveSessionForChannel) {
-        const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
-        if (resolved) payload.session_id = resolved;
-      }
-      if (!payload.session_id && controlOp.op === "elevation_grant") {
-        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-          data: {
-            content: "⚠️ No session bound to this channel. Provide a session_id.",
-          },
-        });
-        return;
-      }
-      const res = await deps.invokeControlOp(controlOp.op, payload);
-      let content: string;
-      if (res.ok && res.result) {
-        const r = res.result as Record<string, unknown>;
-        if (controlOp.op === "elevation_grant") {
-          content = `🔓 Elevation granted for \`${r.sessionId ?? payload.session_id}\` (expires: ${r.expiresAt ?? "unknown"}, grant: \`${r.id ?? "?"}\`)`;
-        } else if (controlOp.op === "elevation_list") {
-          const grants = (r.grants ?? []) as Array<{
-            id: string;
-            sessionId: string;
-            expiresAt: string;
-          }>;
-          if (grants.length === 0) {
-            content = "📋 No active elevation grants.";
-          } else {
-            const lines = grants.map(
-              (g) => `• \`${g.id}\` — \`${g.sessionId}\` (expires: ${g.expiresAt})`,
-            );
-            content = `📋 Active elevation grants (${grants.length}):\n${lines.join("\n")}`;
-          }
-        } else {
-          const count = r.revokedCount ?? (r.revoked === true ? 1 : 0);
-          content = `🔒 Elevation revoked. ${count} grant(s) removed.`;
-        }
-      } else {
-        content = `⚠️ \`${controlOp.op}\` failed: ${res.error ?? "unknown error"}`;
-      }
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content },
-      });
-    } catch (err) {
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content: `⚠️ Elevation failed: ${String(err)}` },
-      });
-    }
+  if (customId.startsWith(PROMPT_SELECT_PREFIX)) {
+    await handlePromptSelectStage(ctx);
     return;
   }
 
-  if (controlOp.op === "yolo_mode") {
-    try {
-      const payload = { ...controlOp.payload };
-      if (!payload.session_id && deps.resolveSessionForChannel) {
-        const resolved = deps.resolveSessionForChannel(parsed.channelId, parsed.guildId);
-        if (resolved) payload.session_id = resolved;
-      }
-      if (!payload.session_id) {
-        await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-          type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-          data: {
-            content: "⚠️ No session bound to this channel. Provide a session_id.",
-          },
-        });
-        return;
-      }
-      const res = await deps.invokeControlOp(controlOp.op, payload);
-      let content: string;
-      if (res.ok && res.result) {
-        const r = res.result as Record<string, unknown>;
-        const sessionId = r.sessionId ?? payload.session_id;
-        const isStatus = payload.action === "status";
-        if (r.enabled === true) {
-          content = isStatus
-            ? `🤖 Yolo mode status for \`${sessionId}\`: ON — HITL auto-approved until cleared.`
-            : `🤖 Yolo mode ON for \`${sessionId}\` — HITL auto-approved until cleared.`;
-        } else {
-          content = isStatus
-            ? `🤖 Yolo mode status for \`${sessionId}\`: OFF.`
-            : `🤖 Yolo mode OFF for \`${sessionId}\`.`;
-        }
-      } else {
-        content = `⚠️ \`yolo_mode\` failed: ${res.error ?? "unknown error"}`;
-      }
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content },
-      });
-    } catch (err) {
-      await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
-        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-        data: { content: `⚠️ Yolo mode failed: ${String(err)}` },
-      });
-    }
+  const decoded = decodeModelSelectCustomId(customId);
+  if (!decoded) {
+    // Unknown component - ignore
+    deps.logger.debug("discord.interaction.ignored", {
+      type: ev.type,
+      id: ev.id,
+      customId,
+    });
     return;
   }
 
-  await deps.transport.interactionCallback(parsed.interactionId, parsed.interactionToken, {
+  const { step, extra } = decoded;
+  // The session is not encoded in custom_id (Discord's 100-char limit breaks
+  // for long thread-bound subagent URNs); re-derive it from the channel.
+  const sessionId = await resolveSessionOrRespond(
+    deps,
+    {},
+    ev.channelId,
+    ev.guildId,
+    async (content) => {
+      await deps.transport.interactionCallback(ev.id, ev.token, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content, flags: 64 },
+      });
+    },
+  );
+  if (!sessionId) return;
+
+  switch (step) {
+    case "provider":
+      await handleModelProviderStep(ctx, sessionId);
+      break;
+    case "model":
+      await handleModelSelectStep(ctx, sessionId, extra);
+      break;
+    // Unknown step - ignore
+  }
+}
+
+/**
+ * Canned-prompt slug dropdown (type 3, stage 2): look up the prompt's
+ * placeholders for the re-derived session, then run the prompt inline (no
+ * parameters) or open the shared parameter modal (stage 3 rewrites message A).
+ */
+async function handlePromptSelectStage(ctx: InteractionContext): Promise<void> {
+  const { deps, ev } = ctx;
+  const values = ev.data?.values;
+  if (!values || values.length === 0) return;
+  const slug = values[0];
+  // The session is no longer carried in custom_id (100-char limit); re-derive
+  // from the channel. Cross-channel `session_id` override is only honored on
+  // the direct-run path; staged flows target the bound session.
+  const sessionId = await resolveSessionOrRespond(
+    deps,
+    {},
+    ev.channelId,
+    ev.guildId,
+    async (content) => {
+      await deps.transport.interactionCallback(ev.id, ev.token, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content, flags: 64 },
+      });
+    },
+  );
+  if (!sessionId) return;
+  let placeholders: readonly string[] = [];
+  try {
+    const res = await deps.invokeControlOp("prompt_list", { session_id: sessionId });
+    if (res.ok && res.result) {
+      const prompts = (res.result as { prompts?: PromptListEntry[] }).prompts ?? [];
+      placeholders = prompts.find((p) => p.slug === slug)?.placeholders ?? [];
+    }
+  } catch (err) {
+    deps.logger.warn("discord.interaction.prompt_list_failed", {
+      sessionId,
+      err: String(err),
+    });
+  }
+  if (placeholders.length === 0) {
+    // No placeholders — nothing to ask. ACK FIRST with UPDATE_MESSAGE (7)
+    // so message A is immediately rewritten in place with the delivery
+    // confirmation (dropdown cleared).
+    await runPromptProxy(
+      deps,
+      ev.id,
+      ev.token,
+      { slug, session_id: sessionId, platform_user_id: ev.userId },
+      ev.channelId,
+      ev.guildId,
+      "inline-update",
+    );
+    return;
+  }
+  // Placeholders → shared parameter modal. Message A stays visible while the
+  // modal is open (Discord text inputs exist only inside modals); stage 3
+  // rewrites message A when the modal is submitted.
+  await respondWithPromptParameterModal(
+    deps,
+    ev.id,
+    ev.token,
+    slug,
+    placeholders,
+    "update-message",
+  );
+}
+
+/**
+ * Stage-3 entry for canned prompts (type 5): modal submitted. Rebuilds the
+ * params from the inputs, re-derives the session from the channel, and runs
+ * the prompt with an `inline-update` rewrite of message A. Also routes model
+ * modal submits (`custom_modal` step) and cruise-control activations.
+ */
+/**
+ * Stage-3 entry for canned prompts (type 5): modal submitted. Rebuilds the
+ * params from the inputs, re-derives the session from the channel, and runs
+ * the prompt with an `inline-update` rewrite of message A. Also routes model
+ * modal submits (`custom_modal` step) and cruise-control activations.
+ */
+async function handleModalSubmitInteraction(ctx: InteractionContext): Promise<void> {
+  const customId = ctx.ev.data?.custom_id;
+  if (!customId) {
+    ctx.deps.logger.debug("discord.interaction.ignored", {
+      type: ctx.ev.type,
+      id: ctx.ev.id,
+    });
+    return;
+  }
+
+  if (customId === CRUISE_MODAL_ID || customId.startsWith(CRUISE_MODAL_PREFIX)) {
+    await handleCruiseModalSubmit(ctx, customId);
+    return;
+  }
+  if (customId.startsWith(PROMPT_MODAL_PREFIX)) {
+    await handlePromptModalSubmit(ctx, customId);
+    return;
+  }
+  await handleModelModalSubmit(ctx, customId);
+}
+
+/**
+ * Cruise control activation modal (type 5) submitted → activate and report.
+ * The session is re-derived from the channel (never in custom_id — 100-char
+ * limit); an optional model rides in the custom_id suffix.
+ */
+async function handleCruiseModalSubmit(ctx: InteractionContext, customId: string): Promise<void> {
+  const { deps, ev } = ctx;
+  const model = customId.startsWith(CRUISE_MODAL_PREFIX)
+    ? customId.slice(CRUISE_MODAL_PREFIX.length)
+    : undefined;
+  const sessionId = await resolveSessionOrRespond(
+    deps,
+    {},
+    ev.channelId,
+    ev.guildId,
+    async (content) => {
+      await deps.transport.interactionCallback(ev.id, ev.token, {
+        type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+        data: { content },
+      });
+    },
+  );
+  if (!sessionId) return;
+  const inputs: Record<string, string> = {};
+  for (const row of ev.data?.components ?? []) {
+    const input = row.components?.[0];
+    if (input && typeof input.custom_id === "string") {
+      inputs[input.custom_id] = input.value ?? "";
+    }
+  }
+  const yes = inputs.yes?.trim();
+  const no = inputs.no?.trim();
+  const escalate = inputs.escalate?.trim();
+  if (!yes || !no) {
+    await deps.transport.interactionCallback(ev.id, ev.token, {
+      type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+      data: {
+        content: "⚠️ Approve (`yes`) and deny (`no`) guidance are both required.",
+      },
+    });
+    return;
+  }
+  let content: string;
+  try {
+    const res = await deps.invokeControlOp("hitl_cruise_control", {
+      session_id: sessionId,
+      yes,
+      no,
+      ...(escalate ? { escalate } : {}),
+      ...(model ? { model } : {}),
+    });
+    if (res.ok) {
+      const warnings = (res.result as { warnings?: string[] } | undefined)?.warnings ?? [];
+      const warnSuffix = warnings.length ? `\n${warnings.map((w) => `⚠️ ${w}`).join("\n")}` : "";
+      content = `🚗 Cruise control activated for \`${sessionId}\`${escalate ? " (with escalation route)" : ""}.${warnSuffix}`;
+    } else {
+      content = `⚠️ Failed to activate cruise control: ${res.error ?? "unknown error"}`;
+    }
+  } catch (err) {
+    content = `⚠️ Failed to activate cruise control: ${String(err)}`;
+  }
+  await deps.transport.interactionCallback(ev.id, ev.token, {
     type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-    data: { content: `Unhandled operation: \`${controlOp.op}\`` },
+    data: { content },
   });
+}
+
+/**
+ * Stage 3: canned prompt modal submitted → run the prompt and rewrite
+ * message A (the dropdown) with the final recap. custom_id carries only the
+ * slug (`prompt_modal|<slug>`); the session is NOT embedded (a thread-bound
+ * subagent URN overflows Discord's 100-char custom_id limit).
+ */
+async function handlePromptModalSubmit(ctx: InteractionContext, customId: string): Promise<void> {
+  const { deps, ev } = ctx;
+  const slug = customId.slice(PROMPT_MODAL_PREFIX.length);
+  if (!slug) return;
+  // Rebuild params from the inputs; every placeholder key must be present
+  // even when the user left the field empty (empty values are valid).
+  const params: Record<string, string> = {};
+  for (const row of ev.data?.components ?? []) {
+    const input = row.components?.[0];
+    if (input && typeof input.custom_id === "string") {
+      params[input.custom_id] = input.value ?? "";
+    }
+  }
+  await runPromptProxy(
+    deps,
+    ev.id,
+    ev.token,
+    {
+      slug,
+      platform_user_id: ev.userId,
+      ...params,
+    },
+    ev.channelId,
+    ev.guildId,
+    // ACK FIRST with UPDATE_MESSAGE (7), rewriting message A in place
+    // with the delivery confirmation (type 6 is invalid for modal
+    // submits — component interactions only).
+    "inline-update",
+  );
+}
+
+/**
+ * Model free-text modal (`custom_modal` step) submitted → validate the
+ * `provider/model` value and assign it, rewriting message A in place.
+ */
+async function handleModelModalSubmit(ctx: InteractionContext, customId: string): Promise<void> {
+  const { deps, ev } = ctx;
+  const decoded = decodeModelSelectCustomId(customId);
+  if (!decoded) {
+    // Unknown modal - ignore
+    deps.logger.debug("discord.interaction.ignored", {
+      type: ev.type,
+      id: ev.id,
+      customId,
+    });
+    return;
+  }
+
+  if (decoded.step !== "custom_modal") {
+    return;
+  }
+
+  // The session is not encoded in custom_id (Discord's 100-char limit breaks
+  // for long thread-bound subagent URNs); re-derive it from the channel.
+  const sessionId = await resolveSessionOrRespond(
+    deps,
+    {},
+    ev.channelId,
+    ev.guildId,
+    async (content) => {
+      await deps.transport.interactionCallback(ev.id, ev.token, {
+        type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
+        data: { content, components: [] },
+      });
+    },
+  );
+  if (!sessionId) return;
+
+  // Extract text input value
+  const components = ev.data?.components;
+  if (!components || components.length === 0) {
+    return;
+  }
+
+  const textInput = components[0]?.components?.[0];
+  if (!textInput || !textInput.value) {
+    return;
+  }
+
+  const value = textInput.value;
+
+  await applyModelTextInput(deps, ev.id, ev.token, sessionId, value);
+}
+
+/**
+ * Validate the free-text `provider/model` value and assign it to the session
+ * (invalid format rewrites message A with the warning; a valid value flows
+ * through the shared setter and rewrites message A with the outcome).
+ */
+async function applyModelTextInput(
+  deps: DiscordInteractionHandlerDeps,
+  interactionId: string,
+  interactionToken: string,
+  sessionId: string,
+  value: string,
+): Promise<void> {
+  if (!value.includes("/")) {
+    await deps.transport.interactionCallback(interactionId, interactionToken, {
+      type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
+      data: {
+        content: `⚠️ Invalid model format. Expected \`provider/model\`, got \`${value}\``,
+        components: [],
+      },
+    });
+    return;
+  }
+  await setSessionModel(deps, { session_id: sessionId }, value, async (content) => {
+    await deps.transport.interactionCallback(interactionId, interactionToken, {
+      type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
+      data: { content, components: [] },
+    });
+  });
+}
+
+/**
+ * Model-select `provider` step (type 3): show the custom-entry modal for the
+ * `(custom)` option, otherwise rewrite message A with the model menu for the
+ * newly selected provider (provider row re-rendered with it highlighted).
+ */
+async function handleModelProviderStep(ctx: InteractionContext, sessionId: string): Promise<void> {
+  const { deps, ev } = ctx;
+  const values = ev.data?.values;
+  if (!values || values.length === 0) {
+    return;
+  }
+  const value = values[0];
+
+  if (value === "__custom__") {
+    // Respond with modal for custom input
+    await deps.transport.interactionCallback(ev.id, ev.token, {
+      type: INTERACTION_RESPONSE_MODAL,
+      data: buildEnterModelModal(),
+    });
+    return;
+  }
+
+  // Real provider selected - show model select
+  if (!deps.getModelsConfig) {
+    // Shouldn't happen if we got here, but handle gracefully
+    return;
+  }
+
+  const modelsConfig = await deps.getModelsConfig();
+  if (!modelsConfig || !modelsConfig.providers) {
+    return;
+  }
+
+  const provider = modelsConfig.providers.find((p) => p.id === value);
+  if (!provider) {
+    return;
+  }
+
+  const providers = toProviderConfigList(modelsConfig.providers);
+
+  // Build model options
+  const modelOptions = buildModelSelectOptions({
+    providerId: value,
+    providers,
+    failoverChain: toFailoverChainList(modelsConfig.failoverChain),
+  });
+
+  // Rebuild provider options with the newly selected provider highlighted
+  const providerOptions = buildProviderSelectOptions({
+    providers,
+    currentProviderId: value,
+  });
+
+  await deps.transport.interactionCallback(ev.id, ev.token, {
+    type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
+    data: {
+      content: `🎯 **Model Configuration**\nSession: \`${sessionId}\`\nProvider: ${provider.name}`,
+      components: [
+        {
+          type: ACTION_ROW,
+          components: [
+            {
+              type: STRING_SELECT,
+              custom_id: encodeModelSelectCustomId("provider"),
+              placeholder: "Select a provider",
+              options: providerOptions,
+            },
+          ],
+        },
+        {
+          type: ACTION_ROW,
+          components: [
+            {
+              type: STRING_SELECT,
+              custom_id: encodeModelSelectCustomId("model", value),
+              placeholder: "Select a model",
+              options: modelOptions,
+            },
+          ],
+        },
+      ],
+    },
+  });
+}
+
+/**
+ * Model-select `model` step (type 3): assign the picked model to the session
+ * and rewrite message A in place with the ✅/⚠️ outcome.
+ */
+async function handleModelSelectStep(
+  ctx: InteractionContext,
+  sessionId: string,
+  extra: string | undefined,
+): Promise<void> {
+  const { deps, ev } = ctx;
+  const values = ev.data?.values;
+  if (!values || values.length === 0) {
+    return;
+  }
+  const selectedModel = values[0];
+  const providerId = extra;
+
+  if (!providerId) {
+    return;
+  }
+
+  await setSessionModel(
+    deps,
+    { session_id: sessionId },
+    `${providerId}/${selectedModel}`,
+    async (content) => {
+      await deps.transport.interactionCallback(ev.id, ev.token, {
+        type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
+        data: { content, components: [] },
+      });
+    },
+  );
 }
