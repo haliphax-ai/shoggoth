@@ -9,7 +9,10 @@ import type { PlatformCommand } from "@shoggoth/daemon/lib";
 export const APPLICATION_COMMAND = 2;
 export const MESSAGE_COMPONENT = 3;
 export const MODAL_SUBMIT = 5;
-export const INTERACTION_RESPONSE_DEFERRED_UPDATE = 6;
+/** Interaction response type 4 = CHANNEL_MESSAGE_WITH_SOURCE. */
+export const INTERACTION_RESPONSE_CHANNEL_MESSAGE = 4;
+/** Interaction response type 5 = DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE. */
+export const INTERACTION_RESPONSE_DEFERRED = 5;
 export const INTERACTION_RESPONSE_UPDATE_MESSAGE = 7;
 export const INTERACTION_RESPONSE_MODAL = 9;
 
