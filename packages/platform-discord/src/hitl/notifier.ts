@@ -1,4 +1,5 @@
 import { registerDiscordHitlNoticeAndAddReactions } from "./reaction-wiring";
+import { NotFoundError } from "../rest-client";
 import {
   formatHitlPayloadExcerpt,
   buildHitlQueuedNoticeLines,
@@ -95,25 +96,72 @@ export function createDiscordHitlNotifier(input: {
           });
       }
       if (hitlNotifyDmUserId) {
-        void resolveDmChannelId()
-          .then(async (ch) => {
-            const sent = await input.discord.discordRestTransport.createMessage(ch, { content });
-            if (!input.hitlDiscordNoticeRegistry) return;
-            await registerDiscordHitlNoticeAndAddReactions({
-              transport: input.discord.discordRestTransport,
-              channelId: ch,
-              messageId: sent.id,
-              row,
-              registry: input.hitlDiscordNoticeRegistry,
-              logger: input.logger,
-            });
-          })
-          .catch((e) => {
-            input.logger.warn("hitl.discord_dm_notify_failed", {
-              err: String(e),
-            });
+        void sendDmNotice(
+          input,
+          resolveDmChannelId,
+          (staleChannelId) => {
+            if (dmChannelIdCached === staleChannelId) dmChannelIdCached = undefined;
+          },
+          content,
+          row,
+        ).catch((e) => {
+          input.logger.warn("hitl.discord_dm_notify_failed", {
+            err: String(e),
           });
+        });
       }
     },
   };
+}
+
+/**
+ * Deliver one HITL notice to the configured DM channel. On 404 from a
+ * cached channel id (the user deleted the DM), the cache is dropped and the
+ * channel is re-resolved once — but the retry is not re-attempted after a
+ * second 404, so a genuinely broken DM target still surfaces the error.
+ */
+async function sendDmNotice(
+  input: {
+    readonly logger: Logger;
+    readonly discord: DiscordMessagingRuntime;
+    readonly hitlDiscordNoticeRegistry?: HitlDiscordNoticeRegistry;
+  },
+  resolveDmChannelId: () => Promise<string>,
+  clearDmChannelCache: (channelId: string) => void,
+  content: string,
+  row: PendingActionRow,
+): Promise<{ readonly id: string }> {
+  const transport = input.discord.discordRestTransport;
+  const ch = await resolveDmChannelId();
+  try {
+    return await sendToChannel(ch);
+  } catch (e) {
+    if (!(e instanceof NotFoundError)) throw e;
+    input.logger.info("hitl.discord_dm_channel_gone", { channelId: ch });
+    clearDmChannelCache(ch);
+    const fresh = await resolveDmChannelId();
+    try {
+      return await sendToChannel(fresh);
+    } catch (e2) {
+      // The re-resolved channel is broken too — drop it so the next notice
+      // re-resolves instead of pinning the failure into the cache.
+      clearDmChannelCache(fresh);
+      throw e2;
+    }
+  }
+
+  async function sendToChannel(channelId: string): Promise<{ readonly id: string }> {
+    const sent = await transport.createMessage(channelId, { content });
+    if (input.hitlDiscordNoticeRegistry) {
+      await registerDiscordHitlNoticeAndAddReactions({
+        transport,
+        channelId,
+        messageId: sent.id,
+        row,
+        registry: input.hitlDiscordNoticeRegistry,
+        logger: input.logger,
+      });
+    }
+    return sent;
+  }
 }
