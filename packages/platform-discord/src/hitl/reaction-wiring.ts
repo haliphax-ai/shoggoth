@@ -20,14 +20,27 @@ export async function registerDiscordHitlNoticeAndAddReactions(input: {
     input.row.sessionId,
     input.row.toolName,
   );
-  for (const emoji of HITL_DISCORD_NOTICE_REACTION_EMOJIS) {
-    try {
-      await input.transport.createMessageReaction(input.channelId, input.messageId, emoji);
-    } catch (e) {
-      input.logger.warn("hitl.discord_reaction_add_failed", {
-        err: String(e),
-        emoji,
-      });
+  const settled = await Promise.allSettled(
+    HITL_DISCORD_NOTICE_REACTION_EMOJIS.map((emoji) =>
+      input.transport.createMessageReaction(input.channelId, input.messageId, emoji).then(
+        () => emoji,
+        (e: unknown) => Promise.reject({ emoji, cause: e }),
+      ),
+    ),
+  );
+  const failedEmojis: string[] = [];
+  const errors: unknown[] = [];
+  for (const outcome of settled) {
+    if (outcome.status === "rejected") {
+      const { emoji, cause } = outcome.reason as { emoji: string; cause: unknown };
+      failedEmojis.push(emoji);
+      errors.push(cause);
     }
+  }
+  if (failedEmojis.length > 0) {
+    input.logger.warn("hitl.discord_reactions_failed", {
+      failedEmojis,
+      err: errors.map(String).join("; "),
+    });
   }
 }
