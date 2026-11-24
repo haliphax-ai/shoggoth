@@ -49,9 +49,18 @@ interface GatewayPayload {
 const MAX_RECONNECT_ATTEMPTS = 10;
 const BACKOFF_BASE_MS = 1_000;
 const BACKOFF_MAX_MS = 30_000;
+/** Upper bound on waiting for the socket close event during an intentional stop. */
+const SESSION_STOP_TIMEOUT_MS = 5_000;
 
 function backoffMs(attempt: number): number {
   return Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_MAX_MS);
+}
+
+function unrefTimer(
+  t: ReturnType<typeof setTimeout> | ReturnType<typeof setInterval> | undefined,
+): void {
+  // Timers must never keep the daemon (or a test process) alive.
+  (t as { unref?: () => void } | undefined)?.unref?.();
 }
 
 /**
@@ -145,6 +154,7 @@ export async function connectDiscordGateway(
       heartbeatAcked = false;
       sendPayload({ op: 1, d: lastSeq });
     }, intervalMs);
+    unrefTimer(heartbeatTimer);
   }
 
   function sendIdentify(): void {
@@ -356,7 +366,7 @@ export async function connectDiscordGateway(
       delayMs: delay,
       resume: canResume,
     });
-    setTimeout(() => {
+    const reconnectTimer = setTimeout(() => {
       reconnectPending = false;
       if (intentionallyStopped) {
         resolveSessionDone?.();
@@ -368,6 +378,7 @@ export async function connectDiscordGateway(
         scheduleReconnect();
       });
     }, delay);
+    unrefTimer(reconnectTimer);
   }
 
   // Initial connection — must succeed or throw.
@@ -378,7 +389,13 @@ export async function connectDiscordGateway(
       if (intentionallyStopped) return;
       intentionallyStopped = true;
       closeSocket(1000, "shoggoth shutdown");
-      await sessionDonePromise;
+      const timeout = new Promise<void>((resolve) => {
+        setTimeout(() => {
+          log.warn("gateway session close timed out, forcing shutdown");
+          resolve();
+        }, SESSION_STOP_TIMEOUT_MS);
+      });
+      await Promise.race([sessionDonePromise, timeout]);
     },
     getBotUserId: () => botUserId,
   };
