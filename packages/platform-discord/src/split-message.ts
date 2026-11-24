@@ -1,10 +1,12 @@
-import { DISCORD_PLATFORM_MAX_MESSAGE_BODY_CHARS } from "./errors";
 import {
   buildReopenPrefix,
   computeChunkClose,
   type OpenFormattingState,
   CLOSED_FORMATTING,
 } from "./formatting-state";
+
+/** Discord message body limit; success and error replies are sliced to this length. */
+export const DISCORD_PLATFORM_MAX_MESSAGE_BODY_CHARS = 2000;
 
 /**
  * Split a Discord message into chunks that each fit within `maxLength`.
