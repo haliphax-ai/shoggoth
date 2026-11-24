@@ -1,4 +1,5 @@
 import type { Logger } from "@shoggoth/shared";
+import { createDiscordRestClient } from "./rest-client";
 import type {
   DiscordInboundEvent,
   DiscordReactionAddEvent,
@@ -61,14 +62,22 @@ export async function connectDiscordGateway(
   options: DiscordGatewayConnectOptions,
 ): Promise<DiscordGatewaySession> {
   const log = options.logger;
-  const fetchFn = options.fetchFn ?? globalThis.fetch.bind(globalThis);
   const intents = options.intents ?? DISCORD_GATEWAY_INTENTS_DEFAULT;
   const allowBot = options.allowBotMessages ?? false;
   const WS = options.createWebSocket ?? ((url: string) => new WebSocket(url));
 
-  // Fetch initial gateway URL.
-  const gwRes = await fetchFn("https://discord.com/api/v10/gateway/bot", {
-    headers: { Authorization: `Bot ${options.botToken}` },
+  // Initial gateway URL via the metered REST client (retry/backoff + logging);
+  // construction is side-effect-free, so this cannot deadlock startup.
+  const rest = createDiscordRestClient({
+    botToken: options.botToken,
+    ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
+    logger: options.logger,
+  });
+  const gwRes = await rest.request({
+    operation: "getGatewayBot",
+    method: "GET",
+    path: "/gateway/bot",
+    routeKey: "GET /gateway/bot",
   });
   if (!gwRes.ok) {
     const text = await gwRes.text();

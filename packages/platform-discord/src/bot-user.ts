@@ -1,15 +1,26 @@
+import { createDiscordRestClient } from "./rest-client";
+
 /**
  * Discord REST: current bot user (`GET /users/@me`).
+ *
+ * Routed through the shared metered REST client (retry/backoff + logging).
+ * Construction is side-effect-free, so this cannot deadlock startup.
  */
 export async function fetchDiscordBotUserId(options: {
   readonly botToken: string;
   readonly fetchFn?: typeof fetch;
   readonly apiBase?: string;
 }): Promise<string> {
-  const base = (options.apiBase ?? "https://discord.com/api/v10").replace(/\/$/, "");
-  const fetchFn = options.fetchFn ?? globalThis.fetch.bind(globalThis);
-  const res = await fetchFn(`${base}/users/@me`, {
-    headers: { Authorization: `Bot ${options.botToken}` },
+  const rest = createDiscordRestClient({
+    botToken: options.botToken,
+    ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
+    ...(options.apiBase ? { apiBase: options.apiBase } : {}),
+  });
+  const res = await rest.request({
+    operation: "getBotUser",
+    method: "GET",
+    path: "/users/@me",
+    routeKey: "GET /users/@me",
   });
   const text = await res.text();
   if (!res.ok) {
