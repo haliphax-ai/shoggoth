@@ -4,6 +4,7 @@ import {
   appendSyntheticClose,
   computeChunkClose,
   computeOpenFormatting,
+  createIncrementalSyntheticClose,
 } from "../src/formatting-state";
 
 describe("computeOpenFormatting", () => {
@@ -241,5 +242,30 @@ describe("spoiler (||) boundary rules", () => {
 
   it("ignores a lone word-end spoiler marker", () => {
     assert.deepStrictEqual(computeOpenFormatting("ends here||").openInline, []);
+  });
+});
+
+describe("createIncrementalSyntheticClose", () => {
+  it("matches appendSyntheticClose across growing snapshots", () => {
+    const incremental = createIncrementalSyntheticClose();
+    const snapshots = [
+      "start *unfinished",
+      "start *unfinished** and __",
+      "start *unfinished** and __ under_score text",
+      "start *unfinished** and __ under_score text\n```ts\nconst x",
+      "start *unfinished** and __ under_score text\n```ts\nconst x = 1;\n```",
+      "start *unfinished** and __ under_score text\n```ts\nconst x = 1;\n```\ndone",
+    ];
+    for (const snapshot of snapshots) {
+      assert.strictEqual(incremental(snapshot), appendSyntheticClose(snapshot));
+    }
+  });
+
+  it("falls back to a full scan when the snapshot shrinks or resets", () => {
+    const incremental = createIncrementalSyntheticClose();
+    assert.strictEqual(incremental("```js\nlet x"), "```js\nlet x\n```");
+    // A new (shorter) message on the same closer must not inherit fence state.
+    assert.strictEqual(incremental("plain text"), "plain text");
+    assert.strictEqual(incremental("*italic unfinished"), "*italic unfinished*");
   });
 });
