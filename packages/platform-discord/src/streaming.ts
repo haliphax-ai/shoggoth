@@ -2,7 +2,7 @@ import type { MessagingAdapterCapabilities } from "@shoggoth/messaging";
 import type { DiscordBridgeLogger } from "./bridge";
 import type { DiscordRestTransport } from "./transport";
 import { BadRequestError, MissingPermissionsError, NotFoundError } from "./rest-client";
-import { appendSyntheticClose } from "./formatting-state";
+import { createIncrementalSyntheticClose } from "./formatting-state";
 import { splitDiscordMessage } from "./split-message";
 import { mdTableToAscii } from "./table-formatter.js";
 import { formatMessageWithThinking, type ThinkingDisplayMode } from "./thinking-formatter";
@@ -60,11 +60,12 @@ function barRenderChunks(
   lastRender: { chunks: string[] | null; budget: number | null },
   budget: number,
   lastPushedText: string | null,
+  syntheticClose: (text: string) => string,
 ): string[] {
   if (lastRender.chunks !== null && lastRender.budget === budget) {
     return lastRender.chunks;
   }
-  return splitDiscordMessage(appendSyntheticClose(lastPushedText ?? "…"), budget);
+  return splitDiscordMessage(syntheticClose(lastPushedText ?? "…"), budget);
 }
 
 export function createDiscordStreamingOutbound(
@@ -93,6 +94,15 @@ export function createDiscordStreamingOutbound(
         content: "…",
       });
       const messageId = created.id;
+      /**
+       * Incremental synthetic close for the streamed body snapshots. A
+       * growing snapshot only pays for the lines appended since the previous
+       * render; anything that is not a strict extension (reset, text that
+       * shrank after table reflow, a new message on the same handle) falls
+       * back to a full rescan. Output is identical to a one-shot synthetic
+       * close of the same text.
+       */
+      const syntheticClose = createIncrementalSyntheticClose();
       const overflowMessages = new Map<number, OverflowMessage>();
       /**
        * Per-handle operation mutex. pushUpdate (chain-serialized by the
@@ -268,7 +278,7 @@ export function createDiscordStreamingOutbound(
             const renderedText =
               _statusBarLine === null || formattedText === ""
                 ? formattedText
-                : appendSyntheticClose(formattedText);
+                : syntheticClose(formattedText);
 
             const budget = splitBudget(_statusBarLine);
             const chunks = splitDiscordMessage(renderedText, budget);
@@ -295,7 +305,7 @@ export function createDiscordStreamingOutbound(
             const renderedText =
               _statusBarLine === null || formattedText === ""
                 ? formattedText
-                : appendSyntheticClose(formattedText);
+                : syntheticClose(formattedText);
 
             const budget = splitBudget(_statusBarLine);
             const chunks = splitDiscordMessage(renderedText, budget);
@@ -337,7 +347,7 @@ export function createDiscordStreamingOutbound(
             const activeLine = _statusBarLine;
             if (activeLine === null) return;
             const budget = splitBudget(activeLine);
-            const chunks = barRenderChunks(lastRender, budget, lastPushedText);
+            const chunks = barRenderChunks(lastRender, budget, lastPushedText, syntheticClose);
             const finalChunks = applyStatusBar(chunks, activeLine);
             await reconcileOverflow(finalChunks);
           });
