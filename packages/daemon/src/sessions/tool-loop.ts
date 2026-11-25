@@ -15,7 +15,7 @@ import { classifyToolRisk } from "../hitl/risk-classify";
 import { requiresHumanApproval } from "../hitl/approval-gate";
 import { buildCruiseControlBanner, extractCruiseToolCommand } from "../hitl/cruise-control";
 import { resolveCompoundResource, type SubResourceExtractorRegistry } from "../policy/sub-resource";
-import type { HitlAutoApproveGate } from "../hitl/hitl-auto-approve";
+import type { HitlAutoApproveGate } from "@shoggoth/shared";
 import type { HitlNotifier } from "../hitl/hitl-notifier";
 import type { PendingActionRow, PendingActionsStore } from "../hitl/pending-actions-store";
 import type { SystemGatesHook } from "./system-gates";
