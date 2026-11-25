@@ -21,6 +21,7 @@ import type {
   TurnStatusBar,
 } from "../../src/presentation/status-bar";
 import { DEFAULT_STATUS_BAR_CONFIG, type ResolvedStatusBarConfig } from "@shoggoth/shared";
+import { invalidateStatusBarSources } from "../../src/presentation/status-bar-invalidations";
 
 let nowValue = 0;
 const now = () => nowValue;
@@ -369,6 +370,7 @@ describe("createTurnStatusBar", () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect((sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot).notifies).toBe(1);
     live = 0; // complete() marked the row fired; nothing pushed a count
+    invalidateStatusBarSources("notifies");
     bar.markThinking();
     await vi.advanceTimersByTimeAsync(1000);
     // Live 0 (not the stale cached 1): renderers omit the section at 0, so
@@ -425,6 +427,7 @@ describe("createTurnStatusBar", () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect((sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot).timers).toBe(1);
     live = 0;
+    invalidateStatusBarSources("timers");
     bar.markThinking();
     await vi.advanceTimersByTimeAsync(1000);
     expect((sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot).timers).toBe(0);
@@ -487,6 +490,7 @@ describe("createTurnStatusBar", () => {
       persistent: 1,
     });
     live = { total: 0, persistent: 0 };
+    invalidateStatusBarSources("subagents");
     bar.markThinking();
     await vi.advanceTimersByTimeAsync(1000);
     expect((sink.setStatusBar.mock.calls.at(-1)![0] as StatusBarSnapshot).subagents).toEqual({
@@ -962,7 +966,10 @@ describe("createStatusBarTurnTracker", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(lines.at(-1)).toBe("n1");
     // The handle fires with no push event: the render must not go stale.
+    // (The mutation site bumps the source's change version, as the real
+    // scheduler does.)
     live = 0;
+    invalidateStatusBarSources("notifies");
     tracker.onThinkingDelta?.("…");
     await vi.advanceTimersByTimeAsync(1_000);
     expect(lines.at(-1)).toBe("n0");
@@ -986,7 +993,10 @@ describe("createStatusBarTurnTracker", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(lines.at(-1)).toBe("t2");
     // A timer fires with no push event: the render must not go stale.
+    // (The mutation site bumps the source's change version, as the real
+    // scheduler does.)
     live = 1;
+    invalidateStatusBarSources("timers");
     tracker.onThinkingDelta?.("…");
     await vi.advanceTimersByTimeAsync(1_000);
     expect(lines.at(-1)).toBe("t1");
@@ -1010,7 +1020,10 @@ describe("createStatusBarTurnTracker", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(lines.at(-1)).toBe("s2");
     // A subagent terminates with no push event: the render must not go stale.
+    // (The mutation site bumps the source's change version, as the real
+    // session store does.)
     live = { total: 1, persistent: 1 };
+    invalidateStatusBarSources("subagents");
     tracker.onThinkingDelta?.("…");
     await vi.advanceTimersByTimeAsync(1_000);
     expect(lines.at(-1)).toBe("s1");

@@ -8,6 +8,7 @@ import { isTerminal, type TruncationMode } from "@shoggoth/os-exec";
 import { getLogger } from "../logging";
 import { beginOneShotDelivery, settleOneShotDelivery } from "../subagent/one-shot-wake-window";
 import { pendingDrains, releaseOneShotIfDrained } from "../subagent/one-shot-notify-drain";
+import { invalidateStatusBarSources } from "../presentation/status-bar-invalidations";
 
 const log = getLogger("exec-notify-scheduler");
 
@@ -122,6 +123,7 @@ export class ExecNotifyScheduler {
       handle.command,
       JSON.stringify(handle.options),
     );
+    invalidateStatusBarSources("notifies");
 
     const mp = lookup(handle.execSessionId);
     if (!mp) {
@@ -155,6 +157,9 @@ export class ExecNotifyScheduler {
     const info = db
       .prepare("UPDATE exec_notifies SET fired = 1 WHERE id = ? AND fired = 0")
       .run(id);
+    if (info.changes > 0) {
+      invalidateStatusBarSources("notifies");
+    }
     return info.changes > 0;
   }
 
@@ -290,6 +295,7 @@ export class ExecNotifyScheduler {
         .prepare("UPDATE exec_notifies SET fired = 1 WHERE id = ? AND fired = 0")
         .run(id);
       if (info.changes === 0) return; // already resolved (double state-change, cancel, …)
+      invalidateStatusBarSources("notifies");
     }
     // Release after delivery, never before: a held one-shot must outlive the
     // notification it was held for (issue #620). The count is re-read at

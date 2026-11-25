@@ -284,6 +284,12 @@ export {
   type StatusBarSink,
   type StatusBarRenderer,
 } from "./presentation/status-bar";
+export {
+  invalidateStatusBarSources,
+  statusBarSourceVersions,
+  type StatusBarDataSource,
+  type StatusBarSourceVersions,
+} from "./presentation/status-bar-invalidations";
 
 // --- Presentation layer: platform adapter interface ---
 

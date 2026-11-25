@@ -29,6 +29,8 @@ import { resolveShoggothAgentId } from "../config/effective-runtime";
 import { createSessionManager } from "../sessions/session-manager";
 import { createSessionStore } from "../sessions/session-store";
 import type { PendingActionsStore } from "../hitl/pending-actions-store";
+import { createCruiseControlStore } from "../hitl/cruise-control";
+import { invalidateStatusBarSources } from "../presentation/status-bar-invalidations";
 import { setAgentIntegrationInvoker } from "./agent-integration-invoke-ref";
 import {
   handleIntegrationControlOp,
@@ -343,6 +345,10 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
   } = opts;
 
   const logger = getLogger("control-plane");
+  // Fallback cruise store (in-memory) wrapped so activations/deactivations
+  // bump the status bar's cruise change version; daemon-supplied stores keep
+  // their own invalidation wiring.
+  const cruiseFallback = createCruiseControlStore();
   const acpxStore = stateDb ? createSqliteAcpxBindingStore(stateDb) : undefined;
   const agentStore = stateDb ? createSqliteAgentTokenStore(stateDb) : new MemoryAgentTokenStore();
   const operatorTokenSecret = readOperatorTokenSecret(config);
@@ -399,7 +405,21 @@ export async function startControlPlane(opts: ControlPlaneOptions): Promise<Cont
     acpxSupervisor,
     hitlPending: hitlPendingOpt,
     hitlClear: hitlClearOpt,
-    cruiseControl: cruiseControlOpt,
+    cruiseControl: cruiseControlOpt ?? {
+      // Same minimal surface the platform's yoloActive wraps: stores carry no
+      // cross-cutting hooks, so status-bar invalidation rides this adapter.
+      get: (sessionId) => cruiseFallback.get(sessionId),
+      set: (sessionId, policy) => {
+        invalidateStatusBarSources("cruise");
+        cruiseFallback.set(sessionId, policy);
+      },
+      clear: (sessionId) => {
+        const cleared = cruiseFallback.clear(sessionId);
+        invalidateStatusBarSources("cruise");
+        return cleared;
+      },
+      isActive: (sessionId) => cruiseFallback.isActive(sessionId),
+    },
     cancelMcpHttpRequest: cancelMcpHttpRequestOpt ?? dispatchMcpHttpCancelRequest,
     vault: vaultServiceRef.current,
   };
