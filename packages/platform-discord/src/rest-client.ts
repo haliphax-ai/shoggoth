@@ -275,8 +275,13 @@ interface BucketState {
   pausedUntil: number;
   /** Requests currently in flight (used to serialize unknown buckets). */
   inFlight: number;
-  /** Dispatch queue sorted by (priority rank, sequence). */
+  /** Dispatch queue kept sorted by (priority rank, sequence). */
   queue: QueuedRequest[];
+  /**
+   * Lower bound of min(enqueuedAt + deadline) over `queue`; Infinity until a
+   * scan (or insert) computes it. Lets `sweepDeadlines` skip whole scans.
+   */
+  deadlineFloor: number;
   timer: ReturnType<typeof setTimeout> | null;
   /** Epoch ms the current timer is set to fire (for re-arming earlier). */
   timerAt: number;
@@ -324,12 +329,32 @@ function parseRetryBody(text: string): { retryAfterSec: number | null; global: b
   }
 }
 
+/** Same key `insertQueued` orders by: (priority rank, sequence). */
+function queueRank(q: QueuedRequest): number {
+  return PRIORITY_RANK[q.spec.priority ?? "user"];
+}
+
+/**
+ * Insert one entry at its sorted position instead of re-sorting the queue.
+ * `seq` is monotonic, so an enqueue almost always appends in O(1); only
+ * priority inversions (e.g. a user send behind queued background probes)
+ * pay a scan.
+ */
+/** Sorted position for (rank, seq) under the queue ordering. */
+function insertionIndex(queue: QueuedRequest[], rank: number, seq: number): number {
+  let i = queue.length;
+  while (i > 0) {
+    const prev = queue[i - 1]!;
+    const r = queueRank(prev);
+    if (rank > r || (rank === r && seq >= prev.seq)) break;
+    i--;
+  }
+  return i;
+}
+
+/** Full re-sort for multi-entry merges (bucket hash migration). */
 function sortQueue(queue: QueuedRequest[]): void {
-  queue.sort(
-    (a, b) =>
-      PRIORITY_RANK[a.spec.priority ?? "user"] - PRIORITY_RANK[b.spec.priority ?? "user"] ||
-      a.seq - b.seq,
-  );
+  queue.sort((a, b) => queueRank(a) - queueRank(b) || a.seq - b.seq);
 }
 
 /**
@@ -391,6 +416,7 @@ export function createDiscordRestClient(options: DiscordRestClientOptions): Disc
         pausedUntil: 0,
         inFlight: 0,
         queue: [],
+        deadlineFloor: Infinity,
         timer: null,
         timerAt: 0,
       };
@@ -458,6 +484,13 @@ export function createDiscordRestClient(options: DiscordRestClientOptions): Disc
     schedule(key);
   }
 
+  /** Bubble-insert one entry and refresh the bucket's deadline floor. */
+  function insertQueued(state: BucketState, entry: QueuedRequest): void {
+    const i = insertionIndex(state.queue, queueRank(entry), entry.seq);
+    state.queue.splice(i, 0, entry);
+    state.deadlineFloor = Math.min(state.deadlineFloor, entry.enqueuedAt + deadlineFor(entry));
+  }
+
   function promotePending(ck: string): void {
     if (coalesceInFlight.has(ck)) return;
     const pending = coalescePending.get(ck);
@@ -477,8 +510,7 @@ export function createDiscordRestClient(options: DiscordRestClientOptions): Disc
       },
     };
     const state = getBucket(resolveKey(pending.spec));
-    state.queue.push(entry);
-    sortQueue(state.queue);
+    insertQueued(state, entry);
   }
 
   /** Deadline for a queued entry: coalesced edits expire far sooner. */
@@ -495,21 +527,31 @@ export function createDiscordRestClient(options: DiscordRestClientOptions): Disc
     return best;
   }
 
-  /** Reject queue entries whose deadline has passed (even while paused). */
+  /**
+   * Reject queue entries whose deadline has passed (even while paused).
+   * `deadlineFloor` is the exact min deadline after every scan, so skips only
+   * happen while no entry can have expired.
+   */
   function sweepDeadlines(key: string): void {
     const state = buckets.get(key);
     if (!state || state.queue.length === 0) return;
     const now = Date.now();
+    if (now < state.deadlineFloor) return;
     const kept: QueuedRequest[] = [];
+    let best = Infinity;
     for (const q of state.queue) {
       const dl = deadlineFor(q);
       if (now - q.enqueuedAt > dl) {
         const err = new QueueTimeoutError(q.spec.operation, now - q.enqueuedAt, dl);
         logFailure(err, q.spec);
         q.reject(err);
-      } else kept.push(q);
+      } else {
+        kept.push(q);
+        best = Math.min(best, q.enqueuedAt + dl);
+      }
     }
     state.queue = kept;
+    state.deadlineFloor = best;
   }
 
   /** Arm a wake-up for a blocked bucket at the earlier of block-end and queue deadline. */
@@ -739,13 +781,7 @@ export function createDiscordRestClient(options: DiscordRestClientOptions): Disc
       s.remaining = 0;
       s.resetAt = Date.now() + waitMs;
       s.pausedUntil = global ? s.pausedUntil : Date.now() + waitMs;
-      // Retries keep the front of their priority lane.
-      const idx = s.queue.findIndex(
-        (q) =>
-          PRIORITY_RANK[q.spec.priority ?? "user"] > PRIORITY_RANK[entry.spec.priority ?? "user"],
-      );
-      if (idx < 0) s.queue.push(entry);
-      else s.queue.splice(idx, 0, entry);
+      insertQueued(s, entry);
       if (global) armGlobalTimer(waitMs);
       else armWhileBlocked(key, s, s.pausedUntil);
     });
@@ -789,8 +825,7 @@ export function createDiscordRestClient(options: DiscordRestClientOptions): Disc
         };
         const key = resolveKey(spec);
         const state = getBucket(key);
-        state.queue.push(entry);
-        sortQueue(state.queue);
+        insertQueued(state, entry);
         schedule(key);
       });
     },

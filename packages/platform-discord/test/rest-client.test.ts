@@ -353,6 +353,53 @@ describe("Discord REST client", () => {
       assert.deepEqual(bodies[1], JSON.stringify({ user: 1 }));
       assert.deepEqual(bodies[2], JSON.stringify({ probe: 1 }));
     });
+
+    it("appends same-lane requests in sequence behind a queued higher-priority request", async () => {
+      const bodies: Array<string | null> = [];
+      const { fetchFn } = recorder((_url, init, i) => {
+        bodies.push(init.body == null ? null : String(init.body));
+        if (i === 0) {
+          return json(
+            { id: "seed" },
+            200,
+            okHeaders({ "X-RateLimit-Remaining": "0", "X-RateLimit-Reset-After": "0.1" }),
+          );
+        }
+        return json({ id: "ok" }, 200, okHeaders({ "X-RateLimit-Remaining": "4" }));
+      });
+      const c = createDiscordRestClient({ botToken: "tok", fetchFn });
+      const base = {
+        method: "POST",
+        path: "/channels/ch1/messages",
+        routeKey: "POST /channels/ch1/messages",
+      };
+      // Seed: exhausts the bucket.
+      await c.request({ operation: "createMessage", ...base, body: JSON.stringify({ seed: 1 }) });
+      // A user send enqueued first, then two background probes behind it.
+      const user = c.request({
+        operation: "createMessage",
+        ...base,
+        body: JSON.stringify({ user: 1 }),
+      });
+      const bg1 = c.request({
+        operation: "probe",
+        ...base,
+        priority: "background",
+        body: JSON.stringify({ probe: 1 }),
+      });
+      const bg2 = c.request({
+        operation: "probe",
+        ...base,
+        priority: "background",
+        body: JSON.stringify({ probe: 2 }),
+      });
+      await Promise.all([user, bg1, bg2]);
+      assert.equal(bodies.length, 4);
+      // Insertion keeps lane order: user first, then background in seq order.
+      assert.deepEqual(bodies[1], JSON.stringify({ user: 1 }));
+      assert.deepEqual(bodies[2], JSON.stringify({ probe: 1 }));
+      assert.deepEqual(bodies[3], JSON.stringify({ probe: 2 }));
+    });
   });
 
   describe("edit coalescing", () => {
