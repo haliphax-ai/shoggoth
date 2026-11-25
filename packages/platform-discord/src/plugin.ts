@@ -8,7 +8,11 @@ import {
   type PlatformStartCtx,
   type PlatformDeliveryResolver,
 } from "@shoggoth/plugins";
-import { modelEntriesFromRecord, modelProvidersToEntries } from "@shoggoth/shared";
+import {
+  DEFAULT_MAX_ATTACHMENT_BYTES,
+  modelEntriesFromRecord,
+  modelProvidersToEntries,
+} from "@shoggoth/shared";
 import { discordPlatformRegistration } from "./platform-registration";
 import { createDiscordProbe } from "./probe";
 import { startDaemonDiscordMessaging, type DiscordMessagingRuntime } from "./bootstrap";
@@ -38,6 +42,7 @@ import {
   type PostActionDeps,
   type AttachmentDownloadActionDeps,
 } from "@shoggoth/messaging";
+import { downloadFileToDisk } from "./download-file";
 import { toolReadBinary } from "@shoggoth/os-exec";
 import { mdTableToAscii } from "./table-formatter.js";
 import type Database from "better-sqlite3";
@@ -537,16 +542,12 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
             }
           },
 
-          downloadFile: async (url, destPath) => {
-            const res = await fetch(url);
-            if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
-            const buf = Buffer.from(await res.arrayBuffer());
-            const { writeFile, mkdir } = await import("node:fs/promises");
-            const { dirname } = await import("node:path");
-            await mkdir(dirname(destPath), { recursive: true });
-            await writeFile(destPath, buf);
-            return buf.byteLength;
-          },
+          downloadFile: (url, destPath) =>
+            downloadFileToDisk(
+              url,
+              destPath,
+              configRef.current?.maxAttachmentBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES,
+            ),
         };
         const dispatchMessageTool = createActionToolDispatcher(messageToolDeps);
         const msgCtx: MessageToolContext = {
