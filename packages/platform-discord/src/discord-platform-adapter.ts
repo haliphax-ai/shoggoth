@@ -32,6 +32,11 @@ import type { Logger, PendingActionRow } from "./daemon-types";
 /** Discord typing indicator lasts ~10s; renew while the model formulates a reply. */
 const DISCORD_TYPING_RENEWAL_MS = 8000;
 
+/** Timers must never keep the daemon (or a test process) alive. */
+function unrefTimer(t: ReturnType<typeof setInterval> | undefined): void {
+  (t as { unref?: () => void } | undefined)?.unref?.();
+}
+
 export interface DiscordPlatformAdapterConfig {
   readonly discord: DiscordMessagingRuntime;
   readonly logger: Logger;
@@ -199,9 +204,17 @@ export class DiscordPlatformAdapter implements PlatformAdapter {
       return;
     }
     await this.discord.notifyAgentTypingForSession(sessionId);
-    const id = setInterval(() => {
-      void this.discord.notifyAgentTypingForSession(sessionId);
-    }, DISCORD_TYPING_RENEWAL_MS);
+    // Resolve the channel once: an unmapped session has nowhere to send typing
+    // renewals, so arming an interval would only no-op every cycle. The
+    // production bridge maps sessions via the same lookup used here.
+    const channelId = this.discord.resolveOutboundChannelIdForSession?.(sessionId);
+    let id: ReturnType<typeof setInterval> | undefined;
+    if (channelId) {
+      id = setInterval(() => {
+        void this.discord.notifyAgentTypingForSession(sessionId);
+      }, DISCORD_TYPING_RENEWAL_MS);
+      unrefTimer(id);
+    }
     try {
       await work();
     } finally {
