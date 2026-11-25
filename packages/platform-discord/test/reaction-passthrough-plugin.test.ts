@@ -14,7 +14,8 @@ const h = vi.hoisted(() => ({
   captured: {
     onReactionAdd: undefined as ((ev: unknown) => void) | undefined,
     messagingOpts: undefined as Record<string, any> | undefined,
-    platformOpts: undefined as Record<string, any> | undefined,
+    runtime: undefined as Record<string, any> | undefined,
+    platformOpts: undefined as any,
     bindings: undefined as Map<string, string> | undefined,
     platformHandle: undefined as Record<string, any> | undefined,
   },
@@ -34,7 +35,7 @@ vi.mock("../src/bootstrap", () => ({
         guildId: "guild-1",
       },
     ];
-    return {
+    const runtime: Record<string, any> = {
       routes,
       capabilities: { extensions: {} },
       discordBotUserId: "bot-99",
@@ -67,6 +68,8 @@ vi.mock("../src/bootstrap", () => ({
       }),
       stop: vi.fn(async () => {}),
     };
+    h.captured.runtime = runtime;
+    return runtime;
   }),
 }));
 
@@ -88,6 +91,7 @@ vi.mock("../src/platform", () => ({
 }));
 
 import createDiscordPlugin from "../src/plugin";
+import type { HitlDiscordNoticeRegistry } from "../src/hitl/notice-registry";
 
 const OWNER = "owner-1";
 const TEST_CONFIG = {
@@ -133,8 +137,20 @@ beforeEach(async () => {
   deps = {
     logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     policyEngine: {},
-    hitlStack: undefined,
-    hitlAutoApproveGate: undefined,
+    hitlStack: {
+      pending: {
+        approve: vi.fn(),
+        deny: vi.fn(),
+        listPendingForSession: vi.fn(() => []),
+        listAllPending: vi.fn(() => []),
+      },
+      waitForHitlResolution: vi.fn(async () => "approved" as const),
+    },
+    hitlAutoApproveGate: {
+      enableSessionTool: vi.fn(),
+      enableAgentTool: vi.fn(async () => {}),
+      shouldAutoApprove: vi.fn(() => false),
+    },
     hitlConfigRef: undefined,
     abortSession: vi.fn(),
     invokeControlOp: vi.fn(),
@@ -161,6 +177,96 @@ beforeEach(async () => {
   // Notice resolver from PlatformDeps flows into the platform options (DI, not a global).
   expect(h.captured.platformOpts?.noticeResolver).toBe(deps.noticeResolver);
   handleReactionPassthrough = platformHandleSpy();
+});
+
+describe("reaction passthrough registry fast path", () => {
+  /** The plugin creates its own registry at start; grab it via captured platform opts. */
+  function registry(): HitlDiscordNoticeRegistry {
+    return (h.captured.platformOpts as Record<string, any>).hitlDiscordNoticeRegistry;
+  }
+
+  function transport(): Record<string, any> {
+    return h.captured.runtime?.discordRestTransport as Record<string, any>;
+  }
+
+  it("skips the REST author GET for a registered HITL notice", async () => {
+    registry().register("1500000000000000001", "m-1", "pending-1", "agent:test:s1", "shell");
+
+    await deliver(reactionEvent("1500000000000000001"));
+
+    expect(transport().getMessage).not.toHaveBeenCalled();
+    expect(handleReactionPassthrough).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the REST author GET on a registry miss", async () => {
+    registry().register(
+      "1500000000000000001",
+      "registered-id",
+      "pending-1",
+      "agent:test:s1",
+      "shell",
+    );
+
+    await deliver(reactionEvent("1500000000000000001"));
+
+    expect(transport().getMessage).toHaveBeenCalledTimes(1);
+    expect(handleReactionPassthrough).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops owner reactions on non-bot messages (author check preserved)", async () => {
+    registry().register(
+      "1500000000000000001",
+      "registered-id",
+      "pending-1",
+      "agent:test:s1",
+      "shell",
+    );
+
+    transport().getMessage = vi.fn(async () => ({
+      id: "m-1",
+      content: "not from the bot",
+      timestamp: "2026-10-13T14:00:00.000Z",
+      author: { id: "human-1" },
+    }));
+
+    h.captured.onReactionAdd?.(reactionEvent("1500000000000000001"));
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(transport().getMessage).toHaveBeenCalledTimes(1);
+    expect(handleReactionPassthrough).not.toHaveBeenCalled();
+  });
+
+  it("uses empty content and a fresh timestamp on the registry fast path", async () => {
+    registry().register("1500000000000000001", "m-1", "pending-1", "agent:test:s1", "shell");
+
+    await deliver(reactionEvent("1500000000000000001"));
+
+    const call = handleReactionPassthrough.mock.calls[0][0];
+    expect(call.messageContent).toBe("");
+    expect(call.messageTimestamp).toBeGreaterThan(0);
+    expect(call.emoji).toBe("👍");
+    expect(call.userId).toBe(OWNER);
+  });
+
+  it("routes every reaction through the author GET without a HITL stack", async () => {
+    // Shared setup above started the plugin WITH a HITL stack; run a separate
+    // plugin instance with the stack absent to cover the plain passthrough wiring.
+    h.captured.onReactionAdd = undefined;
+    h.captured.messagingOpts = undefined;
+    h.captured.platformOpts = undefined;
+    h.captured.platformHandle = undefined;
+    deps.hitlStack = undefined;
+    deps.hitlAutoApproveGate = undefined;
+    const plugin = createDiscordPlugin();
+    await plugin.hooks["platform.start"](ctx as any);
+
+    handleReactionPassthrough = platformHandleSpy();
+    await deliver(reactionEvent("1500000000000000001"));
+
+    expect(h.captured.platformOpts?.hitlDiscordNoticeRegistry).toBeUndefined();
+    expect(transport().getMessage).toHaveBeenCalledTimes(1);
+    expect(handleReactionPassthrough).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("reaction passthrough session resolution", () => {

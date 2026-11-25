@@ -408,6 +408,21 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
             : (ev.emoji.name ?? "");
           if (!emojiStr) return;
 
+          // A registry hit proves bot authorship (entries are only registered when
+          // the bot posts a HITL notice). Notices carry no legend and their events
+          // are consumed by the gateway pipeline, so this cannot hide a legend.
+          const registered = hitlDiscordNoticeRegistry?.lookup(ev.channelId, ev.messageId);
+          if (registered) {
+            void discordPlatform.handleReactionPassthrough({
+              sessionId,
+              messageContent: "",
+              messageTimestamp: Date.now(),
+              emoji: emojiStr,
+              userId: ev.userId,
+            });
+            return;
+          }
+
           void (async () => {
             try {
               const msg = await discordMessaging.discordRestTransport.getMessage(
