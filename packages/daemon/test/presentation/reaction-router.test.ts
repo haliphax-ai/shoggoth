@@ -11,7 +11,7 @@ describe("parseReactionLegend", () => {
   });
 
   it("parses a simple legend block", () => {
-    const content = `Some text\nReact to choose:\n👍 Approve\n👎 Reject\n\nMore text`;
+    const content = `Some text\nReact to choose:\n- 👍 Approve\n- 👎 Reject\n\nMore text`;
     const legend = parseReactionLegend(content);
     expect(legend).not.toBeNull();
     expect(legend!.entries).toEqual([
@@ -21,26 +21,26 @@ describe("parseReactionLegend", () => {
   });
 
   it("handles emoji-only entries (no label)", () => {
-    const content = `React to choose:\n🔥\n`;
+    const content = `React to choose:\n- 🔥\n`;
     const legend = parseReactionLegend(content);
     expect(legend).not.toBeNull();
     expect(legend!.entries).toEqual([{ emoji: "🔥", label: "" }]);
   });
 
   it("stops at blank line", () => {
-    const content = `React to choose:\n✅ Yes\n\n❌ No`;
+    const content = `React to choose:\n- ✅ Yes\n\n- ❌ No`;
     const legend = parseReactionLegend(content);
     expect(legend!.entries).toHaveLength(1);
     expect(legend!.entries[0]).toEqual({ emoji: "✅", label: "Yes" });
   });
 
   it("returns null when header exists but no entries follow", () => {
-    const content = `React to choose:\n\nNothing here`;
+    const content = `React to choose:\n\n<nothing>`;
     expect(parseReactionLegend(content)).toBeNull();
   });
 
   it("is case-insensitive for the header", () => {
-    const content = `REACT TO CHOOSE:\n🎉 Party`;
+    const content = `REACT TO CHOOSE:\n- 🎉 Party`;
     const legend = parseReactionLegend(content);
     expect(legend).not.toBeNull();
     expect(legend!.entries[0]!.label).toBe("Party");
@@ -71,7 +71,7 @@ describe("routeReaction", () => {
   });
 
   it("returns adhoc when legend matches", () => {
-    const content = "Some text\nReact to choose:\n👍 Approve\n👎 Reject\n\nMore text";
+    const content = "Some text\nReact to choose:\n- 👍 Approve\n- 👎 Reject\n\nMore text";
     const now = Date.now();
     const result = routeReaction({
       ...base,
@@ -87,7 +87,7 @@ describe("routeReaction", () => {
   });
 
   it("discards when legend exists but emoji not in legend", () => {
-    const content = "Some text\nReact to choose:\n✅ Yes\n❌ No\n\nMore text";
+    const content = "Some text\nReact to choose:\n- ✅ Yes\n- ❌ No\n\nMore text";
     const now = Date.now();
     const result = routeReaction({
       ...base,

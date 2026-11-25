@@ -623,7 +623,7 @@ async function handleChoiceAction(
   if (!validated.ok) return validated;
   const choices = validated.choices;
   const preamble = typeof args.content === "string" ? args.content.trim() : "";
-  const legendLines = choices.map((c) => `${c.emoji} ${c.label}`);
+  const legendLines = choices.map((c) => `- ${c.emoji} ${c.label}`);
 
   // Build the message body, optionally prepended with sender provenance banner
   let bodyContent = [...(preamble ? [preamble, ""] : []), "React to choose:", ...legendLines].join(

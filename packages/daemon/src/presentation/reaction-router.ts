@@ -34,14 +34,11 @@ export function parseReactionLegend(messageContent: string): ParsedReactionLegen
     const line = raw.trim();
     if (line.length === 0) break; // blank line terminates the block
 
-    // First token is the emoji, rest is the label
-    const spaceIdx = line.indexOf(" ");
-    if (spaceIdx === -1) {
-      // Line with emoji only — no label; still a valid entry with empty label
-      entries.push({ emoji: line, label: "" });
-    } else {
-      const emoji = line.slice(0, spaceIdx);
-      const label = line.slice(spaceIdx + 1).trim();
+    // First token is the list item marker, next is emoji, rest is the label
+    const split = line.split(" ");
+    if (split.length > 1) {
+      const emoji = split[1];
+      const label = split.length < 3 ? "" : split.slice(2).join(" ");
       entries.push({ emoji, label });
     }
   }
