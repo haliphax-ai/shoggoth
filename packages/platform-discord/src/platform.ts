@@ -77,6 +77,102 @@ import { DiscordPlatformAdapter } from "./discord-platform-adapter";
 import { resolveStatusBarConfig, type ResolvedStatusBarConfig } from "@shoggoth/shared";
 import type { CruiseControlHandle } from "@shoggoth/shared";
 import { renderDiscordStatusBar } from "./status-bar";
+import type { DiscordStreamHandle } from "./streaming";
+
+/** Narrow a turn outcome to the status bar's terminal set: everything but
+ *  "completed" passes through; "completed" renders as "finished". Shared by the
+ *  messaging_surface and internal delivery paths so the mapping cannot drift. */
+function terminalOutcomeOf(
+  outcome: SessionAgentTurnResult["outcome"],
+): "finished" | "aborted" | "failed" | "canceled" {
+  return outcome === "aborted" || outcome === "failed" || outcome === "canceled"
+    ? outcome
+    : "finished";
+}
+
+/** Build the status-bar-wrapped stream handle over a raw Discord stream handle:
+ *  setFullContent/pushUpdate delegate straight through, setStatusBar/close pass
+ *  through when the raw handle supports them. Shared by the inbound pre-start
+ *  path and the messaging_surface path so a teardown fix cannot miss one copy. */
+function wrapDiscordStreamHandle(raw: DiscordStreamHandle): StreamHandle {
+  return {
+    setFullContent: (text: string) => raw.setFullContent(text),
+    pushUpdate: (text: string) => raw.pushUpdate(text),
+    ...(raw.setStatusBar ? { setStatusBar: (line: string | null) => raw.setStatusBar!(line) } : {}),
+    // Teardown pass-through: the abort path must be able to
+    // finalize the underlying handle through this wrapper.
+    ...(raw.close ? { close: () => raw.close!() } : {}),
+  };
+}
+
+/** Start the session's streaming outbound and wrap the raw handle with the
+ *  status-bar sink so the bar applies to the in-flight message (delegates to
+ *  any native setStatusBar on the handle; teardown close() passes through).
+ *  Returns undefined when streaming is disabled, the session has no streaming
+ *  outbound, or the start failed (logged as `stream_start_failed` — pass
+ *  `warn.withSessionId` to include the session id in that payload, matching
+ *  the messaging_surface path's original shape). Shared by the inbound
+ *  pre-start path and the messaging_surface path so a teardown fix cannot
+ *  miss one copy. */
+async function startStreamHandleWithBar(
+  deps: {
+    readonly logger: Logger;
+    readonly env: NodeJS.ProcessEnv;
+    readonly statusBarDep: {
+      readonly config: ResolvedStatusBarConfig;
+      readonly attachSink: (h: StreamHandle) => unknown;
+    };
+    readonly streamingForSession: DiscordMessagingRuntime["streamingForSession"];
+  },
+  sessionId: string,
+  warn?: { readonly withSessionId?: boolean },
+): Promise<StreamHandle | undefined> {
+  let handle: StreamHandle | undefined;
+  if (deps.env.SHOGGOTH_DISCORD_STREAM === "1") {
+    const streamingOutbound = deps.streamingForSession(sessionId);
+    if (streamingOutbound) {
+      try {
+        const raw = await streamingOutbound.start();
+        // Wrap the raw stream handle with the status-bar sink so the bar
+        // applies to the in-flight message; delegates to any native
+        // setStatusBar on the handle.
+        if (deps.statusBarDep.config.enabled) {
+          deps.statusBarDep.attachSink(raw as unknown as StreamHandle);
+        }
+        handle = wrapDiscordStreamHandle(raw);
+      } catch (e) {
+        deps.logger.warn(
+          "discord.platform.stream_start_failed",
+          warn?.withSessionId ? { err: String(e), sessionId } : { err: String(e) },
+        );
+      }
+    }
+  }
+  return handle;
+}
+
+/** Build the `afterHitlQueued` callback that posts the in-session HITL queued
+ *  notice; undefined when SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION=0. Shared by
+ *  the inbound, messaging_surface, and internal delivery paths. */
+function afterHitlQueuedFor(
+  env: NodeJS.ProcessEnv,
+  send: (
+    row: PendingActionRow,
+    delivery: {
+      readonly sessionId: string;
+      readonly userId?: string;
+      readonly replyToMessageId?: string;
+    },
+  ) => Promise<void>,
+  delivery: {
+    readonly sessionId: string;
+    readonly userId?: string;
+    readonly replyToMessageId?: string;
+  },
+): ((row: PendingActionRow) => Promise<void>) | undefined {
+  const inSession = env.SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION !== "0";
+  return inSession ? (row) => send(row, delivery) : undefined;
+}
 
 /** Minimal status-bar dep: config from resolveStatusBarConfig, render from renderDiscordStatusBar,
  *  attachSink for live-bar stream wrapping, and stats seeded from session_stats (turn.db is
@@ -579,7 +675,11 @@ export async function startDiscordPlatform(
         "user",
         userMessageLabel,
         async () => {
-          const hitlReplyInSession = env.SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION !== "0";
+          const afterHitlQueued = afterHitlQueuedFor(env, sendHitlQueuedNotice, {
+            sessionId: msg.sessionId,
+            userId: msg.userId,
+            replyToMessageId: msg.id,
+          });
 
           const mcpLifecycle = mcpRuntime.trackInstanceIdle
             ? {
@@ -609,35 +709,15 @@ export async function startDiscordPlatform(
           // If streaming is enabled, post the placeholder ("…") BEFORE starting the
           // typing indicator. Discord cancels typing when a bot posts a message, so
           // posting the placeholder inside withTypingIndicator would kill the indicator.
-          let preStartedStreamHandle: import("@shoggoth/daemon/lib").StreamHandle | undefined;
-          if (streamEnabled()) {
-            const streamingOutbound = opts.discord.streamingForSession(msg.sessionId);
-            if (streamingOutbound) {
-              try {
-                const raw = await streamingOutbound.start();
-                // Wrap the raw stream handle with the status-bar sink so the bar
-                // applies to the in-flight message (mirrors the messaging_surface
-                // path below); delegates to any native setStatusBar on the handle.
-                if (statusBarDep.config.enabled) {
-                  statusBarDep.attachSink(raw as unknown as StreamHandle);
-                }
-                preStartedStreamHandle = {
-                  setFullContent: (text: string) => raw.setFullContent(text),
-                  pushUpdate: (text: string) => raw.pushUpdate(text),
-                  ...(raw.setStatusBar
-                    ? { setStatusBar: (line: string | null) => raw.setStatusBar!(line) }
-                    : {}),
-                  // Teardown pass-through: the abort path must be able to
-                  // finalize the underlying handle through this wrapper.
-                  ...(raw.close ? { close: () => raw.close!() } : {}),
-                };
-              } catch (e) {
-                opts.logger.warn("discord.platform.stream_start_failed", {
-                  err: String(e),
-                });
-              }
-            }
-          }
+          const preStartedStreamHandle = await startStreamHandleWithBar(
+            {
+              logger: opts.logger,
+              env,
+              statusBarDep,
+              streamingForSession: opts.discord.streamingForSession,
+            },
+            msg.sessionId,
+          );
 
           // Resolve the model once per inbound turn; both image options below
           // are derived from it.
@@ -713,16 +793,7 @@ export async function startDiscordPlatform(
                     hitlNotifier,
                     autoApprove: opts.hitlAutoApproveGate,
                     ...cruiseControlToolLoopHook(opts),
-                    ...(hitlReplyInSession
-                      ? {
-                          afterHitlQueued: (row: PendingActionRow) =>
-                            sendHitlQueuedNotice(row, {
-                              sessionId: msg.sessionId,
-                              userId: msg.userId,
-                              replyToMessageId: msg.id,
-                            }),
-                        }
-                      : {}),
+                    ...(afterHitlQueued ? { afterHitlQueued } : {}),
                   },
                   loopImpl,
                   createToolCallingClient: createToolClient,
@@ -772,19 +843,15 @@ export async function startDiscordPlatform(
         toolCount: mcpCtx.toolsLoop.length,
       });
       const userMetadata = input.userMetadata ?? {};
-      const hitlReplyInSession = env.SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION !== "0";
       const buildAfterHitlQueued = (delivery: {
         readonly userId: string;
         readonly replyToMessageId?: string;
       }) =>
-        hitlReplyInSession
-          ? (row: PendingActionRow) =>
-              sendHitlQueuedNotice(row, {
-                sessionId: sid,
-                userId: delivery.userId,
-                replyToMessageId: delivery.replyToMessageId,
-              })
-          : undefined;
+        afterHitlQueuedFor(env, sendHitlQueuedNotice, {
+          sessionId: sid,
+          userId: delivery.userId,
+          replyToMessageId: delivery.replyToMessageId,
+        });
 
       // One tracker for the messaging_surface turn: live and terminal bars are its
       // snapshots from the same renderer (only the phase emoji differs). Captures
@@ -950,44 +1017,25 @@ export async function startDiscordPlatform(
           (opts.configRef?.current ?? opts.config).platforms?.showThinking === false
             ? undefined
             : createThinkingOutput();
-        if (streamEnabled()) {
-          const streamingOutbound = opts.discord.streamingForSession(sid);
-          if (streamingOutbound) {
-            try {
-              const raw = await streamingOutbound.start();
-              // Wrap the raw stream handle with the status-bar sink so the bar
-              // can be applied to the in-flight message (test: raw handles carry
-              // setStatusBar). Delegates to any native setStatusBar on the handle.
-              if (statusBarDep.config.enabled) {
-                statusBarDep.attachSink(raw as unknown as StreamHandle);
-              }
-              surfaceStreamHandle = {
-                setFullContent: (text: string) => raw.setFullContent(text),
-                pushUpdate: (text: string) => raw.pushUpdate(text),
-                ...(raw.setStatusBar
-                  ? { setStatusBar: (line: string | null) => raw.setStatusBar!(line) }
-                  : {}),
-                // Teardown pass-through: the abort path must be able to
-                // finalize the underlying handle through this wrapper.
-                ...(raw.close ? { close: () => raw.close!() } : {}),
-              };
-              // Wire the tracker's live target; the tracker flushes its
-              // captured ⏳ line so the placeholder carries the bar from turn
-              // start (capture-fallback until this handle exists).
-              surfaceTracker?.attachSink({
-                setStatusBar: (line: string | null) =>
-                  surfaceStreamHandle?.setStatusBar
-                    ? surfaceStreamHandle.setStatusBar(line)
-                    : Promise.resolve(),
-              });
-            } catch (e) {
-              opts.logger.warn("discord.platform.stream_start_failed", {
-                err: String(e),
-                sessionId: sid,
-              });
-            }
-          }
-        }
+        surfaceStreamHandle = await startStreamHandleWithBar(
+          {
+            logger: opts.logger,
+            env,
+            statusBarDep,
+            streamingForSession: opts.discord.streamingForSession,
+          },
+          sid,
+          { withSessionId: true },
+        );
+        // Wire the tracker's live target; the tracker flushes its
+        // captured ⏳ line so the placeholder carries the bar from turn
+        // start (capture-fallback until this handle exists).
+        surfaceTracker?.attachSink({
+          setStatusBar: (line: string | null) =>
+            surfaceStreamHandle?.setStatusBar
+              ? surfaceStreamHandle.setStatusBar(line)
+              : Promise.resolve(),
+        });
         surfaceStreamPusher = surfaceStreamHandle
           ? createCoalescingStreamPusher((s) => surfaceStreamHandle!.pushUpdate(s), streamMinMs())
           : undefined;
@@ -1048,13 +1096,9 @@ export async function startDiscordPlatform(
             // ONE terminal composition: tracker finish() renders the frozen bar
             // (✅/🛑/❌) through the same renderer as the live bar; the terminal
             // snapshot carries this turn's real tool-call count.
-            const outcome =
-              turnResult.outcome === "aborted" ||
-              turnResult.outcome === "failed" ||
-              turnResult.outcome === "canceled"
-                ? turnResult.outcome
-                : "finished";
-            const barLine = surfaceTracker ? await surfaceTracker.finish(outcome) : undefined;
+            const barLine = surfaceTracker
+              ? await surfaceTracker.finish(terminalOutcomeOf(turnResult.outcome))
+              : undefined;
             if (surfaceStreamPusher && surfaceStreamHandle) {
               // Final streamed edit first — it renders only the live display re-spliced
               // with banners (never the terminal composition), so the in-flight message
@@ -1148,18 +1192,20 @@ export async function startDiscordPlatform(
         }
       }
       let internalAfterHitlQueued: ((row: PendingActionRow) => void | Promise<void>) | undefined;
-      if (sessionRow.parentSessionId && hitlReplyInSession) {
+      if (
+        sessionRow.parentSessionId &&
+        afterHitlQueuedFor(env, sendHitlQueuedNotice, { sessionId: sid })
+      ) {
         const parentRow = sessions.getById(sessionRow.parentSessionId);
         const parentChannelId = parentRow
           ? opts.discord.resolveOutboundChannelIdForSession?.(parentRow.id)
           : undefined;
         if (parentChannelId) {
           const ownerUserId = resolveDiscordOwnerUserId(configForOwnerGate());
-          internalAfterHitlQueued = (row: PendingActionRow) =>
-            sendHitlQueuedNotice(row, {
-              sessionId: sessionRow.parentSessionId!,
-              userId: ownerUserId ?? "system",
-            });
+          internalAfterHitlQueued = afterHitlQueuedFor(env, sendHitlQueuedNotice, {
+            sessionId: sessionRow.parentSessionId!,
+            userId: ownerUserId ?? "system",
+          });
         }
       }
 
@@ -1191,12 +1237,7 @@ export async function startDiscordPlatform(
       // edit carries the same terminal bar a normal turn would. The caller's
       // `oobTurnBanner.finish` clears the sink and edits the body afterwards.
       if (surfaceTracker) {
-        const outcome =
-          turnResult.outcome === "aborted" ||
-          turnResult.outcome === "failed" ||
-          turnResult.outcome === "canceled"
-            ? turnResult.outcome
-            : "finished";
+        const outcome = terminalOutcomeOf(turnResult.outcome);
         try {
           // Capture the rendered terminal bar line (the ONE terminal
           // composition) and attach it to the turn result so the caller can
