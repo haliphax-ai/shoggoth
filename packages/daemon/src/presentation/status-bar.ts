@@ -6,8 +6,61 @@ import { getSessionPrimaryModelRef } from "../sessions/model-resolution";
 import { getModelContextWindowTokens } from "../model-metadata";
 import type { ToolCallEvent } from "../sessions/tool-loop";
 import { getLogger } from "../logging";
+import {
+  invalidateStatusBarSources,
+  statusBarSourceVersions,
+  type StatusBarDataSource,
+  type StatusBarSourceVersions,
+} from "./status-bar-invalidations";
 
 const log = getLogger("status-bar");
+
+// --- Live-section change invalidation: mutations bump a per-source change
+// version (status-bar-invalidations); the poll below wakes active engines
+// after a change, and renders stay bound to each engine's own render cadence.
+
+/** How often the version poll wakes active engines to check for changes. */
+const INVALIDATE_WATCH_MS = 1000;
+
+const activeInvalidateSignals = new Set<() => void>();
+let invalidateWatchTimer: ReturnType<typeof setTimeout> | undefined;
+let lastWatchedVersions = statusBarSourceVersions();
+
+function invalidateWatchdog(): void {
+  invalidateWatchTimer = undefined;
+  const versions = statusBarSourceVersions();
+  let changed = false;
+  for (const source of Object.keys(versions) as StatusBarDataSource[]) {
+    if (versions[source] !== lastWatchedVersions[source]) {
+      lastWatchedVersions[source] = versions[source];
+      changed = true;
+    }
+  }
+  if (changed) {
+    for (const signal of activeInvalidateSignals) {
+      try {
+        signal();
+      } catch {
+        // A racing engine teardown must not kill the poll for the others.
+      }
+    }
+  }
+  if (activeInvalidateSignals.size > 0) {
+    invalidateWatchTimer = setTimeout(invalidateWatchdog, INVALIDATE_WATCH_MS);
+  }
+}
+
+/** Engines register a signal while live; the poll runs only while any exist. */
+function addInvalidateSignal(signal: () => void): void {
+  activeInvalidateSignals.add(signal);
+  if (invalidateWatchTimer === undefined) {
+    invalidateWatchTimer = setTimeout(invalidateWatchdog, INVALIDATE_WATCH_MS);
+  }
+}
+
+function removeInvalidateSignal(signal: () => void): void {
+  activeInvalidateSignals.delete(signal);
+}
 
 export type TurnStatusPhase =
   | "starting"
@@ -89,15 +142,15 @@ export interface TurnStatusBar {
   setCompactions(count: number): void;
   /** Marks the 🗑️ compaction overlay on/off while the turn keeps its phase. */
   setCompacting(active: boolean): void;
-  /** Live subagent count refresh (spawned/terminated mid-turn).
-   *  Ignored at render time when a `subagentsCount` provider is set — the
-   *  provider is the render-time source of truth. */
+  /** Live subagent count refresh (spawned/terminated mid-turn). Ignored at
+   *  render time when a `subagentsCount` provider is set — the provider wins
+   *  whenever its source's change version moves. */
   setSubagents(counts: { total: number; persistent: number }): void;
   /** Live timer count refresh (timers queued/cancelled mid-turn). */
   setTimers(count: number): void;
   /** Live exec-notify handle refresh (handles registered/resolved mid-turn).
    *  Ignored at render time when a `notifiesCount` provider is set — the
-   *  provider is the render-time source of truth. */
+   *  provider wins whenever its source's change version moves. */
   setNotifies(count: number): void;
   /** Terminal render (✅/🛑/❌); after this the bar is frozen and timers cleared. */
   finish(outcome: "finished" | "aborted" | "canceled" | "failed"): Promise<void>;
@@ -109,43 +162,46 @@ export function createTurnStatusBar(opts: {
   cfg: ResolvedStatusBarConfig;
   sink: StatusBarSink;
   render: StatusBarRenderer;
+  /** Poll cadence for the change-version check (default 1000 ms). */
+  invalidatePollMs?: number;
   /** Bar re-render cadence; default 1000 ms. */
   minIntervalMs?: number;
   now?: () => number;
   /**
-   * Live exec-notify count provider. When present, the notifies section is
-   * re-read from it on every render instead of using the seeded/cached
-   * `setNotifies` value — a handle that fires or is cancelled mid-turn is
-   * reflected immediately, so the terminal bar can never render a stale
-   * count. A provider throw (e.g. the DB closing during shutdown) falls
-   * back to the cache.
+   * Live exec-notify count provider. When present, the notifies section
+   * re-reads it only when the notifies change version moved since the last
+   * render (invalidate-on-change) instead of on every render — a handle that
+   * fires or is cancelled mid-turn still lands promptly, and the terminal
+   * bar can never render a stale count. A provider throw (e.g. the DB
+   * closing during shutdown) falls back to the cache.
    */
   notifiesCount?: () => number;
   /**
-   * Live subagent-count provider. When present, the subagents section is
-   * re-read from it on every render instead of the seeded/cached
-   * `setSubagents` value — a spawn, termination, or kill mid-turn is
-   * reflected immediately even when no push event fired. A provider throw
+   * Live subagent-count provider. When present, the subagents section
+   * re-reads it only when the subagents change version moved since the last
+   * render (invalidate-on-change) — a spawn, termination, or kill mid-turn
+   * still lands promptly even when no push event fired. A provider throw
    * falls back to the cache.
    */
   subagentsCount?: () => { total: number; persistent: number };
   /**
-   * Live timer-count provider. When present, the timers section is re-read
-   * from it on every render instead of the seeded/cached `setTimers` value —
-   * a timer that fires or is cancelled mid-turn is reflected immediately
-   * even when no push event fired. A provider throw falls back to the cache.
+   * Live timer-count provider. When present, the timers section re-reads it
+   * only when the timers change version moved since the last render
+   * (invalidate-on-change) — a timer that fires or is cancelled mid-turn
+   * still lands promptly even when no push event fired. A provider throw
+   * falls back to the cache.
    */
   timersCount?: () => number;
   /**
    * Live cruise-control activity provider. When present and true, the
    * snapshot carries `cruiseControl` so the platform renders the 🚗 section
-   * (reflected immediately when activated/deactivated mid-turn).
+   * (refreshed when the cruise change version moves).
    */
   cruiseControlActive?: () => boolean;
   /**
    * Live yolo-mode activity provider. When present and true, the snapshot
-   * carries `yoloMode` so the platform renders the 😎 section (reflected
-   * immediately when enabled/disabled mid-turn).
+   * carries `yoloMode` so the platform renders the 😎 section (refreshed
+   * when the yolo change version moves).
    */
   yoloModeActive?: () => boolean;
 }): TurnStatusBar {
@@ -153,6 +209,7 @@ export function createTurnStatusBar(opts: {
   const sink = opts.sink;
   const render = opts.render;
   const minIntervalMs = opts.minIntervalMs ?? 1000;
+  const invalidatePollMs = opts.invalidatePollMs ?? 1000;
   const now = opts.now ?? (() => Date.now());
 
   const allSectionsOff =
@@ -189,11 +246,71 @@ export function createTurnStatusBar(opts: {
   let startedAt = 0;
   let dirty = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  // Cached last-rendered live values (false = no active flag). When a
+  // provider exists, these are refreshed from the provider only when the
+  // source's change version moved — renders between changes are pure cache.
+  let cruiseControl = false;
+  let yoloMode = false;
+  // Per-source change versions at the last render. A version that did not
+  // move means the underlying data did not change and the render is pure cache.
+  let renderedVersions: StatusBarSourceVersions | undefined;
+  // Sources whose provider has been consulted at least once: the first render
+  // of each always goes to the provider (the pre-turn seeded value may be
+  // stale before the turn even starts).
+  const consultedOnce = new Set<StatusBarDataSource>();
+  // Set when the version poll observes a change; one setTimeout turn later the
+  // render fires, reads the fresh provider values into the cache, and clears it.
+  let invalidateTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function markInvalidateDirty() {
+    if (finished || dirty) return;
+    dirty = true;
+    if (invalidateTimer) return;
+    invalidateTimer = setTimeout(() => {
+      invalidateTimer = undefined;
+      if (dirty) scheduleRender();
+    }, invalidatePollMs);
+  }
+
+  // The version watchdog wakes this engine shortly after any source changes;
+  // the signal only arms the coalesced render (versionChanged does the rest).
+  const invalidateSignal = markInvalidateDirty;
+  addInvalidateSignal(invalidateSignal);
+
+  function versionChanged(source: StatusBarDataSource): boolean {
+    const versions = statusBarSourceVersions();
+    if (!consultedOnce.has(source)) {
+      // First render of this source: consult the provider once so the bar
+      // starts from DB truth rather than the possibly-stale pre-turn
+      // snapshot, then record the baseline.
+      consultedOnce.add(source);
+      renderedVersions = { ...(renderedVersions ?? versions), [source]: versions[source] };
+      return true;
+    }
+    if (versions[source] !== renderedVersions![source]) {
+      // Only the checked source's baseline moves: a second changed source in
+      // the same render must still be seen by its own check.
+      renderedVersions = { ...renderedVersions!, [source]: versions[source] };
+      return true;
+    }
+    return false;
+  }
+
+  function clearInvalidateTimer() {
+    if (invalidateTimer !== undefined) {
+      clearTimeout(invalidateTimer);
+      invalidateTimer = undefined;
+    }
+  }
 
   function snapshot(): StatusBarSnapshot {
-    const subagentsNow = effectiveSubagents();
-    const timersNow = effectiveTimers();
-    const notifiesNow = effectiveNotifies();
+    // Invalidate-on-change: each provider below is only re-consulted when its
+    // source's change version moved since the last render (refreshLive).
+    const subagentsNow = refreshLive("subagents", opts.subagentsCount, subagents);
+    const timersNow = refreshLive("timers", opts.timersCount, timers);
+    const notifiesNow = refreshLive("notifies", opts.notifiesCount, notifies);
+    cruiseControl = refreshLive("cruise", opts.cruiseControlActive, cruiseControl);
+    yoloMode = refreshLive("yolo", opts.yoloModeActive, yoloMode);
     return {
       phase,
       sequence,
@@ -207,79 +324,32 @@ export function createTurnStatusBar(opts: {
       ...(subagentsNow ? { subagents: subagentsNow } : {}),
       ...(timersNow !== undefined ? { timers: timersNow } : {}),
       ...(notifiesNow !== undefined ? { notifies: notifiesNow } : {}),
-      ...(effectiveCruiseControl() ? { cruiseControl: true } : {}),
-      ...(effectiveYoloMode() ? { yoloMode: true } : {}),
+      ...(cruiseControl ? { cruiseControl: true } : {}),
+      ...(yoloMode ? { yoloMode: true } : {}),
     };
   }
 
-  /** True while the cruise-control provider (when present) reports active. */
-  function effectiveCruiseControl(): boolean {
-    const provider = opts.cruiseControlActive;
-    if (!provider) return false;
-    try {
-      return provider();
-    } catch {
-      return false;
-    }
-  }
-
-  /** True while the yolo-mode provider (when present) reports active. */
-  function effectiveYoloMode(): boolean {
-    const provider = opts.yoloModeActive;
-    if (!provider) return false;
-    try {
-      return provider();
-    } catch {
-      return false;
-    }
-  }
-
   /**
-   * The counts the subagents section renders: the live provider when present
-   * (DB truth at render time — a spawn, termination, or kill mid-turn is
-   * reflected immediately, even without a push event), else the seeded/cached
-   * value. A provider throw falls back to the cache.
+   * Value a live section renders: re-reads `provider` only when `source`'s
+   * change version moved since the last render (invalidate-on-change);
+   * renders between changes are pure cache. A provider throw (e.g. the DB
+   * closing during shutdown) falls back to the cached value. No provider:
+   * the cached value (booleans start false).
    */
-  function effectiveSubagents(): { total: number; persistent: number } | undefined {
-    const provider = opts.subagentsCount;
-    if (!provider) return subagents;
-    try {
-      return provider();
-    } catch {
-      return subagents;
+  function refreshLive<T>(
+    source: StatusBarDataSource,
+    provider: (() => T) | undefined,
+    cached: T,
+  ): T {
+    if (!provider) return cached;
+    if (versionChanged(source)) {
+      try {
+        return provider();
+      } catch {
+        return cached;
+      }
     }
-  }
-
-  /**
-   * The count the timers section renders: the live provider when present
-   * (DB truth at render time — a timer that fires or is cancelled mid-turn
-   * is reflected immediately, even without a push event), else the
-   * seeded/cached value. A provider throw falls back to the cache.
-   */
-  function effectiveTimers(): number | undefined {
-    const provider = opts.timersCount;
-    if (!provider) return timers;
-    try {
-      return provider();
-    } catch {
-      return timers;
-    }
-  }
-
-  /**
-   * The count the notifies section renders: the live provider when present
-   * (DB truth at render time — a handle that fired or was cancelled mid-turn
-   * is reflected immediately), else the seeded/cached value. A provider
-   * throw (e.g. the DB closing during shutdown) falls back to the cache.
-   */
-  function effectiveNotifies(): number | undefined {
-    const provider = opts.notifiesCount;
-    if (!provider) return notifies;
-    try {
-      return provider();
-    } catch {
-      return notifies;
-    }
+    return cached;
   }
 
   async function doRender() {
@@ -294,6 +364,9 @@ export function createTurnStatusBar(opts: {
   function scheduleRender() {
     if (finished) return;
     dirty = true;
+    // Re-read of changed live sections is bound to this render's cadence; the
+    // version poll only guarantees the coalesced render happens (the poll
+    // cannot render directly — that would race the render timer).
     if (timer) return;
     timer = setTimeout(() => {
       timer = undefined;
@@ -325,6 +398,7 @@ export function createTurnStatusBar(opts: {
       totalTools = 0;
       last = undefined;
       phase = "starting";
+      renderedVersions = undefined;
       await doRender();
     },
 
@@ -397,18 +471,23 @@ export function createTurnStatusBar(opts: {
     setSubagents(counts) {
       if (finished) return;
       subagents = counts;
+      // A push is an invalidation too: the section's provider must be
+      // re-consulted on the next render so DB truth and the push agree.
+      invalidateStatusBarSources("subagents");
       scheduleRender();
     },
 
     setTimers(count) {
       if (finished) return;
       timers = count;
+      invalidateStatusBarSources("timers");
       scheduleRender();
     },
 
     setNotifies(count) {
       if (finished) return;
       notifies = count;
+      invalidateStatusBarSources("notifies");
       scheduleRender();
     },
 
@@ -422,6 +501,8 @@ export function createTurnStatusBar(opts: {
         clearTimeout(timer);
         timer = undefined;
       }
+      clearInvalidateTimer();
+      removeInvalidateSignal(invalidateSignal);
       await doRender();
     },
 
@@ -432,6 +513,8 @@ export function createTurnStatusBar(opts: {
         clearTimeout(timer);
         timer = undefined;
       }
+      clearInvalidateTimer();
+      removeInvalidateSignal(invalidateSignal);
     },
   };
 }
@@ -462,21 +545,25 @@ export interface StatusBarStats {
    * stats were collected for): the seeded `notifies` value is a snapshot
    * taken before the turn runs, so renders pull through this provider
    * instead — a handle that fires mid-turn must not leave a stale section on
-   * the bar. Absent in bare/test setups: the snapshot is used.
+   * the bar. Consulted only when the notifies change version moves
+   * (invalidate-on-change), not on every render. Absent in bare/test setups:
+   * the snapshot is used.
    */
   readonly liveNotifies?: () => number;
   /**
    * Live provider for the timer count (bound to the same session): the
    * seeded `timers` value is a pre-turn snapshot, so renders pull through
    * this provider instead — a timer queued, cancelled, or fired mid-turn
-   * must not leave a stale section on the bar.
+   * must not leave a stale section on the bar. Consulted only when the
+   * timers change version moves (invalidate-on-change).
    */
   readonly liveTimers?: () => number;
   /**
    * Live provider for the subagent counts (bound to the same session): the
    * seeded `subagents` value is a pre-turn snapshot, so renders pull through
    * this provider instead — a spawn, termination, or kill mid-turn must not
-   * leave a stale section on the bar.
+   * leave a stale section on the bar. Consulted only when the subagents
+   * change version moves (invalidate-on-change).
    */
   readonly liveSubagents?: () => { total: number; persistent: number };
 }
@@ -537,8 +624,8 @@ export function getStatusBarStats(db: Database.Database, sessionId: string): Sta
   const subagents = getSessionSubagentCounts(db, sessionId);
   const timers = getSessionActiveTimerCount(db, sessionId);
   const notifies = getSessionActiveNotifyCount(db, sessionId);
-  // Renders pull these counts live through closures (the seeded values are
-  // pre-turn snapshots and go stale the moment they change mid-turn).
+  // Live providers below: consulted only when the source's change version
+  // moved (invalidate-on-change) — renders between changes are pure cache.
   const liveNotifies = (): number => getSessionActiveNotifyCount(db, sessionId);
   const liveTimers = (): number => getSessionActiveTimerCount(db, sessionId);
   const liveSubagents = (): { total: number; persistent: number } =>
@@ -662,26 +749,32 @@ export function createStatusBarTurnTracker(opts: {
   minIntervalMs?: number;
   /**
    * Overrides the live notify-count provider (defaults to the collected
-   * stats' bound `liveNotifies` closure when present).
+   * stats' bound `liveNotifies` closure when present). Consulted only when
+   * the notifies change version moves.
    */
   notifiesCount?: () => number;
   /**
    * Overrides the live timer-count provider (defaults to the collected
-   * stats' bound `liveTimers` closure when present).
+   * stats' bound `liveTimers` closure when present). Consulted only when
+   * the timers change version moves.
    */
   timersCount?: () => number;
   /**
    * Overrides the live subagent-count provider (defaults to the collected
-   * stats' bound `liveSubagents` closure when present).
+   * stats' bound `liveSubagents` closure when present). Consulted only when
+   * the subagents change version moves.
    */
   subagentsCount?: () => { total: number; persistent: number };
   /**
-   * Live cruise-control activity provider — re-read on every render so an
-   * activation/deactivation mid-turn is reflected immediately.
+   * Live cruise-control activity provider — re-read only when the cruise
+   * change version moves so an activation/deactivation mid-turn is
+   * reflected promptly without re-reading on every render.
    */
   cruiseControlActive?: () => boolean;
-  /** Live yolo-mode activity provider — re-read on every render so an
-   * enable/disable mid-turn is reflected immediately.
+  /**
+   * Live yolo-mode activity provider — re-read only when the yolo change
+   * version moves so an enable/disable mid-turn is reflected promptly
+   * without re-reading on every render.
    */
   yoloModeActive?: () => boolean;
 }): TurnStatusBarTracker {

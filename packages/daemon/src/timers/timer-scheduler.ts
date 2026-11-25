@@ -5,6 +5,7 @@
 import type Database from "better-sqlite3";
 import { TimerHeap, type TimerEntry } from "./timer-heap";
 import { getLogger } from "../logging";
+import { invalidateStatusBarSources } from "../presentation/status-bar-invalidations";
 
 const log = getLogger("timer-scheduler");
 
@@ -55,6 +56,7 @@ export class TimerScheduler {
       timer.message,
       timer.sessionAnchor ?? null,
     );
+    invalidateStatusBarSources("timers");
 
     let buf = this.pendingTimers.get(timer.sessionId);
     if (!buf) {
@@ -119,6 +121,7 @@ export class TimerScheduler {
       }
     }
     db.prepare("UPDATE timers SET fired = 1 WHERE id = ?").run(id);
+    invalidateStatusBarSources("timers");
     if (removed) {
       this.reschedule();
     }
@@ -230,6 +233,7 @@ export class TimerScheduler {
   private async fireTimer(db: Database.Database, entry: TimerEntry): Promise<void> {
     try {
       db.prepare("UPDATE timers SET fired = 1 WHERE id = ?").run(entry.id);
+      invalidateStatusBarSources("timers");
       this.inFlight.add(entry.id);
       try {
         await this.deliver(entry);

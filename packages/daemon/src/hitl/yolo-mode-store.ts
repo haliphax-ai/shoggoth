@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { invalidateStatusBarSources } from "../presentation/status-bar-invalidations";
 
 /**
  * Yolo mode: a flag stamped on a session for its lifetime (persisted, no
@@ -20,6 +21,7 @@ export function createYoloModeStore(db: Database.Database) {
     },
 
     setEnabled(sessionId: string, enabled: boolean): void {
+      invalidateStatusBarSources("yolo");
       if (enabled) {
         db.prepare(
           `INSERT INTO session_yolo_mode (session_id, enabled, updated_at)

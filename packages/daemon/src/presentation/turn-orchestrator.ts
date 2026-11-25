@@ -136,13 +136,15 @@ export interface PresentationTurnOrchestratorDeps {
       readonly liveSubagents?: () => { total: number; persistent: number };
     };
     /**
-     * Live cruise-control activity provider — re-read on every render so an
-     * activation/deactivation mid-turn is reflected immediately.
+     * Live cruise-control activity provider — re-read only when the cruise
+     * change version moves, so an activation/deactivation mid-turn is
+     * reflected promptly without re-reading on every render.
      */
     readonly cruiseControlActive?: (sessionId: string) => boolean;
     /**
-     * Live yolo-mode activity provider — re-read on every render so an
-     * enable/disable mid-turn is reflected immediately.
+     * Live yolo-mode activity provider — re-read only when the yolo change
+     * version moves, so an enable/disable mid-turn is reflected promptly
+     * without re-reading on every render.
      */
     readonly yoloModeActive?: (sessionId: string) => boolean;
   };

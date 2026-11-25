@@ -62,6 +62,7 @@ import type {
   NoticeResolver,
   DaemonPendingActionsStack,
 } from "./daemon-types";
+import { invalidateStatusBarSources, statusBarSourceVersions } from "@shoggoth/daemon/lib";
 import type { HitlAutoApproveGate } from "@shoggoth/shared";
 import type { PendingActionsStore } from "@shoggoth/daemon/lib";
 import { notice } from "./notices";
@@ -122,9 +123,10 @@ export function buildStatusBarDep(
     // Pre-turn stats for seeding the bar (sequence / compactions / context
     // window fill) — sourced daemon-side; the platform only wires them in.
     stats: (sessionId: string) => getStatusBarStats(db, sessionId),
-    // Live cruise-control activity provider — re-read on every render.
+    // Live activity providers — invalidate-on-change: the engine re-reads
+    // each only when its source's change version moves (zero DB reads on
+    // steady-state renders).
     ...(cruiseControlActive ? { cruiseControlActive } : {}),
-    // Live yolo-mode activity provider — re-read on every render.
     ...(yoloModeActive ? { yoloModeActive } : {}),
   };
 }
@@ -247,19 +249,31 @@ export async function startDiscordPlatform(
   const hitlStack = opts.hitlPending ?? createHitlPendingResolutionStack(opts.db);
   const { pending, waitForHitlResolution } = hitlStack;
   const yoloMode = createYoloModeStore(opts.db);
+  // Last-read yolo state per session, keyed alongside yoloVersionAtLastRead.
+  const yoloReadCache = new Map<string, boolean>();
   // The daemon-supplied store carries the full resolution surface; the platform
   // only depends on the minimal view above. Adapter to the tool-loop contract so
   // a daemon-side removal of a resolution method fails the typecheck here.
   const pendingForToolLoop = pending as unknown as PendingActionsStore;
 
   // A state DB that has not run the yolo migration yet must not break a turn:
-  // the flag simply reads as off.
+  // the flag simply reads as off. The provider re-reads only on a version
+  // change (pure cache between changes — no steady-state SQLite access).
+  const yoloVersionAtLastRead = new Map<string, number>();
   const yoloActive = (sessionId: string): boolean => {
-    try {
-      return yoloMode.isEnabled(sessionId);
-    } catch {
-      return false;
+    const version = statusBarSourceVersions().yolo;
+    if (yoloVersionAtLastRead.get(sessionId) === version) {
+      return yoloReadCache.get(sessionId) ?? false;
     }
+    let enabled = false;
+    try {
+      enabled = yoloMode.isEnabled(sessionId);
+    } catch {
+      enabled = false;
+    }
+    yoloReadCache.set(sessionId, enabled);
+    yoloVersionAtLastRead.set(sessionId, version);
+    return enabled;
   };
 
   /** Spread into a status-bar tracker creation to render the 😎 section. */
@@ -876,11 +890,21 @@ export async function startDiscordPlatform(
                   onCompaction: () => surfaceTracker?.onCompaction?.(),
                   onCompactionFailed: () => surfaceTracker?.onCompactionFailed?.(),
                   onContextUpdate: (update) => surfaceTracker?.onContextUpdate?.(update),
-                  // Count-change events: keep the 🕵️/⏰/↩️ sections live on this path
-                  // (render-time providers backstop changes that fire without an event).
-                  onSubagentsChanged: (counts) => surfaceTracker?.onSubagentsChanged?.(counts),
-                  onTimersChanged: (count) => surfaceTracker?.onTimersChanged?.(count),
-                  onNotifiesChanged: (count) => surfaceTracker?.onNotifiesChanged?.(count),
+                  // Count-change events: keep the 🕵️/⏰/↩️ sections live on this
+                  // path — bumps re-arm the version poll; tracker pushes keep
+                  // the cache fresh without waiting for it.
+                  onSubagentsChanged: (counts) => {
+                    invalidateStatusBarSources("subagents");
+                    surfaceTracker?.onSubagentsChanged?.(counts);
+                  },
+                  onTimersChanged: (count) => {
+                    invalidateStatusBarSources("timers");
+                    surfaceTracker?.onTimersChanged?.(count);
+                  },
+                  onNotifiesChanged: (count) => {
+                    invalidateStatusBarSources("notifies");
+                    surfaceTracker?.onNotifiesChanged?.(count);
+                  },
                   // Abort while the model call may still stream or hang: stop the
                   // producers immediately — post-turn delivery never runs for a
                   // promise that never settles. finish("aborted") freezes the 🛑 render.

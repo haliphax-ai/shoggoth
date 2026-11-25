@@ -8,6 +8,7 @@ import {
   generateSystemContextToken,
   type ContextLevel,
 } from "@shoggoth/shared";
+import { invalidateStatusBarSources } from "../presentation/status-bar-invalidations";
 
 export type SessionStatus = "starting" | "active" | "terminated" | string;
 
@@ -282,6 +283,9 @@ function getSessionRow(stmt: Database.Statement, id: string): SessionRow | undef
 
 function createSessionRow(stmt: Database.Statement, input: CreateSessionInput): void {
   validateCreateInput(input);
+  // The status bar's live subagent counts are cached between renders and
+  // refreshed only when the subagents change version moves.
+  invalidateStatusBarSources("subagents");
   stmt.run({
     id: input.id,
     agent_id: input.subagentId ?? null,
@@ -438,6 +442,9 @@ function updateSessionRow(
     ...keptSubagentLinks(cur, patch),
   };
   updateStmt.run({ id, ...runParams });
+  // The status bar's live subagent counts are cached between renders and
+  // refreshed only when the subagents change version moves.
+  invalidateStatusBarSources("subagents");
 }
 
 function listSessionRows(
