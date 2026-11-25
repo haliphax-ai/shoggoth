@@ -273,7 +273,7 @@ describe("runToolLoop", () => {
           }),
         autoApprove: {
           enableSessionTool: () => {},
-          enableAgentTool: () => {},
+          enableAgentTool: async () => {},
           shouldAutoApprove: () => true,
         },
       },

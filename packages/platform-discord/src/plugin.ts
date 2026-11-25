@@ -6,7 +6,6 @@ import {
   defineMessagingPlatformPlugin,
   type MessagingPlatformPlugin,
   type PlatformStartCtx,
-  type PlatformDeps,
   type PlatformDeliveryResolver,
 } from "@shoggoth/plugins";
 import { modelEntriesFromRecord, modelProvidersToEntries } from "@shoggoth/shared";
@@ -27,7 +26,11 @@ import {
   resolveEffectiveDiscordRoutes,
   resolveDiscordOwnerUserId,
 } from "./config";
-import { resolveSessionIdForRoutes, type DiscordThreadCreateEvent } from "./adapter";
+import {
+  resolveSessionIdForRoutes,
+  type DiscordThreadCreateEvent,
+  type DiscordReactionAddEvent,
+} from "./adapter";
 import {
   createActionToolDispatcher,
   type MessageToolDeps,
@@ -38,15 +41,16 @@ import {
 import { toolReadBinary } from "@shoggoth/os-exec";
 import { mdTableToAscii } from "./table-formatter.js";
 import type Database from "better-sqlite3";
+import type {
+  DaemonPendingActionsStore,
+  DaemonPendingActionsStack,
+  DaemonPolicyEngine,
+  DaemonSubagentRuntimeExtension,
+} from "./daemon-types";
+import type { SubagentRuntimeExtension, MessageToolContext } from "@shoggoth/shared";
 
-/** Reaction event shape (matches adapter's DiscordReactionAddEvent). */
-interface ReactionAddEvent {
-  userId: string;
-  channelId: string;
-  messageId: string;
-  guildId?: string;
-  emoji: { name?: string; id?: string };
-}
+/** Canonical adapter shape for gateway reaction events. */
+type ReactionAddEvent = DiscordReactionAddEvent;
 
 /** State held across the plugin's lifecycle. */
 interface DiscordPluginState {
@@ -133,7 +137,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           setMessageToolContext,
           setPlatformAdapter,
         } = ctx as PlatformStartCtx;
-        const platformDeps = deps as PlatformDeps;
+        const platformDeps = deps;
 
         // Plugin reads its own bot token from config
         state.getToken = () => resolveDiscordBotToken(configRef.current);
@@ -261,7 +265,9 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
               return resolveDiscordCommandGuildIds(configRef.current);
             },
             logger,
-            abortSession: abortSession as any,
+            // The interaction layer may abort with no session selected; the daemon
+            // implementation treats a blank id the same way.
+            abortSession: (sessionId) => abortSession(sessionId ?? ""),
             invokeControlOp,
             getModelsConfig: async () => {
               const cfg = configRef.current;
@@ -309,19 +315,19 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           }),
           onMessageReactionAdd:
             hitlStack && hitlDiscordNoticeRegistry && hitlAutoApproveGate
-              ? async (ev: any) => {
+              ? async (ev: DiscordReactionAddEvent) => {
                   const consumed = await handleDiscordHitlReactionAdd({
                     ev,
-                    pending: hitlStack.pending as any,
+                    pending: hitlStack.pending as DaemonPendingActionsStore,
                     registry: hitlDiscordNoticeRegistry,
-                    autoApprove: hitlAutoApproveGate as any,
+                    autoApprove: hitlAutoApproveGate,
                     ownerUserId: resolveDiscordOwnerUserId(configRef.current),
                     botUserIdRef: state.reactionBotUserIdRef,
                     logger: logger.child?.({ component: "reactions" }) ?? logger,
                   });
                   if (!consumed) state.reactionPassthroughRef.current?.(ev);
                 }
-              : (ev: any) => {
+              : (ev: DiscordReactionAddEvent) => {
                   state.reactionPassthroughRef.current?.(ev);
                 },
           reactionBotUserIdRef: state.reactionBotUserIdRef,
@@ -349,11 +355,11 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           db: db as Database.Database,
           config: configRef.current,
           configRef,
-          policyEngine: policyEngine as any,
+          policyEngine: policyEngine as DaemonPolicyEngine,
           hitlConfigRef: platformDeps.hitlConfigRef,
-          hitlPending: hitlStack as any,
+          hitlPending: hitlStack as DaemonPendingActionsStack,
           hitlDiscordNoticeRegistry,
-          hitlAutoApproveGate: hitlAutoApproveGate as any,
+          hitlAutoApproveGate,
           cruiseControl: platformDeps.cruiseControl,
           noticeResolver,
           logger,
@@ -430,7 +436,7 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
         };
 
         // Set subagent runtime extension
-        const subagentExt = {
+        const subagentExt: DaemonSubagentRuntimeExtension = {
           runSessionModelTurn: discordPlatform.runSessionModelTurn,
           subscribeSubagentSession: discordPlatform.subscribeSubagentSession,
           registerPlatformThreadBinding: discordMessaging.registerPlatformThreadBinding,
@@ -459,7 +465,11 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           },
           oobTurnBanner: discordPlatform.oobTurnBanner,
         };
-        setSubagentRuntimeExtension(subagentExt as any);
+        // Single checkable boundary: the concrete platform object must carry the
+        // daemon-required surface before the loose shared contract accepts it.
+        setSubagentRuntimeExtension(
+          subagentExt satisfies DaemonSubagentRuntimeExtension as SubagentRuntimeExtension,
+        );
 
         // Build message tool deps, confirming every action-specific dep group the
         // enabled capability extensions imply is wired — at construction time,
@@ -539,9 +549,14 @@ export default function createDiscordPlugin(): MessagingPlatformPlugin {
           },
         };
         const dispatchMessageTool = createActionToolDispatcher(messageToolDeps);
-        const msgCtx = {
+        const msgCtx: MessageToolContext = {
           slice: discordMessaging.capabilities.extensions as unknown as Record<string, boolean>,
-          execute: (sessionId: string, args: any) => dispatchMessageTool(sessionId, args),
+          execute: (sessionId, args) => {
+            if (typeof args !== "object" || args === null || Array.isArray(args)) {
+              throw new Error("message tool args must be a JSON object");
+            }
+            return dispatchMessageTool(sessionId, args as Record<string, unknown>);
+          },
         };
         setMessageToolContext(msgCtx);
 

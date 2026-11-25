@@ -1,7 +1,8 @@
 import type { DiscordReactionAddEvent } from "../adapter";
 import { parseAgentSessionUrn } from "@shoggoth/shared";
 import type { Logger } from "../daemon-types";
-import type { PendingActionsStore, HitlAutoApproveGate } from "../daemon-types";
+import type { PendingActionsStore } from "../daemon-types";
+import type { HitlAutoApproveGate } from "@shoggoth/shared";
 import type { HitlDiscordNoticeRegistry } from "./notice-registry";
 
 const RESOLVER = "discord:owner:reaction";

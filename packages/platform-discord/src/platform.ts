@@ -41,7 +41,6 @@ import {
   formatAdhocReactionEventContext,
   PresentationTurnOrchestrator,
   type TieredTurnQueue,
-  type HitlPendingStack,
   type PolicyEngine,
   type HitlConfigRef,
   type ExecuteSessionAgentTurnInput,
@@ -60,9 +59,11 @@ import type {
   HitlNotifier,
   PendingActionRow,
   Logger,
-  HitlAutoApproveGate,
   NoticeResolver,
+  DaemonPendingActionsStack,
 } from "./daemon-types";
+import type { HitlAutoApproveGate } from "@shoggoth/shared";
+import type { PendingActionsStore } from "@shoggoth/daemon/lib";
 import { notice } from "./notices";
 import type { DiscordMessagingRuntime } from "./bridge";
 import { mergeOrchestratorEnv, resolveDiscordOwnerUserId, resolveReactionConfig } from "./config";
@@ -171,7 +172,7 @@ export interface DiscordPlatformOptions {
   readonly config: ShoggothConfig;
   readonly policyEngine?: PolicyEngine;
   readonly hitlConfigRef?: HitlConfigRef;
-  readonly hitlPending?: HitlPendingStack;
+  readonly hitlPending?: DaemonPendingActionsStack;
   readonly logger: Logger;
   readonly discord: DiscordMessagingRuntime;
   readonly configRef?: { current: ShoggothConfig };
@@ -246,6 +247,11 @@ export async function startDiscordPlatform(
   const hitlStack = opts.hitlPending ?? createHitlPendingResolutionStack(opts.db);
   const { pending, waitForHitlResolution } = hitlStack;
   const yoloMode = createYoloModeStore(opts.db);
+  // The daemon-supplied store carries the full resolution surface; the platform
+  // only depends on the minimal view above. Adapter to the tool-loop contract so
+  // a daemon-side removal of a resolution method fails the typecheck here.
+  const pendingForToolLoop = pending as unknown as PendingActionsStore;
+
   // A state DB that has not run the yolo migration yet must not break a turn:
   // the flag simply reads as off.
   const yoloActive = (sessionId: string): boolean => {
@@ -406,14 +412,14 @@ export async function startDiscordPlatform(
           applySessionContextSegmentNew({
             db: opts.db,
             sessions,
-            pending,
+            pending: pendingForToolLoop,
             sessionId: msg.sessionId,
           });
         } else {
           applySessionContextSegmentReset({
             db: opts.db,
             sessions,
-            pending,
+            pending: pendingForToolLoop,
             sessionId: msg.sessionId,
           });
         }
@@ -686,7 +692,7 @@ export async function startDiscordPlatform(
                   hitl: {
                     bypassUpTo: resolveSessionBypassUpTo(msg.sessionId, opts.config),
                     yoloActive,
-                    pending,
+                    pending: pendingForToolLoop,
                     clock: { nowMs: () => Date.now() },
                     newPendingId: () => randomUUID(),
                     waitForHitlResolution,
@@ -833,7 +839,7 @@ export async function startDiscordPlatform(
           hitl: {
             bypassUpTo: resolveSessionBypassUpTo(sid, opts.config),
             yoloActive,
-            pending,
+            pending: pendingForToolLoop,
             clock: { nowMs: () => Date.now() },
             newPendingId: () => randomUUID(),
             waitForHitlResolution,
