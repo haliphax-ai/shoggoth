@@ -217,10 +217,30 @@ export async function connectDiscordGateway(
 
     return new Promise<void>((resolve, reject) => {
       let handshakeComplete = false;
-      const handshakeTimeout = setTimeout(() => {
+      // Per-connection gate: whichever failure path fires first (timeout,
+      // error, or close) consumes the one reconnect attempt for this socket.
+      let reconnectScheduled = false;
+
+      function handleConnectionLost(reason: string): void {
+        clearHeartbeat();
         if (!handshakeComplete) {
           handshakeComplete = true;
-          reject(new Error("Discord gateway HELLO/READY timeout"));
+          clearTimeout(handshakeTimeout);
+          reject(new Error(reason));
+        }
+        if (!reconnectScheduled) {
+          reconnectScheduled = true;
+          if (!intentionallyStopped) {
+            scheduleReconnect(reason);
+          } else {
+            resolveSessionDone?.();
+          }
+        }
+      }
+
+      const handshakeTimeout = setTimeout(() => {
+        if (!handshakeComplete) {
+          handleConnectionLost("Discord gateway HELLO/READY timeout");
           closeSocket(4000, "timeout");
         }
       }, 30_000);
@@ -243,32 +263,17 @@ export async function connectDiscordGateway(
 
       socket.addEventListener("error", () => {
         if (!handshakeComplete) {
-          handshakeComplete = true;
-          clearTimeout(handshakeTimeout);
-          reject(new Error("Discord gateway WebSocket error"));
+          handleConnectionLost("Discord gateway WebSocket error");
         }
-        // Post-handshake errors will trigger the close event.
+        // Post-handshake errors will trigger the close event; if the close
+        // event also fires for the same socket, the gate above prevents a
+        // second schedule for one failure.
       });
-
-      let reconnectScheduled = false;
 
       socket.addEventListener(
         "close",
         () => {
-          clearHeartbeat();
-          if (!handshakeComplete) {
-            handshakeComplete = true;
-            clearTimeout(handshakeTimeout);
-            reject(new Error("Discord gateway WebSocket closed during handshake"));
-          }
-          if (!reconnectScheduled) {
-            reconnectScheduled = true;
-            if (!intentionallyStopped) {
-              scheduleReconnect();
-            } else {
-              resolveSessionDone?.();
-            }
-          }
+          handleConnectionLost("Discord gateway WebSocket closed");
         },
         { once: true },
       );
@@ -342,29 +347,21 @@ export async function connectDiscordGateway(
     });
   }
 
-  function scheduleReconnect(): void {
+  function scheduleReconnect(reason: string): void {
     if (reconnectPending) return;
     reconnectPending = true;
     if (intentionallyStopped) {
       resolveSessionDone?.();
       return;
     }
-    if (consecutiveReconnects >= MAX_RECONNECT_ATTEMPTS) {
-      log.error("exhausted reconnect attempts, giving up", {
-        maxAttempts: MAX_RECONNECT_ATTEMPTS,
-      });
-      resolveSessionDone?.();
-      return;
-    }
     const delay = backoffMs(consecutiveReconnects);
-    consecutiveReconnects++;
-    const attempt = consecutiveReconnects;
     const canResume = !!(sessionId && lastSeq !== null);
     log.info("scheduling reconnect", {
-      attempt,
+      attempt: consecutiveReconnects + 1,
       maxAttempts: MAX_RECONNECT_ATTEMPTS,
       delayMs: delay,
       resume: canResume,
+      reason,
     });
     const reconnectTimer = setTimeout(() => {
       reconnectPending = false;
@@ -372,10 +369,19 @@ export async function connectDiscordGateway(
         resolveSessionDone?.();
         return;
       }
+      if (consecutiveReconnects >= MAX_RECONNECT_ATTEMPTS) {
+        log.error("exhausted reconnect attempts, giving up", {
+          maxAttempts: MAX_RECONNECT_ATTEMPTS,
+        });
+        resolveSessionDone?.();
+        return;
+      }
+      // The budget is consumed once per actual connection attempt, not per
+      // scheduling path; a failure is reported once via the per-connection
+      // gate in openConnection.
+      consecutiveReconnects++;
       openConnection(canResume).catch((err) => {
-        log.error("reconnect attempt failed", { attempt, error: String(err) });
-        // close event may not fire after a connection-level error; schedule next attempt directly.
-        scheduleReconnect();
+        log.error("reconnect attempt failed", { error: String(err) });
       });
     }, delay);
     unrefTimer(reconnectTimer);
