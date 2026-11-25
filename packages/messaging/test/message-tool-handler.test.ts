@@ -526,7 +526,7 @@ describe("executeMessageToolAction", () => {
     const transport = mockTransport({
       async createMessage(ch, body) {
         assert.equal(ch, "ch1");
-        assert.equal(body.content, "Pick one:\n\nReact to choose:\n👍 Approve\n👎 Reject");
+        assert.equal(body.content, "Pick one:\n\nReact to choose:\n- 👍 Approve\n- 👎 Reject");
         return { id: "m1" };
       },
       async createMessageReaction(ch, mid, emoji) {
