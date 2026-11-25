@@ -20,6 +20,7 @@ import {
   type FailoverChainEntry,
   type ProviderConfig,
 } from "./model-select";
+import { MESSAGES } from "./messages";
 
 /** The set of slash commands Shoggoth registers (guild-scoped). */
 const SLASH_COMMANDS = [
@@ -395,9 +396,7 @@ type PromptListEntry = { slug: string; placeholders?: readonly string[] };
 type PromptReplyStyle = "direct-response" | "inline-update";
 
 /** The unbound-channel warning text shared by every session-resolution guard. */
-const PROVIDER_MODEL_WARNING = "⚠️ No session bound to this channel. Provide a session_id.";
-/** Title of the shared free-text "Enter Model" modal. */
-const PROVIDER_MODEL_MODAL_TITLE = "Enter Model";
+const UNBOUND_SESSION_WARNING = MESSAGES.unboundSessionWarning;
 
 /**
  * Transport body types only declare `content`/`flags`, but Discord's
@@ -426,7 +425,7 @@ async function resolveSessionOrRespond(
   if (payload.session_id) return payload.session_id as string;
   const resolved = deps.resolveSessionForChannel?.(channelId, guildId);
   if (resolved) return resolved;
-  await warn(PROVIDER_MODEL_WARNING);
+  await warn(UNBOUND_SESSION_WARNING);
   return undefined;
 }
 
@@ -454,7 +453,7 @@ function buildEnterModelModal(): {
   ];
 } {
   return {
-    title: PROVIDER_MODEL_MODAL_TITLE,
+    title: MESSAGES.enterModelModalTitle,
     custom_id: encodeModelSelectCustomId("custom_modal"),
     components: [
       {
@@ -494,9 +493,9 @@ async function setSessionModel(
     });
     content = res.ok
       ? `✅ Model set to \`${model}\``
-      : `⚠️ Failed to set model: ${res.error ?? "unknown error"}`;
+      : MESSAGES.failedSetModel(res.error ?? "unknown error");
   } catch (err) {
-    content = `⚠️ Failed to set model: ${String(err)}`;
+    content = MESSAGES.failedSetModel(String(err));
   }
   await callback(content);
 }
@@ -625,7 +624,7 @@ async function runPromptProxy(
     const res = await invoke();
     if (res instanceof Error || !res.ok) {
       await edit(
-        `⚠️ Prompt failed: ${res instanceof Error ? res.message : (res.error ?? "unknown error")}`,
+        MESSAGES.failedPrompt(res instanceof Error ? res.message : (res.error ?? "unknown error")),
       );
       return;
     }
@@ -641,7 +640,7 @@ async function runPromptProxy(
   const res = await invoke();
   const content =
     res instanceof Error || !res.ok
-      ? `⚠️ Prompt failed: ${res instanceof Error ? res.message : (res.error ?? "unknown error")}`
+      ? MESSAGES.failedPrompt(res instanceof Error ? res.message : (res.error ?? "unknown error"))
       : submitted;
   await deps.transport.interactionCallback(interactionId, interactionToken, {
     type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
@@ -676,7 +675,7 @@ async function respondWithPromptParameterModal(
           ? INTERACTION_RESPONSE_UPDATE_MESSAGE
           : INTERACTION_RESPONSE_CHANNEL_MESSAGE,
       data: {
-        content: `⚠️ Prompt \`${slug}\` has ${placeholders.length} parameters; Discord modals support at most 5.`,
+        content: MESSAGES.promptTooManyParameters(slug, placeholders.length),
         components: [],
         ...(guardStyle === "ephemeral-channel" ? { flags: 64 } : {}),
       },
@@ -968,7 +967,7 @@ async function requireSession(
     deps,
     parsed.interactionId,
     parsed.interactionToken,
-    PROVIDER_MODEL_WARNING,
+    UNBOUND_SESSION_WARNING,
     flags,
   );
   return null;
@@ -1009,7 +1008,7 @@ async function invokeOpAndRespond(
       deps,
       parsed.interactionId,
       parsed.interactionToken,
-      `⚠️ \`${controlOp.op}\` failed: ${String(err)}`,
+      MESSAGES.failedOp(controlOp.op, String(err)),
     );
   }
 }
@@ -1057,13 +1056,13 @@ async function handleSessionKill(ctx: SlashCommandContext): Promise<void> {
     } else if (res.error && res.error.includes("top-level agent session")) {
       content = `🔒 Close refused: \`${payload.session_id}\` is a top-level agent session. \`/close\` reaps subagent sessions only.`;
     } else {
-      content = `⚠️ Close failed: ${res.error ?? "unknown error"}`;
+      content = MESSAGES.failedClose(res.error ?? "unknown error");
     }
   } catch (err) {
     const msg = String(err);
     content = msg.includes("top-level agent session")
       ? `🔒 Close refused: \`${payload.session_id}\` is a top-level agent session. \`/close\` reaps subagent sessions only.`
-      : `⚠️ Close failed: ${msg}`;
+      : MESSAGES.failedClose(msg);
   }
   await respondChannelMessage(deps, interactionId, interactionToken, content);
 }
@@ -1086,9 +1085,9 @@ async function handleSessionSteer(ctx: SlashCommandContext): Promise<void> {
     const res = await deps.invokeControlOp("session_steer", payload);
     steerContent = res.ok
       ? `✅ Steering prompt submitted to session \`${payload.session_id}\`.`
-      : `⚠️ Steer failed: ${res.error ?? "unknown error"}`;
+      : MESSAGES.failedSteer(res.error ?? "unknown error");
   } catch (err) {
-    steerContent = `⚠️ Steer failed: ${String(err)}`;
+    steerContent = MESSAGES.failedSteer(String(err));
   }
   try {
     await respondChannelMessage(deps, interactionId, interactionToken, steerContent, 64);
@@ -1175,9 +1174,9 @@ async function handleCruiseToggle(ctx: SlashCommandContext, sessionId: string): 
     });
     content = res.ok
       ? `🚗 Cruise control deactivated for \`${sessionId}\`.`
-      : `⚠️ Failed to deactivate cruise control: ${res.error ?? "unknown error"}`;
+      : MESSAGES.failedDeactivateCruise(res.error ?? "unknown error");
   } catch (err) {
-    content = `⚠️ Failed to deactivate cruise control: ${String(err)}`;
+    content = MESSAGES.failedDeactivateCruise(String(err));
   }
   await respondChannelMessage(deps, interactionId, interactionToken, content);
 }
@@ -1222,9 +1221,9 @@ async function handleCruiseWithGuidance(
       await reportCruiseActivation(ctx, sessionId, escalate, res.result);
       return;
     }
-    content = `⚠️ Failed to activate cruise control: ${res.error ?? "unknown error"}`;
+    content = MESSAGES.failedActivateCruise(res.error ?? "unknown error");
   } catch (err) {
-    content = `⚠️ Failed to activate cruise control: ${String(err)}`;
+    content = MESSAGES.failedActivateCruise(String(err));
   }
   await respondChannelMessage(deps, interactionId, interactionToken, content);
 }
@@ -1239,12 +1238,11 @@ async function reportCruiseActivation(
   const { deps, parsed } = ctx;
   const r = result as { warnings?: string[] } | undefined;
   const warnings = r?.warnings ?? [];
-  const warnSuffix = warnings.length ? `\n${warnings.map((w) => `⚠️ ${w}`).join("\n")}` : "";
   await respondChannelMessage(
     deps,
     parsed.interactionId,
     parsed.interactionToken,
-    `🚗 Cruise control activated for \`${sessionId}\`${escalate ? " (with escalation route)" : ""}.${warnSuffix}`,
+    MESSAGES.cruiseActivated(sessionId, escalate, warnings),
   );
 }
 
@@ -1285,13 +1283,13 @@ async function fetchPromptList(
     if (!res.ok) {
       return {
         kind: "error",
-        content: `⚠️ Failed to list prompts: ${res.error ?? "unknown error"}`,
+        content: MESSAGES.failedListPrompts(res.error ?? "unknown error"),
       };
     }
     const prompts = (res.result as { prompts?: PromptListEntry[] } | undefined)?.prompts ?? [];
     return { kind: "ok", prompts };
   } catch (err) {
-    return { kind: "error", content: `⚠️ Failed to list prompts: ${String(err)}` };
+    return { kind: "error", content: MESSAGES.failedListPrompts(String(err)) };
   }
 }
 
@@ -1433,7 +1431,7 @@ async function handleStatusCommand(ctx: SlashCommandContext): Promise<void> {
     if (res.ok && res.result) {
       return formatStatusResult(res.result as Record<string, unknown>);
     }
-    return `⚠️ Failed to get status: ${res.error ?? "unknown error"}`;
+    return MESSAGES.failedOp("session_context_status", res.error ?? "unknown error");
   });
 }
 
@@ -1649,7 +1647,7 @@ function extractCurrentModelSelection(res: {
 function isInvalidModelId(modelId: string): string | undefined {
   const slashIdx = modelId.indexOf("/");
   return slashIdx < 1 || slashIdx === modelId.length - 1
-    ? `⚠️ Invalid model format. Expected \`provider/model\`, got \`${modelId}\``
+    ? MESSAGES.invalidModelId(modelId)
     : undefined;
 }
 
@@ -1678,13 +1676,13 @@ async function handleContextChange(ctx: SlashCommandContext): Promise<void> {
         const res = await deps.invokeControlOp(controlOp.op, payload);
         const content = res.ok
           ? `✅ \`${controlOp.op}\` completed.`
-          : `⚠️ \`${controlOp.op}\` failed: ${res.error ?? "unknown error"}`;
+          : MESSAGES.failedOp(controlOp.op, res.error ?? "unknown error");
         await deps.transport.editOriginalInteractionResponse(deps.applicationId, interactionToken, {
           content,
         });
       } catch (err) {
         await deps.transport.editOriginalInteractionResponse(deps.applicationId, interactionToken, {
-          content: `⚠️ \`${controlOp.op}\` failed: ${String(err)}`,
+          content: MESSAGES.failedOp(controlOp.op, String(err)),
         });
       }
       return;
@@ -1693,14 +1691,14 @@ async function handleContextChange(ctx: SlashCommandContext): Promise<void> {
     const res = await deps.invokeControlOp(controlOp.op, payload);
     const content = res.ok
       ? `✅ \`${controlOp.op}\` completed.`
-      : `⚠️ \`${controlOp.op}\` failed: ${res.error ?? "unknown error"}`;
+      : MESSAGES.failedOp(controlOp.op, res.error ?? "unknown error");
     await respondChannelMessage(deps, interactionId, interactionToken, content);
   } catch (err) {
     await respondChannelMessage(
       deps,
       interactionId,
       interactionToken,
-      `⚠️ \`${controlOp.op}\` failed: ${String(err)}`,
+      MESSAGES.failedOp(controlOp.op, String(err)),
     );
   }
 }
@@ -1798,7 +1796,7 @@ function formatElevationResult(
     const count = r.revokedCount ?? (r.revoked === true ? 1 : 0);
     return `🔒 Elevation revoked. ${count} grant(s) removed.`;
   }
-  return `⚠️ \`${ctx.controlOp.op}\` failed: ${res.error ?? "unknown error"}`;
+  return MESSAGES.failedOp(ctx.controlOp.op, res.error ?? "unknown error");
 }
 
 /** `/yolo`: toggle (or query) the per-session HITL auto-approve flag. */
@@ -1838,7 +1836,7 @@ function formatYoloResult(
       ? `🤖 Yolo mode status for \`${sessionId}\`: OFF.`
       : `🤖 Yolo mode OFF for \`${sessionId}\`.`;
   }
-  return `⚠️ \`yolo_mode\` failed: ${res.error ?? "unknown error"}`;
+  return MESSAGES.failedOp("yolo_mode", res.error ?? "unknown error");
 }
 
 /**
@@ -2065,13 +2063,12 @@ async function handleCruiseModalSubmit(ctx: InteractionContext, customId: string
     });
     if (res.ok) {
       const warnings = (res.result as { warnings?: string[] } | undefined)?.warnings ?? [];
-      const warnSuffix = warnings.length ? `\n${warnings.map((w) => `⚠️ ${w}`).join("\n")}` : "";
-      content = `🚗 Cruise control activated for \`${sessionId}\`${escalate ? " (with escalation route)" : ""}.${warnSuffix}`;
+      content = MESSAGES.cruiseActivated(sessionId, escalate, warnings);
     } else {
-      content = `⚠️ Failed to activate cruise control: ${res.error ?? "unknown error"}`;
+      content = MESSAGES.failedActivateCruise(res.error ?? "unknown error");
     }
   } catch (err) {
-    content = `⚠️ Failed to activate cruise control: ${String(err)}`;
+    content = MESSAGES.failedActivateCruise(String(err));
   }
   await deps.transport.interactionCallback(ev.id, ev.token, {
     type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
@@ -2185,7 +2182,7 @@ async function applyModelTextInput(
     await deps.transport.interactionCallback(interactionId, interactionToken, {
       type: INTERACTION_RESPONSE_UPDATE_MESSAGE,
       data: {
-        content: `⚠️ Invalid model format. Expected \`provider/model\`, got \`${value}\``,
+        content: MESSAGES.invalidModelId(value),
         components: [],
       },
     });
