@@ -6,7 +6,6 @@ import type { ModelInvocationParams } from "@shoggoth/models";
 import {
   DEFAULT_HITL_CONFIG,
   formatAgentIdentityPrefix,
-  parseAgentSessionUrn,
   type ShoggothConfig,
   type SystemContext,
 } from "@shoggoth/shared";
@@ -36,9 +35,6 @@ import {
   getStatusBarStats,
   createStatusBarTurnTracker,
   formatAssistantReply,
-  routeReaction,
-  formatGlobalReactionEventContext,
-  formatAdhocReactionEventContext,
   PresentationTurnOrchestrator,
   type TieredTurnQueue,
   type PolicyEngine,
@@ -46,7 +42,6 @@ import {
   type ExecuteSessionAgentTurnInput,
   type SessionAgentTurnResult,
   type SessionModelTurnDelivery,
-  type StatusBarSnapshot,
   type TurnStatusBarTracker,
   type StreamHandle,
   type OobTurnBannerHandle,
@@ -65,167 +60,32 @@ import type {
 import { invalidateStatusBarSources, statusBarSourceVersions } from "@shoggoth/daemon/lib";
 import type { HitlAutoApproveGate } from "@shoggoth/shared";
 import type { PendingActionsStore } from "@shoggoth/daemon/lib";
+import type { HitlDiscordNoticeRegistry } from "./hitl/notice-registry";
 import { notice } from "./notices";
 import type { DiscordMessagingRuntime } from "./bridge";
-import { mergeOrchestratorEnv, resolveDiscordOwnerUserId, resolveReactionConfig } from "./config";
-import { registerDiscordHitlNoticeAndAddReactions } from "./hitl/reaction-wiring";
-import type { HitlDiscordNoticeRegistry } from "./hitl/notice-registry";
-import { buildHitlQueuedNoticeLines, createDiscordHitlNotifier } from "./hitl/notifier";
+import { mergeOrchestratorEnv, resolveDiscordOwnerUserId } from "./config";
+import { createDiscordHitlNotifier } from "./hitl/notifier";
 import { sliceDiscordPlatformMessageBody } from "./errors";
 import { formatAttachmentMetadata } from "./attachment-metadata";
 import { DiscordPlatformAdapter } from "./discord-platform-adapter";
-import { resolveStatusBarConfig, type ResolvedStatusBarConfig } from "@shoggoth/shared";
+import { resolveStatusBarConfig } from "@shoggoth/shared";
 import type { CruiseControlHandle } from "@shoggoth/shared";
-import { renderDiscordStatusBar } from "./status-bar";
-import type { DiscordStreamHandle } from "./streaming";
+import {
+  afterHitlQueuedFor,
+  buildStatusBarDep,
+  sendHitlQueuedNotice,
+  startStreamHandleWithBar,
+  terminalOutcomeOf,
+  type HitlQueuedDelivery,
+} from "./platform-shared";
+import {
+  handleReactionPassthrough,
+  type DiscordReactionPassthroughEvent,
+} from "./reaction-passthrough";
 
-/** Narrow a turn outcome to the status bar's terminal set: everything but
- *  "completed" passes through; "completed" renders as "finished". Shared by the
- *  messaging_surface and internal delivery paths so the mapping cannot drift. */
-function terminalOutcomeOf(
-  outcome: SessionAgentTurnResult["outcome"],
-): "finished" | "aborted" | "failed" | "canceled" {
-  return outcome === "aborted" || outcome === "failed" || outcome === "canceled"
-    ? outcome
-    : "finished";
-}
-
-/** Build the status-bar-wrapped stream handle over a raw Discord stream handle:
- *  setFullContent/pushUpdate delegate straight through, setStatusBar/close pass
- *  through when the raw handle supports them. Shared by the inbound pre-start
- *  path and the messaging_surface path so a teardown fix cannot miss one copy. */
-function wrapDiscordStreamHandle(raw: DiscordStreamHandle): StreamHandle {
-  return {
-    setFullContent: (text: string) => raw.setFullContent(text),
-    pushUpdate: (text: string) => raw.pushUpdate(text),
-    ...(raw.setStatusBar ? { setStatusBar: (line: string | null) => raw.setStatusBar!(line) } : {}),
-    // Teardown pass-through: the abort path must be able to
-    // finalize the underlying handle through this wrapper.
-    ...(raw.close ? { close: () => raw.close!() } : {}),
-  };
-}
-
-/** Start the session's streaming outbound and wrap the raw handle with the
- *  status-bar sink so the bar applies to the in-flight message (delegates to
- *  any native setStatusBar on the handle; teardown close() passes through).
- *  Returns undefined when streaming is disabled, the session has no streaming
- *  outbound, or the start failed (logged as `stream_start_failed` — pass
- *  `warn.withSessionId` to include the session id in that payload, matching
- *  the messaging_surface path's original shape). Shared by the inbound
- *  pre-start path and the messaging_surface path so a teardown fix cannot
- *  miss one copy. */
-async function startStreamHandleWithBar(
-  deps: {
-    readonly logger: Logger;
-    readonly env: NodeJS.ProcessEnv;
-    readonly statusBarDep: {
-      readonly config: ResolvedStatusBarConfig;
-      readonly attachSink: (h: StreamHandle) => unknown;
-    };
-    readonly streamingForSession: DiscordMessagingRuntime["streamingForSession"];
-  },
-  sessionId: string,
-  warn?: { readonly withSessionId?: boolean },
-): Promise<StreamHandle | undefined> {
-  let handle: StreamHandle | undefined;
-  if (deps.env.SHOGGOTH_DISCORD_STREAM === "1") {
-    const streamingOutbound = deps.streamingForSession(sessionId);
-    if (streamingOutbound) {
-      try {
-        const raw = await streamingOutbound.start();
-        // Wrap the raw stream handle with the status-bar sink so the bar
-        // applies to the in-flight message; delegates to any native
-        // setStatusBar on the handle.
-        if (deps.statusBarDep.config.enabled) {
-          deps.statusBarDep.attachSink(raw as unknown as StreamHandle);
-        }
-        handle = wrapDiscordStreamHandle(raw);
-      } catch (e) {
-        deps.logger.warn(
-          "discord.platform.stream_start_failed",
-          warn?.withSessionId ? { err: String(e), sessionId } : { err: String(e) },
-        );
-      }
-    }
-  }
-  return handle;
-}
-
-/** Build the `afterHitlQueued` callback that posts the in-session HITL queued
- *  notice; undefined when SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION=0. Shared by
- *  the inbound, messaging_surface, and internal delivery paths. */
-function afterHitlQueuedFor(
-  env: NodeJS.ProcessEnv,
-  send: (
-    row: PendingActionRow,
-    delivery: {
-      readonly sessionId: string;
-      readonly userId?: string;
-      readonly replyToMessageId?: string;
-    },
-  ) => Promise<void>,
-  delivery: {
-    readonly sessionId: string;
-    readonly userId?: string;
-    readonly replyToMessageId?: string;
-  },
-): ((row: PendingActionRow) => Promise<void>) | undefined {
-  const inSession = env.SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION !== "0";
-  return inSession ? (row) => send(row, delivery) : undefined;
-}
-
-/** Minimal status-bar dep: config from resolveStatusBarConfig, render from renderDiscordStatusBar,
- *  attachSink for live-bar stream wrapping, and stats seeded from session_stats (turn.db is
- *  unavailable when the orchestrator creates the tracker); passed to the presentation orchestrator. */
-export function buildStatusBarDep(
-  db: Database.Database,
-  cfg: ResolvedStatusBarConfig,
-  cruiseControlActive?: (sessionId: string) => boolean,
-  yoloModeActive?: (sessionId: string) => boolean,
-): {
-  config: ResolvedStatusBarConfig;
-  render: (snap: StatusBarSnapshot, c: ResolvedStatusBarConfig) => string;
-  attachSink: (h: StreamHandle) => { setStatusBar(line: string | null): Promise<void> };
-  stats: (sessionId: string) => {
-    sequence: number;
-    compactions: number;
-    context?: { currentTokens: number; totalTokens?: number };
-    subagents?: { total: number; persistent: number };
-    timers?: number;
-    notifies?: number;
-    liveNotifies?: () => number;
-    liveTimers?: () => number;
-    liveSubagents?: () => { total: number; persistent: number };
-  };
-  cruiseControlActive?: (sessionId: string) => boolean;
-  yoloModeActive?: (sessionId: string) => boolean;
-} {
-  return {
-    config: cfg,
-    render: renderDiscordStatusBar,
-    // Wrap the stream handle in place: the sink delegates to any native
-    // setStatusBar (Discord streaming applies the bar to the in-flight message)
-    // and the augmented handle is returned so streaming keeps working through it.
-    attachSink: (h: StreamHandle) => {
-      const native = h.setStatusBar?.bind(h);
-      const sink = {
-        setStatusBar: async (line: string | null) => {
-          await native?.(line);
-        },
-      };
-      h.setStatusBar = (line: string | null) => sink.setStatusBar(line);
-      return h as StreamHandle & typeof sink;
-    },
-    // Pre-turn stats for seeding the bar (sequence / compactions / context
-    // window fill) — sourced daemon-side; the platform only wires them in.
-    stats: (sessionId: string) => getStatusBarStats(db, sessionId),
-    // Live activity providers — invalidate-on-change: the engine re-reads
-    // each only when its source's change version moves (zero DB reads on
-    // steady-state renders).
-    ...(cruiseControlActive ? { cruiseControlActive } : {}),
-    ...(yoloModeActive ? { yoloModeActive } : {}),
-  };
-}
+// Keep platform.ts's prior exports working: buildStatusBarDep was exported from
+// platform.ts before the split and is now implemented in platform-shared.
+export { buildStatusBarDep };
 
 /** Notice resolution for this platform instance: opts.noticeResolver if set. */
 function platformNoticeResolver(opts: DiscordPlatformOptions): NoticeResolver {
@@ -455,36 +315,16 @@ export async function startDiscordPlatform(
     }),
   );
 
+  /** Shared deps for the in-session HITL queued-notice delivery. */
+  const sharedNoticeDeps = {
+    discord: opts.discord,
+    hitlDiscordNoticeRegistry: opts.hitlDiscordNoticeRegistry,
+    logger: opts.logger,
+  };
+
   /** Send the in-session HITL queued notice and wire up approval reactions. */
-  async function sendHitlQueuedNotice(
-    row: PendingActionRow,
-    delivery: {
-      readonly sessionId: string;
-      readonly userId?: string;
-      readonly replyToMessageId?: string;
-    },
-  ): Promise<void> {
-    const ref = await opts.discord.outbound.sendDiscord(
-      createOutboundMessage({
-        id: randomUUID(),
-        sessionId: delivery.sessionId,
-        userId: delivery.userId,
-        createdAt: new Date().toISOString(),
-        body: sliceDiscordPlatformMessageBody(buildHitlQueuedNoticeLines(row).join("\n")),
-        extensions: { replyToMessageId: delivery.replyToMessageId },
-      }),
-    );
-    if (opts.hitlDiscordNoticeRegistry) {
-      await registerDiscordHitlNoticeAndAddReactions({
-        transport: opts.discord.discordRestTransport,
-        channelId: ref.channelId,
-        messageId: ref.messageId,
-        row,
-        registry: opts.hitlDiscordNoticeRegistry,
-        logger: opts.logger,
-      });
-    }
-  }
+  const hitlQueuedNotice = (row: PendingActionRow, delivery: HitlQueuedDelivery): Promise<void> =>
+    sendHitlQueuedNotice(sharedNoticeDeps, row, delivery);
 
   async function dispatchChained(sessionId: string, msg: InternalMessage): Promise<void> {
     const prev = chainTail.get(sessionId) ?? Promise.resolve();
@@ -675,7 +515,7 @@ export async function startDiscordPlatform(
         "user",
         userMessageLabel,
         async () => {
-          const afterHitlQueued = afterHitlQueuedFor(env, sendHitlQueuedNotice, {
+          const afterHitlQueued = afterHitlQueuedFor(env, hitlQueuedNotice, {
             sessionId: msg.sessionId,
             userId: msg.userId,
             replyToMessageId: msg.id,
@@ -847,7 +687,7 @@ export async function startDiscordPlatform(
         readonly userId: string;
         readonly replyToMessageId?: string;
       }) =>
-        afterHitlQueuedFor(env, sendHitlQueuedNotice, {
+        afterHitlQueuedFor(env, hitlQueuedNotice, {
           sessionId: sid,
           userId: delivery.userId,
           replyToMessageId: delivery.replyToMessageId,
@@ -1194,7 +1034,7 @@ export async function startDiscordPlatform(
       let internalAfterHitlQueued: ((row: PendingActionRow) => void | Promise<void>) | undefined;
       if (
         sessionRow.parentSessionId &&
-        afterHitlQueuedFor(env, sendHitlQueuedNotice, { sessionId: sid })
+        afterHitlQueuedFor(env, hitlQueuedNotice, { sessionId: sid })
       ) {
         const parentRow = sessions.getById(sessionRow.parentSessionId);
         const parentChannelId = parentRow
@@ -1202,7 +1042,7 @@ export async function startDiscordPlatform(
           : undefined;
         if (parentChannelId) {
           const ownerUserId = resolveDiscordOwnerUserId(configForOwnerGate());
-          internalAfterHitlQueued = afterHitlQueuedFor(env, sendHitlQueuedNotice, {
+          internalAfterHitlQueued = afterHitlQueuedFor(env, hitlQueuedNotice, {
             sessionId: sessionRow.parentSessionId!,
             userId: ownerUserId ?? "system",
           });
@@ -1295,65 +1135,18 @@ export async function startDiscordPlatform(
       });
     });
   }
-  async function handleReactionPassthrough(ev: {
-    readonly sessionId: string;
-    readonly messageContent: string;
-    readonly messageTimestamp: number;
-    readonly emoji: string;
-    readonly userId: string;
-  }): Promise<void> {
-    const cfg = opts.configRef?.current ?? opts.config;
-    const agentId = parseAgentSessionUrn(ev.sessionId)?.agentId;
-    const agentReactions = agentId ? cfg.agents?.list?.[agentId]?.reactions : undefined;
-
-    const { globalPassthrough, maxAgeMinutes } = resolveReactionConfig(cfg, agentReactions);
-
-    const route = routeReaction({
-      emoji: ev.emoji,
-      messageContent: ev.messageContent,
-      messageTimestamp: ev.messageTimestamp,
-      nowMs: Date.now(),
-      maxAgeMinutes,
-      globalPassthrough,
-    });
-
-    if (route.kind === "discard") {
-      opts.logger.debug("reaction.passthrough.discard", {
-        sessionId: ev.sessionId,
-        emoji: ev.emoji,
-        reason: route.reason,
-      });
-      return;
-    }
-
-    let eventContext: string;
-    if (route.kind === "adhoc") {
-      eventContext = formatAdhocReactionEventContext(
-        ev.emoji,
-        route.legend.entries,
-        ev.messageContent,
-      );
-    } else {
-      eventContext = formatGlobalReactionEventContext(ev.emoji, ev.messageContent);
-    }
-
-    try {
-      await runSessionModelTurn({
-        sessionId: ev.sessionId,
-        userContent: eventContext,
-        systemContext: {
-          kind: "reaction",
-          summary: `Reaction ${ev.emoji} passthrough`,
-        },
-        delivery: { kind: "messaging_surface", userId: ev.userId },
-      });
-    } catch (e) {
-      opts.logger.warn("reaction.passthrough.turn_failed", {
-        err: String(e),
-        sessionId: ev.sessionId,
-      });
-    }
-  }
+  /** Reaction passthrough — extracted to reaction-passthrough.ts; this wires
+   *  the platform's live config reference and turn entry into the deps. */
+  const reactionPassthrough = (ev: DiscordReactionPassthroughEvent): Promise<void> =>
+    handleReactionPassthrough(
+      {
+        config: opts.config,
+        configRef: opts.configRef,
+        logger: opts.logger,
+        runSessionModelTurn: (input) => runSessionModelTurn(input),
+      },
+      ev,
+    );
 
   /**
    * OOB turn banner surface (issue #363). `begin` posts a "processing" banner as
@@ -1444,7 +1237,7 @@ export async function startDiscordPlatform(
     oobTurnBanner,
     subscribeSubagentSession,
     announcePersistentSubagentSessionEnded,
-    handleReactionPassthrough,
+    handleReactionPassthrough: reactionPassthrough,
     pinMessage: async (input: { readonly channelId: string; readonly messageId: string }) => {
       await opts.discord.discordRestTransport.pinMessage?.(input.channelId, input.messageId);
     },
