@@ -31,6 +31,10 @@ interface FakeSocket {
   deliverAck(): void;
   /** Simulate the server closing the socket. */
   serverClose(code?: number): void;
+  /** Hold the close event triggered by client-side close() until flushClose(). */
+  holdClose(): void;
+  /** Deliver a close event held by holdClose(). */
+  flushClose(): void;
   /** The close code the client passed to ws.close(), if any. */
   clientCloseCode: number | undefined;
 }
@@ -61,6 +65,9 @@ function createFakeSocketFactory() {
     const emit = (type: string, ev: unknown) => {
       for (const fn of listeners.get(type) ?? []) fn(ev);
     };
+
+    let closeHeld = false;
+    let heldCloseCode: number | undefined;
 
     const fake: FakeSocket = {
       sent: [],
@@ -96,6 +103,13 @@ function createFakeSocketFactory() {
       serverClose(code = 1006) {
         emit("close", { code, reason: "" });
       },
+      holdClose() {
+        closeHeld = true;
+      },
+      flushClose() {
+        closeHeld = false;
+        emit("close", { code: heldCloseCode, reason: "" });
+      },
     };
 
     const ws = {
@@ -108,6 +122,10 @@ function createFakeSocketFactory() {
 
       close(code?: number, _reason?: string) {
         fake.clientCloseCode = code;
+        if (closeHeld) {
+          heldCloseCode = code;
+          return;
+        }
         emit("close", { code, reason: _reason ?? "" });
       },
       get readyState() {
@@ -311,6 +329,42 @@ describe("gateway reconnection", () => {
       s1.emitOpen();
       s1.deliverHello();
       s1.deliverResumed();
+      await session.stop();
+    });
+
+    it("consumes exactly one reconnect attempt per failed handshake", async () => {
+      const factory = createFakeSocketFactory();
+      const { session, s0 } = await connectAndHandshake(factory);
+
+      // First failure: post-handshake close (attempt 1, 1s backoff).
+      const s1Promise = factory.waitForSocket();
+      s0.serverClose(1006);
+      await vi.advanceTimersByTimeAsync(2_000);
+      const s1 = await s1Promise;
+      expect(factory.sockets.length).toBe(2);
+
+      // Second failure: HELLO never arrives. The transport's close event is
+      // held until after the handshake timeout schedules the reconnect and the
+      // backoff timer fires; the late close must not schedule a second retry.
+      s1.holdClose();
+      s1.emitOpen();
+      await vi.advanceTimersByTimeAsync(30_000); // handshake timeout → one schedule
+      await vi.advanceTimersByTimeAsync(2_000); // backoff elapses → next socket
+      expect(factory.sockets.length).toBe(3);
+
+      // Late close for the socket that already timed out.
+      s1.flushClose();
+
+      // Complete the handshake on the replacement socket.
+      const s2 = factory.sockets[2];
+      s2.emitOpen();
+      s2.deliverHello();
+      s2.deliverResumed();
+
+      // No extra attempt was scheduled for the late close.
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(factory.sockets.length).toBe(3);
+
       await session.stop();
     });
 
