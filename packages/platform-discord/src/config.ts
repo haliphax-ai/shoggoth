@@ -52,6 +52,38 @@ export function resolveShoggothAgentId(cfg: ShoggothConfig): string {
   return cfg.runtime?.agentId?.trim() || "main";
 }
 
+// ── Reaction passthrough ─────────────────────────────────────────────────────
+
+/** Emojis forwarded to the model session when no allowlist is configured. */
+export const DEFAULT_REACTION_GLOBAL_PASSTHROUGH = ["👍", "👎", "✅", "❌"] as const;
+
+/** Default max age in minutes for a reaction to be routed. */
+export const DEFAULT_REACTION_MAX_AGE_MINUTES = 30;
+
+/** Per-agent `reactions` overrides from `agents.list.<id>.reactions`. */
+export interface AgentReactionsOverride {
+  readonly globalPassthrough?: readonly string[];
+  readonly maxAgeMinutes?: number;
+}
+
+/**
+ * Resolve the reaction-passthrough settings for an event. Precedence:
+ * agent `reactions` overrides, then top-level `reactions`, then defaults.
+ */
+export function resolveReactionConfig(
+  cfg: ShoggothConfig,
+  agentReactions?: AgentReactionsOverride,
+): { globalPassthrough: readonly string[]; maxAgeMinutes: number } {
+  const top = cfg.reactions;
+  const globalPassthrough =
+    agentReactions?.globalPassthrough ??
+    top?.globalPassthrough ??
+    DEFAULT_REACTION_GLOBAL_PASSTHROUGH;
+  const maxAgeMinutes =
+    agentReactions?.maxAgeMinutes ?? top?.maxAgeMinutes ?? DEFAULT_REACTION_MAX_AGE_MINUTES;
+  return { globalPassthrough, maxAgeMinutes };
+}
+
 /**
  * Resolve the Discord bot token. Resolution order (env wins):
  * 1. `process.env[tokenEnv]` when `discord.tokenEnv` names an env var (the

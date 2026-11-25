@@ -65,7 +65,7 @@ import type {
 } from "./daemon-types";
 import { notice } from "./notices";
 import type { DiscordMessagingRuntime } from "./bridge";
-import { mergeOrchestratorEnv, resolveDiscordOwnerUserId } from "./config";
+import { mergeOrchestratorEnv, resolveDiscordOwnerUserId, resolveReactionConfig } from "./config";
 import { registerDiscordHitlNoticeAndAddReactions } from "./hitl/reaction-wiring";
 import type { HitlDiscordNoticeRegistry } from "./hitl/notice-registry";
 import { buildHitlQueuedNoticeLines, createDiscordHitlNotifier } from "./hitl/notifier";
@@ -1235,17 +1235,7 @@ export async function startDiscordPlatform(
     const agentId = parseAgentSessionUrn(ev.sessionId)?.agentId;
     const agentReactions = agentId ? cfg.agents?.list?.[agentId]?.reactions : undefined;
 
-    const globalPassthrough = (agentReactions?.globalPassthrough ??
-      (cfg as any).reactions?.globalPassthrough ?? [
-        "\uD83D\uDC4D",
-        "\uD83D\uDC4E",
-        "\u2705",
-        "\u274C",
-      ]) as string[];
-
-    const maxAgeMinutes = (agentReactions?.maxAgeMinutes ??
-      (cfg as any).reactions?.maxAgeMinutes ??
-      30) as number;
+    const { globalPassthrough, maxAgeMinutes } = resolveReactionConfig(cfg, agentReactions);
 
     const route = routeReaction({
       emoji: ev.emoji,
