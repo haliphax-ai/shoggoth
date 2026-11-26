@@ -1,7 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { getImageBlockCodec } from "@shoggoth/models";
 import type Database from "better-sqlite3";
-import { createOutboundMessage, type InternalMessage } from "@shoggoth/messaging";
 import type { ModelInvocationParams } from "@shoggoth/models";
 import {
   DEFAULT_HITL_CONFIG,
@@ -10,32 +7,24 @@ import {
   type SystemContext,
 } from "@shoggoth/shared";
 import {
-  daemonNotice,
   createHitlPendingResolutionStack,
   createPolicyEngine,
   createYoloModeStore,
   createSessionStore,
   createTranscriptStore,
   createToolRunStore,
-  applySessionContextSegmentNew,
-  applySessionContextSegmentReset,
-  parseSessionSegmentInlineCommand,
-  sessionSegmentStartupUserContent,
-  resolveSessionBypassUpTo,
   createSessionMcpRuntime,
   defaultPlatformAssistantDeps,
-  createQueuedMessageIndicator,
   getTurnQueue,
   PresentationTurnOrchestrator,
   type TieredTurnQueue,
   type PolicyEngine,
-  type HitlConfigRef,
   type SessionAgentTurnResult,
   type SessionModelTurnDelivery,
   type OobTurnBannerHandle,
   type PlatformAssistantDeps,
-  resolveModel,
-  shouldSkipThreadSessionSentinel,
+  type HitlConfigRef,
+  daemonNotice,
 } from "@shoggoth/daemon/lib";
 import type {
   HitlNotifier,
@@ -50,18 +39,15 @@ import type { PendingActionsStore } from "@shoggoth/daemon/lib";
 import type { HitlDiscordNoticeRegistry } from "./hitl/notice-registry";
 import { notice } from "./notices";
 import type { DiscordMessagingRuntime } from "./bridge";
-import { mergeOrchestratorEnv, resolveDiscordOwnerUserId } from "./config";
+import { mergeOrchestratorEnv } from "./config";
 import { createDiscordHitlNotifier } from "./hitl/notifier";
 import { sliceDiscordPlatformMessageBody } from "./errors";
-import { formatAttachmentMetadata } from "./attachment-metadata";
 import { DiscordPlatformAdapter } from "./discord-platform-adapter";
 import { resolveStatusBarConfig } from "@shoggoth/shared";
 import type { CruiseControlHandle } from "@shoggoth/shared";
 import {
-  afterHitlQueuedFor,
   buildStatusBarDep,
   sendHitlQueuedNotice,
-  startStreamHandleWithBar,
   type HitlQueuedDelivery,
 } from "./platform-shared";
 import {
@@ -75,6 +61,7 @@ import {
   type SurfaceTurnDeps,
   type SurfaceTurnInput,
 } from "./surface-turn";
+import { createInboundTurnPipeline, type InboundTurnPipeline } from "./inbound-turn";
 
 // Keep platform.ts's prior exports working: buildStatusBarDep was exported from
 // platform.ts before the split and is now implemented in platform-shared.
@@ -266,7 +253,6 @@ export async function startDiscordPlatform(
   const createToolClient = assistantDeps.createToolCallingClient;
 
   const turnQueue: TieredTurnQueue = getTurnQueue();
-  const chainTail = new Map<string, Promise<void>>();
   const subagentBusUnsubs: (() => void)[] = [];
 
   // Create the PlatformAdapter for Discord
@@ -296,16 +282,6 @@ export async function startDiscordPlatform(
     statusBar: statusBarDep,
   });
 
-  const unsubs = opts.discord.routes.map((route) =>
-    opts.discord.bus.subscribe(route.sessionId, (msg) => {
-      void dispatchChained(route.sessionId, msg).catch((e) => {
-        opts.logger.error("discord.platform.dispatch_failed", {
-          err: String(e),
-        });
-      });
-    }),
-  );
-
   /** Shared deps for the in-session HITL queued-notice delivery. */
   const sharedNoticeDeps = {
     discord: opts.discord,
@@ -317,337 +293,48 @@ export async function startDiscordPlatform(
   const hitlQueuedNotice = (row: PendingActionRow, delivery: HitlQueuedDelivery): Promise<void> =>
     sendHitlQueuedNotice(sharedNoticeDeps, row, delivery);
 
-  async function dispatchChained(sessionId: string, msg: InternalMessage): Promise<void> {
-    const prev = chainTail.get(sessionId) ?? Promise.resolve();
-    const run = prev.then(() => handleInbound(msg));
-    chainTail.set(
-      sessionId,
-      run.catch(() => {}),
-    );
-    await run;
-  }
+  // Inbound turn pipeline: chained dispatch, segment commands, and the queued
+  // inbound model turn — extracted to inbound-turn.ts; this wires the
+  // platform's stores, HITL stack, MCP runtime, and orchestrator into it.
+  const inbound: InboundTurnPipeline = createInboundTurnPipeline({
+    db: opts.db,
+    config: opts.config,
+    configRef: opts.configRef,
+    env,
+    logger: opts.logger,
+    sessions,
+    transcript,
+    toolRuns,
+    turnQueue,
+    mcpRuntime,
+    policyEngine: engine,
+    getHitlConfig,
+    pendingForToolLoop,
+    waitForHitlResolution,
+    hitlNotifier,
+    hitlAutoApproveGate: opts.hitlAutoApproveGate,
+    loopImpl,
+    createToolCallingClient: createToolClient,
+    cruiseControlToolLoopHook: () => cruiseControlToolLoopHook(opts),
+    yoloActive,
+    adapter,
+    orchestrator,
+    statusBarDep,
+    hitlQueuedNotice,
+    noticeResolver,
+    discord: opts.discord,
+    configForOwnerGate,
+  });
 
-  async function handleInbound(msg: InternalMessage): Promise<void> {
-    if (msg.direction !== "inbound") return;
-    const text = msg.body?.trim() ?? "";
-    if (!text) return;
-
-    const session = sessions.getById(msg.sessionId);
-    if (!session) {
-      opts.logger.warn("discord.platform.no_session", {
-        sessionId: msg.sessionId,
-        hint: "no SQLite session row for this route; the daemon auto-bootstraps the main agent session on startup — check config and restart",
-      });
-      return;
-    }
-
-    const ownerSnowflake = resolveDiscordOwnerUserId(configForOwnerGate());
-    if (ownerSnowflake && !session.subagentMode) {
-      if (!msg.extensions.platform?.discord?.isOwner) return;
-    }
-
-    const segmentMode = parseSessionSegmentInlineCommand(text);
-    if (segmentMode) {
-      try {
-        if (segmentMode === "new") {
-          applySessionContextSegmentNew({
-            db: opts.db,
-            sessions,
-            pending: pendingForToolLoop,
-            sessionId: msg.sessionId,
-          });
-        } else {
-          applySessionContextSegmentReset({
-            db: opts.db,
-            sessions,
-            pending: pendingForToolLoop,
-            sessionId: msg.sessionId,
-          });
-        }
-      } catch (e) {
-        opts.logger.warn("discord.platform.segment_command_failed", {
-          err: String(e),
-          sessionId: msg.sessionId,
-          mode: segmentMode,
-        });
-        try {
-          await opts.discord.outbound.sendDiscord(
-            createOutboundMessage({
-              id: randomUUID(),
-              sessionId: msg.sessionId,
-              userId: msg.userId,
-              createdAt: new Date().toISOString(),
-              body: sliceDiscordPlatformMessageBody(
-                notice(noticeResolver, "segment-command-error", {
-                  mode: segmentMode,
-                  error: String(e),
-                }),
-              ),
-              extensions: { replyToMessageId: msg.id },
-            }),
-          );
-        } catch {
-          /* ignore */
-        }
-        return;
-      }
-      const sessionAfter = sessions.getById(msg.sessionId);
-      if (!sessionAfter) return;
-      const segShort = sessionAfter.contextSegmentId.slice(0, 8);
-      const ack =
-        segmentMode === "new"
-          ? notice(noticeResolver, "segment-ack-new", { segmentPreview: segShort })
-          : notice(noticeResolver, "segment-ack-reset", { segmentPreview: segShort });
-      try {
-        await opts.discord.outbound.sendDiscord(
-          createOutboundMessage({
-            id: randomUUID(),
-            sessionId: msg.sessionId,
-            userId: msg.userId,
-            createdAt: new Date().toISOString(),
-            body: sliceDiscordPlatformMessageBody(ack),
-            extensions: { replyToMessageId: msg.id },
-          }),
-        );
-      } catch (e) {
-        opts.logger.warn("discord.platform.segment_ack_failed", {
+  const unsubs = opts.discord.routes.map((route) =>
+    opts.discord.bus.subscribe(route.sessionId, (msg) => {
+      void inbound.dispatchChained(route.sessionId, msg).catch((e) => {
+        opts.logger.error("discord.platform.dispatch_failed", {
           err: String(e),
         });
-      }
-      await runDiscordInboundModelTurn(
-        msg,
-        sessionAfter,
-        sessionSegmentStartupUserContent(segmentMode),
-        {
-          sessionSegmentStartup: segmentMode,
-        },
-      );
-      return;
-    }
-
-    const userContent = msg.body;
-    const attachments = msg.extensions.attachments;
-
-    await runDiscordInboundModelTurn(msg, session, userContent, {}, attachments);
-  }
-
-  async function runDiscordInboundModelTurn(
-    msg: InternalMessage,
-    session: NonNullable<ReturnType<typeof sessions.getById>>,
-    userContent: string,
-    extraUserMetadata: Record<string, unknown>,
-    attachments?: readonly import("@shoggoth/messaging").MessageAttachment[],
-  ): Promise<void> {
-    // Thread sentinel: a thread subagent's first "." message only starts the thread
-    // (status already posted at create time) — exit before placeholder/typing/queue
-    // side effects; attachments keep the body non-"." so they behave normally.
-    if (
-      !attachments?.length &&
-      shouldSkipThreadSessionSentinel({
-        db: opts.db,
-        sessions,
-        sessionId: msg.sessionId,
-        body: userContent,
-      })
-    ) {
-      opts.logger.debug("discord.platform.thread_sentinel_skipped", {
-        sessionId: msg.sessionId,
-        messageId: msg.id,
       });
-      return;
-    }
-
-    // Queued-message indicator (issue #399): ⏳ reaction while the operator's message
-    // waits behind an in-flight turn (reply/post fallback without reactions); removed
-    // when the turn starts or the entry is dropped.
-    const queuedIndicator = createQueuedMessageIndicator({
-      sessionId: msg.sessionId,
-      messageId: msg.id,
-      capabilities: adapter.capabilities,
-      logger: opts.logger,
-      resolveChannelId: (sid) => opts.discord.resolveOutboundChannelIdForSession?.(sid),
-      sendReply: async (body) => {
-        await opts.discord.outbound.sendDiscord(
-          createOutboundMessage({
-            id: randomUUID(),
-            sessionId: msg.sessionId,
-            userId: msg.userId,
-            createdAt: new Date().toISOString(),
-            body: sliceDiscordPlatformMessageBody(body),
-            extensions: { replyToMessageId: msg.id },
-          }),
-        );
-      },
-      sendPost: async (body) => {
-        await opts.discord.outbound.sendDiscord(
-          createOutboundMessage({
-            id: randomUUID(),
-            sessionId: msg.sessionId,
-            userId: msg.userId,
-            createdAt: new Date().toISOString(),
-            body: sliceDiscordPlatformMessageBody(body),
-            extensions: {},
-          }),
-        );
-      },
-    });
-
-    // Fire-and-forget: push to the turn queue (synchronous) and return immediately.
-    // Create a label with truncated message content for display in queue
-    const maxLabelLength = 100;
-    const userMessageLabel =
-      userContent.length > maxLabelLength
-        ? userContent.slice(0, maxLabelLength) + "..."
-        : userContent;
-
-    void turnQueue
-      .enqueue(
-        msg.sessionId,
-        "user",
-        userMessageLabel,
-        async () => {
-          const afterHitlQueued = afterHitlQueuedFor(env, hitlQueuedNotice, {
-            sessionId: msg.sessionId,
-            userId: msg.userId,
-            replyToMessageId: msg.id,
-          });
-
-          const mcpLifecycle = mcpRuntime.trackInstanceIdle
-            ? {
-                onTurnBegin: () => {
-                  mcpRuntime.notifyTurnBegin(msg.sessionId);
-                },
-                onTurnEnd: () => {
-                  mcpRuntime.notifyTurnEnd(msg.sessionId);
-                },
-              }
-            : undefined;
-
-          const d = msg.extensions.platform?.discord;
-          const userMetadata: Record<string, unknown> = {
-            ...extraUserMetadata,
-            discordMessageId: msg.id,
-            ...(d
-              ? {
-                  discordAuthorId: d.authorId,
-                  discordAuthorIsBot: d.authorIsBot,
-                  discordIsSelf: d.isSelf,
-                  discordIsOwner: d.isOwner,
-                }
-              : {}),
-          };
-
-          // If streaming is enabled, post the placeholder ("…") BEFORE starting the
-          // typing indicator. Discord cancels typing when a bot posts a message, so
-          // posting the placeholder inside withTypingIndicator would kill the indicator.
-          const preStartedStreamHandle = await startStreamHandleWithBar(
-            {
-              logger: opts.logger,
-              env,
-              statusBarDep,
-              streamingForSession: opts.discord.streamingForSession,
-            },
-            msg.sessionId,
-          );
-
-          // Resolve the model once per inbound turn; both image options below
-          // are derived from it.
-          const turnCfg = opts.configRef?.current ?? opts.config;
-          const turnModel = resolveModel(opts.db, turnCfg, {
-            sessionId: msg.sessionId,
-          });
-
-          await adapter.withTypingIndicator(msg.sessionId, async () => {
-            await orchestrator.orchestrateInboundTurn({
-              sessionId: msg.sessionId,
-              replyToMessageId: msg.id,
-              preStartedStreamHandle,
-              onStreamStartFailed: (errMsg) => {
-                opts.logger.warn("discord.platform.stream_start_failed", {
-                  err: errMsg,
-                });
-              },
-              mcpLifecycle,
-              logContext: { sessionId: msg.sessionId },
-              onTurnExecutionFailed: (e) => {
-                opts.logger.warn("discord.platform.turn_failed", {
-                  err: String(e),
-                  sessionId: msg.sessionId,
-                });
-              },
-              attachments,
-              imageBlockCodec: (() => {
-                const kind = turnModel?.provider?.kind;
-                if (
-                  kind === "openai-compatible" ||
-                  kind === "anthropic-messages" ||
-                  kind === "gemini"
-                ) {
-                  return getImageBlockCodec(kind);
-                }
-                return undefined;
-              })(),
-              imageUrlPassthrough:
-                turnModel !== null &&
-                turnModel.provider.kind !== "gemini" &&
-                turnModel.provider.imageUrlPassthrough === true,
-              formatAttachmentMetadata,
-              workspacePath: session.workspacePath,
-              messageId: msg.id,
-              // post-turn delivery runs outside the queue entry so a hung platform edit cannot wedge the session's turn queue
-              detachPostTurnDelivery: true,
-              ...(session.runtimeUid !== undefined && session.runtimeGid !== undefined
-                ? { creds: { uid: session.runtimeUid, gid: session.runtimeGid } }
-                : {}),
-              buildTurn: async () => {
-                const _mcpCtx = await mcpRuntime.resolveContext(msg.sessionId);
-                return {
-                  db: opts.db,
-                  sessionId: msg.sessionId,
-                  session,
-                  transcript,
-                  toolRuns,
-                  userContent,
-                  userMetadata,
-
-                  env,
-                  config: opts.config,
-                  policyEngine: engine,
-                  getHitlConfig,
-                  hitl: {
-                    bypassUpTo: resolveSessionBypassUpTo(msg.sessionId, opts.config),
-                    yoloActive,
-                    pending: pendingForToolLoop,
-                    clock: { nowMs: () => Date.now() },
-                    newPendingId: () => randomUUID(),
-                    waitForHitlResolution,
-                    hitlNotifier,
-                    autoApprove: opts.hitlAutoApproveGate,
-                    ...cruiseControlToolLoopHook(opts),
-                    ...(afterHitlQueued ? { afterHitlQueued } : {}),
-                  },
-                  loopImpl,
-                  createToolCallingClient: createToolClient,
-                  resolveMcpContext: mcpRuntime.resolveContext,
-                };
-              },
-            });
-          });
-        },
-        {
-          onQueued: () => queuedIndicator.markQueued(),
-          onDequeued: () => {
-            void queuedIndicator.clear();
-          },
-        },
-      )
-      .catch((e) => {
-        opts.logger.warn("discord.platform.user_turn_failed", {
-          err: String(e),
-          sessionId: msg.sessionId,
-        });
-      });
-  }
+    }),
+  );
 
   // Surface turn engine wiring: everything the engine needs, captured once —
   // the engine itself owns no platform closures. The per-turn presentation
@@ -691,7 +378,7 @@ export async function startDiscordPlatform(
   function subscribeSubagentSession(sessionId: string): () => void {
     const sid = sessionId.trim();
     const u = opts.discord.bus.subscribe(sid, (msg) => {
-      void dispatchChained(sid, msg).catch((e) => {
+      void inbound.dispatchChained(sid, msg).catch((e) => {
         opts.logger.error("discord.platform.dispatch_failed", {
           err: String(e),
         });
@@ -753,9 +440,7 @@ export async function startDiscordPlatform(
       for (const u of unsubs) u();
       for (const u of subagentBusUnsubs) u();
       subagentBusUnsubs.length = 0;
-      const inFlightChains = [...chainTail.values()];
-      chainTail.clear();
-      await Promise.all(inFlightChains);
+      await inbound.stop();
       await mcpRuntime.shutdown();
     },
     runSessionModelTurn,
