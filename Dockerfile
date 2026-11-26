@@ -5,7 +5,14 @@
 
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
-RUN npm install -g npm@12
+RUN set -eux; \
+  npm pack npm@12 --pack-destination /tmp && \
+  tar -xzf /tmp/npm-*.tgz -C /tmp && \
+  rm -rf /usr/local/lib/node_modules/npm && \
+  mv /tmp/package /usr/local/lib/node_modules/npm && \
+  rm -f /tmp/npm-*.tgz && \
+  ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+  ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 COPY package.json package-lock.json* tsconfig.base.json ./
 COPY packages ./packages
 COPY scripts ./scripts
