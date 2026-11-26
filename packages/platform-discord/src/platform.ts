@@ -67,6 +67,12 @@ import { createInboundTurnPipeline, type InboundTurnPipeline } from "./inbound-t
 // platform.ts before the split and is now implemented in platform-shared.
 export { buildStatusBarDep };
 
+/** Discord streaming minimum edit interval, clamped to ≥ 0 (default 400ms). */
+function discordStreamMinIntervalMs(env: NodeJS.ProcessEnv): number {
+  const raw = Number(env.SHOGGOTH_DISCORD_STREAM_MIN_MS ?? 400);
+  return Number.isFinite(raw) ? Math.max(0, raw) : 400;
+}
+
 /** Notice resolution for this platform instance: opts.noticeResolver if set. */
 function platformNoticeResolver(opts: DiscordPlatformOptions): NoticeResolver {
   return opts.noticeResolver ?? daemonNotice;
@@ -92,6 +98,33 @@ function cruiseControlToolLoopHook(opts: DiscordPlatformOptions) {
       isActive: (sessionId: string) => cruise.store.isActive(sessionId),
       judge: cruise.judge,
     },
+  };
+}
+
+/** Per-session boolean flag with invalidate-on-change caching: re-reads the
+ *  source store only when `sourceVersion` moves (zero DB reads on steady-state
+ *  reads); a source-store throw reads as `false` so an unmigrated state DB
+ *  cannot break a turn. */
+function createSessionFlagReadCache(
+  read: (sessionId: string) => boolean,
+  sourceVersion: () => number,
+): (sessionId: string) => boolean {
+  const enabledBySession = new Map<string, boolean>();
+  const versionAtLastRead = new Map<string, number>();
+  return (sessionId: string): boolean => {
+    const version = sourceVersion();
+    if (versionAtLastRead.get(sessionId) === version) {
+      return enabledBySession.get(sessionId) ?? false;
+    }
+    let enabled = false;
+    try {
+      enabled = read(sessionId);
+    } catch {
+      enabled = false;
+    }
+    enabledBySession.set(sessionId, enabled);
+    versionAtLastRead.set(sessionId, version);
+    return enabled;
   };
 }
 
@@ -185,8 +218,6 @@ export async function startDiscordPlatform(
   const hitlStack = opts.hitlPending ?? createHitlPendingResolutionStack(opts.db);
   const { pending, waitForHitlResolution } = hitlStack;
   const yoloMode = createYoloModeStore(opts.db);
-  // Last-read yolo state per session, keyed alongside yoloVersionAtLastRead.
-  const yoloReadCache = new Map<string, boolean>();
   // The daemon-supplied store carries the full resolution surface; the platform
   // only depends on the minimal view above. Adapter to the tool-loop contract so
   // a daemon-side removal of a resolution method fails the typecheck here.
@@ -195,28 +226,14 @@ export async function startDiscordPlatform(
   // A state DB that has not run the yolo migration yet must not break a turn:
   // the flag simply reads as off. The provider re-reads only on a version
   // change (pure cache between changes — no steady-state SQLite access).
-  const yoloVersionAtLastRead = new Map<string, number>();
-  const yoloActive = (sessionId: string): boolean => {
-    const version = statusBarSourceVersions().yolo;
-    if (yoloVersionAtLastRead.get(sessionId) === version) {
-      return yoloReadCache.get(sessionId) ?? false;
-    }
-    let enabled = false;
-    try {
-      enabled = yoloMode.isEnabled(sessionId);
-    } catch {
-      enabled = false;
-    }
-    yoloReadCache.set(sessionId, enabled);
-    yoloVersionAtLastRead.set(sessionId, version);
-    return enabled;
-  };
+  const yoloActive = createSessionFlagReadCache(
+    (sessionId) => yoloMode.isEnabled(sessionId),
+    () => statusBarSourceVersions().yolo,
+  );
 
   /** Live cruise-control activity provider for status-bar trackers. */
-  const cruiseControlActiveFor = (sessionId: string): boolean => {
-    const provider = cruiseStatusBarProvider(opts, sessionId).cruiseControlActive;
-    return provider ? provider() : false;
-  };
+  const cruiseControlActiveFor = (sessionId: string): boolean =>
+    cruiseStatusBarProvider(opts, sessionId).cruiseControlActive?.() ?? false;
 
   const assistantDeps = pickDiscordAssistantDeps(opts.deps);
   const noticeResolver = platformNoticeResolver(opts);
@@ -265,10 +282,6 @@ export async function startDiscordPlatform(
   // Create the PresentationTurnOrchestrator — delegates formatting, streaming,
   // and error presentation to the presentation layer.
   const streamEnabled = () => env.SHOGGOTH_DISCORD_STREAM === "1";
-  const streamMinMs = () => {
-    const raw = Number(env.SHOGGOTH_DISCORD_STREAM_MIN_MS ?? 400);
-    return Number.isFinite(raw) ? Math.max(0, raw) : 400;
-  };
 
   const orchestrator = new PresentationTurnOrchestrator({
     config: opts.config,
@@ -276,7 +289,7 @@ export async function startDiscordPlatform(
     env,
     adapter,
     get streamingIntervalMs() {
-      return streamEnabled() ? streamMinMs() : 0;
+      return streamEnabled() ? discordStreamMinIntervalMs(env) : 0;
     },
     errorReplyPrefix: "⚠️ ",
     statusBar: statusBarDep,
@@ -368,7 +381,7 @@ export async function startDiscordPlatform(
     hitlQueuedNotice,
     configForOwnerGate,
     resolveOutboundChannelIdForSession: opts.discord.resolveOutboundChannelIdForSession,
-    streamMinMs,
+    streamMinMs: () => discordStreamMinIntervalMs(env),
   };
 
   async function runSessionModelTurn(input: SurfaceTurnInput): Promise<SessionAgentTurnResult> {
