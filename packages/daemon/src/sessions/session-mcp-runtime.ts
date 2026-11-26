@@ -4,6 +4,7 @@ import {
   SHOGGOTH_DEFAULT_MCP_INSTANCE_IDLE_MS,
   mcpServersToEntries,
   type ShoggothConfig,
+  type ShoggothMcpServerEntry,
   evaluateMcpServerRules,
   resolveEffectiveMcpServerRules,
   isSubagentSessionUrn,
@@ -15,6 +16,7 @@ import {
   type AgentMcpContext,
   type ConnectShoggothMcpPoolOptions,
   type McpServerConnectStatus,
+  type McpServerPool,
 } from "../mcp/mcp-server-pool";
 import {
   registerMcpHttpCancelHandler,
@@ -278,6 +280,8 @@ export async function createSessionMcpRuntime(
   // ── Global pool state (mutable for idle eviction / reconnect) ──
   let globalExternalSources: readonly McpSourceCatalog[] = [];
   let globalExternalInvoke: ExternalMcpInvoke | undefined;
+  /** Liveness probe of the connected global pool (null when not connected). */
+  let globalDeadProbe: (() => boolean) | null = null;
   let mcpShutdownGlobal: (() => Promise<void>) | undefined;
   let globalPoolConnected = false;
   /**
@@ -311,9 +315,11 @@ export async function createSessionMcpRuntime(
       };
       globalExternalSources = pool.externalSources;
       globalExternalInvoke = external;
+      globalDeadProbe = () => pool.hasLiveServers?.() ?? true;
       globalPoolConnected = true;
       globalConnectFailed = false;
     } catch (e) {
+      globalDeadProbe = null;
       globalConnectFailed = true;
       log.error("session.mcp_pool.connect_failed", { err: String(e) });
     }
@@ -354,6 +360,8 @@ export async function createSessionMcpRuntime(
     ctx: SessionMcpToolContext;
     rebuild: () => SessionMcpToolContext;
     epoch: number;
+    /** The backing pool; its liveness probe invalidates the snapshot on death. */
+    pool?: McpServerPool;
   };
   const perSessionMcpCtx = new Map<string, PerSessionMcpCacheEntry>();
   const perSessionMcpConnect = new Map<string, Promise<SessionMcpToolContext>>();
@@ -380,14 +388,33 @@ export async function createSessionMcpRuntime(
 
   // ── Per-agent pool state ─────────────────────────────────────────
   const perAgentMcpClose = new Map<string, () => Promise<void>>();
-  const perAgentMcpCtx = new Map<
-    string,
-    { sources: readonly McpSourceCatalog[]; external: ExternalMcpInvoke | undefined }
-  >();
-  const perAgentMcpConnect = new Map<
-    string,
-    Promise<{ sources: readonly McpSourceCatalog[]; external: ExternalMcpInvoke | undefined }>
-  >();
+  /**
+   * Cache entry: the pool descriptor (servers, sources, invoke) plus a
+   * liveness probe. `live` reads the pool's server-death state, so a stdio
+   * server dying (process exit / stream end) invalidates the cache without
+   * any polling — the next `resolveContext` reconnects instead of serving a
+   * permanently dead session.
+   */
+  type PerAgentPoolCacheEntry = {
+    readonly servers: readonly ShoggothMcpServerEntry[];
+    readonly sources: readonly McpSourceCatalog[];
+    readonly external: ExternalMcpInvoke | undefined;
+    readonly pool: McpServerPool | undefined;
+    readonly live: () => boolean;
+  };
+  const perAgentMcpCtx = new Map<string, PerAgentPoolCacheEntry>();
+  const perAgentMcpConnect = new Map<string, Promise<PerAgentPoolCacheEntry>>();
+
+  /** True when the entry exists and its pool reports at least one dead server. */
+  function perAgentPoolDead(entry: PerAgentPoolCacheEntry | undefined): boolean {
+    if (!entry) return false;
+    try {
+      return !entry.live();
+    } catch {
+      // A broken liveness probe must never wedge resolution; treat as live.
+      return false;
+    }
+  }
 
   // ── Unified idle eviction ────────────────────────────────────────
 
@@ -541,14 +568,22 @@ export async function createSessionMcpRuntime(
    * Ensures a per-agent MCP pool is connected for `agentId`, returning cached sources/external.
    * Concurrent calls for the same agent coalesce on a single in-flight promise.
    */
-  async function ensurePerAgentPool(
-    agentId: string,
-  ): Promise<{ sources: readonly McpSourceCatalog[]; external: ExternalMcpInvoke | undefined }> {
+  async function ensurePerAgentPool(agentId: string): Promise<PerAgentPoolCacheEntry> {
     const cached = perAgentMcpCtx.get(agentId);
-    if (cached) return cached;
+    if (cached && perAgentPoolDead(cached)) {
+      // A stdio server in this pool died: drop the stale entry (cascading to
+      // dependent per-session snapshots) and reconnect from scratch — an
+      // explicit recovery, so circuits re-arm.
+      log.warn("session.mcp_pool.server_exited", { poolScope: "per_agent", agentId });
+      log.info("session.mcp_pool.per_agent_reconnect", { agentId });
+      evictPool(agentId, "per_agent");
+    }
+    const entry = perAgentMcpCtx.get(agentId);
+    if (entry) return entry;
 
     let inflight = perAgentMcpConnect.get(agentId);
     if (!inflight) {
+      const wasRecovery = perAgentPoolDead(cached);
       inflight = (async () => {
         try {
           const agentContext = resolveAgentMcpContext(opts.db, agentId, workspacesRoot);
@@ -556,6 +591,9 @@ export async function createSessionMcpRuntime(
             ...mcpConnectOpts,
             agentContext,
             agentId,
+            // A dead-pool recovery is an explicit reconnect: grant a fresh
+            // retry budget instead of failing fast on an open breaker.
+            ...(wasRecovery ? { rearmCircuits: true } : {}),
           };
           // Filter out servers denied for this agent in any context (top-level
           // or subagent). If a server is denied in ANY context, it should not
@@ -578,7 +616,14 @@ export async function createSessionMcpRuntime(
             unregister();
             await pool.close();
           });
-          const result = { sources: pool.externalSources, external };
+          const live = (): boolean => pool.hasLiveServers?.() ?? true;
+          const result: PerAgentPoolCacheEntry = {
+            servers: allowedServers,
+            sources: pool.externalSources,
+            external,
+            pool,
+            live,
+          };
           perAgentMcpCtx.set(agentId, result);
           return result;
         } catch (e) {
@@ -589,7 +634,13 @@ export async function createSessionMcpRuntime(
           // Do NOT cache the failure: an empty entry with no close fn would
           // survive idle-eviction sweeps and pin the agent to a manifest
           // without its servers; the next resolveContext retries the connect.
-          return { sources: [] as McpSourceCatalog[], external: undefined };
+          return {
+            servers: [],
+            sources: [] as McpSourceCatalog[],
+            external: undefined,
+            pool: undefined,
+            live: () => true,
+          };
         }
       })();
       perAgentMcpConnect.set(agentId, inflight);
@@ -610,9 +661,22 @@ export async function createSessionMcpRuntime(
       return runContextFinalizers(builtinMcpCtx, sessionId);
     }
 
-    // Reconnect the global pool when not connected: after an explicit idle
-    // eviction, or after a failed connect only when a breaker has closed (a
-    // failed connect with all circuits open is NOT retried here).
+    // Reconnect the global pool when not connected (idle eviction, or failed
+    // connect with a closed breaker). A pool whose server died counts as
+    // "not connected": evict the stale state first so we reconnect fresh.
+    let globalPoolDead = false;
+    if (globalPoolConnected && globalServers.length > 0) {
+      try {
+        globalPoolDead =
+          globalExternalInvoke !== undefined && globalDeadProbe !== null && !globalDeadProbe();
+      } catch {
+        globalPoolDead = false;
+      }
+    }
+    if (globalPoolDead) {
+      log.warn("session.mcp_pool.server_exited", { poolScope: "global" });
+      evictPool("__global__", "global");
+    }
     if (
       globalServers.length > 0 &&
       !globalPoolConnected &&
@@ -645,9 +709,26 @@ export async function createSessionMcpRuntime(
     let agentExternal: ExternalMcpInvoke | undefined;
 
     if (perAgentServers.length > 0 && agentId) {
+      // ensurePerAgentPool re-resolves the entry after a server death (cache
+      // invalidated → fresh connect), so re-read sources/external from it.
       const agentPool = await ensurePerAgentPool(agentId);
       agentSources = agentPool.sources;
       agentExternal = agentPool.external;
+    }
+
+    // ── Dead per-session pool: drop the stale snapshot and reconnect ──
+    if (perSessionServers.length > 0 && perSessionMcpClose.has(sessionId)) {
+      const ctxEntry = perSessionMcpCtx.get(sessionId);
+      let dead = false;
+      try {
+        dead = !(ctxEntry?.pool?.hasLiveServers?.() ?? true);
+      } catch {
+        dead = false;
+      }
+      if (dead) {
+        log.warn("session.mcp_pool.server_exited", { poolScope: "per_session", sessionId });
+        evictPool(sessionId, "per_session");
+      }
     }
 
     // ── No per-session servers: merge global + per-agent ────────
@@ -744,7 +825,12 @@ export async function createSessionMcpRuntime(
             );
           };
           const ctx = buildCtx();
-          perSessionMcpCtx.set(sessionId, { ctx, rebuild: buildCtx, epoch: catalogEpoch });
+          perSessionMcpCtx.set(sessionId, {
+            ctx,
+            rebuild: buildCtx,
+            epoch: catalogEpoch,
+            pool,
+          });
           trackSessionCacheEntry(sessionId);
           return ctx;
         } catch (e) {
