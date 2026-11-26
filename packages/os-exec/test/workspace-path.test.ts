@@ -1,9 +1,14 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, realpathSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { PathEscapeError, resolvePathForRead, resolvePathForWrite } from "../src/workspace-path";
+import {
+  PathEscapeError,
+  cachedRealpathSync,
+  resolvePathForRead,
+  resolvePathForWrite,
+} from "../src/workspace-path";
 
 describe("workspace path allowlist", () => {
   let ws: string;
@@ -202,6 +207,71 @@ describe("workspace path allowlist", () => {
     it("rejects paths with NUL bytes", () => {
       assert.throws(() => resolvePathForRead(ws, "file\0name"), PathEscapeError);
       assert.throws(() => resolvePathForWrite(ws, "file\0name"), PathEscapeError);
+    });
+  });
+
+  describe("cachedRealpathSync invalidation", () => {
+    it("reuses a fresh cache hit across calls", () => {
+      const first = cachedRealpathSync(ws);
+      const second = cachedRealpathSync(ws);
+      assert.strictEqual(first, second);
+      assert.strictEqual(first, realpathSync(ws));
+    });
+
+    it("refreshes after delete-and-recreate of the workspace root", () => {
+      const before = cachedRealpathSync(ws);
+
+      rmSync(ws, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      mkdirSync(ws, { recursive: true });
+
+      const after = cachedRealpathSync(ws);
+      assert.strictEqual(after, realpathSync(ws));
+      assert.strictEqual(after, before);
+    });
+
+    it("resolves through a new symlink to a different directory after recreation", () => {
+      const alt = mkdtempSync(join(tmpdir(), "shoggoth-alt-"));
+      try {
+        const before = cachedRealpathSync(ws);
+
+        rmSync(ws, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        symlinkSync(alt, ws);
+
+        const after = cachedRealpathSync(ws);
+        assert.strictEqual(after, realpathSync(alt));
+        assert.notStrictEqual(after, before);
+
+        // Containment now anchors on the new real root: reads inside alt succeed.
+        mkdirSync(join(alt, "sub"), { recursive: true });
+        writeFileSync(join(alt, "sub/data.txt"), "ok");
+        assert.strictEqual(
+          resolvePathForRead(ws, "sub/data.txt"),
+          realpathSync(join(alt, "sub/data.txt")),
+        );
+      } finally {
+        rmSync(alt, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      }
+    });
+
+    it("refreshes when the cached real path itself disappears", () => {
+      const before = cachedRealpathSync(ws);
+      const mirror = join(tmpdir(), "shoggoth-mirror-", basename(ws));
+      mkdirSync(dirname(mirror), { recursive: true });
+      symlinkSync(ws, mirror);
+
+      try {
+        assert.strictEqual(cachedRealpathSync(mirror), realpathSync(mirror));
+
+        rmSync(ws, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        mkdirSync(ws, { recursive: true });
+
+        const after = cachedRealpathSync(mirror);
+        assert.strictEqual(after, realpathSync(mirror));
+        assert.strictEqual(after, before);
+      } finally {
+        rmSync(mirror, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        rmSync(ws, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      }
     });
   });
 });

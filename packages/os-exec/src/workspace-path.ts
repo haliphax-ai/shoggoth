@@ -1,14 +1,39 @@
-import { realpathSync } from "node:fs";
+import { lstatSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
-// Cache realpathSync results per workspace root to avoid repeated syscalls
 const realpathCache = new Map<string, string>();
-function cachedRealpathSync(workspaceRoot: string): string {
+
+/**
+ * Resolve the real path of a workspace root, caching results per input path.
+ *
+ * A cached value is reused only while it is still a real (non-symlink)
+ * directory matching the current (device, inode) of `workspaceRoot`; otherwise
+ * the entry is refreshed via `realpathSync`. This keeps containment checks and
+ * the `cwd`/HOME handed to child processes anchored on the same, current real
+ * root even when the root is deleted and recreated during a daemon lifetime.
+ */
+export function cachedRealpathSync(workspaceRoot: string): string {
   let cached = realpathCache.get(workspaceRoot);
-  if (cached === undefined) {
-    cached = realpathSync(workspaceRoot);
-    realpathCache.set(workspaceRoot, cached);
+  if (cached !== undefined) {
+    try {
+      // `lstatSync` (not `statSync`) so a cached path that has itself become a
+      // symlink is treated as stale instead of matching through its target.
+      const cachedStat = lstatSync(cached, { bigint: true });
+      const rootStat = statSync(workspaceRoot, { bigint: true });
+      if (
+        cachedStat.isDirectory() &&
+        cachedStat.dev === rootStat.dev &&
+        cachedStat.ino === rootStat.ino
+      ) {
+        return cached;
+      }
+    } catch {
+      // lstat/stat failure (ENOENT, EACCES, ...): fall through to re-resolve.
+    }
+    realpathCache.delete(workspaceRoot);
   }
+  cached = realpathSync(workspaceRoot);
+  realpathCache.set(workspaceRoot, cached);
   return cached;
 }
 
