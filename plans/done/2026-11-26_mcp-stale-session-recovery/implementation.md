@@ -41,3 +41,18 @@ Files: `packages/daemon/src/sessions/session-mcp-runtime.ts`,
    targeted, then full `npm test`.
 2. `npx tsc --noEmit` (hooks run this on push too).
 3. Commit per phase, push, open PR to `main` referencing issue #734.
+
+## Addendum (post-implementation)
+
+- The planned `McpServerConnectStatus.transport` field was dropped: it broke an
+  existing `deepEqual` in `mcp-server-pool.test.ts` and had no consumer after
+  the transport-wrapping approach was simplified away.
+- Death detection rides entirely on the `onServerExit` connect option (procman
+  stdio path); the transport's `onExit` tap remains available but the pool does
+  not wrap sessions.
+- Crash-loop guard: rapid re-deaths (within 10 s of a successful respawn)
+  increment a per-server streak; at 3 the pool stops auto-respawning until the
+  next explicit connect. Backoff (250 ms × 2^streak, cap 8 s) spaces attempts.
+- MCP stdio procman spec now uses `restart: { mode: "never" }`: the pool owns
+  recovery; a procman-restarted child cannot be bridged to the dead session
+  object and would race the pool's respawn.

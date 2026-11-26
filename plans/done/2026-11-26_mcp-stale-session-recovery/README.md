@@ -1,6 +1,6 @@
 ---
 date: 2026-11-26
-completed: never
+completed: 2026-11-26
 ---
 
 # Plan: MCP pool recovers from dead/restarted stdio servers
