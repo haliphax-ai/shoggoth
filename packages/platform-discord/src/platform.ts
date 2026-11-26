@@ -10,12 +10,7 @@ import {
   type SystemContext,
 } from "@shoggoth/shared";
 import {
-  createTurnBannerCollector,
   daemonNotice,
-  registerActiveTurnSurface,
-  createCoalescingStreamPusher,
-  createThinkingOutput,
-  normalizeRoundProse,
   createHitlPendingResolutionStack,
   createPolicyEngine,
   createYoloModeStore,
@@ -27,26 +22,18 @@ import {
   parseSessionSegmentInlineCommand,
   sessionSegmentStartupUserContent,
   resolveSessionBypassUpTo,
-  executeSessionAgentTurn,
   createSessionMcpRuntime,
   defaultPlatformAssistantDeps,
   createQueuedMessageIndicator,
   getTurnQueue,
-  getStatusBarStats,
-  createStatusBarTurnTracker,
-  formatAssistantReply,
   PresentationTurnOrchestrator,
   type TieredTurnQueue,
   type PolicyEngine,
   type HitlConfigRef,
-  type ExecuteSessionAgentTurnInput,
   type SessionAgentTurnResult,
   type SessionModelTurnDelivery,
-  type TurnStatusBarTracker,
-  type StreamHandle,
   type OobTurnBannerHandle,
   type PlatformAssistantDeps,
-  renderTurnTerminationBody,
   resolveModel,
   shouldSkipThreadSessionSentinel,
 } from "@shoggoth/daemon/lib";
@@ -57,7 +44,7 @@ import type {
   NoticeResolver,
   DaemonPendingActionsStack,
 } from "./daemon-types";
-import { invalidateStatusBarSources, statusBarSourceVersions } from "@shoggoth/daemon/lib";
+import { statusBarSourceVersions } from "@shoggoth/daemon/lib";
 import type { HitlAutoApproveGate } from "@shoggoth/shared";
 import type { PendingActionsStore } from "@shoggoth/daemon/lib";
 import type { HitlDiscordNoticeRegistry } from "./hitl/notice-registry";
@@ -75,7 +62,6 @@ import {
   buildStatusBarDep,
   sendHitlQueuedNotice,
   startStreamHandleWithBar,
-  terminalOutcomeOf,
   type HitlQueuedDelivery,
 } from "./platform-shared";
 import {
@@ -83,6 +69,12 @@ import {
   type DiscordReactionPassthroughEvent,
 } from "./reaction-passthrough";
 import { createOobTurnBanner } from "./oob-banner";
+import {
+  createSurfaceTurnState,
+  runSurfaceTurn,
+  type SurfaceTurnDeps,
+  type SurfaceTurnInput,
+} from "./surface-turn";
 
 // Keep platform.ts's prior exports working: buildStatusBarDep was exported from
 // platform.ts before the split and is now implemented in platform-shared.
@@ -233,10 +225,11 @@ export async function startDiscordPlatform(
     return enabled;
   };
 
-  /** Spread into a status-bar tracker creation to render the 😎 section. */
-  const yoloStatusBarProvider = (sessionId: string) => ({
-    yoloModeActive: () => yoloActive(sessionId),
-  });
+  /** Live cruise-control activity provider for status-bar trackers. */
+  const cruiseControlActiveFor = (sessionId: string): boolean => {
+    const provider = cruiseStatusBarProvider(opts, sessionId).cruiseControlActive;
+    return provider ? provider() : false;
+  };
 
   const assistantDeps = pickDiscordAssistantDeps(opts.deps);
   const noticeResolver = platformNoticeResolver(opts);
@@ -256,10 +249,7 @@ export async function startDiscordPlatform(
   const statusBarDep = buildStatusBarDep(
     opts.db,
     resolveStatusBarConfig(opts.configRef?.current ?? opts.config),
-    (sessionId) => {
-      const provider = cruiseStatusBarProvider(opts, sessionId).cruiseControlActive;
-      return provider ? provider() : false;
-    },
+    cruiseControlActiveFor,
     (sessionId) => yoloActive(sessionId),
   );
 
@@ -659,441 +649,43 @@ export async function startDiscordPlatform(
       });
   }
 
-  async function runSessionModelTurn(input: {
-    readonly sessionId: string;
-    readonly userContent: string;
-    readonly userMetadata?: Record<string, unknown>;
-    readonly systemContext?: SystemContext;
-    readonly delivery: SessionModelTurnDelivery;
-    readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
-    readonly turnBanner?: string;
-    readonly statusBarSink?: { setStatusBar: (line: string | null) => Promise<void> };
-  }): Promise<SessionAgentTurnResult> {
-    const sid = input.sessionId.trim();
-    const sessionRow = sessions.getById(sid);
-    if (!sessionRow || sessionRow.status === "terminated") {
-      throw new Error(`session not available: ${sid}`);
-    }
-    let turnResult!: SessionAgentTurnResult;
-    await turnQueue.enqueue(sid, "system", input.systemContext?.kind ?? "system", async () => {
-      opts.logger.debug("platform.turn_queue_acquired", { sessionId: sid });
-      opts.logger.debug("platform.mcp_context_resolving", { sessionId: sid });
-      const mcpCtx = await mcpRuntime.resolveContext(sid);
-      opts.logger.debug("platform.mcp_context_resolved", {
-        sessionId: sid,
-        toolCount: mcpCtx.toolsLoop.length,
-      });
-      const userMetadata = input.userMetadata ?? {};
-      const buildAfterHitlQueued = (delivery: {
-        readonly userId: string;
-        readonly replyToMessageId?: string;
-      }) =>
-        afterHitlQueuedFor(env, hitlQueuedNotice, {
-          sessionId: sid,
-          userId: delivery.userId,
-          replyToMessageId: delivery.replyToMessageId,
-        });
+  // Surface turn engine wiring: everything the engine needs, captured once —
+  // the engine itself owns no platform closures. The per-turn presentation
+  // state is built fresh for each call (see createSurfaceTurnState).
+  const surfaceTurnDeps: SurfaceTurnDeps = {
+    db: opts.db,
+    config: opts.config,
+    configRef: opts.configRef,
+    env,
+    logger: opts.logger,
+    sessions,
+    transcript,
+    toolRuns,
+    turnQueue,
+    resolveMcpContext: mcpRuntime.resolveContext,
+    policyEngine: engine,
+    getHitlConfig,
+    pendingForToolLoop,
+    waitForHitlResolution,
+    hitlNotifier,
+    hitlAutoApproveGate: opts.hitlAutoApproveGate,
+    loopImpl,
+    createToolCallingClient: createToolClient,
+    cruiseControlToolLoopHook: () => cruiseControlToolLoopHook(opts),
+    yoloActive,
+    cruiseControlActiveFor,
+    yoloModeActive: (sessionId) => yoloActive(sessionId),
+    adapter,
+    streamingForSession: opts.discord.streamingForSession,
+    statusBarDep,
+    hitlQueuedNotice,
+    configForOwnerGate,
+    resolveOutboundChannelIdForSession: opts.discord.resolveOutboundChannelIdForSession,
+    streamMinMs,
+  };
 
-      // One tracker for the messaging_surface turn: live and terminal bars are its
-      // snapshots from the same renderer (only the phase emoji differs). Captures
-      // until the stream handle exists; attachSink flushes the ⏳ line onto it.
-      let surfaceTracker: TurnStatusBarTracker | undefined;
-      let thinkingOutput: ReturnType<typeof createThinkingOutput> | undefined;
-      let surfaceStreamPusher: ReturnType<typeof createCoalescingStreamPusher> | undefined;
-      // Declared here (not in the messaging_surface branch) so the abort
-      // handler inside executeTurn can finalize the in-flight message handle.
-      let surfaceStreamHandle: StreamHandle | undefined;
-      // Round-settled prose of earlier rounds for the live display when the
-      // thinking composer is disabled (showThinking === false surfaces still
-      // show every round, separated by the transcript's blank line).
-      let surfacePriorRoundsProse = "";
-      // In-turn banner anchors: the runner's live position (committed prose
-      // segments / tool calls) captured at notice-fire time.
-      let surfaceCommittedProseSegments = 0;
-      let surfaceToolCalls = 0;
-      // The turn's committed prose segments, pushed in lockstep with
-      // `surfaceCommittedProseSegments` (same admission condition): a round still
-      // streaming is not committed, so mid-round notices ride the tail append.
-      const surfaceCommittedProse: string[] = [];
-      let surfaceDisplay = "";
-      // Every push re-renders display + notices from scratch (the coalescing pusher
-      // ships the latest state), so banners land chronologically, never patched into
-      // a pushed message. At this scope so every producer renders through the splice.
-      const surfaceBanners = createTurnBannerCollector({
-        captureAnchor: () => ({
-          committedProseSegments: surfaceCommittedProseSegments,
-          toolCalls: surfaceToolCalls,
-        }),
-        onNotice: () => {
-          if (surfaceStreamPusher) pushDisplay(surfaceDisplay || "…");
-        },
-      });
-      // A caller-provided banner (e.g. a steer banner) anchors at slot 0 — before the
-      // model's first prose segment — so the output attributes the turn to its prompt.
-      // Added before any turn output exists; live display and terminal body both carry it.
-      if (input.turnBanner) surfaceBanners.add(input.turnBanner);
-      const pushDisplay = (display: string): void => {
-        surfaceDisplay = display;
-        if (!surfaceStreamPusher) return;
-        surfaceStreamPusher.push(
-          surfaceBanners.liveBody(display, { segments: surfaceCommittedProse }),
-        );
-      };
-      const executeTurn = (
-        afterHitlQueued?: (row: PendingActionRow) => void | Promise<void>,
-        streamOverride?: ExecuteSessionAgentTurnInput["stream"],
-      ) =>
-        executeSessionAgentTurn({
-          db: opts.db,
-          sessionId: sid,
-          session: sessionRow,
-          transcript,
-          toolRuns,
-          userContent: input.userContent,
-          userMetadata,
-          systemContext: input.systemContext,
-          modelInvocationOverride: input.modelInvocationOverride,
-
-          env,
-          config: opts.config,
-          policyEngine: engine,
-          getHitlConfig,
-          hitl: {
-            bypassUpTo: resolveSessionBypassUpTo(sid, opts.config),
-            yoloActive,
-            pending: pendingForToolLoop,
-            clock: { nowMs: () => Date.now() },
-            newPendingId: () => randomUUID(),
-            waitForHitlResolution,
-            hitlNotifier,
-            autoApprove: opts.hitlAutoApproveGate,
-            ...cruiseControlToolLoopHook(opts),
-            ...(afterHitlQueued ? { afterHitlQueued } : {}),
-          },
-          loopImpl,
-          createToolCallingClient: createToolClient,
-          resolveMcpContext: mcpRuntime.resolveContext,
-          ...(streamOverride ? { stream: streamOverride } : {}),
-          // Forward turn events into the tracker so the live bar re-renders mid-turn
-          // (thinking / tool count / HITL pause / compaction / context fill).
-          // `onTurnAborted` stops the pusher and freezes the tracker even on a hung call.
-          ...(surfaceTracker || thinkingOutput || surfaceStreamPusher
-            ? {
-                events: {
-                  onThinkingDelta: (ev: { accumulated: string; round: number }) => {
-                    if (thinkingOutput) {
-                      const display = thinkingOutput.onThinking(ev);
-                      if (surfaceStreamPusher) {
-                        pushDisplay(display.trim() ? display : "…");
-                      }
-                    }
-                    surfaceTracker?.onThinkingDelta?.(ev.accumulated);
-                  },
-                  onToolCall: (ev) => {
-                    surfaceToolCalls += 1;
-                    surfaceTracker?.onToolCall?.(ev);
-                  },
-                  onHitlQueued: (call) => surfaceTracker?.onHitlQueued?.(call),
-                  onCompactionStart: () => surfaceTracker?.onCompactionStart?.(),
-                  onCompaction: () => surfaceTracker?.onCompaction?.(),
-                  onCompactionFailed: () => surfaceTracker?.onCompactionFailed?.(),
-                  onContextUpdate: (update) => surfaceTracker?.onContextUpdate?.(update),
-                  // Count-change events: keep the 🕵️/⏰/↩️ sections live on this
-                  // path — bumps re-arm the version poll; tracker pushes keep
-                  // the cache fresh without waiting for it.
-                  onSubagentsChanged: (counts) => {
-                    invalidateStatusBarSources("subagents");
-                    surfaceTracker?.onSubagentsChanged?.(counts);
-                  },
-                  onTimersChanged: (count) => {
-                    invalidateStatusBarSources("timers");
-                    surfaceTracker?.onTimersChanged?.(count);
-                  },
-                  onNotifiesChanged: (count) => {
-                    invalidateStatusBarSources("notifies");
-                    surfaceTracker?.onNotifiesChanged?.(count);
-                  },
-                  // Abort while the model call may still stream or hang: stop the
-                  // producers immediately — post-turn delivery never runs for a
-                  // promise that never settles. finish("aborted") freezes the 🛑 render.
-                  onTurnAborted: () => {
-                    surfaceStreamPusher?.stop();
-                    // Deterministic teardown: no producer (late deltas, stray
-                    // renders) may edit the aborted turn's message after this point.
-                    surfaceStreamHandle?.close?.();
-                    if (surfaceTracker) {
-                      void surfaceTracker.finish("aborted").catch((e) => {
-                        opts.logger.warn("discord.platform.status_bar_abort_finish_failed", {
-                          sessionId: sid,
-                          err: String(e),
-                        });
-                      });
-                    }
-                  },
-                },
-              }
-            : {}),
-        });
-
-      if (input.delivery.kind === "messaging_surface") {
-        const delivery = input.delivery;
-
-        // Snapshot stats BEFORE the turn runs: executing the turn increments
-        // session_stats.turn_count, and the bar must report the sequence of
-        // the very turn it belongs to (not the next one).
-        if (statusBarDep.config.enabled) {
-          surfaceTracker = createStatusBarTurnTracker({
-            cfg: statusBarDep.config,
-            render: statusBarDep.render,
-            stats: getStatusBarStats(opts.db, sid),
-            ...cruiseStatusBarProvider(opts, sid),
-            ...yoloStatusBarProvider(sid),
-          });
-        }
-
-        // With streaming, post the placeholder ("…") BEFORE the typing indicator
-        // (Discord cancels typing when a bot posts), then coalesce text deltas into
-        // live edits of that message, matching the inbound-turn pathway.
-        thinkingOutput =
-          (opts.configRef?.current ?? opts.config).platforms?.showThinking === false
-            ? undefined
-            : createThinkingOutput();
-        surfaceStreamHandle = await startStreamHandleWithBar(
-          {
-            logger: opts.logger,
-            env,
-            statusBarDep,
-            streamingForSession: opts.discord.streamingForSession,
-          },
-          sid,
-          { withSessionId: true },
-        );
-        // Wire the tracker's live target; the tracker flushes its
-        // captured ⏳ line so the placeholder carries the bar from turn
-        // start (capture-fallback until this handle exists).
-        surfaceTracker?.attachSink({
-          setStatusBar: (line: string | null) =>
-            surfaceStreamHandle?.setStatusBar
-              ? surfaceStreamHandle.setStatusBar(line)
-              : Promise.resolve(),
-        });
-        surfaceStreamPusher = surfaceStreamHandle
-          ? createCoalescingStreamPusher((s) => surfaceStreamHandle!.pushUpdate(s), streamMinMs())
-          : undefined;
-
-        // In-turn surface notices: mid-turn banners fold into this turn's output
-        // (streamed display and final body) instead of standalone messages. Registers
-        // the collector created above; every live push already renders through it.
-        const surfaceUnregister = registerActiveTurnSurface(sid, surfaceBanners).unregister;
-
-        try {
-          await adapter.withTypingIndicator(sid, async () => {
-            turnResult = await executeTurn(
-              buildAfterHitlQueued(delivery),
-              surfaceStreamPusher
-                ? {
-                    streamModel: true,
-                    onModelTextDelta: (ev: { accumulated: string; round: number }) => {
-                      const display = thinkingOutput
-                        ? thinkingOutput.onText(ev)
-                        : surfacePriorRoundsProse + ev.accumulated;
-                      pushDisplay(display.trim() ? display : "…");
-                      // Prose phase (💬) on the live bar.
-                      surfaceTracker?.onProse?.(ev.accumulated);
-                    },
-                    onModelRoundEnd: (ev: { round: number; content: string }) => {
-                      // A settled round commits one prose segment when its normalized
-                      // content is non-blank — same condition as the inbound path, so
-                      // anchors map 1:1; whitespace-only content never enters.
-                      const prose = normalizeRoundProse(ev.content);
-                      if (prose) {
-                        surfaceCommittedProseSegments += 1;
-                        surfaceCommittedProse.push(prose);
-                      }
-                      let display: string;
-                      if (thinkingOutput) {
-                        display = thinkingOutput.endRound(ev);
-                      } else {
-                        // The committed list and `surfacePriorRoundsProse`
-                        // track the same segments; rebuild the display from
-                        // it so the two can never drift.
-                        surfacePriorRoundsProse = surfaceCommittedProse.join("\n\n");
-                        display = surfacePriorRoundsProse;
-                      }
-                      pushDisplay(display.trim() ? display : "…");
-                    },
-                  }
-                : streamEnabled() || thinkingOutput
-                  ? { streamModel: true }
-                  : undefined,
-            );
-            const cfg = opts.configRef?.current ?? opts.config;
-            // Compose the body from the turn's full prose (every assistant text
-            // segment, in order) so multi-segment turns deliver ALL segments; a
-            // FAILED turn delivers the streamed snapshot + failureNotice instead.
-            const failed = turnResult.outcome === "failed";
-            const snapshot = surfaceDisplay.trim() && surfaceDisplay !== "…" ? surfaceDisplay : "";
-            const replyText = turnResult.assistantTurnProse ?? turnResult.latestAssistantText;
-            // ONE terminal composition: tracker finish() renders the frozen bar
-            // (✅/🛑/❌) through the same renderer as the live bar; the terminal
-            // snapshot carries this turn's real tool-call count.
-            const barLine = surfaceTracker
-              ? await surfaceTracker.finish(terminalOutcomeOf(turnResult.outcome))
-              : undefined;
-            if (surfaceStreamPusher && surfaceStreamHandle) {
-              // Final streamed edit first — it renders only the live display re-spliced
-              // with banners (never the terminal composition), so the in-flight message
-              // never shows banners smashed to the bottom mid-termination.
-              await surfaceStreamPusher.flush();
-              // Clear the in-flight handle's active-bar state first (no edit) so the
-              // delivery edit below, whose body already carries barLine, lands the
-              // bar exactly once. Never block delivery.
-              if (barLine && surfaceStreamHandle.setStatusBar) {
-                try {
-                  await surfaceStreamHandle.setStatusBar(null);
-                } catch (e) {
-                  opts.logger.warn("discord.platform.status_bar_clear_failed", {
-                    sessionId: sid,
-                    err: String(e),
-                  });
-                }
-              }
-            }
-            // Termination shaping runs ONE final body through ONE terminal render —
-            // no intermediate layout can exist. Fail-open per path: the streamed
-            // path makes no edit; the non-streamed path still delivers unshaped.
-            const formattedBody = formatAssistantReply(
-              cfg,
-              sid,
-              env,
-              replyText,
-              turnResult.failoverMeta,
-            );
-            // Failed: the display snapshot IS the body (already carries live
-            // decoration); normal: format the reply and let the composer wrap it.
-            // Splice segments are cut from the same source either way.
-            const terminationBase = failed
-              ? snapshot || turnResult.assistantTurnProse || ""
-              : (thinkingOutput?.render(formattedBody) ?? formattedBody);
-            const terminationSegments = (failed ? terminationBase : replyText).split("\n\n");
-            let fullBody: string;
-            try {
-              const shaped = await renderTurnTerminationBody(terminationBase, [
-                (body: string) =>
-                  surfaceBanners.terminalBody(body, { segments: terminationSegments }),
-              ]);
-              // The failure notice is the LAST block: appended after the
-              // banner splice so it can never fall into an
-              // unresolvable-anchor fallback slot ahead of in-turn banners.
-              const withNotice =
-                failed && turnResult.failureNotice
-                  ? shaped
-                    ? `${shaped}\n\n${turnResult.failureNotice}`
-                    : turnResult.failureNotice
-                  : shaped;
-              fullBody = barLine ? `${withNotice}\n\n${barLine}` : withNotice;
-            } catch (e) {
-              opts.logger.warn("discord.platform.termination_shaping_failed", {
-                sessionId: sid,
-                err: String(e),
-              });
-              if (surfaceStreamPusher && surfaceStreamHandle) {
-                // Streamed path fails open: no terminal edit — the streamed output
-                // stands, and the failure notice is lost here rather than risking a
-                // wrong body (the bar still carries the ❌ outcome).
-                return;
-              }
-              // Non-streamed path has nothing streamed to fall back on — deliver
-              // unshaped, exactly once, with the bar the tracker rendered (and the
-              // failure notice when the turn failed, rather than dropping it).
-              const unshaped =
-                failed && turnResult.failureNotice && terminationBase
-                  ? `${terminationBase}\n\n${turnResult.failureNotice}`
-                  : terminationBase;
-              fullBody = barLine ? `${unshaped}\n\n${barLine}` : unshaped;
-            }
-            // The ONE terminal render: exactly one delivery edit/send carries
-            // the final shaped body.
-            if (surfaceStreamPusher && surfaceStreamHandle) {
-              await surfaceStreamHandle.setFullContent(fullBody);
-              // Stream edits can't carry file attachments — send as follow-up.
-              const attachments = turnResult.showAttachments;
-              if (attachments?.length) {
-                await adapter.sendBody(sid, "", { attachments: [...attachments] });
-              }
-            } else {
-              await adapter.sendBody(sid, fullBody, {
-                replyTo: delivery.replyToMessageId,
-              });
-            }
-          });
-          return;
-        } finally {
-          surfaceUnregister();
-        }
-      }
-      let internalAfterHitlQueued: ((row: PendingActionRow) => void | Promise<void>) | undefined;
-      if (
-        sessionRow.parentSessionId &&
-        afterHitlQueuedFor(env, hitlQueuedNotice, { sessionId: sid })
-      ) {
-        const parentRow = sessions.getById(sessionRow.parentSessionId);
-        const parentChannelId = parentRow
-          ? opts.discord.resolveOutboundChannelIdForSession?.(parentRow.id)
-          : undefined;
-        if (parentChannelId) {
-          const ownerUserId = resolveDiscordOwnerUserId(configForOwnerGate());
-          internalAfterHitlQueued = afterHitlQueuedFor(env, hitlQueuedNotice, {
-            sessionId: sessionRow.parentSessionId!,
-            userId: ownerUserId ?? "system",
-          });
-        }
-      }
-
-      // OOB banner surface (issue #363): with a caller-provided status-bar sink,
-      // create the same tracker as messaging_surface turns so the live bar streams
-      // into the banner message. Stats snapshotted BEFORE the turn.
-      if (input.statusBarSink && statusBarDep.config.enabled) {
-        surfaceTracker = createStatusBarTurnTracker({
-          cfg: statusBarDep.config,
-          render: statusBarDep.render,
-          stats: getStatusBarStats(opts.db, sid),
-          ...cruiseStatusBarProvider(opts, sid),
-          ...yoloStatusBarProvider(sid),
-        });
-        surfaceTracker.attachSink(input.statusBarSink);
-      }
-
-      opts.logger.debug("platform.executeTurn_calling", {
-        sessionId: sid,
-        delivery: input.delivery.kind,
-      });
-      const internalStreamModel =
-        (opts.configRef?.current ?? opts.config).agents?.internalStreaming !== false;
-      turnResult = await executeTurn(internalAfterHitlQueued, {
-        streamModel: internalStreamModel,
-      });
-
-      // Freeze the bar at its terminal render (✅/🛑/❌) so the banner's final
-      // edit carries the same terminal bar a normal turn would. The caller's
-      // `oobTurnBanner.finish` clears the sink and edits the body afterwards.
-      if (surfaceTracker) {
-        const outcome = terminalOutcomeOf(turnResult.outcome);
-        try {
-          // Capture the rendered terminal bar line (the ONE terminal
-          // composition) and attach it to the turn result so the caller can
-          // hand it back to `oobTurnBanner.finish` for the final edit.
-          const barLine = await surfaceTracker.finish(outcome);
-          if (barLine) turnResult = { ...turnResult, statusBarLine: barLine };
-        } catch (e) {
-          opts.logger.warn("discord.platform.oob_status_bar_finish_failed", {
-            sessionId: sid,
-            err: String(e),
-          });
-        }
-      }
-    });
-    return turnResult;
+  async function runSessionModelTurn(input: SurfaceTurnInput): Promise<SessionAgentTurnResult> {
+    return runSurfaceTurn(surfaceTurnDeps, createSurfaceTurnState(input.turnBanner), input);
   }
 
   function subscribeSubagentSession(sessionId: string): () => void {
