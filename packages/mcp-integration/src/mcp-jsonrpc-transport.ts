@@ -575,7 +575,10 @@ async function connectMcpStdioSessionViaProcman(
     env: opts.env ? ({ ...opts.env } as Record<string, string>) : undefined,
     uid: opts.uid,
     gid: opts.gid,
-    restart: { mode: "on-failure", maxRetries: 5 },
+    // Restart policy "never": the MCP pool owns recovery. A procman-side
+    // restart would spawn a child whose stdio nobody bridges to the dead
+    // session object, racing the pool's own respawn.
+    restart: { mode: "never" },
     stdio: { capture: "pipe", stdin: true },
     shutdown: { signal: "SIGTERM", graceMs: 5000 },
   };

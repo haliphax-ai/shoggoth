@@ -2,10 +2,18 @@
 /**
  * MCP-style JSON-RPC server that exits itself after a delay (ms, argv[2]).
  * Used by tests that exercise server-death handling.
+ *
+ * When argv[3] is a marker file path: the FIRST instance (marker absent)
+ * creates the marker and exits after the delay; any later instance (marker
+ * present, e.g. a respawned one) stays alive. This makes "the server died
+ * once, the replacement is stable" deterministic in tests.
  */
 import * as readline from "node:readline";
+import { existsSync, writeFileSync } from "node:fs";
 
 const delayMs = Number(process.argv[2] ?? "1000");
+const markerPath = process.argv[3];
+const stayAlive = markerPath !== undefined && existsSync(markerPath);
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -37,7 +45,12 @@ rl.on("line", (line) => {
     return;
   }
   if (method === "notifications/initialized") {
-    setTimeout(() => process.exit(0), delayMs);
+    if (!stayAlive) {
+      if (markerPath !== undefined && !existsSync(markerPath)) {
+        writeFileSync(markerPath, String(process.pid));
+      }
+      setTimeout(() => process.exit(0), delayMs);
+    }
     return;
   }
   if (method === "tools/list") {
