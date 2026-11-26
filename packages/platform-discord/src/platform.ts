@@ -1,59 +1,30 @@
-import { randomUUID } from "node:crypto";
-import { getImageBlockCodec } from "@shoggoth/models";
 import type Database from "better-sqlite3";
-import { createOutboundMessage, type InternalMessage } from "@shoggoth/messaging";
 import type { ModelInvocationParams } from "@shoggoth/models";
 import {
   DEFAULT_HITL_CONFIG,
   formatAgentIdentityPrefix,
-  parseAgentSessionUrn,
   type ShoggothConfig,
   type SystemContext,
 } from "@shoggoth/shared";
 import {
-  createTurnBannerCollector,
-  daemonNotice,
-  registerActiveTurnSurface,
-  createCoalescingStreamPusher,
-  createThinkingOutput,
-  normalizeRoundProse,
   createHitlPendingResolutionStack,
   createPolicyEngine,
   createYoloModeStore,
   createSessionStore,
   createTranscriptStore,
   createToolRunStore,
-  applySessionContextSegmentNew,
-  applySessionContextSegmentReset,
-  parseSessionSegmentInlineCommand,
-  sessionSegmentStartupUserContent,
-  resolveSessionBypassUpTo,
-  executeSessionAgentTurn,
   createSessionMcpRuntime,
   defaultPlatformAssistantDeps,
-  createQueuedMessageIndicator,
   getTurnQueue,
-  getStatusBarStats,
-  createStatusBarTurnTracker,
-  formatAssistantReply,
-  routeReaction,
-  formatGlobalReactionEventContext,
-  formatAdhocReactionEventContext,
   PresentationTurnOrchestrator,
   type TieredTurnQueue,
   type PolicyEngine,
-  type HitlConfigRef,
-  type ExecuteSessionAgentTurnInput,
   type SessionAgentTurnResult,
   type SessionModelTurnDelivery,
-  type StatusBarSnapshot,
-  type TurnStatusBarTracker,
-  type StreamHandle,
   type OobTurnBannerHandle,
   type PlatformAssistantDeps,
-  renderTurnTerminationBody,
-  resolveModel,
-  shouldSkipThreadSessionSentinel,
+  type HitlConfigRef,
+  daemonNotice,
 } from "@shoggoth/daemon/lib";
 import type {
   HitlNotifier,
@@ -62,169 +33,44 @@ import type {
   NoticeResolver,
   DaemonPendingActionsStack,
 } from "./daemon-types";
-import { invalidateStatusBarSources, statusBarSourceVersions } from "@shoggoth/daemon/lib";
+import { statusBarSourceVersions } from "@shoggoth/daemon/lib";
 import type { HitlAutoApproveGate } from "@shoggoth/shared";
 import type { PendingActionsStore } from "@shoggoth/daemon/lib";
+import type { HitlDiscordNoticeRegistry } from "./hitl/notice-registry";
 import { notice } from "./notices";
 import type { DiscordMessagingRuntime } from "./bridge";
-import { mergeOrchestratorEnv, resolveDiscordOwnerUserId, resolveReactionConfig } from "./config";
-import { registerDiscordHitlNoticeAndAddReactions } from "./hitl/reaction-wiring";
-import type { HitlDiscordNoticeRegistry } from "./hitl/notice-registry";
-import { buildHitlQueuedNoticeLines, createDiscordHitlNotifier } from "./hitl/notifier";
+import { mergeOrchestratorEnv } from "./config";
+import { createDiscordHitlNotifier } from "./hitl/notifier";
 import { sliceDiscordPlatformMessageBody } from "./errors";
-import { formatAttachmentMetadata } from "./attachment-metadata";
 import { DiscordPlatformAdapter } from "./discord-platform-adapter";
-import { resolveStatusBarConfig, type ResolvedStatusBarConfig } from "@shoggoth/shared";
+import { resolveStatusBarConfig } from "@shoggoth/shared";
 import type { CruiseControlHandle } from "@shoggoth/shared";
-import { renderDiscordStatusBar } from "./status-bar";
-import type { DiscordStreamHandle } from "./streaming";
+import {
+  buildStatusBarDep,
+  sendHitlQueuedNotice,
+  type HitlQueuedDelivery,
+} from "./platform-shared";
+import {
+  handleReactionPassthrough,
+  type DiscordReactionPassthroughEvent,
+} from "./reaction-passthrough";
+import { createOobTurnBanner } from "./oob-banner";
+import {
+  createSurfaceTurnState,
+  runSurfaceTurn,
+  type SurfaceTurnDeps,
+  type SurfaceTurnInput,
+} from "./surface-turn";
+import { createInboundTurnPipeline, type InboundTurnPipeline } from "./inbound-turn";
 
-/** Narrow a turn outcome to the status bar's terminal set: everything but
- *  "completed" passes through; "completed" renders as "finished". Shared by the
- *  messaging_surface and internal delivery paths so the mapping cannot drift. */
-function terminalOutcomeOf(
-  outcome: SessionAgentTurnResult["outcome"],
-): "finished" | "aborted" | "failed" | "canceled" {
-  return outcome === "aborted" || outcome === "failed" || outcome === "canceled"
-    ? outcome
-    : "finished";
-}
+// Keep platform.ts's prior exports working: buildStatusBarDep was exported from
+// platform.ts before the split and is now implemented in platform-shared.
+export { buildStatusBarDep };
 
-/** Build the status-bar-wrapped stream handle over a raw Discord stream handle:
- *  setFullContent/pushUpdate delegate straight through, setStatusBar/close pass
- *  through when the raw handle supports them. Shared by the inbound pre-start
- *  path and the messaging_surface path so a teardown fix cannot miss one copy. */
-function wrapDiscordStreamHandle(raw: DiscordStreamHandle): StreamHandle {
-  return {
-    setFullContent: (text: string) => raw.setFullContent(text),
-    pushUpdate: (text: string) => raw.pushUpdate(text),
-    ...(raw.setStatusBar ? { setStatusBar: (line: string | null) => raw.setStatusBar!(line) } : {}),
-    // Teardown pass-through: the abort path must be able to
-    // finalize the underlying handle through this wrapper.
-    ...(raw.close ? { close: () => raw.close!() } : {}),
-  };
-}
-
-/** Start the session's streaming outbound and wrap the raw handle with the
- *  status-bar sink so the bar applies to the in-flight message (delegates to
- *  any native setStatusBar on the handle; teardown close() passes through).
- *  Returns undefined when streaming is disabled, the session has no streaming
- *  outbound, or the start failed (logged as `stream_start_failed` — pass
- *  `warn.withSessionId` to include the session id in that payload, matching
- *  the messaging_surface path's original shape). Shared by the inbound
- *  pre-start path and the messaging_surface path so a teardown fix cannot
- *  miss one copy. */
-async function startStreamHandleWithBar(
-  deps: {
-    readonly logger: Logger;
-    readonly env: NodeJS.ProcessEnv;
-    readonly statusBarDep: {
-      readonly config: ResolvedStatusBarConfig;
-      readonly attachSink: (h: StreamHandle) => unknown;
-    };
-    readonly streamingForSession: DiscordMessagingRuntime["streamingForSession"];
-  },
-  sessionId: string,
-  warn?: { readonly withSessionId?: boolean },
-): Promise<StreamHandle | undefined> {
-  let handle: StreamHandle | undefined;
-  if (deps.env.SHOGGOTH_DISCORD_STREAM === "1") {
-    const streamingOutbound = deps.streamingForSession(sessionId);
-    if (streamingOutbound) {
-      try {
-        const raw = await streamingOutbound.start();
-        // Wrap the raw stream handle with the status-bar sink so the bar
-        // applies to the in-flight message; delegates to any native
-        // setStatusBar on the handle.
-        if (deps.statusBarDep.config.enabled) {
-          deps.statusBarDep.attachSink(raw as unknown as StreamHandle);
-        }
-        handle = wrapDiscordStreamHandle(raw);
-      } catch (e) {
-        deps.logger.warn(
-          "discord.platform.stream_start_failed",
-          warn?.withSessionId ? { err: String(e), sessionId } : { err: String(e) },
-        );
-      }
-    }
-  }
-  return handle;
-}
-
-/** Build the `afterHitlQueued` callback that posts the in-session HITL queued
- *  notice; undefined when SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION=0. Shared by
- *  the inbound, messaging_surface, and internal delivery paths. */
-function afterHitlQueuedFor(
-  env: NodeJS.ProcessEnv,
-  send: (
-    row: PendingActionRow,
-    delivery: {
-      readonly sessionId: string;
-      readonly userId?: string;
-      readonly replyToMessageId?: string;
-    },
-  ) => Promise<void>,
-  delivery: {
-    readonly sessionId: string;
-    readonly userId?: string;
-    readonly replyToMessageId?: string;
-  },
-): ((row: PendingActionRow) => Promise<void>) | undefined {
-  const inSession = env.SHOGGOTH_DISCORD_HITL_REPLY_IN_SESSION !== "0";
-  return inSession ? (row) => send(row, delivery) : undefined;
-}
-
-/** Minimal status-bar dep: config from resolveStatusBarConfig, render from renderDiscordStatusBar,
- *  attachSink for live-bar stream wrapping, and stats seeded from session_stats (turn.db is
- *  unavailable when the orchestrator creates the tracker); passed to the presentation orchestrator. */
-export function buildStatusBarDep(
-  db: Database.Database,
-  cfg: ResolvedStatusBarConfig,
-  cruiseControlActive?: (sessionId: string) => boolean,
-  yoloModeActive?: (sessionId: string) => boolean,
-): {
-  config: ResolvedStatusBarConfig;
-  render: (snap: StatusBarSnapshot, c: ResolvedStatusBarConfig) => string;
-  attachSink: (h: StreamHandle) => { setStatusBar(line: string | null): Promise<void> };
-  stats: (sessionId: string) => {
-    sequence: number;
-    compactions: number;
-    context?: { currentTokens: number; totalTokens?: number };
-    subagents?: { total: number; persistent: number };
-    timers?: number;
-    notifies?: number;
-    liveNotifies?: () => number;
-    liveTimers?: () => number;
-    liveSubagents?: () => { total: number; persistent: number };
-  };
-  cruiseControlActive?: (sessionId: string) => boolean;
-  yoloModeActive?: (sessionId: string) => boolean;
-} {
-  return {
-    config: cfg,
-    render: renderDiscordStatusBar,
-    // Wrap the stream handle in place: the sink delegates to any native
-    // setStatusBar (Discord streaming applies the bar to the in-flight message)
-    // and the augmented handle is returned so streaming keeps working through it.
-    attachSink: (h: StreamHandle) => {
-      const native = h.setStatusBar?.bind(h);
-      const sink = {
-        setStatusBar: async (line: string | null) => {
-          await native?.(line);
-        },
-      };
-      h.setStatusBar = (line: string | null) => sink.setStatusBar(line);
-      return h as StreamHandle & typeof sink;
-    },
-    // Pre-turn stats for seeding the bar (sequence / compactions / context
-    // window fill) — sourced daemon-side; the platform only wires them in.
-    stats: (sessionId: string) => getStatusBarStats(db, sessionId),
-    // Live activity providers — invalidate-on-change: the engine re-reads
-    // each only when its source's change version moves (zero DB reads on
-    // steady-state renders).
-    ...(cruiseControlActive ? { cruiseControlActive } : {}),
-    ...(yoloModeActive ? { yoloModeActive } : {}),
-  };
+/** Discord streaming minimum edit interval, clamped to ≥ 0 (default 400ms). */
+function discordStreamMinIntervalMs(env: NodeJS.ProcessEnv): number {
+  const raw = Number(env.SHOGGOTH_DISCORD_STREAM_MIN_MS ?? 400);
+  return Number.isFinite(raw) ? Math.max(0, raw) : 400;
 }
 
 /** Notice resolution for this platform instance: opts.noticeResolver if set. */
@@ -252,6 +98,33 @@ function cruiseControlToolLoopHook(opts: DiscordPlatformOptions) {
       isActive: (sessionId: string) => cruise.store.isActive(sessionId),
       judge: cruise.judge,
     },
+  };
+}
+
+/** Per-session boolean flag with invalidate-on-change caching: re-reads the
+ *  source store only when `sourceVersion` moves (zero DB reads on steady-state
+ *  reads); a source-store throw reads as `false` so an unmigrated state DB
+ *  cannot break a turn. */
+function createSessionFlagReadCache(
+  read: (sessionId: string) => boolean,
+  sourceVersion: () => number,
+): (sessionId: string) => boolean {
+  const enabledBySession = new Map<string, boolean>();
+  const versionAtLastRead = new Map<string, number>();
+  return (sessionId: string): boolean => {
+    const version = sourceVersion();
+    if (versionAtLastRead.get(sessionId) === version) {
+      return enabledBySession.get(sessionId) ?? false;
+    }
+    let enabled = false;
+    try {
+      enabled = read(sessionId);
+    } catch {
+      enabled = false;
+    }
+    enabledBySession.set(sessionId, enabled);
+    versionAtLastRead.set(sessionId, version);
+    return enabled;
   };
 }
 
@@ -345,8 +218,6 @@ export async function startDiscordPlatform(
   const hitlStack = opts.hitlPending ?? createHitlPendingResolutionStack(opts.db);
   const { pending, waitForHitlResolution } = hitlStack;
   const yoloMode = createYoloModeStore(opts.db);
-  // Last-read yolo state per session, keyed alongside yoloVersionAtLastRead.
-  const yoloReadCache = new Map<string, boolean>();
   // The daemon-supplied store carries the full resolution surface; the platform
   // only depends on the minimal view above. Adapter to the tool-loop contract so
   // a daemon-side removal of a resolution method fails the typecheck here.
@@ -355,27 +226,14 @@ export async function startDiscordPlatform(
   // A state DB that has not run the yolo migration yet must not break a turn:
   // the flag simply reads as off. The provider re-reads only on a version
   // change (pure cache between changes — no steady-state SQLite access).
-  const yoloVersionAtLastRead = new Map<string, number>();
-  const yoloActive = (sessionId: string): boolean => {
-    const version = statusBarSourceVersions().yolo;
-    if (yoloVersionAtLastRead.get(sessionId) === version) {
-      return yoloReadCache.get(sessionId) ?? false;
-    }
-    let enabled = false;
-    try {
-      enabled = yoloMode.isEnabled(sessionId);
-    } catch {
-      enabled = false;
-    }
-    yoloReadCache.set(sessionId, enabled);
-    yoloVersionAtLastRead.set(sessionId, version);
-    return enabled;
-  };
+  const yoloActive = createSessionFlagReadCache(
+    (sessionId) => yoloMode.isEnabled(sessionId),
+    () => statusBarSourceVersions().yolo,
+  );
 
-  /** Spread into a status-bar tracker creation to render the 😎 section. */
-  const yoloStatusBarProvider = (sessionId: string) => ({
-    yoloModeActive: () => yoloActive(sessionId),
-  });
+  /** Live cruise-control activity provider for status-bar trackers. */
+  const cruiseControlActiveFor = (sessionId: string): boolean =>
+    cruiseStatusBarProvider(opts, sessionId).cruiseControlActive?.() ?? false;
 
   const assistantDeps = pickDiscordAssistantDeps(opts.deps);
   const noticeResolver = platformNoticeResolver(opts);
@@ -395,10 +253,7 @@ export async function startDiscordPlatform(
   const statusBarDep = buildStatusBarDep(
     opts.db,
     resolveStatusBarConfig(opts.configRef?.current ?? opts.config),
-    (sessionId) => {
-      const provider = cruiseStatusBarProvider(opts, sessionId).cruiseControlActive;
-      return provider ? provider() : false;
-    },
+    cruiseControlActiveFor,
     (sessionId) => yoloActive(sessionId),
   );
 
@@ -415,7 +270,6 @@ export async function startDiscordPlatform(
   const createToolClient = assistantDeps.createToolCallingClient;
 
   const turnQueue: TieredTurnQueue = getTurnQueue();
-  const chainTail = new Map<string, Promise<void>>();
   const subagentBusUnsubs: (() => void)[] = [];
 
   // Create the PlatformAdapter for Discord
@@ -428,10 +282,6 @@ export async function startDiscordPlatform(
   // Create the PresentationTurnOrchestrator — delegates formatting, streaming,
   // and error presentation to the presentation layer.
   const streamEnabled = () => env.SHOGGOTH_DISCORD_STREAM === "1";
-  const streamMinMs = () => {
-    const raw = Number(env.SHOGGOTH_DISCORD_STREAM_MIN_MS ?? 400);
-    return Number.isFinite(raw) ? Math.max(0, raw) : 400;
-  };
 
   const orchestrator = new PresentationTurnOrchestrator({
     config: opts.config,
@@ -439,15 +289,59 @@ export async function startDiscordPlatform(
     env,
     adapter,
     get streamingIntervalMs() {
-      return streamEnabled() ? streamMinMs() : 0;
+      return streamEnabled() ? discordStreamMinIntervalMs(env) : 0;
     },
     errorReplyPrefix: "⚠️ ",
     statusBar: statusBarDep,
   });
 
+  /** Shared deps for the in-session HITL queued-notice delivery. */
+  const sharedNoticeDeps = {
+    discord: opts.discord,
+    hitlDiscordNoticeRegistry: opts.hitlDiscordNoticeRegistry,
+    logger: opts.logger,
+  };
+
+  /** Send the in-session HITL queued notice and wire up approval reactions. */
+  const hitlQueuedNotice = (row: PendingActionRow, delivery: HitlQueuedDelivery): Promise<void> =>
+    sendHitlQueuedNotice(sharedNoticeDeps, row, delivery);
+
+  // Inbound turn pipeline: chained dispatch, segment commands, and the queued
+  // inbound model turn — extracted to inbound-turn.ts; this wires the
+  // platform's stores, HITL stack, MCP runtime, and orchestrator into it.
+  const inbound: InboundTurnPipeline = createInboundTurnPipeline({
+    db: opts.db,
+    config: opts.config,
+    configRef: opts.configRef,
+    env,
+    logger: opts.logger,
+    sessions,
+    transcript,
+    toolRuns,
+    turnQueue,
+    mcpRuntime,
+    policyEngine: engine,
+    getHitlConfig,
+    pendingForToolLoop,
+    waitForHitlResolution,
+    hitlNotifier,
+    hitlAutoApproveGate: opts.hitlAutoApproveGate,
+    loopImpl,
+    createToolCallingClient: createToolClient,
+    cruiseControlToolLoopHook: () => cruiseControlToolLoopHook(opts),
+    yoloActive,
+    adapter,
+    orchestrator,
+    statusBarDep,
+    hitlQueuedNotice,
+    noticeResolver,
+    discord: opts.discord,
+    configForOwnerGate,
+  });
+
   const unsubs = opts.discord.routes.map((route) =>
     opts.discord.bus.subscribe(route.sessionId, (msg) => {
-      void dispatchChained(route.sessionId, msg).catch((e) => {
+      void inbound.dispatchChained(route.sessionId, msg).catch((e) => {
         opts.logger.error("discord.platform.dispatch_failed", {
           err: String(e),
         });
@@ -455,810 +349,49 @@ export async function startDiscordPlatform(
     }),
   );
 
-  /** Send the in-session HITL queued notice and wire up approval reactions. */
-  async function sendHitlQueuedNotice(
-    row: PendingActionRow,
-    delivery: {
-      readonly sessionId: string;
-      readonly userId?: string;
-      readonly replyToMessageId?: string;
-    },
-  ): Promise<void> {
-    const ref = await opts.discord.outbound.sendDiscord(
-      createOutboundMessage({
-        id: randomUUID(),
-        sessionId: delivery.sessionId,
-        userId: delivery.userId,
-        createdAt: new Date().toISOString(),
-        body: sliceDiscordPlatformMessageBody(buildHitlQueuedNoticeLines(row).join("\n")),
-        extensions: { replyToMessageId: delivery.replyToMessageId },
-      }),
-    );
-    if (opts.hitlDiscordNoticeRegistry) {
-      await registerDiscordHitlNoticeAndAddReactions({
-        transport: opts.discord.discordRestTransport,
-        channelId: ref.channelId,
-        messageId: ref.messageId,
-        row,
-        registry: opts.hitlDiscordNoticeRegistry,
-        logger: opts.logger,
-      });
-    }
-  }
+  // Surface turn engine wiring: everything the engine needs, captured once —
+  // the engine itself owns no platform closures. The per-turn presentation
+  // state is built fresh for each call (see createSurfaceTurnState).
+  const surfaceTurnDeps: SurfaceTurnDeps = {
+    db: opts.db,
+    config: opts.config,
+    configRef: opts.configRef,
+    env,
+    logger: opts.logger,
+    sessions,
+    transcript,
+    toolRuns,
+    turnQueue,
+    resolveMcpContext: mcpRuntime.resolveContext,
+    policyEngine: engine,
+    getHitlConfig,
+    pendingForToolLoop,
+    waitForHitlResolution,
+    hitlNotifier,
+    hitlAutoApproveGate: opts.hitlAutoApproveGate,
+    loopImpl,
+    createToolCallingClient: createToolClient,
+    cruiseControlToolLoopHook: () => cruiseControlToolLoopHook(opts),
+    yoloActive,
+    cruiseControlActiveFor,
+    yoloModeActive: (sessionId) => yoloActive(sessionId),
+    adapter,
+    streamingForSession: opts.discord.streamingForSession,
+    statusBarDep,
+    hitlQueuedNotice,
+    configForOwnerGate,
+    resolveOutboundChannelIdForSession: opts.discord.resolveOutboundChannelIdForSession,
+    streamMinMs: () => discordStreamMinIntervalMs(env),
+  };
 
-  async function dispatchChained(sessionId: string, msg: InternalMessage): Promise<void> {
-    const prev = chainTail.get(sessionId) ?? Promise.resolve();
-    const run = prev.then(() => handleInbound(msg));
-    chainTail.set(
-      sessionId,
-      run.catch(() => {}),
-    );
-    await run;
-  }
-
-  async function handleInbound(msg: InternalMessage): Promise<void> {
-    if (msg.direction !== "inbound") return;
-    const text = msg.body?.trim() ?? "";
-    if (!text) return;
-
-    const session = sessions.getById(msg.sessionId);
-    if (!session) {
-      opts.logger.warn("discord.platform.no_session", {
-        sessionId: msg.sessionId,
-        hint: "no SQLite session row for this route; the daemon auto-bootstraps the main agent session on startup — check config and restart",
-      });
-      return;
-    }
-
-    const ownerSnowflake = resolveDiscordOwnerUserId(configForOwnerGate());
-    if (ownerSnowflake && !session.subagentMode) {
-      if (!msg.extensions.platform?.discord?.isOwner) return;
-    }
-
-    const segmentMode = parseSessionSegmentInlineCommand(text);
-    if (segmentMode) {
-      try {
-        if (segmentMode === "new") {
-          applySessionContextSegmentNew({
-            db: opts.db,
-            sessions,
-            pending: pendingForToolLoop,
-            sessionId: msg.sessionId,
-          });
-        } else {
-          applySessionContextSegmentReset({
-            db: opts.db,
-            sessions,
-            pending: pendingForToolLoop,
-            sessionId: msg.sessionId,
-          });
-        }
-      } catch (e) {
-        opts.logger.warn("discord.platform.segment_command_failed", {
-          err: String(e),
-          sessionId: msg.sessionId,
-          mode: segmentMode,
-        });
-        try {
-          await opts.discord.outbound.sendDiscord(
-            createOutboundMessage({
-              id: randomUUID(),
-              sessionId: msg.sessionId,
-              userId: msg.userId,
-              createdAt: new Date().toISOString(),
-              body: sliceDiscordPlatformMessageBody(
-                notice(noticeResolver, "segment-command-error", {
-                  mode: segmentMode,
-                  error: String(e),
-                }),
-              ),
-              extensions: { replyToMessageId: msg.id },
-            }),
-          );
-        } catch {
-          /* ignore */
-        }
-        return;
-      }
-      const sessionAfter = sessions.getById(msg.sessionId);
-      if (!sessionAfter) return;
-      const segShort = sessionAfter.contextSegmentId.slice(0, 8);
-      const ack =
-        segmentMode === "new"
-          ? notice(noticeResolver, "segment-ack-new", { segmentPreview: segShort })
-          : notice(noticeResolver, "segment-ack-reset", { segmentPreview: segShort });
-      try {
-        await opts.discord.outbound.sendDiscord(
-          createOutboundMessage({
-            id: randomUUID(),
-            sessionId: msg.sessionId,
-            userId: msg.userId,
-            createdAt: new Date().toISOString(),
-            body: sliceDiscordPlatformMessageBody(ack),
-            extensions: { replyToMessageId: msg.id },
-          }),
-        );
-      } catch (e) {
-        opts.logger.warn("discord.platform.segment_ack_failed", {
-          err: String(e),
-        });
-      }
-      await runDiscordInboundModelTurn(
-        msg,
-        sessionAfter,
-        sessionSegmentStartupUserContent(segmentMode),
-        {
-          sessionSegmentStartup: segmentMode,
-        },
-      );
-      return;
-    }
-
-    const userContent = msg.body;
-    const attachments = msg.extensions.attachments;
-
-    await runDiscordInboundModelTurn(msg, session, userContent, {}, attachments);
-  }
-
-  async function runDiscordInboundModelTurn(
-    msg: InternalMessage,
-    session: NonNullable<ReturnType<typeof sessions.getById>>,
-    userContent: string,
-    extraUserMetadata: Record<string, unknown>,
-    attachments?: readonly import("@shoggoth/messaging").MessageAttachment[],
-  ): Promise<void> {
-    // Thread sentinel: a thread subagent's first "." message only starts the thread
-    // (status already posted at create time) — exit before placeholder/typing/queue
-    // side effects; attachments keep the body non-"." so they behave normally.
-    if (
-      !attachments?.length &&
-      shouldSkipThreadSessionSentinel({
-        db: opts.db,
-        sessions,
-        sessionId: msg.sessionId,
-        body: userContent,
-      })
-    ) {
-      opts.logger.debug("discord.platform.thread_sentinel_skipped", {
-        sessionId: msg.sessionId,
-        messageId: msg.id,
-      });
-      return;
-    }
-
-    // Queued-message indicator (issue #399): ⏳ reaction while the operator's message
-    // waits behind an in-flight turn (reply/post fallback without reactions); removed
-    // when the turn starts or the entry is dropped.
-    const queuedIndicator = createQueuedMessageIndicator({
-      sessionId: msg.sessionId,
-      messageId: msg.id,
-      capabilities: adapter.capabilities,
-      logger: opts.logger,
-      resolveChannelId: (sid) => opts.discord.resolveOutboundChannelIdForSession?.(sid),
-      sendReply: async (body) => {
-        await opts.discord.outbound.sendDiscord(
-          createOutboundMessage({
-            id: randomUUID(),
-            sessionId: msg.sessionId,
-            userId: msg.userId,
-            createdAt: new Date().toISOString(),
-            body: sliceDiscordPlatformMessageBody(body),
-            extensions: { replyToMessageId: msg.id },
-          }),
-        );
-      },
-      sendPost: async (body) => {
-        await opts.discord.outbound.sendDiscord(
-          createOutboundMessage({
-            id: randomUUID(),
-            sessionId: msg.sessionId,
-            userId: msg.userId,
-            createdAt: new Date().toISOString(),
-            body: sliceDiscordPlatformMessageBody(body),
-            extensions: {},
-          }),
-        );
-      },
-    });
-
-    // Fire-and-forget: push to the turn queue (synchronous) and return immediately.
-    // Create a label with truncated message content for display in queue
-    const maxLabelLength = 100;
-    const userMessageLabel =
-      userContent.length > maxLabelLength
-        ? userContent.slice(0, maxLabelLength) + "..."
-        : userContent;
-
-    void turnQueue
-      .enqueue(
-        msg.sessionId,
-        "user",
-        userMessageLabel,
-        async () => {
-          const afterHitlQueued = afterHitlQueuedFor(env, sendHitlQueuedNotice, {
-            sessionId: msg.sessionId,
-            userId: msg.userId,
-            replyToMessageId: msg.id,
-          });
-
-          const mcpLifecycle = mcpRuntime.trackInstanceIdle
-            ? {
-                onTurnBegin: () => {
-                  mcpRuntime.notifyTurnBegin(msg.sessionId);
-                },
-                onTurnEnd: () => {
-                  mcpRuntime.notifyTurnEnd(msg.sessionId);
-                },
-              }
-            : undefined;
-
-          const d = msg.extensions.platform?.discord;
-          const userMetadata: Record<string, unknown> = {
-            ...extraUserMetadata,
-            discordMessageId: msg.id,
-            ...(d
-              ? {
-                  discordAuthorId: d.authorId,
-                  discordAuthorIsBot: d.authorIsBot,
-                  discordIsSelf: d.isSelf,
-                  discordIsOwner: d.isOwner,
-                }
-              : {}),
-          };
-
-          // If streaming is enabled, post the placeholder ("…") BEFORE starting the
-          // typing indicator. Discord cancels typing when a bot posts a message, so
-          // posting the placeholder inside withTypingIndicator would kill the indicator.
-          const preStartedStreamHandle = await startStreamHandleWithBar(
-            {
-              logger: opts.logger,
-              env,
-              statusBarDep,
-              streamingForSession: opts.discord.streamingForSession,
-            },
-            msg.sessionId,
-          );
-
-          // Resolve the model once per inbound turn; both image options below
-          // are derived from it.
-          const turnCfg = opts.configRef?.current ?? opts.config;
-          const turnModel = resolveModel(opts.db, turnCfg, {
-            sessionId: msg.sessionId,
-          });
-
-          await adapter.withTypingIndicator(msg.sessionId, async () => {
-            await orchestrator.orchestrateInboundTurn({
-              sessionId: msg.sessionId,
-              replyToMessageId: msg.id,
-              preStartedStreamHandle,
-              onStreamStartFailed: (errMsg) => {
-                opts.logger.warn("discord.platform.stream_start_failed", {
-                  err: errMsg,
-                });
-              },
-              mcpLifecycle,
-              logContext: { sessionId: msg.sessionId },
-              onTurnExecutionFailed: (e) => {
-                opts.logger.warn("discord.platform.turn_failed", {
-                  err: String(e),
-                  sessionId: msg.sessionId,
-                });
-              },
-              attachments,
-              imageBlockCodec: (() => {
-                const kind = turnModel?.provider?.kind;
-                if (
-                  kind === "openai-compatible" ||
-                  kind === "anthropic-messages" ||
-                  kind === "gemini"
-                ) {
-                  return getImageBlockCodec(kind);
-                }
-                return undefined;
-              })(),
-              imageUrlPassthrough:
-                turnModel !== null &&
-                turnModel.provider.kind !== "gemini" &&
-                turnModel.provider.imageUrlPassthrough === true,
-              formatAttachmentMetadata,
-              workspacePath: session.workspacePath,
-              messageId: msg.id,
-              // post-turn delivery runs outside the queue entry so a hung platform edit cannot wedge the session's turn queue
-              detachPostTurnDelivery: true,
-              ...(session.runtimeUid !== undefined && session.runtimeGid !== undefined
-                ? { creds: { uid: session.runtimeUid, gid: session.runtimeGid } }
-                : {}),
-              buildTurn: async () => {
-                const _mcpCtx = await mcpRuntime.resolveContext(msg.sessionId);
-                return {
-                  db: opts.db,
-                  sessionId: msg.sessionId,
-                  session,
-                  transcript,
-                  toolRuns,
-                  userContent,
-                  userMetadata,
-
-                  env,
-                  config: opts.config,
-                  policyEngine: engine,
-                  getHitlConfig,
-                  hitl: {
-                    bypassUpTo: resolveSessionBypassUpTo(msg.sessionId, opts.config),
-                    yoloActive,
-                    pending: pendingForToolLoop,
-                    clock: { nowMs: () => Date.now() },
-                    newPendingId: () => randomUUID(),
-                    waitForHitlResolution,
-                    hitlNotifier,
-                    autoApprove: opts.hitlAutoApproveGate,
-                    ...cruiseControlToolLoopHook(opts),
-                    ...(afterHitlQueued ? { afterHitlQueued } : {}),
-                  },
-                  loopImpl,
-                  createToolCallingClient: createToolClient,
-                  resolveMcpContext: mcpRuntime.resolveContext,
-                };
-              },
-            });
-          });
-        },
-        {
-          onQueued: () => queuedIndicator.markQueued(),
-          onDequeued: () => {
-            void queuedIndicator.clear();
-          },
-        },
-      )
-      .catch((e) => {
-        opts.logger.warn("discord.platform.user_turn_failed", {
-          err: String(e),
-          sessionId: msg.sessionId,
-        });
-      });
-  }
-
-  async function runSessionModelTurn(input: {
-    readonly sessionId: string;
-    readonly userContent: string;
-    readonly userMetadata?: Record<string, unknown>;
-    readonly systemContext?: SystemContext;
-    readonly delivery: SessionModelTurnDelivery;
-    readonly modelInvocationOverride?: Partial<ModelInvocationParams>;
-    readonly turnBanner?: string;
-    readonly statusBarSink?: { setStatusBar: (line: string | null) => Promise<void> };
-  }): Promise<SessionAgentTurnResult> {
-    const sid = input.sessionId.trim();
-    const sessionRow = sessions.getById(sid);
-    if (!sessionRow || sessionRow.status === "terminated") {
-      throw new Error(`session not available: ${sid}`);
-    }
-    let turnResult!: SessionAgentTurnResult;
-    await turnQueue.enqueue(sid, "system", input.systemContext?.kind ?? "system", async () => {
-      opts.logger.debug("platform.turn_queue_acquired", { sessionId: sid });
-      opts.logger.debug("platform.mcp_context_resolving", { sessionId: sid });
-      const mcpCtx = await mcpRuntime.resolveContext(sid);
-      opts.logger.debug("platform.mcp_context_resolved", {
-        sessionId: sid,
-        toolCount: mcpCtx.toolsLoop.length,
-      });
-      const userMetadata = input.userMetadata ?? {};
-      const buildAfterHitlQueued = (delivery: {
-        readonly userId: string;
-        readonly replyToMessageId?: string;
-      }) =>
-        afterHitlQueuedFor(env, sendHitlQueuedNotice, {
-          sessionId: sid,
-          userId: delivery.userId,
-          replyToMessageId: delivery.replyToMessageId,
-        });
-
-      // One tracker for the messaging_surface turn: live and terminal bars are its
-      // snapshots from the same renderer (only the phase emoji differs). Captures
-      // until the stream handle exists; attachSink flushes the ⏳ line onto it.
-      let surfaceTracker: TurnStatusBarTracker | undefined;
-      let thinkingOutput: ReturnType<typeof createThinkingOutput> | undefined;
-      let surfaceStreamPusher: ReturnType<typeof createCoalescingStreamPusher> | undefined;
-      // Declared here (not in the messaging_surface branch) so the abort
-      // handler inside executeTurn can finalize the in-flight message handle.
-      let surfaceStreamHandle: StreamHandle | undefined;
-      // Round-settled prose of earlier rounds for the live display when the
-      // thinking composer is disabled (showThinking === false surfaces still
-      // show every round, separated by the transcript's blank line).
-      let surfacePriorRoundsProse = "";
-      // In-turn banner anchors: the runner's live position (committed prose
-      // segments / tool calls) captured at notice-fire time.
-      let surfaceCommittedProseSegments = 0;
-      let surfaceToolCalls = 0;
-      // The turn's committed prose segments, pushed in lockstep with
-      // `surfaceCommittedProseSegments` (same admission condition): a round still
-      // streaming is not committed, so mid-round notices ride the tail append.
-      const surfaceCommittedProse: string[] = [];
-      let surfaceDisplay = "";
-      // Every push re-renders display + notices from scratch (the coalescing pusher
-      // ships the latest state), so banners land chronologically, never patched into
-      // a pushed message. At this scope so every producer renders through the splice.
-      const surfaceBanners = createTurnBannerCollector({
-        captureAnchor: () => ({
-          committedProseSegments: surfaceCommittedProseSegments,
-          toolCalls: surfaceToolCalls,
-        }),
-        onNotice: () => {
-          if (surfaceStreamPusher) pushDisplay(surfaceDisplay || "…");
-        },
-      });
-      // A caller-provided banner (e.g. a steer banner) anchors at slot 0 — before the
-      // model's first prose segment — so the output attributes the turn to its prompt.
-      // Added before any turn output exists; live display and terminal body both carry it.
-      if (input.turnBanner) surfaceBanners.add(input.turnBanner);
-      const pushDisplay = (display: string): void => {
-        surfaceDisplay = display;
-        if (!surfaceStreamPusher) return;
-        surfaceStreamPusher.push(
-          surfaceBanners.liveBody(display, { segments: surfaceCommittedProse }),
-        );
-      };
-      const executeTurn = (
-        afterHitlQueued?: (row: PendingActionRow) => void | Promise<void>,
-        streamOverride?: ExecuteSessionAgentTurnInput["stream"],
-      ) =>
-        executeSessionAgentTurn({
-          db: opts.db,
-          sessionId: sid,
-          session: sessionRow,
-          transcript,
-          toolRuns,
-          userContent: input.userContent,
-          userMetadata,
-          systemContext: input.systemContext,
-          modelInvocationOverride: input.modelInvocationOverride,
-
-          env,
-          config: opts.config,
-          policyEngine: engine,
-          getHitlConfig,
-          hitl: {
-            bypassUpTo: resolveSessionBypassUpTo(sid, opts.config),
-            yoloActive,
-            pending: pendingForToolLoop,
-            clock: { nowMs: () => Date.now() },
-            newPendingId: () => randomUUID(),
-            waitForHitlResolution,
-            hitlNotifier,
-            autoApprove: opts.hitlAutoApproveGate,
-            ...cruiseControlToolLoopHook(opts),
-            ...(afterHitlQueued ? { afterHitlQueued } : {}),
-          },
-          loopImpl,
-          createToolCallingClient: createToolClient,
-          resolveMcpContext: mcpRuntime.resolveContext,
-          ...(streamOverride ? { stream: streamOverride } : {}),
-          // Forward turn events into the tracker so the live bar re-renders mid-turn
-          // (thinking / tool count / HITL pause / compaction / context fill).
-          // `onTurnAborted` stops the pusher and freezes the tracker even on a hung call.
-          ...(surfaceTracker || thinkingOutput || surfaceStreamPusher
-            ? {
-                events: {
-                  onThinkingDelta: (ev: { accumulated: string; round: number }) => {
-                    if (thinkingOutput) {
-                      const display = thinkingOutput.onThinking(ev);
-                      if (surfaceStreamPusher) {
-                        pushDisplay(display.trim() ? display : "…");
-                      }
-                    }
-                    surfaceTracker?.onThinkingDelta?.(ev.accumulated);
-                  },
-                  onToolCall: (ev) => {
-                    surfaceToolCalls += 1;
-                    surfaceTracker?.onToolCall?.(ev);
-                  },
-                  onHitlQueued: (call) => surfaceTracker?.onHitlQueued?.(call),
-                  onCompactionStart: () => surfaceTracker?.onCompactionStart?.(),
-                  onCompaction: () => surfaceTracker?.onCompaction?.(),
-                  onCompactionFailed: () => surfaceTracker?.onCompactionFailed?.(),
-                  onContextUpdate: (update) => surfaceTracker?.onContextUpdate?.(update),
-                  // Count-change events: keep the 🕵️/⏰/↩️ sections live on this
-                  // path — bumps re-arm the version poll; tracker pushes keep
-                  // the cache fresh without waiting for it.
-                  onSubagentsChanged: (counts) => {
-                    invalidateStatusBarSources("subagents");
-                    surfaceTracker?.onSubagentsChanged?.(counts);
-                  },
-                  onTimersChanged: (count) => {
-                    invalidateStatusBarSources("timers");
-                    surfaceTracker?.onTimersChanged?.(count);
-                  },
-                  onNotifiesChanged: (count) => {
-                    invalidateStatusBarSources("notifies");
-                    surfaceTracker?.onNotifiesChanged?.(count);
-                  },
-                  // Abort while the model call may still stream or hang: stop the
-                  // producers immediately — post-turn delivery never runs for a
-                  // promise that never settles. finish("aborted") freezes the 🛑 render.
-                  onTurnAborted: () => {
-                    surfaceStreamPusher?.stop();
-                    // Deterministic teardown: no producer (late deltas, stray
-                    // renders) may edit the aborted turn's message after this point.
-                    surfaceStreamHandle?.close?.();
-                    if (surfaceTracker) {
-                      void surfaceTracker.finish("aborted").catch((e) => {
-                        opts.logger.warn("discord.platform.status_bar_abort_finish_failed", {
-                          sessionId: sid,
-                          err: String(e),
-                        });
-                      });
-                    }
-                  },
-                },
-              }
-            : {}),
-        });
-
-      if (input.delivery.kind === "messaging_surface") {
-        const delivery = input.delivery;
-
-        // Snapshot stats BEFORE the turn runs: executing the turn increments
-        // session_stats.turn_count, and the bar must report the sequence of
-        // the very turn it belongs to (not the next one).
-        if (statusBarDep.config.enabled) {
-          surfaceTracker = createStatusBarTurnTracker({
-            cfg: statusBarDep.config,
-            render: statusBarDep.render,
-            stats: getStatusBarStats(opts.db, sid),
-            ...cruiseStatusBarProvider(opts, sid),
-            ...yoloStatusBarProvider(sid),
-          });
-        }
-
-        // With streaming, post the placeholder ("…") BEFORE the typing indicator
-        // (Discord cancels typing when a bot posts), then coalesce text deltas into
-        // live edits of that message, matching the inbound-turn pathway.
-        thinkingOutput =
-          (opts.configRef?.current ?? opts.config).platforms?.showThinking === false
-            ? undefined
-            : createThinkingOutput();
-        surfaceStreamHandle = await startStreamHandleWithBar(
-          {
-            logger: opts.logger,
-            env,
-            statusBarDep,
-            streamingForSession: opts.discord.streamingForSession,
-          },
-          sid,
-          { withSessionId: true },
-        );
-        // Wire the tracker's live target; the tracker flushes its
-        // captured ⏳ line so the placeholder carries the bar from turn
-        // start (capture-fallback until this handle exists).
-        surfaceTracker?.attachSink({
-          setStatusBar: (line: string | null) =>
-            surfaceStreamHandle?.setStatusBar
-              ? surfaceStreamHandle.setStatusBar(line)
-              : Promise.resolve(),
-        });
-        surfaceStreamPusher = surfaceStreamHandle
-          ? createCoalescingStreamPusher((s) => surfaceStreamHandle!.pushUpdate(s), streamMinMs())
-          : undefined;
-
-        // In-turn surface notices: mid-turn banners fold into this turn's output
-        // (streamed display and final body) instead of standalone messages. Registers
-        // the collector created above; every live push already renders through it.
-        const surfaceUnregister = registerActiveTurnSurface(sid, surfaceBanners).unregister;
-
-        try {
-          await adapter.withTypingIndicator(sid, async () => {
-            turnResult = await executeTurn(
-              buildAfterHitlQueued(delivery),
-              surfaceStreamPusher
-                ? {
-                    streamModel: true,
-                    onModelTextDelta: (ev: { accumulated: string; round: number }) => {
-                      const display = thinkingOutput
-                        ? thinkingOutput.onText(ev)
-                        : surfacePriorRoundsProse + ev.accumulated;
-                      pushDisplay(display.trim() ? display : "…");
-                      // Prose phase (💬) on the live bar.
-                      surfaceTracker?.onProse?.(ev.accumulated);
-                    },
-                    onModelRoundEnd: (ev: { round: number; content: string }) => {
-                      // A settled round commits one prose segment when its normalized
-                      // content is non-blank — same condition as the inbound path, so
-                      // anchors map 1:1; whitespace-only content never enters.
-                      const prose = normalizeRoundProse(ev.content);
-                      if (prose) {
-                        surfaceCommittedProseSegments += 1;
-                        surfaceCommittedProse.push(prose);
-                      }
-                      let display: string;
-                      if (thinkingOutput) {
-                        display = thinkingOutput.endRound(ev);
-                      } else {
-                        // The committed list and `surfacePriorRoundsProse`
-                        // track the same segments; rebuild the display from
-                        // it so the two can never drift.
-                        surfacePriorRoundsProse = surfaceCommittedProse.join("\n\n");
-                        display = surfacePriorRoundsProse;
-                      }
-                      pushDisplay(display.trim() ? display : "…");
-                    },
-                  }
-                : streamEnabled() || thinkingOutput
-                  ? { streamModel: true }
-                  : undefined,
-            );
-            const cfg = opts.configRef?.current ?? opts.config;
-            // Compose the body from the turn's full prose (every assistant text
-            // segment, in order) so multi-segment turns deliver ALL segments; a
-            // FAILED turn delivers the streamed snapshot + failureNotice instead.
-            const failed = turnResult.outcome === "failed";
-            const snapshot = surfaceDisplay.trim() && surfaceDisplay !== "…" ? surfaceDisplay : "";
-            const replyText = turnResult.assistantTurnProse ?? turnResult.latestAssistantText;
-            // ONE terminal composition: tracker finish() renders the frozen bar
-            // (✅/🛑/❌) through the same renderer as the live bar; the terminal
-            // snapshot carries this turn's real tool-call count.
-            const barLine = surfaceTracker
-              ? await surfaceTracker.finish(terminalOutcomeOf(turnResult.outcome))
-              : undefined;
-            if (surfaceStreamPusher && surfaceStreamHandle) {
-              // Final streamed edit first — it renders only the live display re-spliced
-              // with banners (never the terminal composition), so the in-flight message
-              // never shows banners smashed to the bottom mid-termination.
-              await surfaceStreamPusher.flush();
-              // Clear the in-flight handle's active-bar state first (no edit) so the
-              // delivery edit below, whose body already carries barLine, lands the
-              // bar exactly once. Never block delivery.
-              if (barLine && surfaceStreamHandle.setStatusBar) {
-                try {
-                  await surfaceStreamHandle.setStatusBar(null);
-                } catch (e) {
-                  opts.logger.warn("discord.platform.status_bar_clear_failed", {
-                    sessionId: sid,
-                    err: String(e),
-                  });
-                }
-              }
-            }
-            // Termination shaping runs ONE final body through ONE terminal render —
-            // no intermediate layout can exist. Fail-open per path: the streamed
-            // path makes no edit; the non-streamed path still delivers unshaped.
-            const formattedBody = formatAssistantReply(
-              cfg,
-              sid,
-              env,
-              replyText,
-              turnResult.failoverMeta,
-            );
-            // Failed: the display snapshot IS the body (already carries live
-            // decoration); normal: format the reply and let the composer wrap it.
-            // Splice segments are cut from the same source either way.
-            const terminationBase = failed
-              ? snapshot || turnResult.assistantTurnProse || ""
-              : (thinkingOutput?.render(formattedBody) ?? formattedBody);
-            const terminationSegments = (failed ? terminationBase : replyText).split("\n\n");
-            let fullBody: string;
-            try {
-              const shaped = await renderTurnTerminationBody(terminationBase, [
-                (body: string) =>
-                  surfaceBanners.terminalBody(body, { segments: terminationSegments }),
-              ]);
-              // The failure notice is the LAST block: appended after the
-              // banner splice so it can never fall into an
-              // unresolvable-anchor fallback slot ahead of in-turn banners.
-              const withNotice =
-                failed && turnResult.failureNotice
-                  ? shaped
-                    ? `${shaped}\n\n${turnResult.failureNotice}`
-                    : turnResult.failureNotice
-                  : shaped;
-              fullBody = barLine ? `${withNotice}\n\n${barLine}` : withNotice;
-            } catch (e) {
-              opts.logger.warn("discord.platform.termination_shaping_failed", {
-                sessionId: sid,
-                err: String(e),
-              });
-              if (surfaceStreamPusher && surfaceStreamHandle) {
-                // Streamed path fails open: no terminal edit — the streamed output
-                // stands, and the failure notice is lost here rather than risking a
-                // wrong body (the bar still carries the ❌ outcome).
-                return;
-              }
-              // Non-streamed path has nothing streamed to fall back on — deliver
-              // unshaped, exactly once, with the bar the tracker rendered (and the
-              // failure notice when the turn failed, rather than dropping it).
-              const unshaped =
-                failed && turnResult.failureNotice && terminationBase
-                  ? `${terminationBase}\n\n${turnResult.failureNotice}`
-                  : terminationBase;
-              fullBody = barLine ? `${unshaped}\n\n${barLine}` : unshaped;
-            }
-            // The ONE terminal render: exactly one delivery edit/send carries
-            // the final shaped body.
-            if (surfaceStreamPusher && surfaceStreamHandle) {
-              await surfaceStreamHandle.setFullContent(fullBody);
-              // Stream edits can't carry file attachments — send as follow-up.
-              const attachments = turnResult.showAttachments;
-              if (attachments?.length) {
-                await adapter.sendBody(sid, "", { attachments: [...attachments] });
-              }
-            } else {
-              await adapter.sendBody(sid, fullBody, {
-                replyTo: delivery.replyToMessageId,
-              });
-            }
-          });
-          return;
-        } finally {
-          surfaceUnregister();
-        }
-      }
-      let internalAfterHitlQueued: ((row: PendingActionRow) => void | Promise<void>) | undefined;
-      if (
-        sessionRow.parentSessionId &&
-        afterHitlQueuedFor(env, sendHitlQueuedNotice, { sessionId: sid })
-      ) {
-        const parentRow = sessions.getById(sessionRow.parentSessionId);
-        const parentChannelId = parentRow
-          ? opts.discord.resolveOutboundChannelIdForSession?.(parentRow.id)
-          : undefined;
-        if (parentChannelId) {
-          const ownerUserId = resolveDiscordOwnerUserId(configForOwnerGate());
-          internalAfterHitlQueued = afterHitlQueuedFor(env, sendHitlQueuedNotice, {
-            sessionId: sessionRow.parentSessionId!,
-            userId: ownerUserId ?? "system",
-          });
-        }
-      }
-
-      // OOB banner surface (issue #363): with a caller-provided status-bar sink,
-      // create the same tracker as messaging_surface turns so the live bar streams
-      // into the banner message. Stats snapshotted BEFORE the turn.
-      if (input.statusBarSink && statusBarDep.config.enabled) {
-        surfaceTracker = createStatusBarTurnTracker({
-          cfg: statusBarDep.config,
-          render: statusBarDep.render,
-          stats: getStatusBarStats(opts.db, sid),
-          ...cruiseStatusBarProvider(opts, sid),
-          ...yoloStatusBarProvider(sid),
-        });
-        surfaceTracker.attachSink(input.statusBarSink);
-      }
-
-      opts.logger.debug("platform.executeTurn_calling", {
-        sessionId: sid,
-        delivery: input.delivery.kind,
-      });
-      const internalStreamModel =
-        (opts.configRef?.current ?? opts.config).agents?.internalStreaming !== false;
-      turnResult = await executeTurn(internalAfterHitlQueued, {
-        streamModel: internalStreamModel,
-      });
-
-      // Freeze the bar at its terminal render (✅/🛑/❌) so the banner's final
-      // edit carries the same terminal bar a normal turn would. The caller's
-      // `oobTurnBanner.finish` clears the sink and edits the body afterwards.
-      if (surfaceTracker) {
-        const outcome = terminalOutcomeOf(turnResult.outcome);
-        try {
-          // Capture the rendered terminal bar line (the ONE terminal
-          // composition) and attach it to the turn result so the caller can
-          // hand it back to `oobTurnBanner.finish` for the final edit.
-          const barLine = await surfaceTracker.finish(outcome);
-          if (barLine) turnResult = { ...turnResult, statusBarLine: barLine };
-        } catch (e) {
-          opts.logger.warn("discord.platform.oob_status_bar_finish_failed", {
-            sessionId: sid,
-            err: String(e),
-          });
-        }
-      }
-    });
-    return turnResult;
+  async function runSessionModelTurn(input: SurfaceTurnInput): Promise<SessionAgentTurnResult> {
+    return runSurfaceTurn(surfaceTurnDeps, createSurfaceTurnState(input.turnBanner), input);
   }
 
   function subscribeSubagentSession(sessionId: string): () => void {
     const sid = sessionId.trim();
     const u = opts.discord.bus.subscribe(sid, (msg) => {
-      void dispatchChained(sid, msg).catch((e) => {
+      void inbound.dispatchChained(sid, msg).catch((e) => {
         opts.logger.error("discord.platform.dispatch_failed", {
           err: String(e),
         });
@@ -1295,156 +428,39 @@ export async function startDiscordPlatform(
       });
     });
   }
-  async function handleReactionPassthrough(ev: {
-    readonly sessionId: string;
-    readonly messageContent: string;
-    readonly messageTimestamp: number;
-    readonly emoji: string;
-    readonly userId: string;
-  }): Promise<void> {
-    const cfg = opts.configRef?.current ?? opts.config;
-    const agentId = parseAgentSessionUrn(ev.sessionId)?.agentId;
-    const agentReactions = agentId ? cfg.agents?.list?.[agentId]?.reactions : undefined;
+  /** Reaction passthrough — extracted to reaction-passthrough.ts; this wires
+   *  the platform's live config reference and turn entry into the deps. */
+  const reactionPassthrough = (ev: DiscordReactionPassthroughEvent): Promise<void> =>
+    handleReactionPassthrough(
+      {
+        config: opts.config,
+        configRef: opts.configRef,
+        logger: opts.logger,
+        runSessionModelTurn: (input) => runSessionModelTurn(input),
+      },
+      ev,
+    );
 
-    const { globalPassthrough, maxAgeMinutes } = resolveReactionConfig(cfg, agentReactions);
-
-    const route = routeReaction({
-      emoji: ev.emoji,
-      messageContent: ev.messageContent,
-      messageTimestamp: ev.messageTimestamp,
-      nowMs: Date.now(),
-      maxAgeMinutes,
-      globalPassthrough,
-    });
-
-    if (route.kind === "discard") {
-      opts.logger.debug("reaction.passthrough.discard", {
-        sessionId: ev.sessionId,
-        emoji: ev.emoji,
-        reason: route.reason,
-      });
-      return;
-    }
-
-    let eventContext: string;
-    if (route.kind === "adhoc") {
-      eventContext = formatAdhocReactionEventContext(
-        ev.emoji,
-        route.legend.entries,
-        ev.messageContent,
-      );
-    } else {
-      eventContext = formatGlobalReactionEventContext(ev.emoji, ev.messageContent);
-    }
-
-    try {
-      await runSessionModelTurn({
-        sessionId: ev.sessionId,
-        userContent: eventContext,
-        systemContext: {
-          kind: "reaction",
-          summary: `Reaction ${ev.emoji} passthrough`,
-        },
-        delivery: { kind: "messaging_surface", userId: ev.userId },
-      });
-    } catch (e) {
-      opts.logger.warn("reaction.passthrough.turn_failed", {
-        err: String(e),
-        sessionId: ev.sessionId,
-      });
-    }
-  }
-
-  /**
-   * OOB turn banner surface (issue #363). `begin` posts a "processing" banner as
-   * an editable message via the session's streaming outbound. That returns
-   * `undefined` when the session isn't surface-bound or the platform can't edit
-   * messages, in which case callers fall back to plain delivery. `finish` edits
-   * the banner message in place with the terminal banner plus optional
-   * `to_operator` content and the turn's terminal status-bar line, clearing
-   * the live bar first so it isn't rendered twice.
-   */
-  const oobTurnBanner = {
-    async begin(input: {
-      readonly sessionId: string;
-      readonly processing: string;
-    }): Promise<OobTurnBannerHandle | undefined> {
-      const streamingOutbound = opts.discord.streamingForSession(input.sessionId);
-      if (!streamingOutbound) return undefined;
-      try {
-        const handle = await streamingOutbound.start();
-        await handle.setFullContent(input.processing);
-        return {
-          sessionId: input.sessionId,
-          setBody: async (text: string) => {
-            await handle.setFullContent(text);
-          },
-          setStatusBar: async (line: string | null) => {
-            if (handle.setStatusBar) await handle.setStatusBar(line);
-          },
-        };
-      } catch (e) {
-        opts.logger.warn("discord.oob_banner.begin_failed", {
-          sessionId: input.sessionId,
-          err: String(e),
-        });
-        return undefined;
-      }
-    },
-    async finish(input: {
-      readonly handle: OobTurnBannerHandle;
-      readonly terminal: string;
-      readonly content?: string;
-      /** Terminal bar line (✅/🛑/❌) rendered by the turn's status-bar
-       *  tracker; appended last so the banner matches every other turn
-       *  surface. Omitted when the turn had no tracker. */
-      readonly statusBar?: string;
-    }): Promise<void> {
-      // Clear the live bar (a state-only operation that makes no edit) so the
-      // terminal body edit below lands the bar exactly once, mirroring the
-      // messaging_surface delivery pattern.
-      try {
-        await input.handle.setStatusBar(null);
-      } catch (e) {
-        opts.logger.warn("discord.oob_banner.status_bar_clear_failed", {
-          sessionId: input.handle.sessionId,
-          err: String(e),
-        });
-      }
-      // Edit the banner message in place via the handle captured at `begin`.
-      // A missing `setBody` means the platform cannot edit messages, so there
-      // is nothing to append to and we leave the processing banner as-is.
-      if (!input.handle.setBody) return;
-      try {
-        // Compose terminal (+ optional content) then the terminal bar line
-        // LAST — the same append order the messaging_surface delivery uses.
-        const base = input.content ? `${input.terminal}\n\n${input.content}` : input.terminal;
-        const body = input.statusBar ? `${base}\n\n${input.statusBar}` : base;
-        await input.handle.setBody(body);
-      } catch (e) {
-        opts.logger.warn("discord.oob_banner.finish_failed", {
-          sessionId: input.handle.sessionId,
-          err: String(e),
-        });
-      }
-    },
-  };
+  /** OOB turn banner surface — extracted to oob-banner.ts; wired with the
+   *  platform's streaming outbound resolver and logger. */
+  const oobTurnBanner = createOobTurnBanner({
+    logger: opts.logger,
+    streamingForSession: opts.discord.streamingForSession,
+  });
 
   return {
     stop: async () => {
       for (const u of unsubs) u();
       for (const u of subagentBusUnsubs) u();
       subagentBusUnsubs.length = 0;
-      const inFlightChains = [...chainTail.values()];
-      chainTail.clear();
-      await Promise.all(inFlightChains);
+      await inbound.stop();
       await mcpRuntime.shutdown();
     },
     runSessionModelTurn,
     oobTurnBanner,
     subscribeSubagentSession,
     announcePersistentSubagentSessionEnded,
-    handleReactionPassthrough,
+    handleReactionPassthrough: reactionPassthrough,
     pinMessage: async (input: { readonly channelId: string; readonly messageId: string }) => {
       await opts.discord.discordRestTransport.pinMessage?.(input.channelId, input.messageId);
     },
