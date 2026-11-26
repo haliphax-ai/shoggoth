@@ -104,7 +104,9 @@ export type McpServerPool = {
    * Live tool catalogs in config order. When a server signals
    * `notifications/tools/list_changed`, its entry is replaced **in place** (same
    * array identity, same index) after a `tools/list` re-fetch — hold the array
-   * reference rather than snapshotting its contents.
+   * reference rather than snapshotting its contents. The same in-place swap
+   * happens after a dead stdio/tcp server is respawned, so consumers holding
+   * the array reference see the refreshed catalog.
    */
   readonly externalSources: readonly McpSourceCatalog[];
   /**
@@ -112,6 +114,20 @@ export type McpServerPool = {
    * Returns true if that server is an HTTP transport pool member.
    */
   readonly cancelMcpRequest?: (sourceId: string, requestId: number) => boolean;
+  /**
+   * Observer tap: fired once per observed server death (stdio process exit, or
+   * stream end/error on stdio-direct/tcp) before respawn bookkeeping completes.
+   * Streams dying as part of a deliberate `close()` never fire it.
+   */
+  onServerExit?: (info: {
+    readonly sourceId: string;
+    readonly exitCode: number | null;
+    readonly signal: NodeJS.Signals | null;
+  }) => void;
+  /** True when the given source has a session that has not been observed dead. */
+  readonly isServerLive?: (sourceId: string) => boolean;
+  /** True when no session in this pool has been observed dead (empty pools: true). */
+  readonly hasLiveServers?: () => boolean;
   readonly close: () => Promise<void>;
 };
 
@@ -208,6 +224,29 @@ export async function connectShoggothMcpServers(
   const sessions = new Map<string, McpJsonRpcSession>();
   const streamableBySourceId = new Map<string, McpStreamableHttpSession>();
   const onPoolMessage = options?.onMcpServerMessage;
+  /** Set once a session for that server has been observed dead (exit/stream end). */
+  const deadServers = new Set<string>();
+  /** In-flight respawn per server id; concurrent death events coalesce on one handshake. */
+  const respawning = new Map<string, Promise<boolean>>();
+  /**
+   * Crash-loop guard bookkeeping: deaths that strike again within
+   * {@link RESPAWN_STABLE_WINDOW_MS} of the last successful respawn count as
+   * consecutive crash-loop failures; a death of a long-lived session resets
+   * the streak (genuinely healthy servers that later die get respawned).
+   */
+  const respawnStreak = new Map<string, number>();
+  const respawnOkAt = new Map<string, number>();
+  /** Consecutive rapid re-deaths before the pool stops auto-respawning. */
+  const MAX_RESPAWN_STREAK = 3;
+  /** A respawned session counts as "stable" once it lives this long. */
+  const RESPAWN_STABLE_WINDOW_MS = 10_000;
+  /** Base delay before a respawn attempt (doubles per streak). */
+  const RESPAWN_BASE_DELAY_MS = 250;
+  /** Upper bound for the respawn backoff delay. */
+  const RESPAWN_MAX_DELAY_MS = 8_000;
+  let poolClosed = false;
+  /** Set after the pool object exists; death events read the observer tap from it. */
+  let poolObj: McpServerPool | undefined;
 
   const agentCtx = options?.agentContext;
 
@@ -264,6 +303,132 @@ export async function connectShoggothMcpServers(
     })().catch((e) => {
       log.error("mcp.pool.tool_catalog_refresh_crashed", { sourceId, err: String(e) });
     });
+  }
+
+  /**
+   * Reconnect one dead server in place: fresh handshake (spawn → initialize →
+   * tools/list) through the normal retry/circuit path with the circuit
+   * re-armed (an explicit recovery, not churn), then swap the live session
+   * into the `sessions` map and replace the catalog entry in place.
+   * Concurrent death events for one server coalesce on a single handshake.
+   * Returns true when the server is live again.
+   */
+  function respawnServer(s: ShoggothMcpServerEntry): Promise<boolean> {
+    const existing = respawning.get(s.id);
+    if (existing) return existing;
+    // Crash-loop guard: after N rapid re-deaths the pool stops auto-respawning
+    // this server. The next EXPLICIT pool connect re-arms it.
+    if ((respawnStreak.get(s.id) ?? 0) >= MAX_RESPAWN_STREAK) {
+      log.warn("mcp.pool.server_respawn_suppressed", {
+        sourceId: s.id,
+        streak: respawnStreak.get(s.id),
+      });
+      return Promise.resolve(false);
+    }
+    const attempt = (async () => {
+      try {
+        // Backoff between respawn attempts (doubles per streak): a server that
+        // dies immediately after every handshake must not turn into an
+        // unbounded spawn/exit loop.
+        const streak = respawnStreak.get(s.id) ?? 0;
+        if (streak > 0) {
+          const delayMs = Math.min(RESPAWN_BASE_DELAY_MS * 2 ** (streak - 1), RESPAWN_MAX_DELAY_MS);
+          await sleep(delayMs);
+        }
+        // Re-arm this server's circuit: respawn is an explicit recovery path.
+        const circuit = mcpServerCircuits.get(s.id);
+        if (circuit) {
+          circuit.attempts = 0;
+          circuit.open = false;
+          circuit.lastError = undefined;
+        }
+        const outcome = await startServer(s);
+        // The old (dead) session object is always released: its procman
+        // registration must not leak even though the pool no longer routes
+        // through it.
+        const stale = sessions.get(s.id);
+        const dropStale = () => {
+          if (stale) void stale.close().catch(() => {});
+        };
+        if (!outcome.session || !outcome.catalog || !outcome.status.ok) {
+          // A stale entry must never keep serving the dead process.
+          if (stale && deadServers.has(s.id)) {
+            sessions.delete(s.id);
+            dropStale();
+          }
+          log.warn("mcp.pool.server_respawn_failed", {
+            sourceId: s.id,
+            err: outcome.status.error,
+          });
+          return false;
+        }
+        dropStale();
+        sessions.set(s.id, outcome.session);
+        deadServers.delete(s.id);
+        const idx = externalSources.findIndex((c) => c.sourceId === s.id);
+        if (idx !== -1) {
+          externalSources[idx] = outcome.catalog;
+          options?.onToolCatalogChange?.({ sourceId: s.id });
+        } else {
+          externalSources.push(outcome.catalog);
+        }
+        log.info("mcp.pool.server_respawn_ok", {
+          sourceId: s.id,
+          attempts: outcome.status.attempts,
+        });
+        respawnOkAt.set(s.id, Date.now());
+        return true;
+      } catch (e) {
+        log.warn("mcp.pool.server_respawn_failed", { sourceId: s.id, err: String(e) });
+        return false;
+      } finally {
+        respawning.delete(s.id);
+      }
+    })();
+    respawning.set(s.id, attempt);
+    return attempt;
+  }
+
+  /**
+   * Death handler wired to the session's exit tap: mark dead, notify the
+   * observer, and fire-and-forget the in-place respawn. The `external` invoke
+   * closure reads the `sessions` map per call, so swapping the session repairs
+   * routing for every cached context without any reconnect handshake.
+   */
+  function handleSessionDeath(
+    s: ShoggothMcpServerEntry,
+    info: {
+      readonly reason: "stream_end" | "stream_error" | "process_exit";
+      readonly exitCode?: number | null;
+      readonly signal?: NodeJS.Signals | null;
+    },
+  ): void {
+    if (poolClosed) return;
+    if (deadServers.has(s.id)) return;
+    deadServers.add(s.id);
+    // Crash-loop accounting: a re-death within the stability window of the
+    // last successful respawn extends the streak; a death of a session that
+    // had been up for a while resets it (healthy server, one-off crash).
+    const lastOk = respawnOkAt.get(s.id);
+    if (lastOk !== undefined) {
+      if (Date.now() - lastOk < RESPAWN_STABLE_WINDOW_MS) {
+        respawnStreak.set(s.id, (respawnStreak.get(s.id) ?? 0) + 1);
+      } else {
+        respawnStreak.delete(s.id);
+      }
+    }
+    poolObj?.onServerExit?.({
+      sourceId: s.id,
+      exitCode: info.exitCode ?? null,
+      signal: info.signal ?? null,
+    });
+    log.warn("mcp.pool.server_exited", {
+      sourceId: s.id,
+      reason: info.reason,
+      exitCode: info.exitCode ?? null,
+      signal: info.signal ?? null,
+    });
+    void respawnServer(s);
   }
 
   /** Open one server (env/vault resolution + connect + `tools/list`) in isolation. */
@@ -337,6 +502,12 @@ export async function connectShoggothMcpServers(
             gid: agentCtx?.gid,
             processManager: getProcessManager(),
             onServerNotification: (msg) => handleServerNotification(s.id, msg),
+            onServerExit: (info) =>
+              handleSessionDeath(s, {
+                reason: "process_exit",
+                exitCode: info.exitCode,
+                signal: info.signal,
+              }),
           });
         } else if (s.transport === "tcp") {
           session = await openMcpTcpClient({
@@ -463,10 +634,16 @@ export async function connectShoggothMcpServers(
       st.cancelRequest(requestId);
       return true;
     },
+    isServerLive: (sourceId) => !deadServers.has(sourceId),
+    hasLiveServers: () => deadServers.size === 0,
     close: async () => {
+      poolClosed = true;
+      const inflight = [...respawning.values()];
+      await Promise.all(inflight);
       await Promise.all([...sessions.values()].map((x) => x.close().catch(() => {})));
     },
   };
+  poolObj = pool;
 
   return { pool, external, statuses };
 }

@@ -168,6 +168,16 @@ export function createMcpJsonRpcSession(
      * Set to `null` to disable timeouts. Defaults to 60 seconds.
      */
     readonly requestTimeout?: number | null;
+    /**
+     * Invoked exactly once when the session becomes unusable without a deliberate
+     * `close()`: the input stream ended (`stream_end`), the input stream errored
+     * (`stream_error`), or the underlying process exited (`process_exit`, wired
+     * separately by the procman transport). Tap errors are swallowed so the read
+     * loop never breaks. Never fires for a deliberate `close()`.
+     */
+    readonly onExit?: (info: {
+      readonly reason: "stream_end" | "stream_error" | "process_exit";
+    }) => void;
   },
 ): McpJsonRpcSession {
   let nextId = 1;
@@ -176,6 +186,17 @@ export function createMcpJsonRpcSession(
   let buffer = "";
   let closed = false;
   let inputEnded = false;
+  let exitNotified = false;
+
+  function notifyExit(reason: "stream_end" | "stream_error" | "process_exit"): void {
+    if (exitNotified || closed) return;
+    exitNotified = true;
+    try {
+      options?.onExit?.({ reason });
+    } catch {
+      // A throwing tap must never break the transport.
+    }
+  }
 
   // Periodic stale-entry cleanup (belt-and-suspenders with per-request timers).
   // Runs every 30 s and rejects any pending entry older than requestTimeout.
@@ -270,6 +291,7 @@ export function createMcpJsonRpcSession(
 
   function onEnd(): void {
     inputEnded = true;
+    notifyExit("stream_end");
     if (!closed) {
       failAll(new Error("MCP JSON-RPC stream ended"));
     }
@@ -277,6 +299,7 @@ export function createMcpJsonRpcSession(
 
   function onErr(err: unknown): void {
     options?.onReaderError?.(err);
+    notifyExit("stream_error");
     if (!closed) {
       failAll(err instanceof Error ? err : new Error(String(err)));
     }
@@ -420,6 +443,16 @@ export interface McpStdioConnectOptions {
   readonly gid?: number;
   /** Optional tap for server-initiated JSON-RPC notifications received on this session. */
   readonly onServerNotification?: McpServerNotificationHandler;
+  /**
+   * Invoked when the managed (procman) child process exits — crash, external
+   * kill, or procman restart. A deliberate `close()` (procman `stop()`) does
+   * NOT fire this tap: the process exits in state `stopping`, and the tap is
+   * only raised for exits that happen outside a deliberate teardown.
+   */
+  readonly onServerExit?: (info: {
+    readonly exitCode: number | null;
+    readonly signal: NodeJS.Signals | null;
+  }) => void;
   /** DI seam: defaults to the real `node:child_process` spawn. Override in tests. */
   readonly spawnImpl?: typeof spawn;
 }
@@ -542,7 +575,10 @@ async function connectMcpStdioSessionViaProcman(
     env: opts.env ? ({ ...opts.env } as Record<string, string>) : undefined,
     uid: opts.uid,
     gid: opts.gid,
-    restart: { mode: "on-failure", maxRetries: 5 },
+    // Restart policy "never": the MCP pool owns recovery. A procman-side
+    // restart would spawn a child whose stdio nobody bridges to the dead
+    // session object, racing the pool's own respawn.
+    restart: { mode: "never" },
     stdio: { capture: "pipe", stdin: true },
     shutdown: { signal: "SIGTERM", graceMs: 5000 },
   };
@@ -569,12 +605,15 @@ async function connectMcpStdioSessionViaProcman(
   managed.on("stdout", (chunk: Buffer) => {
     stdoutStream.write(chunk);
   });
-  // When the managed process dies (crash, signal, failed restart), end the
-  // stdout stream so pending requests (initialize) fail fast with EOF instead
-  // of hanging until their request timeout.
-  managed.on("exit", () => {
+  // On death: end the stdout bridge (pending requests fail fast with EOF) and
+  // raise onServerExit so the pool can drop the dead session and reconnect.
+  // Deliberate close() stops with state "stopping" — that never signals death.
+  managed.on("exit", (code: number | null, signal: NodeJS.Signals | null) => {
     if (!stdoutStream.destroyed && !stdoutStream.writableEnded) {
       stdoutStream.end();
+    }
+    if (managed.state !== "stopping") {
+      opts.onServerExit?.({ exitCode: code, signal });
     }
   });
 
