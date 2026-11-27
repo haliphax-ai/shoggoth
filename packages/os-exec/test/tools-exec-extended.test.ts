@@ -17,7 +17,6 @@ import {
   toolExecExtended,
   logBashEnvWritable,
   bashEnvIsAgentWritable,
-  getExecSession,
   getManagedExecSession,
   removeExecSession,
   setProcessManager,
@@ -519,10 +518,10 @@ describe("toolExecExtended", () => {
           if (["exited", "dead", "failed"].includes(s)) resolve();
         });
       });
-      removeExecSession(bg.sessionId);
+      await removeExecSession(bg.sessionId);
     });
 
-    it("session is retrievable via getExecSession", async () => {
+    it("session is retrievable via getManagedExecSession", async () => {
       const r = await toolExecExtended(
         ws,
         {
@@ -532,7 +531,7 @@ describe("toolExecExtended", () => {
         creds,
       );
       const bg = r as ExecBackgroundResult;
-      const mp = getExecSession(bg.sessionId);
+      const mp = getManagedExecSession(bg.sessionId);
       assert.ok(mp);
       assert.equal(mp.pid, bg.pid);
 
@@ -545,7 +544,7 @@ describe("toolExecExtended", () => {
           if (["exited", "dead", "failed"].includes(s)) resolve();
         });
       });
-      removeExecSession(bg.sessionId);
+      await removeExecSession(bg.sessionId);
     });
 
     it("background process captures output", async () => {
@@ -575,7 +574,7 @@ describe("toolExecExtended", () => {
       const output = mp.readOutput("stdout");
       assert.ok(output.includes("bg-output"));
 
-      removeExecSession(bg.sessionId);
+      await removeExecSession(bg.sessionId);
     });
 
     it("background with stdin writes input before backgrounding", async () => {
@@ -604,7 +603,7 @@ describe("toolExecExtended", () => {
 
       // NOTE: procman path hardcodes stdin: false — stdin data not captured yet
       assert.ok(mp.readOutput("stdout").includes("no-stdin"));
-      removeExecSession(bg.sessionId);
+      await removeExecSession(bg.sessionId);
     });
 
     it("background with timeout kills the process", async () => {
@@ -634,7 +633,7 @@ describe("toolExecExtended", () => {
       // Process was killed by timeout (state should be 'dead' or 'failed')
       assert.ok(["dead", "failed"].includes(mp.state));
 
-      removeExecSession(bg.sessionId);
+      await removeExecSession(bg.sessionId);
     });
   });
 
@@ -675,7 +674,7 @@ describe("toolExecExtended", () => {
       assert.equal(bg.status, "running");
 
       // Clean up: kill the process
-      const mp = getExecSession(bg.sessionId);
+      const mp = getManagedExecSession(bg.sessionId);
       assert.ok(mp);
       mp.kill();
       await new Promise<void>((resolve) => {
@@ -687,7 +686,7 @@ describe("toolExecExtended", () => {
           if (["exited", "dead", "failed"].includes(s)) resolve();
         });
       });
-      removeExecSession(bg.sessionId);
+      await removeExecSession(bg.sessionId);
     });
 
     it("yieldMs of 0 is equivalent to background: true", async () => {
@@ -703,7 +702,7 @@ describe("toolExecExtended", () => {
       const bg = r as ExecBackgroundResult;
       assert.ok(bg.sessionId);
 
-      const mp = getExecSession(bg.sessionId);
+      const mp = getManagedExecSession(bg.sessionId);
       assert.ok(mp);
       await new Promise<void>((resolve) => {
         if (["exited", "dead", "failed"].includes(mp.state)) {
@@ -714,7 +713,7 @@ describe("toolExecExtended", () => {
           if (["exited", "dead", "failed"].includes(s)) resolve();
         });
       });
-      removeExecSession(bg.sessionId);
+      await removeExecSession(bg.sessionId);
     });
 
     it("background: true wins over yieldMs", async () => {
@@ -733,7 +732,7 @@ describe("toolExecExtended", () => {
       // yielded should NOT be set — this was immediate background, not yield
       assert.equal(bg.yielded, undefined);
 
-      const mp = getExecSession(bg.sessionId);
+      const mp = getManagedExecSession(bg.sessionId);
       assert.ok(mp);
       await new Promise<void>((resolve) => {
         if (["exited", "dead", "failed"].includes(mp.state)) {
@@ -744,7 +743,7 @@ describe("toolExecExtended", () => {
           if (["exited", "dead", "failed"].includes(s)) resolve();
         });
       });
-      removeExecSession(bg.sessionId);
+      await removeExecSession(bg.sessionId);
     });
 
     it("rejects negative yieldMs", async () => {
@@ -773,7 +772,7 @@ describe("toolExecExtended", () => {
         assert.ok(bg.partialOutput.includes("partial-data"));
       }
 
-      const mp = getExecSession(bg.sessionId);
+      const mp = getManagedExecSession(bg.sessionId);
       assert.ok(mp);
       mp.kill();
       await new Promise<void>((resolve) => {
@@ -785,7 +784,7 @@ describe("toolExecExtended", () => {
           if (["exited", "dead", "failed"].includes(s)) resolve();
         });
       });
-      removeExecSession(bg.sessionId);
+      await removeExecSession(bg.sessionId);
     });
   });
 
@@ -1080,7 +1079,7 @@ describe("toolExecExtended", () => {
       const content = readFileSync(join(ws, "bg-combined.txt"), "utf8");
       assert.ok(content.includes("bg-out"));
       assert.ok(content.includes("bg-err"));
-      removeExecSession(bg.sessionId);
+      await removeExecSession(bg.sessionId);
     });
     it("background + stdoutFile/stderrFile: streams to separate files", async () => {
       const r = await toolExecExtended(
@@ -1112,7 +1111,7 @@ describe("toolExecExtended", () => {
 
       assert.ok(readFileSync(join(ws, "bg-stdout.txt"), "utf8").includes("split-out"));
       assert.ok(readFileSync(join(ws, "bg-stderr.txt"), "utf8").includes("split-err"));
-      removeExecSession(bg.sessionId);
+      await removeExecSession(bg.sessionId);
     });
     it("yieldMs expiry + stdoutFile: output streams to file while running", async () => {
       const r = await toolExecExtended(
@@ -1132,7 +1131,7 @@ describe("toolExecExtended", () => {
       // Output is in the file even though the process is still running
       const content = readFileSync(join(ws, "yield-stdout.txt"), "utf8");
       assert.ok(content.includes("yield-out"));
-      removeExecSession(bg.sessionId);
+      await removeExecSession(bg.sessionId);
     });
     it("yieldMs finishing in window + file output: foreground result with paths", async () => {
       const r = await toolExecExtended(

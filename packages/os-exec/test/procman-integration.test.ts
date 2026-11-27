@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from "vitest";
+import { describe, it, beforeEach, afterEach, vi } from "vitest";
 import assert from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -8,7 +8,6 @@ import {
   toolExecExtended,
   setProcessManager,
   getProcessManager,
-  getExecSession,
   getManagedExecSession,
   removeExecSession,
 } from "../src/tools";
@@ -72,7 +71,7 @@ describe("procman integration", () => {
       assert.equal(bg.status, "running");
     });
 
-    it("process is tracked in ProcessManager, not legacy Map", async () => {
+    it("process is tracked in ProcessManager via the unified lookup", async () => {
       const r = await toolExecExtended(
         ws,
         {
@@ -83,14 +82,8 @@ describe("procman integration", () => {
       );
       const bg = r as ExecBackgroundResult;
 
-      // Should be retrievable via getExecSession (unified lookup)
-      const handle = getExecSession(bg.sessionId);
-      assert.ok(handle, "getExecSession should find procman-managed processes");
-      assert.equal(handle.pid, bg.pid);
-
-      // Should also be in procman via getManagedExecSession
       const mp = getManagedExecSession(bg.sessionId);
-      assert.ok(mp, "process should be in ProcessManager");
+      assert.ok(mp, "getManagedExecSession should find procman-managed processes");
       assert.equal(mp.pid, bg.pid);
     });
 
@@ -150,18 +143,77 @@ describe("procman integration", () => {
       );
       const bg = r as ExecBackgroundResult;
 
-      const removed = removeExecSession(bg.sessionId);
+      const removed = await removeExecSession(bg.sessionId);
       assert.equal(removed, true);
 
-      // Yield event-loop ticks until stop() finishes and the manager drops
-      // the session — no wall-clock sleep.
-      for (let i = 0; i < 100 && getManagedExecSession(bg.sessionId) !== undefined; i++) {
-        await new Promise<void>((resolve) => setImmediate(resolve));
-      }
-
-      // Should no longer be in procman
+      // Should no longer be in procman (stop awaited before returning)
       const mp = getManagedExecSession(bg.sessionId);
       assert.strictEqual(mp, undefined);
+    });
+
+    it("removeExecSession returns false for unknown session ID", async () => {
+      const removed = await removeExecSession("exec-does-not-exist");
+      assert.equal(removed, false);
+    });
+
+    it("removeExecSession returns false when the stop rejects", async () => {
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "sleep 10",
+          background: true,
+        },
+        creds,
+      );
+      const bg = r as ExecBackgroundResult;
+
+      const stopAll = pm.stopAll.bind(pm);
+      const originalStop = pm.stop.bind(pm);
+      pm.stop = vi.fn().mockRejectedValue(new Error("stop failed"));
+
+      try {
+        const removed = await removeExecSession(bg.sessionId);
+        assert.equal(removed, false);
+      } finally {
+        pm.stop = originalStop;
+        await stopAll();
+      }
+    });
+
+    it("removeExecSession returns false when the stop does not settle in time", async () => {
+      vi.useFakeTimers();
+      try {
+        const r = await toolExecExtended(
+          ws,
+          {
+            command: "sleep 10",
+            background: true,
+          },
+          creds,
+        );
+        const bg = r as ExecBackgroundResult;
+
+        const originalStop = pm.stop.bind(pm);
+        pm.stop = vi.fn().mockReturnValue(new Promise<void>(() => {}));
+
+        let removed: boolean | undefined;
+        const pending = removeExecSession(bg.sessionId).then((v) => {
+          removed = v;
+        });
+
+        // Advance past the stop timeout; the racing timeout rejects first.
+        await vi.advanceTimersByTimeAsync(5000);
+        await pending;
+        assert.equal(removed, false);
+
+        pm.stop = originalStop;
+        // Un-fake timers before real cleanup so pm.stopAll() works.
+        vi.useRealTimers();
+        await pm.stopAll();
+      } finally {
+        vi.useRealTimers();
+        setProcessManager(undefined);
+      }
     });
   });
 

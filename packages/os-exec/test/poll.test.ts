@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { ProcessManager } from "@shoggoth/procman";
 import {
   toolExecExtended,
-  getExecSession,
+  getManagedExecSession,
   removeExecSession,
   setProcessManager,
 } from "../src/tools";
@@ -52,7 +52,7 @@ describe("toolPoll", () => {
 
   /** Helper: wait for a process to exit, then clean up. */
   async function cleanup(sessionId: string): Promise<void> {
-    const mp = getExecSession(sessionId);
+    const mp = getManagedExecSession(sessionId);
     if (mp) {
       if (!["exited", "dead", "failed"].includes(mp.state)) {
         mp.kill();
@@ -66,7 +66,7 @@ describe("toolPoll", () => {
           });
         });
       }
-      removeExecSession(sessionId);
+      await removeExecSession(sessionId);
     }
   }
 
@@ -143,7 +143,7 @@ describe("toolPoll", () => {
 
     it("returns exited status with exit code for a completed process", async () => {
       const { pid, sessionId } = await spawnBg("echo done");
-      const mp = getExecSession(sessionId)!;
+      const mp = getManagedExecSession(sessionId)!;
       await new Promise<void>((resolve) => {
         if (["exited", "dead", "failed"].includes(mp.state)) {
           resolve();
@@ -164,13 +164,13 @@ describe("toolPoll", () => {
         assert.ok(result.output.includes("done"));
         assert.ok(result.outputBytes > 0);
       } finally {
-        removeExecSession(sessionId);
+        await removeExecSession(sessionId);
       }
     });
 
     it("captures non-zero exit code", async () => {
       const { pid, sessionId } = await spawnBg("exit 42");
-      const mp = getExecSession(sessionId)!;
+      const mp = getManagedExecSession(sessionId)!;
       await new Promise<void>((resolve) => {
         if (["exited", "dead", "failed"].includes(mp.state)) {
           resolve();
@@ -188,7 +188,7 @@ describe("toolPoll", () => {
         assert.equal(result.status, "exited");
         assert.equal(result.exitCode, 42);
       } finally {
-        removeExecSession(sessionId);
+        await removeExecSession(sessionId);
       }
     });
   });
@@ -227,7 +227,7 @@ describe("toolPoll", () => {
         assert.equal(result.waited, true);
         assert.ok(typeof result.waitedMs === "number");
       } finally {
-        removeExecSession(sessionId);
+        await removeExecSession(sessionId);
       }
     });
 
@@ -247,7 +247,7 @@ describe("toolPoll", () => {
 
     it("returns immediately for already-exited process regardless of timeout", async () => {
       const { pid, sessionId } = await spawnBg("echo already-done");
-      const mp = getExecSession(sessionId)!;
+      const mp = getManagedExecSession(sessionId)!;
       await new Promise<void>((resolve) => {
         if (["exited", "dead", "failed"].includes(mp.state)) {
           resolve();
@@ -268,7 +268,7 @@ describe("toolPoll", () => {
         // Should not have waited the full 5s
         assert.ok(elapsed < 1000);
       } finally {
-        removeExecSession(sessionId);
+        await removeExecSession(sessionId);
       }
     });
   });
@@ -280,7 +280,7 @@ describe("toolPoll", () => {
   describe("streams", () => {
     it("returns combined output by default", async () => {
       const { pid, sessionId } = await spawnBg("echo out; echo err >&2");
-      const mp = getExecSession(sessionId)!;
+      const mp = getManagedExecSession(sessionId)!;
       await new Promise<void>((resolve) => {
         if (["exited", "dead", "failed"].includes(mp.state)) {
           resolve();
@@ -300,13 +300,13 @@ describe("toolPoll", () => {
         assert.ok(!("stdout" in result));
         assert.ok(!("stderr" in result));
       } finally {
-        removeExecSession(sessionId);
+        await removeExecSession(sessionId);
       }
     });
 
     it("returns split stdout/stderr when streams is true", async () => {
       const { pid, sessionId } = await spawnBg("echo out-data; echo err-data >&2");
-      const mp = getExecSession(sessionId)!;
+      const mp = getManagedExecSession(sessionId)!;
       await new Promise<void>((resolve) => {
         if (["exited", "dead", "failed"].includes(mp.state)) {
           resolve();
@@ -327,7 +327,7 @@ describe("toolPoll", () => {
         assert.ok(result.stderrBytes > 0);
         assert.ok(!("output" in result));
       } finally {
-        removeExecSession(sessionId);
+        await removeExecSession(sessionId);
       }
     });
   });
@@ -339,7 +339,7 @@ describe("toolPoll", () => {
   describe("tail", () => {
     it("returns only the last N lines of output", async () => {
       const { pid, sessionId } = await spawnBg("seq 1 100");
-      const mp = getExecSession(sessionId)!;
+      const mp = getManagedExecSession(sessionId)!;
       await new Promise<void>((resolve) => {
         if (["exited", "dead", "failed"].includes(mp.state)) {
           resolve();
@@ -360,13 +360,13 @@ describe("toolPoll", () => {
         assert.ok(result.output.includes("100"));
         assert.equal(result.truncated, true);
       } finally {
-        removeExecSession(sessionId);
+        await removeExecSession(sessionId);
       }
     });
 
     it("returns all output when tail exceeds line count", async () => {
       const { pid, sessionId } = await spawnBg("echo one; echo two");
-      const mp = getExecSession(sessionId)!;
+      const mp = getManagedExecSession(sessionId)!;
       await new Promise<void>((resolve) => {
         if (["exited", "dead", "failed"].includes(mp.state)) {
           resolve();
@@ -385,13 +385,13 @@ describe("toolPoll", () => {
         assert.ok(result.output.includes("two"));
         assert.equal(result.truncated, false);
       } finally {
-        removeExecSession(sessionId);
+        await removeExecSession(sessionId);
       }
     });
 
     it("works with streams: true", async () => {
       const { pid, sessionId } = await spawnBg("seq 1 50; seq 51 100 >&2");
-      const mp = getExecSession(sessionId)!;
+      const mp = getManagedExecSession(sessionId)!;
       await new Promise<void>((resolve) => {
         if (["exited", "dead", "failed"].includes(mp.state)) {
           resolve();
@@ -411,7 +411,7 @@ describe("toolPoll", () => {
         // stderr tail should have lines from seq 51 100
         assert.ok(result.stderr.includes("100"));
       } finally {
-        removeExecSession(sessionId);
+        await removeExecSession(sessionId);
       }
     });
   });
@@ -423,7 +423,7 @@ describe("toolPoll", () => {
   describe("since", () => {
     it("returns output after the byte offset", async () => {
       const { pid, sessionId } = await spawnBg("printf 'AAABBBCCC'");
-      const mp = getExecSession(sessionId)!;
+      const mp = getManagedExecSession(sessionId)!;
       await new Promise<void>((resolve) => {
         if (["exited", "dead", "failed"].includes(mp.state)) {
           resolve();
@@ -442,13 +442,13 @@ describe("toolPoll", () => {
         assert.equal(result.outputBytes, 9); // total bytes
         assert.equal(result.truncated, true); // since > 0 means truncated
       } finally {
-        removeExecSession(sessionId);
+        await removeExecSession(sessionId);
       }
     });
 
     it("returns empty output when since exceeds current byte count", async () => {
       const { pid, sessionId } = await spawnBg("echo short");
-      const mp = getExecSession(sessionId)!;
+      const mp = getManagedExecSession(sessionId)!;
       await new Promise<void>((resolve) => {
         if (["exited", "dead", "failed"].includes(mp.state)) {
           resolve();
@@ -467,13 +467,13 @@ describe("toolPoll", () => {
         // outputBytes tells the agent the current total
         assert.ok(result.outputBytes > 0);
       } finally {
-        removeExecSession(sessionId);
+        await removeExecSession(sessionId);
       }
     });
 
     it("returns all output when since is 0", async () => {
       const { pid, sessionId } = await spawnBg("echo all-data");
-      const mp = getExecSession(sessionId)!;
+      const mp = getManagedExecSession(sessionId)!;
       await new Promise<void>((resolve) => {
         if (["exited", "dead", "failed"].includes(mp.state)) {
           resolve();
@@ -491,13 +491,13 @@ describe("toolPoll", () => {
         assert.ok(result.output.includes("all-data"));
         assert.equal(result.truncated, false); // since=0 means no truncation
       } finally {
-        removeExecSession(sessionId);
+        await removeExecSession(sessionId);
       }
     });
 
     it("works with streams: true", async () => {
       const { pid, sessionId } = await spawnBg("printf 'STDOUT'; printf 'STDERR' >&2");
-      const mp = getExecSession(sessionId)!;
+      const mp = getManagedExecSession(sessionId)!;
       await new Promise<void>((resolve) => {
         if (["exited", "dead", "failed"].includes(mp.state)) {
           resolve();
@@ -515,7 +515,7 @@ describe("toolPoll", () => {
         assert.equal(result.stdout, "DOUT");
         assert.equal(result.stderr, "DERR");
       } finally {
-        removeExecSession(sessionId);
+        await removeExecSession(sessionId);
       }
     });
   });
@@ -527,7 +527,7 @@ describe("toolPoll", () => {
   describe("tail + since interaction", () => {
     it("tail takes precedence over since", async () => {
       const { pid, sessionId } = await spawnBg("seq 1 10");
-      const mp = getExecSession(sessionId)!;
+      const mp = getManagedExecSession(sessionId)!;
       await new Promise<void>((resolve) => {
         if (["exited", "dead", "failed"].includes(mp.state)) {
           resolve();
@@ -547,7 +547,7 @@ describe("toolPoll", () => {
         assert.ok(lines.length <= 2);
         assert.ok(result.output.includes("10"));
       } finally {
-        removeExecSession(sessionId);
+        await removeExecSession(sessionId);
       }
     });
   });

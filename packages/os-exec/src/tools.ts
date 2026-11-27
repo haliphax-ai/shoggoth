@@ -1036,28 +1036,38 @@ export function getManagedExecSession(sessionId: string): ManagedProcess | undef
   return _processManager?.get(sessionId);
 }
 
-/**
- * Retrieve a background session by ID (procman-only).
- * Alias for getManagedExecSession for backward compatibility.
- */
-export function getExecSession(sessionId: string): ManagedProcess | undefined {
-  return _processManager?.get(sessionId);
-}
+/** Max time removeExecSession waits for the underlying process stop. */
+export const EXEC_SESSION_STOP_TIMEOUT_MS = 5000;
 
 /**
- * Remove a completed session from the registry.
- * When a ProcessManager is set, stops and removes the process from procman.
- * Falls back to the legacy Map.
+ * Remove a session from the registry, stopping its process.
+ * When a ProcessManager is set and the session exists, awaits the stop with a
+ * short timeout and propagates the real outcome: true when the process was
+ * stopped and deregistered, false when there is no ProcessManager, the session
+ * is unknown, the stop rejects, or the stop does not settle in time.
  */
-export function removeExecSession(sessionId: string): boolean {
-  if (_processManager) {
-    const mp = _processManager.get(sessionId);
-    if (mp) {
-      _processManager.stop(sessionId).catch(() => {});
-      return true;
-    }
+export async function removeExecSession(sessionId: string): Promise<boolean> {
+  const pm = _processManager;
+  if (!pm) return false;
+
+  if (!pm.get(sessionId)) return false;
+
+  try {
+    await Promise.race([
+      pm.stop(sessionId),
+      new Promise<never>((_, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error(`stop timed out after ${EXEC_SESSION_STOP_TIMEOUT_MS}ms`)),
+          EXEC_SESSION_STOP_TIMEOUT_MS,
+        );
+        if (typeof timer.unref === "function") timer.unref();
+      }),
+    ]);
+    return true;
+  } catch (err) {
+    log.warn("exec session stop failed", { sessionId, error: String(err) });
+    return false;
   }
-  return false;
 }
 
 // ---------------------------------------------------------------------------
