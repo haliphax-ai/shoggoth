@@ -343,21 +343,24 @@ export async function toolWrite(
     throw new Error(`toolWrite failed: ${r.stderr.trim() || `exit ${r.exitCode}`}`);
   }
 
-  // Parse result metadata from subprocess stdout
+  // Parse result metadata from subprocess stdout. The child always emits
+  // exactly one JSON line on success, so a parse failure means the contract
+  // is broken — fail hard rather than reporting a degraded bytesWritten.
+  let result: { bytesWritten: number; dirCreated: boolean };
   try {
-    const result = JSON.parse(r.stdout) as {
-      bytesWritten: number;
-      dirCreated: boolean;
-    };
-    return {
-      path: abs,
-      bytesWritten: result.bytesWritten,
-      dirCreated: result.dirCreated || undefined,
-    };
-  } catch {
-    // Fallback if JSON parsing fails — operation still succeeded
-    return { path: abs, bytesWritten: Buffer.byteLength(opts.content, "utf8") };
+    result = JSON.parse(r.stdout) as { bytesWritten: number; dirCreated: boolean };
+  } catch (err) {
+    throw new Error(
+      `toolWrite failed: could not parse write result JSON: ${
+        (err as Error).message
+      } (stdout: ${JSON.stringify(r.stdout.slice(0, 200))})`,
+    );
   }
+  return {
+    path: abs,
+    bytesWritten: result.bytesWritten,
+    dirCreated: result.dirCreated || undefined,
+  };
 }
 
 /**
