@@ -14,12 +14,7 @@ export {
   type SystemContext,
 } from "./system-context";
 export { deepMerge } from "./merge";
-export {
-  LAYOUT,
-  OPERATOR_GLOBAL_INSTRUCTIONS_BASENAME,
-  EXEC_ENV_DIR,
-  EXEC_BASH_ENV,
-} from "./paths";
+export { LAYOUT, OPERATOR_GLOBAL_INSTRUCTIONS_BASENAME } from "./paths";
 export {
   DEFAULT_HITL_CONFIG,
   DEFAULT_MAX_ATTACHMENT_BYTES,

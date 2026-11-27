@@ -1,10 +1,31 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { EXEC_BASH_ENV } from "@shoggoth/shared";
-import { toolRead, toolWrite, toolExec } from "../src/tools";
+import { toolRead, toolWrite, toolExec, logBashEnvWritable } from "../src/tools";
+import { createLogger, setRootLogger, type Logger, type LogFields } from "@shoggoth/shared";
+
+type RecordedLog = { level: string; msg: string; fields?: Record<string, unknown> };
+
+/** Install a recording root logger and return its captured records. */
+function recordingLogger(): RecordedLog[] {
+  const logs: RecordedLog[] = [];
+  const record = (level: string) => (msg: string, fields?: LogFields) => {
+    logs.push({ level, msg, fields });
+  };
+  const logger = {
+    debug: record("debug"),
+    info: record("info"),
+    warn: record("warn"),
+    error: record("error"),
+    child: () => logger,
+  } as unknown as Logger;
+  setRootLogger(logger);
+  return logs;
+}
+
+const defaultLogger = createLogger({ component: "tools.test" });
 
 describe("minimal v1 tools (read / write / exec)", () => {
   let ws: string;
@@ -15,6 +36,7 @@ describe("minimal v1 tools (read / write / exec)", () => {
   });
 
   afterEach(() => {
+    setRootLogger(defaultLogger);
     rmSync(ws, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
@@ -41,19 +63,27 @@ describe("minimal v1 tools (read / write / exec)", () => {
     await assert.rejects(() => toolRead(ws, "..", creds));
   });
 
-  it("toolExec keeps BASH_ENV on the daemon-owned sentinel, outside the workspace", async () => {
+  it("toolExec points BASH_ENV at the workspace .bashrc and flags it agent-writable", async () => {
+    const logs = recordingLogger();
     const r = await toolExec(ws, ["/bin/bash", "-c", "echo $BASH_ENV"], creds);
     assert.equal(r.exitCode, 0);
-    const seen = r.stdout.trim();
-    assert.equal(seen, EXEC_BASH_ENV);
+    assert.equal(r.stdout.trim(), join(ws, ".bashrc"));
     assert.ok(
       !r.stderr.includes("/bin/bash:"),
       `BASH_ENV handling must stay silent, got stderr: ${r.stderr.trim()}`,
     );
-    const rel = relative(ws, seen);
     assert.ok(
-      rel === ".." || rel.startsWith(`..${sep}`),
-      `BASH_ENV must be outside the workspace, got: ${seen}`,
+      logs.some((l) => l.level === "error" && l.msg.includes("BASH_ENV")),
+      `expected an agent-writable BASH_ENV error, got: ${JSON.stringify(logs)}`,
+    );
+  });
+
+  it("logBashEnvWritable stays silent when the target is not agent-writable", () => {
+    const logs = recordingLogger();
+    logBashEnvWritable("/etc/hosts");
+    assert.ok(
+      !logs.some((l) => l.level === "error" && l.msg.includes("BASH_ENV")),
+      `expected no BASH_ENV error, got: ${JSON.stringify(logs)}`,
     );
   });
 });

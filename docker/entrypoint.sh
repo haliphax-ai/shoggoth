@@ -28,14 +28,6 @@ if [ -d /etc/shoggoth/config.d/dynamic ]; then
 fi
 fix_dir /var/lib/shoggoth/daemon 0700 shoggoth shoggoth
 fix_dir /var/lib/shoggoth/state 0700 shoggoth shoggoth
-# Exec-shell startup files for agent subprocesses (BASH_ENV target): agents must be
-# able to traverse/read (silent handling) but never create or replace files here.
-fix_dir /var/lib/shoggoth/exec-env 0755 shoggoth shoggoth
-if [ ! -e /var/lib/shoggoth/exec-env/bash-env ]; then
-  : > /var/lib/shoggoth/exec-env/bash-env
-fi
-chown shoggoth:shoggoth /var/lib/shoggoth/exec-env/bash-env
-chmod 0644 /var/lib/shoggoth/exec-env/bash-env
 
 # Workspaces root: setgid (2…) so new session dirs inherit group `agent`; agent UID matches group perms.
 fix_dir /var/lib/shoggoth/workspaces 0770 shoggoth agent
