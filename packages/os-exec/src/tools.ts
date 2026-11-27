@@ -13,6 +13,7 @@ import {
   PathEscapeError,
 } from "./workspace-path";
 import type { ProcessManager, ManagedProcess, ProcessSpec } from "@shoggoth/procman";
+import { EXEC_BASH_ENV } from "@shoggoth/shared";
 import { isTerminal } from "./util";
 
 export interface AgentCredentials {
@@ -364,7 +365,10 @@ export async function toolWrite(
 function xdgEnvForWorkspace(workspaceRoot: string): NodeJS.ProcessEnv {
   return {
     HOME: workspaceRoot,
-    BASH_ENV: join(workspaceRoot, ".bashrc"),
+    // Daemon-owned ground (/var/lib/shoggoth/exec-env, entrypoint 0755) — outside
+    // the workspace, so a planted file is never sourced. Pinned below against
+    // per-call `env` repointing.
+    BASH_ENV: EXEC_BASH_ENV,
     XDG_CONFIG_HOME: join(workspaceRoot, ".config"),
     XDG_DATA_HOME: join(workspaceRoot, ".local", "share"),
     XDG_CACHE_HOME: join(workspaceRoot, ".cache"),
@@ -1110,10 +1114,13 @@ export async function toolExecExtended(
     }
   }
 
-  // Merge env: workspace XDG defaults + user overrides
+  // Merge env: workspace XDG defaults + user overrides. The bash startup-file
+  // env is pinned to the daemon-owned path AFTER the spread so an agent can't
+  // repoint it into the workspace (or anywhere else) via per-call env.
   const env: NodeJS.ProcessEnv = {
     ...xdgEnvForWorkspace(rootCwd),
     ...(opts.env as NodeJS.ProcessEnv | undefined),
+    BASH_ENV: EXEC_BASH_ENV,
   };
 
   // Resolve output limits

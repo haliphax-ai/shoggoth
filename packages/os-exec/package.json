@@ -16,7 +16,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@shoggoth/procman": "*"
+    "@shoggoth/procman": "*",
+    "@shoggoth/shared": "*"
   },
   "devDependencies": {
     "typescript": "~5.7.2"

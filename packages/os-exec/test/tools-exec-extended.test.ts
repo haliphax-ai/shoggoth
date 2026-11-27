@@ -1,9 +1,10 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { ProcessManager } from "@shoggoth/procman";
+import { EXEC_BASH_ENV } from "@shoggoth/shared";
 import {
   toolExecExtended,
   getExecSession,
@@ -758,19 +759,32 @@ describe("toolExecExtended", () => {
   // -----------------------------------------------------------------------
 
   describe("BASH_ENV and bash shell", () => {
-    it("sets BASH_ENV to workspace .bashrc", async () => {
+    it("sets BASH_ENV to the daemon-controlled file outside the workspace", async () => {
       const r = await toolExecExtended(ws, { command: "echo $BASH_ENV" }, creds);
       assert.equal(r.kind, "foreground");
       const fg = r as ExecForegroundResult;
+      assert.equal(fg.output?.trim(), EXEC_BASH_ENV);
       assert.ok(
-        fg.output?.trim().endsWith("/.bashrc"),
-        `expected BASH_ENV to end with /.bashrc, got: ${fg.output?.trim()}`,
+        !fg.output?.includes("/bin/bash:"),
+        `BASH_ENV handling must stay silent, got: ${fg.output?.trim()}`,
       );
-      // Should be an absolute path under the workspace, not just "/.bashrc"
+      // Regression: must not live on agent-writable workspace ground.
+      const rel = relative(ws, fg.output!.trim());
       assert.ok(
-        fg.output!.trim().length > "/.bashrc".length,
-        "BASH_ENV should be an absolute path, not just /.bashrc",
+        rel === ".." || rel.startsWith(`..${sep}`),
+        `BASH_ENV must be outside the workspace, got: ${fg.output?.trim()}`,
       );
+    });
+
+    it("pins BASH_ENV against per-call env overrides", async () => {
+      const r = await toolExecExtended(
+        ws,
+        { command: "echo $BASH_ENV", env: { BASH_ENV: join(ws, "planted") } },
+        creds,
+      );
+      assert.equal(r.kind, "foreground");
+      const fg = r as ExecForegroundResult;
+      assert.equal(fg.output?.trim(), EXEC_BASH_ENV);
     });
 
     it("runs commands via /bin/bash, not /bin/sh", async () => {
@@ -781,15 +795,35 @@ describe("toolExecExtended", () => {
       assert.ok(!fg.output?.includes("not_bash"), "should be running under bash, not sh");
     });
 
-    it("sources .bashrc via BASH_ENV when it exists", async () => {
+    it("never sources a workspace .bashrc", async () => {
       writeFileSync(join(ws, ".bashrc"), "export CUSTOM_FROM_BASHRC=hello_from_rc\n");
       const r = await toolExecExtended(ws, { command: "echo $CUSTOM_FROM_BASHRC" }, creds);
       assert.equal(r.kind, "foreground");
       const fg = r as ExecForegroundResult;
       assert.ok(
-        fg.output?.includes("hello_from_rc"),
-        `expected .bashrc to be sourced, got: ${fg.output?.trim()}`,
+        !fg.output?.includes("hello_from_rc"),
+        `workspace .bashrc must not be sourced, got: ${fg.output?.trim()}`,
       );
+    });
+
+    it("never sources a file planted under the workspace even if BASH_ENV is overridden", async () => {
+      writeFileSync(join(ws, "planted-rc"), "export CUSTOM_FROM_PLANT=hello_from_plant\n");
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "echo ${CUSTOM_FROM_PLANT:-unset} $BASH_ENV",
+          env: { BASH_ENV: join(ws, "planted-rc") },
+        },
+        creds,
+      );
+      assert.equal(r.kind, "foreground");
+      const fg = r as ExecForegroundResult;
+      // Pinned env wins over the override, so the planted file is never sourced.
+      assert.ok(
+        fg.output?.trim().startsWith("unset"),
+        `planted file must not be sourced, got: ${fg.output?.trim()}`,
+      );
+      assert.equal(fg.output?.trim().split(" ")[1], EXEC_BASH_ENV);
     });
   });
 
