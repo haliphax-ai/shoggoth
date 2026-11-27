@@ -1023,9 +1023,16 @@ export function getProcessManager(): ProcessManager | undefined {
 // Extended exec — session registry for background processes
 // ---------------------------------------------------------------------------
 
-/** Generate a unique procman-compatible spec ID for exec sessions. */
+/** Monotonic creation sequence for exec session specs (recency ordering). */
+let _procmanIdSeq = 0;
+
+/**
+ * Generate a unique procman-compatible spec ID for exec sessions.
+ * The embedded sequence number is monotonic, so lexicographic comparison of
+ * IDs orders sessions by creation time (used for PID-reuse recency tiebreaks).
+ */
 function nextProcmanId(): string {
-  return `exec-${randomUUID()}`;
+  return `exec-${String(++_procmanIdSeq).padStart(10, "0")}-${randomUUID()}`;
 }
 
 /**

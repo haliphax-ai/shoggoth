@@ -72,9 +72,33 @@ export type PollResponse = PollResult | PollError;
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Prefix and separator of the creation sequence embedded in exec spec IDs. */
+const PROC_SEQ_PREFIX = "exec-";
+const PROC_SEQ_SEP = "-";
+
+/**
+ * Extract the monotonic creation sequence from an exec spec ID
+ * (`exec-<seq>-<uuid>`). Returns -1 when the ID predates this format, so such
+ * specs lose recency comparisons against sequenced ones.
+ */
+function specCreationSeq(id: string): number {
+  if (!id.startsWith(PROC_SEQ_PREFIX)) return -1;
+  const rest = id.slice(PROC_SEQ_PREFIX.length);
+  const end = rest.indexOf(PROC_SEQ_SEP);
+  if (end <= 0) return -1;
+  const seqStr = rest.slice(0, end);
+  if (!/^\d+$/.test(seqStr)) return -1;
+  return Number(seqStr);
+}
+
 /**
  * Find the most recent process matching a given PID via procman.
  * Handles PID reuse by preferring the most recently created session.
+ *
+ * Session IDs embed a monotonic creation sequence (see `nextProcmanId` in
+ * tools.ts), so lexicographic ID comparison orders sessions by creation time.
+ * Specs without a sequence — from other producers or older versions — fall
+ * back to their spec ID.
  */
 function findProcessByPid(pid: number): ManagedProcess | undefined {
   const pm = getProcessManager();
@@ -82,11 +106,13 @@ function findProcessByPid(pid: number): ManagedProcess | undefined {
 
   const managed = pm.listByOwner({ kind: "agent-tool", scopeId: "exec" });
   let bestMp: ManagedProcess | undefined;
+  let bestSeq = -1;
   for (const mp of managed) {
-    if (mp.pid === pid) {
-      if (!bestMp || mp.spec.id > bestMp.spec.id) {
-        bestMp = mp;
-      }
+    if (mp.pid !== pid) continue;
+    const seq = specCreationSeq(mp.spec.id);
+    if (!bestMp || seq > bestSeq || (seq === bestSeq && mp.spec.id > bestMp.spec.id)) {
+      bestMp = mp;
+      bestSeq = seq;
     }
   }
   return bestMp;
