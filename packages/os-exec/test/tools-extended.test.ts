@@ -187,6 +187,15 @@ describe("toolReadExtended", () => {
       assert.ok(multi.notices?.some((n) => n.includes("capped")));
     });
 
+    it("caps mid-glob with exactly maxFiles files in sorted order", async () => {
+      const r = await toolReadExtended(ws, { paths: ["src/*"], maxFiles: 2 }, creds);
+      assert.equal(r.kind, "multi");
+      const multi = r as ReadMultiResult;
+      // src/* matches a.ts, b.ts, c.js — sorted; cap keeps only the first two.
+      assert.deepEqual(Object.keys(multi.files), ["src/a.ts", "src/b.ts"]);
+      assert.ok(multi.notices?.some((n) => n.includes("capped")));
+    });
+
     it("returns empty files with notice when glob matches nothing", async () => {
       const r = await toolReadExtended(ws, { paths: ["nonexistent/*.xyz"] }, creds);
       assert.equal(r.kind, "multi");

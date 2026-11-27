@@ -551,8 +551,11 @@ function buildFileStat(relPath: string, raw: Record<string, unknown>): FileStat 
 
 /**
  * Resolve an array of paths/globs to concrete workspace-relative paths.
- * Globs are expanded against the real workspace root. Each result is validated
- * through resolvePathForRead. Returns paths relative to workspace root.
+ * Globs are expanded against the real workspace root; glob matches are already
+ * workspace-relative and contained, so they skip the per-match
+ * resolvePathForRead round-trip — the read/stat step re-validates anything it
+ * opens. Pattern processing stops as soon as `maxFiles` results are collected.
+ * Returns paths relative to workspace root.
  */
 function resolvePathList(
   workspaceRoot: string,
@@ -564,26 +567,22 @@ function resolvePathList(
   const results: string[] = [];
 
   for (const pattern of patterns) {
+    // Cap reached — stop expanding further patterns entirely.
+    if (results.length >= maxFiles) break;
     // Check if the pattern contains glob characters
     const isGlob = /[*?{}[\]]/.test(pattern);
     if (isGlob) {
       const matches = globSync(pattern, { cwd: rootReal });
       const sorted = (matches as string[]).sort();
       for (const match of sorted) {
+        // Stop mid-pattern once the cap is met — no further dedup/push work.
         if (results.length >= maxFiles) break;
-        try {
-          // Validate the resolved path stays inside workspace
-          const abs = resolvePathForRead(workspaceRoot, match);
-          if (!seen.has(abs)) {
-            seen.add(abs);
-            results.push(relative(rootReal, abs));
-          }
-        } catch {
-          // Match explicit-path behavior: add the path so the error surfaces per-file
-          if (!seen.has(match)) {
-            seen.add(match);
-            results.push(match);
-          }
+        // Glob matches are workspace-relative by construction (globSync runs
+        // against rootReal), so containment is already guaranteed without a
+        // per-match resolvePathForRead round-trip.
+        if (!seen.has(match)) {
+          seen.add(match);
+          results.push(match);
         }
       }
     } else {
