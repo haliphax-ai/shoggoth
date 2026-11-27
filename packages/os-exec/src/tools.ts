@@ -1,4 +1,4 @@
-import { existsSync, realpathSync, globSync } from "node:fs";
+import { existsSync, globSync, realpathSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 // readFileSync removed — scripts are loaded as files via tsx
@@ -6,20 +6,14 @@ import { join, resolve, relative, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { runAsUser, type RunAsUserResult } from "./subprocess";
-import { resolvePathForRead, resolvePathForWrite, PathEscapeError } from "./workspace-path";
+import {
+  cachedRealpathSync,
+  resolvePathForRead,
+  resolvePathForWrite,
+  PathEscapeError,
+} from "./workspace-path";
 import type { ProcessManager, ManagedProcess, ProcessSpec } from "@shoggoth/procman";
 import { isTerminal } from "./util";
-
-// Cache realpathSync results per workspace root to avoid repeated syscalls
-const realpathCache = new Map<string, string>();
-function cachedRealpathSync(workspaceRoot: string): string {
-  let cached = realpathCache.get(workspaceRoot);
-  if (cached === undefined) {
-    cached = realpathSync(workspaceRoot);
-    realpathCache.set(workspaceRoot, cached);
-  }
-  return cached;
-}
 
 export interface AgentCredentials {
   uid: number;
