@@ -15,10 +15,10 @@
     "@shoggoth/models": "*",
     "@shoggoth/shared": "*",
     "@shoggoth/skills": "*",
-    "tsx": "^4.19.3"
+    "tsx": "^4.19.3",
+    "undici": "^6.29.1"
   },
   "devDependencies": {
-    "better-sqlite3": "^11.7.0",
-    "undici": "^8.13.1"
+    "better-sqlite3": "^11.7.0"
   }
 }
