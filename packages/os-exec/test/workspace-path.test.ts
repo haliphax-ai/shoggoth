@@ -274,4 +274,25 @@ describe("workspace path allowlist", () => {
       }
     });
   });
+
+  describe("cachedRealpathSync cache bounds", () => {
+    it("keeps resolving correctly after the cache exceeds its bound", () => {
+      const dirs: string[] = [];
+      try {
+        // Exceed the documented cache limit (256) to force LRU eviction.
+        for (let i = 0; i < 300; i++) {
+          const dir = mkdtempSync(join(tmpdir(), "shoggoth-lru-"));
+          dirs.push(dir);
+          assert.strictEqual(cachedRealpathSync(dir), realpathSync(dir));
+        }
+        // Evicted entries must still resolve correctly on re-resolution.
+        assert.strictEqual(cachedRealpathSync(dirs[0]!), realpathSync(dirs[0]!));
+        assert.strictEqual(cachedRealpathSync(dirs[299]!), realpathSync(dirs[299]!));
+      } finally {
+        for (const dir of dirs) {
+          rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        }
+      }
+    });
+  });
 });
