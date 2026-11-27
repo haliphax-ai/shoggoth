@@ -3,7 +3,8 @@ import assert from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { ProcessManager } from "@shoggoth/procman";
+import { ProcessManager, ManagedProcess } from "@shoggoth/procman";
+import type { ProcessSpec } from "@shoggoth/procman";
 import {
   toolExecExtended,
   getManagedExecSession,
@@ -597,6 +598,160 @@ describe("toolPoll", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // PID reuse — recency tiebreak
+  // -----------------------------------------------------------------------
+
+  describe("PID reuse tiebreak", () => {
+    /** Real spec id of the one live base session (for teardown). */
+    let baseId: string;
+    let cloneIds: string[] = [];
+
+    /**
+     * Register thin stand-ins sharing the base session's PID, each carrying
+     * its own spec. findProcessByPid compares only spec.id and pid, so
+     * duplicated EventEmitters (and the `_pid` name-mangling workaround they
+     * would need) are unnecessary; state and output stay with the real
+     * ManagedProcess that the winner resolves to.
+     */
+    function registerSpecClones(ids: string[]): void {
+      const base = pm.listByOwner({ kind: "agent-tool", scopeId: "exec" })[0];
+      if (!base) throw new Error("no managed session registered");
+
+      for (const id of ids) {
+        const spec: ProcessSpec = {
+          id,
+          owner: { kind: "agent-tool", scopeId: "exec" },
+          command: base.spec.command,
+          args: base.spec.args,
+          cwd: base.spec.cwd,
+          uid: base.spec.uid,
+          gid: base.spec.gid,
+          env: base.spec.env,
+          restart: { mode: "never" },
+          stdio: { capture: "pipe", stdin: false },
+        };
+        // Construction does not spawn; real procman tests register bare
+        // instances the same way. `_pid` and `processes` are private.
+        const mp = new ManagedProcess(spec);
+        (mp as unknown as { _pid: number })._pid = base.pid;
+        (pm as unknown as { processes: Map<string, ManagedProcess> }).processes.set(id, mp);
+        cloneIds.push(id);
+      }
+    }
+
+    /**
+     * Rewrite the real session's spec ID to a known sequence so test outcomes
+     * do not depend on the module-level counter's value at test time.
+     */
+    function resequenceBase(id: string): void {
+      const base = pm.listByOwner({ kind: "agent-tool", scopeId: "exec" })[0];
+      if (!base) throw new Error("no managed session registered");
+      const spec = { ...base.spec, id } as ProcessSpec;
+      const reid = base as unknown as { spec: ProcessSpec };
+      reid.spec = spec;
+    }
+
+    beforeEach(() => {
+      baseId = "";
+      cloneIds = [];
+    });
+
+    afterEach(async () => {
+      // Bare clones were never started; deregister them directly so the
+      // outer stopAll only handles the real spawned process.
+      const map = (pm as unknown as { processes: Map<string, ManagedProcess> }).processes;
+      for (const id of cloneIds) map.delete(id);
+      cloneIds = [];
+      if (baseId) {
+        const mp = map.get(baseId);
+        if (mp && mp.state !== "dead") await mp.kill();
+      }
+    });
+
+    it("prefers the newest sequenced session among clones sharing a PID", async () => {
+      const { pid, sessionId } = await spawnBg("echo NEWEST-OUTPUT; sleep 5");
+      baseId = sessionId;
+      resequenceBase("exec-0000000010-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+      registerSpecClones([
+        "exec-0000000011-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "exec-0000000012-cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "exec-0000000013-dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      ]);
+
+      const r = await toolPoll({ pid });
+      assert.ok(!("error" in r));
+      // The newest clone wins, so the real session's output must not show up.
+      assert.equal(r.output.includes("NEWEST-OUTPUT"), false);
+      // The winner is a bare clone (never started).
+      assert.equal(r.runtimeMs, 0);
+      assert.equal(r.status, "running");
+    });
+
+    it("orders clones by embedded sequence, not lexicographic id", async () => {
+      const { pid, sessionId } = await spawnBg("echo NEWEST-OUTPUT; sleep 5");
+      baseId = sessionId;
+      resequenceBase("exec-0000000020-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+      registerSpecClones([
+        "exec-0000000021-zzzzzzzz-zzzz-4zzz-8zzz-zzzzzzzzzzzz",
+        "exec-0000000022-cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "exec-0000000023-dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      ]);
+
+      const r = await toolPoll({ pid });
+      assert.ok(!("error" in r));
+      // The sequence-newest clone wins, so the real session's output must
+      // not show up.
+      assert.equal(r.output.includes("NEWEST-OUTPUT"), false);
+      // The winner is a bare clone (never started).
+      assert.equal(r.runtimeMs, 0);
+      assert.equal(r.status, "running");
+    });
+
+    it("resolves to the real session when it is the newest", async () => {
+      const { pid, sessionId } = await spawnBg("echo NEWEST-OUTPUT; sleep 5");
+      baseId = sessionId;
+      resequenceBase("exec-0000000030-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+      registerSpecClones([
+        "exec-0000000028-cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "exec-0000000029-dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      ]);
+
+      const r = await toolPoll({ pid, timeout: 2000 });
+      assert.ok(!("error" in r));
+      assert.equal(r.output.includes("NEWEST-OUTPUT"), true);
+      assert.equal(r.runtimeMs > 0, true);
+    });
+
+    it("prefers sequenced specs over lexicographically larger unsequenced ids", async () => {
+      const { pid, sessionId } = await spawnBg("echo NEWEST-OUTPUT; sleep 5");
+      baseId = sessionId;
+      resequenceBase("exec-0000000040-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+      // "ffffffff" sorts above any zero-padded sequence but parses to -1.
+      registerSpecClones(["exec-ffffffff-ffff-4fff-8fff-ffffffffffff"]);
+
+      const r = await toolPoll({ pid, timeout: 2000 });
+      assert.ok(!("error" in r));
+      assert.equal(r.output.includes("NEWEST-OUTPUT"), true);
+      assert.equal(r.runtimeMs > 0, true);
+    });
+
+    it("breaks equal sequences by lexicographic spec id", async () => {
+      const { pid, sessionId } = await spawnBg("echo NEWEST-OUTPUT; sleep 5");
+      baseId = sessionId;
+      resequenceBase("exec-0000000050-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+      registerSpecClones(["exec-0000000050-eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"]);
+
+      const r = await toolPoll({ pid });
+      assert.ok(!("error" in r));
+      // Equal sequences: the lexicographically larger id wins, so the real
+      // session's output must not show up.
+      assert.equal(r.output.includes("NEWEST-OUTPUT"), false);
+      assert.equal(r.runtimeMs, 0);
+      assert.equal(r.status, "running");
     });
   });
 });
