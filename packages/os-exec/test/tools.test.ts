@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { toolRead, toolWrite, toolExec, logBashEnvWritable } from "../src/tools";
@@ -78,12 +78,19 @@ describe("minimal v1 tools (read / write / exec)", () => {
     );
   });
 
-  it("logBashEnvWritable stays silent when the target is not agent-writable", () => {
+  it("logBashEnvWritable stays silent when the target is locked to the agent", () => {
     const logs = recordingLogger();
-    logBashEnvWritable("/etc/hosts");
-    assert.ok(
-      !logs.some((l) => l.level === "error" && l.msg.includes("BASH_ENV")),
-      `expected no BASH_ENV error, got: ${JSON.stringify(logs)}`,
-    );
+    const p = join(ws, ".bashrc");
+    writeFileSync(p, "locked\n");
+    chmodSync(p, 0o444);
+    try {
+      logBashEnvWritable(p, { uid: 46464, gid: 46464 });
+      assert.ok(
+        !logs.some((l) => l.level === "error" && l.msg.includes("BASH_ENV")),
+        `expected no BASH_ENV error, got: ${JSON.stringify(logs)}`,
+      );
+    } finally {
+      chmodSync(p, 0o644);
+    }
   });
 });

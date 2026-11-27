@@ -830,6 +830,10 @@ describe("toolExecExtended", () => {
   // ---------------------------------------------------------------------------
 
   describe("BASH_ENV agent-writability detection", () => {
+    // Foreign agent identity that owns nothing in the fixture tree, so only the
+    // "other" permission bits apply to it. The suite process may run as root,
+    // where its own access checks prove nothing about agent writability.
+    const agentCreds = { uid: 46464, gid: 46464 };
     let logs: RecordedLog[];
 
     beforeEach(() => {
@@ -843,37 +847,49 @@ describe("toolExecExtended", () => {
     it("bashEnvIsAgentWritable: writable existing file", () => {
       const p = join(ws, ".bashrc");
       writeFileSync(p, "ok\n");
-      assert.equal(bashEnvIsAgentWritable(p), true);
+      assert.equal(bashEnvIsAgentWritable(p, creds), true);
     });
 
-    it("bashEnvIsAgentWritable: missing file under writable parent", () => {
-      assert.equal(bashEnvIsAgentWritable(join(ws, ".bashrc")), true);
+    it("bashEnvIsAgentWritable: world-writable file owned by someone else", () => {
+      const p = join(ws, "foreign-rc");
+      writeFileSync(p, "ok\n");
+      chmodSync(p, 0o666);
+      assert.equal(bashEnvIsAgentWritable(p, agentCreds), true);
     });
 
-    it("bashEnvIsAgentWritable: existing non-writable file", () => {
+    it("bashEnvIsAgentWritable: missing file under agent-writable parent", () => {
+      const dir = join(ws, "open-dir");
+      mkdirSync(dir);
+      chmodSync(dir, 0o777);
+      assert.equal(bashEnvIsAgentWritable(join(dir, ".bashrc"), agentCreds), true);
+    });
+
+    it("bashEnvIsAgentWritable: existing file locked against the agent", () => {
       const p = join(ws, ".bashrc");
       writeFileSync(p, "locked\n");
       chmodSync(p, 0o444);
       try {
-        assert.equal(bashEnvIsAgentWritable(p), false);
+        assert.equal(bashEnvIsAgentWritable(p, agentCreds), false);
       } finally {
         chmodSync(p, 0o644);
       }
     });
 
-    it("bashEnvIsAgentWritable: missing file under non-writable parent", () => {
+    it("bashEnvIsAgentWritable: missing file under agent-locked parent", () => {
       const dir = join(ws, "locked-dir");
       mkdirSync(dir);
       chmodSync(dir, 0o555);
       try {
-        assert.equal(bashEnvIsAgentWritable(join(dir, ".bashrc")), false);
+        assert.equal(bashEnvIsAgentWritable(join(dir, ".bashrc"), agentCreds), false);
       } finally {
         chmodSync(dir, 0o755);
       }
     });
 
     it("logs an error when the effective BASH_ENV target is agent-writable", async () => {
-      writeFileSync(join(ws, ".bashrc"), "echo planted\n");
+      const rc = join(ws, ".bashrc");
+      writeFileSync(rc, "echo planted\n");
+      chmodSync(rc, 0o666);
       const r = await toolExecExtended(ws, { command: "true" }, creds);
       assert.equal(r.kind, "foreground");
       const hit = logs.find(
@@ -886,11 +902,10 @@ describe("toolExecExtended", () => {
     });
 
     it("logs an error for a per-call env override repointing BASH_ENV", async () => {
-      const r = await toolExecExtended(
-        ws,
-        { command: "true", env: { BASH_ENV: join(ws, "planted-rc") } },
-        creds,
-      );
+      const rc = join(ws, "planted-rc");
+      writeFileSync(rc, "echo planted\n");
+      chmodSync(rc, 0o666);
+      const r = await toolExecExtended(ws, { command: "true", env: { BASH_ENV: rc } }, creds);
       assert.equal(r.kind, "foreground");
       const hit = logs.find(
         (l) =>
@@ -902,10 +917,12 @@ describe("toolExecExtended", () => {
     });
 
     it("logs an error when BASH_ENV target is missing but its parent is writable", async () => {
-      mkdirSync(join(ws, "sub"));
+      const dir = join(ws, "open-sub");
+      mkdirSync(dir);
+      chmodSync(dir, 0o777);
       const r = await toolExecExtended(
         ws,
-        { command: "true", env: { BASH_ENV: join(ws, "sub", ".bashrc") } },
+        { command: "true", env: { BASH_ENV: join(dir, ".bashrc") } },
         creds,
       );
       assert.equal(r.kind, "foreground");
@@ -913,25 +930,29 @@ describe("toolExecExtended", () => {
         (l) =>
           l.level === "error" &&
           l.msg.includes("BASH_ENV") &&
-          (l.fields?.bashEnvPath as string | undefined)?.includes(join("sub", ".bashrc")),
+          (l.fields?.bashEnvPath as string | undefined)?.includes(join("open-sub", ".bashrc")),
       );
       assert.ok(hit, `expected an error for the creatable target, got: ${JSON.stringify(logs)}`);
     });
 
     it("does not log when BASH_ENV target is not agent-writable", async () => {
-      const r = await toolExecExtended(
-        ws,
-        { command: "true", env: { BASH_ENV: "/etc/hosts" } },
-        creds,
-      );
-      assert.equal(r.kind, "foreground");
-      const hit = logs.find((l) => l.level === "error" && l.msg.includes("BASH_ENV"));
-      assert.ok(!hit, `expected no BASH_ENV error, got: ${JSON.stringify(logs)}`);
+      const rc = join(ws, "locked-rc");
+      writeFileSync(rc, "locked\n");
+      chmodSync(rc, 0o444);
+      try {
+        const r = await toolExecExtended(ws, { command: "true", env: { BASH_ENV: rc } }, creds);
+        assert.equal(r.kind, "foreground");
+        const hit = logs.find((l) => l.level === "error" && l.msg.includes("BASH_ENV"));
+        assert.ok(!hit, `expected no BASH_ENV error, got: ${JSON.stringify(logs)}`);
+      } finally {
+        chmodSync(rc, 0o644);
+      }
     });
 
     it("logBashEnvWritable detects a planted workspace .bashrc", () => {
-      writeFileSync(join(ws, ".bashrc"), "ok\n");
-      logBashEnvWritable(join(ws, ".bashrc"));
+      const rc = join(ws, ".bashrc");
+      writeFileSync(rc, "ok\n");
+      logBashEnvWritable(rc, creds);
       assert.ok(
         logs.some((l) => l.level === "error" && l.msg.includes("BASH_ENV")),
         "expected a BASH_ENV error log",
