@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from "vitest";
+import { describe, it, beforeEach, afterEach, vi } from "vitest";
 import assert from "node:assert";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -456,6 +456,30 @@ describe("toolWrite", () => {
           ),
         /binary/i,
       );
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Malformed subprocess result (JSON parse failure must fail hard)
+  // -----------------------------------------------------------------------
+
+  describe("malformed subprocess result", () => {
+    it("throws instead of returning a degraded bytesWritten on unparseable output", async () => {
+      writeFileSync(join(ws, "f.txt"), "aaa\nbbb\nccc\n");
+      const subprocess = await import("../src/subprocess");
+      const realRunAsUser = subprocess.runAsUser;
+      const spy = vi.spyOn(subprocess, "runAsUser").mockImplementation(async (spec) => {
+        const r = await realRunAsUser(spec);
+        return { ...r, stdout: "not json at all\n" };
+      });
+      try {
+        await assert.rejects(
+          () => toolWrite(ws, { path: "f.txt", content: "BBB", startLine: 2 }, creds),
+          /could not parse write result JSON/,
+        );
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });
