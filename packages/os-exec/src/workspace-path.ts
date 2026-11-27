@@ -1,16 +1,56 @@
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
-const realpathCache = new Map<string, string>();
+/** Maximum number of entries retained in the workspace-root realpath cache. */
+const REALPATH_CACHE_LIMIT = 256;
+
+/**
+ * Simple bounded LRU cache for workspace-root real paths.
+ *
+ * Entries are revalidated on every hit (see `cachedRealpathSync`), so eviction
+ * is purely a memory bound: dropping the least recently used root merely costs
+ * one `realpathSync` call on its next use.
+ */
+class RealpathLruCache {
+  private readonly entries = new Map<string, string>();
+
+  get(key: string): string | undefined {
+    const value = this.entries.get(key);
+    if (value !== undefined) {
+      // Re-inserting moves the entry to the back, marking it most recently used.
+      this.entries.delete(key);
+      this.entries.set(key, value);
+    }
+    return value;
+  }
+
+  set(key: string, value: string): void {
+    if (this.entries.has(key)) {
+      this.entries.delete(key);
+    }
+    this.entries.set(key, value);
+    if (this.entries.size > REALPATH_CACHE_LIMIT) {
+      // `Map` iteration is insertion order, so the first key is the LRU entry.
+      const lruKey = this.entries.keys().next();
+      if (!lruKey.done) {
+        this.entries.delete(lruKey.value);
+      }
+    }
+  }
+
+  delete(key: string): void {
+    this.entries.delete(key);
+  }
+}
+
+const realpathCache = new RealpathLruCache();
 
 /**
  * Resolve the real path of a workspace root, caching results per input path.
  *
- * A cached value is reused only while it is still a real (non-symlink)
- * directory matching the current (device, inode) of `workspaceRoot`; otherwise
- * the entry is refreshed via `realpathSync`. This keeps containment checks and
- * the `cwd`/HOME handed to child processes anchored on the same, current real
- * root even when the root is deleted and recreated during a daemon lifetime.
+ * A cached value is reused only while it matches the current (device, inode)
+ * of `workspaceRoot`; otherwise it is refreshed via `realpathSync`. The cache
+ * is LRU-bounded so it cannot grow without limit during a daemon lifetime.
  */
 export function cachedRealpathSync(workspaceRoot: string): string {
   let cached = realpathCache.get(workspaceRoot);
