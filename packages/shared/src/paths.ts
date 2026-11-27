@@ -1,6 +1,5 @@
 /**
  * Canonical filesystem layout (v1). Daemon-owned trees are not traversable by agent UID
- * when entrypoint permissions are applied (see docker/entrypoint.sh).
  */
 
 /**

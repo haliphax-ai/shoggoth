@@ -1,4 +1,4 @@
-import { existsSync, globSync, realpathSync } from "node:fs";
+import { existsSync, globSync, realpathSync, statSync, type Stats } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 // readFileSync removed — scripts are loaded as files via tsx
@@ -13,7 +13,10 @@ import {
   PathEscapeError,
 } from "./workspace-path";
 import type { ProcessManager, ManagedProcess, ProcessSpec } from "@shoggoth/procman";
+import { getLogger } from "@shoggoth/shared";
 import { isTerminal } from "./util";
+
+const log = getLogger("os-exec");
 
 export interface AgentCredentials {
   uid: number;
@@ -373,6 +376,50 @@ function xdgEnvForWorkspace(workspaceRoot: string): NodeJS.ProcessEnv {
 }
 
 /**
+ * DAC write permission for a stat result, from the perspective of `uid`/`gid`.
+ * Supplementary groups are not considered — agent credentials carry only uid/gid.
+ */
+function dacWritableBy(st: Stats, uid: number, gid: number): boolean {
+  const bits =
+    st.uid === uid ? (st.mode >> 6) & 0o7 : st.gid === gid ? (st.mode >> 3) & 0o7 : st.mode & 0o7;
+  return (bits & 0o2) !== 0;
+}
+
+/**
+ * True when the `BASH_ENV` startup-file target is writable (or creatable) by the agent
+ * identity. Judged from ownership and permission bits (DAC), not the calling process's
+ * access — the daemon typically runs as root, whose own access checks always succeed.
+ */
+export function bashEnvIsAgentWritable(target: string, creds: AgentCredentials): boolean {
+  // BASH_ENV points into the agent-writable workspace by design; a writable or
+  // agent-creatable target gets sourced by every later non-interactive bash spawn.
+  // Detection is visibility-only — an agent able to write this file gains nothing new.
+  let st: Stats;
+  try {
+    st = statSync(target);
+  } catch {
+    // Target does not exist — creatable iff the parent directory is agent-writable.
+    try {
+      return dacWritableBy(statSync(dirname(target)), creds.uid, creds.gid);
+    } catch {
+      return false;
+    }
+  }
+  // A non-regular target is never sourced by bash, so it poses no startup-file risk.
+  return st.isFile() && dacWritableBy(st, creds.uid, creds.gid);
+}
+
+/**
+ * Log an error when the `BASH_ENV` target is writable by the agent identity, so planted
+ * startup-file activity is visible in daemon logs instead of silent.
+ */
+export function logBashEnvWritable(bashEnvPath: string, creds: AgentCredentials): void {
+  if (bashEnvIsAgentWritable(bashEnvPath, creds)) {
+    log.error("BASH_ENV target is agent-writable", { bashEnvPath });
+  }
+}
+
+/**
  * Execute argv[0] with remaining args; working directory is the real workspace root.
  */
 export async function toolExec(
@@ -388,13 +435,15 @@ export async function toolExec(
   const cwd = cwdOverride ? realpathSync(cwdOverride) : home;
   const file = argv[0]!;
   const args = argv.slice(1);
+  const env = xdgEnvForWorkspace(home);
+  logBashEnvWritable(env.BASH_ENV!, creds);
   return runAsUser({
     file,
     args,
     cwd,
     uid: creds.uid,
     gid: creds.gid,
-    env: xdgEnvForWorkspace(home),
+    env,
   });
 }
 
@@ -1110,11 +1159,14 @@ export async function toolExecExtended(
     }
   }
 
-  // Merge env: workspace XDG defaults + user overrides
+  // Merge env: workspace XDG defaults + user overrides. The writable check below
+  // sees the effective BASH_ENV value, including per-call env overrides, so
+  // repointing the startup file stays visible in the daemon log.
   const env: NodeJS.ProcessEnv = {
     ...xdgEnvForWorkspace(rootCwd),
     ...(opts.env as NodeJS.ProcessEnv | undefined),
   };
+  logBashEnvWritable(env.BASH_ENV!, creds);
 
   // Resolve output limits
   const maxOutput = Math.min(opts.maxOutput ?? MAX_OUTPUT_DEFAULT, MAX_OUTPUT_SYSTEM_CAP);

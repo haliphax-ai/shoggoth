@@ -1,11 +1,22 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  chmodSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ProcessManager } from "@shoggoth/procman";
+import { createLogger, setRootLogger, type Logger, type LogFields } from "@shoggoth/shared";
 import {
   toolExecExtended,
+  logBashEnvWritable,
+  bashEnvIsAgentWritable,
   getExecSession,
   getManagedExecSession,
   removeExecSession,
@@ -13,6 +24,31 @@ import {
 } from "../src/tools";
 import { PathEscapeError } from "../src/workspace-path";
 import type { ExecForegroundResult, ExecBackgroundResult } from "../src/tools";
+
+type RecordedLog = { level: string; msg: string; fields?: Record<string, unknown> };
+
+/** Install a recording root logger and return its captured records. */
+function recordingLogger(): RecordedLog[] {
+  const logs: RecordedLog[] = [];
+  const record = (level: string) => (msg: string, fields?: LogFields) => {
+    logs.push({ level, msg, fields });
+  };
+  const logger = {
+    debug: record("debug"),
+    info: record("info"),
+    warn: record("warn"),
+    error: record("error"),
+    child: () => logger,
+  } as unknown as Logger;
+  setRootLogger(logger);
+  return logs;
+}
+
+const defaultLogger = createLogger({ component: "tools-exec-extended.test" });
+
+function restoreRootLogger(): void {
+  setRootLogger(defaultLogger);
+}
 
 describe("toolExecExtended", () => {
   let ws: string;
@@ -758,18 +794,14 @@ describe("toolExecExtended", () => {
   // -----------------------------------------------------------------------
 
   describe("BASH_ENV and bash shell", () => {
-    it("sets BASH_ENV to workspace .bashrc", async () => {
+    it("sets BASH_ENV to the workspace .bashrc", async () => {
       const r = await toolExecExtended(ws, { command: "echo $BASH_ENV" }, creds);
       assert.equal(r.kind, "foreground");
       const fg = r as ExecForegroundResult;
+      assert.equal(fg.output?.trim(), join(ws, ".bashrc"));
       assert.ok(
-        fg.output?.trim().endsWith("/.bashrc"),
-        `expected BASH_ENV to end with /.bashrc, got: ${fg.output?.trim()}`,
-      );
-      // Should be an absolute path under the workspace, not just "/.bashrc"
-      assert.ok(
-        fg.output!.trim().length > "/.bashrc".length,
-        "BASH_ENV should be an absolute path, not just /.bashrc",
+        !fg.output?.includes("/bin/bash:"),
+        `BASH_ENV handling must stay silent, got: ${fg.output?.trim()}`,
       );
     });
 
@@ -781,7 +813,7 @@ describe("toolExecExtended", () => {
       assert.ok(!fg.output?.includes("not_bash"), "should be running under bash, not sh");
     });
 
-    it("sources .bashrc via BASH_ENV when it exists", async () => {
+    it("sources a workspace .bashrc via BASH_ENV", async () => {
       writeFileSync(join(ws, ".bashrc"), "export CUSTOM_FROM_BASHRC=hello_from_rc\n");
       const r = await toolExecExtended(ws, { command: "echo $CUSTOM_FROM_BASHRC" }, creds);
       assert.equal(r.kind, "foreground");
@@ -789,6 +821,141 @@ describe("toolExecExtended", () => {
       assert.ok(
         fg.output?.includes("hello_from_rc"),
         `expected .bashrc to be sourced, got: ${fg.output?.trim()}`,
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // BASH_ENV agent-writability detection (visibility-only)
+  // ---------------------------------------------------------------------------
+
+  describe("BASH_ENV agent-writability detection", () => {
+    // Foreign agent identity that owns nothing in the fixture tree, so only the
+    // "other" permission bits apply to it. The suite process may run as root,
+    // where its own access checks prove nothing about agent writability.
+    const agentCreds = { uid: 46464, gid: 46464 };
+    let logs: RecordedLog[];
+
+    beforeEach(() => {
+      logs = recordingLogger();
+    });
+
+    afterEach(() => {
+      restoreRootLogger();
+    });
+
+    it("bashEnvIsAgentWritable: writable existing file", () => {
+      const p = join(ws, ".bashrc");
+      writeFileSync(p, "ok\n");
+      assert.equal(bashEnvIsAgentWritable(p, creds), true);
+    });
+
+    it("bashEnvIsAgentWritable: world-writable file owned by someone else", () => {
+      const p = join(ws, "foreign-rc");
+      writeFileSync(p, "ok\n");
+      chmodSync(p, 0o666);
+      assert.equal(bashEnvIsAgentWritable(p, agentCreds), true);
+    });
+
+    it("bashEnvIsAgentWritable: missing file under agent-writable parent", () => {
+      const dir = join(ws, "open-dir");
+      mkdirSync(dir);
+      chmodSync(dir, 0o777);
+      assert.equal(bashEnvIsAgentWritable(join(dir, ".bashrc"), agentCreds), true);
+    });
+
+    it("bashEnvIsAgentWritable: existing file locked against the agent", () => {
+      const p = join(ws, ".bashrc");
+      writeFileSync(p, "locked\n");
+      chmodSync(p, 0o444);
+      try {
+        assert.equal(bashEnvIsAgentWritable(p, agentCreds), false);
+      } finally {
+        chmodSync(p, 0o644);
+      }
+    });
+
+    it("bashEnvIsAgentWritable: missing file under agent-locked parent", () => {
+      const dir = join(ws, "locked-dir");
+      mkdirSync(dir);
+      chmodSync(dir, 0o555);
+      try {
+        assert.equal(bashEnvIsAgentWritable(join(dir, ".bashrc"), agentCreds), false);
+      } finally {
+        chmodSync(dir, 0o755);
+      }
+    });
+
+    it("logs an error when the effective BASH_ENV target is agent-writable", async () => {
+      const rc = join(ws, ".bashrc");
+      writeFileSync(rc, "echo planted\n");
+      chmodSync(rc, 0o666);
+      const r = await toolExecExtended(ws, { command: "true" }, creds);
+      assert.equal(r.kind, "foreground");
+      const hit = logs.find(
+        (l) =>
+          l.level === "error" &&
+          l.msg.includes("BASH_ENV") &&
+          (l.fields?.bashEnvPath as string | undefined)?.startsWith(ws),
+      );
+      assert.ok(hit, `expected an agent-writable BASH_ENV error, got: ${JSON.stringify(logs)}`);
+    });
+
+    it("logs an error for a per-call env override repointing BASH_ENV", async () => {
+      const rc = join(ws, "planted-rc");
+      writeFileSync(rc, "echo planted\n");
+      chmodSync(rc, 0o666);
+      const r = await toolExecExtended(ws, { command: "true", env: { BASH_ENV: rc } }, creds);
+      assert.equal(r.kind, "foreground");
+      const hit = logs.find(
+        (l) =>
+          l.level === "error" &&
+          l.msg.includes("BASH_ENV") &&
+          (l.fields?.bashEnvPath as string | undefined)?.includes("planted-rc"),
+      );
+      assert.ok(hit, `expected an error for the repointed target, got: ${JSON.stringify(logs)}`);
+    });
+
+    it("logs an error when BASH_ENV target is missing but its parent is writable", async () => {
+      const dir = join(ws, "open-sub");
+      mkdirSync(dir);
+      chmodSync(dir, 0o777);
+      const r = await toolExecExtended(
+        ws,
+        { command: "true", env: { BASH_ENV: join(dir, ".bashrc") } },
+        creds,
+      );
+      assert.equal(r.kind, "foreground");
+      const hit = logs.find(
+        (l) =>
+          l.level === "error" &&
+          l.msg.includes("BASH_ENV") &&
+          (l.fields?.bashEnvPath as string | undefined)?.includes(join("open-sub", ".bashrc")),
+      );
+      assert.ok(hit, `expected an error for the creatable target, got: ${JSON.stringify(logs)}`);
+    });
+
+    it("does not log when BASH_ENV target is not agent-writable", async () => {
+      const rc = join(ws, "locked-rc");
+      writeFileSync(rc, "locked\n");
+      chmodSync(rc, 0o444);
+      try {
+        const r = await toolExecExtended(ws, { command: "true", env: { BASH_ENV: rc } }, creds);
+        assert.equal(r.kind, "foreground");
+        const hit = logs.find((l) => l.level === "error" && l.msg.includes("BASH_ENV"));
+        assert.ok(!hit, `expected no BASH_ENV error, got: ${JSON.stringify(logs)}`);
+      } finally {
+        chmodSync(rc, 0o644);
+      }
+    });
+
+    it("logBashEnvWritable detects a planted workspace .bashrc", () => {
+      const rc = join(ws, ".bashrc");
+      writeFileSync(rc, "ok\n");
+      logBashEnvWritable(rc, creds);
+      assert.ok(
+        logs.some((l) => l.level === "error" && l.msg.includes("BASH_ENV")),
+        "expected a BASH_ENV error log",
       );
     });
   });
