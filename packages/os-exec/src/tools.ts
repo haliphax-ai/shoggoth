@@ -183,6 +183,140 @@ export async function toolRead(
   return r.stdout;
 }
 
+/** One per-path request for a batched child script. */
+interface BatchRequest {
+  path: string;
+  absPath: string;
+}
+
+/** One per-path result from a batched child script (fields depend on the script). */
+type BatchEntry = Record<string, unknown> & { path: string; error?: string };
+
+/** Per-path outcome for a batched multi-file read. */
+type BatchReadResult = { ok: true; content: string } | { ok: false; error: string };
+
+/**
+ * Spawn a batched child script once for a whole multi-file tool call.
+ * Requests go in as a JSON array on stdin; per-path results come back as a
+ * JSON array on stdout with request order preserved. Non-zero exit or
+ * malformed output means the envelope itself failed — per-path results
+ * cannot be recovered then, so this throws.
+ */
+async function runBatchScript(
+  workspaceRoot: string,
+  script: string,
+  requests: BatchRequest[],
+  creds: AgentCredentials,
+): Promise<BatchEntry[]> {
+  const cwd = cachedRealpathSync(workspaceRoot);
+  const r = await runAsUser({
+    file: process.execPath,
+    args: tsxScriptArgs(script),
+    cwd,
+    uid: creds.uid,
+    gid: creds.gid,
+    stdin: JSON.stringify(requests),
+    env: { SHOGGOTH_TOOL_STAT_LINE_LIMIT: String(STAT_LINE_COUNT_LIMIT) },
+  });
+  if (r.exitCode !== 0) {
+    throw new Error(`batched ${script} failed: ${r.stderr.trim() || `exit ${r.exitCode}`}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(r.stdout);
+  } catch {
+    throw new Error(`batched ${script} failed: invalid JSON on stdout`);
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(`batched ${script} failed: non-array result`);
+  }
+  return parsed as BatchEntry[];
+}
+
+/**
+ * Batched multi-file read: one child process per tool call instead of one per
+ * path. Each path is validated with resolvePathForRead exactly like the
+ * single-file toolRead; a path that fails validation keeps its per-file error
+ * entry while the rest of the batch proceeds.
+ */
+async function toolReadBatch(
+  workspaceRoot: string,
+  paths: string[],
+  creds: AgentCredentials,
+): Promise<Map<string, BatchReadResult>> {
+  const requests: BatchRequest[] = [];
+  const rejected = new Map<string, string>();
+  for (const relPath of paths) {
+    try {
+      requests.push({ path: relPath, absPath: resolvePathForRead(workspaceRoot, relPath) });
+    } catch (e) {
+      rejected.set(relPath, (e as Error).message);
+    }
+  }
+  const entries =
+    requests.length > 0 ? await runBatchScript(workspaceRoot, "read-many.ts", requests, creds) : [];
+  const byPath = new Map<string, BatchReadResult>();
+  let i = 0;
+  for (const relPath of paths) {
+    const rejection = rejected.get(relPath);
+    if (rejection !== undefined) {
+      byPath.set(relPath, { ok: false, error: rejection });
+      continue;
+    }
+    const entry = entries[i++] ?? { path: relPath, error: "missing batch result" };
+    byPath.set(
+      relPath,
+      entry.error !== undefined
+        ? { ok: false, error: String(entry.error) }
+        : { ok: true, content: typeof entry.content === "string" ? entry.content : "" },
+    );
+  }
+  return byPath;
+}
+
+/**
+ * Batched multi-file stat: one child process per tool call. Logical (pre-
+ * realpath) paths are passed so the child's lstatSync can detect symlinks;
+ * a path that fails read validation lands as a per-path error record, same
+ * as in the per-file loop it replaces.
+ */
+async function toolStatBatch(
+  workspaceRoot: string,
+  paths: string[],
+  creds: AgentCredentials,
+): Promise<Map<string, Record<string, unknown>>> {
+  const rootReal = cachedRealpathSync(workspaceRoot);
+  const requests: BatchRequest[] = [];
+  const rejected = new Map<string, string>();
+  for (const relPath of paths) {
+    try {
+      resolvePathForRead(workspaceRoot, relPath);
+      requests.push({
+        path: relPath,
+        absPath: join(rootReal, relPath),
+      });
+    } catch (e) {
+      rejected.set(relPath, (e as Error).message);
+    }
+  }
+  const entries =
+    requests.length > 0 ? await runBatchScript(workspaceRoot, "stat-many.ts", requests, creds) : [];
+  const byPath = new Map<string, Record<string, unknown>>();
+  let i = 0;
+  for (const relPath of paths) {
+    const rejection = rejected.get(relPath);
+    if (rejection !== undefined) {
+      byPath.set(relPath, { error: rejection });
+      continue;
+    }
+    const entry = entries[i++] ?? { path: relPath, error: "missing batch result" };
+    const raw: Record<string, unknown> = { ...entry };
+    delete raw.path;
+    byPath.set(relPath, raw);
+  }
+  return byPath;
+}
+
 /**
  * Read a workspace-relative path as raw bytes (Buffer) using the agent UID/GID.
  * Same DAC sandbox pattern as {@link toolRead} but base64-encodes in the child
@@ -754,30 +888,12 @@ export async function toolReadExtended(
   // --- Multi-path / glob mode ---
   const patterns = opts.paths!;
   const { relativePaths, truncated } = resolvePathList(workspaceRoot, patterns, maxFiles);
-  const rootReal = cachedRealpathSync(workspaceRoot);
 
   if (isStat) {
-    const stats: FileStat[] = [];
-    for (const relPath of relativePaths) {
-      try {
-        // Validate security (ensures resolved target is inside workspace)
-        resolvePathForRead(workspaceRoot, relPath);
-        // Use logical path so lstatSync can detect symlinks
-        const logicalAbs = join(rootReal, relPath);
-        const raw = await toolStatRaw(workspaceRoot, logicalAbs, creds);
-        stats.push(buildFileStat(relPath, raw));
-      } catch (e) {
-        stats.push({
-          path: relPath,
-          size: 0,
-          sizeHuman: "0 B",
-          mtime: "",
-          type: "other",
-          permissions: "---------",
-          error: (e as Error).message,
-        });
-      }
-    }
+    const rawByPath = await toolStatBatch(workspaceRoot, relativePaths, creds);
+    const stats = relativePaths.map((relPath) =>
+      buildFileStat(relPath, rawByPath.get(relPath) ?? { error: "missing stat result" }),
+    );
     return { kind: "stat-multi", stats };
   }
 
@@ -786,51 +902,54 @@ export async function toolReadExtended(
   const notices: string[] = [];
   let totalBytes = 0;
 
+  const contents = await toolReadBatch(workspaceRoot, relativePaths, creds);
+
   for (const relPath of relativePaths) {
-    try {
-      let content = await toolRead(workspaceRoot, relPath, creds);
-
-      // Skip binary files
-      if (isBinaryContent(content)) {
-        files[relPath] = "[binary file, skipped]";
-        notices.push(`${relPath}: binary file, skipped`);
-        continue;
-      }
-
-      // Apply line range if specified
-      if (hasLineRange) {
-        content = sliceLines(content, lineOpts);
-      }
-
-      // Truncate per-file
-      const { content: trimmed, truncated: fileTruncated } = truncateContent(content);
-      content = trimmed;
-      if (fileTruncated) {
-        notices.push(
-          `${relPath}: truncated to ${PER_FILE_MAX_LINES} lines / ${formatSize(PER_FILE_MAX_BYTES)}`,
-        );
-      }
-
-      // Check total response budget
-      const contentBytes = Buffer.byteLength(content, "utf8");
-      if (totalBytes + contentBytes > PER_FILE_MAX_BYTES) {
-        notices.push(
-          `${relPath}: omitted (total response size would exceed ${formatSize(PER_FILE_MAX_BYTES)})`,
-        );
-        // Mark remaining files as omitted
-        const idx = relativePaths.indexOf(relPath);
-        for (let i = idx + 1; i < relativePaths.length; i++) {
-          notices.push(`${relativePaths[i]}: omitted (total response size budget exhausted)`);
-        }
-        break;
-      }
-
-      totalBytes += contentBytes;
-      files[relPath] = content;
-    } catch (e) {
-      files[relPath] = `[error: ${(e as Error).message}]`;
-      notices.push(`${relPath}: ${(e as Error).message}`);
+    const batched = contents.get(relPath)!;
+    if (!batched.ok) {
+      files[relPath] = `[error: ${batched.error}]`;
+      notices.push(`${relPath}: ${batched.error}`);
+      continue;
     }
+    let content = batched.content;
+
+    // Skip binary files
+    if (isBinaryContent(content)) {
+      files[relPath] = "[binary file, skipped]";
+      notices.push(`${relPath}: binary file, skipped`);
+      continue;
+    }
+
+    // Apply line range if specified
+    if (hasLineRange) {
+      content = sliceLines(content, lineOpts);
+    }
+
+    // Truncate per-file
+    const { content: trimmed, truncated: fileTruncated } = truncateContent(content);
+    content = trimmed;
+    if (fileTruncated) {
+      notices.push(
+        `${relPath}: truncated to ${PER_FILE_MAX_LINES} lines / ${formatSize(PER_FILE_MAX_BYTES)}`,
+      );
+    }
+
+    // Check total response budget
+    const contentBytes = Buffer.byteLength(content, "utf8");
+    if (totalBytes + contentBytes > PER_FILE_MAX_BYTES) {
+      notices.push(
+        `${relPath}: omitted (total response size would exceed ${formatSize(PER_FILE_MAX_BYTES)})`,
+      );
+      // Mark remaining files as omitted
+      const idx = relativePaths.indexOf(relPath);
+      for (let i = idx + 1; i < relativePaths.length; i++) {
+        notices.push(`${relativePaths[i]}: omitted (total response size budget exhausted)`);
+      }
+      break;
+    }
+
+    totalBytes += contentBytes;
+    files[relPath] = content;
   }
 
   if (truncated) {
