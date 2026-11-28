@@ -36,9 +36,13 @@ interface PollResultBase {
   exitCode?: number;
   signal?: string;
   runtimeMs: number;
-  /** True when the poll waited (timeout > 0) and the process was still running. */
+  /**
+   * True when the poll waited out its full timeout with the process still
+   * running (timeout expired without the process exiting). Omitted when the
+   * poll returned instantly or the process exited during the wait.
+   */
   waited?: boolean;
-  /** Actual milliseconds waited before returning. */
+  /** Actual milliseconds waited before returning (only set with `waited`). */
   waitedMs?: number;
 }
 
@@ -230,6 +234,48 @@ export async function toolPoll(opts: PollOptions): Promise<PollResponse> {
 // Procman ManagedProcess polling
 // ---------------------------------------------------------------------------
 
+/**
+ * Wait up to `timeoutMs` for a managed process to reach a terminal state;
+ * resolves via `state-change` listener, post-registration re-check, or
+ * timeout — whichever fires first. The timeout timer is always cleared
+ * when the exit path wins, so no dangling timer holds the event loop.
+ *
+ * Returns true only when the timeout actually expired with the process
+ * still running; callers use this to decide whether `waited` is meaningful
+ * (an instant exit resolves the wait without any real waiting).
+ */
+function waitForProcessExitOrTimeout(mp: ManagedProcess, timeoutMs: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+
+    /** Settle the wait exactly once; cleanup runs on every path. */
+    const finish = (didTimeout: boolean) => {
+      clearTimeout(timeoutTimer);
+      resolve(didTimeout);
+    };
+
+    const check = (_state: string) => {
+      if (isTerminal(mp.state)) {
+        mp.removeListener("state-change", check);
+        finish(false);
+      }
+    };
+
+    mp.on("state-change", check);
+    if (isTerminal(mp.state)) {
+      // Already exited while we were setting up.
+      mp.removeListener("state-change", check);
+      finish(false);
+      return;
+    }
+
+    timeoutTimer = setTimeout(() => {
+      mp.removeListener("state-change", check);
+      finish(true);
+    }, timeoutMs);
+  });
+}
+
 async function pollManagedProcess(mp: ManagedProcess, opts: PollOptions): Promise<PollResult> {
   const timeoutMs = opts.timeout ?? 0;
   let waited = false;
@@ -240,30 +286,14 @@ async function pollManagedProcess(mp: ManagedProcess, opts: PollOptions): Promis
   // If the process is still running and timeout > 0, wait for it
   if (!isExited && timeoutMs > 0) {
     const waitStart = Date.now();
-    const check = (_state: string) => {
-      if (isTerminal(mp.state)) {
-        mp.removeListener("state-change", check);
-      }
-    };
+    const timedOut = await waitForProcessExitOrTimeout(mp, timeoutMs);
 
-    await Promise.race([
-      new Promise<void>((resolve) => {
-        mp.on("state-change", check);
-        // Already exited while we were setting up?
-        if (isTerminal(mp.state)) {
-          mp.removeListener("state-change", check);
-          resolve();
-        }
-      }),
-      new Promise<void>((resolve) =>
-        setTimeout(() => {
-          mp.removeListener("state-change", check);
-          resolve();
-        }, timeoutMs),
-      ),
-    ]);
-    waitedMs = Date.now() - waitStart;
-    waited = true;
+    // `waited` is only meaningful when the timeout path actually fired —
+    // an instant exit resolves the wait without any real waiting.
+    if (timedOut) {
+      waitedMs = Date.now() - waitStart;
+      waited = true;
+    }
   }
 
   const runtimeMs = mp.uptimeMs;

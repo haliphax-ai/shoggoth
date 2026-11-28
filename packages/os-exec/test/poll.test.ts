@@ -225,8 +225,10 @@ describe("toolPoll", () => {
         assert.equal(result.status, "exited");
         assert.equal(result.exitCode, 0);
         assert.ok(result.output.includes("fast-finish"));
-        assert.equal(result.waited, true);
-        assert.ok(typeof result.waitedMs === "number");
+        // Process exited during the wait — that is not a "waited out the
+        // timeout" result.
+        assert.equal(result.waited, undefined);
+        assert.equal(result.waitedMs, undefined);
       } finally {
         await removeExecSession(sessionId);
       }
@@ -240,7 +242,7 @@ describe("toolPoll", () => {
         const result = r as PollCombinedResult;
         assert.equal(result.status, "running");
         assert.equal(result.waited, true);
-        assert.ok(result.waitedMs! >= 150); // allow some timing slack
+        assert.ok(result.waitedMs! >= 150); // allow some clock skew around the 200ms window
       } finally {
         await cleanup(sessionId);
       }
@@ -268,8 +270,70 @@ describe("toolPoll", () => {
         assert.equal(result.status, "exited");
         // Should not have waited the full 5s
         assert.ok(elapsed < 1000);
+        // An already-exited process returns instantly — `waited` must be
+        // omitted so callers can tell "blocked for the window" from "returned
+        // right away".
+        assert.equal(result.waited, undefined);
+        assert.equal(result.waitedMs, undefined);
       } finally {
         await removeExecSession(sessionId);
+      }
+    });
+    it("clears the timeout timer when the process exits during the wait", async () => {
+      const { pid, sessionId } = await spawnBg("sleep 5");
+      const mp = getManagedExecSession(sessionId)!;
+      await new Promise<void>((resolve) => {
+        if (mp.state === "running") {
+          resolve();
+          return;
+        }
+        mp.on("state-change", (s: string) => {
+          if (s === "running") resolve();
+        });
+      });
+
+      // Fake clock starts at zero pending timers. The kill makes the
+      // state-change path win the race; a leaked timer would still be
+      // counted on the fake clock.
+      vi.useFakeTimers();
+      try {
+        const pending = toolPoll({ pid, timeout: 60000 });
+        mp.kill();
+        const r = await pending;
+        assert.ok(!("error" in r));
+        const result = r as PollCombinedResult;
+        assert.equal(result.status, "exited");
+        assert.equal(result.waited, undefined);
+        assert.equal(result.waitedMs, undefined);
+        assert.equal(vi.getTimerCount(), 0);
+      } finally {
+        vi.useRealTimers();
+        await cleanup(sessionId);
+      }
+    });
+
+    it("clears the timeout timer when the timeout expires", async () => {
+      const { pid, sessionId } = await spawnBg("sleep 5");
+      try {
+        // Real timers for spawn setup (procman schedules its own timers);
+        // fake clock for the poll's timeout window.
+        vi.useFakeTimers();
+        try {
+          const pending = toolPoll({ pid, timeout: 2000 });
+          // Progress the fake clock until the poll's own timeout fires; a
+          // leaked timer would still be counted on the fake clock.
+          await vi.advanceTimersByTimeAsync(2000);
+          const r = await pending;
+          assert.ok(!("error" in r));
+          const result = r as PollCombinedResult;
+          assert.equal(result.status, "running");
+          assert.equal(result.waited, true);
+          assert.equal(vi.getTimerCount(), 0);
+        } finally {
+          vi.useRealTimers();
+        }
+      } finally {
+        await cleanup(sessionId);
       }
     });
   });
