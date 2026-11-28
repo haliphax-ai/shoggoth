@@ -896,6 +896,9 @@ export interface ExecExtendedOptions {
    * File path to write combined stdout+stderr to (workspace-relative). Mutually exclusive with stdoutFile/stderrFile.
    * Bypasses inline truncation; subject to MAX_FILE_OUTPUT_BYTES safety cap.
    * With `background`/`yieldMs`, output streams directly to the file as it is produced (safety cap does not apply).
+   * In streaming (background/yieldMs) mode the file is written via `2>&1`, so
+   * stderr is merged into the file and split streams are unrecoverable — use
+   * `stdoutFile`/`stderrFile` when stdout and stderr must stay separate.
    */
   outputFile?: string;
 }
@@ -1096,11 +1099,10 @@ interface FileRedirects {
  * Build a shell redirection prefix for streaming file output in
  * background/yieldMs modes. Paths are resolved (and validated against the
  * workspace root) up front so an escaping path fails before the process is
- * spawned. Output streams to the file directly from the process — nothing is
- * buffered in memory, so the MAX_FILE_OUTPUT_BYTES cap does not apply.
- *
- * The prefix uses `exec` so the redirections apply to the entire command line
- * (including compound commands like `a && b`), unlike a trailing suffix.
+ * spawned; output streams directly to the file, so the MAX_FILE_OUTPUT_BYTES
+ * cap does not apply. `exec` applies the redirections to the whole command
+ * line (compound commands included). `outputFile` merges stderr via `2>&1`
+ * (split streams unrecoverable); `stdoutFile`/`stderrFile` keep streams split.
  */
 function buildFileRedirects(
   workspaceRoot: string,
