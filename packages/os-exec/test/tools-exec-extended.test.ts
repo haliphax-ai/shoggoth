@@ -1354,4 +1354,172 @@ describe("toolExecExtended", () => {
       assert.ok(content.includes("small-output"));
     });
   });
+
+  // File redirects: composed background shell — buildFileRedirects prefixes
+  // `exec …; ` ahead of the user command; these tests exercise the composed
+  // script through the real background/yieldMs exec path.
+  describe("file redirects: composed background shell", () => {
+    /** Wait until a managed exec session reaches a terminal state. */
+    async function waitForExit(sessionId: string): Promise<void> {
+      const mp = getManagedExecSession(sessionId);
+      assert.ok(mp);
+      if (["exited", "dead", "failed"].includes(mp.state)) return;
+      await new Promise<void>((resolve) => {
+        mp.on("state-change", (s: string) => {
+          if (["exited", "dead", "failed"].includes(s)) resolve();
+        });
+      });
+    }
+
+    it("outputFile: compound command (a && b) runs fully; stderr merges into the file", async () => {
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "echo compound-one && echo compound-two && echo compound-err >&2",
+          outputFile: "redirects-compound.txt",
+          background: true,
+        },
+        creds,
+      );
+      assert.equal(r.kind, "background");
+      const bg = r as ExecBackgroundResult;
+      await waitForExit(bg.sessionId);
+
+      const content = readFileSync(join(ws, "redirects-compound.txt"), "utf8");
+      assert.ok(content.includes("compound-one"));
+      assert.ok(content.includes("compound-two"));
+      // The generated `2>&1` merges stderr into the same file — with
+      // `outputFile`, split streams are unrecoverable from the file.
+      assert.ok(content.includes("compound-err"));
+      await removeExecSession(bg.sessionId);
+    });
+
+    it("outputFile: pipeline (a | b) runs with redirected output", async () => {
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "echo pipe-payload | tr a-z A-Z",
+          outputFile: "redirects-pipeline.txt",
+          background: true,
+        },
+        creds,
+      );
+      assert.equal(r.kind, "background");
+      const bg = r as ExecBackgroundResult;
+      await waitForExit(bg.sessionId);
+
+      const content = readFileSync(join(ws, "redirects-pipeline.txt"), "utf8");
+      assert.ok(content.includes("PIPE-PAYLOAD"));
+      await removeExecSession(bg.sessionId);
+    });
+
+    it("outputFile: multi-line heredoc keeps its terminator and runs", async () => {
+      // Composed: `exec > 'file' 2>&1; cat <<'EOF'\nheredoc-body\nEOF` — the
+      // prefix is a complete list item, so bash still pairs the heredoc body
+      // with its terminator; this documents that heredocs survive the prefix.
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "cat <<'EOF'\nheredoc-body\nEOF",
+          outputFile: "redirects-heredoc.txt",
+          background: true,
+        },
+        creds,
+      );
+      assert.equal(r.kind, "background");
+      const bg = r as ExecBackgroundResult;
+      await waitForExit(bg.sessionId);
+
+      const content = readFileSync(join(ws, "redirects-heredoc.txt"), "utf8");
+      assert.ok(content.includes("heredoc-body"));
+      await removeExecSession(bg.sessionId);
+    });
+
+    it("outputFile: leading ! negation parses and runs after the prefix", async () => {
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "! false; echo negated-ok",
+          outputFile: "redirects-negation.txt",
+          background: true,
+        },
+        creds,
+      );
+      assert.equal(r.kind, "background");
+      const bg = r as ExecBackgroundResult;
+      await waitForExit(bg.sessionId);
+
+      const content = readFileSync(join(ws, "redirects-negation.txt"), "utf8");
+      assert.ok(content.includes("negated-ok"));
+      await removeExecSession(bg.sessionId);
+    });
+
+    it("invalid first line after the prefix: bash syntax error, no output file", async () => {
+      // Composed line 1 is `exec ...; && echo unreachable`: bash fails to
+      // parse, nothing runs, no file is created, and the syntax error lands
+      // on the stderr pipe — pointing at the composed line, not the command.
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "&& echo unreachable",
+          outputFile: "redirects-syntax-error.txt",
+          background: true,
+        },
+        creds,
+      );
+      assert.equal(r.kind, "background");
+      const bg = r as ExecBackgroundResult;
+      await waitForExit(bg.sessionId);
+
+      const mp = getManagedExecSession(bg.sessionId);
+      assert.ok(mp);
+      assert.notEqual(mp.lastExitCode, 0);
+      assert.equal(existsSync(join(ws, "redirects-syntax-error.txt")), false);
+      assert.ok(mp.readOutput("stderr").includes("syntax error"));
+      await removeExecSession(bg.sessionId);
+    });
+
+    it("stdoutFile + stderrFile: streams stay separate (no merge)", async () => {
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "echo split-out; echo split-err >&2",
+          stdoutFile: "redirects-split-stdout.txt",
+          stderrFile: "redirects-split-stderr.txt",
+          background: true,
+        },
+        creds,
+      );
+      assert.equal(r.kind, "background");
+      const bg = r as ExecBackgroundResult;
+      await waitForExit(bg.sessionId);
+
+      const stdoutContent = readFileSync(join(ws, "redirects-split-stdout.txt"), "utf8");
+      const stderrContent = readFileSync(join(ws, "redirects-split-stderr.txt"), "utf8");
+      assert.ok(stdoutContent.includes("split-out"));
+      assert.ok(stderrContent.includes("split-err"));
+      // With stdoutFile/stderrFile (unlike outputFile) the streams stay split.
+      assert.equal(stdoutContent.includes("split-err"), false);
+      assert.equal(stderrContent.includes("split-out"), false);
+      await removeExecSession(bg.sessionId);
+    });
+
+    it("yieldMs in-window + outputFile: pipeline completes with foreground file result", async () => {
+      const r = await toolExecExtended(
+        ws,
+        {
+          command: "echo yield-pipe | tr a-z A-Z",
+          outputFile: "redirects-yield-pipe.txt",
+          yieldMs: 30000,
+        },
+        creds,
+      );
+      assert.equal(r.kind, "foreground");
+      const fg = r as ExecForegroundResult;
+      assert.equal(fg.outputFile, "redirects-yield-pipe.txt");
+
+      const content = readFileSync(join(ws, "redirects-yield-pipe.txt"), "utf8");
+      assert.ok(content.includes("YIELD-PIPE"));
+    });
+  });
 });
