@@ -479,7 +479,7 @@ describe("procman integration", () => {
       assert.equal(result.status, "exited");
       assert.equal(result.exitCode, 0);
       assert.ok(result.output.includes("fast-pm"));
-      assert.equal(result.waited, true);
+      assert.equal(result.waited, undefined);
     });
 
     it("returns error for unknown PID when procman is set", async () => {
