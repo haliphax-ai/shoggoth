@@ -94,6 +94,10 @@ function spawnChild(options: RunAsUserOptions): ChildProcess {
   child.unref();
 
   if (child.stdin && options.stdin !== undefined) {
+    // The child's exit status decides the command outcome; if it exits
+    // before draining stdin (EPIPE), swallow the stream error so it cannot
+    // surface as an uncaught exception and fail an otherwise-successful run.
+    child.stdin.on("error", () => {});
     child.stdin.write(options.stdin, "utf8");
     child.stdin.end();
   }
